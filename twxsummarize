@@ -15,6 +15,10 @@ headings="│ THREAD / THREAD POOL                                 │ OBJECT NA
 separator="├──────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┼────────────┼──────────────┤"
 footer="└──────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────┴────────────┴──────────────┘"
 
+# TO DO:
+# - add a feature to auto-detect the file type (from the name) and adapt the relevant columns to use in accordance (Script: object, obj_instance, Error: thread, ???, Application: object, thread)
+# - add a command line feature to omit or include via RegEx
+
 echo -e "$title"
 
 # Function to display usage
