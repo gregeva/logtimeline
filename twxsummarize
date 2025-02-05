@@ -46,11 +46,10 @@ input_files=("$@")
 for input_file in "${input_files[@]}"; do
     for file in $input_file; do
         if [ -f "$file" ]; then
-    	    echo "$header"
-            echo "$headings"
-            echo "$separator" 
+            echo -e "\033[0;35m$input_file\033[0m"
+    	    echo -e "$header\n$headings\n$separator" 
             cat ${file} | sed -E 's/\[T: (.+)-[0-9]+\]/[T: \1]/' | perl -pe 's/(?<time>[^ ]* [^ ]*) \[L: (?<level>[^\]]*)] \[O: (?<object>[^\]]*)] \[I: (?<obj_instance>[^\]]*)] \[U: (?<user>[^\]]*)] \[S: (?<session>[^\]]*)] \[P: (?<platformid>[^\]]*)] \[T: (?<thread>[^\]]*)] (?<message>.*)/$+{thread} $+{object} $+{level}/' | sort | uniq -c | sort -rn | head -n ${MAX_LINES:-25} | cut -d\  -f1-4 | awk '{ printf "│  %-50s  │  %-60s  │  %-8s  │  %-10s  │\n", $2, $3, $4, $1; }'
-            echo "$footer"
+            echo -e "$footer\n"
         else
             echo "Warning: $file not found."
         fi
