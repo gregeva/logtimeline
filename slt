@@ -16,6 +16,7 @@ my @in_files;
 # - add an option to flip into access log mode
 # - add capabilities to do access log mode inspecting number of requests and status codes
 # - add a command line feature to omit or include via RegEx
+# - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file
 
 
 my $title = <<"END";
