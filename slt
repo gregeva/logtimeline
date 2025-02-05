@@ -1,0 +1,134 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use POSIX qw(strftime);
+use Time::Piece;
+use Term::ReadKey;
+use Getopt::Long;
+
+# Configuration
+my $bucket_size_minutes = 5;
+my @in_files;
+
+my $title = <<"END";
+\033[0;37m
+───────────────────────────────────────────────────────────────────────────────────────
+
+   ,:: slt ::' simple log timeline  --  by Greg Eva // geva\@ptc.com
+
+───────────────────────────────────────────────────────────────────────────────────────
+\033[0m
+END
+print $title;
+
+# Get command-line options
+GetOptions(
+    'bucket-size|bs=i' => \$bucket_size_minutes,
+) or die "Usage: $0 --bucket-size|-bs <minutes> <file1> <file2> ...\n";
+
+# Ensure at least one file is provided
+@in_files = @ARGV;
+die "Usage: $0 --bucket-size|-bs <minutes> <file1> <file2> ...\n" unless @in_files;
+
+my $bucket_size_seconds = $bucket_size_minutes * 60;
+
+# Define ANSI colors
+my %colors = (
+    'ERROR' => "\033[0;31m",
+    'WARN'  => "\033[0;33m",
+    'INFO'  => "\033[0;32m",
+    'DEBUG' => "\033[0;34m",
+    'TRACE' => "\033[0;35m",
+    'NC'    => "\033[0m"
+);
+
+# Get terminal width
+my ($terminal_width) = GetTerminalSize();
+$terminal_width //= 80; # Default to 80 if terminal width cannot be determined
+
+# Parse logs, bucket by time, and count log levels
+my %log_counts;
+foreach my $in_file (@in_files) {
+    open my $fh, '<', $in_file or die "Cannot open file: $in_file";
+    my $line_number = 0;
+    while (<$fh>) {
+        $line_number++;
+        if ($line_number % 100 == 0) {
+            printf("\rProcessing line %d in file %s", $line_number, $in_file);
+            $| = 1; # Flush output
+        }
+        if (my ($timestamp_str, $log_level) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\+\d{4} \[L: ([^\]]*)\]/) {
+            # Convert timestamp to epoch seconds using Time::Piece
+            my $timestamp = Time::Piece->strptime($timestamp_str, "%Y-%m-%d %H:%M:%S")->epoch;
+            my $bucket = int($timestamp / $bucket_size_seconds) * $bucket_size_seconds;
+            $log_counts{$bucket}{$log_level}{count}++;
+        }
+    }
+    close $fh;
+}
+print "\r\033[0;32mProcessing complete.\033[0m";
+print " " x ( $terminal_width - length( "Processing complete." ) );
+print "\n\n";
+
+# Determine the maximum total log messages for any time window
+my $max_total_count = 0;
+foreach my $bucket (keys %log_counts) {
+    my $total_count = 0;
+    foreach my $log_level (keys %{$log_counts{$bucket}}) {
+        $total_count += $log_counts{$bucket}{$log_level}{count};
+    }
+    $max_total_count = $total_count if $total_count > $max_total_count;
+}
+
+# Calculate the maximum length of log level titles and counts
+my $legend_length = 0;
+foreach my $bucket (keys %log_counts) {
+    my $bucket_legend_length = 0;
+    foreach my $log_level (keys %{$log_counts{$bucket}}) {
+        my $count = $log_counts{$bucket}{$log_level}{count};
+        my $title_length = length("$log_level: $count ");
+        $bucket_legend_length += $title_length;
+    }
+    $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
+}
+
+# Normalize counts to fit terminal width
+my $max_graph_width = $terminal_width - $legend_length - 2 - 4 - 15;    # static values based on timestamp length, some white space, maybe a vertical line spacer
+foreach my $bucket (keys %log_counts) {
+    foreach my $log_level (keys %{$log_counts{$bucket}}) {
+        my $count = $log_counts{$bucket}{$log_level}{count};
+        my $scaled_count = int(($count / $max_total_count) * $max_graph_width);
+        $log_counts{$bucket}{$log_level}{scaled_count} = $scaled_count;
+    }
+}
+
+# Define log level order
+my @log_levels = qw(ERROR WARN INFO DEBUG TRACE);
+
+# Generate bar graph
+foreach my $bucket (sort keys %log_counts) {
+    my $bucket_time_str = strftime("%Y-%m-%d %H:%M", localtime($bucket));
+    print "$bucket_time_str ";
+    my $log_details = "";
+    my $legend_length_bucket = 0;
+    foreach my $log_level (@log_levels) {
+        if (exists $log_counts{$bucket}{$log_level}) {
+            my $count = $log_counts{$bucket}{$log_level}{count};
+            my $color = $colors{$log_level} // $colors{'NC'};
+            $log_details .= "$color$log_level: $count$colors{'NC'} ";
+            $legend_length_bucket += length("$log_level: $count ");
+        }
+    }
+    print $log_details;
+    my $padding = $legend_length - $legend_length_bucket;
+    print " " x ($padding >= 0 ? $padding : 0);
+    print "│ ";
+    foreach my $log_level (@log_levels) {
+        if (exists $log_counts{$bucket}{$log_level}) {
+            my $scaled_count = $log_counts{$bucket}{$log_level}{scaled_count};
+            my $color = $colors{$log_level} // $colors{'NC'};
+            print "$color" . ('█' x $scaled_count) . "$colors{'NC'} ";
+        }
+    }
+    print "\n";
+}
