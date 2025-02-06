@@ -12,11 +12,15 @@ my @in_files;
 
 # TO DO:
 # - add a feature/option to only count certain log levels (like ERROR:WARN)
+# - add a feature/option to omit certain log levels (like TRACE:DEBUG)
+# - add a feature to allow providing start and end times where entries outside of that range are omitted
 # - add a feature to auto-detect if the file is an access log or normal log (ie; 500 or ERRROR)
 # - add an option to flip into access log mode
 # - add capabilities to do access log mode inspecting number of requests and status codes
 # - add a command line feature to omit or include via RegEx
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file
+# - add a feature allowing for auto-detection of file type, and hence analysis pattern/options to use
+# - add a feature to allow gfor grouping of various other log categories like ThreadPool or Object context (instead of errors)
 
 
 my $title = <<"END";
