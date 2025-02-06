@@ -14,6 +14,8 @@ my $range_start_epoch = 0;
 my $range_end_epoch = 0;
 my %range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %range;
+my $exclude_regex;
+my $include_regex;
 my @in_files;
 
 # TO DO:
@@ -27,7 +29,9 @@ my @in_files;
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file
 # - add a feature allowing for auto-detection of file type, and hence analysis pattern/options to use
 # - add a feature to allow gfor grouping of various other log categories like ThreadPool or Object context (instead of errors)
+# - add a mode to go down to second precision
 
+# RAC client: [2025-02-04T12:06:22.784] [TRACE] MessageStream - handling data from GAS with chunk size: 88
 
 # Get terminal width
 my ($terminal_width, $terminal_height) = GetTerminalSize();
@@ -66,14 +70,16 @@ GetOptions(
     'bucket-size|bs=i' => \$bucket_size_minutes,
     'start|s=s' => \$range_start,
     'end|e=s' => \$range_end,
-) or die " 1 Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n";
+    'exclude|e=s' => \$exclude_regex,
+    'include|i=s' => \$include_regex
+) or die "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n";
 
 $range{'start'} = $range_start if defined( $range_start );
 $range{'end'} = $range_end if defined(  $range_end );
 
 # Ensure at least one file is provided
 @in_files = @ARGV;
-die " 2 Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n" unless @in_files;
+die "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n" unless @in_files;
 
 my $bucket_size_seconds = $bucket_size_minutes * 60;
 
@@ -128,6 +134,8 @@ foreach my $in_file (@in_files) {
             # Convert timestamp to epoch seconds using Time::Piece
             my $timestamp = Time::Piece->strptime($timestamp_str, "%Y-%m-%d %H:%M:%S")->epoch;
             next if( $timestamp < $range_epoch{'start'} || $timestamp >= $range_epoch{'end'} );
+            next if( defined( $exclude_regex ) && /$exclude_regex/ );
+            next if( defined( $include_regex ) && !/$include_regex/ );
             my $bucket = int($timestamp / $bucket_size_seconds) * $bucket_size_seconds;
             $log_counts{$bucket}{$log_level}{count}++;
         }
