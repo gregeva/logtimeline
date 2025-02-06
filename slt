@@ -8,6 +8,12 @@ use Getopt::Long;
 
 # Configuration
 my $bucket_size_minutes = 0;
+my $range_start = "";
+my $range_end = "";
+my $range_start_epoch = 0;
+my $range_end_epoch = 0;
+my %range_epoch = ( 'start' => 0, 'end' => 2521843200 );
+my %range;
 my @in_files;
 
 # TO DO:
@@ -58,11 +64,16 @@ print $title;
 # Get command-line options
 GetOptions(
     'bucket-size|bs=i' => \$bucket_size_minutes,
-) or die "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n";
+    'start|s=s' => \$range_start,
+    'end|e=s' => \$range_end,
+) or die " 1 Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n";
+
+$range{'start'} = $range_start if defined( $range_start );
+$range{'end'} = $range_end if defined(  $range_end );
 
 # Ensure at least one file is provided
 @in_files = @ARGV;
-die "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n" unless @in_files;
+die " 2 Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n" unless @in_files;
 
 my $bucket_size_seconds = $bucket_size_minutes * 60;
 
@@ -75,6 +86,32 @@ my %colors = (
     'TRACE' => "\033[0;35m",
     'NC'    => "\033[0m"
 );
+
+foreach my $key (keys %range) {
+    my $value = $range{$key};  # Get the value (either $range_start or $range_end)
+    next unless length( $range{$key} ) > 0;
+    my $epoch_value;  # Variable to store the epoch time
+
+    # Convert timestamp to epoch seconds using Time::Piece
+    if ( $value =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/ ) {
+        $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d %H:%M:%S" )->epoch;
+    } elsif ( $value =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/ ) {
+        $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d %H:%M" )->epoch;
+    } elsif ( $value =~ /^\d{4}-\d{2}-\d{2}/ ) {
+        $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d" )->epoch;
+    } elsif ( $value =~ /^\d{2}:\d{2}:\d{2}/ ) {
+        $epoch_value = Time::Piece->strptime( $value, "%H:%M:%S" )->epoch;
+    } elsif ( $value =~ /^\d{2}:\d{2}/ ) {
+        $epoch_value = Time::Piece->strptime( $value, "%H:%M" )->epoch;
+    } else {
+	print "Warning: unhandled date/time format - option not taken into account\n";
+        #$epoch_value = undef;  # Or some appropriate default/error value
+    }
+
+    $range_epoch{$key} = $epoch_value if defined( $epoch_value );  # Store the epoch value in the hash
+}
+
+#print "Start epoch: $range_epoch{'start'} -- End epoch: $range_epoch{'end'}\n";
 
 # Parse logs, bucket by time, and count log levels
 my %log_counts;
@@ -90,6 +127,7 @@ foreach my $in_file (@in_files) {
         if (my ($timestamp_str, $log_level) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\+\d{4} \[L: ([^\]]*)\]/) {
             # Convert timestamp to epoch seconds using Time::Piece
             my $timestamp = Time::Piece->strptime($timestamp_str, "%Y-%m-%d %H:%M:%S")->epoch;
+            next if( $timestamp < $range_epoch{'start'} || $timestamp >= $range_epoch{'end'} );
             my $bucket = int($timestamp / $bucket_size_seconds) * $bucket_size_seconds;
             $log_counts{$bucket}{$log_level}{count}++;
         }
@@ -137,8 +175,10 @@ my @log_levels = qw(ERROR WARN INFO DEBUG TRACE);
 
 # Generate bar graph
 foreach my $bucket (sort keys %log_counts) {
-    my $bucket_time_str = strftime("%Y-%m-%d %H:%M", localtime($bucket));
+    my $bucket_time_str = strftime("%Y-%m-%d %H:%M", gmtime($bucket));
+    #my $bucket_time_str = strftime("%Y-%m-%d %H:%M", localtime($bucket));			# don't use this as it is converting unknown timezone in logs to client timezome
     print "$bucket_time_str ";
+    #print "$bucket  ";
     my $log_details = "";
     my $legend_length_bucket = 0;
     foreach my $log_level (@log_levels) {
