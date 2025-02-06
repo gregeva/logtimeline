@@ -7,7 +7,7 @@ use Term::ReadKey;
 use Getopt::Long;
 
 # Configuration
-my $bucket_size_minutes = 5;
+my $bucket_size_minutes = 0;
 my @in_files;
 
 # TO DO:
@@ -23,6 +23,27 @@ my @in_files;
 # - add a feature to allow gfor grouping of various other log categories like ThreadPool or Object context (instead of errors)
 
 
+# Get terminal width
+my ($terminal_width, $terminal_height) = GetTerminalSize();
+$terminal_width //= 80; # Default to 80 if terminal width cannot be determined
+$terminal_height //= 24; # Default to 24 if terminal height cannot be determined
+
+# Auto-adjust the bucket size based on the terminal height (larger terminal can handle more rows)
+if( $terminal_height <= 24 ) {
+    $bucket_size_minutes = 60;
+} elsif( $terminal_height <= 45 ) {
+    $bucket_size_minutes = 30;
+} elsif( $terminal_height <= 65 ) {
+    $bucket_size_minutes = 10;
+} elsif( $terminal_height <= 85 ) {
+    $bucket_size_minutes = 5;
+} elsif( $terminal_height > 85 ) {
+    $bucket_size_minutes = 1;
+} else {
+    $bucket_size_minutes = 60;
+}
+#print "Terminal is: $terminal_width x $terminal_height -- Bucket size: $bucket_size_minutes\n";
+
 my $title = <<"END";
 \033[0;37m
 ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -37,11 +58,11 @@ print $title;
 # Get command-line options
 GetOptions(
     'bucket-size|bs=i' => \$bucket_size_minutes,
-) or die "Usage: $0 --bucket-size|-bs <minutes> <file1> <file2> ...\n";
+) or die "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n";
 
 # Ensure at least one file is provided
 @in_files = @ARGV;
-die "Usage: $0 --bucket-size|-bs <minutes> <file1> <file2> ...\n" unless @in_files;
+die "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n" unless @in_files;
 
 my $bucket_size_seconds = $bucket_size_minutes * 60;
 
@@ -54,10 +75,6 @@ my %colors = (
     'TRACE' => "\033[0;35m",
     'NC'    => "\033[0m"
 );
-
-# Get terminal width
-my ($terminal_width) = GetTerminalSize();
-$terminal_width //= 80; # Default to 80 if terminal width cannot be determined
 
 # Parse logs, bucket by time, and count log levels
 my %log_counts;
