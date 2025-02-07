@@ -3,6 +3,7 @@ use strict;
 use warnings;
 use POSIX qw(strftime);
 use Time::Piece;
+use DateTime;
 use Term::ReadKey;
 use Getopt::Long;
 use Term::ANSIColor;
@@ -27,7 +28,6 @@ my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRAC
 # TO DO:
 # - add a summary table at the end showing totals in the various buckets
 
-# - add a feature to allow providing start and end times where entries outside of that range are omitted
 # - add a feature to auto-detect if the file is an access log or normal log (ie; 500 or ERRROR)
 # - add capabilities to do access log mode inspecting number of requests and status codes
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads)
@@ -127,15 +127,20 @@ sub adapt_to_command_line_options {
     die "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n" unless @in_files;
 
     $bucket_size_seconds = $bucket_size_minutes * 60;
+    return;
+}
 
-    # Parse various possible formats for input of start and end times and set associated filter variables
-    # BUG: specifying only the time should default to the date included in the file, however at this point we've not yet read the file
+# Parse various possible formats for input of start and end times and set associated filter variables
+sub calculate_start_end_filter_timestamps {
+    my ( $log_time ) = @_;
+    my $log_date = $log_time->epoch() - ( $log_time->hour * ( 60 * 60 ) + $log_time->minute * 60 + $log_time->second );
+
     foreach my $key (keys %range) {
         my $value = $range{$key};  # Get the value (either $range_start or $range_end)
         next unless length( $range{$key} ) > 0;
         my $epoch_value;  # Variable to store the epoch time
 
-        # Convert timestamp to epoch seconds using Time::Piece
+        # Convert timestamp to epoch seconds using Time::Piece -- WARNING -- use of strptime can cause timezone problems, it appears to work here as I've manually set TZ to UTC on input
         if ( $value =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/ ) {
             $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d %H:%M:%S" )->epoch;
         } elsif ( $value =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/ ) {
@@ -143,17 +148,17 @@ sub adapt_to_command_line_options {
         } elsif ( $value =~ /^\d{4}-\d{2}-\d{2}/ ) {
             $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d" )->epoch;
         } elsif ( $value =~ /^\d{2}:\d{2}:\d{2}/ ) {
-            $epoch_value = Time::Piece->strptime( $value, "%H:%M:%S" )->epoch;
+            $epoch_value = $log_date + Time::Piece->strptime( $value, "%H:%M:%S" )->epoch;
         } elsif ( $value =~ /^\d{2}:\d{2}/ ) {
-            $epoch_value = Time::Piece->strptime( $value, "%H:%M" )->epoch;
+            $epoch_value = $log_date + Time::Piece->strptime( $value, "%H:%M" )->epoch;
         } else {
-        	print "Warning: unhandled date/time format - option not taken into account\n";
-            #$epoch_value = undef;  # Or some appropriate default/error value
+            print "Warning: unhandled date/time format - option not taken into account\n";
         }
 
+        #print "Epoch value in seconds: $epoch_value\n";
         $range_epoch{$key} = $epoch_value if defined( $epoch_value );  # Store the epoch value in the hash
     }
-    return;
+    return 1;
 }
 
 sub adapt_to_terminal_settings {
@@ -213,6 +218,7 @@ sub read_and_process_logs {
     foreach my $in_file (@in_files) {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
         my $line_number = 0;
+        my $range_filter_initialized = 0;
         while (<$fh>) {
             $line_number++;
             if ($line_number % 100 == 0) {
@@ -222,17 +228,28 @@ sub read_and_process_logs {
             if (my ($timestamp_str, $log_level) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\+\d{4} \[L: ([^\]]*)\]/) {
                 my $log_level_bucket = $log_level;
                 # Convert timestamp to epoch seconds using Time::Piece
-                my $timestamp = Time::Piece->strptime($timestamp_str, "%Y-%m-%d %H:%M:%S")->epoch;
+    #            my $timestamp = Time::Piece->strptime($timestamp_str, "%Y-%m-%d %H:%M:%S")->epoch;
+                my $timestamp = DateTime->new(
+                    year      => substr($timestamp_str, 0, 4),
+                    month     => substr($timestamp_str, 5, 2),
+                    day       => substr($timestamp_str, 8, 2),
+                    hour      => substr($timestamp_str, 11, 2),
+                    minute    => substr($timestamp_str, 14, 2),
+                    second    => substr($timestamp_str, 17, 2),
+                    time_zone => 'UTC',
+                );
+
+                $range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp ) unless $range_filter_initialized;
 
                 # a number of conditions determine if this read row should be skipped
-                next if( $timestamp < $range_epoch{'start'} || $timestamp >= $range_epoch{'end'} );
+                next if( $timestamp->epoch() < $range_epoch{'start'} || $timestamp->epoch() >= $range_epoch{'end'} );
                 next if( defined( $exclude_regex ) && /$exclude_regex/ );
                 next if( defined( $include_regex ) && !/$include_regex/ );
 
                 # determine if this line should be highlighted
                 $log_level_bucket .= "-HL" if( defined( $highlight_regex ) && /$highlight_regex/ );
 
-                my $bucket = int($timestamp / $bucket_size_seconds) * $bucket_size_seconds;
+                my $bucket = int($timestamp->epoch() / $bucket_size_seconds) * $bucket_size_seconds;
                 $log_counts{$bucket}{$log_level_bucket}{count}++;
             }
         }
@@ -326,6 +343,7 @@ sub print_bar_graph {
 print_title();
 adapt_to_terminal_settings(); 
 adapt_to_command_line_options();
+#calculate_start_end_filter_timestamps();
 read_and_process_logs();
 normalize_data_for_output();
 print_bar_graph();
