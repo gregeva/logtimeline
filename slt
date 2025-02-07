@@ -16,16 +16,21 @@ my %range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %range;
 my $exclude_regex;
 my $include_regex;
+my $pause_output = 0;
+my $hide_values = 0;
 my @in_files;
 
 # TO DO:
+# - add a highlight feature which allows keeping all entries, however specifically highlights entries matching a RegEx
+
+# - add a summary table at the end showing totals in the various buckets
+
 # - add a feature/option to only count certain log levels (like ERROR:WARN)
 # - add a feature/option to omit certain log levels (like TRACE:DEBUG)
 # - add a feature to allow providing start and end times where entries outside of that range are omitted
 # - add a feature to auto-detect if the file is an access log or normal log (ie; 500 or ERRROR)
 # - add an option to flip into access log mode
 # - add capabilities to do access log mode inspecting number of requests and status codes
-# - add a command line feature to omit or include via RegEx
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file
 # - add a feature allowing for auto-detection of file type, and hence analysis pattern/options to use
 # - add a feature to allow gfor grouping of various other log categories like ThreadPool or Object context (instead of errors)
@@ -68,6 +73,8 @@ print $title;
 # Get command-line options
 GetOptions(
     'bucket-size|bs=i' => \$bucket_size_minutes,
+    'pause|p' => \$pause_output,
+    'hide-values|hv' => \$hide_values,
     'start|s=s' => \$range_start,
     'end|e=s' => \$range_end,
     'exclude|e=s' => \$exclude_regex,
@@ -83,16 +90,51 @@ die "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n" unless @in_f
 
 my $bucket_size_seconds = $bucket_size_minutes * 60;
 
-# Define ANSI colors
+# Define ANSI colors (HL = highlight, NC = no color)
+    #'ERROR' => "\033[0;31m",
 my %colors = (
     'ERROR' => "\033[0;31m",
     'WARN'  => "\033[0;33m",
     'INFO'  => "\033[0;32m",
     'DEBUG' => "\033[0;34m",
     'TRACE' => "\033[0;35m",
-    'NC'    => "\033[0m"
+    'NC'    => "\033[0m",
+    'HL'    => "\033[0m"
 );
 
+## SUBS ##
+
+sub pause_for_keypress {
+    my ($prompt) = @_;  # Get the optional prompt message
+    $prompt = "Press any key to continue (or Q to quit)..." unless defined $prompt;
+    print "\033[0;44m$prompt\033[0m";
+
+    ReadMode 4;  # Turn off line buffering
+    my $key = ReadKey(0);
+    ReadMode 0;  # Restore normal input mode
+
+    if (defined $key) {
+        if ($key eq "q" || $key eq "Q") {
+            print "\r";
+            print " " x length( $prompt );
+            print "\r\033[0;35mExiting program.\033[0m\n";
+            exit 0;
+        } else {
+            print "\r";
+            print " " x length( $prompt );
+            print "\r";
+            return 1;  # Return a value indicating "continue"
+        }
+    } else {
+        print "\r";
+        print " " x length( $prompt );
+        print "\r";
+        return 1;
+    }
+}
+
+# Parse various possible formats for input of start and end times and set associated filter variables
+# BUG: specifying only the time should default to the date included in the file, however at this point we've not yet read the file
 foreach my $key (keys %range) {
     my $value = $range{$key};  # Get the value (either $range_start or $range_end)
     next unless length( $range{$key} ) > 0;
@@ -117,9 +159,8 @@ foreach my $key (keys %range) {
     $range_epoch{$key} = $epoch_value if defined( $epoch_value );  # Store the epoch value in the hash
 }
 
-#print "Start epoch: $range_epoch{'start'} -- End epoch: $range_epoch{'end'}\n";
-
 # Parse logs, bucket by time, and count log levels
+# BUG: this should be able to take multiple files as inputs using * but it doesn't work, same for including multiple files
 my %log_counts;
 foreach my $in_file (@in_files) {
     open my $fh, '<', $in_file or die "Cannot open file: $in_file";
@@ -133,9 +174,12 @@ foreach my $in_file (@in_files) {
         if (my ($timestamp_str, $log_level) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\+\d{4} \[L: ([^\]]*)\]/) {
             # Convert timestamp to epoch seconds using Time::Piece
             my $timestamp = Time::Piece->strptime($timestamp_str, "%Y-%m-%d %H:%M:%S")->epoch;
+
+            # a number of conditions determine if this read row should be skipped
             next if( $timestamp < $range_epoch{'start'} || $timestamp >= $range_epoch{'end'} );
             next if( defined( $exclude_regex ) && /$exclude_regex/ );
             next if( defined( $include_regex ) && !/$include_regex/ );
+
             my $bucket = int($timestamp / $bucket_size_seconds) * $bucket_size_seconds;
             $log_counts{$bucket}{$log_level}{count}++;
         }
@@ -158,14 +202,16 @@ foreach my $bucket (keys %log_counts) {
 
 # Calculate the maximum length of log level titles and counts
 my $legend_length = 0;
-foreach my $bucket (keys %log_counts) {
-    my $bucket_legend_length = 0;
-    foreach my $log_level (keys %{$log_counts{$bucket}}) {
-        my $count = $log_counts{$bucket}{$log_level}{count};
-        my $title_length = length("$log_level: $count ");
-        $bucket_legend_length += $title_length;
+if( !$hide_values ) {
+    foreach my $bucket (keys %log_counts) {
+        my $bucket_legend_length = 0;
+        foreach my $log_level (keys %{$log_counts{$bucket}}) {
+            my $count = $log_counts{$bucket}{$log_level}{count};
+            my $title_length = length("$log_level: $count ");
+            $bucket_legend_length += $title_length;
+        }
+        $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
     }
-    $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
 }
 
 # Normalize counts to fit terminal width
@@ -182,6 +228,7 @@ foreach my $bucket (keys %log_counts) {
 my @log_levels = qw(ERROR WARN INFO DEBUG TRACE);
 
 # Generate bar graph
+my $lines_printed = 0;
 foreach my $bucket (sort keys %log_counts) {
     my $bucket_time_str = strftime("%Y-%m-%d %H:%M", gmtime($bucket));
     #my $bucket_time_str = strftime("%Y-%m-%d %H:%M", localtime($bucket));			# don't use this as it is converting unknown timezone in logs to client timezome
@@ -197,7 +244,7 @@ foreach my $bucket (sort keys %log_counts) {
             $legend_length_bucket += length("$log_level: $count ");
         }
     }
-    print $log_details;
+    print $log_details unless $hide_values;
     my $padding = $legend_length - $legend_length_bucket;
     print " " x ($padding >= 0 ? $padding : 0);
     print "│ ";
@@ -209,4 +256,5 @@ foreach my $bucket (sort keys %log_counts) {
         }
     }
     print "\n";
+    pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
 }
