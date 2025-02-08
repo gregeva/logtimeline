@@ -27,6 +27,7 @@ my ($terminal_width, $terminal_height) = GetTerminalSize();
 my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRACE-HL TRACE 5xx-HL 5xx 4xx-HL 4xx 3xx-HL 3xx 2xx-HL 2xx 1xx-HL 1xx );			# Define log bucket printing order
 
 # TO DO:
+# - FIX BUG : if there are no entries in a given time bucket, it is never created, hence not showing silence between busy periods.
 # - add a summary table at the end showing totals in the various buckets (start, end time, total duration in time of logs, average logs per minute, second, total of all of the bucket occurences, size of the file, lines processed, lines omitted/didn't match)
 # - add a feature to include/exclude HTTP status codes which would need to be converted to RegEx as 4xx isn't going to be found
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize)
