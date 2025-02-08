@@ -9,7 +9,7 @@ use Getopt::Long;
 use Term::ANSIColor;
 
 # Configuration
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_milliseconds ) = 0;
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds ) = 0;
 my %log_counts;			# this is where the counts of log entries are tallied across the time buckets
 my $legend_length = 0;
 my $range_start = "";
@@ -18,7 +18,7 @@ my $range_start_epoch = 0;
 my $range_end_epoch = 0;
 my %range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %range;
-my $output_timestamp_format = "%Y-%m-%d %H:%M:%S";
+my $output_timestamp_format = "%Y-%m-%d %H:%M";
 #my( $output_timestamp_min ) = DateTime->from_epoch( epoch => 1678886400 );
 my( $output_timestamp_min, $output_timestamp_max );
 my( $exclude_regex, $include_regex, $highlight_regex );
@@ -130,11 +130,12 @@ sub adapt_to_command_line_options {
         'bucket-size|bs=i' => \$bucket_size_minutes,
         'pause|p' => \$pause_output,
         'hide-values|hv' => \$hide_values,
-        'start|s=s' => \$range_start,
-        'end|e=s' => \$range_end,
+        'start|st=s' => \$range_start,
+        'end|et=s' => \$range_end,
         'exclude|e=s' => \$exclude_regex,
         'include|i=s' => \$include_regex,
         'highlight|h=s' => \$highlight_regex,
+        'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds
     ) or die print_version_and_usage( "required options not provided" ); 
 
@@ -153,8 +154,8 @@ sub adapt_to_command_line_options {
 #    # Handle the error here
 #    print "Caught the error: $@";
 #}
-
-    $bucket_size_seconds = $print_milliseconds ? $bucket_size_minutes : $bucket_size_minutes * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
+    $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
+    $bucket_size_seconds = $print_seconds ? $bucket_size_minutes : $bucket_size_minutes * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
 
     return;
 }
@@ -423,12 +424,9 @@ sub normalize_data_for_output {
 sub print_bar_graph {
     my $lines_printed = 0;
     foreach my $bucket (sort keys %log_counts) {
-        #my $bucket_time_str = strftime("%Y-%m-%d %H:%M:%S", gmtime($bucket));
         my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
         $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
-        #my $bucket_time_str = strftime("%Y-%m-%d %H:%M", localtime($bucket));			# don't use this as it is converting unknown timezone in logs to client timezome
         print "$bucket_time_str ";
-        #print "$bucket  ";
         my $log_details = "";
         my $legend_length_bucket = 0;
         foreach my $category_bucket (@log_levels) {
