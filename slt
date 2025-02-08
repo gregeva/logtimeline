@@ -26,11 +26,10 @@ my ($terminal_width, $terminal_height) = GetTerminalSize();
 my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRACE-HL TRACE);						# Define log bucket printing order
 
 # TO DO:
-# - add a summary table at the end showing totals in the various buckets
-
 # - add a feature to auto-detect if the file is an access log or normal log (ie; 500 or ERRROR)
+# - add a summary table at the end showing totals in the various buckets
 # - add capabilities to do access log mode inspecting number of requests and status codes
-# - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads)
+# - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize)
 # - add a feature allowing for auto-detection of file type, and hence analysis pattern/options to use
 # - add a feature to allow gfor grouping of various other log categories like ThreadPool or Object context (instead of errors)
 # - add a mode to go down to second precision
@@ -221,7 +220,7 @@ sub read_and_process_logs {
         my $range_filter_initialized = 0;
         while (<$fh>) {
             $line_number++;
-            if ($line_number % 100 == 0) {
+            if ($line_number % 997 == 0) {	# only print processing status update every X lines processed
                 printf("\rProcessing line %d in file %s", $line_number, $in_file);
                 $| = 1; # Flush output
             }
