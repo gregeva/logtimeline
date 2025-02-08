@@ -19,6 +19,8 @@ my $range_end_epoch = 0;
 my %range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %range;
 my $output_timestamp_format = "%Y-%m-%d %H:%M:%S";
+#my( $output_timestamp_min ) = DateTime->from_epoch( epoch => 1678886400 );
+my( $output_timestamp_min, $output_timestamp_max );
 my( $exclude_regex, $include_regex, $highlight_regex );
 my $pause_output = 0;
 my $hide_values = 0;
@@ -27,7 +29,6 @@ my ($terminal_width, $terminal_height) = GetTerminalSize();
 my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRACE-HL TRACE 5xx-HL 5xx 4xx-HL 4xx 3xx-HL 3xx 2xx-HL 2xx 1xx-HL 1xx );			# Define log bucket printing order
 
 # TO DO:
-# - FIX BUG : if there are no entries in a given time bucket, it is never created, hence not showing silence between busy periods.
 # - add a summary table at the end showing totals in the various buckets (start, end time, total duration in time of logs, average logs per minute, second, total of all of the bucket occurences, size of the file, lines processed, lines omitted/didn't match)
 # - add a feature to include/exclude HTTP status codes which would need to be converted to RegEx as 4xx isn't going to be found
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize)
@@ -349,6 +350,11 @@ sub read_and_process_logs {
                 # determine if this line should be highlighted
                 $category_bucket .= "-HL" if( defined( $highlight_regex ) && /$highlight_regex/ );
 
+
+                # sets earliest and latest timestamp values being displayed (after the range filtering selection)
+                $output_timestamp_min = $timestamp->epoch() if !defined( $output_timestamp_min ) || $output_timestamp_min > $timestamp->epoch();
+                $output_timestamp_max = $timestamp->epoch() if !defined( $output_timestamp_max ) || $output_timestamp_max < $timestamp->epoch();
+
                 my $bucket = int($timestamp->epoch() / $bucket_size_seconds) * $bucket_size_seconds;
                 $log_counts{$bucket}{$category_bucket}{count}++;
                 $log_counts{$bucket}{$category_bucket}{duration} += $request_duration if $request_duration;
@@ -366,6 +372,18 @@ sub read_and_process_logs {
 sub normalize_data_for_output {
     # Determine the maximum total log messages for any time window
     my $max_total_count = 0;
+
+    # Go through all of the buckets between the earliest and latest times and ensure that they have empty data to print time buckets with no data
+    my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;
+    for (my $bucket = $start_bucket; $bucket <= $output_timestamp_max; $bucket += $bucket_size_seconds) {
+        $log_counts{$bucket}{'empty'}{'count'} = 0;
+    }
+
+    # Example usage (to demonstrate the values):
+#    foreach my $bucket (sort keys %log_counts) {
+#        print "Bucket: $bucket, Empty Count: ", $log_counts{$bucket}{'empty'}{'count'}, "\n";
+#    }
+
     foreach my $bucket (keys %log_counts) {
         my $total_count = 0;
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
@@ -380,6 +398,7 @@ sub normalize_data_for_output {
             my $bucket_legend_length = 0;
             foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
                 my $count = $log_counts{$bucket}{$category_bucket}{count};
+                next unless $count > 0;				# don't include the empty bucket who's purpose is to normalize the buckets represented
 		
                 my $title_length = $category_bucket =~ /-HL$/ ? length(" $count ") : length("$category_bucket: $count ");
                 $bucket_legend_length += $title_length;
@@ -419,6 +438,8 @@ sub print_bar_graph {
                 if( $category_bucket =~ /-HL$/ ) {
                     $log_details .= "${color}$count$colors{'NC'} ";
                     $legend_length_bucket += length("$count ");
+                } elsif( $count < 1 ) {					 # don't include the empty bucket who's purpose is to normalize the buckets represented
+                    next;
                 } else {
                     $log_details .= "$color$category_bucket: $count$colors{'NC'} ";
                     $legend_length_bucket += length("$category_bucket: $count ");
