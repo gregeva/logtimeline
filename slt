@@ -9,7 +9,7 @@ use Getopt::Long;
 use Term::ANSIColor;
 
 # Configuration
-my ( $bucket_size_minutes, $bucket_size_seconds ) = 0;
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_milliseconds ) = 0;
 my %log_counts;			# this is where the counts of log entries are tallied across the time buckets
 my $legend_length = 0;
 my $range_start = "";
@@ -18,29 +18,39 @@ my $range_start_epoch = 0;
 my $range_end_epoch = 0;
 my %range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %range;
+my $output_timestamp_format = "%Y-%m-%d %H:%M:%S";
 my( $exclude_regex, $include_regex, $highlight_regex );
 my $pause_output = 0;
 my $hide_values = 0;
 my @in_files;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
-my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRACE-HL TRACE);						# Define log bucket printing order
+my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRACE-HL TRACE 5xx-HL 5xx 4xx-HL 4xx 3xx-HL 3xx 2xx-HL 2xx 1xx-HL 1xx );			# Define log bucket printing order
 
 # TO DO:
-# - add a feature to auto-detect if the file is an access log or normal log (ie; 500 or ERRROR)
-# - add a summary table at the end showing totals in the various buckets
-# - add capabilities to do access log mode inspecting number of requests and status codes
+# - add a summary table at the end showing totals in the various buckets (start, end time, total duration in time of logs, average logs per minute, second, total of all of the bucket occurences, size of the file, lines processed, lines omitted/didn't match)
+# - add a feature to include/exclude HTTP status codes which would need to be converted to RegEx as 4xx isn't going to be found
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize)
 # - add a feature allowing for auto-detection of file type, and hence analysis pattern/options to use
 # - add a feature to allow gfor grouping of various other log categories like ThreadPool or Object context (instead of errors)
 # - add a mode to go down to second precision
+# - performance improvement: leverage a tempt file with cached file stats (log start/end times, num lines, ...) to start/stop reading the file when provided start/end time ranges based on guesses around filesize
 
+## LOG STRUCTURES ##
 # RAC client: [2025-02-04T12:06:22.784] [TRACE] MessageStream - handling data from GAS with chunk size: 88
+# TWX logs: 2025-02-04 12:05:57.481+0000 [L: DEBUG] [O: c.t.p.p.StreamEntryProcessor] [I: ] [U: ] [S: ] [P: ] [T: pool-6-thread-3] Stream Entry Block Size Threshold Reached...
+# Tomcat access logs: 10.224.212.63 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
+
 my %colors = (
     'ERROR' => "\033[0;31m",
     'WARN'  => "\033[0;33m",
     'INFO'  => "\033[0;32m",
     'DEBUG' => "\033[0;34m",
     'TRACE' => "\033[0;35m",
+    '1xx'  => "\033[0;34m",
+    '2xx'  => "\033[0;32m",
+    '3xx'  => "\033[0;35m",
+    '4xx'  => "\033[0;33m",
+    '5xx'  => "\033[0;31m",
     'NC'    => "\033[0m"
 );
 
@@ -105,6 +115,11 @@ END
     return;
 }
 
+sub print_version_and_usage {
+"Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n";
+    return;
+}
+
 sub adapt_to_command_line_options {
     # Get command-line options
     GetOptions(
@@ -115,17 +130,19 @@ sub adapt_to_command_line_options {
         'end|e=s' => \$range_end,
         'exclude|e=s' => \$exclude_regex,
         'include|i=s' => \$include_regex,
-        'highlight|h=s' => \$highlight_regex
-    ) or die "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n";
+        'highlight|h=s' => \$highlight_regex,
+        'milliseconds|ms' => \$print_milliseconds
+    ) or die print_version_and_usage(); 
 
     $range{'start'} = $range_start if defined( $range_start );
     $range{'end'} = $range_end if defined(  $range_end );
 
     # Ensure at least one file is provided
     @in_files = @ARGV;
-    die "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n" unless @in_files;
+    die print_version_and_usage() unless @in_files;
 
-    $bucket_size_seconds = $bucket_size_minutes * 60;
+    $bucket_size_seconds = $print_milliseconds ? $bucket_size_minutes : $bucket_size_minutes * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
+
     return;
 }
 
@@ -218,25 +235,97 @@ sub read_and_process_logs {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
         my $line_number = 0;
         my $range_filter_initialized = 0;
+        my %month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
+
         while (<$fh>) {
             $line_number++;
+            my ( $timestamp_str, $log_level, $category_bucket ) = "";
+            my ( $is_line_match, $is_access_log, $match_type, $status_code, $bytes_sent, $request_duration ) = 0;
+            my $timestamp;
+            
+
             if ($line_number % 997 == 0) {	# only print processing status update every X lines processed
                 printf("\rProcessing line %d in file %s", $line_number, $in_file);
                 $| = 1; # Flush output
             }
-            if (my ($timestamp_str, $log_level) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\+\d{4} \[L: ([^\]]*)\]/) {
-                my $log_level_bucket = $log_level;
-                # Convert timestamp to epoch seconds using Time::Piece
-    #            my $timestamp = Time::Piece->strptime($timestamp_str, "%Y-%m-%d %H:%M:%S")->epoch;
-                my $timestamp = DateTime->new(
-                    year      => substr($timestamp_str, 0, 4),
-                    month     => substr($timestamp_str, 5, 2),
-                    day       => substr($timestamp_str, 8, 2),
-                    hour      => substr($timestamp_str, 11, 2),
-                    minute    => substr($timestamp_str, 14, 2),
-                    second    => substr($timestamp_str, 17, 2),
-                    time_zone => 'UTC',
-                );
+            # ORIGINAL #if (my ($timestamp_str, $log_level) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\+\d{4} \[L: ([^\]]*)\]/) {
+
+#            if (my ($timestamp_str, $log_level) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\+\d{4} \[L: ([^\]]*)\]/) {
+#           #if( $_ = /^[\[]?(?<timestamp_str>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})\.?(?<milliseconds>\d{3})?.*? \[[L: ]*(?<log_level>[^\]]*)\]/ ) {
+#                $timestamp_str =~ tr/T/ /;
+#                my $category_bucket = $log_level;
+#                # Convert timestamp to epoch seconds using Time::Piece
+#    #            my $timestamp = Time::Piece->strptime($timestamp_str, "%Y-%m-%d %H:%M:%S")->epoch;
+#                my $timestamp = DateTime->new(
+#                    year      => substr($timestamp_str, 0, 4),
+#                    month     => substr($timestamp_str, 5, 2),
+#                    day       => substr($timestamp_str, 8, 2),
+#                    hour      => substr($timestamp_str, 11, 2),
+#                    minute    => substr($timestamp_str, 14, 2),
+#                    second    => substr($timestamp_str, 17, 2),
+#                    time_zone => 'UTC',
+#                );
+
+            if ( ($timestamp_str, $category_bucket) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]/) {
+                $is_line_match = 1;
+                $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
+            } elsif ( ($timestamp_str, $category_bucket ) = $_ =~ /^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3}).*? \[[L: ]*([^\]]*)\]/ ) {
+                $is_line_match = 1;
+                $match_type = 2;			# this is matching RAC client log format [2025-02-04T12:06:22.784] [TRACE]
+                $timestamp_str =~ tr/T/ /;
+            } elsif ( (undef, $timestamp_str, $category_bucket, $bytes_sent, $request_duration) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "[^"]+" (\d{3}) (\d+) (\d+)/ ) {
+                $is_line_match = 1;
+                $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
+                $is_access_log = 1;
+                $status_code = $category_bucket;
+                $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
+                $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
+            } elsif ( (undef, $timestamp_str, $category_bucket, $bytes_sent) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "[^"]+" (\d{3}) (\d+)/ ) {
+                $is_line_match = 1;
+                $match_type = 4;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626
+                					# this is matching Nginx ingress access log format 3.133.31.181 - - [18/Nov/2024:14:19:55 +0000] "GET / HTTP/1.1" 404 431 "-" "WizDynamicScanner/1.0"
+                $is_access_log = 1;
+                $status_code = $category_bucket;
+                $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
+                $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
+            } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^{"\@timestamp":"([^"]*).*"level":"([^"]*)/ ) {
+                $is_line_match = 1;
+                $match_type = 5;			# this matches Connection Server JSON formatted logs : {"@timestamp":"2025-02-02T21:03:06.725+00:00","@version":1,"message":"Error encountered, closing WebSocket: endpointId=2608459","logger_name":"com.thingworx.connectionserver.alwayson.AbstractClientEndpoint","thread_name":"vert.x-eventloop-thread-16","level":"WARN","level_value":30000,"stack_trace":"io.vertx.core.http.HttpClosedException: Connection was closed\n"}
+                $timestamp_str =~ s/\+\d{2}:\d{2}$//;	# chop off the timezone offset
+                $timestamp_str =~ tr/T/ /;
+            }
+
+
+            #print "\033[0;32m[$timestamp_str|$category_bucket] [$is_line_match/$match_type] \033[0m$_";
+            #$| = 1; # Flush output
+
+            if( $is_line_match ) {
+                if( $match_type == 1 || $match_type == 2 || $match_type == 5 ) {
+                    $timestamp = DateTime->new(
+                        year      => substr($timestamp_str, 0, 4),
+                        month     => substr($timestamp_str, 5, 2),
+                        day       => substr($timestamp_str, 8, 2),
+                        hour      => substr($timestamp_str, 11, 2),
+                        minute    => substr($timestamp_str, 14, 2),
+                        second    => substr($timestamp_str, 17, 2),
+                        time_zone => 'UTC',
+                    );
+                } elsif( $match_type == 3 || $match_type == 4 ) {
+                    my ($day, $month_str, $year, $hour, $minute, $second) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/;
+                    my $month = $month_map{$month_str};
+                    $timestamp = DateTime->new(
+                        year      => $year,
+                        month     => $month,
+                        day       => $day,
+                        hour      => $hour,
+                        minute    => $minute,
+                        second    => $second,
+                        time_zone => 'UTC',
+                    );
+
+#                    print "\033[0;35m[%d]\033[0m", $timestamp->epoch();
+#                    $| = 1; # Flush output
+                }
 
                 $range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp ) unless $range_filter_initialized;
 
@@ -246,10 +335,11 @@ sub read_and_process_logs {
                 next if( defined( $include_regex ) && !/$include_regex/ );
 
                 # determine if this line should be highlighted
-                $log_level_bucket .= "-HL" if( defined( $highlight_regex ) && /$highlight_regex/ );
+                $category_bucket .= "-HL" if( defined( $highlight_regex ) && /$highlight_regex/ );
 
                 my $bucket = int($timestamp->epoch() / $bucket_size_seconds) * $bucket_size_seconds;
-                $log_counts{$bucket}{$log_level_bucket}{count}++;
+                $log_counts{$bucket}{$category_bucket}{count}++;
+                $log_counts{$bucket}{$category_bucket}{duration} += $request_duration if $request_duration;
             }
         }
         close $fh;
@@ -266,8 +356,8 @@ sub normalize_data_for_output {
     my $max_total_count = 0;
     foreach my $bucket (keys %log_counts) {
         my $total_count = 0;
-        foreach my $log_level (keys %{$log_counts{$bucket}}) {
-            $total_count += $log_counts{$bucket}{$log_level}{count};
+        foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
+            $total_count += $log_counts{$bucket}{$category_bucket}{count};
         }
         $max_total_count = $total_count if $total_count > $max_total_count;
     }
@@ -276,10 +366,10 @@ sub normalize_data_for_output {
     if( !$hide_values ) {
         foreach my $bucket (keys %log_counts) {
             my $bucket_legend_length = 0;
-            foreach my $log_level (keys %{$log_counts{$bucket}}) {
-                my $count = $log_counts{$bucket}{$log_level}{count};
+            foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
+                my $count = $log_counts{$bucket}{$category_bucket}{count};
 		
-                my $title_length = $log_level =~ /-HL$/ ? length(" $count ") : length("$log_level: $count ");
+                my $title_length = $category_bucket =~ /-HL$/ ? length(" $count ") : length("$category_bucket: $count ");
                 $bucket_legend_length += $title_length;
             }
             $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
@@ -287,12 +377,13 @@ sub normalize_data_for_output {
     }
 
     # Normalize counts to fit terminal width
-    my $max_graph_width = $terminal_width - $legend_length - 2 - 4 - 15;    # static values based on timestamp length, some white space, maybe a vertical line spacer
+    my $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format );    # static values based on timestamp length, some white space, maybe a vertical line spacer
+    $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
     foreach my $bucket (keys %log_counts) {
-        foreach my $log_level (keys %{$log_counts{$bucket}}) {
-            my $count = $log_counts{$bucket}{$log_level}{count};
+        foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
+            my $count = $log_counts{$bucket}{$category_bucket}{count};
             my $scaled_count = int(($count / $max_total_count) * $max_graph_width);
-            $log_counts{$bucket}{$log_level}{scaled_count} = $scaled_count;
+            $log_counts{$bucket}{$category_bucket}{scaled_count} = $scaled_count;
         }
     }
     return;
@@ -301,22 +392,24 @@ sub normalize_data_for_output {
 sub print_bar_graph {
     my $lines_printed = 0;
     foreach my $bucket (sort keys %log_counts) {
-        my $bucket_time_str = strftime("%Y-%m-%d %H:%M", gmtime($bucket));
+        #my $bucket_time_str = strftime("%Y-%m-%d %H:%M:%S", gmtime($bucket));
+        my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
+        $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
         #my $bucket_time_str = strftime("%Y-%m-%d %H:%M", localtime($bucket));			# don't use this as it is converting unknown timezone in logs to client timezome
         print "$bucket_time_str ";
         #print "$bucket  ";
         my $log_details = "";
         my $legend_length_bucket = 0;
-        foreach my $log_level (@log_levels) {
-            if (exists $log_counts{$bucket}{$log_level}) {
-                my $count = $log_counts{$bucket}{$log_level}{count};
-                my $color = $colors{$log_level} // $colors{'NC'};
-                if( $log_level =~ /-HL$/ ) {
+        foreach my $category_bucket (@log_levels) {
+            if (exists $log_counts{$bucket}{$category_bucket}) {
+                my $count = $log_counts{$bucket}{$category_bucket}{count};
+                my $color = $colors{$category_bucket} // $colors{'NC'};
+                if( $category_bucket =~ /-HL$/ ) {
                     $log_details .= "${color}$count$colors{'NC'} ";
                     $legend_length_bucket += length("$count ");
                 } else {
-                    $log_details .= "$color$log_level: $count$colors{'NC'} ";
-                    $legend_length_bucket += length("$log_level: $count ");
+                    $log_details .= "$color$category_bucket: $count$colors{'NC'} ";
+                    $legend_length_bucket += length("$category_bucket: $count ");
                 }
             }
         }
@@ -324,13 +417,14 @@ sub print_bar_graph {
         my $padding = $legend_length - $legend_length_bucket;
         print " " x ($padding >= 0 ? $padding : 0);
         print "│ ";
-        foreach my $log_level (@log_levels) {
-            if (exists $log_counts{$bucket}{$log_level}) {
-                my $scaled_count = $log_counts{$bucket}{$log_level}{scaled_count};
-                my $color = $colors{$log_level} // $colors{'NC'};
+        foreach my $category_bucket (@log_levels) {
+            if (exists $log_counts{$bucket}{$category_bucket}) {
+                my $scaled_count = $log_counts{$bucket}{$category_bucket}{scaled_count};
+                my $color = $colors{$category_bucket} // $colors{'NC'};
                 print "$color" . ('█' x $scaled_count) . "$colors{'NC'}";
             }
         }
+#print $log_counts{$bucket}{$category_bucket}{duration};
         print "\n";
         pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
     }
@@ -346,4 +440,6 @@ adapt_to_command_line_options();
 read_and_process_logs();
 normalize_data_for_output();
 print_bar_graph();
+
+print "\n";
 exit;
