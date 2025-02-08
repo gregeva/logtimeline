@@ -116,7 +116,9 @@ END
 }
 
 sub print_version_and_usage {
-"Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n";
+    my ( $error_reason ) = @_;
+    print "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n";
+    print "\n  Error: $error_reason\n";
     return;
 }
 
@@ -132,14 +134,23 @@ sub adapt_to_command_line_options {
         'include|i=s' => \$include_regex,
         'highlight|h=s' => \$highlight_regex,
         'milliseconds|ms' => \$print_milliseconds
-    ) or die print_version_and_usage(); 
+    ) or die print_version_and_usage( "required options not provided" ); 
 
     $range{'start'} = $range_start if defined( $range_start );
     $range{'end'} = $range_end if defined(  $range_end );
 
     # Ensure at least one file is provided
     @in_files = @ARGV;
-    die print_version_and_usage() unless @in_files;
+    die print_version_and_usage( "unable to open any files" ) unless @in_files;
+
+# Should include cleaner handling of possible problems with entering command line options
+#eval {
+#    die "Something bad happened";
+#};
+#if ($@) {
+#    # Handle the error here
+#    print "Caught the error: $@";
+#}
 
     $bucket_size_seconds = $print_milliseconds ? $bucket_size_minutes : $bucket_size_minutes * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
 
