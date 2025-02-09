@@ -9,7 +9,7 @@ use Getopt::Long;
 use Term::ANSIColor;
 
 # Configuration
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds ) = 0;
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $omit_empty ) = 0;
 my %log_counts;			# this is where the counts of log entries are tallied across the time buckets
 my $legend_length = 0;
 my $range_start = "";
@@ -34,7 +34,6 @@ my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRAC
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize)
 # - add a feature allowing for auto-detection of file type, and hence analysis pattern/options to use
 # - add a feature to allow gfor grouping of various other log categories like ThreadPool or Object context (instead of errors)
-# - add a mode to go down to second precision
 # - performance improvement: leverage a tempt file with cached file stats (log start/end times, num lines, ...) to start/stop reading the file when provided start/end time ranges based on guesses around filesize
 
 ## LOG STRUCTURES ##
@@ -135,6 +134,7 @@ sub adapt_to_command_line_options {
         'exclude|e=s' => \$exclude_regex,
         'include|i=s' => \$include_regex,
         'highlight|h=s' => \$highlight_regex,
+        'omit-empty|oe' => \$omit_empty,
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds
     ) or die print_version_and_usage( "required options not provided" ); 
@@ -156,6 +156,13 @@ sub adapt_to_command_line_options {
 #}
     $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
     $bucket_size_seconds = $print_seconds ? $bucket_size_minutes : $bucket_size_minutes * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
+    if( $print_seconds ) {
+        $bucket_size_seconds = $bucket_size_minutes;
+    } elsif( $print_milliseconds ) {
+        $bucket_size_seconds = $bucket_size_minutes / 1000;
+    } else {
+        $bucket_size_seconds = $bucket_size_minutes * 60;
+    }
 
     return;
 }
@@ -375,9 +382,11 @@ sub normalize_data_for_output {
     my $max_total_count = 0;
 
     # Go through all of the buckets between the earliest and latest times and ensure that they have empty data to print time buckets with no data
-    my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;
-    for (my $bucket = $start_bucket; $bucket <= $output_timestamp_max; $bucket += $bucket_size_seconds) {
-        $log_counts{$bucket}{'empty'}{'count'} = 0;
+    unless( $omit_empty ) {
+        my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;
+        for (my $bucket = $start_bucket; $bucket <= $output_timestamp_max; $bucket += $bucket_size_seconds) {
+            $log_counts{$bucket}{'empty'}{'count'} = 0;
+        }
     }
 
     # Example usage (to demonstrate the values):
