@@ -9,8 +9,8 @@ use Getopt::Long;
 use Term::ANSIColor;
 
 # Configuration
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $omit_empty ) = 0;
-my %log_counts;			# this is where the counts of log entries are tallied across the time buckets
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $omit_empty, $total_lines_read, $total_lines_included, $total_lines_highlighted ) = 0;
+my ( %log_counts, %category_totals );			# this is where the counts of log entries are tallied across the time buckets
 my $legend_length = 0;
 my $range_start = "";
 my $range_end = "";
@@ -27,6 +27,19 @@ my $hide_values = 0;
 my @in_files;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
 my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRACE-HL TRACE 5xx-HL 5xx 4xx-HL 4xx 3xx-HL 3xx 2xx-HL 2xx 1xx-HL 1xx );			# Define log bucket printing order
+my %blocks = (
+    'A' => '█',    # Full block
+    'B' => '▓',    # Heavy shading
+    'C' => '▒',    # Medium shading
+    'D' => '░',    # Light shading
+    'E' => '▪',    # Black Square
+    'F' => '▫',    # White Square
+    'G' => '☰',    # Menu
+    'H' => '•',    # Bullet Point
+    'I' => '■',    # Black Very Heavy
+    'J' => '□'     # White square
+);
+my $default_chart_block = "A";
 
 # TO DO:
 # - add a summary table at the end showing totals in the various buckets (start, end time, total duration in time of logs, average logs per minute, second, total of all of the bucket occurences, size of the file, lines processed, lines omitted/didn't match)
@@ -34,7 +47,7 @@ my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRAC
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize)
 # - add a feature allowing for auto-detection of file type, and hence analysis pattern/options to use
 # - add a feature to allow gfor grouping of various other log categories like ThreadPool or Object context (instead of errors)
-# - performance improvement: leverage a tempt file with cached file stats (log start/end times, num lines, ...) to start/stop reading the file when provided start/end time ranges based on guesses around filesize
+# - performance improvement: leverage a temp file with cached file stats (log start/end times, num lines, ...) to start/stop reading the file when provided start/end time ranges based on guesses around filesize
 
 ## LOG STRUCTURES ##
 # RAC client: [2025-02-04T12:06:22.784] [TRACE] MessageStream - handling data from GAS with chunk size: 88
@@ -52,7 +65,31 @@ my %colors = (
     '3xx'  => "\033[0;35m",
     '4xx'  => "\033[0;33m",
     '5xx'  => "\033[0;31m",
-    'NC'    => "\033[0m"
+    'NC'    => "\033[0m",
+    'black' => "\033[30m\033[49m",
+    'red' => "\033[31m\033[49m",
+    'green' => "\033[32m\033[49m",
+    'yellow' => "\033[33m\033[49m",
+    'blue' => "\033[34m\033[49m",
+    'magenta' => "\033[35m\033[49m",
+    'cyan' => "\033[36m\033[49m",
+    'white' => "\033[36m\033[49m",
+    'bright-black' => "\033[90m\033[109m",
+    'bright-red' => "\033[91m\033[109m",
+    'bright-green' => "\033[92m\033[109m",
+    'bright-yellow' => "\033[93m\033[109m",
+    'bright-blue' => "\033[94m\033[109m",
+    'bright-magenta' => "\033[95m\033[109m",
+    'bright-cyan' => "\033[96m\033[109m",
+    'bright-white' => "\033[97m\033[109m",
+    'black-underline' => "\033[4;30m",
+    'red-underline' => "\033[4;31m",
+    'green-underline' => "\033[4;32m",
+    'yellow-underline' => "\033[4;33m",
+    'blue-underline' => "\033[4;34m",
+    'magenta-underline' => "\033[4;35m",
+    'cyan-underline' => "\033[4;36m",
+    'white-underline' => "\033[4;37m"
 );
 
 # ANSI code for yellow background
@@ -105,6 +142,7 @@ foreach my $key (keys %colors) {
 sub print_title {
     my $title = <<"END";
 \033[0;37m
+\033[90m\033[109m
 ──────────────────────────────────────────────────────────────────────────────────────────────
 
    ,:: slt ::' simple log timeline  --  by Greg Eva // geva\@ptc.com || gregeva\@gmail.com
@@ -263,7 +301,7 @@ sub read_and_process_logs {
             my ( $timestamp_str, $log_level, $category_bucket ) = "";
             my ( $is_line_match, $is_access_log, $match_type, $status_code, $bytes_sent, $request_duration ) = 0;
             my $timestamp;
-            
+            $total_lines_read++;
 
             if ($line_number % 997 == 0) {	# only print processing status update every X lines processed
                 printf("\rProcessing line %d in file %s", $line_number, $in_file);
@@ -366,11 +404,13 @@ sub read_and_process_logs {
                 my $bucket = int($timestamp->epoch() / $bucket_size_seconds) * $bucket_size_seconds;
                 $log_counts{$bucket}{$category_bucket}{count}++;
                 $log_counts{$bucket}{$category_bucket}{duration} += $request_duration if $request_duration;
+                # if not already set, configure the block character to use
+                $log_counts{$bucket}{$category_bucket}{'block'} = ( !defined $log_counts{$bucket}{$category_bucket}{block} && !$is_access_log ) ? $blocks{'I'} : $blocks{'J'};
             }
         }
         close $fh;
     }
-    print "\r\033[0;32mProcessing complete.\033[0m";
+    print "\r$colors{'bright-green'}Processing complete.$colors{'NC'}";
     print " " x ( $terminal_width - length( "Processing complete." ) );
     print "\n\n";
 
@@ -425,6 +465,9 @@ sub normalize_data_for_output {
             my $count = $log_counts{$bucket}{$category_bucket}{count};
             my $scaled_count = int(($count / $max_total_count) * $max_graph_width);
             $log_counts{$bucket}{$category_bucket}{scaled_count} = $scaled_count;
+            $category_totals{$category_bucket} += $count;							# tally the totals for each category bucket
+            $total_lines_included += $count;
+            $total_lines_highlighted += $count if $category_bucket =~ /-HL$/;
         }
     }
     return;
@@ -461,13 +504,43 @@ sub print_bar_graph {
             if (exists $log_counts{$bucket}{$category_bucket}) {
                 my $scaled_count = $log_counts{$bucket}{$category_bucket}{scaled_count};
                 my $color = $colors{$category_bucket} // $colors{'NC'};
-                print "$color" . ('█' x $scaled_count) . "$colors{'NC'}";
+ #               print "$color" . ('█' x $scaled_count) . "$colors{'NC'}";
+                # the following provides a mechanism for changing the look of the bars for access logs compared to other logs
+                print "$color" . ( $category_bucket =~ /^[12345]xx(-HL)?$/ ? $blocks{'I'} : $blocks{$default_chart_block} ) x $scaled_count . "$colors{'NC'}";
             }
         }
 #print $log_counts{$bucket}{$category_bucket}{duration};
         print "\n";
         pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
     }
+    return;
+}
+
+sub print_summary_table {
+    my $category_column_width = 15;
+    my $count_column_width = 10;
+    my $table_format = "  %-${category_column_width}s %${count_column_width}d\n";
+
+    print "\n\n";
+    print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "Category", "Total"; 
+    print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
+
+    foreach my $category_bucket (@log_levels) {
+        next unless $category_totals{$category_bucket};
+	
+        my ( $legend_title ) =  "$category_bucket:" . " " x ( 12 - length( $category_bucket ) );
+        #print "$legend_title$category_totals{$category_bucket}\n"; 
+        #printf "%-${category_column_width}s %${count_column_width}d\n", $category_bucket, $category_totals{$category_bucket}; 
+        printf $table_format, $category_bucket, $category_totals{$category_bucket}; 
+
+    }
+    printf $table_format, "HIGHLIGHTED", $total_lines_highlighted if defined $highlight_regex;
+    printf $table_format, "LINES INCLUDED", $total_lines_included; 
+    printf $table_format, "LINES READ", $total_lines_read; 
+    print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
+    print "\n";
+
     return;
 }
 
@@ -480,6 +553,7 @@ adapt_to_command_line_options();
 read_and_process_logs();
 normalize_data_for_output();
 print_bar_graph();
+print_summary_table();
 
 print "\n";
 exit;

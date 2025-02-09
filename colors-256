@@ -1,0 +1,39 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+# Function to generate ANSI escape code for 256-color foreground
+sub ansi_256_fg {
+    my ($color_code) = @_;
+    return "\\033[38;5;${color_code}m"; # Escaped
+}
+
+# Function to generate ANSI escape code for 256-color background
+sub ansi_256_bg {
+    my ($color_code) = @_;
+    return "\\033[48;5;${color_code}m"; # Escaped
+}
+
+# Reset code
+my $reset = "\033[0m";
+
+# Print table header
+print "| Color Code | Foreground Code | Example Text |\n";
+print "|------------|-----------------|--------------|\n";
+
+# Loop through a range of 256-color codes and print examples
+for (my $i = 16; $i <= 231; $i++) { #Standard colors are 16-231
+    my $fg_code = ansi_256_fg($i);
+    print "| $i | `$fg_code` | \033[38;5;${i}mForeground\033[0m |\n";
+}
+
+print "\nBackground colors:\n";
+print "| Color Code | Background Code | Example Text |\n";
+print "|------------|-----------------|--------------|\n";
+
+for (my $i = 16; $i <= 231; $i++) { #Standard colors are 16-231
+    my $bg_code = ansi_256_bg($i);
+    print "| $i | `$bg_code` | \033[48;5;${i}mBackground\033[0m |\n";
+}
+
