@@ -9,8 +9,8 @@ use Getopt::Long;
 use Term::ANSIColor;
 
 # Configuration
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $omit_empty, $total_lines_read, $total_lines_included, $total_lines_highlighted ) = 0;
-my ( %log_counts, %category_totals );			# this is where the counts of log entries are tallied across the time buckets
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $omit_empty, $omit_summary, $total_lines_read, $total_lines_included, $total_lines_highlighted ) = 0;
+my ( %log_counts, %category_totals, %log_analysis );			# this is where the counts of log entries are tallied across the time buckets
 my $legend_length = 0;
 my $range_start = "";
 my $range_end = "";
@@ -173,6 +173,7 @@ sub adapt_to_command_line_options {
         'include|i=s' => \$include_regex,
         'highlight|h=s' => \$highlight_regex,
         'omit-empty|oe' => \$omit_empty,
+        'omit-summary|os' => \$omit_summary,
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds
     ) or die print_version_and_usage( "required options not provided" ); 
@@ -299,7 +300,7 @@ sub read_and_process_logs {
         while (<$fh>) {
             $line_number++;
             my ( $timestamp_str, $log_level, $category_bucket ) = "";
-            my ( $is_line_match, $is_access_log, $match_type, $status_code, $bytes_sent, $request_duration ) = 0;
+            my ( $is_line_match, $is_access_log, $match_type, $status_code, $bytes, $duration ) = 0;
             my $timestamp;
             $total_lines_read++;
 
@@ -332,14 +333,14 @@ sub read_and_process_logs {
                 $is_line_match = 1;
                 $match_type = 2;			# this is matching RAC client log format [2025-02-04T12:06:22.784] [TRACE]
                 $timestamp_str =~ tr/T/ /;
-            } elsif ( (undef, $timestamp_str, $category_bucket, $bytes_sent, $request_duration) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "[^"]+" (\d{3}) (\d+) (\d+)/ ) {
+            } elsif ( (undef, $timestamp_str, $category_bucket, $bytes, $duration) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "[^"]+" (\d{3}) (\d+) (\d+)/ ) {
                 $is_line_match = 1;
                 $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
                 $is_access_log = 1;
                 $status_code = $category_bucket;
                 $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
-            } elsif ( (undef, $timestamp_str, $category_bucket, $bytes_sent) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "[^"]+" (\d{3}) (\d+)/ ) {
+            } elsif ( (undef, $timestamp_str, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "[^"]+" (\d{3}) (\d+)/ ) {
                 $is_line_match = 1;
                 $match_type = 4;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626
                 					# this is matching Nginx ingress access log format 3.133.31.181 - - [18/Nov/2024:14:19:55 +0000] "GET / HTTP/1.1" 404 431 "-" "WizDynamicScanner/1.0"
@@ -403,9 +404,15 @@ sub read_and_process_logs {
 
                 my $bucket = int($timestamp->epoch() / $bucket_size_seconds) * $bucket_size_seconds;
                 $log_counts{$bucket}{$category_bucket}{count}++;
-                $log_counts{$bucket}{$category_bucket}{duration} += $request_duration if $request_duration;
-                # if not already set, configure the block character to use
-                $log_counts{$bucket}{$category_bucket}{'block'} = ( !defined $log_counts{$bucket}{$category_bucket}{block} && !$is_access_log ) ? $blocks{'I'} : $blocks{'J'};
+                if( $is_access_log ) {
+                    $log_analysis{$bucket}{count}++;
+                    $log_analysis{$bucket}{duration} += $duration if $duration;
+                    $log_analysis{$bucket}{bytes} += $bytes if $bytes;
+
+                  #  printf "\033[0;35m[duration: %d] [bytes: %d]\033[0m\n", $duration, $bytes;
+                   # printf "\033[0;35m[status: %s] [duration: %d] [bytes: %d]\033[0m\n", $category_bucket, $log_counts{$bucket}{duration}, $log_counts{$bucket}{bytes};
+                  #  $| = 1; # Flush output
+                }
             }
         }
         close $fh;
@@ -509,12 +516,20 @@ sub print_bar_graph {
                 print "$color" . ( $category_bucket =~ /^[12345]xx(-HL)?$/ ? $blocks{'I'} : $blocks{$default_chart_block} ) x $scaled_count . "$colors{'NC'}";
             }
         }
-#print $log_counts{$bucket}{$category_bucket}{duration};
+        
         print "\n";
+# BUG - if using pause, the summary table won't be paused as it isn't implementing the next line
         pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
     }
     return;
 }
+
+sub access_log_stats {
+	my( $bucket ) = @_;
+	my( $pretty_duration, $pretty_avg_duration, $pretty_bytes );
+        printf "%dms / %d s / %dMB", int( $log_analysis{$bucket}{duration} / $log_analysis{$bucket}{count} ), $log_analysis{$bucket}{duration} / 1000, int( $log_analysis{$bucket}{bytes} / 1024 / 1024 );
+}
+
 
 sub print_summary_table {
     my $category_column_width = 15;
@@ -553,7 +568,7 @@ adapt_to_command_line_options();
 read_and_process_logs();
 normalize_data_for_output();
 print_bar_graph();
-print_summary_table();
+print_summary_table() unless $omit_summary;;
 
 print "\n";
 exit;
