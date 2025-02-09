@@ -1,0 +1,70 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+# Define the base ANSI color codes
+my @colors = (
+    "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"
+);
+
+# Function to generate ANSI escape code
+sub ansi_code {
+    my ($fg, $bg) = @_;
+    return "\\033[3${fg}m\\033[4${bg}m";  # Escaped
+}
+
+# Function to generate bright ANSI escape code
+sub ansi_code_bright {
+    my ($fg, $bg) = @_;
+    return "\\033[9${fg}m\\033[10${bg}m"; # Escaped
+}
+
+# Function to generate underline ANSI escape code
+sub ansi_code_underline {
+    my ($fg) = @_;
+    return "\\033[4;3${fg}m";  # Escaped
+}
+
+# Reset code
+my $reset = "\033[0m";
+
+# Print table header
+print "| Color Name | Foreground Code | Example Text | WARNING FG/BG Code | WARNING FG/BG Text |\n";
+print "|------------|-----------------|--------------|-----------------|-----------------|\n";
+
+# Loop through the colors and print examples
+for (my $i = 0; $i <= $#colors; $i++) {
+    my $color_name = ucfirst($colors[$i]);
+    my $fg_code    = &ansi_code($i, 9);  #Foreground colours on white
+
+    my $same_code = &ansi_code($i, $i);
+    print "| $color_name | `$fg_code` | \033[3${i}m\033[49mForeground\033[0m | `$same_code` | \033[3${i}m\033[4${i}mWARNING\033[0m |\n";
+}
+
+print "\nBright variations:\n";
+print "| Color Name | Foreground Code | Example Text | WARNING FG/BG Code | WARNING FG/BG Text |\n";
+print "|------------|-----------------|--------------|-----------------|-----------------|\n";
+
+# Loop through the colors and print examples
+for (my $i = 0; $i <= $#colors; $i++) {
+    my $color_name = ucfirst($colors[$i]);
+    my $fg_code    = &ansi_code_bright($i, 9); #Foreground colours on white
+    my $same_code = &ansi_code_bright($i, $i);
+    print "| $color_name | `$fg_code` | \033[9${i}m\033[49mForeground\033[0m | `$same_code` | \033[9${i}m\033[10${i}mWARNING\033[0m |\n";
+}
+
+print "\nUnderline:\n";
+print "| Color Name |  Code | Example Text |\n";
+print "|------------|-----------------|--------------|\n";
+
+# Loop through the colors and print examples
+for (my $i = 0; $i <= $#colors; $i++) {
+    my $color_name = ucfirst($colors[$i]);
+    my $fg_code    = &ansi_code_underline($i); #Underline colours on white
+
+    print "| $color_name | `$fg_code` | \033[4;3${i}mUnderline\033[0m |\n";
+}
+
+exit;
+
