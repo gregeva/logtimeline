@@ -9,8 +9,12 @@ use Getopt::Long;
 use Term::ANSIColor;
 
 # Configuration
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $omit_empty, $omit_summary, $total_lines_read, $total_lines_included, $total_lines_highlighted ) = 0;
+my $version_number = "0.1.12";
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary ) = 0;
 my ( %log_counts, %category_totals, %log_analysis );			# this is where the counts of log entries are tallied across the time buckets
+my $total_lines_read = 0;
+my $total_lines_included = 0;
+my $total_lines_highlighted = 0;
 my $legend_length = 0;
 my $range_start = "";
 my $range_end = "";
@@ -20,7 +24,9 @@ my %range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %range;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
 #my( $output_timestamp_min ) = DateTime->from_epoch( epoch => 1678886400 );
-my( $output_timestamp_min, $output_timestamp_max );
+#my( $output_timestamp_min, $output_timestamp_max );
+my $output_timestamp_min = 0;
+my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex );
 my $pause_output = 0;
 my $hide_values = 0;
@@ -42,12 +48,17 @@ my %blocks = (
 my $default_chart_block = "A";
 
 # TO DO:
-# - add a summary table at the end showing totals in the various buckets (start, end time, total duration in time of logs, average logs per minute, second, total of all of the bucket occurences, size of the file, lines processed, lines omitted/didn't match)
-# - add a feature to include/exclude HTTP status codes which would need to be converted to RegEx as 4xx isn't going to be found
+# - add a summary table at the end showing totals in the various buckets (start, end time, total duration in time of logs, average logs per minute, second, size of the file, lines omitted/didn't match)
+# - add a feature providing the Top X messages in the summary - would need to be turned on (takes memory), could only apply to more complex log analysis where full pattern is known (see twxsummarize)
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize)
-# - add a feature allowing for auto-detection of file type, and hence analysis pattern/options to use
-# - add a feature to allow gfor grouping of various other log categories like ThreadPool or Object context (instead of errors)
+# - add feature to calculate mean, standard deviation, Coefficient of Variation (%), 90/95th percentile for duration including lines
+# - add feature to add a right side table indicating statistical calculations when in duration measurement mode 
+
+# NOT PRIORITY BACKLOG
+# - add a feature to include/exclude HTTP status codes which would need to be converted to RegEx as 4xx isn't going to be found
+# - add a feature to allow for grouping of various other log categories like ThreadPool or Object context (instead of errors)
 # - performance improvement: leverage a temp file with cached file stats (log start/end times, num lines, ...) to start/stop reading the file when provided start/end time ranges based on guesses around filesize
+# - support for live tailing
 
 ## LOG STRUCTURES ##
 # RAC client: [2025-02-04T12:06:22.784] [TRACE] MessageStream - handling data from GAS with chunk size: 88
@@ -145,7 +156,7 @@ sub print_title {
 \033[90m\033[109m
 ──────────────────────────────────────────────────────────────────────────────────────────────
 
-   ,:: slt ::' simple log timeline  --  by Greg Eva // geva\@ptc.com || gregeva\@gmail.com
+   ,:: ltl ::' log timeline  --  by Greg Eva // geva\@ptc.com // gregeva\@gmail.com
 
 ──────────────────────────────────────────────────────────────────────────────────────────────
 \033[0m
@@ -154,10 +165,15 @@ END
     return;
 }
 
-sub print_version_and_usage {
+sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 --bucket-size | -bs <minutes> <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--hide-values|-h] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--omit-empty|-oe] [--omit-summary|-os] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
+    return;
+}
+
+sub print_version {
+    print "Version: $version_number\n\n";
     return;
 }
 
@@ -175,15 +191,21 @@ sub adapt_to_command_line_options {
         'omit-empty|oe' => \$omit_empty,
         'omit-summary|os' => \$omit_summary,
         'seconds|s' => \$print_seconds,
-        'milliseconds|ms' => \$print_milliseconds
-    ) or die print_version_and_usage( "required options not provided" ); 
+        'milliseconds|ms' => \$print_milliseconds,
+        'version|v' => \$print_version
+    ) or die print_usage( "required options not provided" ); 
 
     $range{'start'} = $range_start if defined( $range_start );
     $range{'end'} = $range_end if defined(  $range_end );
 
+    if( $print_version ) {
+        print_version();
+        exit;
+    }
+
     # Ensure at least one file is provided
     @in_files = @ARGV;
-    die print_version_and_usage( "unable to open any files" ) unless @in_files;
+    die print_usage( "unable to open any files" ) unless @in_files;
 
 # Should include cleaner handling of possible problems with entering command line options
 #eval {
@@ -194,7 +216,7 @@ sub adapt_to_command_line_options {
 #    print "Caught the error: $@";
 #}
     $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
-    $bucket_size_seconds = $print_seconds ? $bucket_size_minutes : $bucket_size_minutes * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
+    #$bucket_size_seconds = $print_seconds ? $bucket_size_minutes : $bucket_size_minutes * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
     if( $print_seconds ) {
         $bucket_size_seconds = $bucket_size_minutes;
     } elsif( $print_milliseconds ) {
@@ -397,10 +419,9 @@ sub read_and_process_logs {
                 # determine if this line should be highlighted
                 $category_bucket .= "-HL" if( defined( $highlight_regex ) && /$highlight_regex/ );
 
-
                 # sets earliest and latest timestamp values being displayed (after the range filtering selection)
-                $output_timestamp_min = $timestamp->epoch() if !defined( $output_timestamp_min ) || $output_timestamp_min > $timestamp->epoch();
-                $output_timestamp_max = $timestamp->epoch() if !defined( $output_timestamp_max ) || $output_timestamp_max < $timestamp->epoch();
+                $output_timestamp_min = $timestamp->epoch() if $output_timestamp_min == 0 || $output_timestamp_min > $timestamp->epoch();
+                $output_timestamp_max = $timestamp->epoch() if $output_timestamp_max == 0 || $output_timestamp_max < $timestamp->epoch();
 
                 my $bucket = int($timestamp->epoch() / $bucket_size_seconds) * $bucket_size_seconds;
                 $log_counts{$bucket}{$category_bucket}{count}++;
@@ -470,7 +491,7 @@ sub normalize_data_for_output {
     foreach my $bucket (keys %log_counts) {
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
             my $count = $log_counts{$bucket}{$category_bucket}{count};
-            my $scaled_count = int(($count / $max_total_count) * $max_graph_width);
+            my $scaled_count = $max_total_count != 0 ? int(($count / $max_total_count) * $max_graph_width) : 0;
             $log_counts{$bucket}{$category_bucket}{scaled_count} = $scaled_count;
             $category_totals{$category_bucket} += $count;							# tally the totals for each category bucket
             $total_lines_included += $count;
@@ -482,44 +503,48 @@ sub normalize_data_for_output {
 
 sub print_bar_graph {
     my $lines_printed = 0;
-    foreach my $bucket (sort keys %log_counts) {
-        my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
-        $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
-        print "$bucket_time_str ";
-        my $log_details = "";
-        my $legend_length_bucket = 0;
-        foreach my $category_bucket (@log_levels) {
-            if (exists $log_counts{$bucket}{$category_bucket}) {
-                my $count = $log_counts{$bucket}{$category_bucket}{count};
-                my $color = $colors{$category_bucket} // $colors{'NC'};
-                if( $category_bucket =~ /-HL$/ ) {
-                    $log_details .= "${color}$count$colors{'NC'} ";
-                    $legend_length_bucket += length("$count ");
-                } elsif( $count < 1 ) {					 # don't include the empty bucket who's purpose is to normalize the buckets represented
-                    next;
-                } else {
-                    $log_details .= "$color$category_bucket: $count$colors{'NC'} ";
-                    $legend_length_bucket += length("$category_bucket: $count ");
+    if( $total_lines_included ) {
+        foreach my $bucket (sort keys %log_counts) {
+            my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
+            $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
+            print "$bucket_time_str ";
+            my $log_details = "";
+            my $legend_length_bucket = 0;
+            foreach my $category_bucket (@log_levels) {
+                if (exists $log_counts{$bucket}{$category_bucket}) {
+                    my $count = $log_counts{$bucket}{$category_bucket}{count};
+                    my $color = $colors{$category_bucket} // $colors{'NC'};
+                    if( $category_bucket =~ /-HL$/ ) {
+                        $log_details .= "${color}$count$colors{'NC'} ";
+                        $legend_length_bucket += length("$count ");
+                    } elsif( $count < 1 ) {					 # don't include the empty bucket who's purpose is to normalize the buckets represented
+                        next;
+                    } else {
+                        $log_details .= "$color$category_bucket: $count$colors{'NC'} ";
+                        $legend_length_bucket += length("$category_bucket: $count ");
+                    }
                 }
             }
-        }
-        print $log_details unless $hide_values;
-        my $padding = $legend_length - $legend_length_bucket;
-        print " " x ($padding >= 0 ? $padding : 0);
-        print "│ ";
-        foreach my $category_bucket (@log_levels) {
-            if (exists $log_counts{$bucket}{$category_bucket}) {
-                my $scaled_count = $log_counts{$bucket}{$category_bucket}{scaled_count};
-                my $color = $colors{$category_bucket} // $colors{'NC'};
- #               print "$color" . ('█' x $scaled_count) . "$colors{'NC'}";
-                # the following provides a mechanism for changing the look of the bars for access logs compared to other logs
-                print "$color" . ( $category_bucket =~ /^[12345]xx(-HL)?$/ ? $blocks{'I'} : $blocks{$default_chart_block} ) x $scaled_count . "$colors{'NC'}";
+            print $log_details unless $hide_values;
+            my $padding = $legend_length - $legend_length_bucket;
+            print " " x ($padding >= 0 ? $padding : 0);
+            print "│ ";
+            foreach my $category_bucket (@log_levels) {
+                if (exists $log_counts{$bucket}{$category_bucket}) {
+                    my $scaled_count = $log_counts{$bucket}{$category_bucket}{scaled_count};
+                    my $color = $colors{$category_bucket} // $colors{'NC'};
+     #               print "$color" . ('█' x $scaled_count) . "$colors{'NC'}";
+                    # the following provides a mechanism for changing the look of the bars for access logs compared to other logs
+                    print "$color" . ( $category_bucket =~ /^[12345]xx(-HL)?$/ ? $blocks{'I'} : $blocks{$default_chart_block} ) x $scaled_count . "$colors{'NC'}";
+                }
             }
+            
+            print "\n";
+    # BUG - if using pause, the summary table won't be paused as it isn't implementing the next line
+            pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
         }
-        
-        print "\n";
-# BUG - if using pause, the summary table won't be paused as it isn't implementing the next line
-        pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
+    } else {
+        printf "Read $total_lines_read lines, however no lines matched any of the patterns within the timeframe.\n";
     }
     return;
 }
