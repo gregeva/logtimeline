@@ -5,7 +5,7 @@ MAX_LINES=20
 title="\033[0;37m\
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\
 \n\
-   ,:: twxsummarize ::' summarize thingworx log files  --  by Greg Eva // geva@ptc.com || gregeva@gmail.com\n\
+   ,:: twxsummarize ::' summarize thingworx log files  --  by Greg Eva // geva@ptc.com // gregeva@gmail.com\n\
 \n\
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\
 \033[0m"
