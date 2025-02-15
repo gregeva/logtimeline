@@ -14,10 +14,12 @@ use Proc::ProcessTable;
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.1.12";
+my $version_number = "0.1.13";
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary ) = 0;
-my ( $current_memory_usage, $max_memory_usage ) = ( 0, 0 );
-my ( %log_counts, %category_totals, %log_analysis );			# this is where the counts of log entries are tallied across the time buckets
+my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed ) = ( 0, 0, 0, 0 );
+my ( %log_counts, %category_totals, %log_analysis, %log_messages );	# this is where the counts of log entries are tallied across the time buckets
+my $max_log_message_length = 150;					# used to define the maximum key length of the log message bucket counts
+my $top_n_messages = 10;
 my $total_lines_read = 0;
 my $total_lines_included = 0;
 my $total_lines_highlighted = 0;
@@ -372,6 +374,8 @@ sub adapt_to_terminal_settings {
         $bucket_size_minutes = 60;
     }
     #print "Terminal is: $terminal_width x $terminal_height -- Bucket size: $bucket_size_minutes\n";
+
+    $max_log_message_length = $terminal_width - 30;		# this is the max that we can print without wrapping, depends on the summary table width, and terminal width 
     return;
 }
 
@@ -415,7 +419,7 @@ sub read_and_process_logs {
 
         while (<$fh>) {
             $line_number++;
-            my ( $timestamp_str, $log_level, $category_bucket ) = "";
+            my ( $timestamp_str, $log_level, $category_bucket, $object, $instance, $user, $platform, $thread, $message ) = ("") x 9;
             my ( $is_line_match, $is_access_log, $match_type, $status_code, $bytes, $duration ) = 0;
             my $timestamp;
             $total_lines_read++;
@@ -424,7 +428,6 @@ sub read_and_process_logs {
                 printf("\rProcessing line %d in file %s", $line_number, $in_file);
                 $| = 1; # Flush output
             }
-
 
             if ($line_number % 100000 == 0) {	# only collect memory in use around every 100000 lines processed
                 $current_memory_usage = get_memory_usage();								# track maximum memory usage
@@ -451,7 +454,11 @@ sub read_and_process_logs {
 #                    time_zone => 'UTC',
 #                );
 
-            if ( ($timestamp_str, $category_bucket) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]/) {
+            if ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
+                $is_line_match = 1;
+                $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
+                $thread =~ s/(.*)-\d+$/$1/;
+            } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]/) {
                 $is_line_match = 1;
                 $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
             } elsif ( ($timestamp_str, $category_bucket ) = $_ =~ /^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3}).*? \[[L: ]*([^\]]*)\]/ ) {
@@ -480,6 +487,7 @@ sub read_and_process_logs {
                 $timestamp_str =~ tr/T/ /;
             }
 
+#print "Thread: $thread   Object: $object   Message: $message\n";
 
             #print "\033[0;32m[$timestamp_str|$category_bucket] [$is_line_match/$match_type] \033[0m$_";
             #$| = 1; # Flush output
@@ -529,8 +537,19 @@ sub read_and_process_logs {
                 $output_timestamp_max = $timestamp->epoch() if $output_timestamp_max == 0 || $output_timestamp_max < $timestamp->epoch();
 
                 my $bucket = int($timestamp->epoch() / $bucket_size_seconds) * $bucket_size_seconds;
+
                 $log_counts{$bucket}{$category_bucket}{count}++;
-                if( $is_access_log ) {
+                if( defined($thread) && defined($object) && defined($message) ) {			# ThingWorx log line parsed and usable for additional analysis
+                    my $log_level = $category_bucket;
+                    $log_level =~ s/-HL$//;
+                    my $log_key = substr("[$log_level] [$thread] [$object] $message", 0, $max_log_message_length);
+                    if( $category_bucket =~ /-HL$/ ) {
+                        $log_messages{highlight}{$log_key}{count}++;
+                    } else {
+                        $log_messages{plain}{$log_key}{count}++;
+                    }
+                    
+                } elsif( $is_access_log ) {
                     $log_analysis{$bucket}{count}++;
                     $log_analysis{$bucket}{duration} += $duration if $duration;
                     $log_analysis{$bucket}{bytes} += $bytes if $bytes;
@@ -673,6 +692,7 @@ sub print_summary_table {
     my $count_column_width = 10;
     my $table_format = "  %-${category_column_width}s %${count_column_width}d\n";
 
+    ## START SUMMARY STATISTIC TABLE ##
     print "\n\n";
     print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
     printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "Category", "Total"; 
@@ -687,14 +707,38 @@ sub print_summary_table {
         printf $table_format, $category_bucket, $category_totals{$category_bucket}; 
 
     }
+    print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
     printf $table_format, "HIGHLIGHTED", $total_lines_highlighted if defined $highlight_regex;
     printf $table_format, "LINES INCLUDED", $total_lines_included; 
     printf $table_format, "LINES READ", $total_lines_read; 
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "PROCESSING TIME", format_time( $elapsed, 's', 'medium' );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' );
     print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
     print "\n";
 
+    ## START MESSAGE SUMMARY ##
+
+    foreach my $grouping ( qw( highlight plain ) ) {
+        # Ensure the grouping exists and is a hash reference
+        if (exists $log_messages{$grouping} && ref($log_messages{$grouping}) eq 'HASH') {
+            my @top_keys = (sort { $log_messages{$grouping}{$b}{count} <=> $log_messages{$grouping}{$a}{count} } keys %{$log_messages{$grouping}})[0..($top_n_messages-1)];
+
+            # Print the top messages
+            foreach my $key (@top_keys) {
+                if (defined $key && exists $log_messages{$grouping}{$key}) {
+                    print "$log_messages{$grouping}{$key}{count} | $key\n";
+                }
+            }
+
+            print "\n------\n";
+        #} else {
+        #    warn "Grouping '$grouping' does not exist or is not a hash reference.\n";
+        }
+    }
+
     return;
 }
+
 
 ## MAIN ##
 
@@ -703,16 +747,12 @@ adapt_to_terminal_settings();
 adapt_to_command_line_options();
 read_and_process_logs();
 normalize_data_for_output();
+$end_time = [gettimeofday];
+$elapsed = tv_interval($start_time, $end_time);
+
 print_bar_graph();
 print_summary_table() unless $omit_summary;;
 
-
-# End time
-my $end_time = [gettimeofday];
-my $elapsed = tv_interval($start_time, $end_time);
-
-print "Execution time: ", format_time( $elapsed, 's', 'long' ), "\n";
-print "Maximum memory used: ", format_bytes( $max_memory_usage, 'kB' ), "\n";
 
 print "\n";
 exit;
