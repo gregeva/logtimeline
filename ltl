@@ -7,10 +7,16 @@ use DateTime;
 use Term::ReadKey;
 use Getopt::Long;
 use Term::ANSIColor;
+use Time::HiRes qw(gettimeofday tv_interval);
+use Proc::ProcessTable;
+
+# Start time
+my $start_time = [gettimeofday];
 
 # Configuration
 my $version_number = "0.1.12";
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary ) = 0;
+my ( $current_memory_usage, $max_memory_usage ) = ( 0, 0 );
 my ( %log_counts, %category_totals, %log_analysis );			# this is where the counts of log entries are tallied across the time buckets
 my $total_lines_read = 0;
 my $total_lines_included = 0;
@@ -32,7 +38,7 @@ my $pause_output = 0;
 my $hide_values = 0;
 my @in_files;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
-my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRACE-HL TRACE 5xx-HL 5xx 4xx-HL 4xx 3xx-HL 3xx 2xx-HL 2xx 1xx-HL 1xx );			# Define log bucket printing order
+my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRACE-HL TRACE 5xx-HL 5xx 4xx-HL 4xx 3xx-HL 3xx 2xx-HL 2xx 1xx-HL 1xx empty );		# Define log bucket printing order
 my %blocks = (
     'A' => '█',    # Full block
     'B' => '▓',    # Heavy shading
@@ -175,6 +181,94 @@ sub print_usage {
 sub print_version {
     print "Version: $version_number\n\n";
     return;
+}
+
+# Function to get current memory usage
+sub get_memory_usage {
+    my $t = Proc::ProcessTable->new();
+    my ($memory_usage) = map { $_->rss } grep { $_->pid == $$ } @{$t->table};
+    return $memory_usage;
+}
+
+sub format_bytes {
+    my ($value, $unit) = @_;
+    my %units = (
+        'B'  => 1,
+        'kB' => 1024,
+        'MB' => 1024**2,
+        'GB' => 1024**3,
+        'TB' => 1024**4,
+    );
+
+    # Convert input value to bytes
+    my $bytes = $value * $units{$unit};
+
+    # Determine the most relevant unit
+    my @unit_order = ('B', 'kB', 'MB', 'GB', 'TB');
+    my $formatted_value = $bytes;
+    my $formatted_unit = 'B';
+
+    foreach my $u (@unit_order) {
+        if ($bytes >= $units{$u}) {
+            $formatted_value = $bytes / $units{$u};
+            $formatted_unit = $u;
+        } else {
+            last;
+        }
+    }
+
+    # Format the value to 1 decimal place
+    $formatted_value = sprintf("%.1f", $formatted_value);
+
+    return "$formatted_value $formatted_unit";
+}
+
+sub format_time {
+    my ($value, $unit, $format) = @_;
+    my %units = (
+        'us' => 1,                # Microseconds
+        'ms' => 1000,             # Milliseconds
+        's'  => 1000000,          # Seconds
+        'm'  => 60 * 1000000,     # Minutes
+        'h'  => 60 * 60 * 1000000, # Hours
+        'D'  => 24 * 60 * 60 * 1000000, # Days
+    );
+
+    my %unit_names = (
+        'us' => { short => 'us', medium => 'microsec', long => 'microseconds' },
+        'ms' => { short => 'ms', medium => 'millisec', long => 'milliseconds' },
+        's'  => { short => 's',  medium => 'sec',      long => 'seconds' },
+        'm'  => { short => 'm',  medium => 'min',      long => 'minutes' },
+        'h'  => { short => 'h',  medium => 'hr',       long => 'hours' },
+        'D'  => { short => 'd',  medium => 'day',      long => 'days' },
+    );
+
+    $format = "short" if !defined $format;
+
+    # Convert input value to microseconds
+    my $microseconds = $value * $units{$unit};
+
+    # Determine the most relevant unit
+    my @unit_order = ('us', 'ms', 's', 'm', 'h', 'D');
+    my $formatted_value = $microseconds;
+    my $formatted_unit = 'us';
+
+    foreach my $u (@unit_order) {
+        if ($microseconds >= $units{$u}) {
+            $formatted_value = $microseconds / $units{$u};
+            $formatted_unit = $u;
+        } else {
+            last;
+        }
+    }
+
+    # Format the value to 1 decimal place
+    $formatted_value = sprintf("%.1f", $formatted_value);
+
+    # Get the appropriate unit name based on the format
+    my $unit_name = $unit_names{$formatted_unit}{$format};
+
+    return "$formatted_value $unit_name";
 }
 
 sub adapt_to_command_line_options {
@@ -330,6 +424,15 @@ sub read_and_process_logs {
                 printf("\rProcessing line %d in file %s", $line_number, $in_file);
                 $| = 1; # Flush output
             }
+
+
+            if ($line_number % 100000 == 0) {	# only collect memory in use around every 100000 lines processed
+                $current_memory_usage = get_memory_usage();								# track maximum memory usage
+                if ($current_memory_usage > $max_memory_usage) {
+                    $max_memory_usage = $current_memory_usage;
+                }
+            }
+
             # ORIGINAL #if (my ($timestamp_str, $log_level) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\+\d{4} \[L: ([^\]]*)\]/) {
 
 #            if (my ($timestamp_str, $log_level) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\+\d{4} \[L: ([^\]]*)\]/) {
@@ -382,7 +485,9 @@ sub read_and_process_logs {
             #$| = 1; # Flush output
 
             if( $is_line_match ) {
-                if( $match_type == 1 || $match_type == 2 || $match_type == 5 ) {
+                unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
+                    next;
+                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 ) {
                     $timestamp = DateTime->new(
                         year      => substr($timestamp_str, 0, 4),
                         month     => substr($timestamp_str, 5, 2),
@@ -476,14 +581,16 @@ sub normalize_data_for_output {
             my $bucket_legend_length = 0;
             foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
                 my $count = $log_counts{$bucket}{$category_bucket}{count};
-                next unless $count > 0;				# don't include the empty bucket who's purpose is to normalize the buckets represented
-		
+                next unless $count > 0 && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
+
                 my $title_length = $category_bucket =~ /-HL$/ ? length(" $count ") : length("$category_bucket: $count ");
                 $bucket_legend_length += $title_length;
             }
             $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
         }
     }
+
+#print "Legend length: $legend_length\n";
 
     # Normalize counts to fit terminal width
     my $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format );    # static values based on timestamp length, some white space, maybe a vertical line spacer
@@ -496,6 +603,11 @@ sub normalize_data_for_output {
             $category_totals{$category_bucket} += $count;							# tally the totals for each category bucket
             $total_lines_included += $count;
             $total_lines_highlighted += $count if $category_bucket =~ /-HL$/;
+        }
+
+        $current_memory_usage = get_memory_usage();								# track maximum memory usage
+        if ($current_memory_usage > $max_memory_usage) {
+            $max_memory_usage = $current_memory_usage;
         }
     }
     return;
@@ -589,11 +701,18 @@ sub print_summary_table {
 print_title();
 adapt_to_terminal_settings(); 
 adapt_to_command_line_options();
-#calculate_start_end_filter_timestamps();
 read_and_process_logs();
 normalize_data_for_output();
 print_bar_graph();
 print_summary_table() unless $omit_summary;;
+
+
+# End time
+my $end_time = [gettimeofday];
+my $elapsed = tv_interval($start_time, $end_time);
+
+print "Execution time: ", format_time( $elapsed, 's', 'long' ), "\n";
+print "Maximum memory used: ", format_bytes( $max_memory_usage, 'kB' ), "\n";
 
 print "\n";
 exit;
