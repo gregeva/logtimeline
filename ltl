@@ -738,14 +738,14 @@ sub normalize_data_for_output {
 
     foreach my $bucket (keys %log_counts) {
         my $total_count = 0;
-        my $total_bytes = $log_stats{$bucket}{bytes};
+        my $total_bytes = $log_stats{$bucket}{bytes} if $print_durations;
 
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
             $total_count += $log_counts{$bucket}{$category_bucket}{count};
         }
 
         $max_total_count = $total_count if $total_count > $max_total_count;
-        $max_total_bytes = $total_bytes if $total_bytes > $max_total_bytes;
+        $max_total_bytes = $total_bytes if ( $print_durations && $total_bytes > $max_total_bytes );
     }
 
     # Calculate the maximum length of log level titles and counts
