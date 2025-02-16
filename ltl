@@ -22,6 +22,9 @@ my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_millisec
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed ) = ( 0, 0, 0, 0 );
 my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );		# this is where the counts of log entries are tallied across the time buckets
 my $max_log_message_length = 150;							# used to define the maximum key length of the log message bucket counts
+my $durations_graph_width = 0;
+my $max_graph_width = 0;
+my $print_durations = 0;
 my $top_n_messages = 10;
 my $total_lines_read = 0;
 my $total_lines_included = 0;
@@ -442,24 +445,6 @@ sub read_and_process_logs {
                 }
             }
 
-            # ORIGINAL #if (my ($timestamp_str, $log_level) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\+\d{4} \[L: ([^\]]*)\]/) {
-
-#            if (my ($timestamp_str, $log_level) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\+\d{4} \[L: ([^\]]*)\]/) {
-#           #if( $_ = /^[\[]?(?<timestamp_str>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})\.?(?<milliseconds>\d{3})?.*? \[[L: ]*(?<log_level>[^\]]*)\]/ ) {
-#                $timestamp_str =~ tr/T/ /;
-#                my $category_bucket = $log_level;
-#                # Convert timestamp to epoch seconds using Time::Piece
-#    #            my $timestamp = Time::Piece->strptime($timestamp_str, "%Y-%m-%d %H:%M:%S")->epoch;
-#                my $timestamp = DateTime->new(
-#                    year      => substr($timestamp_str, 0, 4),
-#                    month     => substr($timestamp_str, 5, 2),
-#                    day       => substr($timestamp_str, 8, 2),
-#                    hour      => substr($timestamp_str, 11, 2),
-#                    minute    => substr($timestamp_str, 14, 2),
-#                    second    => substr($timestamp_str, 17, 2),
-#                    time_zone => 'UTC',
-#                );
-
             if ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
                 $is_line_match = 1;
                 $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
@@ -570,15 +555,18 @@ sub read_and_process_logs {
                 }
 
                 if( $is_access_log ) {
+                    $print_durations = 1 if $print_durations != 1;
 
                     ## STATISTICAL DATA CAPTURE ##
                     #print "$duration -- $_";
                     my $duration_bucket = log_bucket($duration, $log_base);
                     $duration = 0 if !defined( $duration );
+                    $bytes = 0 if !defined( $bytes );
     
                     # Initialize the hash if not already done
                     $log_analysis{$bucket}{$duration_bucket} //= {
                         count => 0,
+                        total_bytes => 0,
                         total_duration => 0,
                         sum_of_squares => 0,
                         durations => [],
@@ -587,13 +575,9 @@ sub read_and_process_logs {
                     # Update the hash with the new data
                     $log_analysis{$bucket}{$duration_bucket}{count}++;
                     $log_analysis{$bucket}{$duration_bucket}{total_duration} += $duration;
+                    $log_analysis{$bucket}{$duration_bucket}{total_bytes} += $bytes;
                     $log_analysis{$bucket}{$duration_bucket}{sum_of_squares} += $duration ** 2;
                     push @{$log_analysis{$bucket}{$duration_bucket}{durations}}, $duration;
-
-
-#                    $log_analysis{$bucket}{count}++;
-#                    $log_analysis{$bucket}{duration} += $duration if $duration;
-#                    $log_analysis{$bucket}{bytes} += $bytes if $bytes;
 
                   #  printf "\033[0;35m[duration: %d] [bytes: %d]\033[0m\n", $duration, $bytes;
                    # printf "\033[0;35m[status: %s] [duration: %d] [bytes: %d]\033[0m\n", $category_bucket, $log_counts{$bucket}{duration}, $log_counts{$bucket}{bytes};
@@ -616,6 +600,7 @@ sub calculate_all_statistics {
         my $aggregated_data = {
             count => 0,
             total_duration => 0,
+            total_bytes => 0,
             sum_of_squares => 0,
             durations => [],
         };
@@ -624,6 +609,7 @@ sub calculate_all_statistics {
             my $bucket_data = $log_analysis{$bucket}{$duration_bucket};
             $aggregated_data->{count} += $bucket_data->{count};
             $aggregated_data->{total_duration} += $bucket_data->{total_duration};
+            $aggregated_data->{total_bytes} += $bucket_data->{total_bytes};
             $aggregated_data->{sum_of_squares} += $bucket_data->{sum_of_squares};
             push @{$aggregated_data->{durations}}, @{$bucket_data->{durations}};
         }
@@ -632,6 +618,7 @@ sub calculate_all_statistics {
 
         $log_stats{$bucket} = {
             count => $aggregated_data->{count},
+            bytes => $aggregated_data->{total_bytes},
             mean => $mean,
             p90 => $p90,
             p95 => $p95,
@@ -656,41 +643,46 @@ sub calculate_all_statistics {
             my $z_score = calculate_z_score($mean, $rolling_mean, $rolling_std_dev);
 
     #        print "Time Bucket: $bucket\n";
-            print "Count: $aggregated_data->{count}, Mean: $mean, 90th Percentile: $p90, 95th Percentile: $p95, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: $z_score\n";
+    #        print "Count: $aggregated_data->{count}, Bytes: $aggregated_data->{total_bytes}, Mean: $mean, 90th Percentile: $p90, 95th Percentile: $p95, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: $z_score\n";
 	    $log_stats{$bucket}{z_score} = $z_score;
         } else {
 
     #        print "Time Bucket: $bucket\n";
-            print "Count: $aggregated_data->{count}, Mean: $mean, 90th Percentile: $p90, 95th Percentile: $p95, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A\n";
+    #        print "Count: $aggregated_data->{count}, Mean: $mean, 90th Percentile: $p90, 95th Percentile: $p95, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A\n";
         }
 
         # Update rolling window logic
         push @rolling_window, { mean => $mean, sum_of_squares => $aggregated_data->{sum_of_squares} };
         shift @rolling_window if @rolling_window > $rolling_window_size;
-    }
 
-    # Calculate and print overall statistics for the entire dataset
-    my $overall_data = {
-        count => 0,
-        total_duration => 0,
-        sum_of_squares => 0,
-        durations => [],
-    };
-
-    foreach my $bucket (keys %log_analysis) {
-        foreach my $duration_bucket (keys %{$log_analysis{$bucket}}) {
-            my $bucket_data = $log_analysis{$bucket}{$duration_bucket};
-            $overall_data->{count} += $bucket_data->{count};
-            $overall_data->{total_duration} += $bucket_data->{total_duration};
-            $overall_data->{sum_of_squares} += $bucket_data->{sum_of_squares};
-            push @{$overall_data->{durations}}, @{$bucket_data->{durations}};
+        $current_memory_usage = get_memory_usage();								# track maximum memory usage
+        if ($current_memory_usage > $max_memory_usage) {
+            $max_memory_usage = $current_memory_usage;
         }
     }
 
-    my ($overall_mean, $overall_p90, $overall_p95, $overall_std_dev, $overall_cv) = calculate_statistics($overall_data);
-    print "Overall Statistics:\n";
-    print "Count: $overall_data->{count}, Mean: $overall_mean, 90th Percentile: $overall_p90, 95th Percentile: $overall_p95, Std Dev: $overall_std_dev, Coefficient of Variance: $overall_cv\n";
-
+#    # Calculate and print overall statistics for the entire dataset
+#    my $overall_stats = {
+#        count => 0,
+#        total_duration => 0,
+#        sum_of_squares => 0,
+#        durations => [],
+#    };
+#
+#    foreach my $bucket (keys %log_analysis) {
+#        foreach my $duration_bucket (keys %{$log_analysis{$bucket}}) {
+#            my $bucket_data = $log_analysis{$bucket}{$duration_bucket};
+#            $overall_stats->{count} += $bucket_data->{count};
+#            $overall_stats->{total_duration} += $bucket_data->{total_duration};
+#            $overall_stats->{sum_of_squares} += $bucket_data->{sum_of_squares};
+#            push @{$overall_stats->{durations}}, @{$bucket_data->{durations}};
+#        }
+#    }
+#
+#    my ($overall_mean, $overall_p90, $overall_p95, $overall_std_dev, $overall_cv) = calculate_statistics($overall_stats);
+#    print "Overall Statistics:\n";
+#    print "Count: $overall_stats->{count}, Mean: $overall_mean, 90th Percentile: $overall_p90, 95th Percentile: $overall_p95, Std Dev: $overall_std_dev, Coefficient of Variance: $overall_cv\n";
+#
     return;
 }
 
@@ -729,6 +721,7 @@ sub calculate_statistics {
 sub normalize_data_for_output {
     # Determine the maximum total log messages for any time window
     my $max_total_count = 0;
+    my $max_total_bytes = 0;
 
     # Go through all of the buckets between the earliest and latest times and ensure that they have empty data to print time buckets with no data
     unless( $omit_empty ) {
@@ -745,10 +738,14 @@ sub normalize_data_for_output {
 
     foreach my $bucket (keys %log_counts) {
         my $total_count = 0;
+        my $total_bytes = $log_stats{$bucket}{bytes};
+
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
             $total_count += $log_counts{$bucket}{$category_bucket}{count};
         }
+
         $max_total_count = $total_count if $total_count > $max_total_count;
+        $max_total_bytes = $total_bytes if $total_bytes > $max_total_bytes;
     }
 
     # Calculate the maximum length of log level titles and counts
@@ -766,12 +763,20 @@ sub normalize_data_for_output {
         }
     }
 
-#print "Legend length: $legend_length\n";
+    #print "Legend length: $legend_length\n";
 
-    # Normalize counts to fit terminal width
-    my $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format );    # static values based on timestamp length, some white space, maybe a vertical line spacer
+    $durations_graph_width = $print_durations ? 56 + 3: 0;
+
+    # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
+    $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format ) - $durations_graph_width;
     $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
     foreach my $bucket (keys %log_counts) {
+        # scale the transferred bytes for printing the graph
+        my $bytes = $log_stats{$bucket}{bytes};
+        my $scaled_bytes = $max_total_bytes != 0 ? int(($bytes / $max_total_bytes) * $durations_graph_width) : 0;
+        $log_stats{$bucket}{scaled_bytes} = $scaled_bytes;
+
+        # scale the log message counts for printing the graph
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
             my $count = $log_counts{$bucket}{$category_bucket}{count};
             my $scaled_count = $max_total_count != 0 ? int(($count / $max_total_count) * $max_graph_width) : 0;
@@ -792,10 +797,14 @@ sub normalize_data_for_output {
 sub print_bar_graph {
     my $lines_printed = 0;
     if( $total_lines_included ) {
+        print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
+        $lines_printed++;
         foreach my $bucket (sort keys %log_counts) {
             my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
+            my $printed_chars = 0;
             $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
             print "$bucket_time_str ";
+            $printed_chars += length( $bucket_time_str ) + $legend_length + 2;
             my $log_details = "";
             my $legend_length_bucket = 0;
             foreach my $category_bucket (@log_levels) {
@@ -812,11 +821,15 @@ sub print_bar_graph {
                         $legend_length_bucket += length("$category_bucket: $count ");
                     }
                 }
+
+
             }
+
             print $log_details unless $hide_values;
             my $padding = $legend_length - $legend_length_bucket;
             print " " x ($padding >= 0 ? $padding : 0);
-            print "│ ";
+            print "$colors{'bright-black'}│$colors{'NC'} ";
+
             foreach my $category_bucket (@log_levels) {
                 if (exists $log_counts{$bucket}{$category_bucket}) {
                     my $scaled_count = $log_counts{$bucket}{$category_bucket}{scaled_count};
@@ -824,13 +837,24 @@ sub print_bar_graph {
      #               print "$color" . ('█' x $scaled_count) . "$colors{'NC'}";
                     # the following provides a mechanism for changing the look of the bars for access logs compared to other logs
                     print "$color" . ( $category_bucket =~ /^[12345]xx(-HL)?$/ ? $blocks{'I'} : $blocks{$default_chart_block} ) x $scaled_count . "$colors{'NC'}";
+                    $printed_chars += $scaled_count;
                 }
             }
             
+            if( $print_durations ) {
+                my $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width - 2;		# 2 is the magic number to get 1 space after the tallest bar 
+                print " " x $missing_chars;
+                print " $colors{'bright-black'}│$colors{'NC'} ";
+                printf( "$colors{'cyan'}%8s$colors{'NC'}  $colors{'bright-blue'}P50:%-5s$colors{'NC'} $colors{'yellow'}P90:%-5s$colors{'NC'} $colors{'red'}P95:%-5s$colors{'NC'} $colors{'white-underline'}CV:%5s$colors{'NC'} Z:%5s", format_bytes( $log_stats{$bucket}{bytes},'B'), $log_stats{$bucket}{mean}, $log_stats{$bucket}{p90}, $log_stats{$bucket}{p95}, $log_stats{$bucket}{cv}, $log_stats{$bucket}{z_score} );
+
+            }
+
             print "\n";
     # BUG - if using pause, the summary table won't be paused as it isn't implementing the next line
             pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
         }
+
+        print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}";
     } else {
         printf "Read $total_lines_read lines, however no lines matched any of the patterns within the timeframe.\n";
     }
@@ -903,6 +927,7 @@ print_title();
 adapt_to_terminal_settings(); 
 adapt_to_command_line_options();
 read_and_process_logs();
+calculate_all_statistics();
 normalize_data_for_output();
 $end_time = [gettimeofday];
 $elapsed = tv_interval($start_time, $end_time);
@@ -910,7 +935,6 @@ $elapsed = tv_interval($start_time, $end_time);
 print_bar_graph();
 print_summary_table() unless $omit_summary;
 
-calculate_all_statistics();
 
 print "\n";
 exit;
