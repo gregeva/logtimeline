@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
-use POSIX qw(strftime);
+use POSIX qw(strftime floor);
 use Time::Piece;
 use DateTime;
 use Term::ReadKey;
@@ -15,10 +15,13 @@ my $start_time = [gettimeofday];
 
 # Configuration
 my $version_number = "0.1.13";
+my $log_base = 2;
+my @rolling_window;
+my $rolling_window_size = 30;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary ) = 0;
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed ) = ( 0, 0, 0, 0 );
-my ( %log_counts, %category_totals, %log_analysis, %log_messages );	# this is where the counts of log entries are tallied across the time buckets
-my $max_log_message_length = 150;					# used to define the maximum key length of the log message bucket counts
+my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );		# this is where the counts of log entries are tallied across the time buckets
+my $max_log_message_length = 150;							# used to define the maximum key length of the log message bucket counts
 my $top_n_messages = 10;
 my $total_lines_read = 0;
 my $total_lines_included = 0;
@@ -567,10 +570,30 @@ sub read_and_process_logs {
                 }
 
                 if( $is_access_log ) {
-## STATISTICAL DATA CAPTURE ##
-                    $log_analysis{$bucket}{count}++;
-                    $log_analysis{$bucket}{duration} += $duration if $duration;
-                    $log_analysis{$bucket}{bytes} += $bytes if $bytes;
+
+                    ## STATISTICAL DATA CAPTURE ##
+                    #print "$duration -- $_";
+                    my $duration_bucket = log_bucket($duration, $log_base);
+                    $duration = 0 if !defined( $duration );
+    
+                    # Initialize the hash if not already done
+                    $log_analysis{$bucket}{$duration_bucket} //= {
+                        count => 0,
+                        total_duration => 0,
+                        sum_of_squares => 0,
+                        durations => [],
+                    };
+    
+                    # Update the hash with the new data
+                    $log_analysis{$bucket}{$duration_bucket}{count}++;
+                    $log_analysis{$bucket}{$duration_bucket}{total_duration} += $duration;
+                    $log_analysis{$bucket}{$duration_bucket}{sum_of_squares} += $duration ** 2;
+                    push @{$log_analysis{$bucket}{$duration_bucket}{durations}}, $duration;
+
+
+#                    $log_analysis{$bucket}{count}++;
+#                    $log_analysis{$bucket}{duration} += $duration if $duration;
+#                    $log_analysis{$bucket}{bytes} += $bytes if $bytes;
 
                   #  printf "\033[0;35m[duration: %d] [bytes: %d]\033[0m\n", $duration, $bytes;
                    # printf "\033[0;35m[status: %s] [duration: %d] [bytes: %d]\033[0m\n", $category_bucket, $log_counts{$bucket}{duration}, $log_counts{$bucket}{bytes};
@@ -585,6 +608,122 @@ sub read_and_process_logs {
     print "\n\n";
 
     return;
+}
+
+sub calculate_all_statistics {
+    # Calculate and print statistics for each time bucket
+    foreach my $bucket (sort { $a <=> $b } keys %log_analysis) {
+        my $aggregated_data = {
+            count => 0,
+            total_duration => 0,
+            sum_of_squares => 0,
+            durations => [],
+        };
+    
+        foreach my $duration_bucket (keys %{$log_analysis{$bucket}}) {
+            my $bucket_data = $log_analysis{$bucket}{$duration_bucket};
+            $aggregated_data->{count} += $bucket_data->{count};
+            $aggregated_data->{total_duration} += $bucket_data->{total_duration};
+            $aggregated_data->{sum_of_squares} += $bucket_data->{sum_of_squares};
+            push @{$aggregated_data->{durations}}, @{$bucket_data->{durations}};
+        }
+    
+        my ($mean, $p90, $p95, $std_dev, $cv) = calculate_statistics($aggregated_data);
+
+        $log_stats{$bucket} = {
+            count => $aggregated_data->{count},
+            mean => $mean,
+            p90 => $p90,
+            p95 => $p95,
+            std_dev => $std_dev,
+            cv => $cv,
+            z_score => 'N/A'
+        };
+    
+        # Calculate rolling mean and std_dev
+        my $rolling_mean = 0;
+        my $rolling_sum_of_squares = 0;
+        my $rolling_count = 0;
+        foreach my $prev_bucket (@rolling_window) {
+            $rolling_mean += $prev_bucket->{mean};
+            $rolling_sum_of_squares += $prev_bucket->{sum_of_squares};
+            $rolling_count++;
+        }
+        if ($rolling_count > 0) {
+            $rolling_mean /= $rolling_count;
+            my $rolling_variance = ($rolling_sum_of_squares / $rolling_count) - ($rolling_mean ** 2);
+            my $rolling_std_dev = sqrt($rolling_variance);
+            my $z_score = calculate_z_score($mean, $rolling_mean, $rolling_std_dev);
+
+    #        print "Time Bucket: $bucket\n";
+            print "Count: $aggregated_data->{count}, Mean: $mean, 90th Percentile: $p90, 95th Percentile: $p95, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: $z_score\n";
+	    $log_stats{$bucket}{z_score} = $z_score;
+        } else {
+
+    #        print "Time Bucket: $bucket\n";
+            print "Count: $aggregated_data->{count}, Mean: $mean, 90th Percentile: $p90, 95th Percentile: $p95, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A\n";
+        }
+
+        # Update rolling window logic
+        push @rolling_window, { mean => $mean, sum_of_squares => $aggregated_data->{sum_of_squares} };
+        shift @rolling_window if @rolling_window > $rolling_window_size;
+    }
+
+    # Calculate and print overall statistics for the entire dataset
+    my $overall_data = {
+        count => 0,
+        total_duration => 0,
+        sum_of_squares => 0,
+        durations => [],
+    };
+
+    foreach my $bucket (keys %log_analysis) {
+        foreach my $duration_bucket (keys %{$log_analysis{$bucket}}) {
+            my $bucket_data = $log_analysis{$bucket}{$duration_bucket};
+            $overall_data->{count} += $bucket_data->{count};
+            $overall_data->{total_duration} += $bucket_data->{total_duration};
+            $overall_data->{sum_of_squares} += $bucket_data->{sum_of_squares};
+            push @{$overall_data->{durations}}, @{$bucket_data->{durations}};
+        }
+    }
+
+    my ($overall_mean, $overall_p90, $overall_p95, $overall_std_dev, $overall_cv) = calculate_statistics($overall_data);
+    print "Overall Statistics:\n";
+    print "Count: $overall_data->{count}, Mean: $overall_mean, 90th Percentile: $overall_p90, 95th Percentile: $overall_p95, Std Dev: $overall_std_dev, Coefficient of Variance: $overall_cv\n";
+
+    return;
+}
+
+# Function to calculate the log scale bucket
+sub log_bucket {
+    my ($value, $base) = @_;
+    $value = 0 if !defined( $value );
+    return $value > 0 ? floor(log($value) / log($base)) : 0;
+}
+
+# Function to calculate Z-score
+sub calculate_z_score {
+    my ($current_mean, $rolling_mean, $rolling_std_dev) = @_;
+    return 'N/A' if $rolling_std_dev == 0;
+    return sprintf("%.2f", ($current_mean - $rolling_mean) / $rolling_std_dev);
+}
+
+# Function to calculate statistical metrics
+sub calculate_statistics {
+    my ($bucket_data) = @_;
+    my $count = $bucket_data->{count};
+    return unless $count > 0;
+    
+    my $mean = int($bucket_data->{total_duration} / $count);
+    my $variance = ($bucket_data->{sum_of_squares} / $count) - ($mean ** 2);
+    my $std_dev = sqrt($variance);
+    my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean) : 'N/A';
+
+    my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
+    my $p90 = int($sorted[int($count * 0.9)]);
+    my $p95 = int($sorted[int($count * 0.95)]);
+    
+    return ($mean, $p90, $p95, $std_dev, $cv);
 }
 
 sub normalize_data_for_output {
@@ -769,8 +908,9 @@ $end_time = [gettimeofday];
 $elapsed = tv_interval($start_time, $end_time);
 
 print_bar_graph();
-print_summary_table() unless $omit_summary;;
+print_summary_table() unless $omit_summary;
 
+calculate_all_statistics();
 
 print "\n";
 exit;
