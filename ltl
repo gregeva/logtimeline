@@ -58,6 +58,9 @@ my $default_chart_block = "A";
 # TO DO:
 # - add a summary table at the end showing totals in the various buckets (start, end time, total duration in time of logs, average logs per minute, second, size of the file, lines omitted/didn't match)
 # - add a feature providing the Top X messages in the summary - would need to be turned on (takes memory), could only apply to more complex log analysis where full pattern is known (see twxsummarize)
+# - add a feature to parse GC logs including their freed space and pause duration, and common log messages could include the type of GC
+# - adapt access log format to support top messages
+# - context detection and removal from log lines (maybe use bloom filter) - seek names in other lines, and then match on that in log lines and substitute the text (error in entity name Thing1)
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize)
 # - add feature to calculate mean, standard deviation, Coefficient of Variation (%), 90/95th percentile for duration including lines
 # - add feature to add a right side table indicating statistical calculations when in duration measurement mode 
@@ -465,14 +468,16 @@ sub read_and_process_logs {
                 $is_line_match = 1;
                 $match_type = 2;			# this is matching RAC client log format [2025-02-04T12:06:22.784] [TRACE]
                 $timestamp_str =~ tr/T/ /;
-            } elsif ( (undef, $timestamp_str, $category_bucket, $bytes, $duration) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "[^"]+" (\d{3}) (\d+) (\d+)/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) (\d+)/ ) {
                 $is_line_match = 1;
                 $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
                 $is_access_log = 1;
                 $status_code = $category_bucket;
                 $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
-            } elsif ( (undef, $timestamp_str, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "[^"]+" (\d{3}) (\d+)/ ) {
+                #$message =~ s/\?.+$//;			# chop off the query string from the URI
+#print "$message -- $_";
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+)/ ) {
                 $is_line_match = 1;
                 $match_type = 4;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626
                 					# this is matching Nginx ingress access log format 3.133.31.181 - - [18/Nov/2024:14:19:55 +0000] "GET / HTTP/1.1" 404 431 "-" "WizDynamicScanner/1.0"
@@ -480,6 +485,7 @@ sub read_and_process_logs {
                 $status_code = $category_bucket;
                 $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
+                #$message =~ s/\?.+$//;			# chop off the query string from the URI
             } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^{"\@timestamp":"([^"]*).*"level":"([^"]*)/ ) {
                 $is_line_match = 1;
                 $match_type = 5;			# this matches Connection Server JSON formatted logs : {"@timestamp":"2025-02-02T21:03:06.725+00:00","@version":1,"message":"Error encountered, closing WebSocket: endpointId=2608459","logger_name":"com.thingworx.connectionserver.alwayson.AbstractClientEndpoint","thread_name":"vert.x-eventloop-thread-16","level":"WARN","level_value":30000,"stack_trace":"io.vertx.core.http.HttpClosedException: Connection was closed\n"}
@@ -539,17 +545,29 @@ sub read_and_process_logs {
                 my $bucket = int($timestamp->epoch() / $bucket_size_seconds) * $bucket_size_seconds;
 
                 $log_counts{$bucket}{$category_bucket}{count}++;
-                if( defined($thread) && defined($object) && defined($message) ) {			# ThingWorx log line parsed and usable for additional analysis
+
+                if( defined( $message ) ) {
+                    my $log_key = "";
                     my $log_level = $category_bucket;
                     $log_level =~ s/-HL$//;
-                    my $log_key = substr("[$log_level] [$thread] [$object] $message", 0, $max_log_message_length);
+
+                    if( defined($thread) && defined($object) ) {					# ThingWorx log line parsed and usable for additional analysis
+                        $log_key = substr("[$log_level] [$thread] [$object] $message", 0, $max_log_message_length);
+                    } elsif( defined( $thread ) ) {
+                        $log_key = substr("[$log_level] [$thread] $message", 0, $max_log_message_length);
+                    } else {
+                        $log_key = substr("[$log_level] $message", 0, $max_log_message_length);
+                    }
+
                     if( $category_bucket =~ /-HL$/ ) {
                         $log_messages{highlight}{$log_key}{count}++;
                     } else {
                         $log_messages{plain}{$log_key}{count}++;
                     }
-                    
-                } elsif( $is_access_log ) {
+                }
+
+                if( $is_access_log ) {
+## STATISTICAL DATA CAPTURE ##
                     $log_analysis{$bucket}{count}++;
                     $log_analysis{$bucket}{duration} += $duration if $duration;
                     $log_analysis{$bucket}{bytes} += $bytes if $bytes;
@@ -711,7 +729,7 @@ sub print_summary_table {
     printf $table_format, "HIGHLIGHTED", $total_lines_highlighted if defined $highlight_regex;
     printf $table_format, "LINES INCLUDED", $total_lines_included; 
     printf $table_format, "LINES READ", $total_lines_read; 
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "PROCESSING TIME", format_time( $elapsed, 's', 'medium' );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "PROCESSING TIME", format_time( $elapsed, 's', 'short' );
     printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' );
     print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
     print "\n";
