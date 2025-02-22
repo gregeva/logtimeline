@@ -571,6 +571,9 @@ sub read_and_process_logs {
                 if( $is_access_log ) {
                     $print_durations = 1 if $print_durations != 1;
 
+# TO DO - this is a temporary hack to turn off empty time window support as it does not presently work with statistical calculations
+                    $omit_empty = 1 if !defined( $omit_empty ) || $omit_empty != 1;
+
                     ## STATISTICAL DATA CAPTURE ##
                     #print "$duration -- $_";
                     my $duration_bucket = log_bucket($duration, $log_base);
@@ -621,6 +624,9 @@ sub calculate_all_statistics {
     
         foreach my $duration_bucket (keys %{$log_analysis{$bucket}}) {
             my $bucket_data = $log_analysis{$bucket}{$duration_bucket};
+
+            next if !defined( $bucket_data->{count} );
+
             $aggregated_data->{count} += $bucket_data->{count};
             $aggregated_data->{total_duration} += $bucket_data->{total_duration};
             $aggregated_data->{total_bytes} += $bucket_data->{total_bytes};
@@ -732,18 +738,32 @@ sub calculate_statistics {
     return ($mean, $p90, $p95, $std_dev, $cv);
 }
 
-sub normalize_data_for_output {
-    # Determine the maximum total log messages for any time window
-    my $max_total_count = 0;
-    my $max_total_bytes = 0;
+sub initialize_empty_time_windows {
 
     # Go through all of the buckets between the earliest and latest times and ensure that they have empty data to print time buckets with no data
     unless( $omit_empty ) {
         my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;
         for (my $bucket = $start_bucket; $bucket <= $output_timestamp_max; $bucket += $bucket_size_seconds) {
             $log_counts{$bucket}{'empty'}{'count'} = 0;
+
+                    # Initialize the hash if not already done
+#                    $log_analysis{$bucket}{$duration_bucket} //= {
+#                        count => 0,
+#                        total_bytes => 0,
+#                        total_duration => 0,
+#                        sum_of_squares => 0,
+#                        durations => [],
+#                    };
         }
     }
+
+    return;
+}
+
+sub normalize_data_for_output {
+    # Determine the maximum total log messages for any time window
+    my $max_total_count = 0;
+    my $max_total_bytes = 0;
 
     # Example usage (to demonstrate the values):
 #    foreach my $bucket (sort keys %log_counts) {
@@ -786,6 +806,7 @@ sub normalize_data_for_output {
     $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
     foreach my $bucket (keys %log_counts) {
         # scale the transferred bytes for printing the graph
+# TO DO : need to handle cases where we don't have bytes, but would have duration
         my $bytes = $log_stats{$bucket}{bytes};
         my $scaled_bytes = $max_total_bytes != 0 ? int(($bytes / $max_total_bytes) * $durations_graph_width) : 0;
         $log_stats{$bucket}{scaled_bytes} = $scaled_bytes;
@@ -950,6 +971,7 @@ print_title();
 adapt_to_terminal_settings(); 
 adapt_to_command_line_options();
 read_and_process_logs();
+initialize_empty_time_windows();
 calculate_all_statistics();
 normalize_data_for_output();
 $end_time = [gettimeofday];
