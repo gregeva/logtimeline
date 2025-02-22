@@ -17,7 +17,7 @@ my $start_time = [gettimeofday];
 my $version_number = "0.1.13";
 my $log_base = 2;
 my @rolling_window;
-my $rolling_window_size = 30;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
+my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary ) = 0;
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed ) = ( 0, 0, 0, 0 );
 my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );		# this is where the counts of log entries are tallied across the time buckets
@@ -25,6 +25,7 @@ my $max_log_message_length = 150;							# used to define the maximum key length 
 my $durations_graph_width = 0;
 my $max_graph_width = 0;
 my $print_durations = 0;
+my ( $filter_duration_min, $filter_duration_max );
 my $top_n_messages = 10;
 my $total_lines_read = 0;
 my $total_lines_included = 0;
@@ -62,10 +63,16 @@ my %blocks = (
 my $default_chart_block = "A";
 
 # TO DO:
+# - add request and error rates to the access log statistics
+# - create a conditioal path to resize durations stats pane and only print available information if duration value is not present (also don't do the statistical calculations)
+# - have the duration stats pane auto-size based on which data was found and is able to be displayed (bytes, duration, rates, etc.)
+# - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
+
 # - add a summary table at the end showing totals in the various buckets (start, end time, total duration in time of logs, average logs per minute, second, size of the file, lines omitted/didn't match)
 # - add a feature providing the Top X messages in the summary - would need to be turned on (takes memory), could only apply to more complex log analysis where full pattern is known (see twxsummarize)
 # - add a feature to parse GC logs including their freed space and pause duration, and common log messages could include the type of GC
-# - adapt access log format to support top messages
+
+
 # - context detection and removal from log lines (maybe use bloom filter) - seek names in other lines, and then match on that in log lines and substitute the text (error in entity name Thing1)
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize)
 # - add feature to calculate mean, standard deviation, Coefficient of Variation (%), 90/95th percentile for duration including lines
@@ -81,6 +88,7 @@ my $default_chart_block = "A";
 # RAC client: [2025-02-04T12:06:22.784] [TRACE] MessageStream - handling data from GAS with chunk size: 88
 # TWX logs: 2025-02-04 12:05:57.481+0000 [L: DEBUG] [O: c.t.p.p.StreamEntryProcessor] [I: ] [U: ] [S: ] [P: ] [T: pool-6-thread-3] Stream Entry Block Size Threshold Reached...
 # Tomcat access logs: 10.224.212.63 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
+# Catalina.out: 20-Feb-2025 08:55:05.055 INFO [main] org.apache.catalina.startup.HostConfig.deployDirectory Deployment of web application directory [/app/opt/apache-tomcat/webapps/Thingworx] has finished in [37,549] ms
 
 my %colors = (
     'ERROR' => "\033[0;31m",
@@ -184,7 +192,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--hide-values|-h] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--omit-empty|-oe] [--omit-summary|-os] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--hide-values|-h] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--omit-empty|-oe] [--omit-summary|-os] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -297,7 +305,9 @@ sub adapt_to_command_line_options {
         'omit-summary|os' => \$omit_summary,
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds,
-        'version|v' => \$print_version
+        'version|v' => \$print_version,
+        'duration-min|dmin=i' => \$filter_duration_min,
+        'duration-max|dmax=i' => \$filter_duration_max
     ) or die print_usage( "required options not provided" ); 
 
     $range{'start'} = $range_start if defined( $range_start );
@@ -487,6 +497,8 @@ sub read_and_process_logs {
             #$| = 1; # Flush output
 
             if( $is_line_match ) {
+                $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
+
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
                 } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 ) {
@@ -522,6 +534,8 @@ sub read_and_process_logs {
                 next if( $timestamp->epoch() < $range_epoch{'start'} || $timestamp->epoch() >= $range_epoch{'end'} );
                 next if( defined( $exclude_regex ) && /$exclude_regex/ );
                 next if( defined( $include_regex ) && !/$include_regex/ );
+                next if( defined( $filter_duration_min ) && $duration < $filter_duration_min );		# skip if duration value is below specified minimum filter
+                next if( defined( $filter_duration_max ) && $duration > $filter_duration_max );		# skip if duration value is above specified maximum filter
 
                 # determine if this line should be highlighted
                 $category_bucket .= "-HL" if( defined( $highlight_regex ) && /$highlight_regex/ );
@@ -897,12 +911,20 @@ sub print_summary_table {
     print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
     print "\n";
 
+
     ## START MESSAGE SUMMARY ##
 
     foreach my $grouping ( qw( highlight plain ) ) {
         # Ensure the grouping exists and is a hash reference
         if (exists $log_messages{$grouping} && ref($log_messages{$grouping}) eq 'HASH') {
             my @top_keys = (sort { $log_messages{$grouping}{$b}{count} <=> $log_messages{$grouping}{$a}{count} } keys %{$log_messages{$grouping}})[0..($top_n_messages-1)];
+
+            if( $grouping eq "highlight" ) {
+                print "$colors{'bright-yellow-HL'}TOP HIGHLIGHTED MESSAGES (highlighted based on RegEx pattern match)$colors{'NC'}$colors{'bright-yellow'}\n";
+            } elsif( $grouping eq "plain" ) {
+                print "$colors{'bright-cyan-HL'}TOP OVERALL MESSAGES (retained for processing after inclusion, exclusion, time range, and duration filters)$colors{'NC'}$colors{'bright-cyan'}\n";
+            }
+            print "─" x 125 . "$colors{'NC'}\n";
 
             # Print the top messages
             foreach my $key (@top_keys) {
@@ -911,7 +933,8 @@ sub print_summary_table {
                 }
             }
 
-            print "\n------\n";
+            print "\n";
+
         #} else {
         #    warn "Grouping '$grouping' does not exist or is not a hash reference.\n";
         }
