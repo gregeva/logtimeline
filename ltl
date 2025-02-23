@@ -14,7 +14,7 @@ use Proc::ProcessTable;
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.1.13";
+my $version_number = "0.1.15";
 my $log_base = 2;
 my @rolling_window;
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -615,6 +615,7 @@ sub read_and_process_logs {
                 if( defined( $message ) ) {
                     my $log_key = "";
                     my $log_level = $category_bucket;
+                    my $category = "";
                     $log_level =~ s/-HL$//;
 
                     if( defined($thread) && defined($object) ) {					# ThingWorx log line parsed and usable for additional analysis
@@ -626,10 +627,32 @@ sub read_and_process_logs {
                     }
 
                     if( $category_bucket =~ /-HL$/ ) {
-                        $log_messages{highlight}{$log_key}{count}++;
+                        $category = 'highlight';
                     } else {
-                        $log_messages{plain}{$log_key}{count}++;
+                        $category = 'plain';
                     }
+
+                    $log_messages{$category}{$log_key}{count}++;
+
+#                    if( $is_access_log ) {
+#                        # Calculate the log scale bucket for the duration
+#                        my $duration_bucket = log_bucket($duration, $log_base);
+#
+#                        # Ensure duration and bytes are defined
+#                        $duration = 0 if !defined($duration);
+#                        $bytes = 0 if !defined($bytes);
+#
+#                        # Increment the count for the duration bucket
+#                        $log_messages{$category}{$duration_bucket}{count}++;
+#
+#                        # Accumulate the total duration and bytes
+#                        $log_messages{$category}{$duration_bucket}{total_duration} += $duration;
+#                        $log_messages{$category}{$duration_bucket}{total_bytes} += $bytes;
+#
+#                        # Accumulate the sum of squares for variance calculation
+#                        $log_messages{$category}{$duration_bucket}{sum_of_squares} += $duration ** 2;
+#                        push @{$log_messages{$category}{$duration_bucket}{durations}}, $duration;
+#                    }
                 }
 
                 if( $is_access_log ) {
@@ -767,6 +790,45 @@ sub calculate_all_statistics {
 #    print "Overall Statistics:\n";
 #    print "Count: $overall_stats->{count}, Mean: $overall_mean, 90th Percentile: $overall_p90, 95th Percentile: $overall_p95, Std Dev: $overall_std_dev, Coefficient of Variance: $overall_cv\n";
 #
+
+## STATS FOR TOP LOG MESSAGES ##
+#
+#    foreach my $category (sort { $a <=> $b } keys %log_messages) {
+#        my $aggregated_data = {
+#            count => 0,
+#            total_duration => 0,
+#            total_bytes => 0,
+#            sum_of_squares => 0,
+#            durations => [],
+#        };
+#    
+#        foreach my $duration_bucket (keys %{$log_messages{$category}}) {
+#            my $category_data = $log_messages{$category}{$duration_bucket};
+#
+#            next if !defined( $category_data->{count} );
+#
+#            $aggregated_data->{count} += $category_data->{count};
+#            $aggregated_data->{total_duration} += $category_data->{total_duration};
+#            $aggregated_data->{total_bytes} += $category_data->{total_bytes};
+#            $aggregated_data->{sum_of_squares} += $category_data->{sum_of_squares};
+#            push @{$aggregated_data->{durations}}, @{$category_data->{durations}};
+#        }
+#    
+#        my ($mean, $p90, $p95, $std_dev, $cv) = calculate_statistics($aggregated_data);
+#
+#        $log_messages{$category}{$log_key}{count....
+#
+#
+#    #        print "Time Bucket: $bucket\n";
+#    #        print "Count: $aggregated_data->{count}, Mean: $mean, 90th Percentile: $p90, 95th Percentile: $p95, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A\n";
+#        }
+#
+#        $current_memory_usage = get_memory_usage();								# track maximum memory usage
+#        if ($current_memory_usage > $max_memory_usage) {
+#            $max_memory_usage = $current_memory_usage;
+#        }
+#    }
+
     return;
 }
 
