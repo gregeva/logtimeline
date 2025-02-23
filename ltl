@@ -48,7 +48,16 @@ my $pause_output = 0;
 my $hide_values = 0;
 my @in_files;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
-my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRACE-HL TRACE 5xx-HL 5xx 4xx-HL 4xx 3xx-HL 3xx 2xx-HL 2xx 1xx-HL 1xx empty );		# Define log bucket printing order
+
+# Define log bucket printing order
+#my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRACE-HL TRACE 5xx-HL 5xx 4xx-HL 4xx 3xx-HL 3xx 2xx-HL 2xx 1xx-HL 1xx empty );
+my @log_levels = (
+    'ERROR-HL', 'ERROR', 'WARN-HL', 'WARN', 'INFO-HL', 'INFO', 
+    'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx', 
+    '4xx-HL', '4xx', '3xx-HL', '3xx', '2xx-HL', '2xx', '1xx-HL', 
+    '1xx', 'Pause Young-HL', 'Pause Young', 'Pause Full-HL', 'Pause Full', 'empty'
+);
+
 my %blocks = (
     'A' => '█',    # Full block
     'B' => '▓',    # Heavy shading
@@ -68,7 +77,7 @@ my $default_chart_block = "A";
 # - create a conditioal path to resize durations stats pane and only print available information if duration value is not present (also don't do the statistical calculations)
 # - have the duration stats pane auto-size based on which data was found and is able to be displayed (bytes, duration, rates, etc.)
 # - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
-
+# - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
 # - add a summary table at the end showing totals in the various buckets (start, end time, total duration in time of logs, average logs per minute, second, size of the file, lines omitted/didn't match)
 # - add a feature providing the Top X messages in the summary - would need to be turned on (takes memory), could only apply to more complex log analysis where full pattern is known (see twxsummarize)
 # - add a feature to parse GC logs including their freed space and pause duration, and common log messages could include the type of GC
@@ -90,6 +99,12 @@ my $default_chart_block = "A";
 # TWX logs: 2025-02-04 12:05:57.481+0000 [L: DEBUG] [O: c.t.p.p.StreamEntryProcessor] [I: ] [U: ] [S: ] [P: ] [T: pool-6-thread-3] Stream Entry Block Size Threshold Reached...
 # Tomcat access logs: 10.224.212.63 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
 # Catalina.out: 20-Feb-2025 08:55:05.055 INFO [main] org.apache.catalina.startup.HostConfig.deployDirectory Deployment of web application directory [/app/opt/apache-tomcat/webapps/Thingworx] has finished in [37,549] ms
+# GC Logs
+# [2024-12-17T06:10:16.351+0000][29576.409s][info][gc             ] GC(25524) Pause Full (G1 Evacuation Pause) 17047M->16380M(17408M) 2459.735ms
+# [2024-12-17T06:10:16.351+0000][29576.409s][info][gc,cpu         ] GC(25524) User=4.73s Sys=0.01s Real=2.46s
+# [2024-12-17T06:10:16.993+0000][29577.052s][info][gc,start       ] GC(25525) Pause Young (Concurrent Start) (G1 Evacuation Pause)
+# [2024-11-21T18:36:30.300+0000][info][gc            ] GC(16) Pause Young (Normal) (G1 Evacuation Pause) 949M->685M(9216M) 106.703ms
+# 2021-05-11T07:41:12.706+0000: 0.578: [GC pause (G1 Evacuation Pause) (young), 0.0069706 secs]
 
 my %colors = (
     'ERROR' => "\033[0;31m",
@@ -102,6 +117,8 @@ my %colors = (
     '3xx'  => "\033[0;35m",
     '4xx'  => "\033[0;33m",
     '5xx'  => "\033[0;31m",
+    'Pause Young' => "\033[0;35m",
+    'Pause Full' => "\033[0;31m",
     'NC'    => "\033[0m",
     'black' => "\033[30m\033[49m",
     'red' => "\033[31m\033[49m",
@@ -208,6 +225,38 @@ sub get_memory_usage {
     my $t = Proc::ProcessTable->new();
     my ($memory_usage) = map { $_->rss } grep { $_->pid == $$ } @{$t->table};
     return $memory_usage;
+}
+
+sub convert_bytes {
+    my ($input_value, $input_unit) = @_;
+    my ($value, $unit);
+
+    if( defined( $input_unit ) ) {
+        $value = $input_value;
+        $unit = $input_unit;
+    } else {
+        ( $value, $unit ) = $input_value =~ /^(\d+)[ ]?(\w+)$/;
+    }
+
+    my %units = (
+        'B'  => 1,
+        'b'  => 1,
+        'kB' => 1024,
+        'KB' => 1024,
+        'k' => 1024,
+        'K' => 1024,
+        'MB' => 1024**2,
+        'M' => 1024**2,
+        'GB' => 1024**3,
+        'G' => 1024**3,
+        'TB' => 1024**4,
+        'T' => 1024**4,
+    );
+
+    # Convert input value to bytes
+    my $bytes = $value * $units{$unit};
+
+    return $bytes;
 }
 
 sub format_bytes {
@@ -442,9 +491,11 @@ sub read_and_process_logs {
         while (<$fh>) {
             $line_number++;
             my ( $timestamp_str, $log_level, $category_bucket, $object, $instance, $user, $platform, $thread, $message ) = ("") x 9;
-            my ( $is_line_match, $is_access_log, $match_type, $status_code, $bytes, $duration ) = 0;
+            my ( $is_line_match, $is_access_log, $match_type, $status_code, $bytes, $duration, $heap_from, $heap_to, $heap_size ) = 0;
             my $timestamp;
             $total_lines_read++;
+
+#($timestamp_str, $category_bucket, $heap_from, $heap_to, $heap_size, $duration) = (undef, undef, undef, undef, undef, undef);
 
             if ($line_number % 997 == 0) {	# only print processing status update every X lines processed
                 printf("\rProcessing line %d in file %s", $line_number, $in_file);
@@ -492,6 +543,14 @@ sub read_and_process_logs {
                 $match_type = 5;			# this matches Connection Server JSON formatted logs : {"@timestamp":"2025-02-02T21:03:06.725+00:00","@version":1,"message":"Error encountered, closing WebSocket: endpointId=2608459","logger_name":"com.thingworx.connectionserver.alwayson.AbstractClientEndpoint","thread_name":"vert.x-eventloop-thread-16","level":"WARN","level_value":30000,"stack_trace":"io.vertx.core.http.HttpClosedException: Connection was closed\n"}
                 $timestamp_str =~ s/\+\d{2}:\d{2}$//;	# chop off the timezone offset
                 $timestamp_str =~ tr/T/ /;
+            } elsif ( ( $timestamp_str, $category_bucket, $message, $heap_from, $heap_to, $heap_size, $duration ) = $_ =~ /^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}.*?\[info\]\[gc\s*\] GC\(\d+\) (.+?) (\(.+?\)) (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms/ ) {
+                $is_line_match = 1;
+                $match_type = 6;			# this matches Java GC log info level pause
+                $is_access_log = 1;			# need this to have statistics calculated
+                $default_chart_block = 'C' unless $default_chart_block ne 'C';
+
+                $bytes = convert_bytes( $heap_from ) - convert_bytes( $heap_to );
+                $bytes = $bytes < 0 ? 0 : $bytes;
             }
 
 #print "Thread: $thread   Object: $object   Message: $message\n";
@@ -504,7 +563,7 @@ sub read_and_process_logs {
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
-                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 ) {
+                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 ) {
                     $timestamp = DateTime->new(
                         year      => substr($timestamp_str, 0, 4),
                         month     => substr($timestamp_str, 5, 2),
@@ -543,7 +602,7 @@ sub read_and_process_logs {
                 next if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max );			# skip if bytes value is above specified maximum filter
 
                 # determine if this line should be highlighted
-                $category_bucket .= "-HL" if( defined( $highlight_regex ) && /$highlight_regex/ );
+                $category_bucket .= '-HL' if( defined( $highlight_regex ) && /$highlight_regex/ );
 
                 # sets earliest and latest timestamp values being displayed (after the range filtering selection)
                 $output_timestamp_min = $timestamp->epoch() if $output_timestamp_min == 0 || $output_timestamp_min > $timestamp->epoch();
@@ -847,6 +906,7 @@ sub print_bar_graph {
             $printed_chars += length( $bucket_time_str ) + $legend_length + 2;
             my $log_details = "";
             my $legend_length_bucket = 0;
+
             foreach my $category_bucket (@log_levels) {
                 if (exists $log_counts{$bucket}{$category_bucket}) {
                     my $count = $log_counts{$bucket}{$category_bucket}{count};
@@ -885,7 +945,7 @@ sub print_bar_graph {
                 my $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width - 2;		# 2 is the magic number to get 1 space after the tallest bar 
                 print " " x $missing_chars;
                 print " $colors{'bright-black'}│$colors{'NC'} ";
-                printf( "$colors{'cyan'}%8s$colors{'NC'}  $colors{'bright-blue'}P50:%-5s$colors{'NC'} $colors{'yellow'}P90:%-5s$colors{'NC'} $colors{'red'}P95:%-5s$colors{'NC'} $colors{'white-underline'}CV:%5s$colors{'NC'} Z:%5s", format_bytes( $log_stats{$bucket}{bytes},'B'), $log_stats{$bucket}{mean}, $log_stats{$bucket}{p90}, $log_stats{$bucket}{p95}, $log_stats{$bucket}{cv}, $log_stats{$bucket}{z_score} );
+                printf( "$colors{'cyan'}%8s$colors{'NC'}  $colors{'bright-blue'}P50:%-5s$colors{'NC'} $colors{'yellow'}P90:%-5s$colors{'NC'} $colors{'red'}P95:%-5s$colors{'NC'} $colors{'white-underline'}CV:%5s$colors{'NC'} Z:%5s", format_bytes( $log_stats{$bucket}{bytes},'B' ), $log_stats{$bucket}{mean}, $log_stats{$bucket}{p90}, $log_stats{$bucket}{p95}, $log_stats{$bucket}{cv}, $log_stats{$bucket}{z_score} );
 
             }
 
@@ -922,7 +982,7 @@ sub print_summary_table {
     foreach my $category_bucket (@log_levels) {
         next unless $category_totals{$category_bucket};
 	
-        my ( $legend_title ) =  "$category_bucket:" . " " x ( 12 - length( $category_bucket ) );
+        my ( $legend_title ) =  "$category_bucket:" . " " x ( 14 - length( $category_bucket ) );
         #print "$legend_title$category_totals{$category_bucket}\n"; 
         #printf "%-${category_column_width}s %${count_column_width}d\n", $category_bucket, $category_totals{$category_bucket}; 
         printf $table_format, $category_bucket, $category_totals{$category_bucket}; 
