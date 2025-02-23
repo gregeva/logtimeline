@@ -26,6 +26,7 @@ my $durations_graph_width = 0;
 my $max_graph_width = 0;
 my $print_durations = 0;
 my ( $filter_duration_min, $filter_duration_max );
+my ( $filter_bytes_min, $filter_bytes_max );
 my $top_n_messages = 10;
 my $total_lines_read = 0;
 my $total_lines_included = 0;
@@ -192,7 +193,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--hide-values|-h] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--omit-empty|-oe] [--omit-summary|-os] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--hide-values|-h] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--omit-empty|-oe] [--omit-summary|-os] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -307,7 +308,9 @@ sub adapt_to_command_line_options {
         'milliseconds|ms' => \$print_milliseconds,
         'version|v' => \$print_version,
         'duration-min|dmin=i' => \$filter_duration_min,
-        'duration-max|dmax=i' => \$filter_duration_max
+        'duration-max|dmax=i' => \$filter_duration_max,
+        'bytes-min|bmin=i' => \$filter_bytes_min,
+        'bytes-max|bmax=i' => \$filter_bytes_max
     ) or die print_usage( "required options not provided" ); 
 
     $range{'start'} = $range_start if defined( $range_start );
@@ -536,6 +539,8 @@ sub read_and_process_logs {
                 next if( defined( $include_regex ) && !/$include_regex/ );
                 next if( defined( $filter_duration_min ) && $duration < $filter_duration_min );		# skip if duration value is below specified minimum filter
                 next if( defined( $filter_duration_max ) && $duration > $filter_duration_max );		# skip if duration value is above specified maximum filter
+                next if( defined( $filter_bytes_min ) && $bytes < $filter_bytes_min );			# skip if bytes value is below specified minimum filter
+                next if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max );			# skip if bytes value is above specified maximum filter
 
                 # determine if this line should be highlighted
                 $category_bucket .= "-HL" if( defined( $highlight_regex ) && /$highlight_regex/ );
