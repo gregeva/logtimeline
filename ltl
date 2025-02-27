@@ -80,13 +80,15 @@ my $default_chart_block = "A";
 # - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
 # - add a summary table at the end showing totals in the various buckets (start, end time, total duration in time of logs, average logs per minute, second, size of the file, lines omitted/didn't match)
 # - add a feature providing the Top X messages in the summary - would need to be turned on (takes memory), could only apply to more complex log analysis where full pattern is known (see twxsummarize)
-# - add a feature to parse GC logs including their freed space and pause duration, and common log messages could include the type of GC
 
+# - should add a time counter for reading the files, and one for the processing.  Today this is grouped together but with different I/O limitations and statistical calculations one or the other will fluctuate.
 
 # - context detection and removal from log lines (maybe use bloom filter) - seek names in other lines, and then match on that in log lines and substitute the text (error in entity name Thing1)
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize)
 # - add feature to calculate mean, standard deviation, Coefficient of Variation (%), 90/95th percentile for duration including lines
 # - add feature to add a right side table indicating statistical calculations when in duration measurement mode 
+
+## BUGS ##
 
 # NOT PRIORITY BACKLOG
 # - add a feature to include/exclude HTTP status codes which would need to be converted to RegEx as 4xx isn't going to be found
@@ -498,7 +500,7 @@ sub read_and_process_logs {
 #($timestamp_str, $category_bucket, $heap_from, $heap_to, $heap_size, $duration) = (undef, undef, undef, undef, undef, undef);
 
             if ($line_number % 997 == 0) {	# only print processing status update every X lines processed
-                printf("\rProcessing line %d in file %s", $line_number, $in_file);
+                printf("\rProcessing line %d in file %s (%d overall)", $line_number, $in_file, $total_lines_read);
                 $| = 1; # Flush output
             }
 
@@ -619,9 +621,13 @@ sub read_and_process_logs {
                     $log_level =~ s/-HL$//;
 
                     if( defined($thread) && defined($object) ) {					# ThingWorx log line parsed and usable for additional analysis
-                        $log_key = substr("[$log_level] [$thread] [$object] $message", 0, $max_log_message_length);
+                        my $truncated_thread = substr( $thread, 0, 20 );
+                        my $max_object_length = 25;
+                        my $truncated_object = substr( $object, length($object) > $max_object_length ? length($object)-$max_object_length : 0, $max_object_length );
+                        $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, $max_log_message_length);
                     } elsif( defined( $thread ) ) {
-                        $log_key = substr("[$log_level] [$thread] $message", 0, $max_log_message_length);
+                        my $truncated_thread = substr( $thread, 0, 20 );
+                        $log_key = substr("[$log_level] [$truncated_thread] $message", 0, $max_log_message_length);
                     } else {
                         $log_key = substr("[$log_level] $message", 0, $max_log_message_length);
                     }
@@ -690,6 +696,8 @@ sub read_and_process_logs {
             }
         }
         close $fh;
+
+        print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
     }
     print "\r$colors{'bright-green'}Processing complete.$colors{'NC'}";
     print " " x ( $terminal_width - length( "Processing complete." ) );
@@ -925,7 +933,7 @@ sub normalize_data_for_output {
 
     #print "Legend length: $legend_length\n";
 
-    $durations_graph_width = $print_durations ? 56 + 3: 0;
+    $durations_graph_width = $print_durations ? 59 + 3: 0;
 
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
     $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format ) - $durations_graph_width;
@@ -1007,7 +1015,7 @@ sub print_bar_graph {
                 my $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width - 2;		# 2 is the magic number to get 1 space after the tallest bar 
                 print " " x $missing_chars;
                 print " $colors{'bright-black'}│$colors{'NC'} ";
-                printf( "$colors{'cyan'}%8s$colors{'NC'}  $colors{'bright-blue'}P50:%-5s$colors{'NC'} $colors{'yellow'}P90:%-5s$colors{'NC'} $colors{'red'}P95:%-5s$colors{'NC'} $colors{'white-underline'}CV:%5s$colors{'NC'} Z:%5s", format_bytes( $log_stats{$bucket}{bytes},'B' ), $log_stats{$bucket}{mean}, $log_stats{$bucket}{p90}, $log_stats{$bucket}{p95}, $log_stats{$bucket}{cv}, $log_stats{$bucket}{z_score} );
+                printf( "$colors{'cyan'}%8s$colors{'NC'}  $colors{'bright-blue'}AVG:%-6s$colors{'NC'} $colors{'yellow'}P90:%-6s$colors{'NC'} $colors{'red'}P95:%-6s$colors{'NC'} $colors{'white-underline'}CV:%5s$colors{'NC'} Z:%5s", format_bytes( $log_stats{$bucket}{bytes},'B' ), $log_stats{$bucket}{mean}, $log_stats{$bucket}{p90}, $log_stats{$bucket}{p95}, $log_stats{$bucket}{cv}, $log_stats{$bucket}{z_score} );
 
             }
 
