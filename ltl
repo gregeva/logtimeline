@@ -1115,18 +1115,18 @@ sub print_summary_table {
 
     if( $print_durations ) {
         %col_relative_size = (
-            1 => 63,
+            1 => 67,
             2 => 6,
-            3 => 6,
+            3 => 5,
             4 => 6,
             5 => 6,
             6 => 6,
-            7 => 7,
+            7 => 9,
         );
     } else {
         %col_relative_size = (
             1 => 80,
-            2 => 20,
+            2 => 18,
         );
     }
 
@@ -1156,14 +1156,14 @@ sub print_summary_table {
                 $header_title = " " x $table_padding_outer . "$colors{'bright-yellow-HL'}" . sprintf( "%-$col_width{1}s", "TOP HIGHLIGHTED MESSAGES (highlighted based on RegEx pattern match)" ) . " " x $table_padding_inner;
 
                 if( $print_durations ) {
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{3}s", "P1" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P50" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P99" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", "CV" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", "Time" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", "P1" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P50" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P99" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "CV" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "Time" ); 
                 } else {
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
                 }
 
                 $header_title .= "$colors{'NC'}$colors{'bright-yellow'}";
@@ -1171,14 +1171,14 @@ sub print_summary_table {
                 $header_title = " " x $table_padding_outer . "$colors{'bright-cyan-HL'}" . sprintf( "%-$col_width{1}s", "TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)" ) . " " x $table_padding_inner;
 
                 if( $print_durations ) {
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{3}s", "P1" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P50" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P99" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", "CV" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", "Time" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", "P1" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P50" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P99" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "CV" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "Time" ); 
                 } else {
-                    $header_title .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
                 }
 
                 $header_title .= "$colors{'NC'}$colors{'bright-cyan'}";
@@ -1189,7 +1189,7 @@ sub print_summary_table {
 
             # Print the top messages
             foreach my $key (@top_keys) {
-                my $row = "";
+                my $row = " " x $table_padding_outer;
 
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
                     my $message = substr( $key, 0, $col_width{1} );
@@ -1202,16 +1202,16 @@ sub print_summary_table {
                         my $cv = $log_messages{$grouping}{$key}{cv};
                         my $total_duration = $log_messages{$grouping}{$key}{total_duration};
 
-                        $row .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{2}s", $count ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{3}s", $p1 ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", $p50 ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", $p99 ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", $cv ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{4}s", $total_duration ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $count ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", $p1 ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", $p50 ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", $p99 ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", $cv ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", $total_duration ) . " " x $table_padding_inner; 
                     } else {
-                        $row .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_outer . " " x $table_padding_inner . sprintf( "%$col_width{2}s", $count ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $count ) . " " x $table_padding_inner; 
 
                     }
 
