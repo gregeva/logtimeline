@@ -638,27 +638,37 @@ sub read_and_process_logs {
                         $category = 'plain';
                     }
 
+                    #$log_messages{$category}{$log_key}{count} //= 0;
+                    #$log_messages{$category}{$log_key}{count} = 0 if !defined $log_messages{$category}{$log_key}{count};
                     $log_messages{$category}{$log_key}{count}++;
 
-#                    if( $is_access_log ) {
-#                        # Calculate the log scale bucket for the duration
-#                        my $duration_bucket = log_bucket($duration, $log_base);
-#
-#                        # Ensure duration and bytes are defined
-#                        $duration = 0 if !defined($duration);
-#                        $bytes = 0 if !defined($bytes);
-#
-#                        # Increment the count for the duration bucket
-#                        $log_messages{$category}{$duration_bucket}{count}++;
-#
-#                        # Accumulate the total duration and bytes
-#                        $log_messages{$category}{$duration_bucket}{total_duration} += $duration;
-#                        $log_messages{$category}{$duration_bucket}{total_bytes} += $bytes;
-#
-#                        # Accumulate the sum of squares for variance calculation
-#                        $log_messages{$category}{$duration_bucket}{sum_of_squares} += $duration ** 2;
-#                        push @{$log_messages{$category}{$duration_bucket}{durations}}, $duration;
-#                    }
+                    if( $is_access_log ) {
+                        # Calculate the log scale bucket for the duration
+                        my $duration_bucket = log_bucket($duration, $log_base);
+
+                        # Ensure duration and bytes are defined
+                        $duration = 0 if !defined($duration);
+                        $bytes = 0 if !defined($bytes);
+
+                        # Initialize the hash if not already done
+                        $log_messages{$category}{$log_key}{$duration_bucket} //= {
+                            count => 0,
+                            total_bytes => 0,
+                            total_duration => 0,
+                            sum_of_squares => 0,
+                            durations => [],
+                        };
+                        # Increment the count for the duration bucket
+                        $log_messages{$category}{$log_key}{$duration_bucket}{count}++;
+
+                        # Accumulate the total duration and bytes
+                        $log_messages{$category}{$log_key}{$duration_bucket}{total_duration} += $duration;
+                        $log_messages{$category}{$log_key}{$duration_bucket}{total_bytes} += $bytes;
+
+                        # Accumulate the sum of squares for variance calculation
+                        $log_messages{$category}{$log_key}{$duration_bucket}{sum_of_squares} += $duration ** 2;
+                        push @{$log_messages{$category}{$log_key}{$duration_bucket}{durations}}, $duration;
+                    }
                 }
 
                 if( $is_access_log ) {
@@ -800,42 +810,56 @@ sub calculate_all_statistics {
 #
 
 ## STATS FOR TOP LOG MESSAGES ##
-#
-#    foreach my $category (sort { $a <=> $b } keys %log_messages) {
-#        my $aggregated_data = {
-#            count => 0,
-#            total_duration => 0,
-#            total_bytes => 0,
-#            sum_of_squares => 0,
-#            durations => [],
-#        };
-#    
-#        foreach my $duration_bucket (keys %{$log_messages{$category}}) {
-#            my $category_data = $log_messages{$category}{$duration_bucket};
-#
-#            next if !defined( $category_data->{count} );
-#
-#            $aggregated_data->{count} += $category_data->{count};
-#            $aggregated_data->{total_duration} += $category_data->{total_duration};
-#            $aggregated_data->{total_bytes} += $category_data->{total_bytes};
-#            $aggregated_data->{sum_of_squares} += $category_data->{sum_of_squares};
-#            push @{$aggregated_data->{durations}}, @{$category_data->{durations}};
-#        }
-#    
-#        my ($mean, $p90, $p95, $std_dev, $cv) = calculate_statistics($aggregated_data);
-#
-#        $log_messages{$category}{$log_key}{count....
-#
-#
-#    #        print "Time Bucket: $bucket\n";
-#    #        print "Count: $aggregated_data->{count}, Mean: $mean, 90th Percentile: $p90, 95th Percentile: $p95, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A\n";
-#        }
-#
-#        $current_memory_usage = get_memory_usage();								# track maximum memory usage
-#        if ($current_memory_usage > $max_memory_usage) {
-#            $max_memory_usage = $current_memory_usage;
-#        }
-#    }
+
+    my $top_n_messages = 10;  # Set your desired number of top messages
+
+    foreach my $category (keys %log_messages) {
+        # Collect and sort the log keys based on the count within each log_key
+        my @sorted_log_keys = sort {
+            my $count_a = $log_messages{$category}{$a}{count} // 0;
+            my $count_b = $log_messages{$category}{$b}{count} // 0;
+            $count_b <=> $count_a;
+        } keys %{$log_messages{$category}};
+
+        # Process only the top N log keys
+        my @top_keys = @sorted_log_keys[0 .. $top_n_messages - 1];
+
+#            foreach my $log_key2 (@top_keys) {
+#                # Your processing code here
+#                print "$log_messages{$category}{$log_key2}{count} : $log_key2 \n";  # Example output
+#            }
+
+        foreach my $log_key (@top_keys) {
+            my $aggregated_data = {
+                count => 0,
+                total_duration => 0,
+                total_bytes => 0,
+                sum_of_squares => 0,
+                durations => [],
+            };
+
+            foreach my $duration_bucket (sort {$a <=> $b} grep { $_ ne 'count' } keys %{$log_messages{$category}{$log_key}}) {
+                my $message_data = $log_messages{$category}{$log_key}{$duration_bucket};
+
+                next if !defined( $message_data->{count} );
+
+                $aggregated_data->{count} += $message_data->{count};
+                $aggregated_data->{total_duration} += $message_data->{total_duration};
+                $aggregated_data->{total_bytes} += $message_data->{total_bytes};
+                $aggregated_data->{sum_of_squares} += $message_data->{sum_of_squares};
+                push @{$aggregated_data->{durations}}, @{$message_data->{durations}};
+            }
+
+            my ($mean, $p90, $p95, $std_dev, $cv) = calculate_statistics($aggregated_data);
+    
+            #print "--- $log_key ---\n     Count: $aggregated_data->{count}, Mean: $mean, 90th Percentile: $p90, 95th Percentile: $p95, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A\n";
+
+            $current_memory_usage = get_memory_usage();								# track maximum memory usage
+            if ($current_memory_usage > $max_memory_usage) {
+                $max_memory_usage = $current_memory_usage;
+            }
+        }
+    }
 
     return;
 }
