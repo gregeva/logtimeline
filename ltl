@@ -45,7 +45,7 @@ my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex );
 my $pause_output = 0;
-my $hide_values = 0;
+my $omit_values = 0;
 my @in_files;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
 
@@ -212,7 +212,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--hide-values|-h] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--omit-empty|-oe] [--omit-summary|-os] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--omit-values|-ov] [--omit-empty|-oe] [--omit-summary|-os] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -348,12 +348,12 @@ sub adapt_to_command_line_options {
     GetOptions(
         'bucket-size|bs=i' => \$bucket_size_minutes,
         'pause|p' => \$pause_output,
-        'hide-values|hv' => \$hide_values,
         'start|st=s' => \$range_start,
         'end|et=s' => \$range_end,
         'exclude|e=s' => \$exclude_regex,
         'include|i=s' => \$include_regex,
         'highlight|h=s' => \$highlight_regex,
+        'omit-values|ov' => \$omit_values,
         'omit-empty|oe' => \$omit_empty,
         'omit-summary|os' => \$omit_summary,
         'seconds|s' => \$print_seconds,
@@ -982,7 +982,7 @@ sub normalize_data_for_output {
     }
 
     # Calculate the maximum length of log level titles and counts
-    if( !$hide_values ) {
+    if( !$omit_values ) {
         foreach my $bucket (keys %log_counts) {
             my $bucket_legend_length = 0;
             foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
@@ -1074,7 +1074,7 @@ sub print_bar_graph {
 
             }
 
-            print $log_details unless $hide_values;
+            print $log_details unless $omit_values;
             my $padding = $legend_length - $legend_length_bucket;
             print " " x ($padding >= 0 ? $padding : 0);
             print "$colors{'bright-black'}│$colors{'NC'} ";
