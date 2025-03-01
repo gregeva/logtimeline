@@ -1158,7 +1158,7 @@ sub print_summary_table {
     } else {
         %col_relative_size = (
             1 => 92,
-            2 => 7,
+            2 => 8,
         );
     }
 
@@ -1226,7 +1226,7 @@ sub print_summary_table {
             my $header_title = " ";
 
             if( $grouping eq "highlight" ) {
-                $header_title = " " x $table_padding_outer . "$colors{'bright-yellow-HL'}" . sprintf( "%-$col_width{1}s", "TOP HIGHLIGHTED MESSAGES (highlighted based on RegEx pattern match)" ) . " " x $table_padding_inner;
+                $header_title = " " x $table_padding_outer . "$colors{'bright-yellow-HL'}" . " " x $table_padding_inner . sprintf( "%-$col_width{1}s", "TOP HIGHLIGHTED MESSAGES (highlighted based on RegEx pattern match)" ) . " " x $table_padding_inner;
 
                 if( $print_durations ) {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
@@ -1234,14 +1234,14 @@ sub print_summary_table {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P50" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", "P99" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", "CV" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", "Time" ); 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", "Time" ) . " " x $table_padding_inner; 
                 } else {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
                 }
 
                 $header_title .= "$colors{'NC'}$colors{'bright-yellow'}";
             } elsif( $grouping eq "plain" ) {
-                $header_title = " " x $table_padding_outer . "$colors{'bright-cyan-HL'}" . sprintf( "%-$col_width{1}s", "TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)" ) . " " x $table_padding_inner;
+                $header_title = " " x $table_padding_outer . "$colors{'bright-cyan-HL'}" . " " x $table_padding_inner . sprintf( "%-$col_width{1}s", "TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)" ) . " " x $table_padding_inner;
 
                 if( $print_durations ) {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
@@ -1249,7 +1249,7 @@ sub print_summary_table {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P50" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", "P99" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", "CV" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", "Time" ); 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", "Time" ) . " " x $table_padding_inner; 
                 } else {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
                 }
