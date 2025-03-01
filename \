@@ -709,17 +709,15 @@ sub read_and_process_logs {
 
         print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
     }
-    print "\r$colors{'bright-green'}Processing completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Processing completed." ) );
-    print "\n";
+    print "\r$colors{'bright-green'}Processing complete.$colors{'NC'}";
+    print " " x ( $terminal_width - length( "Processing complete." ) );
+    print "\n\n";
 
     return;
 }
 
 sub calculate_all_statistics {
-
-    print "\rCalculating statistics...";
-
+    # Calculate and print statistics for each time bucket
     foreach my $bucket (sort { $a <=> $b } keys %log_analysis) {
         my $aggregated_data = {
             count => 0,
@@ -830,6 +828,11 @@ sub calculate_all_statistics {
             # Process only the top N log keys
             my @top_keys = @sorted_log_keys[0 .. $top_n_messages - 1];
     
+    #            foreach my $log_key2 (@top_keys) {
+    #                # Your processing code here
+    #                print "$log_messages{$category}{$log_key2}{count} : $log_key2 \n";  # Example output
+    #            }
+    
             foreach my $log_key (@top_keys) {
                 my $aggregated_data = {
                     count => 0,
@@ -870,11 +873,6 @@ sub calculate_all_statistics {
             }
         }
     }
-
-    print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
-    print "\r$colors{'bright-green'}Calculating statistics completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Calculating statistics completed." ) );
-    print "\n";
 
     return;
 }
@@ -919,9 +917,6 @@ sub initialize_empty_time_windows {
     # Go through all of the buckets between the earliest and latest times and ensure that they have empty data to print time buckets with no data
     unless( $omit_empty ) {
         my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;
-
-        print "\rInitializing empty time windows...";
-
         for (my $bucket = $start_bucket; $bucket <= $output_timestamp_max; $bucket += $bucket_size_seconds) {
             $log_counts{$bucket}{'empty'}{'count'} = 0;
 
@@ -934,11 +929,6 @@ sub initialize_empty_time_windows {
 #                        durations => [],
 #                    };
         }
-
-        print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
-        print "\r$colors{'bright-green'}Initializing empty time windows completed.$colors{'NC'}";
-        print " " x ( $terminal_width - length( "Initializing empty time windows completed." ) );
-        print "\n";
     }
 
     return;
@@ -949,17 +939,17 @@ sub normalize_data_for_output {
     my $max_total_count = 0;
     my $max_total_bytes = 0;
 
-    print "\rScaling and normalizing data...";
+    # Example usage (to demonstrate the values):
+#    foreach my $bucket (sort keys %log_counts) {
+#        print "Bucket: $bucket, Empty Count: ", $log_counts{$bucket}{'empty'}{'count'}, "\n";
+#    }
 
     foreach my $bucket (keys %log_counts) {
         my $total_count = 0;
         my $total_bytes = $log_stats{$bucket}{bytes} if $print_durations;
 
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
-            my $count = $log_counts{$bucket}{$category_bucket}{count};
-            next unless $count > 0 && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
-            #$total_count += $log_counts{$bucket}{$category_bucket}{count};
-            $total_count += $count;
+            $total_count += $log_counts{$bucket}{$category_bucket}{count};
         }
 
         $max_total_count = $total_count if $total_count > $max_total_count;
@@ -989,9 +979,8 @@ sub normalize_data_for_output {
     $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format ) - $durations_graph_width;
     $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
     foreach my $bucket (keys %log_counts) {
-        my $processed_time_buckets //= 0;
-# TO DO : need to handle cases where we don't have bytes, but would have duration
         # scale the transferred bytes for printing the graph
+# TO DO : need to handle cases where we don't have bytes, but would have duration
         my $bytes = $log_stats{$bucket}{bytes};
         my $scaled_bytes = $max_total_bytes != 0 ? int(($bytes / $max_total_bytes) * $durations_graph_width) : 0;
         $log_stats{$bucket}{scaled_bytes} = $scaled_bytes;
@@ -1006,24 +995,11 @@ sub normalize_data_for_output {
             $total_lines_highlighted += $count if $category_bucket =~ /-HL$/;
         }
 
-        if( $processed_time_buckets++ % 50 ) {
-            $current_memory_usage = get_memory_usage();								# track maximum memory usage
-            if ($current_memory_usage > $max_memory_usage) {
-                $max_memory_usage = $current_memory_usage;
-            }
+        $current_memory_usage = get_memory_usage();								# track maximum memory usage
+        if ($current_memory_usage > $max_memory_usage) {
+            $max_memory_usage = $current_memory_usage;
         }
     }
-
-    $current_memory_usage = get_memory_usage();								# track maximum memory usage
-    if ($current_memory_usage > $max_memory_usage) {
-        $max_memory_usage = $current_memory_usage;
-    }
-
-    print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
-    print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Scaling and normalizing data completed." ) );
-    print "\n";
-
     return;
 }
 
@@ -1262,10 +1238,8 @@ adapt_to_terminal_settings();
 adapt_to_command_line_options();
 read_and_process_logs();
 initialize_empty_time_windows();
-print "Calculate statistics...";
-calculate_all_statistics();
+#calculate_all_statistics();
 normalize_data_for_output();
-
 $end_time = [gettimeofday];
 $elapsed = tv_interval($start_time, $end_time);
 
