@@ -1223,6 +1223,9 @@ sub print_summary_table {
         # Ensure the grouping exists and is a hash reference
         if (exists $log_messages{$grouping} && ref($log_messages{$grouping}) eq 'HASH') {
             my @top_keys = (sort { $log_messages{$grouping}{$b}{count} <=> $log_messages{$grouping}{$a}{count} } keys %{$log_messages{$grouping}})[0..($top_n_messages-1)];
+
+            next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
+
             my $header_title = " ";
 
             if( $grouping eq "highlight" ) {
