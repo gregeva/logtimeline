@@ -9,6 +9,7 @@ use Getopt::Long;
 use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
 use Proc::ProcessTable;
+use List::Util qw(min);
 
 # Start time
 my $start_time = [gettimeofday];
@@ -74,6 +75,8 @@ my $default_chart_block = "A";
 
 # TO DO:
 # - add request and error rates to the access log statistics
+# - separate code for printing the graph, generating the summary table, and the Top Messages
+# - add pagination support for the summary overview and the top messages
 # - create a conditioal path to resize durations stats pane and only print available information if duration value is not present (also don't do the statistical calculations)
 # - have the duration stats pane auto-size based on which data was found and is able to be displayed (bytes, duration, rates, etc.)
 # - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
@@ -85,8 +88,6 @@ my $default_chart_block = "A";
 
 # - context detection and removal from log lines (maybe use bloom filter) - seek names in other lines, and then match on that in log lines and substitute the text (error in entity name Thing1)
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize)
-# - add feature to calculate mean, standard deviation, Coefficient of Variation (%), 90/95th percentile for duration including lines
-# - add feature to add a right side table indicating statistical calculations when in duration measurement mode 
 
 ## BUGS ##
 
@@ -186,11 +187,6 @@ foreach my $key (keys %colors) {
     $colors{$new_key} = "$colors{$key}\033[48;5;${bg_color_256}m";
   #  print "$original_fg_color\n";
 }
-
-#foreach my $key (keys %colors){
-#    print "Testing: $key\n";
-#    print "$colors{$key}This is $key with \$colors{'NC'} $reset_all\n";
-#}
 
 
 ## SUBS ##
@@ -297,11 +293,11 @@ sub format_bytes {
 sub format_time {
     my ($value, $unit, $format, $space) = @_;
     my %units = (
-        'us' => 1,                # Microseconds
-        'ms' => 1000,             # Milliseconds
-        's'  => 1000000,          # Seconds
-        'm'  => 60 * 1000000,     # Minutes
-        'h'  => 60 * 60 * 1000000, # Hours
+        'us' => 1,                      # Microseconds
+        'ms' => 1000,                   # Milliseconds
+        's'  => 1000000,                # Seconds
+        'm'  => 60 * 1000000,           # Minutes
+        'h'  => 60 * 60 * 1000000,      # Hours
         'D'  => 24 * 60 * 60 * 1000000, # Days
     );
 
@@ -353,6 +349,7 @@ sub adapt_to_command_line_options {
         'exclude|e=s' => \$exclude_regex,
         'include|i=s' => \$include_regex,
         'highlight|h=s' => \$highlight_regex,
+        'top-messages|n=i' => \$top_n_messages,
         'omit-values|ov' => \$omit_values,
         'omit-empty|oe' => \$omit_empty,
         'omit-summary|os' => \$omit_summary,
@@ -826,8 +823,6 @@ sub calculate_all_statistics {
 
 ## STATS FOR TOP LOG MESSAGES ##
 
-    my $top_n_messages = 10;  # Set your desired number of top messages
-
     if( $print_durations ) {
         foreach my $category (keys %log_messages) {
             # Collect and sort the log keys based on the count within each log_key
@@ -838,8 +833,9 @@ sub calculate_all_statistics {
             } keys %{$log_messages{$category}};
     
             # Process only the top N log keys
-            my @top_keys = @sorted_log_keys[0 .. $top_n_messages - 1];
-    
+            #my @top_keys = @sorted_log_keys[0 .. $top_n_messages - 1];
+            my @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)]; 
+
             foreach my $log_key (@top_keys) {
                 my $aggregated_data = {
                     count => 0,
@@ -1021,7 +1017,7 @@ sub normalize_data_for_output {
             $total_lines_highlighted += $count if $category_bucket =~ /-HL$/;
         }
 
-        if( $processed_time_buckets++ % 50 ) {
+        if( $processed_time_buckets++ % 50 == 0 ) {
             $current_memory_usage = get_memory_usage();								# track maximum memory usage
             if ($current_memory_usage > $max_memory_usage) {
                 $max_memory_usage = $current_memory_usage;
@@ -1070,8 +1066,6 @@ sub print_bar_graph {
                         $legend_length_bucket += length("$category_bucket: $count ");
                     }
                 }
-
-
             }
 
             print $log_details unless $omit_values;
@@ -1146,7 +1140,6 @@ sub print_summary_table {
     print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
     print "\n";
 
-
     ## START MESSAGE SUMMARY ##
 
     # Define the relative size of each column as a percentage
@@ -1184,7 +1177,48 @@ sub print_summary_table {
         $col_width{$column} = int($table_width * $col_relative_size{$column} / 100) - (2 * $table_padding_inner);
     }
 
+    ### DETERMINE CUT OF HIGHLIGHTED VS PLAIN MESSAGES TO PRINT ###
+    # Step 1: Sort and store available messages for each category in a hash of arrays
+    my %sorted_keys = (
+        'highlight' => [ sort { $log_messages{'highlight'}{$b}{count} <=> $log_messages{'highlight'}{$a}{count} } keys %{$log_messages{'highlight'}} ],
+        'plain' => [ sort { $log_messages{'plain'}{$b}{count} <=> $log_messages{'plain'}{$a}{count} } keys %{$log_messages{'plain'}} ],
+    );
+
+    # Initialize the hash to store top message counts
+    my %top_message_count = (
+        'highlight' => 0,
+        'plain' => 0,
+    );
+
     foreach my $grouping ( qw( highlight plain ) ) {
+        for my $i (0 .. $#{$sorted_keys{$grouping}}) {
+            last if $i >= $top_n_messages;
+            $top_message_count{$grouping}++;
+        }
+    }
+
+    # Step 2: Determine how many messages to print from each category
+    my $half_top_n = int($top_n_messages / 2);
+
+    # Initialize the hash to store the number of messages to print
+    my %messages_to_print = (
+        'highlight' => $half_top_n,
+        'plain' => $half_top_n,
+    );
+
+    $messages_to_print{'highlight'}++ if $top_n_messages % 2 != 0;		# if halving doesn't equate to Top N, then add another row to highlighted messages
+
+    # Step 3: Adjust if one category has fewer messages than needed, ensuring the total remains $top_n_messages
+    if ($top_message_count{'highlight'} < $messages_to_print{'highlight'}) {
+        $messages_to_print{'highlight'} = $top_message_count{'highlight'};
+        $messages_to_print{'plain'} = $top_n_messages - $messages_to_print{'highlight'};
+    } elsif ($top_message_count{'plain'} < $messages_to_print{'plain'}) {
+        $messages_to_print{'plain'} = $top_message_count{'plain'};
+        $messages_to_print{'highlight'} = $top_n_messages - $messages_to_print{'plain'};
+    }
+
+    foreach my $grouping ( qw( highlight plain ) ) {
+        my $messages_printed = 0;
 
         # Ensure the grouping exists and is a hash reference
         if (exists $log_messages{$grouping} && ref($log_messages{$grouping}) eq 'HASH') {
@@ -1228,6 +1262,8 @@ sub print_summary_table {
 
             # Print the top messages
             foreach my $key (@top_keys) {
+                next if $messages_printed++ >= $messages_to_print{$grouping};
+ 
                 my $row = " " x $table_padding_outer;
 
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
@@ -1284,9 +1320,9 @@ normalize_data_for_output();
 $end_time = [gettimeofday];
 $elapsed = tv_interval($start_time, $end_time);
 
+print "\n";
 print_bar_graph();
 print_summary_table() unless $omit_summary;
-
 
 print "\n";
 exit;
