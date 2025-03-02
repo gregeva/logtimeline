@@ -19,7 +19,7 @@ my $version_number = "0.1.15";
 my $log_base = 2;
 my @rolling_window;
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary ) = 0;
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate ) = 0;
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed ) = ( 0, 0, 0, 0 );
 my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );		# this is where the counts of log entries are tallied across the time buckets
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
@@ -56,7 +56,8 @@ my @log_levels = (
     'ERROR-HL', 'ERROR', 'WARN-HL', 'WARN', 'INFO-HL', 'INFO', 
     'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx', 
     '4xx-HL', '4xx', '3xx-HL', '3xx', '2xx-HL', '2xx', '1xx-HL', 
-    '1xx', 'Pause Young-HL', 'Pause Young', 'Pause Full-HL', 'Pause Full', 'empty'
+    '1xx', 'Pause Young-HL', 'Pause Young', 'Pause Full-HL', 'Pause Full',
+    'err-rate', 'msg-rate', 'empty'
 );
 
 my %blocks = (
@@ -74,7 +75,8 @@ my %blocks = (
 my $default_chart_block = "A";
 
 # TO DO:
-# - add request and error rates to the access log statistics
+# - add request and error rates to the access log statistics (normalized to minutes)
+# - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
 # - separate code for printing the graph, generating the summary table, and the Top Messages
 # - add pagination support for the summary overview and the top messages
 # - create a conditioal path to resize durations stats pane and only print available information if duration value is not present (also don't do the statistical calculations)
@@ -122,6 +124,8 @@ my %colors = (
     '5xx'  => "\033[0;31m",
     'Pause Young' => "\033[0;35m",
     'Pause Full' => "\033[0;31m",
+    'err-rate' => "\033[0;31m",
+    'msg-rate'    => "\033[0m",
     'NC'    => "\033[0m",
     'black' => "\033[30m\033[49m",
     'red' => "\033[31m\033[49m",
@@ -288,6 +292,37 @@ sub format_bytes {
     $formatted_value = sprintf("%.1f", $formatted_value);
 
     return "$formatted_value $formatted_unit";
+}
+
+sub format_number {
+    my ($value, $space) = @_;
+    my %units = (
+        '1'  => 1,
+        'k' => 1000,
+        'Mil' => 1000**2,
+        'Bil' => 1000**3,
+        'Tril' => 1000**4,
+    );
+
+
+    # Determine the most relevant unit
+    my @unit_order = ('1', 'k', 'M', 'G', 'T');
+    my $formatted_value = $value;
+    my $formatted_unit = '';
+
+    foreach my $u (@unit_order) {
+        if ($value >= $units{$u}) {
+            $formatted_value = $value / $units{$u};
+            $formatted_unit = $u;
+        } else {
+            last;
+        }
+    }
+
+    # Format the value to 1 decimal place
+    $formatted_value = sprintf("%.1f", $formatted_value);
+
+    return "$formatted_value" . defined( $space ) ? " " : "" . $formatted_unit == 1 ? "" : "$formatted_unit";
 }
 
 sub format_time {
@@ -965,13 +1000,21 @@ sub normalize_data_for_output {
     foreach my $bucket (keys %log_counts) {
         my $total_count = 0;
         my $total_bytes = $log_stats{$bucket}{bytes} if $print_durations;
+        my $error_count = 0;
 
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
             my $count = $log_counts{$bucket}{$category_bucket}{count};
-            next unless $count > 0 && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
+            next unless $count > 0 && $category_bucket !~ /^empty|err-rate|msg-rate$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
             #$total_count += $log_counts{$bucket}{$category_bucket}{count};
             $total_count += $count;
+            $error_count += $count if $category_bucket =~ /^ERROR|5xx|4xx$/i;
         }
+
+        unless( defined( $omit_rate ) && $omit_rate ) {
+            $log_counts{$bucket}{'err-rate'}{count} = $error_count / $bucket_size_seconds * 60;
+            $log_counts{$bucket}{'msg-rate'}{count} = $total_count / $bucket_size_seconds * 60;
+        }
+# ABCD
 
         $max_total_count = $total_count if $total_count > $max_total_count;
         $max_total_bytes = $total_bytes if ( $print_durations && $total_bytes > $max_total_bytes );
@@ -1074,6 +1117,7 @@ sub print_bar_graph {
             print "$colors{'bright-black'}│$colors{'NC'} ";
 
             foreach my $category_bucket (@log_levels) {
+                next unless $category_bucket !~ /^empty|err-rate|msg-rate$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
                 if (exists $log_counts{$bucket}{$category_bucket}) {
                     my $scaled_count = $log_counts{$bucket}{$category_bucket}{scaled_count};
                     my $color = $colors{$category_bucket} // $colors{'NC'};
