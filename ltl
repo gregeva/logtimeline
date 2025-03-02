@@ -15,7 +15,7 @@ use List::Util qw(min);
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.1.15";
+my $version_number = "0.1.17";
 my $log_base = 2;
 my @rolling_window;
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -75,17 +75,15 @@ my %blocks = (
 my $default_chart_block = "A";
 
 # TO DO:
-# - add request and error rates to the access log statistics (normalized to minutes)
 # - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
 # - separate code for printing the graph, generating the summary table, and the Top Messages
 # - add pagination support for the summary overview and the top messages
-# - create a conditioal path to resize durations stats pane and only print available information if duration value is not present (also don't do the statistical calculations)
+# - create a conditional path to resize durations stats pane and only print available information if duration value is not present (also don't do the statistical calculations)
 # - have the duration stats pane auto-size based on which data was found and is able to be displayed (bytes, duration, rates, etc.)
 # - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
 # - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
 # - add a summary table at the end showing totals in the various buckets (start, end time, total duration in time of logs, average logs per minute, second, size of the file, lines omitted/didn't match)
-# - add a feature providing the Top X messages in the summary - would need to be turned on (takes memory), could only apply to more complex log analysis where full pattern is known (see twxsummarize)
-
+# - multi-threaded file reading
 # - should add a time counter for reading the files, and one for the processing.  Today this is grouped together but with different I/O limitations and statistical calculations one or the other will fluctuate.
 
 # - context detection and removal from log lines (maybe use bloom filter) - seek names in other lines, and then match on that in log lines and substitute the text (error in entity name Thing1)
@@ -124,7 +122,7 @@ my %colors = (
     '5xx'  => "\033[0;31m",
     'Pause Young' => "\033[0;35m",
     'Pause Full' => "\033[0;31m",
-    'err-rate' => "\033[0;31m",
+    'err-rate' => "\033[91m\033[109m",
     'msg-rate'    => "\033[0m",
     'NC'    => "\033[0m",
     'black' => "\033[30m\033[49m",
@@ -306,7 +304,7 @@ sub format_number {
 
 
     # Determine the most relevant unit
-    my @unit_order = ('1', 'k', 'M', 'G', 'T');
+    my @unit_order = ('1', 'k', 'Mil', 'Bil', 'Tril');
     my $formatted_value = $value;
     my $formatted_unit = '';
 
@@ -320,9 +318,10 @@ sub format_number {
     }
 
     # Format the value to 1 decimal place
-    $formatted_value = sprintf("%.1f", $formatted_value);
+    $formatted_value = sprintf("%.1f%s%s", $formatted_value, defined($space) ? " " : "", $formatted_unit eq "1" ? "" : $formatted_unit );
+    $formatted_value =~ s/\.0//;
 
-    return "$formatted_value" . defined( $space ) ? " " : "" . $formatted_unit == 1 ? "" : "$formatted_unit";
+    return $formatted_value;
 }
 
 sub format_time {
@@ -388,6 +387,7 @@ sub adapt_to_command_line_options {
         'omit-values|ov' => \$omit_values,
         'omit-empty|oe' => \$omit_empty,
         'omit-summary|os' => \$omit_summary,
+        'omit-rate|or' => \$omit_rate,
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds,
         'version|v' => \$print_version,
@@ -1014,26 +1014,38 @@ sub normalize_data_for_output {
             $log_counts{$bucket}{'err-rate'}{count} = $error_count / $bucket_size_seconds * 60;
             $log_counts{$bucket}{'msg-rate'}{count} = $total_count / $bucket_size_seconds * 60;
         }
-# ABCD
 
         $max_total_count = $total_count if $total_count > $max_total_count;
         $max_total_bytes = $total_bytes if ( $print_durations && $total_bytes > $max_total_bytes );
     }
 
     # Calculate the maximum length of log level titles and counts
-    if( !$omit_values ) {
+#    if( !$omit_values ) {
         foreach my $bucket (keys %log_counts) {
             my $bucket_legend_length = 0;
             foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
                 my $count = $log_counts{$bucket}{$category_bucket}{count};
+                my $title_length = 0;
                 next unless $count > 0 && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
+                next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate)$/;
+                next if $omit_rate && $category_bucket =~ /^(err-rate|msg-rate)$/;
 
-                my $title_length = $category_bucket =~ /-HL$/ ? length(" $count ") : length("$category_bucket: $count ");
+                if( $category_bucket =~ /-HL$/ ) {
+                    $title_length = length(" $count ");
+                } elsif( $category_bucket =~ /^err-rate$/ ) {
+                    #$title_length = length(" $count:");
+                    $title_length = length(" " . format_number( $count ) . ":");
+                } elsif( $category_bucket =~ /^msg-rate$/ ) {
+                    #$title_length = length("$count/m ");
+                    $title_length = length( format_number( $count ) . "/m ");
+                } else {
+                    $title_length = length("$category_bucket: $count ");
+                }
                 $bucket_legend_length += $title_length;
             }
             $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
         }
-    }
+#    }
 
     #print "Legend length: $legend_length\n";
 
@@ -1093,15 +1105,29 @@ sub print_bar_graph {
             print "$bucket_time_str ";
             $printed_chars += length( $bucket_time_str ) + $legend_length + 2;
             my $log_details = "";
+            my $rate_metrics = "";
             my $legend_length_bucket = 0;
 
             foreach my $category_bucket (@log_levels) {
                 if (exists $log_counts{$bucket}{$category_bucket}) {
                     my $count = $log_counts{$bucket}{$category_bucket}{count};
                     my $color = $colors{$category_bucket} // $colors{'NC'};
-                    if( $category_bucket =~ /-HL$/ ) {
-                        $log_details .= "${color}$count$colors{'NC'} ";
-                        $legend_length_bucket += length("$count ");
+                    next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate)$/;	# we don't want to count data that won't be printed
+
+                    if( $category_bucket =~ /(-HL|err-rate|msg-rate)$/ ) {
+                        if( $category_bucket =~ /^err-rate$/ ) {
+                            $rate_metrics .= "${color}" . format_number($count) . "$colors{'NC'}";
+                            $rate_metrics .= "$colors{'bright-black'}:$colors{'NC'}";
+                            $legend_length_bucket += length( " " . format_number($count) . ":" );
+                        } elsif( $category_bucket =~ /^msg-rate$/ ) {
+                            #$rate_metrics .= "${color}$count$colors{'NC'}";
+                            $rate_metrics .= "${color}" . format_number($count) . "$colors{'NC'}";
+                            $rate_metrics .= "$colors{'bright-black'}/m$colors{'NC'} ";
+                            $legend_length_bucket += length( format_number($count) . "/m " );
+                        } else {
+                            $log_details .= "${color}$count$colors{'NC'}" . " " x $category_bucket =~ /-HL$/;
+                            $legend_length_bucket += length("$count ");
+                        }
                     } elsif( $count < 1 ) {					 # don't include the empty bucket who's purpose is to normalize the buckets represented
                         next;
                     } else {
@@ -1113,7 +1139,10 @@ sub print_bar_graph {
 
             print $log_details unless $omit_values;
             my $padding = $legend_length - $legend_length_bucket;
+#print " legend_length: $legend_length legend_length_bucket: $legend_length_bucket padding: $padding\n";
             print " " x ($padding >= 0 ? $padding : 0);
+            print " $rate_metrics" unless $omit_rate;
+
             print "$colors{'bright-black'}│$colors{'NC'} ";
 
             foreach my $category_bucket (@log_levels) {
@@ -1167,6 +1196,7 @@ sub print_summary_table {
     print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
 
     foreach my $category_bucket (@log_levels) {
+        next if $category_bucket =~ /^(empty|err-rate|msg-rate)$/;
         next unless $category_totals{$category_bucket};
 	
         my ( $legend_title ) =  "$category_bucket:" . " " x ( 14 - length( $category_bucket ) );
