@@ -75,6 +75,7 @@ my %blocks = (
 my $default_chart_block = "A";
 
 # TO DO:
+# - cut off .0 from formatted output (number, bytes)
 # - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
 # - separate code for printing the graph, generating the summary table, and the Top Messages
 # - add pagination support for the summary overview and the top messages
@@ -708,7 +709,7 @@ sub read_and_process_logs {
                     $print_durations = 1 if $print_durations != 1;
 
 # TO DO - this is a temporary hack to turn off empty time window support as it does not presently work with statistical calculations
-                    $omit_empty = 1 if !defined( $omit_empty ) || $omit_empty != 1;
+#                    $omit_empty = 1 if !defined( $omit_empty ) || $omit_empty != 1;
 
                     ## STATISTICAL DATA CAPTURE ##
                     #print "$duration -- $_";
@@ -1019,31 +1020,41 @@ sub normalize_data_for_output {
         $max_total_bytes = $total_bytes if ( $print_durations && $total_bytes > $max_total_bytes );
     }
 
+
     # Calculate the maximum length of log level titles and counts
 #    if( !$omit_values ) {
         foreach my $bucket (keys %log_counts) {
+
+#my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
+#print "$bucket_time_str : ";
+
             my $bucket_legend_length = 0;
             foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
                 my $count = $log_counts{$bucket}{$category_bucket}{count};
                 my $title_length = 0;
-                next unless $count > 0 && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
+                next unless ( $count > 0 || $category_bucket =~ /^(err|msg)-rate$/ ) && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
+# problem is if err-rate is 0, it is not counted, but then it is still printed.
                 next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate)$/;
                 next if $omit_rate && $category_bucket =~ /^(err-rate|msg-rate)$/;
 
                 if( $category_bucket =~ /-HL$/ ) {
                     $title_length = length(" $count ");
                 } elsif( $category_bucket =~ /^err-rate$/ ) {
-                    #$title_length = length(" $count:");
                     $title_length = length(" " . format_number( $count ) . ":");
+#print "$category_bucket \"" . format_number( $count ) . "\" title length: $title_length ... ";
                 } elsif( $category_bucket =~ /^msg-rate$/ ) {
-                    #$title_length = length("$count/m ");
                     $title_length = length( format_number( $count ) . "/m ");
+#print "$category_bucket \"" . format_number( $count ) . "\" title length: $title_length ... ";
                 } else {
                     $title_length = length("$category_bucket: $count ");
+#print "$category_bucket \"$category_bucket: $count\" title length: $title_length ... ";
                 }
                 $bucket_legend_length += $title_length;
             }
             $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
+# abc
+#print "-- legend_length = $legend_length\n";
+
         }
 #    }
 
@@ -1116,14 +1127,14 @@ sub print_bar_graph {
 
                     if( $category_bucket =~ /(-HL|err-rate|msg-rate)$/ ) {
                         if( $category_bucket =~ /^err-rate$/ ) {
-                            $rate_metrics .= "${color}" . format_number($count) . "$colors{'NC'}";
+                            $rate_metrics .= "${color}" . format_number( $count ) . "$colors{'NC'}";
                             $rate_metrics .= "$colors{'bright-black'}:$colors{'NC'}";
-                            $legend_length_bucket += length( " " . format_number($count) . ":" );
+                            $legend_length_bucket += length( " " . format_number( $count ) . ":" );
                         } elsif( $category_bucket =~ /^msg-rate$/ ) {
                             #$rate_metrics .= "${color}$count$colors{'NC'}";
-                            $rate_metrics .= "${color}" . format_number($count) . "$colors{'NC'}";
+                            $rate_metrics .= "${color}" . format_number( $count ) . "$colors{'NC'}";
                             $rate_metrics .= "$colors{'bright-black'}/m$colors{'NC'} ";
-                            $legend_length_bucket += length( format_number($count) . "/m " );
+                            $legend_length_bucket += length( format_number( $count ) . "/m " );
                         } else {
                             $log_details .= "${color}$count$colors{'NC'}" . " " x $category_bucket =~ /-HL$/;
                             $legend_length_bucket += length("$count ");
@@ -1139,7 +1150,9 @@ sub print_bar_graph {
 
             print $log_details unless $omit_values;
             my $padding = $legend_length - $legend_length_bucket;
+
 #print " legend_length: $legend_length legend_length_bucket: $legend_length_bucket padding: $padding\n";
+
             print " " x ($padding >= 0 ? $padding : 0);
             print " $rate_metrics" unless $omit_rate;
 
