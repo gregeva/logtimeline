@@ -366,6 +366,7 @@ sub format_time {
 
     # Format the value to 1 decimal place
     $formatted_value = sprintf("%.1f", $formatted_value);
+    $formatted_value =~ s/\.0+$//;
 
     # Get the appropriate unit name based on the format
     my $unit_name = $unit_names{$formatted_unit}{$format};
@@ -574,6 +575,7 @@ sub read_and_process_logs {
                 $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
                 #$message =~ s/\?.+$//;			# chop off the query string from the URI
+# TO DO - update RegEx to pull out message, thread name
             } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^{"\@timestamp":"([^"]*).*"level":"([^"]*)/ ) {
                 $is_line_match = 1;
                 $match_type = 5;			# this matches Connection Server JSON formatted logs : {"@timestamp":"2025-02-02T21:03:06.725+00:00","@version":1,"message":"Error encountered, closing WebSocket: endpointId=2608459","logger_name":"com.thingworx.connectionserver.alwayson.AbstractClientEndpoint","thread_name":"vert.x-eventloop-thread-16","level":"WARN","level_value":30000,"stack_trace":"io.vertx.core.http.HttpClosedException: Connection was closed\n"}
@@ -587,6 +589,25 @@ sub read_and_process_logs {
 
                 $bytes = convert_bytes( $heap_from ) - convert_bytes( $heap_to );
                 $bytes = $bytes < 0 ? 0 : $bytes;
+            } elsif ( ( $category_bucket, $timestamp_str, $message ) = $_ =~ /^([^ ]+)\s+\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[.,]\d{3})\] (.*)$/ ) {  
+                $is_line_match = 1;
+                $match_type = 7;			# this matches ThingWorx Analytics V2 types for adaptor, sync, async
+                $timestamp_str =~ tr/,/./;
+                $timestamp_str =~ tr/T/ /;
+                $message =~ s/\s+$//g;
+            } elsif ( ( $timestamp_str, $thread, $category_bucket, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^ ]*)\s+\[([^]]+)\]\s+(\w+)\s+(.*)$/ ) {  
+                $is_line_match = 1;
+                $match_type = 8;			# this matches ThingWorx Analytics worker type
+                $thread =~ s/(.*)-\d+$/$1/;
+                $timestamp_str =~ tr/,/./;
+                $timestamp_str =~ tr/T/ /;
+                $message =~ s/\s+$//g;
+
+                # Analytics log formats
+                # worker   # 2025-02-20 10:06:10 [nioEventLoopGroup-2-1] WARN  io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]
+                # adaptor  # ERROR [2025-02-19 18:31:00,284] com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!
+                # sync     # INFO  [2025-02-20 04:49:11,450] org.ehcache.core.EhcacheManager: Cache 'scorefunc_cachex' created in EhcacheManager.
+                # async    # WARN  [2025-02-19 18:30:01,437] org.apache.zookeeper.ClientCnxnSocketNetty: future isn't success.
             }
 
 #print "Thread: $thread   Object: $object   Message: $message\n";
@@ -599,7 +620,7 @@ sub read_and_process_logs {
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
-                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 ) {
+                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 || $match_type == 7 || $match_type == 8 ) {
                     $timestamp = DateTime->new(
                         year      => substr($timestamp_str, 0, 4),
                         month     => substr($timestamp_str, 5, 2),
@@ -1033,15 +1054,17 @@ sub normalize_data_for_output {
             foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
                 my $count = $log_counts{$bucket}{$category_bucket}{count};
                 my $title_length = 0;
+                #next unless ( $count > 0 || $category_bucket =~ /^(err|msg)-rate$/ ) && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
                 next unless ( $count > 0 || $category_bucket =~ /^(err|msg)-rate$/ ) && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
 # problem is if err-rate is 0, it is not counted, but then it is still printed.
                 next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate)$/;
                 next if $omit_rate && $category_bucket =~ /^(err-rate|msg-rate)$/;
+                next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0;
 
                 if( $category_bucket =~ /-HL$/ ) {
                     $title_length = length(" $count ");
                 } elsif( $category_bucket =~ /^err-rate$/ ) {
-                    $title_length = length(" " . format_number( $count ) . ":");
+                    $title_length = length("  " . format_number( $count ) . ":");
 #print "$category_bucket \"" . format_number( $count ) . "\" title length: $title_length ... ";
                 } elsif( $category_bucket =~ /^msg-rate$/ ) {
                     $title_length = length( format_number( $count ) . "/m ");
@@ -1054,7 +1077,7 @@ sub normalize_data_for_output {
             }
             $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
 # abc
-#print "-- legend_length = $legend_length\n";
+#print "-- bucket_legend_length = $bucket_legend_length, legend_length = $legend_length\n";
 
         }
 #    }
@@ -1076,7 +1099,9 @@ sub normalize_data_for_output {
 
         # scale the log message counts for printing the graph
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
+            #next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0;    # should be caught by below 
             my $count = $log_counts{$bucket}{$category_bucket}{count};
+            next if !defined $count;										# skip scaling where varible was left or is undefined (ie; no error or message rate)
             my $scaled_count = $max_total_count != 0 ? int(($count / $max_total_count) * $max_graph_width) : 0;
             $log_counts{$bucket}{$category_bucket}{scaled_count} = $scaled_count;
             $category_totals{$category_bucket} += $count;							# tally the totals for each category bucket
@@ -1113,24 +1138,29 @@ sub print_bar_graph {
         foreach my $bucket (sort keys %log_counts) {
             my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
             my $printed_chars = 0;
+
+            ## PRINT TIMESTAMP IN CHART ROW
             $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
             print "$bucket_time_str ";
+
             $printed_chars += length( $bucket_time_str ) + $legend_length + 2;
             my $log_details = "";
             my $rate_metrics = "";
             my $legend_length_bucket = 0;
 
+            ## LOOP THROUGH LOG CATEGORY BUCKETS AND PRINT PER ROW LEGEND COUNTS
             foreach my $category_bucket (@log_levels) {
                 if (exists $log_counts{$bucket}{$category_bucket}) {
                     my $count = $log_counts{$bucket}{$category_bucket}{count};
                     my $color = $colors{$category_bucket} // $colors{'NC'};
                     next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate)$/;	# we don't want to count data that won't be printed
+                    next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0; 
 
                     if( $category_bucket =~ /(-HL|err-rate|msg-rate)$/ ) {
                         if( $category_bucket =~ /^err-rate$/ ) {
-                            $rate_metrics .= "${color}" . format_number( $count ) . "$colors{'NC'}";
+                            $rate_metrics .= "  ${color}" . format_number( $count ) . "$colors{'NC'}";
                             $rate_metrics .= "$colors{'bright-black'}:$colors{'NC'}";
-                            $legend_length_bucket += length( " " . format_number( $count ) . ":" );
+                            $legend_length_bucket += length( "  " . format_number( $count ) . ":" );
                         } elsif( $category_bucket =~ /^msg-rate$/ ) {
                             #$rate_metrics .= "${color}$count$colors{'NC'}";
                             $rate_metrics .= "${color}" . format_number( $count ) . "$colors{'NC'}";
@@ -1152,10 +1182,10 @@ sub print_bar_graph {
             print $log_details unless $omit_values;
             my $padding = $legend_length - $legend_length_bucket;
 
-#print " legend_length: $legend_length legend_length_bucket: $legend_length_bucket padding: $padding\n";
+#print " legend_length: $legend_length legend_length_bucket: $legend_length_bucket padding: $padding [$rate_metrics]" . length($rate_metrics) . "\n";
 
             print " " x ($padding >= 0 ? $padding : 0);
-            print " $rate_metrics" unless $omit_rate;
+            print $rate_metrics unless $omit_rate;
 
             print "$colors{'bright-black'}│$colors{'NC'} ";
 
