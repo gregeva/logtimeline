@@ -1011,13 +1011,14 @@ sub normalize_data_for_output {
             $error_count += $count if $category_bucket =~ /^ERROR|5xx|4xx$/i;
         }
 
+        # this part takes the time windows error and message counts and converts them to a per minute rate
         unless( defined( $omit_rate ) && $omit_rate ) {
             $log_counts{$bucket}{'err-rate'}{count} = $error_count / $bucket_size_seconds * 60;
             $log_counts{$bucket}{'msg-rate'}{count} = $total_count / $bucket_size_seconds * 60;
         }
 
         $max_total_count = $total_count if $total_count > $max_total_count;
-        $max_total_bytes = $total_bytes if ( $print_durations && $total_bytes > $max_total_bytes );
+        $max_total_bytes = $total_bytes if ( defined $total_bytes && $print_durations && $total_bytes > $max_total_bytes );
     }
 
 
@@ -1070,7 +1071,7 @@ sub normalize_data_for_output {
 # TO DO : need to handle cases where we don't have bytes, but would have duration
         # scale the transferred bytes for printing the graph
         my $bytes = $log_stats{$bucket}{bytes};
-        my $scaled_bytes = $max_total_bytes != 0 ? int(($bytes / $max_total_bytes) * $durations_graph_width) : 0;
+        my $scaled_bytes = ( defined $bytes && defined $max_total_bytes && $max_total_bytes != 0 ) ? int(($bytes / $max_total_bytes) * $durations_graph_width) : 0;
         $log_stats{$bucket}{scaled_bytes} = $scaled_bytes;
 
         # scale the log message counts for printing the graph
@@ -1174,7 +1175,7 @@ sub print_bar_graph {
                 my $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width - 2;		# 2 is the magic number to get 1 space after the tallest bar 
                 print " " x $missing_chars;
                 print " $colors{'bright-black'}│$colors{'NC'} ";
-                printf( "$colors{'cyan'}%8s$colors{'NC'}  $colors{'bright-blue'}P50:%-6s$colors{'NC'} $colors{'yellow'}P90:%-6s$colors{'NC'} $colors{'red'}P95:%-6s$colors{'NC'} $colors{'white-underline'}CV:%5s$colors{'NC'} Z:%5s", format_bytes( $log_stats{$bucket}{bytes},'B' ), $log_stats{$bucket}{p50}, $log_stats{$bucket}{p90}, $log_stats{$bucket}{p95}, $log_stats{$bucket}{cv}, $log_stats{$bucket}{z_score} );
+                printf( "$colors{'cyan'}%8s$colors{'NC'}  $colors{'bright-blue'}P50:%-6s$colors{'NC'} $colors{'yellow'}P90:%-6s$colors{'NC'} $colors{'red'}P95:%-6s$colors{'NC'} $colors{'white-underline'}CV:%5s$colors{'NC'} Z:%5s", defined $log_stats{$bucket}{bytes} ? format_bytes( $log_stats{$bucket}{bytes},'B' ) : "", defined $log_stats{$bucket}{p50} ? $log_stats{$bucket}{p50} : "", defined $log_stats{$bucket}{p90} ? $log_stats{$bucket}{p90} : "", defined $log_stats{$bucket}{p95} ? $log_stats{$bucket}{p95} : "", defined $log_stats{$bucket}{cv} ? $log_stats{$bucket}{cv} : "", defined $log_stats{$bucket}{z_score} ? $log_stats{$bucket}{z_score} : "" );
 
             }
 
