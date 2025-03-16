@@ -372,7 +372,7 @@ sub format_time {
     my $unit_name = $unit_names{$formatted_unit}{$format};
     $unit_name = " " . $unit_name if defined( $space );
 
-    return "$formatted_value$unit_name";
+    return defined $value ? "$formatted_value$unit_name" : undef;
 }
 
 sub adapt_to_command_line_options {
@@ -528,7 +528,8 @@ sub read_and_process_logs {
         while (<$fh>) {
             $line_number++;
             my ( $timestamp_str, $log_level, $category_bucket, $object, $instance, $user, $platform, $thread, $message ) = ("") x 9;
-            my ( $is_line_match, $is_access_log, $match_type, $status_code, $bytes, $duration, $heap_from, $heap_to, $heap_size ) = 0;
+            my ( $is_line_match, $is_access_log, $match_type, $status_code, $heap_from, $heap_to, $heap_size ) = 0;
+            my ( $bytes, $duration, $count ) = ( undef, undef, undef );
             my $timestamp;
             $total_lines_read++;
 
@@ -550,6 +551,15 @@ sub read_and_process_logs {
                 $is_line_match = 1;
                 $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
                 $thread =~ s/(.*)-\d+$/$1/;
+
+                # this section is optional, for cases where log line has included additional context which should be interpretted (row count, execution duration, result size)
+                ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)\s/;
+                ( $duration ) = $message =~ / durationM[sS]\s*=\s*(\d+)\s/;
+                ( $count ) = $message =~ / count\s*=\s*(\d+)\s/;
+                $is_access_log = 1 if defined $bytes || defined $duration || defined $count;
+
+#printf( "$message -- durationMS=%s bytes=%s count=%s\n", defined $duration ? $duration : "-", defined $bytes ? $bytes : "-", defined $count ? $count : "-" );
+
             } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]/) {
                 $is_line_match = 1;
                 $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
@@ -715,8 +725,8 @@ sub read_and_process_logs {
                         my $duration_bucket = log_bucket($duration, $log_base);
 
                         # Ensure duration and bytes are defined
-                        $duration = 0 if !defined($duration);
-                        $bytes = 0 if !defined($bytes);
+                        #$duration = 0 if !defined($duration);
+                        #$bytes = 0 if !defined($bytes);
 
                         # Initialize the hash if not already done
                         $log_messages{$category}{$log_key}{$duration_bucket} //= {
@@ -730,12 +740,15 @@ sub read_and_process_logs {
                         $log_messages{$category}{$log_key}{$duration_bucket}{count}++;
 
                         # Accumulate the total duration and bytes
-                        $log_messages{$category}{$log_key}{$duration_bucket}{total_duration} += $duration;
-                        $log_messages{$category}{$log_key}{$duration_bucket}{total_bytes} += $bytes;
+                        $log_messages{$category}{$log_key}{$duration_bucket}{total_bytes} += $bytes if defined $bytes;
 
-                        # Accumulate the sum of squares for variance calculation
-                        $log_messages{$category}{$log_key}{$duration_bucket}{sum_of_squares} += $duration ** 2;
-                        push @{$log_messages{$category}{$log_key}{$duration_bucket}{durations}}, $duration;
+                        if( defined $duration ) {
+                            $log_messages{$category}{$log_key}{$duration_bucket}{total_duration} += $duration;
+
+                            # Accumulate the sum of squares for variance calculation
+                            $log_messages{$category}{$log_key}{$duration_bucket}{sum_of_squares} += $duration ** 2;
+                            push @{$log_messages{$category}{$log_key}{$duration_bucket}{durations}}, $duration;
+                        }
                     }
                 }
 
@@ -909,8 +922,8 @@ sub calculate_all_statistics {
             foreach my $log_key (@top_keys) {
                 my $aggregated_data = {
                     count => 0,
-                    total_duration => 0,
-                    total_bytes => 0,
+                    total_duration => undef,
+                    total_bytes => undef,
                     sum_of_squares => 0,
                     durations => [],
                 };
@@ -926,10 +939,13 @@ sub calculate_all_statistics {
                     next if !defined( $message_data->{count} );
     
                     $aggregated_data->{count} += $message_data->{count};
-                    $aggregated_data->{total_duration} += $message_data->{total_duration};
                     $aggregated_data->{total_bytes} += $message_data->{total_bytes};
-                    $aggregated_data->{sum_of_squares} += $message_data->{sum_of_squares};
-                    push @{$aggregated_data->{durations}}, @{$message_data->{durations}};
+
+                    if( defined $message_data->{total_duration} ) {
+                        $aggregated_data->{total_duration} += $message_data->{total_duration};
+                        $aggregated_data->{sum_of_squares} += $message_data->{sum_of_squares};
+                        push @{$aggregated_data->{durations}}, @{$message_data->{durations}};
+                    }
 
                     # free up the memory from the data structure as it is no longer needed
                     undef $log_messages{$category}{$log_key}{$duration_bucket}{durations};
@@ -946,7 +962,7 @@ sub calculate_all_statistics {
                 $log_messages{$category}{$log_key}{p95} = $p95;
                 $log_messages{$category}{$log_key}{p99} = $p99;
                 $log_messages{$category}{$log_key}{cv} = $cv;
-                $log_messages{$category}{$log_key}{total_duration} = format_time( $aggregated_data->{total_duration}, 'ms', 'medium', 'space' );
+                $log_messages{$category}{$log_key}{total_duration} = format_time( $aggregated_data->{total_duration}, 'ms', 'medium', 'space' ) if defined $aggregated_data->{total_duration};
 
             }
         }
@@ -1218,8 +1234,9 @@ sub print_bar_graph {
                 my $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width - 2;		# 2 is the magic number to get 1 space after the tallest bar 
                 print " " x $missing_chars;
                 print " $colors{'bright-black'}│$colors{'NC'} ";
-                printf( "$colors{'cyan'}%8s$colors{'NC'}  $colors{'bright-blue'}P50:%-6s$colors{'NC'} $colors{'yellow'}P90:%-6s$colors{'NC'} $colors{'red'}P95:%-6s$colors{'NC'} $colors{'white-underline'}CV:%5s$colors{'NC'} Z:%5s", defined $log_stats{$bucket}{bytes} ? format_bytes( $log_stats{$bucket}{bytes},'B' ) : "", defined $log_stats{$bucket}{p50} ? $log_stats{$bucket}{p50} : "", defined $log_stats{$bucket}{p90} ? $log_stats{$bucket}{p90} : "", defined $log_stats{$bucket}{p95} ? $log_stats{$bucket}{p95} : "", defined $log_stats{$bucket}{cv} ? $log_stats{$bucket}{cv} : "", defined $log_stats{$bucket}{z_score} ? $log_stats{$bucket}{z_score} : "" );
-
+                if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p90} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{cv} || defined $log_stats{$bucket}{z_score} ) {
+                    printf( "$colors{'cyan'}%8s$colors{'NC'}  $colors{'bright-blue'}P50:%-6s$colors{'NC'} $colors{'yellow'}P90:%-6s$colors{'NC'} $colors{'red'}P95:%-6s$colors{'NC'} $colors{'white-underline'}CV:%5s$colors{'NC'} Z:%5s", defined $log_stats{$bucket}{bytes} ? format_bytes( $log_stats{$bucket}{bytes},'B' ) : "", defined $log_stats{$bucket}{p50} ? $log_stats{$bucket}{p50} : "", defined $log_stats{$bucket}{p90} ? $log_stats{$bucket}{p90} : "", defined $log_stats{$bucket}{p95} ? $log_stats{$bucket}{p95} : "", defined $log_stats{$bucket}{cv} ? $log_stats{$bucket}{cv} : "", defined $log_stats{$bucket}{z_score} ? $log_stats{$bucket}{z_score} : "" );
+                }
             }
 
             print "\n";
@@ -1404,7 +1421,7 @@ sub print_summary_table {
                     my $message = substr( $key, 0, $col_width{1} );
                     my $count = $log_messages{$grouping}{$key}{count};
 
-                    if( $print_durations ) {
+                    if( $print_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
                         my $p1 = $log_messages{$grouping}{$key}{p1};
                         my $p50 = $log_messages{$grouping}{$key}{p50};
                         my $p99 = $log_messages{$grouping}{$key}{p99};
@@ -1413,11 +1430,11 @@ sub print_summary_table {
 
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $count ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", $p1 ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", $p50 ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", $p99 ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", $cv ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", $total_duration ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", defined $p1 ? $p1 : "-" ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", defined $p50 ? $p50 : "-" ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", defined $p99 ? $p99 : "-" ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", defined $cv ? $cv : "-" ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", defined $total_duration ? $total_duration : "-" ) . " " x $table_padding_inner; 
                     } else {
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $count ) . " " x $table_padding_inner; 
