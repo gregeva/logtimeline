@@ -566,7 +566,8 @@ sub read_and_process_logs {
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
                 #$message =~ s/\?.+$//;			# chop off the query string from the URI
 #print "$message -- $_";
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+)/ ) {
+#            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+)/ ) {    # old, working, updated with $ at the end
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+)$/ ) {    # added $ to end to differentiate from later pattern
                 $is_line_match = 1;
                 $match_type = 4;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626
                 					# this is matching Nginx ingress access log format 3.133.31.181 - - [18/Nov/2024:14:19:55 +0000] "GET / HTTP/1.1" 404 431 "-" "WizDynamicScanner/1.0"
@@ -608,6 +609,18 @@ sub read_and_process_logs {
                 # adaptor  # ERROR [2025-02-19 18:31:00,284] com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!
                 # sync     # INFO  [2025-02-20 04:49:11,450] org.ehcache.core.EhcacheManager: Cache 'scorefunc_cachex' created in EhcacheManager.
                 # async    # WARN  [2025-02-19 18:30:01,437] org.apache.zookeeper.ClientCnxnSocketNetty: future isn't success.
+## Analytics Access Log Format ##
+# 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
+
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, undef, undef, $duration) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$/ ) {
+                $is_line_match = 1;
+                $match_type = 9;			# this is matching Tomcat access log format with service execution time 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
+                $is_access_log = 1;
+                $status_code = $category_bucket;
+                $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
+                $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
+                #$message =~ s/\?.+$//;			# chop off the query string from the URI
+#print "$message -- $_";
             }
 
 #print "Thread: $thread   Object: $object   Message: $message\n";
@@ -630,7 +643,7 @@ sub read_and_process_logs {
                         second    => substr($timestamp_str, 17, 2),
                         time_zone => 'UTC',
                     );
-                } elsif( $match_type == 3 || $match_type == 4 ) {
+                } elsif( $match_type == 3 || $match_type == 4 || $match_type == 9 ) {
                     my ($day, $month_str, $year, $hour, $minute, $second) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/;
                     my $month = $month_map{$month_str};
                     $timestamp = DateTime->new(
