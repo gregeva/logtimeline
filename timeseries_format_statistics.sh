@@ -35,7 +35,7 @@ for file in Entity*Statistics-*.csv; do
   while IFS= read -r line; do
     if [ "$header_printed" = false ]; then
       # Print the header with the new timestamp field, name, type, impact, executionTimeSec, meanTimeSec, and meanTimeHour columns
-      echo "timestamp${delimiter}host_system${delimiter}statisticName${delimiter}name${delimiter}type${delimiter}minTime${delimiter}maxTime${delimiter}meanTime${delimiter}count${delimiter}impact${delimiter}executionTimeSec${delimiter}meanTimeSec${delimiter}meanTimeHour"
+      echo "timestamp${delimiter}host_system${delimiter}statisticName${delimiter}name${delimiter}type${delimiter}minTime${delimiter}maxTime${delimiter}meanTime${delimiter}count${delimiter}impact${delimiter}executionTimeSec${delimiter}meanTimeSec${delimiter}meanTimeHour${delimiter}maxTimeSec"
       header_printed=true
     fi
 
@@ -56,9 +56,10 @@ for file in Entity*Statistics-*.csv; do
       executionTimeSec_formula="\"=[@meanTime]*[@count]/1000\""
       meanTimeSec_formula="\"=[@meanTime]/1000\""
       meanTimeHour_formula="\"=[@meanTimeSec]/60\""
+      maxTimeSec_formula="\"=[@maxTime]/1000\""
       
-      # Print the line with the new name, type, impact, executionTimeSec, meanTimeSec, and meanTimeHour columns
-      echo "$formatted_datetime${delimiter}$host_system${delimiter}$statisticName${delimiter}$name_formula${delimiter}$type_formula${delimiter}$minTime${delimiter}$maxTime${delimiter}$meanTime${delimiter}$count${delimiter}$impact_formula${delimiter}$executionTimeSec_formula${delimiter}$meanTimeSec_formula${delimiter}$meanTimeHour_formula"
+      # Print the line with the new name, type, impact, executionTimeSec, meanTimeSec, meanTimeHour, and maxTimeSec columns
+      echo "$formatted_datetime${delimiter}$host_system${delimiter}$statisticName${delimiter}$name_formula${delimiter}$type_formula${delimiter}$minTime${delimiter}$maxTime${delimiter}$meanTime${delimiter}$count${delimiter}$impact_formula${delimiter}$executionTimeSec_formula${delimiter}$meanTimeSec_formula${delimiter}$meanTimeHour_formula${delimiter}$maxTimeSec_formula"
       line_counter=$((line_counter + 1))
     fi
   done < "$file"
