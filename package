@@ -1,0 +1,10 @@
+# For Ubuntu
+
+sudo apt-get install libperl-dev
+sudo apt-get update
+sudo apt-get install build-essential
+sudo apt-get install cpanminus
+sudo cpanm PAR::Packer
+system("perl ./ltl /ThingworxStorage/logs/ApplicationLog.log");
+pp -x -o ltl_static-binary_ubuntu-amd64 wrapper.pl
+
