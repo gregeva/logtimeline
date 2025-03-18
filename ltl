@@ -15,7 +15,7 @@ use List::Util qw(min);
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.1.17";
+my $version_number = "0.2.0";
 my $log_base = 2;
 my @rolling_window;
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -576,6 +576,7 @@ sub read_and_process_logs {
                 $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
 
+                $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
                 $message =~ s/\?.+$// if $omit_querystring;			# chop off the query string from the URI
 
 #print "$message -- $_";
@@ -588,6 +589,8 @@ sub read_and_process_logs {
                 $status_code = $category_bucket;
                 $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
+
+                $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
                 $message =~ s/\?.+$// if $omit_querystring;			# chop off the query string from the URI
 # TO DO - update RegEx to pull out message, thread name
             } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^{"\@timestamp":"([^"]*).*"level":"([^"]*)/ ) {
@@ -632,6 +635,8 @@ sub read_and_process_logs {
                 $status_code = $category_bucket;
                 $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
+
+                $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
                 $message =~ s/\?.+$// if $omit_querystring;			# chop off the query string from the URI
 #print "$message -- $_";
             }
