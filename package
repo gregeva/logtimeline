@@ -8,3 +8,17 @@ sudo cpanm PAR::Packer
 system("perl ./ltl /ThingworxStorage/logs/ApplicationLog.log");
 pp -x -o ltl_static-binary_ubuntu-amd64 wrapper.pl
 
+# Mac
+
+xcode-select --install
+brew install gcc
+brew install perl
+brew install cpanminus
+cpanm PAR::Packer
+sudo cpanm DateTime.pm Term::ReadKey.pm Proc::ProcessTable.pm
+
+cpanm PAR::Packer --force
+wrapper.pl > system("perl ./ltl /Users/geva/Downloads/bspa003/11mar-14mar/access_logs/localhost_access_log-twx01-twx-thingworx-0.2025-03-11.txt"); 
+pp -x -o ltl_static-binary_macos-arm64 wrapper.pl
+
+
