@@ -161,7 +161,7 @@ foreach my $key (keys %colors) {
     my $new_key = "$key-HL";
     #$colors{$new_key} = "$colors{$key}$yellow_bg";			# Apply a yellow background on top of the existing FG color
     
-   my $original_fg_color = $colors{$key}; # Get original foreground
+    my $original_fg_color = $colors{$key}; # Get original foreground
 
     # Extract the original colour code from the FG code
     $original_fg_color =~ s/^\e\[(.*?)m/$1/g;
@@ -183,9 +183,8 @@ foreach my $key (keys %colors) {
 
     #$colors{$new_key} = "\033[48;5;${bg_color_256}m${white_fg}";
     $colors{$new_key} = "$colors{$key}\033[48;5;${bg_color_256}m";
-  #  print "$original_fg_color\n";
+    #print "$colors{$key}$key$colors{'NC'} -- HIGHLIGHT -- $colors{$new_key}$new_key$colors{'NC'}\n";
 }
-
 
 ## SUBS ##
 
@@ -1147,7 +1146,7 @@ sub normalize_data_for_output {
 sub print_bar_graph {
     my $lines_printed = 0;
     if( $total_lines_included ) {
-        print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
+        print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
         $lines_printed++;
         foreach my $bucket (sort keys %log_counts) {
             my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
@@ -1220,12 +1219,16 @@ sub print_bar_graph {
                 print " " x $missing_chars;
                 print " $colors{'bright-black'}│$colors{'NC'} ";
                 if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p90} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{cv} || defined $log_stats{$bucket}{z_score} ) {
+
+                    my $cv_color = defined $log_stats{$bucket}{cv} && $log_stats{$bucket}{cv} >= 20 ? 'WARN-HL' : 'white-underline';
+                    my $zscore_color = defined $log_stats{$bucket}{z_score} && $log_stats{$bucket}{z_score} >= 5 ? 'WARN-HL' : 'NC';
+
                     defined $log_stats{$bucket}{bytes} ? printf( "$colors{'cyan'}%8s$colors{'NC'}  ", format_bytes( $log_stats{$bucket}{bytes},'B' ) ) : printf( " " x 9 );
                     defined $log_stats{$bucket}{p50} ? printf( "$colors{'bright-blue'}P50:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p50} ) >= 4 ? format_time( $log_stats{$bucket}{p50}, 'ms' ) : $log_stats{$bucket}{p50} ) ) : printf( " " x 6 );
                     defined $log_stats{$bucket}{p90} ? printf( "$colors{'yellow'}P90:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p90} ) >= 4 ? format_time( $log_stats{$bucket}{p90}, 'ms' ) : $log_stats{$bucket}{p90} ) ) : printf( " " x 6 ); 
                     defined $log_stats{$bucket}{p95} ? printf( "$colors{'red'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 6 );
-                    defined $log_stats{$bucket}{cv} ? printf( "$colors{'white-underline'}CV:%5s$colors{'NC'} ", $log_stats{$bucket}{cv} ) : printf ( " " x 9 );
-                    defined $log_stats{$bucket}{z_score} ? printf( "Z:%5s", ( $log_stats{$bucket}{z_score} >= 1000 ? $log_stats{$bucket}{z_score} =~ /(\d+)\.\d*/ : $log_stats{$bucket}{z_score} ) ) : printf( " " x 5 );
+                    defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%5s$colors{'NC'} ", $log_stats{$bucket}{cv} ) : printf ( " " x 9 );
+                    defined $log_stats{$bucket}{z_score} ? printf( "$colors{$zscore_color}Z:%5s$colors{'NC'}", ( $log_stats{$bucket}{z_score} >= 1000 ? $log_stats{$bucket}{z_score} =~ /(\d+)\.\d*/ : $log_stats{$bucket}{z_score} ) ) : printf( " " x 5 );
                 }
             }
 
@@ -1482,7 +1485,6 @@ $elapsed_normalize_data = tv_interval($start_time, $end_time);
 
 $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_normalize_data;
 
-print "\n";
 print_bar_graph();
 print_summary_table() unless $omit_summary;
 print_message_summary();
