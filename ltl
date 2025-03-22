@@ -21,7 +21,7 @@ my @rolling_window;
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats ) = 0;
 my ( $include_query_string ) = 0;
-my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed ) = ( 0, 0, 0, 0 );
+my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data ) = ( 0,0,0,0,0,0,0,0 );
 my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );		# this is where the counts of log entries are tallied across the time buckets
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
 my $durations_graph_width = 0;
@@ -290,6 +290,7 @@ sub format_bytes {
 
     # Format the value to 1 decimal place
     $formatted_value = sprintf("%.1f", $formatted_value);
+    $formatted_value =~ s/\.0//;
 
     return "$formatted_value $formatted_unit";
 }
@@ -1255,7 +1256,7 @@ sub access_log_stats {
 
 
 sub print_summary_table {
-    my $category_column_width = 15;
+    my $category_column_width = 30;
     my $count_column_width = 10;
     my $table_format = "  %-${category_column_width}s %${count_column_width}d\n";
 
@@ -1279,7 +1280,11 @@ sub print_summary_table {
     printf $table_format, "HIGHLIGHTED", $total_lines_highlighted if defined $highlight_regex;
     printf $table_format, "LINES INCLUDED", $total_lines_included; 
     printf $table_format, "LINES READ", $total_lines_read; 
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "PROCESSING TIME", format_time( $elapsed, 's', 'short' );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "FILE PROCESSING TIME", format_time( $elapsed_read_files, 's', 'short' );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "INITIALIZE EMPTY BUCKETS", format_time( $elapsed_initialize_empty_time_windows, 's', 'short' );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'short' );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'short' );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'short' );
     printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' );
     print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
     print "\n";
@@ -1458,14 +1463,29 @@ sub print_summary_table {
 print_title();
 adapt_to_terminal_settings(); 
 adapt_to_command_line_options();
+
+$start_time = [gettimeofday];
 read_and_process_logs();
+$end_time = [gettimeofday];
+$elapsed_read_files = tv_interval($start_time, $end_time);
+
+$start_time = [gettimeofday];
 initialize_empty_time_windows();
+$end_time = [gettimeofday];
+$elapsed_initialize_empty_time_windows = tv_interval($start_time, $end_time);
+
+$start_time = [gettimeofday];
 print "Calculate statistics...";
 calculate_all_statistics();
-normalize_data_for_output();
-
 $end_time = [gettimeofday];
-$elapsed = tv_interval($start_time, $end_time);
+$elapsed_calculate_statistics = tv_interval($start_time, $end_time);
+
+$start_time = [gettimeofday];
+normalize_data_for_output();
+$end_time = [gettimeofday];
+$elapsed_normalize_data = tv_interval($start_time, $end_time);
+
+$elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_normalize_data;
 
 print "\n";
 print_bar_graph();
