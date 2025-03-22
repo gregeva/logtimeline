@@ -1,0 +1,4 @@
+Build using Docker for x86_64 based Linux
+docker run --rm -v "$PWD":/app -w /app perl:5.36 bash -c "cpanm PAR::Packer && pp -o my_app_linux_x86_64 my_app.pl"
+Build using Docker for ARM based Linux
+docker run --rm --platform linux/arm64 -v "$PWD":/app -w /app perl:5.36 bash -c "cpanm PAR::Packer && pp -o my_app_arm64 my_app.pl"
