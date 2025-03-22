@@ -1241,7 +1241,7 @@ sub print_bar_graph {
             pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
         }
 
-        print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}";
+        print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
     } else {
         printf "Read $total_lines_read lines, however no lines matched any of the patterns within the timeframe.\n";
     }
@@ -1261,8 +1261,7 @@ sub print_summary_table {
     my $table_format = "  %-${category_column_width}s %${count_column_width}d\n";
 
     ## START SUMMARY STATISTIC TABLE ##
-    print "\n\n";
-    print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
+    print "\n  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
     printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "Category", "Total"; 
     print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
 
@@ -1280,19 +1279,22 @@ sub print_summary_table {
     printf $table_format, "HIGHLIGHTED", $total_lines_highlighted if defined $highlight_regex;
     printf $table_format, "LINES INCLUDED", $total_lines_included; 
     printf $table_format, "LINES READ", $total_lines_read; 
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "FILE PROCESSING TIME", format_time( $elapsed_read_files, 's', 'short' );
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "INITIALIZE EMPTY BUCKETS", format_time( $elapsed_initialize_empty_time_windows, 's', 'short' );
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'short' );
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'short' );
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'short' );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "FILE PROCESSING TIME", format_time( $elapsed_read_files, 's', 'medium', " " );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "INITIALIZE EMPTY BUCKETS", format_time( $elapsed_initialize_empty_time_windows, 's', 'medium', " " );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'medium', " " );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " );
+    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " );
     printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' );
     print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
-    print "\n";
 
-    ## START MESSAGE SUMMARY ##
+    return;
+}
 
+sub print_message_summary {
     # Define the relative size of each column as a percentage
     my %col_relative_size;
+
+    print "\n";
 
     if( $print_durations ) {
         %col_relative_size = (
@@ -1490,6 +1492,7 @@ $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + 
 print "\n";
 print_bar_graph();
 print_summary_table() unless $omit_summary;
+print_message_summary();
 
 print "\n";
 exit;
