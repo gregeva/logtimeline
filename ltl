@@ -19,7 +19,8 @@ my $version_number = "0.2.0";
 my $log_base = 2;
 my @rolling_window;
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_querystring ) = 0;
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate ) = 0;
+my ( $include_query_string ) = 0;
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed ) = ( 0, 0, 0, 0 );
 my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );		# this is where the counts of log entries are tallied across the time buckets
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
@@ -211,7 +212,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--omit-values|-ov] [--omit-empty|-oe] [--omit-summary|-os] [--omit-rate|-or] [--omit-querystring|-oq] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--omit-values|-ov] [--omit-empty|-oe] [--omit-summary|-os] [--omit-rate|-or] [--include-query-string|-iqs] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -390,7 +391,7 @@ sub adapt_to_command_line_options {
         'omit-empty|oe' => \$omit_empty,
         'omit-summary|os' => \$omit_summary,
         'omit-rate|or' => \$omit_rate,
-        'omit-querystring|oq' => \$omit_querystring,
+        'include-query-string|iqs' => \$include_query_string,
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds,
         'version|v' => \$print_version,
@@ -577,7 +578,7 @@ sub read_and_process_logs {
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
 
                 $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
-                $message =~ s/\?.+$// if $omit_querystring;			# chop off the query string from the URI
+                $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
 
 #print "$message -- $_";
 #            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+)/ ) {    # old, working, updated with $ at the end
@@ -591,7 +592,7 @@ sub read_and_process_logs {
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
 
                 $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
-                $message =~ s/\?.+$// if $omit_querystring;			# chop off the query string from the URI
+                $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
 # TO DO - update RegEx to pull out message, thread name
             } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^{"\@timestamp":"([^"]*).*"level":"([^"]*)/ ) {
                 $is_line_match = 1;
@@ -637,7 +638,7 @@ sub read_and_process_logs {
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
 
                 $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
-                $message =~ s/\?.+$// if $omit_querystring;			# chop off the query string from the URI
+                $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
 #print "$message -- $_";
             }
 
