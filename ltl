@@ -19,7 +19,7 @@ my $version_number = "0.2.0";
 my $log_base = 2;
 my @rolling_window;
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate ) = 0;
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats ) = 0;
 my ( $include_query_string ) = 0;
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed ) = ( 0, 0, 0, 0 );
 my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );		# this is where the counts of log entries are tallied across the time buckets
@@ -212,7 +212,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--omit-values|-ov] [--omit-empty|-oe] [--omit-summary|-os] [--omit-rate|-or] [--include-query-string|-iqs] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--include-query-string|-iqs] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -388,8 +388,9 @@ sub adapt_to_command_line_options {
         'highlight|h=s' => \$highlight_regex,
         'top-messages|n=i' => \$top_n_messages,
         'omit-values|ov' => \$omit_values,
+        'omit-stats|os' => \$omit_stats,
         'omit-empty|oe' => \$omit_empty,
-        'omit-summary|os' => \$omit_summary,
+        'omit-summary|osum' => \$omit_summary,
         'omit-rate|or' => \$omit_rate,
         'include-query-string|iqs' => \$include_query_string,
         'seconds|s' => \$print_seconds,
@@ -729,7 +730,7 @@ sub read_and_process_logs {
                     #$log_messages{$category}{$log_key}{count} = 0 if !defined $log_messages{$category}{$log_key}{count};
                     $log_messages{$category}{$log_key}{count}++;
 
-                    if( $is_access_log ) {
+                    if( $is_access_log && !$omit_stats ) {
                         # Calculate the log scale bucket for the duration
                         my $duration_bucket = log_bucket($duration, $log_base);
 
@@ -761,7 +762,7 @@ sub read_and_process_logs {
                     }
                 }
 
-                if( $is_access_log ) {
+                if( $is_access_log && !$omit_stats ) {
                     $print_durations = 1 if $print_durations != 1;
 
 # TO DO - this is a temporary hack to turn off empty time window support as it does not presently work with statistical calculations
