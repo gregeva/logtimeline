@@ -1278,8 +1278,16 @@ sub print_summary_table {
 
     ## PRINT COMMAND AND ARGUMENTS ##
 # TO DO: Will need to carve this out for full setup pagination
-    print "\n$colors{'bright-black'}options: @ORIGINAL_ARGV$colors{'NC'}\n";
 
+
+    print "\n$colors{'bright-black'}options: ";
+    my %argv_hash = map { $_ => 1 } @ARGV;
+    foreach my $arg (@ORIGINAL_ARGV) {
+        unless (exists $argv_hash{$arg}) {
+            print "$arg ";
+        }
+    }
+    print "$colors{'NC'}\n";
 
     ## START SUMMARY STATISTIC TABLE ##
     push @summary_table, sprintf( "\n  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "$padding\n" );
