@@ -50,6 +50,7 @@ my( $exclude_regex, $include_regex, $highlight_regex );
 my $pause_output = 0;
 my $omit_values = 0;
 my @in_files;
+my %in_files_matched;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
 
 # Define log bucket printing order
@@ -522,6 +523,8 @@ sub pause_for_keypress {
 
 # Parse logs, bucket by time, and count log levels
 sub read_and_process_logs {
+    %in_files_matched = map { $_ => 0 } @in_files;			# set hash key per file to match boolean = false
+
     foreach my $in_file (@in_files) {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
         push @files_processed, $in_file;
@@ -532,7 +535,7 @@ sub read_and_process_logs {
         while (<$fh>) {
             $line_number++;
             my ( $timestamp_str, $log_level, $category_bucket, $object, $instance, $user, $platform, $thread, $message ) = ("") x 9;
-            my ( $is_line_match, $is_access_log, $match_type, $status_code, $heap_from, $heap_to, $heap_size ) = 0;
+            my ( $is_line_match, $is_access_log, $match_type, $status_code, $heap_from, $heap_to, $heap_size ) = ( 0, 0, 0, 0, 0, 0, 0 );
             my ( $bytes, $duration, $count ) = ( undef, undef, undef );
             my $timestamp;
             $total_lines_read++;
@@ -691,6 +694,9 @@ sub read_and_process_logs {
                 next if( defined( $filter_duration_max ) && $duration > $filter_duration_max );		# skip if duration value is above specified maximum filter
                 next if( defined( $filter_bytes_min ) && $bytes < $filter_bytes_min );			# skip if bytes value is below specified minimum filter
                 next if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max );			# skip if bytes value is above specified maximum filter
+
+                # take note if any results were found in this file
+                $in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
 
                 # determine if this line should be highlighted
                 $category_bucket .= '-HL' if( defined( $highlight_regex ) && /$highlight_regex/ );
@@ -1323,8 +1329,8 @@ sub print_summary_table {
     push @file_details, sprintf( "$column_padding$padding$colors{'white-underline'}The following file(s) were processed with analysis including results between $min_timestamp_str and $max_timestamp_str$colors{'NC'}\n" );
     push @file_details, "\n";
     foreach my $in_file (@files_processed) {
-         my $filename = length( $in_file ) > $file_detail_width ? "..." . substr( $in_file, length( $in_file ) - ( $file_detail_width - $column_padding - 3 ) ) : $in_file;
-         push @file_details, sprintf( "$column_padding$padding$colors{'white'}%60s$colors{'NC'}\n", $filename );
+         my $filename = length( $in_file ) > $file_detail_width ? "..." . substr( $in_file, length( $in_file ) - ( $file_detail_width - $column_padding - 3 - 4) ) : $in_file;  # -3 for '...', -4 for '[x] '
+         push @file_details, sprintf( "$column_padding$padding$colors{'white'}\[%s\] %60s$colors{'NC'}\n", ( $in_files_matched{$in_file} ? "$colors{'green'}√$colors{'white'}" : "$colors{'red'}χ$colors{'white'}" ), $filename );
     }
 
     for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {
