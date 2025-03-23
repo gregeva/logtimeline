@@ -9,7 +9,7 @@ use Getopt::Long;
 use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
 use Proc::ProcessTable;
-use List::Util qw(min);
+use List::Util qw(min max);
 
 # Start time
 my $start_time = [gettimeofday];
@@ -17,7 +17,7 @@ my $start_time = [gettimeofday];
 # Configuration
 my $version_number = "0.2.0";
 my $log_base = 2;
-my @rolling_window;
+my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats ) = 0;
 my ( $include_query_string ) = 0;
@@ -34,12 +34,13 @@ my $total_lines_read = 0;
 my $total_lines_included = 0;
 my $total_lines_highlighted = 0;
 my $legend_length = 0;
-my $range_start = "";
-my $range_end = "";
-my $range_start_epoch = 0;
-my $range_end_epoch = 0;
-my %range_epoch = ( 'start' => 0, 'end' => 2521843200 );
-my %range;
+my $filter_range_start = "";
+my $filter_range_end = "";
+my $filter_range_start_epoch = 0;
+my $filter_range_end_epoch = 0;
+my %filter_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
+my %result_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
+my %filter_range;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
 #my( $output_timestamp_min ) = DateTime->from_epoch( epoch => 1678886400 );
 #my( $output_timestamp_min, $output_timestamp_max );
@@ -128,7 +129,7 @@ my %colors = (
     'blue' => "\033[34m\033[49m",
     'magenta' => "\033[35m\033[49m",
     'cyan' => "\033[36m\033[49m",
-    'white' => "\033[36m\033[49m",
+    'white' => "\033[36m\033[37m",
     'bright-black' => "\033[90m\033[109m",
     'bright-red' => "\033[91m\033[109m",
     'bright-green' => "\033[92m\033[109m",
@@ -154,6 +155,11 @@ my $yellow_bg = "\033[48;5;229m";  # Very pale yellow background
 #my $yellow_bg = "\033[48;5;222m";  # Light gold background
 #my $yellow_bg = "\033[48;5;216m";  # Pastel yellow background
 my $reset_all    = "\033[0m";  # Reset ALL attributes
+
+# Standard 8 Colors: Uses codes like \e[30m for black, \e[31m for red, etc.
+# Bright 8 Colors: Uses codes like \e[90m for bright black (grey), \e[91m for bright red, etc.
+# 256 Colors: Uses codes like \e[38;5;<color_code>m for foreground and \e[48;5;<color_code>m for background.
+# True Color (24-bit): Uses codes like \e[38;2;<r>;<g>;<b>m for foreground and \e[48;2;<r>;<g>;<b>m for background.
 
 # Create new keys with -HL and yellow background
 foreach my $key (keys %colors) {
@@ -370,12 +376,14 @@ sub format_time {
 }
 
 sub adapt_to_command_line_options {
+    @ORIGINAL_ARGV = @ARGV;
+
     # Get command-line options
     GetOptions(
         'bucket-size|bs=i' => \$bucket_size_minutes,
         'pause|p' => \$pause_output,
-        'start|st=s' => \$range_start,
-        'end|et=s' => \$range_end,
+        'start|st=s' => \$filter_range_start,
+        'end|et=s' => \$filter_range_end,
         'exclude|e=s' => \$exclude_regex,
         'include|i=s' => \$include_regex,
         'highlight|h=s' => \$highlight_regex,
@@ -395,8 +403,8 @@ sub adapt_to_command_line_options {
         'bytes-max|bmax=i' => \$filter_bytes_max
     ) or die print_usage( "required options not provided" ); 
 
-    $range{'start'} = $range_start if defined( $range_start );
-    $range{'end'} = $range_end if defined(  $range_end );
+    $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
+    $filter_range{'end'} = $filter_range_end if defined(  $filter_range_end );
 
     if( $print_version ) {
         print_version();
@@ -433,9 +441,9 @@ sub calculate_start_end_filter_timestamps {
     my ( $log_time ) = @_;
     my $log_date = $log_time->epoch() - ( $log_time->hour * ( 60 * 60 ) + $log_time->minute * 60 + $log_time->second );
 
-    foreach my $key (keys %range) {
-        my $value = $range{$key};  # Get the value (either $range_start or $range_end)
-        next unless length( $range{$key} ) > 0;
+    foreach my $key (keys %filter_range) {
+        my $value = $filter_range{$key};  # Get the value (either $filter_range_start or $filter_range_end)
+        next unless length( $filter_range{$key} ) > 0;
         my $epoch_value;  # Variable to store the epoch time
 
         # Convert timestamp to epoch seconds using Time::Piece -- WARNING -- use of strptime can cause timezone problems, it appears to work here as I've manually set TZ to UTC on input
@@ -454,7 +462,7 @@ sub calculate_start_end_filter_timestamps {
         }
 
         #print "Epoch value in seconds: $epoch_value\n";
-        $range_epoch{$key} = $epoch_value if defined( $epoch_value );  # Store the epoch value in the hash
+        $filter_range_epoch{$key} = $epoch_value if defined( $epoch_value );  # Store the epoch value in the hash
     }
     return 1;
 }
@@ -514,11 +522,11 @@ sub pause_for_keypress {
 
 # Parse logs, bucket by time, and count log levels
 sub read_and_process_logs {
-    # BUG: this should be able to take multiple files as inputs using * but it doesn't work, same for including multiple files
     foreach my $in_file (@in_files) {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
+        push @files_processed, $in_file;
         my $line_number = 0;
-        my $range_filter_initialized = 0;
+        my $filter_range_filter_initialized = 0;
         my %month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
 
         while (<$fh>) {
@@ -673,10 +681,10 @@ sub read_and_process_logs {
 #                    $| = 1; # Flush output
                 }
 
-                $range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp ) unless $range_filter_initialized;
+                $filter_range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp ) unless $filter_range_filter_initialized;
 
                 # a number of conditions determine if this read row should be skipped
-                next if( $timestamp->epoch() < $range_epoch{'start'} || $timestamp->epoch() >= $range_epoch{'end'} );
+                next if( $timestamp->epoch() < $filter_range_epoch{'start'} || $timestamp->epoch() >= $filter_range_epoch{'end'} );
                 next if( defined( $exclude_regex ) && /$exclude_regex/ );
                 next if( defined( $include_regex ) && !/$include_regex/ );
                 next if( defined( $filter_duration_min ) && $duration < $filter_duration_min );		# skip if duration value is below specified minimum filter
@@ -1254,12 +1262,29 @@ sub access_log_stats {
 sub print_summary_table {
     my $category_column_width = 30;
     my $count_column_width = 10;
-    my $table_format = "  %-${category_column_width}s %${count_column_width}d\n";
+    my $table_padding = 2;
+    my $padding = " " x $table_padding;
+    my $column_padding = " " x 1;
+    my $table_format = "$padding%-${category_column_width}s %${count_column_width}d$padding\n";
+    my $summary_table_width = $table_padding + $category_column_width + 1 + $count_column_width + $table_padding;
+    my $file_detail_width = $terminal_width - ( $summary_table_width + $table_padding * 2 );
+    my ( @summary_table, @file_details );
+
+    ## FORMAT MIN/MAX LOG TIMESTAMPS FOR THE SUMMARY ##
+    my $min_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_min));
+    my $max_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_max));
+    $min_timestamp_str .= sprintf ".%03d", ($output_timestamp_min-int($output_timestamp_min))*1000 if $print_milliseconds;
+    $max_timestamp_str .= sprintf ".%03d", ($output_timestamp_max-int($output_timestamp_max))*1000 if $print_milliseconds;
+
+    ## PRINT COMMAND AND ARGUMENTS ##
+# TO DO: Will need to carve this out for full setup pagination
+    print "\n$colors{'bright-black'}options: @ORIGINAL_ARGV$colors{'NC'}\n";
+
 
     ## START SUMMARY STATISTIC TABLE ##
-    print "\n  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "Category", "Total"; 
-    print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
+    push @summary_table, sprintf( "\n  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "$padding\n" );
+    push @summary_table, sprintf( "  " . "%-${category_column_width}s %${count_column_width}s$padding\n", "Category", "Total" ); 
+    push @summary_table, sprintf( "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "$padding\n" );
 
     foreach my $category_bucket (@log_levels) {
         next if $category_bucket =~ /^(empty|err-rate|msg-rate)$/;
@@ -1268,20 +1293,46 @@ sub print_summary_table {
         my ( $legend_title ) =  "$category_bucket:" . " " x ( 14 - length( $category_bucket ) );
         #print "$legend_title$category_totals{$category_bucket}\n"; 
         #printf "%-${category_column_width}s %${count_column_width}d\n", $category_bucket, $category_totals{$category_bucket}; 
-        printf $table_format, $category_bucket, $category_totals{$category_bucket}; 
+        push @summary_table, sprintf( $table_format, $category_bucket, $category_totals{$category_bucket} ); 
 
     }
-    print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
-    printf $table_format, "HIGHLIGHTED", $total_lines_highlighted if defined $highlight_regex;
-    printf $table_format, "LINES INCLUDED", $total_lines_included; 
-    printf $table_format, "LINES READ", $total_lines_read; 
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "FILE PROCESSING TIME", format_time( $elapsed_read_files, 's', 'medium', " " );
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "INITIALIZE EMPTY BUCKETS", format_time( $elapsed_initialize_empty_time_windows, 's', 'medium', " " );
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'medium', " " );
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " );
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " );
-    printf "  " . "%-${category_column_width}s %${count_column_width}s\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' );
-    print "  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "\n";
+
+    push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $count_column_width + 1 ) . "$padding\n" );
+    push @summary_table, sprintf( $table_format, "HIGHLIGHTED", $total_lines_highlighted ) if defined $highlight_regex;
+    push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
+    push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "FILE PROCESSING TIME", format_time( $elapsed_read_files, 's', 'medium', " " ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "INITIALIZE EMPTY BUCKETS", format_time( $elapsed_initialize_empty_time_windows, 's', 'medium', " " ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'medium', " " ) ); 
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) ); 
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) );
+    push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $count_column_width + 1 ) . "$padding\n" );
+
+
+
+    push @file_details, "\n";
+    push @file_details, sprintf( "$column_padding$padding$colors{'white-underline'}The following file(s) were processed with analysis including results between $min_timestamp_str and $max_timestamp_str$colors{'NC'}\n" );
+    push @file_details, "\n";
+    foreach my $in_file (@files_processed) {
+         my $filename = length( $in_file ) > $file_detail_width ? "..." . substr( $in_file, length( $in_file ) - ( $file_detail_width - $column_padding - 3 ) ) : $in_file;
+         push @file_details, sprintf( "$column_padding$padding$colors{'white'}%60s$colors{'NC'}\n", $filename );
+    }
+
+    for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {
+        if( $i >= scalar @summary_table ) {
+            print " " x $summary_table_width;
+        } else {
+            chomp $summary_table[$i];
+            print "$summary_table[$i]$column_padding";
+        }
+
+        if( $i >= scalar @file_details ) {
+            print "\n";
+        } else {
+            print $file_details[$i];
+        }
+    }
 
     return;
 }
