@@ -1333,7 +1333,7 @@ sub print_summary_table {
     push @file_details, sprintf( "$column_padding$padding$colors{'white-underline'}The following file(s) were processed with analysis including results between $min_timestamp_str and $max_timestamp_str$colors{'NC'}\n" );
     push @file_details, "\n";
     foreach my $in_file (@files_processed) {
-         my $filename_max_length = ( $file_detail_width - $column_padding - 3 - 4); 
+         my $filename_max_length = $file_detail_width - length( $column_padding ) - 3 - 4; 
          my $filename = length( $in_file ) > $filename_max_length ? "..." . substr( $in_file, length( $in_file ) - $filename_max_length ) : $in_file;  # -3 for '...', -4 for '[x] '
          push @file_details, sprintf( "$column_padding$padding$colors{'white'}\[%s$colors{'NC'}$colors{'white'}\] %-${filename_max_length}s$colors{'NC'}\n", $match_char[$in_files_matched{$in_file}], $filename );
     }
