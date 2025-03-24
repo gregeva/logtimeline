@@ -1324,7 +1324,7 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'medium', " " ) ); 
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) ); 
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) );
+#    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) );
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $count_column_width + 1 ) . "$padding\n" );
 
 
