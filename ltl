@@ -15,7 +15,7 @@ use List::Util qw(min max);
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.2.0";
+my $version_number = "0.3.0";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
