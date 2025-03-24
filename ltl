@@ -220,9 +220,40 @@ sub print_version {
 }
 
 # Function to get current memory usage
+#sub get_memory_usage {
+#    my $t = Proc::ProcessTable->new();
+#    my ($memory_usage) = map { $_->rss } grep { $_->pid == $$ } @{$t->table};
+#    return $memory_usage;
+#}
 sub get_memory_usage {
-    my $t = Proc::ProcessTable->new();
-    my ($memory_usage) = map { $_->rss } grep { $_->pid == $$ } @{$t->table};
+    my $memory_usage;
+
+    if ($^O eq 'darwin' || $^O eq 'linux') {
+        # For Mac OS and Debian (Linux)
+        eval {
+            require Proc::ProcessTable;
+            my $t = Proc::ProcessTable->new();
+            ($memory_usage) = map { $_->rss } grep { $_->pid == $$ } @{$t->table};
+        };
+        if ($@) {
+            die "Failed to load Proc::ProcessTable: $@";
+        }
+    } elsif ($^O eq 'MSWin32') {
+        # For Windows
+        eval {
+            require Win32::Process::Info;
+            Win32::Process::Info->import();  # Explicitly call import
+            my $pi = Win32::Process::Info->new();
+            my $info = $pi->GetProcInfo();
+            ($memory_usage) = map { $_->{WorkingSetSize} } grep { $_->{ProcessId} == $$ } @$info;
+        };
+        if ($@) {
+            die "Failed to load Win32::Process::Info: $@";
+        }
+    } else {
+        die "Unsupported operating system: $^O";
+    }
+
     return $memory_usage;
 }
 
@@ -1121,11 +1152,14 @@ sub normalize_data_for_output {
     $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
     foreach my $bucket (keys %log_counts) {
         my $processed_time_buckets //= 0;
+		my $check_memory_every = $^O ne 'MSWin32' ? 50 : 500;
+		
 # TO DO : need to handle cases where we don't have bytes, but would have duration
         # scale the transferred bytes for printing the graph
         my $bytes = $log_stats{$bucket}{bytes};
         my $scaled_bytes = ( defined $bytes && defined $max_total_bytes && $max_total_bytes != 0 ) ? int(($bytes / $max_total_bytes) * $durations_graph_width) : 0;
         $log_stats{$bucket}{scaled_bytes} = $scaled_bytes;
+		
 
         # scale the log message counts for printing the graph
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
@@ -1139,12 +1173,13 @@ sub normalize_data_for_output {
             $total_lines_highlighted += $count if $category_bucket =~ /-HL$/;
         }
 
-        if( $processed_time_buckets++ % 50 == 0 ) {
+        if( $processed_time_buckets++ % $check_memory_every == 0 && $^O ne 'MSWin32' ) {
             $current_memory_usage = get_memory_usage();								# track maximum memory usage
             if ($current_memory_usage > $max_memory_usage) {
                 $max_memory_usage = $current_memory_usage;
             }
         }
+		print ".";
     }
 
     $current_memory_usage = get_memory_usage();								# track maximum memory usage
