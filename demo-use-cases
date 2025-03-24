@@ -1,0 +1,21 @@
+
+# Slow API performance due to heavy GC
+
+Situation is a very large call to GetLogEntries where large amount of logs saturate the memory as they are read and prepared to return to the user.
+This should manifest in a number of different ways, but if I combine plot ApplicationLog OR ScriptLog, gc logs, and access logs together, I ought to be able to:
+
+1) See the increased in GC events and duration (see messages for total GC time)
+2) See the API latency increasing as possibly more and more calls are queued (GetLogEntries)
+3) Get an idea of the number of Log messages per minute captured which is impacting this performance
+
+# Explore application changes over time
+
+ThingWorx ConfigurationLogs store entries where entities are changed.  These we can search for and filter 'in' between the ConfigurationLog and the access log.
+Viewing the latency figures from the access log for the events matching our target pattern we'll get an idea of latency over time as well as any failures.
+Combining in SyncLog messages from ApplicationLog searching for Entities would complete the picture in a HA environment about their ability to sync.
+
+- include pattern would need to have various options to match patterns in each log type that we are targetting
+- highlight pattern can then be applied on ConfigurationLog or SyncLog to visualize the number of entity changes across time
+
+
+ 
