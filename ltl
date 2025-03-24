@@ -80,7 +80,7 @@ my %blocks = (
     'I' => '■',    # Black Very Heavy
     'J' => '□'     # White square
 );
-my $default_chart_block = "A";
+my $default_chart_block = $^O ne 'MSWin32' ? "A" : "I";
 
 # TO DO:
 # - reading duration should have a variable which will determine what the units are and this will depend on the detected log file.  For example nginx uses seconds, most other use milliseconds.  Then convert to MS before adding to the stats map so that you can mix and match files with different units.
