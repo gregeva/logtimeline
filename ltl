@@ -1184,7 +1184,6 @@ sub normalize_data_for_output {
                 $max_memory_usage = $current_memory_usage;
             }
         }
-		print ".";
     }
 
     $current_memory_usage = get_memory_usage();								# track maximum memory usage
