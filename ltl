@@ -124,10 +124,10 @@ my %colors = (
     'msg-rate'    => "\033[0m",
     'NC'    => "\033[0m",
     'black' => "\033[30m\033[49m",
-    'red' => "\033[31m\033[49m",
-    'green' => "\033[32m\033[49m",
-    'yellow' => "\033[33m\033[49m",
-    'blue' => "\033[34m\033[49m",
+    'red' => "\033[0;31m",
+    'green'  => "\033[0;32m",
+    'yellow'  => "\033[0;33m",
+    'blue'  => "\033[0;33m",
     'magenta' => "\033[35m\033[49m",
     'cyan' => "\033[36m\033[49m",
     'white' => "\033[36m\033[37m",
@@ -698,8 +698,11 @@ sub read_and_process_logs {
                 # take note if any results were found in this file
                 $in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
 
-                # determine if this line should be highlighted
-                $category_bucket .= '-HL' if( defined( $highlight_regex ) && /$highlight_regex/ );
+                # determine if this line should be highlighted (matches in result search)
+                if( defined( $highlight_regex ) && /$highlight_regex/ ) {
+                    $category_bucket .= '-HL';
+                    $in_files_matched{$in_file} = 2 unless $in_files_matched{$in_file} == 2;
+                }
 
                 # sets earliest and latest timestamp values being displayed (after the range filtering selection)
                 $output_timestamp_min = $timestamp->epoch() if $output_timestamp_min == 0 || $output_timestamp_min > $timestamp->epoch();
@@ -1275,6 +1278,7 @@ sub print_summary_table {
     my $summary_table_width = $table_padding + $category_column_width + 1 + $count_column_width + $table_padding;
     my $file_detail_width = $terminal_width - ( $summary_table_width + $table_padding * 2 );
     my ( @summary_table, @file_details );
+    my ( @match_char ) = ( "$colors{'red'}χ", "$colors{'green'}√", "$colors{'green-HL'}√" );
 
     ## FORMAT MIN/MAX LOG TIMESTAMPS FOR THE SUMMARY ##
     my $min_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_min));
@@ -1330,7 +1334,7 @@ sub print_summary_table {
     push @file_details, "\n";
     foreach my $in_file (@files_processed) {
          my $filename = length( $in_file ) > $file_detail_width ? "..." . substr( $in_file, length( $in_file ) - ( $file_detail_width - $column_padding - 3 - 4) ) : $in_file;  # -3 for '...', -4 for '[x] '
-         push @file_details, sprintf( "$column_padding$padding$colors{'white'}\[%s\] %60s$colors{'NC'}\n", ( $in_files_matched{$in_file} ? "$colors{'green'}√$colors{'white'}" : "$colors{'red'}χ$colors{'white'}" ), $filename );
+         push @file_details, sprintf( "$column_padding$padding$colors{'white'}\[%s$colors{'NC'}$colors{'white'}\] %60s$colors{'NC'}\n", $match_char[$in_files_matched{$in_file}], $filename );
     }
 
     for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {
