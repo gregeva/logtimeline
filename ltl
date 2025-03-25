@@ -1,4 +1,37 @@
 #!/usr/bin/perl
+
+# TO DO:
+# - would be nice to be able to sort message lists by total duration as well as current sort (see services spending the most time)
+# - reading duration should have a variable which will determine what the units are and this will depend on the detected log file.  For example nginx uses seconds, most other use milliseconds.  Then convert to MS before adding to the stats map so that you can mix and match files with different units.
+# - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
+# - add pagination support for the summary overview and the top messages
+# - create a conditional path to resize durations stats pane and only print available information if duration value is not present (also don't do the statistical calculations)
+# - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
+# - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
+# - multi-threaded file reading
+# - add summary table details showing what settings the program is running on for the screenshot record (file names, filter ranges, command line options)
+# - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize) - would have to go thought all input files
+
+
+# NOT PRIORITY BACKLOG
+# - add a feature to include/exclude HTTP status codes which would need to be converted to RegEx as 4xx isn't going to be found
+# - add a feature to allow for grouping of various other log categories like ThreadPool or Object context (instead of errors)
+# - performance improvement: leverage a temp file with cached file stats (log start/end times, num lines, ...) to start/stop reading the file when provided start/end time ranges based on guesses around filesize
+# - support for live tailing
+
+## LOG STRUCTURES ##
+# RAC client: [2025-02-04T12:06:22.784] [TRACE] MessageStream - handling data from GAS with chunk size: 88
+# TWX logs: 2025-02-04 12:05:57.481+0000 [L: DEBUG] [O: c.t.p.p.StreamEntryProcessor] [I: ] [U: ] [S: ] [P: ] [T: pool-6-thread-3] Stream Entry Block Size Threshold Reached...
+# Tomcat access logs: 10.224.212.63 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
+# Catalina.out: 20-Feb-2025 08:55:05.055 INFO [main] org.apache.catalina.startup.HostConfig.deployDirectory Deployment of web application directory [/app/opt/apache-tomcat/webapps/Thingworx] has finished in [37,549] ms
+# GC Logs
+# [2024-12-17T06:10:16.351+0000][29576.409s][info][gc             ] GC(25524) Pause Full (G1 Evacuation Pause) 17047M->16380M(17408M) 2459.735ms
+# [2024-12-17T06:10:16.351+0000][29576.409s][info][gc,cpu         ] GC(25524) User=4.73s Sys=0.01s Real=2.46s
+# [2024-12-17T06:10:16.993+0000][29577.052s][info][gc,start       ] GC(25525) Pause Young (Concurrent Start) (G1 Evacuation Pause)
+# [2024-11-21T18:36:30.300+0000][info][gc            ] GC(16) Pause Young (Normal) (G1 Evacuation Pause) 949M->685M(9216M) 106.703ms
+# 2021-05-11T07:41:12.706+0000: 0.578: [GC pause (G1 Evacuation Pause) (young), 0.0069706 secs]
+
+
 use strict;
 use warnings;
 use POSIX qw(strftime floor);
@@ -81,36 +114,6 @@ my %blocks = (
     'J' => '□'     # White square
 );
 my $default_chart_block = $^O ne 'MSWin32' ? "A" : "I";
-
-# TO DO:
-# - reading duration should have a variable which will determine what the units are and this will depend on the detected log file.  For example nginx uses seconds, most other use milliseconds.  Then convert to MS before adding to the stats map so that you can mix and match files with different units.
-# - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
-# - add pagination support for the summary overview and the top messages
-# - create a conditional path to resize durations stats pane and only print available information if duration value is not present (also don't do the statistical calculations)
-# - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
-# - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
-# - multi-threaded file reading
-# - add summary table details showing what settings the program is running on for the screenshot record (file names, filter ranges, command line options)
-# - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize) - would have to go thought all input files
-
-
-# NOT PRIORITY BACKLOG
-# - add a feature to include/exclude HTTP status codes which would need to be converted to RegEx as 4xx isn't going to be found
-# - add a feature to allow for grouping of various other log categories like ThreadPool or Object context (instead of errors)
-# - performance improvement: leverage a temp file with cached file stats (log start/end times, num lines, ...) to start/stop reading the file when provided start/end time ranges based on guesses around filesize
-# - support for live tailing
-
-## LOG STRUCTURES ##
-# RAC client: [2025-02-04T12:06:22.784] [TRACE] MessageStream - handling data from GAS with chunk size: 88
-# TWX logs: 2025-02-04 12:05:57.481+0000 [L: DEBUG] [O: c.t.p.p.StreamEntryProcessor] [I: ] [U: ] [S: ] [P: ] [T: pool-6-thread-3] Stream Entry Block Size Threshold Reached...
-# Tomcat access logs: 10.224.212.63 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
-# Catalina.out: 20-Feb-2025 08:55:05.055 INFO [main] org.apache.catalina.startup.HostConfig.deployDirectory Deployment of web application directory [/app/opt/apache-tomcat/webapps/Thingworx] has finished in [37,549] ms
-# GC Logs
-# [2024-12-17T06:10:16.351+0000][29576.409s][info][gc             ] GC(25524) Pause Full (G1 Evacuation Pause) 17047M->16380M(17408M) 2459.735ms
-# [2024-12-17T06:10:16.351+0000][29576.409s][info][gc,cpu         ] GC(25524) User=4.73s Sys=0.01s Real=2.46s
-# [2024-12-17T06:10:16.993+0000][29577.052s][info][gc,start       ] GC(25525) Pause Young (Concurrent Start) (G1 Evacuation Pause)
-# [2024-11-21T18:36:30.300+0000][info][gc            ] GC(16) Pause Young (Normal) (G1 Evacuation Pause) 949M->685M(9216M) 106.703ms
-# 2021-05-11T07:41:12.706+0000: 0.578: [GC pause (G1 Evacuation Pause) (young), 0.0069706 secs]
 
 my %colors = (
     'ERROR' => "\033[0;31m",
