@@ -53,7 +53,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.3.0";
+my $version_number = "0.3.1";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -64,7 +64,7 @@ my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );	
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
 my $durations_graph_width = 0;
 my $max_graph_width = 0;
-my $print_durations = 0;
+my ( $print_durations, $track_memory, $print_memory ) = ( 0, 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
 my $top_n_messages = 10;
@@ -440,7 +440,8 @@ sub adapt_to_command_line_options {
         'duration-min|dmin=i' => \$filter_duration_min,
         'duration-max|dmax=i' => \$filter_duration_max,
         'bytes-min|bmin=i' => \$filter_bytes_min,
-        'bytes-max|bmax=i' => \$filter_bytes_max
+        'bytes-max|bmax=i' => \$filter_bytes_max,
+		'memory-usage|mem' => \$print_memory
     ) or die print_usage( "required options not provided" ); 
 
     $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
@@ -586,7 +587,7 @@ sub read_and_process_logs {
                 $| = 1; # Flush output
             }
 
-            if ($line_number % 100000 == 0) {	# only collect memory in use around every 100000 lines processed
+            if ($track_memory && $line_number % 100000 == 0) {	# only collect memory in use around every 100000 lines processed
                 $current_memory_usage = get_memory_usage();								# track maximum memory usage
                 if ($current_memory_usage > $max_memory_usage) {
                     $max_memory_usage = $current_memory_usage;
@@ -875,11 +876,14 @@ sub calculate_all_statistics {
             durations => [],
         };
 
-        $current_memory_usage = get_memory_usage();								# track maximum memory usage
-        if ($current_memory_usage > $max_memory_usage) {
-            $max_memory_usage = $current_memory_usage;
+# TO DO: shouldn't check memory on each pass; use approach like reading lines
+        if( $track_memory ) {
+			$current_memory_usage = get_memory_usage();								# track maximum memory usage
+            if ($current_memory_usage > $max_memory_usage) {
+                $max_memory_usage = $current_memory_usage;
+            }
         }
-    
+   
         foreach my $duration_bucket (keys %{$log_analysis{$bucket}}) {
             my $bucket_data = $log_analysis{$bucket}{$duration_bucket};
 
@@ -966,11 +970,14 @@ sub calculate_all_statistics {
                     durations => [],
                 };
 
-                $current_memory_usage = get_memory_usage();								# track maximum memory usage
-                if ($current_memory_usage > $max_memory_usage) {
-                    $max_memory_usage = $current_memory_usage;
-                }
-    
+# TO DO: Shouldn't check memory usage on each pass, only every few
+                if( $track_memory ) {
+                    $current_memory_usage = get_memory_usage();								# track maximum memory usage
+                    if ($current_memory_usage > $max_memory_usage) {
+                        $max_memory_usage = $current_memory_usage;
+                    }
+                } 
+   
                 foreach my $duration_bucket (sort {$a <=> $b} grep { $_ ne 'count' } keys %{$log_messages{$category}{$log_key}}) {
                     my $message_data = $log_messages{$category}{$log_key}{$duration_bucket};
     
@@ -1181,7 +1188,8 @@ sub normalize_data_for_output {
             $total_lines_highlighted += $count if $category_bucket =~ /-HL$/;
         }
 
-        if( $processed_time_buckets++ % $check_memory_every == 0 && $^O ne 'MSWin32' ) {
+# TO DO: Establish more graceful strategy for memory tracking on Windows (with acceptable performance)
+        if( $track_memory && $processed_time_buckets++ % $check_memory_every == 0 && $^O ne 'MSWin32' ) {
             $current_memory_usage = get_memory_usage();								# track maximum memory usage
             if ($current_memory_usage > $max_memory_usage) {
                 $max_memory_usage = $current_memory_usage;
@@ -1189,10 +1197,12 @@ sub normalize_data_for_output {
         }
     }
 
-    $current_memory_usage = get_memory_usage();								# track maximum memory usage
-    if ($current_memory_usage > $max_memory_usage) {
-        $max_memory_usage = $current_memory_usage;
-    }
+    if( $track_memory ) {
+        $current_memory_usage = get_memory_usage();								# track maximum memory usage
+        if ($current_memory_usage > $max_memory_usage) {
+            $max_memory_usage = $current_memory_usage;
+        }
+	}	
 
     print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
     print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
@@ -1366,7 +1376,7 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'medium', " " ) ); 
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) ); 
-#    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) ) if $print_memory;
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $count_column_width + 1 ) . "$padding\n" );
 
 
