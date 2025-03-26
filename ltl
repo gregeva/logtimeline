@@ -1392,7 +1392,7 @@ sub print_summary_table {
 
     for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {
         if( $i >= scalar @summary_table ) {
-            print " " x $summary_table_width;
+            print " " x $summary_table_width . $column_padding;
         } else {
             chomp $summary_table[$i];
             print "$summary_table[$i]$column_padding";
