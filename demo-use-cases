@@ -17,5 +17,12 @@ Combining in SyncLog messages from ApplicationLog searching for Entities would c
 - include pattern would need to have various options to match patterns in each log type that we are targetting
 - highlight pattern can then be applied on ConfigurationLog or SyncLog to visualize the number of entity changes across time
 
+# Check for Mashup Websocket Reconnection Loop
+
+Until a certain version, the Mashup JavaScript websocket client misbehaves in its reconnection attempts should the connection become severed.  Let's look in the logs for this scenario.
+
+- include access logs targetting /Thingworx/WS URI
+- include Security log targetting "Nonce key not found" indicating use of an unfound appKey
+- include ScriptLog/Application log targetting the persistent session name with user associated
 
  
