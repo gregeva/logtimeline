@@ -730,8 +730,8 @@ sub read_and_process_logs {
                 next if( $timestamp->epoch() < $filter_range_epoch{'start'} || $timestamp->epoch() >= $filter_range_epoch{'end'} );
                 next if( defined( $exclude_regex ) && /$exclude_regex/ );
                 next if( defined( $include_regex ) && !/$include_regex/ );
-                next if( defined( $filter_duration_min ) && defined( $duration ) && $duration < $filter_duration_min );		# skip if duration value is below specified minimum filter
-                next if( defined( $filter_duration_max ) && defined( $duration ) && $duration > $filter_duration_max );		# skip if duration value is above specified maximum filter
+                next if( defined( $filter_duration_min ) && ( !defined( $duration ) || $duration <= $filter_duration_min ));		# skip if duration value is below specified minimum filter
+                next if( defined( $filter_duration_max ) && ( !defined( $duration ) || $duration >= $filter_duration_max ));		# skip if duration value is above specified maximum filter
                 next if( defined( $filter_bytes_min ) && defined( $bytes ) && $bytes < $filter_bytes_min );			# skip if bytes value is below specified minimum filter
                 next if( defined( $filter_bytes_max ) && defined( $bytes ) && $bytes > $filter_bytes_max );			# skip if bytes value is above specified maximum filter
 
