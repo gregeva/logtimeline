@@ -53,7 +53,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.3.2";
+my $version_number = "0.3.3";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -1341,7 +1341,6 @@ sub print_summary_table {
     ## PRINT COMMAND AND ARGUMENTS ##
 # TO DO: Will need to carve this out for full setup pagination
 
-
     print "\n$colors{'bright-black'}options: ";
     my %argv_hash = map { $_ => 1 } @ARGV;
     foreach my $arg (@ORIGINAL_ARGV) {
@@ -1350,6 +1349,8 @@ sub print_summary_table {
         }
     }
     print "$colors{'NC'}\n";
+
+    return if $omit_summary;
 
     ## START SUMMARY STATISTIC TABLE ##
     push @summary_table, sprintf( "\n  " . "─" x ( $category_column_width + $count_column_width + 1 ) . "$padding\n" );
@@ -1426,8 +1427,8 @@ sub print_message_summary {
         );
     } else {
         %col_relative_size = (
-            1 => 92,
-            2 => 8,
+            1 => 94,
+            2 => 6,
         );
     }
 
@@ -1608,7 +1609,7 @@ $elapsed_normalize_data = tv_interval($start_time, $end_time);
 $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_normalize_data;
 
 print_bar_graph();
-print_summary_table() unless $omit_summary;
+print_summary_table();
 print_message_summary();
 
 print "\n";
