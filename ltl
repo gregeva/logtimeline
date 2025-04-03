@@ -53,7 +53,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.3.3";
+my $version_number = "0.3.4";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 10;								# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -604,6 +604,8 @@ sub read_and_process_logs {
                 ( $duration ) = $message =~ / durationM[sS]\s*=\s*(\d+)\s/;
                 ( $count ) = $message =~ / count\s*=\s*(\d+)\s/;
                 $is_access_log = 1 if defined $bytes || defined $duration || defined $count;
+
+                $message =~ s/=\d+/=?/g;
 
 #printf( "$message -- durationMS=%s bytes=%s count=%s\n", defined $duration ? $duration : "-", defined $bytes ? $bytes : "-", defined $count ? $count : "-" );
 
