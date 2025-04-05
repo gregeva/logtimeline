@@ -15,7 +15,8 @@ brew install gcc
 brew install perl
 brew install cpanminus
 cpanm PAR::Packer
-sudo cpanm DateTime.pm Term::ReadKey.pm Proc::ProcessTable.pm
+sudo cpanm DateTime.pm Term::ReadKey.pm Proc::ProcessTable.pm Text::CSV
+sudo /usr/bin/perl -MCPAN -e 'install Text::CSV'
 
 cpanm PAR::Packer --force
 wrapper.pl > system("perl ./ltl /Users/geva/Downloads/bspa003/11mar-14mar/access_logs/localhost_access_log-twx01-twx-thingworx-0.2025-03-11.txt"); 
@@ -34,6 +35,7 @@ cpan Win32::Process
 cpan Win32::API
 cpan App::cpanminus
 cpanm Win32::Process::Info
+cpanm Text::CSV
 cpanm --look Win32::Process::Info
 
 
@@ -46,6 +48,7 @@ perl -MCPAN -e "install PAR::Packer"
 perl -MCPAN -e "install DateTime"
 cpan install DateTime.pm
 cpan Win32::Process::Info
+cpanm Text::CSV
 
 pp -o ltl_static-binary_windows-amd64 ltl
 
