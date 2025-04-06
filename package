@@ -19,8 +19,7 @@ sudo cpanm DateTime.pm Term::ReadKey.pm Proc::ProcessTable.pm Text::CSV
 sudo /usr/bin/perl -MCPAN -e 'install Text::CSV'
 
 cpanm PAR::Packer --force
-wrapper.pl > system("perl ./ltl /Users/geva/Downloads/bspa003/11mar-14mar/access_logs/localhost_access_log-twx01-twx-thingworx-0.2025-03-11.txt"); 
-pp -o ltl_static-binary_macos-arm64 wrapper.pl
+pp -o ltl_static-binary_macos-arm64 ltl
 
 
 # Windows
