@@ -55,7 +55,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.3.5";
+my $version_number = "0.3.6";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 10;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -67,7 +67,7 @@ my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );	
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
 my $durations_graph_width = 0;
 my $max_graph_width = 0;
-my ( $print_durations, $track_memory, $print_memory ) = ( 0, 0, 0 );
+my ( $print_durations, $track_memory ) = ( 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
 my $top_n_messages = 10;
@@ -91,6 +91,7 @@ my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex );
 my $pause_output = 0;
 my $omit_values = 0;
+my ( $sort_type, $sort_key ) = ( "count", "count" );
 my @in_files;
 my %in_files_matched;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
@@ -221,7 +222,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--include-query-string|-iqs] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--include-query-string|-iqs] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -311,6 +312,7 @@ sub format_bytes {
         'TB' => 1024**4,
     );
 
+    return undef unless defined $value;
     # Convert input value to bytes
     my $bytes = $value * $units{$unit};
 
@@ -445,8 +447,9 @@ sub adapt_to_command_line_options {
         'duration-max|dmax=i' => \$filter_duration_max,
         'bytes-min|bmin=i' => \$filter_bytes_min,
         'bytes-max|bmax=i' => \$filter_bytes_max,
-	'memory-usage|mem' => \$print_memory,
-        'output-csv|o' => \$write_messages_to_csv
+	'memory-usage|mem' => \$track_memory,
+        'output-csv|o' => \$write_messages_to_csv,
+        'sort|so=s' => \$sort_type
     ) or die print_usage( "required options not provided" ); 
 
     $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
@@ -460,6 +463,13 @@ sub adapt_to_command_line_options {
     # Ensure at least one file is provided
     @in_files = @ARGV;
     die print_usage( "unable to open any files" ) unless @in_files;
+    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( count duration time impact );
+
+    if( $sort_type =~ /^duration|time$/i ) {
+        $sort_key = "total_duration_num";
+    } elsif( $sort_type =~ /^impact$/i ) {
+        $sort_key = "impact";
+    }
 
 # Should include cleaner handling of possible problems with entering command line options
 #eval {
@@ -791,8 +801,9 @@ sub read_and_process_logs {
                     # Keep track of data for message based statistics
                     if( $is_access_log && !$omit_stats ) {
                         # Calculate the log scale bucket for the duration
-                        my $duration_bucket = log_bucket($duration, $log_base);
-                        #my $duration_bucket = 1;
+                        #my $duration_bucket = log_bucket($duration, $log_base);
+                        my $duration_bucket = 1;
+# bookmark1
 # TO DO: I'm doubtful that these duration buckets are even required considering that we are storing each duration value.
 
                         # Ensure duration and bytes are defined
@@ -800,7 +811,8 @@ sub read_and_process_logs {
                         #$bytes = 0 if !defined($bytes);
 
                         # Initialize the hash if not already done
-                        $log_messages{$category}{$log_key}{$duration_bucket} //= {
+                        #$log_messages{$category}{$log_key}{$duration_bucket} //= {
+                        $log_messages{$category}{$log_key} //= {
                             count => 0,
                             total_bytes => 0,
                             total_duration => 0,
@@ -808,29 +820,41 @@ sub read_and_process_logs {
                             durations => [],
                         };
 
-                        # Increment the count for the duration bucket
-                        $log_messages{$category}{$log_key}{$duration_bucket}{count}++;
+
+### PREPARE THE DATA FOR SORTING HERE ###    
+                        #$log_messages{$category}{$log_key}{$duration_bucket}{count}++;
+# Oops.... I was double counting now that I removed the extra buckets
+                        #$log_messages{$category}{$log_key}{count}++;
 
                         # Accumulate the total duration and bytes
-                        $log_messages{$category}{$log_key}{$duration_bucket}{total_bytes} += $bytes if defined $bytes;
+                        #$log_messages{$category}{$log_key}{$duration_bucket}{total_bytes} += $bytes if defined $bytes;
+                        $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
 # TO DO: the bytes for each message is captured, but not surfaced in the message results
 
                         if( defined $duration ) {
-                            $log_messages{$category}{$log_key}{$duration_bucket}{total_duration} += $duration;
+                            #$log_messages{$category}{$log_key}{$duration_bucket}{total_duration} += $duration;
+                            $log_messages{$category}{$log_key}{total_duration} += $duration;
+                            $log_messages{$category}{$log_key}{total_duration_num} += $duration;
 
                             # Accumulate the sum of squares for variance calculation
-                            $log_messages{$category}{$log_key}{$duration_bucket}{sum_of_squares} += $duration ** 2;
-                            push @{$log_messages{$category}{$log_key}{$duration_bucket}{durations}}, $duration;
+                            #$log_messages{$category}{$log_key}{$duration_bucket}{sum_of_squares} += $duration ** 2;
+                            #push @{$log_messages{$category}{$log_key}{$duration_bucket}{durations}}, $duration;
+                            $log_messages{$category}{$log_key}{sum_of_squares} += $duration ** 2;
+                            push @{$log_messages{$category}{$log_key}{durations}}, $duration;
+
+                            # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
+                            if( $duration > 0 ) {
+                                my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{count}; 
+#print "Count: $log_messages{$category}{$log_key}{count} Duration: $log_messages{$category}{$log_key}{total_duration} Mean : $mean\n";
+                                $log_messages{$category}{$log_key}{impact} = round( log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{count} ) * 100 ) / 100;
+                            }
                         }
                     }
                 }
 
-                # Keep track of data for time window based statistics
+                ## TIME-WINDOWS BASED STATISTICS DATA ##
                 if( $is_access_log && !$omit_stats ) {
                     $print_durations = 1 if $print_durations != 1;
-
-# TO DO - this is a temporary hack to turn off empty time window support as it does not presently work with statistical calculations
-#                    $omit_empty = 1 if !defined( $omit_empty ) || $omit_empty != 1;
 
                     ## STATISTICAL DATA CAPTURE ##
                     #print "$duration -- $_";
@@ -846,7 +870,7 @@ sub read_and_process_logs {
                         sum_of_squares => 0,
                         durations => [],
                     };
-    
+
                     # Update the hash with the new data
                     $log_analysis{$bucket}{$duration_bucket}{count}++;
                     $log_analysis{$bucket}{$duration_bucket}{total_duration} += $duration;
@@ -886,7 +910,7 @@ sub calculate_all_statistics {
 
 # TO DO: shouldn't check memory on each pass; use approach like reading lines
         if( $track_memory ) {
-			$current_memory_usage = get_memory_usage();								# track maximum memory usage
+            $current_memory_usage = get_memory_usage();								# track maximum memory usage
             if ($current_memory_usage > $max_memory_usage) {
                 $max_memory_usage = $current_memory_usage;
             }
@@ -961,16 +985,19 @@ sub calculate_all_statistics {
     if( $print_durations ) {
         foreach my $category (keys %log_messages) {
             # Collect and sort the log keys based on the count within each log_key
-            my @sorted_log_keys = sort {
-                my $count_a = $log_messages{$category}{$a}{count} // 0;
-                my $count_b = $log_messages{$category}{$b}{count} // 0;
-                $count_b <=> $count_a;
+            my @sorted_log_keys;
+
+            @sorted_log_keys = sort {
+               my $count_a = $log_messages{$category}{$a}{$sort_key} // 0;
+               my $count_b = $log_messages{$category}{$b}{$sort_key} // 0;
+               $count_b <=> $count_a;
             } keys %{$log_messages{$category}};
-    
+
             # Process only the top N log keys
             my @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)]; 
 
             foreach my $log_key (@top_keys) {
+#print "$log_key // $sort_key : $log_messages{$category}{$log_key}{$sort_key}\n";
                 my $aggregated_data = {
                     count => 0,
                     total_duration_num => undef,
@@ -987,14 +1014,18 @@ sub calculate_all_statistics {
                         $max_memory_usage = $current_memory_usage;
                     }
                 } 
- 
-                foreach my $duration_bucket (sort {$a <=> $b} grep { $_ ne 'count' } keys %{$log_messages{$category}{$log_key}}) {
-                    my $message_data = $log_messages{$category}{$log_key}{$duration_bucket};
-    
+
+#foreach my $key ( keys %{$log_messages{$category}{$log_key}}) {
+#    print "$key $log_messages{$category}{$log_key}{$key} \n"; 
+#}
+                #foreach my $duration_bucket (sort {$a <=> $b} grep { $_ ne 'count' } keys %{$log_messages{$category}{$log_key}}) {
+                    #my $message_data = $log_messages{$category}{$log_key}{$duration_bucket};
+                    my $message_data = $log_messages{$category}{$log_key};
+
                     next if !defined( $message_data->{count} );
     
                     $aggregated_data->{count} += $message_data->{count};
-                    $aggregated_data->{total_bytes} += $message_data->{total_bytes};
+                    $aggregated_data->{total_bytes} += $message_data->{total_bytes} if defined $message_data->{total_bytes};
 
                     if( defined $message_data->{total_duration} ) {
                         $aggregated_data->{total_duration} += $message_data->{total_duration};
@@ -1003,20 +1034,24 @@ sub calculate_all_statistics {
                     }
 
                     # free up the memory from the data structure as it is no longer needed
-                    undef $log_messages{$category}{$log_key}{$duration_bucket}{durations};
-                    delete $log_messages{$category}{$log_key}{$duration_bucket}{durations};
+                    #undef $log_messages{$category}{$log_key}{$duration_bucket}{durations};
+                    #delete $log_messages{$category}{$log_key}{$duration_bucket}{durations};
 # TO DO: I think that I can also delete $log_messages{$category}{$log_key}{$duration_bucket} as it isn't really used for anything
-                }
+                #}
+
+#foreach my $key ( keys %{$aggregated_data} ) {
+#    print "$log_key $key ";
+#    print defined $aggregated_data->{$key} ? $aggregated_data->{$key} : "undefined";
+#    print "\n"; 
+#}
 
                 if( defined $aggregated_data->{total_duration} ) { 
 
                     my ($mean, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
+                    my $impact = $log_messages{$category}{$log_key}{impact};
                     #print "--- $log_key ---\n     Count: $aggregated_data->{count}, Mean: $mean, P1: $p1, P50: $p50, P75: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A, Total duration: $aggregated_data->{total_duration}\n";
-                    my $impact = round( log( $mean ** $impact_time_exponent * $aggregated_data->{count} ) * 100 ) / 100 or die "Can't take Ln() of zero : $mean ** $impact_time_exponent * $aggregated_data->{count}";
-                    #print "--- $log_key ---\n     Count: $aggregated_data->{count}, Impact: $impact, Mean: $mean, P1: $p1, P50: $p50, P75: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A, Total duration: $aggregated_data->{total_duration}\n";
     
                     $log_messages{$category}{$log_key}{mean} = $mean;
-                    $log_messages{$category}{$log_key}{impact} = $impact;
                     $log_messages{$category}{$log_key}{p1} = $p1;
                     $log_messages{$category}{$log_key}{p50} = $p50;
                     $log_messages{$category}{$log_key}{p75} = $p75;
@@ -1030,6 +1065,10 @@ sub calculate_all_statistics {
                 }
 
                 $log_messages{$category}{$log_key}{total_bytes} = $aggregated_data->{total_bytes} if defined $aggregated_data->{total_bytes};
+
+                # free up the memory from the data structure as it is no longer needed
+                undef $log_messages{$category}{$log_key}{durations};
+                delete $log_messages{$category}{$log_key}{durations};
             }
         }
     }
@@ -1068,8 +1107,8 @@ sub calculate_statistics {
     my $std_dev = sqrt($variance);
     #my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean) : 'N/A';
     my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean ) : undef;
-
     my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
+
     my $p1   = int($sorted[int($count * 0.01)]);
     my $p50  = int($sorted[int($count * 0.5)]);
     my $p75  = int($sorted[int($count * 0.75)]);
@@ -1190,7 +1229,7 @@ sub normalize_data_for_output {
     $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
     foreach my $bucket (keys %log_counts) {
         my $processed_time_buckets //= 0;
-		my $check_memory_every = $^O ne 'MSWin32' ? 50 : 500;
+	my $check_memory_every = $^O ne 'MSWin32' ? 50 : 500;
 		
 # TO DO : need to handle cases where we don't have bytes, but would have duration
         # scale the transferred bytes for printing the graph
@@ -1225,7 +1264,7 @@ sub normalize_data_for_output {
         if ($current_memory_usage > $max_memory_usage) {
             $max_memory_usage = $current_memory_usage;
         }
-	}	
+    }	
 
     print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
     print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
@@ -1401,7 +1440,7 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'medium', " " ) ); 
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) ); 
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) ) if $print_memory;
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) ) if $track_memory;
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $count_column_width + 1 ) . "$padding\n" );
 
 
@@ -1473,10 +1512,21 @@ sub print_message_summary {
 
     ### DETERMINE CUT OF HIGHLIGHTED VS PLAIN MESSAGES TO PRINT ###
     # Step 1: Sort and store available messages for each category in a hash of arrays
-    my %sorted_keys = (
-        'highlight' => [ sort { $log_messages{'highlight'}{$b}{count} <=> $log_messages{'highlight'}{$a}{count} } keys %{$log_messages{'highlight'}} ],
-        'plain' => [ sort { $log_messages{'plain'}{$b}{count} <=> $log_messages{'plain'}{$a}{count} } keys %{$log_messages{'plain'}} ],
-    );
+#    my %sorted_keys = (
+#        'highlight' => [ sort { $log_messages{'highlight'}{$b}{$sort_key} <=> $log_messages{'highlight'}{$a}{$sort_key} } keys %{$log_messages{'highlight'}} ],
+#        'plain' => [ sort { $log_messages{'plain'}{$b}{$sort_key} <=> $log_messages{'plain'}{$a}{$sort_key} } keys %{$log_messages{'plain'}} ],
+#    );
+
+    my %sorted_keys = ( 'highlight' => [], 'plain' => [] );
+    foreach my $grouping ( qw( highlight plain ) ) {
+        my @sorted_keys = sort {
+            my $count_a = $log_messages{$grouping}{$a}{$sort_key} // 0;
+            my $count_b = $log_messages{$grouping}{$b}{$sort_key} // 0;
+            $count_b <=> $count_a; 
+        } keys %{$log_messages{$grouping}};
+
+        $sorted_keys{$grouping} = \@sorted_keys;
+    }
 
     # Initialize the hash to store top message counts
     my %top_message_count = (
@@ -1516,7 +1566,8 @@ sub print_message_summary {
 
         # Ensure the grouping exists and is a hash reference
         if (exists $log_messages{$grouping} && ref($log_messages{$grouping}) eq 'HASH') {
-            my @top_keys = (sort { $log_messages{$grouping}{$b}{count} <=> $log_messages{$grouping}{$a}{count} } keys %{$log_messages{$grouping}})[0..($top_n_messages-1)];
+            #my @top_keys = (sort { $log_messages{$grouping}{$b}{count} <=> $log_messages{$grouping}{$a}{count} } keys %{$log_messages{$grouping}})[0..($top_n_messages-1)];
+            my @top_keys = @{$sorted_keys{$grouping}}[0..($top_n_messages-1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
 
             next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
 
@@ -1570,7 +1621,7 @@ sub print_message_summary {
                     if( $print_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
                         my $total_bytes_num = $log_messages{$grouping}{$key}{total_bytes};
                         my $total_bytes = format_bytes( $total_bytes_num,'B' );
-                        my $mean_bytes = round( $total_bytes_num / $count ); 
+                        my $mean_bytes = round( $total_bytes_num / $count ) if defined $total_bytes_num; 
                         my $mean = $log_messages{$grouping}{$key}{mean};
                         my $impact = $log_messages{$grouping}{$key}{impact};
                         my $p1 = $log_messages{$grouping}{$key}{p1};
