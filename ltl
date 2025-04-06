@@ -56,7 +56,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.4.0";
+my $version_number = "0.4.1";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 10;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -935,12 +935,14 @@ sub calculate_all_statistics {
             delete $log_analysis{$bucket}{$duration_bucket}{durations};
         }
     
-        my ($mean, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
+        my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
 
         $log_stats{$bucket} = {
             count   => $aggregated_data->{count},
             bytes   => $aggregated_data->{total_bytes},
+            min     => $min,
             mean    => $mean,
+            max     => $max,
             p1      => $p1,
             p50     => $p50,
             p75     => $p75,
@@ -969,12 +971,12 @@ sub calculate_all_statistics {
             my $z_score = calculate_z_score($mean, $rolling_mean, $rolling_std_dev);
 
     #        print "Time Bucket: $bucket\n";
-    #        print "Count: $aggregated_data->{count}, Bytes: $aggregated_data->{total_bytes}, Mean: $mean, P1: $p1, P50: $p50, P70: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: $z_score\n";
+    #        print "Count: $aggregated_data->{count}, Bytes: $aggregated_data->{total_bytes}, Min: $min, Mean: $mean, Max: $max, P1: $p1, P50: $p50, P70: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: $z_score\n";
 	    $log_stats{$bucket}{z_score} = $z_score;
         } else {
 
     #        print "Time Bucket: $bucket\n";
-    #        print "Count: $aggregated_data->{count}, Bytes: $aggregated_data->{total_bytes}, Mean: $mean, P1: $p1, P50: $p50, P75: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A\n";
+    #        print "Count: $aggregated_data->{count}, Bytes: $aggregated_data->{total_bytes}, Min: $min, Mean: $mean, Max: $max, P1: $p1, P50: $p50, P75: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A\n";
         }
 
         # Update rolling window logic
@@ -1050,11 +1052,14 @@ sub calculate_all_statistics {
 
                 if( defined $aggregated_data->{total_duration} ) { 
 
-                    my ($mean, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
+                    my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
                     my $impact = $log_messages{$category}{$log_key}{impact};
-                    #print "--- $log_key ---\n     Count: $aggregated_data->{count}, Mean: $mean, P1: $p1, P50: $p50, P75: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A, Total duration: $aggregated_data->{total_duration}\n";
+                    #print "--- $log_key ---\n     Count: $aggregated_data->{count}, Min: $min, Mean: $mean, Max: $max, P1: $p1, P50: $p50, P75: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A, Total duration: $aggregated_data->{total_duration}\n";
     
+                    $log_messages{$category}{$log_key}{min} = $min;
                     $log_messages{$category}{$log_key}{mean} = $mean;
+                    $log_messages{$category}{$log_key}{max} = $max;
+                    $log_messages{$category}{$log_key}{std_dev} = $std_dev;
                     $log_messages{$category}{$log_key}{p1} = $p1;
                     $log_messages{$category}{$log_key}{p50} = $p50;
                     $log_messages{$category}{$log_key}{p75} = $p75;
@@ -1104,13 +1109,16 @@ sub calculate_statistics {
     my ($bucket_data) = @_;
     my $count = $bucket_data->{count};
     return unless $count > 0;
-    
+
+    my $min = min( @{$bucket_data->{durations}} );
     my $mean = int($bucket_data->{total_duration} / $count);
+    my $max = max( @{$bucket_data->{durations}} );
     my $variance = ($bucket_data->{sum_of_squares} / $count) - ($mean ** 2);
     my $std_dev = sqrt($variance);
     #my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean) : 'N/A';
     my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean ) : undef;
     my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
+
 
     my $p1   = int($sorted[int($count * 0.01)]);
     my $p50  = int($sorted[int($count * 0.5)]);
@@ -1120,7 +1128,7 @@ sub calculate_statistics {
     my $p99  = int($sorted[int($count * 0.99)]);
     my $p999 = int($sorted[int($count * 0.999)]);
     
-    return ($mean, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv);
+    return ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv);
 }
 
 sub initialize_empty_time_windows {
@@ -1581,9 +1589,9 @@ sub print_message_summary {
 
                 if( $print_durations ) {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", "P1" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", "Min" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P50" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", "P99" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", "P99.9" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", "CV" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", "Time" ) . " " x $table_padding_inner; 
                 } else {
@@ -1596,9 +1604,9 @@ sub print_message_summary {
 
                 if( $print_durations ) {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", "P1" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", "Min" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P50" ) . " " x $table_padding_inner; 
-                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", "P99" ) . " " x $table_padding_inner; 
+                    $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", "P99.9" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", "CV" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", "Time" ) . " " x $table_padding_inner; 
                 } else {
@@ -1625,7 +1633,10 @@ sub print_message_summary {
                         my $total_bytes_num = $log_messages{$grouping}{$key}{total_bytes};
                         my $total_bytes = format_bytes( $total_bytes_num,'B' );
                         my $mean_bytes = round( $total_bytes_num / $count ) if defined $total_bytes_num; 
+                        my $min = $log_messages{$grouping}{$key}{min};
                         my $mean = $log_messages{$grouping}{$key}{mean};
+                        my $max = $log_messages{$grouping}{$key}{max};
+                        my $std_dev = $log_messages{$grouping}{$key}{std_dev};
                         my $impact = $log_messages{$grouping}{$key}{impact};
                         my $p1 = $log_messages{$grouping}{$key}{p1};
                         my $p50 = $log_messages{$grouping}{$key}{p50};
@@ -1640,21 +1651,21 @@ sub print_message_summary {
 
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $count ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", defined $p1 ? ( length( $p1 ) >= 4 ? format_time( $p1, 'ms', 'short' ) : $p1 ) : "" ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", defined $min ? ( length( $min ) >= 4 ? format_time( $min, 'ms', 'short' ) : $min ) : "" ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", defined $p50 ? ( length( $p50 ) >= 4 ? format_time( $p50, 'ms', 'short' ) : $p50 ) : "" ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", defined $p99 ? ( length( $p99 ) >= 4 ? format_time( $p99, 'ms', 'short' ) : $p99 ) : "" ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", defined $p999 ? ( length( $p999 ) >= 4 ? format_time( $p999, 'ms', 'short' ) : $p999 ) : "" ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", defined $cv ? $cv : "" ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", defined $total_duration ? $total_duration : "" ) . " " x $table_padding_inner; 
 
                         if( $write_messages_to_csv && defined $csv_fh ) {
-                            $csv->print($csv_fh, [ $grouping, $key, $count, $mean_bytes, $total_bytes_num, $total_bytes, $mean, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact ]);
+                            $csv->print($csv_fh, [ $grouping, $key, $count, $mean_bytes, $total_bytes_num, $total_bytes, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact ]);
                         }
                     } else {
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $count ) . " " x $table_padding_inner; 
 
                         if( $write_messages_to_csv && defined $csv_fh ) {
-                            $csv->print($csv_fh, [ $grouping, $key, $count, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef ]);
+                            $csv->print($csv_fh, [ $grouping, $key, $count, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef ]);
                         }
                     }
 
@@ -1713,7 +1724,7 @@ if( $write_messages_to_csv ) {
     $csv_file_args =~ tr/!@#\$%\^&*()_+{}|:"<>?[\];',.\/\\`~ /_/;
     my $csv_file_name = "${timestamp}-LTL-STATS-${csv_file_args}.csv";
     open $csv_fh, '>', $csv_file_name or die "Could not open file: $!";									 # Open a file for writing
-    $csv->print($csv_fh, [qw(Category Message Count MeanBytes TotalBytes TotalBytesNice MeanDuration P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact)]);	 # Print the header
+    $csv->print($csv_fh, [qw(Category Message Count MeanBytes TotalBytes TotalBytesNice MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact)]);	 # Print the header
 }
 
 print_message_summary();														 # Print and write message summaries
