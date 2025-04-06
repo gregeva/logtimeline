@@ -48,9 +48,9 @@ use Text::CSV;
 use Text::CSV_PP;
 
 # Change code page to UTF-8
-#if ($^O eq 'MSWin32') {
-#	system("chcp 65001 > nul");
-#}
+if ($^O eq 'MSWin32') {
+	system("chcp 65001 > nul");
+}
 
 # Start time
 my $start_time = [gettimeofday];
@@ -119,7 +119,7 @@ my %blocks = (
     'I' => '■',    # Black Very Heavy
     'J' => '□'     # White square
 );
-my $default_chart_block = $^O ne 'MSWin32' ? "A" : "I";
+my $default_chart_block = $^O ne 'MSWin32' ? "A" : "A";   # had set it to I for Windows
 
 my %colors = (
     'ERROR' => "\033[0;31m",
