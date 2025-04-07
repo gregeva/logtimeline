@@ -28,6 +28,7 @@ Until a certain version, the Mashup JavaScript websocket client misbehaves in it
 # Extremely Forward Looking - Event Performance Analysis
 
 Inspired from a Confluence page I found using a Splunk search to get percentile measures for event processing performance.
+https://thingworx.jira.com/wiki/spaces/IIoTP/pages/4400316501/Event+Performance+Analysis+Using+Splunk
 
 | rex field=_raw "(?<event_type>Ordered|Unordered).*?\s(?<action_type>pushed|consumed)\s(?:to|from)\s(?<queue_type>durable queue|internal queue).*?eventBatchId:\s(?<eventBatchId>\S+),.*?timestamp: (?<timestamp>\S+)(?<!\,)" 
 | where action_type="pushed" OR action_type="consumed" 
