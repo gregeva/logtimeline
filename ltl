@@ -56,11 +56,11 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.4.1";
+my $version_number = "0.4.2";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 10;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
-my $impact_time_exponent = 4;
+my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats ) = 0;
 my ( $include_query_string ) = 0;
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data ) = ( 0,0,0,0,0,0,0,0 );
@@ -213,7 +213,7 @@ sub print_title {
     my $title = <<"END";
 \033[0;37m \033[90m\033[109m
 ──────────────────────────────────────────────────────────────────────────────────────────────
-   ,:: ltl ::' log timeline  --  by Greg Eva // geva\@ptc.com // gregeva\@gmail.com
+   ,:: ltl ::' log timeline [$version_number] --  by Greg Eva // geva\@ptc.com // gregeva\@gmail.com
 ──────────────────────────────────────────────────────────────────────────────────────────────
 \033[0m
 END
@@ -709,7 +709,7 @@ sub read_and_process_logs {
 
 #print "Thread: $thread   Object: $object   Message: $message\n";
 
-            #print "\033[0;32m[$timestamp_str|$category_bucket] [$is_line_match/$match_type] \033[0m$_";
+            #print "\033[0;32m[$timestamp_str|$category_bucket] HTTP $status_code [$is_line_match/$match_type] \033[0m$_";
             #$| = 1; # Flush output
 
             if( $is_line_match ) {
@@ -774,7 +774,7 @@ sub read_and_process_logs {
 
                 if( defined( $message ) ) {
                     my $log_key = "";
-                    my $log_level = $category_bucket;
+                    my $log_level = $status_code > 0 ? $status_code : $category_bucket;			# If we received an actual HTTP status code, use that for the message statistic data model
                     my $category = "";
                     $log_level =~ s/-HL$//;
 
