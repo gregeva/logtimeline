@@ -56,13 +56,13 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.4.2";
+my $version_number = "0.4.3";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 10;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats ) = 0;
-my ( $include_query_string ) = 0;
+my ( $include_query_string, $include_session ) = ( 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data ) = ( 0,0,0,0,0,0,0,0 );
 my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );		# this is where the counts of log entries are tallied across the time buckets
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
@@ -223,7 +223,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--include-query-string|-iqs] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -441,6 +441,7 @@ sub adapt_to_command_line_options {
         'omit-summary|osum' => \$omit_summary,
         'omit-rate|or' => \$omit_rate,
         'include-query-string|iqs' => \$include_query_string,
+        'include-session|is' => \$include_session,
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds,
         'version|v' => \$print_version,
@@ -592,7 +593,7 @@ sub read_and_process_logs {
 
         while (<$fh>) {
             $line_number++;
-            my ( $timestamp_str, $log_level, $category_bucket, $object, $instance, $user, $platform, $thread, $message ) = ("") x 9;
+            my ( $timestamp_str, $log_level, $category_bucket, $object, $instance, $user, $platform, $thread, $session, $message ) = ("") x 10;
             my ( $is_line_match, $is_access_log, $match_type, $status_code, $heap_from, $heap_to, $heap_size ) = ( 0, 0, 0, 0, 0, 0, 0 );
             my ( $bytes, $duration, $count ) = ( undef, undef, undef );
             my $timestamp;
@@ -634,7 +635,7 @@ sub read_and_process_logs {
                 $is_line_match = 1;
                 $match_type = 2;			# this is matching RAC client log format [2025-02-04T12:06:22.784] [TRACE]
                 $timestamp_str =~ tr/T/ /;
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) (\d+)/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) (\d+)[ ]?(\S+)?[ ]?(\S+)?/ ) {
                 $is_line_match = 1;
                 $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
                 $is_access_log = 1;
@@ -642,8 +643,9 @@ sub read_and_process_logs {
                 $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
 
-                $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
-                $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
+                $message =~ s/ HTTP\/\d\.\d$//;							# chop off the HTTP protocol and version
+                $message =~ s/\?.+$// unless $include_query_string;				# chop off the query string from the URI
+                $message = "[$session] $message" if defined $session && $include_session;	# include session if we found it in the logs
 
 #print "$message -- $_";
 #            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+)/ ) {    # old, working, updated with $ at the end
