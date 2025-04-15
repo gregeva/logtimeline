@@ -2,13 +2,17 @@
 
 These scripts and other resources are built to speed and facilitate debugging, diagnostics, and likely other things.
 
-## slt : Simple Log Timeline
+## llt : Log Time Line
 
 Have you ever wished that you could quickly identify areas of interest or hotspots in very large log files so that you could navigate there directly?  That's what this timeline view is for!!
 
 When dealing with logs which have a very large amount of lines/errors/whatever, it can be quite hard to get an overall view of the file while looking at a screen full of lines representing maybe less than a second.
 
-![slt]([https://raw.githubusercontent.com/gregeva/tools/refs/heads/main/images/slt-30minutewindows.png](https://raw.githubusercontent.com/gregeva/tools/refs/heads/main/images/slt-30minutewindows.png) "slt")
+![ltl](https://raw.githubusercontent.com/gregeva/tools/refs/heads/main/images/slt-30minutewindows.png)
+
+ltl, or log time line has come a long way since its initial release a few months ago.  The usage principle is basically to a) read log lines and try to establish the included time, b) also pull out message details and stats, c) filter in or out the lines based on provided command line options.  Use it to search for patterns, slowness, determine frequency and spacing of calls, and establish performance profile/baseline of your APIs or services.  See help for a list of all of the options and try them out yourself.
+
+Static binary packages are provided for Windows, Ubuntu, and Mac OS.  Download, rename to ltl, and place somewhere in your path.
 
 ## cleanlogs : removes unwanted lines and partial lines to faciliate analysis
 
@@ -16,14 +20,11 @@ Partial lines where one node or thread have written over another log appender ma
 
 Clean logs takes care of some of these scenarios, outputting a "clean" version of one or many log files.
 
-![cleanlogs]([https://raw.githubusercontent.com/gregeva/tools/refs/heads/main/images/slt-30minutewindows.png](https://raw.githubusercontent.com/gregeva/tools/refs/heads/main/images/cleanlogs-wildcard-input-to-output.png) "cleanlogs")
-
-
 ## twxsummarize : ThingWorx Log Summary tool
 
 Similar to the above, this tool is not time-based, but instead groups and summarizes ThingWorx log lines using the common log pattern from Logback.  This helps to answer questions like if certain subsystems are starting to have errors all of a sudden, or if errors present where your diagnostic efforts should focus.
 
-![twxsummarize]([https://raw.githubusercontent.com/gregeva/tools/refs/heads/main/images/twxsummarize-10lines-2files.png](https://raw.githubusercontent.com/gregeva/tools/refs/heads/main/images/twxsummarize-10lines-2files.png) "twxsummarize")
+![twxsummarize](https://raw.githubusercontent.com/gregeva/tools/refs/heads/main/images/twxsummarize-10lines-2files.png)
 
 In a future release I'll add other capabilities like a message grouping view.
 
