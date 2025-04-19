@@ -2,10 +2,10 @@
 
 # TO DO:
 
-# - Figure out why "Lines Included" is wrong (it is slightly higher than the total of the matched columns)
 # - Figure out and fix issues using file name glob patterns in Windows (ScriptLog.*.log)
 # - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
 
+# - Simplify data model for time window statistics and refactor code
 # - Figure out how to work in additional graphs for bytes, duration, count (events/load rows)
 # - Second graph (time): yellow bar chart showing total duration for current time bucket
 # - Adapt message field widths based on terminal width (object field and thread pool)
@@ -788,6 +788,7 @@ sub read_and_process_logs {
                 my $bucket = int($timestamp->epoch() / $bucket_size_seconds) * $bucket_size_seconds;
 
                 $log_counts{$bucket}{$category_bucket}{count}++;
+                $total_lines_included++;
 
                 if( defined( $message ) ) {
                     my $log_key = "";
@@ -1274,7 +1275,6 @@ sub normalize_data_for_output {
             my $scaled_count = $max_total_count != 0 ? int(($count / $max_total_count) * $max_graph_width) : 0;
             $log_counts{$bucket}{$category_bucket}{scaled_count} = $scaled_count;
             $category_totals{$category_bucket} += $count;							# tally the totals for each category bucket
-            $total_lines_included += $count;
             $total_lines_highlighted += $count if $category_bucket =~ /-HL$/;
         }
 
