@@ -70,7 +70,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.4.5";
+my $version_number = "0.4.6";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -81,7 +81,8 @@ my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elaps
 my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );		# this is where the counts of log entries are tallied across the time buckets
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
 my $durations_graph_width = 0;
-my $max_graph_width = 0;
+my ( $graph_count, $max_graph_width ) = ( 1, 0 );
+my %graph_width;
 my ( $print_durations, $track_memory ) = ( 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -106,8 +107,8 @@ my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex );
 my $pause_output = 0;
 my $omit_values = 0;
-my ( $sort_type, $sort_key ) = ( "count", "count" );
-my ( $group_similar_sensitivity ) = ( "none" );
+my ( $sort_type, $sort_key, $trend_type, $trend_key ) = ( "count", "count", "count", "count" );
+my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 my @in_files;
 my %in_files_matched;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
@@ -181,8 +182,8 @@ my %colors = (
 # ANSI code for yellow background
 my $white_fg  = "\033[1;37m"; # Bright White Foreground
 #my $yellow_bg = "\033[43m";  # Yellow background
-my $yellow_bg = "\033[48;5;229m";  # Very pale yellow background
-#my $yellow_bg = "\033[48;5;222m";  # Light gold background
+#my $yellow_bg = "\033[48;5;229m";  # Very pale yellow background
+my $yellow_bg = "\033[48;5;222m";  # Light gold background
 #my $yellow_bg = "\033[48;5;216m";  # Pastel yellow background
 my $reset_all    = "\033[0m";  # Reset ALL attributes
 
@@ -321,6 +322,7 @@ sub convert_bytes {
 sub format_bytes {
     my ($value, $unit) = @_;
     my %units = (
+        'b'  => 1,
         'B'  => 1,
         'kB' => 1024,
         'MB' => 1024**2,
@@ -467,6 +469,7 @@ sub adapt_to_command_line_options {
 	'memory-usage|mem' => \$track_memory,
         'output-csv|o' => \$write_messages_to_csv,
         'sort|so=s' => \$sort_type,
+        'trend|t=s' => \$trend_type,
         'group-similar|g=s' => \$group_similar_sensitivity
     ) or die print_usage( "required options not provided" ); 
 
@@ -482,6 +485,7 @@ sub adapt_to_command_line_options {
     @in_files = @ARGV;
     die print_usage( "unable to open any files" ) unless @in_files;
     die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( count duration time bytes impact );
+    die print_usage( "invalid trend type used" ) unless grep { $_ eq $sort_type } qw( count duration time bytes );
 
     if( $sort_type =~ /^duration|time$/i ) {
         $sort_key = "total_duration_num";
@@ -489,6 +493,14 @@ sub adapt_to_command_line_options {
         $sort_key = "total_bytes";
     } elsif( $sort_type =~ /^impact$/i ) {
         $sort_key = "impact";
+    }
+
+    if( $trend_type =~ /^duration|time$/i ) {
+        $trend_key = "duration";
+        $graph_count = 2;
+    } elsif( $trend_type =~ /^bytes$/i ) {
+        $trend_key = "bytes";
+        $graph_count = 2;
     }
 
 # Should include cleaner handling of possible problems with entering command line options
@@ -943,21 +955,22 @@ sub calculate_all_statistics {
         my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
 
         $log_stats{$bucket} = {
-            count   => $aggregated_data->{count},
-            bytes   => $aggregated_data->{total_bytes},
-            min     => $min,
-            mean    => $mean,
-            max     => $max,
-            p1      => $p1,
-            p50     => $p50,
-            p75     => $p75,
-            p90     => $p90,
-            p95     => $p95,
-            p99     => $p99,
-            p999    => $p999,
-            std_dev => $std_dev,
-            cv      => $cv,
-            z_score => undef 
+            count    => $aggregated_data->{count},
+            bytes    => $aggregated_data->{total_bytes},
+            duration => $aggregated_data->{total_duration},
+            min      => $min,
+            mean     => $mean,
+            max      => $max,
+            p1       => $p1,
+            p50      => $p50,
+            p75      => $p75,
+            p90      => $p90,
+            p95      => $p95,
+            p99      => $p99,
+            p999     => $p999,
+            std_dev  => $std_dev,
+            cv       => $cv,
+            z_score  => undef 
         };
     
         # Calculate rolling mean and std_dev
@@ -1170,6 +1183,11 @@ sub normalize_data_for_output {
     # Determine the maximum total log messages for any time window
     my $max_total_count = 0;
     my $max_total_bytes = 0;
+    my %max_total = (
+        count => 0,
+        bytes => 0,
+        duration => 0,
+    );
 
     print "\rScaling and normalizing data...";
 
@@ -1193,9 +1211,13 @@ sub normalize_data_for_output {
         }
 
         $max_total_count = $total_count if $total_count > $max_total_count;
+        $max_total{count} = $total_count if $total_count > $max_total_count;
         $max_total_bytes = $total_bytes if ( defined $total_bytes && $print_durations && $total_bytes > $max_total_bytes );
-    }
+        $max_total{bytes} = $total_bytes if ( defined $total_bytes && $print_durations && $total_bytes > $max_total_bytes );
 
+        # Calculate the maximum value of the selected trend type if it is activated
+        $max_total{$trend_key} = $log_stats{$bucket}{$trend_key} if ( defined $log_stats{$bucket}{$trend_key} && $graph_count > 1 && $log_stats{$bucket}{$trend_key} > $max_total{$trend_key} );
+    }
 
     # Calculate the maximum length of log level titles and counts
 #    if( !$omit_values ) {
@@ -1229,37 +1251,60 @@ sub normalize_data_for_output {
                 }
                 $bucket_legend_length += $title_length;
             }
-            $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
-# abc
-#print "-- bucket_legend_length = $bucket_legend_length, legend_length = $legend_length\n";
 
+            $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
+#print "-- bucket_legend_length = $bucket_legend_length, legend_length = $legend_length\n";
         }
 #    }
 
     #print "Legend length: $legend_length\n";
 
+# TO DO: make this more dynamic, so that empty columns wouldn't be printed (ie; bytes)
     $durations_graph_width = $print_durations ? 59 + 3: 0;
 
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
     $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format ) - $durations_graph_width;
     $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
+
+    %graph_width = ( 1 => $max_graph_width );
+
+    # Split the graph spacing into parts if more than one graph is to be drawn
+    if( $graph_count > 1 ) {
+        my %graph_relative_size = (
+            1 => 65,
+            2 => 35
+        );
+        %graph_width = (
+            1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
+            2 => round( $graph_relative_size{2} / 100 * $max_graph_width )
+        );
+     }
+
+# bookmark2    
     foreach my $bucket (keys %log_counts) {
         my $processed_time_buckets //= 0;
 	my $check_memory_every = $^O ne 'MSWin32' ? 50 : 500;
 		
 # TO DO : need to handle cases where we don't have bytes, but would have duration
-        # scale the transferred bytes for printing the graph
+        # scale the transferred bytes for printing the statistics table
         my $bytes = $log_stats{$bucket}{bytes};
         my $scaled_bytes = ( defined $bytes && defined $max_total_bytes && $max_total_bytes != 0 ) ? int(($bytes / $max_total_bytes) * $durations_graph_width) : 0;
         $log_stats{$bucket}{scaled_bytes} = $scaled_bytes;
-		
+
+# bookmark3
+        if( $graph_count > 1 ) {
+            my $scaled_trend_key = "scaled_${trend_key}";
+            # need to subtract a few for additional space for the scaled amount to allow for room for separators
+            $log_stats{$bucket}{$scaled_trend_key} = ( defined $log_stats{$bucket}{$trend_key} && defined $max_total{$trend_key} && $max_total{$trend_key} != 0 ) ? int(( $log_stats{$bucket}{$trend_key} / $max_total{$trend_key} ) * ( $graph_width{2} - 3 ) ) : 0;
+        }
 
         # scale the log message counts for printing the graph
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
             #next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0;    # should be caught by below 
             my $count = $log_counts{$bucket}{$category_bucket}{count};
             next if !defined $count;										# skip scaling where varible was left or is undefined (ie; no error or message rate)
-            my $scaled_count = $max_total_count != 0 ? int(($count / $max_total_count) * $max_graph_width) : 0;
+            #my $scaled_count = $max_total_count != 0 ? int(($count / $max_total_count) * $max_graph_width) : 0;
+            my $scaled_count = $max_total_count != 0 ? int(($count / $max_total_count) * $graph_width{1} ) : 0;	# Adapting count scaling to multi-graph functionality
             $log_counts{$bucket}{$category_bucket}{scaled_count} = $scaled_count;
             $category_totals{$category_bucket} += $count;							# tally the totals for each category bucket
             $total_lines_highlighted += $count if $category_bucket =~ /-HL$/;
@@ -1297,12 +1342,13 @@ sub print_bar_graph {
         foreach my $bucket (sort keys %log_counts) {
             my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
             my $printed_chars = 0;
+            my $timestamp_legend_length = length( $bucket_time_str ) + $legend_length + 2; 
 
             ## PRINT TIMESTAMP IN CHART ROW
             $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
             print "$bucket_time_str ";
 
-            $printed_chars += length( $bucket_time_str ) + $legend_length + 2;
+            $printed_chars += $timestamp_legend_length;
             my $log_details = "";
             my $rate_metrics = "";
             my $legend_length_bucket = 0;
@@ -1358,6 +1404,40 @@ sub print_bar_graph {
                     print "$color" . ( $category_bucket =~ /^[12345]xx(-HL)?$/ ? $blocks{'A'} : $blocks{$default_chart_block} ) x $scaled_count . "$colors{'NC'}";
                     $printed_chars += $scaled_count;
                 }
+            }
+
+# bookmark5
+            if( $graph_count > 1 ) {
+                my $scaled_trend_key = "scaled_${trend_key}";
+                my $scaled_trend_value = $log_stats{$bucket}{$scaled_trend_key};
+                my $missing_chars = ( $graph_width{1} ) - ( $printed_chars - $timestamp_legend_length );
+                my $trend_value = $log_stats{$bucket}{$trend_key};
+
+                if( $trend_type =~ /^time|duration$/i ) {
+                    $trend_value = " " . format_time( $log_stats{$bucket}{$trend_key}, 'ms', 'long', ' ' );
+                } elsif( $trend_type =~ /^bytes$/i ) {
+                    $trend_value = " " . format_bytes( $log_stats{$bucket}{$trend_key}, 'B' );
+                }
+#print "$graph_width{1} / $printed_chars /  $missing_chars\n";
+#print "$scaled_trend_key $scaled_trend_value $log_stats{$bucket}{$trend_key}";
+                # Fill in empty characters to the start of the second graph space
+                print " " x $missing_chars . "  ";
+
+                # Print the secondary trend and associated value
+                #print "$yellow_bg"; 
+                #print "\033[93;43m";					# 93 is dark yellow foreground, 43 is light yellow background
+                print "\033[30;103m";
+                for my $i ( 0 .. $graph_width{2} - 3) {
+                    my $value_char = (split //, $trend_value )[$i];
+
+                    if( $i == $scaled_trend_value ) {
+                        print "$colors{'NC'}\033[93m";
+                    }
+
+                    print length( $value_char ) ? $value_char : " ";
+                }
+                #$printed_chars += $missing_chars + $scaled_trend_value;
+                $printed_chars += $missing_chars + 2 + ( $graph_width{2} - 2 );
             }
             
             if( $print_durations ) {
