@@ -2,10 +2,9 @@
 
 # TO DO:
 
-# - Figure out and fix issues using file name glob patterns in Windows (ScriptLog.*.log)
 # - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
+# - Figure out and fix issues using file name glob patterns in Windows (ScriptLog.*.log)
 
-# - Simplify data model for time window statistics and refactor code
 # - Figure out how to work in additional graphs for bytes, duration, count (events/load rows)
 # - Second graph (time): yellow bar chart showing total duration for current time bucket
 # - Adapt message field widths based on terminal width (object field and thread pool)
@@ -71,14 +70,14 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.4.4";
+my $version_number = "0.4.5";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
-my $rolling_window_size = 10;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
+my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats ) = 0;
 my ( $include_query_string, $include_session ) = ( 0, 0 );
-my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data ) = ( 0,0,0,0,0,0,0,0 );
+my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages ) = ( 0,0,0,0,0,0,0,0,0 );
 my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );		# this is where the counts of log entries are tallied across the time buckets
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
 my $durations_graph_width = 0;
@@ -108,6 +107,7 @@ my( $exclude_regex, $include_regex, $highlight_regex );
 my $pause_output = 0;
 my $omit_values = 0;
 my ( $sort_type, $sort_key ) = ( "count", "count" );
+my ( $group_similar_sensitivity ) = ( "none" );
 my @in_files;
 my %in_files_matched;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
@@ -238,7 +238,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--group-similar|-g none] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -466,7 +466,8 @@ sub adapt_to_command_line_options {
         'bytes-max|bmax=i' => \$filter_bytes_max,
 	'memory-usage|mem' => \$track_memory,
         'output-csv|o' => \$write_messages_to_csv,
-        'sort|so=s' => \$sort_type
+        'sort|so=s' => \$sort_type,
+        'group-similar|g=s' => \$group_similar_sensitivity
     ) or die print_usage( "required options not provided" ); 
 
     $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
@@ -821,9 +822,6 @@ sub read_and_process_logs {
 
                     # Keep track of data for message based statistics
                     if( $is_access_log && !$omit_stats ) {
-                        # Calculate the log scale bucket for the duration
-                        #my $duration_bucket = log_bucket($duration, $log_base);
-                        my $duration_bucket = 1;
 # bookmark1
 # TO DO: I'm doubtful that these duration buckets are even required considering that we are storing each duration value.
 
@@ -832,7 +830,6 @@ sub read_and_process_logs {
                         #$bytes = 0 if !defined($bytes);
 
                         # Initialize the hash if not already done
-                        #$log_messages{$category}{$log_key}{$duration_bucket} //= {
                         $log_messages{$category}{$log_key} //= {
                             count => 0,
                             total_bytes => 0,
@@ -843,23 +840,16 @@ sub read_and_process_logs {
 
 
 ### PREPARE THE DATA FOR SORTING HERE ###    
-                        #$log_messages{$category}{$log_key}{$duration_bucket}{count}++;
-# Oops.... I was double counting now that I removed the extra buckets
-                        #$log_messages{$category}{$log_key}{count}++;
 
                         # Accumulate the total duration and bytes
-                        #$log_messages{$category}{$log_key}{$duration_bucket}{total_bytes} += $bytes if defined $bytes;
                         $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
 # TO DO: the bytes for each message is captured, but not surfaced in the message results
 
                         if( defined $duration ) {
-                            #$log_messages{$category}{$log_key}{$duration_bucket}{total_duration} += $duration;
                             $log_messages{$category}{$log_key}{total_duration} += $duration;
                             $log_messages{$category}{$log_key}{total_duration_num} += $duration;
 
                             # Accumulate the sum of squares for variance calculation
-                            #$log_messages{$category}{$log_key}{$duration_bucket}{sum_of_squares} += $duration ** 2;
-                            #push @{$log_messages{$category}{$log_key}{$duration_bucket}{durations}}, $duration;
                             $log_messages{$category}{$log_key}{sum_of_squares} += $duration ** 2;
                             push @{$log_messages{$category}{$log_key}{durations}}, $duration;
 
@@ -879,12 +869,11 @@ sub read_and_process_logs {
 
                     ## STATISTICAL DATA CAPTURE ##
                     #print "$duration -- $_";
-                    my $duration_bucket = log_bucket($duration, $log_base);
                     $duration = 0 if !defined( $duration );
                     $bytes = 0 if !defined( $bytes );
     
                     # Initialize the hash if not already done
-                    $log_analysis{$bucket}{$duration_bucket} //= {
+                    $log_analysis{$bucket} //= {
                         count => 0,
                         total_bytes => 0,
                         total_duration => 0,
@@ -893,11 +882,11 @@ sub read_and_process_logs {
                     };
 
                     # Update the hash with the new data
-                    $log_analysis{$bucket}{$duration_bucket}{count}++;
-                    $log_analysis{$bucket}{$duration_bucket}{total_duration} += $duration;
-                    $log_analysis{$bucket}{$duration_bucket}{total_bytes} += $bytes;
-                    $log_analysis{$bucket}{$duration_bucket}{sum_of_squares} += $duration ** 2;
-                    push @{$log_analysis{$bucket}{$duration_bucket}{durations}}, $duration;
+                    $log_analysis{$bucket}{count}++;
+                    $log_analysis{$bucket}{total_duration} += $duration;
+                    $log_analysis{$bucket}{total_bytes} += $bytes;
+                    $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
+                    push @{$log_analysis{$bucket}{durations}}, $duration;
 
                   #  printf "\033[0;35m[duration: %d] [bytes: %d]\033[0m\n", $duration, $bytes;
                   #  printf "\033[0;35m[status: %s] [duration: %d] [bytes: %d]\033[0m\n", $category_bucket, $log_counts{$bucket}{duration}, $log_counts{$bucket}{bytes};
@@ -937,21 +926,19 @@ sub calculate_all_statistics {
             }
         }
    
-        foreach my $duration_bucket (keys %{$log_analysis{$bucket}}) {
-            my $bucket_data = $log_analysis{$bucket}{$duration_bucket};
+        my $bucket_data = $log_analysis{$bucket};
 
-            next if !defined( $bucket_data->{count} );
+        next if !defined( $bucket_data->{count} );
 
-            $aggregated_data->{count} += $bucket_data->{count};
-            $aggregated_data->{total_duration} += $bucket_data->{total_duration};
-            $aggregated_data->{total_bytes} += $bucket_data->{total_bytes};
-            $aggregated_data->{sum_of_squares} += $bucket_data->{sum_of_squares};
-            push @{$aggregated_data->{durations}}, @{$bucket_data->{durations}};
+        $aggregated_data->{count} += $bucket_data->{count};
+        $aggregated_data->{total_duration} += $bucket_data->{total_duration};
+        $aggregated_data->{total_bytes} += $bucket_data->{total_bytes};
+        $aggregated_data->{sum_of_squares} += $bucket_data->{sum_of_squares};
+        push @{$aggregated_data->{durations}}, @{$bucket_data->{durations}};
 
-            # free up the memory from the data structure as it is no longer needed
-            undef $log_analysis{$bucket}{$duration_bucket}{durations};
-            delete $log_analysis{$bucket}{$duration_bucket}{durations};
-        }
+        # free up the memory from the data structure as it is no longer needed
+        undef $log_analysis{$bucket}{durations};
+        delete $log_analysis{$bucket}{durations};
     
         my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
 
@@ -1465,6 +1452,7 @@ sub print_summary_table {
     push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "FILE PROCESSING TIME", format_time( $elapsed_read_files, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "INITIALIZE EMPTY BUCKETS", format_time( $elapsed_initialize_empty_time_windows, 's', 'medium', " " ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "GROUP SIMILAR MESSAGES", format_time( $elapsed_group_similar_messages, 's', 'medium', " " ) ) unless $group_similar_sensitivity =~ /^none$/;
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'medium', " " ) ); 
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${count_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) ); 
@@ -1702,34 +1690,51 @@ sub print_message_summary {
     return;
 }
 
+## TOKENIZATION, CLUSTERING, COMPRESSION, AGGREGATION, CLEAN UP ##
+
+
+
+
 ## MAIN ##
 
 print_title();
 adapt_to_terminal_settings(); 
 adapt_to_command_line_options();
 
+# READ AND PROCESS LOGS #
 $start_time = [gettimeofday];
 read_and_process_logs();
 $end_time = [gettimeofday];
 $elapsed_read_files = tv_interval($start_time, $end_time);
 
+# INITIALIZE EMPTY TIME BUCKETS #
 $start_time = [gettimeofday];
 initialize_empty_time_windows();
 $end_time = [gettimeofday];
 $elapsed_initialize_empty_time_windows = tv_interval($start_time, $end_time);
 
+# GROUP SIMILAR MESSAGES TOGETHER #
+unless( $group_similar_sensitivity eq "none" ) {
+    $start_time = [gettimeofday];
+
+    $end_time = [gettimeofday];
+    $elapsed_group_similar_messages = tv_interval($start_time, $end_time);
+}
+
+# CALCULATE STATISTICS #
 $start_time = [gettimeofday];
 print "Calculate statistics...";
 calculate_all_statistics();
 $end_time = [gettimeofday];
 $elapsed_calculate_statistics = tv_interval($start_time, $end_time);
 
+# NORMALIZE DATA FOR CONSOLE OUTPUT #
 $start_time = [gettimeofday];
 normalize_data_for_output();
 $end_time = [gettimeofday];
 $elapsed_normalize_data = tv_interval($start_time, $end_time);
 
-$elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_normalize_data;
+$elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
 
 print_bar_graph();
 print_summary_table();
