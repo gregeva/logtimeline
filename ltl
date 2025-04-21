@@ -70,7 +70,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.4.6";
+my $version_number = "0.4.7";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -83,6 +83,7 @@ my $max_log_message_length = 0;							# used to define the maximum key length of
 my $durations_graph_width = 0;
 my ( $graph_count, $max_graph_width ) = ( 1, 0 );
 my %graph_width;
+my @graph_columns = qw( duration bytes );
 my ( $print_durations, $track_memory ) = ( 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -157,7 +158,7 @@ my %colors = (
     'red' => "\033[0;31m",
     'green'  => "\033[0;32m",
     'yellow'  => "\033[0;33m",
-    'blue'  => "\033[0;33m",
+    'blue'  => "\033[0;34m",
     'magenta' => "\033[35m\033[49m",
     'cyan' => "\033[36m\033[49m",
     'white' => "\033[36m\033[37m",
@@ -1192,8 +1193,11 @@ sub initialize_empty_time_windows {
 
 sub normalize_data_for_output {
     # Determine the maximum total log messages for any time window
+# TO DO : These will be able to be removed soon
     my $max_total_count = 0;
     my $max_total_bytes = 0;
+
+# TO DO : user defined value will need to have a max total determined for scaling and printing
     my %max_total = (
         count => 0,
         bytes => 0,
@@ -1229,8 +1233,12 @@ sub normalize_data_for_output {
 
         # Calculate the maximum value of the selected trend type if it is activated
         #$max_total{$trend_key} = $log_stats{$bucket}{$trend_key} if ( defined $log_stats{$bucket}{$trend_key} && $graph_count > 1 && $log_stats{$bucket}{$trend_key} > $max_total{$trend_key} );
+        $max_total{count} = $log_stats{$bucket}{count} if ( defined $log_stats{$bucket}{count} && $graph_count > 1 && $log_stats{$bucket}{count} > $max_total{count} );
+        $max_total{bytes} = $log_stats{$bucket}{bytes} if ( defined $log_stats{$bucket}{bytes} && $graph_count > 1 && $log_stats{$bucket}{bytes} > $max_total{bytes} );
         $max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration} && $graph_count > 1 && $log_stats{$bucket}{duration} > $max_total{duration} );
     }
+
+#$print "Max totals --- count: $max_total{count}  bytes: $max_total{bytes}  duration: $max_total{duration}\n";
 
     # Calculate the maximum length of log level titles and counts
 #    if( !$omit_values ) {
@@ -1283,15 +1291,32 @@ sub normalize_data_for_output {
 
     # Split the graph spacing into parts if more than one graph is to be drawn
 # TO DO : Determine which columns should be printed, and from this determine the column layout
-    if( $graph_count > 1 && $max_total{duration} > 0 ) {
-        my %graph_relative_size = (
-            1 => 65,
-            2 => 35
-        );
-        %graph_width = (
-            1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
-            2 => round( $graph_relative_size{2} / 100 * $max_graph_width )
-        );
+    if( $graph_count > 1 && ( $max_total{duration} > 0 || $max_total{bytes} > 0 ) ) {
+        my %graph_relative_size;
+        $graph_count = ( $max_total{count} > 0 ) + ( $max_total{duration} > 0 ) + ( $max_total{bytes} > 0 ); 
+
+# bookmark6
+        if( $graph_count == 2 ) {
+            %graph_relative_size = (
+                1 => 65,
+                2 => 35,
+            );
+            %graph_width = (
+                1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
+                2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
+            );
+         } elsif(  $graph_count == 3 ) {
+            %graph_relative_size = (
+                1 => 60,
+                2 => 20,
+                3 => 20,
+            );
+            %graph_width = (
+                1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
+                2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
+                3 => round( $graph_relative_size{3} / 100 * $max_graph_width ),
+            );
+         }
      }
 
 # bookmark2    
@@ -1307,12 +1332,18 @@ sub normalize_data_for_output {
 
 # bookmark3 : scale the total values to the printable size
         if( $graph_count > 1 ) {
-            my $scaled_trend_key = "scaled_${trend_key}";
-            # need to subtract a few for additional space for the scaled amount to allow for room for separators
-            $log_stats{$bucket}{$scaled_trend_key} = ( defined $log_stats{$bucket}{$trend_key} && defined $max_total{$trend_key} && $max_total{$trend_key} != 0 ) ? int(( $log_stats{$bucket}{$trend_key} / $max_total{$trend_key} ) * ( $graph_width{2} - 3 ) ) : 0;
+            foreach my $key ( @graph_columns ) {			# go through the list of possible columns and populate the scaled value for that metric for the current time bucket
+                my $column_number = 2; 
+                my $scaled_key = "scaled_${key}";
+                #my $scaled_trend_key = "scaled_${trend_key}";
+
+                # need to subtract a few for additional space for the scaled amount to allow for room for separators
+                #$log_stats{$bucket}{$scaled_trend_key} = ( defined $log_stats{$bucket}{$trend_key} && defined $max_total{$trend_key} && $max_total{$trend_key} != 0 ) ? int(( $log_stats{$bucket}{$trend_key} / $max_total{$trend_key} ) * ( $graph_width{$column_number} - 3 ) ) : 0;
+                $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * ( $graph_width{$column_number++} - 3 ) ) : 0;
+            }
         }
 
-
+# NEXT TO DO: rebuild column structure to use column names as indexes, not 1, 2, 3
 
         # Scale the log message counts for printing the graph
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
@@ -1425,45 +1456,66 @@ sub print_bar_graph {
 # bookmark5
             ## PRINT ADDITIONAL TRENDED VALUES ##
             if( $graph_count > 1 && $log_stats{$bucket}{duration} > 0 ) {
-                my $scaled_trend_key = "scaled_${trend_key}";
-                my $scaled_trend_value = $log_stats{$bucket}{$scaled_trend_key};
                 my $missing_chars = ( $graph_width{1} ) - ( $printed_chars - $timestamp_legend_length );
-                my $trend_value = $log_stats{$bucket}{$trend_key};
+                # Fill in empty characters to the start of the second graph space
+                print " " x $missing_chars;    # this is the +2 referred to in printed_chars increment
+                $printed_chars += $missing_chars;
+
+                foreach my $key ( @graph_columns ) {		# loop through available data columns to print
+                    next unless defined $log_stats{$bucket}{$key} &&  $log_stats{$bucket}{$key} > 0;
+
+                    my $scaled_trend_key = "scaled_${trend_key}";
+                    my $scaled_trend_value = $log_stats{$bucket}{$scaled_trend_key};
+                    my $trend_value = $log_stats{$bucket}{$trend_key};
+                    my $column_number = 2;
 
 # TO DO: Need to check if the value to be plotted exists for this section; should be done in normalization stage
-                next unless defined $trend_value;
+                    #next unless defined $trend_value;
+                    print " ";
 
-                if( $trend_type =~ /^time|duration$/i ) {
-                    $trend_value = " " . format_time( $log_stats{$bucket}{$trend_key}, 'ms', 'long', ' ' );
-                } elsif( $trend_type =~ /^bytes$/i ) {
-                    $trend_value = " " . format_bytes( $log_stats{$bucket}{$trend_key}, 'B' );
-                }
+                    if( $key =~ /^time|duration$/i ) {
+                    #if( $trend_type =~ /^time|duration$/i ) {
+                        $trend_value = " " . format_time( $log_stats{$bucket}{$trend_key}, 'ms', 'long', ' ' );
+                    } elsif( $key =~ /^bytes$/i ) {
+                    #} elsif( $trend_type =~ /^bytes$/i ) {
+                        $trend_value = " " . format_bytes( $log_stats{$bucket}{$trend_key}, 'B' );
+                    }
 #print "$graph_width{1} / $printed_chars /  $missing_chars\n";
 #print "$scaled_trend_key $scaled_trend_value $log_stats{$bucket}{$trend_key}";
-                # Fill in empty characters to the start of the second graph space
-                print " " x $missing_chars .  "  ";    # this is the +2 referred to in printed_chars increment
+# bookmark7
+                    # SECONDARY TREND Print the secondary trend and associated value
+                    #print "$yellow_bg"; 
+                    #print "\033[93;43m";					# 93 is dark yellow foreground, 43 is light yellow background
+                    # Blue background 104m, Blue Foreground 94m
+                    # Yellow background 103m, Yellow Foreground 93m       184 medium yellow (nice!)  190 pale yellow  226 bright yellow   (184 + 190 are the winners)
+                    # Cyan background 103m, Cyan Foreground 36m, bright Cyan 96m     51 bright cyan    123 medium cyan   159 pale cyan
+                    #print $key =~ /^duration$/i ? "\033[30;103m" : "\033[30;106m";
+                    print $key =~ /^duration$/i ? "\033[48;5;226m\033[38;5;0m" : "\033[48;5;51m\033[38;5;0m";
+                    for my $i ( 0 .. $graph_width{$column_number} - 3) {
+                        my $value_char = (split //, $trend_value )[$i];
+                        my $key_highlight = "scaled_${key}-HL";
 
-                # SECONDARY TREND Print the secondary trend and associated value
-                #print "$yellow_bg"; 
-                #print "\033[93;43m";					# 93 is dark yellow foreground, 43 is light yellow background
-                print "\033[30;103m";
-                for my $i ( 0 .. $graph_width{2} - 3) {
-                    my $value_char = (split //, $trend_value )[$i];
+# FIGURE OUT HOW TO SWITCH FROM HIGHLIGHT TO NORMAL BACKGROUND WHEN APPROPRIATE
+#                        if( !defined $log_stats{$bucket}{$key_highlight} || $log_stats{$bucket}{$key_highlight} < 1 || $i > $log_stats{$bucket}{$key_highlight} ) {
+#                            print $key =~ /^duration$/i ? "\033[48;5;184m\033[38;5;0m" : "\033[48;5;123m\033[38;5;0m";
+#                        }
 
-                    if( $i == $scaled_trend_value ) {
-                        print "$colors{'NC'}\033[93m";
+                        if( $i == $scaled_trend_value ) {
+                            print $key =~ /^duration$/i ? "$colors{'NC'}\033[93m" : "$colors{'NC'}\033[36m";
+                        }
+
+                        print length( $value_char ) ? $value_char : " ";
                     }
-
-                    print length( $value_char ) ? $value_char : " ";
+                    print "$colors{'NC'} ";						# clear the foreground color
+                    #$printed_chars += $missing_chars + $scaled_trend_value;
+                    $printed_chars += 2 + ( $graph_width{$column_number++} - 2 );	# +2 for space before and after the sparkline
                 }
-                print "$colors{'NC'}";						# clear the foreground color
-                #$printed_chars += $missing_chars + $scaled_trend_value;
-                $printed_chars += $missing_chars + 2 + ( $graph_width{2} - 2 );
             }
             
             # DURATION STATISTICS print duration statistics table
             if( $print_durations && !$omit_stats ) {
-                my $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width - 2;		# 2 is the magic number to get 1 space after the tallest bar 
+                my $missing_chars;
+                $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width - 2;		# 2 is the magic number to get 1 space after the tallest bar 
                 print " " x $missing_chars if $missing_chars > 0;
                 print " $colors{'bright-black'}│$colors{'NC'} ";
                 if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p90} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{cv} || defined $log_stats{$bucket}{z_score} ) {
