@@ -833,7 +833,8 @@ sub read_and_process_logs {
                     $log_messages{$category}{$log_key}{count}++;
 
                     # Keep track of data for message based statistics
-                    if( $is_access_log && !$omit_stats ) {
+                    #if( $is_access_log && !$omit_stats ) {                 # removing this as I need the stats for other things than printing the duration stats table (like the total time and bytes trends)
+                    if( $is_access_log ) {
 # bookmark1
 # TO DO: I'm doubtful that these duration buckets are even required considering that we are storing each duration value.
 
@@ -876,7 +877,8 @@ sub read_and_process_logs {
                 }
 
                 ## TIME-WINDOWS BASED STATISTICS DATA ##
-                if( $is_access_log && !$omit_stats ) {
+                #if( $is_access_log && !$omit_stats ) {			# removing this as I need the stats for other things than printing the duration stats table (like the total time and bytes trends)
+                if( $is_access_log  ) {
                     $print_durations = 1 if $print_durations != 1;
 
                     ## STATISTICAL DATA CAPTURE ##
@@ -897,8 +899,14 @@ sub read_and_process_logs {
                     $log_analysis{$bucket}{count}++;
                     $log_analysis{$bucket}{total_duration} += $duration;
                     $log_analysis{$bucket}{total_bytes} += $bytes;
+
                     $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
                     push @{$log_analysis{$bucket}{durations}}, $duration;
+                    
+                    if( $category_bucket =~ /-HL$/ ) {			# capture total duration and bytes for highlighted rows
+                        $log_analysis{$bucket}{'total_duration-HL'} += $duration;
+                        $log_analysis{$bucket}{'total_bytes-HL'} += $bytes;
+                    }
 
                   #  printf "\033[0;35m[duration: %d] [bytes: %d]\033[0m\n", $duration, $bytes;
                   #  printf "\033[0;35m[status: %s] [duration: %d] [bytes: %d]\033[0m\n", $category_bucket, $log_counts{$bucket}{duration}, $log_counts{$bucket}{bytes};
@@ -942,6 +950,7 @@ sub calculate_all_statistics {
 
         next if !defined( $bucket_data->{count} );
 
+# TO DO: I think that I can get rid of aggregate_data now that I've simplified the data model
         $aggregated_data->{count} += $bucket_data->{count};
         $aggregated_data->{total_duration} += $bucket_data->{total_duration};
         $aggregated_data->{total_bytes} += $bucket_data->{total_bytes};
@@ -955,22 +964,24 @@ sub calculate_all_statistics {
         my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
 
         $log_stats{$bucket} = {
-            count    => $aggregated_data->{count},
-            bytes    => $aggregated_data->{total_bytes},
-            duration => $aggregated_data->{total_duration},
-            min      => $min,
-            mean     => $mean,
-            max      => $max,
-            p1       => $p1,
-            p50      => $p50,
-            p75      => $p75,
-            p90      => $p90,
-            p95      => $p95,
-            p99      => $p99,
-            p999     => $p999,
-            std_dev  => $std_dev,
-            cv       => $cv,
-            z_score  => undef 
+            count         => $aggregated_data->{count},
+            bytes         => $bucket_data->{total_bytes},
+            'bytes-HL'    => $bucket_data->{'total_bytes-HL'},
+            duration      => $bucket_data->{total_duration},
+            'duration-HL' => $bucket_data->{'total_duration-HL'},
+            min           => $min,
+            mean          => $mean,
+            max           => $max,
+            p1            => $p1,
+            p50           => $p50,
+            p75           => $p75,
+            p90           => $p90,
+            p95           => $p95,
+            p99           => $p99,
+            p999          => $p999,
+            std_dev       => $std_dev,
+            cv            => $cv,
+            z_score       => undef 
         };
     
         # Calculate rolling mean and std_dev
@@ -1210,13 +1221,15 @@ sub normalize_data_for_output {
             $log_counts{$bucket}{'msg-rate'}{count} = $total_count / $bucket_size_seconds * 60;
         }
 
+# TO DO : Duplicate data structures here to be cleaned up
         $max_total_count = $total_count if $total_count > $max_total_count;
         $max_total{count} = $total_count if $total_count > $max_total_count;
         $max_total_bytes = $total_bytes if ( defined $total_bytes && $print_durations && $total_bytes > $max_total_bytes );
         $max_total{bytes} = $total_bytes if ( defined $total_bytes && $print_durations && $total_bytes > $max_total_bytes );
 
         # Calculate the maximum value of the selected trend type if it is activated
-        $max_total{$trend_key} = $log_stats{$bucket}{$trend_key} if ( defined $log_stats{$bucket}{$trend_key} && $graph_count > 1 && $log_stats{$bucket}{$trend_key} > $max_total{$trend_key} );
+        #$max_total{$trend_key} = $log_stats{$bucket}{$trend_key} if ( defined $log_stats{$bucket}{$trend_key} && $graph_count > 1 && $log_stats{$bucket}{$trend_key} > $max_total{$trend_key} );
+        $max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration} && $graph_count > 1 && $log_stats{$bucket}{duration} > $max_total{duration} );
     }
 
     # Calculate the maximum length of log level titles and counts
@@ -1260,7 +1273,7 @@ sub normalize_data_for_output {
     #print "Legend length: $legend_length\n";
 
 # TO DO: make this more dynamic, so that empty columns wouldn't be printed (ie; bytes)
-    $durations_graph_width = $print_durations ? 59 + 3: 0;
+    $durations_graph_width = $print_durations && !$omit_stats ? 59 + 3: 0;
 
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
     $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format ) - $durations_graph_width;
@@ -1269,7 +1282,8 @@ sub normalize_data_for_output {
     %graph_width = ( 1 => $max_graph_width );
 
     # Split the graph spacing into parts if more than one graph is to be drawn
-    if( $graph_count > 1 ) {
+# TO DO : Determine which columns should be printed, and from this determine the column layout
+    if( $graph_count > 1 && $max_total{duration} > 0 ) {
         my %graph_relative_size = (
             1 => 65,
             2 => 35
@@ -1291,14 +1305,16 @@ sub normalize_data_for_output {
         my $scaled_bytes = ( defined $bytes && defined $max_total_bytes && $max_total_bytes != 0 ) ? int(($bytes / $max_total_bytes) * $durations_graph_width) : 0;
         $log_stats{$bucket}{scaled_bytes} = $scaled_bytes;
 
-# bookmark3
+# bookmark3 : scale the total values to the printable size
         if( $graph_count > 1 ) {
             my $scaled_trend_key = "scaled_${trend_key}";
             # need to subtract a few for additional space for the scaled amount to allow for room for separators
             $log_stats{$bucket}{$scaled_trend_key} = ( defined $log_stats{$bucket}{$trend_key} && defined $max_total{$trend_key} && $max_total{$trend_key} != 0 ) ? int(( $log_stats{$bucket}{$trend_key} / $max_total{$trend_key} ) * ( $graph_width{2} - 3 ) ) : 0;
         }
 
-        # scale the log message counts for printing the graph
+
+
+        # Scale the log message counts for printing the graph
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
             #next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0;    # should be caught by below 
             my $count = $log_counts{$bucket}{$category_bucket}{count};
@@ -1407,11 +1423,15 @@ sub print_bar_graph {
             }
 
 # bookmark5
-            if( $graph_count > 1 ) {
+            ## PRINT ADDITIONAL TRENDED VALUES ##
+            if( $graph_count > 1 && $log_stats{$bucket}{duration} > 0 ) {
                 my $scaled_trend_key = "scaled_${trend_key}";
                 my $scaled_trend_value = $log_stats{$bucket}{$scaled_trend_key};
                 my $missing_chars = ( $graph_width{1} ) - ( $printed_chars - $timestamp_legend_length );
                 my $trend_value = $log_stats{$bucket}{$trend_key};
+
+# TO DO: Need to check if the value to be plotted exists for this section; should be done in normalization stage
+                next unless defined $trend_value;
 
                 if( $trend_type =~ /^time|duration$/i ) {
                     $trend_value = " " . format_time( $log_stats{$bucket}{$trend_key}, 'ms', 'long', ' ' );
@@ -1421,9 +1441,9 @@ sub print_bar_graph {
 #print "$graph_width{1} / $printed_chars /  $missing_chars\n";
 #print "$scaled_trend_key $scaled_trend_value $log_stats{$bucket}{$trend_key}";
                 # Fill in empty characters to the start of the second graph space
-                print " " x $missing_chars . "  ";
+                print " " x $missing_chars .  "  ";    # this is the +2 referred to in printed_chars increment
 
-                # Print the secondary trend and associated value
+                # SECONDARY TREND Print the secondary trend and associated value
                 #print "$yellow_bg"; 
                 #print "\033[93;43m";					# 93 is dark yellow foreground, 43 is light yellow background
                 print "\033[30;103m";
@@ -1436,13 +1456,15 @@ sub print_bar_graph {
 
                     print length( $value_char ) ? $value_char : " ";
                 }
+                print "$colors{'NC'}";						# clear the foreground color
                 #$printed_chars += $missing_chars + $scaled_trend_value;
                 $printed_chars += $missing_chars + 2 + ( $graph_width{2} - 2 );
             }
             
-            if( $print_durations ) {
+            # DURATION STATISTICS print duration statistics table
+            if( $print_durations && !$omit_stats ) {
                 my $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width - 2;		# 2 is the magic number to get 1 space after the tallest bar 
-                print " " x $missing_chars;
+                print " " x $missing_chars if $missing_chars > 0;
                 print " $colors{'bright-black'}│$colors{'NC'} ";
                 if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p90} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{cv} || defined $log_stats{$bucket}{z_score} ) {
 
