@@ -84,6 +84,7 @@ my $durations_graph_width = 0;
 my ( $graph_count, $max_graph_width ) = ( 1, 0 );
 my %graph_width;
 my @graph_columns = qw( duration bytes );
+my @populated_graph_columns;
 my ( $print_durations, $track_memory ) = ( 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -783,8 +784,8 @@ sub read_and_process_logs {
                 next if( defined( $include_regex ) && !/$include_regex/ );
                 next if( defined( $filter_duration_min ) && ( !defined( $duration ) || $duration <= $filter_duration_min ));		# skip if duration value is below specified minimum filter
                 next if( defined( $filter_duration_max ) && ( !defined( $duration ) || $duration >= $filter_duration_max ));		# skip if duration value is above specified maximum filter
-                next if( defined( $filter_bytes_min ) && defined( $bytes ) && $bytes < $filter_bytes_min );			# skip if bytes value is below specified minimum filter
-                next if( defined( $filter_bytes_max ) && defined( $bytes ) && $bytes > $filter_bytes_max );			# skip if bytes value is above specified maximum filter
+                next if( defined( $filter_bytes_min ) && ( !defined( $bytes ) || $bytes < $filter_bytes_min ));				# skip if bytes value is below specified minimum filter
+                next if( defined( $filter_bytes_max ) && ( !defined( $bytes ) || $bytes > $filter_bytes_max ));				# skip if bytes value is above specified maximum filter
 
                 # take note if any results were found in this file
                 $in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
@@ -853,7 +854,7 @@ sub read_and_process_logs {
                         };
 
 
-### PREPARE THE DATA FOR SORTING HERE ###    
+                ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
 
                         # Accumulate the total duration and bytes
                         $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
@@ -877,7 +878,7 @@ sub read_and_process_logs {
                     }
                 }
 
-                ## TIME-WINDOWS BASED STATISTICS DATA ##
+                ## CAPTURE TIME-WINDOWS BASED STATISTICS DATA ##
                 #if( $is_access_log && !$omit_stats ) {			# removing this as I need the stats for other things than printing the duration stats table (like the total time and bytes trends)
                 if( $is_access_log  ) {
                     $print_durations = 1 if $print_durations != 1;
@@ -932,11 +933,13 @@ sub calculate_all_statistics {
 
     foreach my $bucket (sort { $a <=> $b } keys %log_analysis) {
         my $aggregated_data = {
-            count => 0,
-            total_duration => 0,
-            total_bytes => 0,
-            sum_of_squares => 0,
-            durations => [],
+            count               => 0,
+            total_duration      => 0,
+            'total_duration-HL' => 0,
+            total_bytes         => 0,
+            'total_bytes-HL'    => 0,
+            sum_of_squares      => 0,
+            durations           => [],
         };
 
 # TO DO: shouldn't check memory on each pass; use approach like reading lines
@@ -949,7 +952,7 @@ sub calculate_all_statistics {
    
         my $bucket_data = $log_analysis{$bucket};
 
-        next if !defined( $bucket_data->{count} );
+        next if !defined( $log_analysis{$bucket}{count} );
 
 # TO DO: I think that I can get rid of aggregate_data now that I've simplified the data model
         $aggregated_data->{count} += $bucket_data->{count};
@@ -1015,8 +1018,7 @@ sub calculate_all_statistics {
 
     }
 
-## STATS FOR TOP LOG MESSAGES ##
-
+    ## STATS FOR TOP LOG MESSAGES ##
     if( $print_durations ) {
         foreach my $category (keys %log_messages) {
             # Collect and sort the log keys based on the count within each log_key
@@ -1295,6 +1297,11 @@ sub normalize_data_for_output {
         my %graph_relative_size;
         $graph_count = ( $max_total{count} > 0 ) + ( $max_total{duration} > 0 ) + ( $max_total{bytes} > 0 ); 
 
+        # Determine and store which of the possible columns to print have data
+        foreach my $key ( @graph_columns ) {
+            push @populated_graph_columns, $key if defined $max_total{$key} && $max_total{$key} != 0;
+        }
+
 # bookmark6
         if( $graph_count == 2 ) {
             %graph_relative_size = (
@@ -1307,9 +1314,9 @@ sub normalize_data_for_output {
             );
          } elsif(  $graph_count == 3 ) {
             %graph_relative_size = (
-                1 => 60,
-                2 => 20,
-                3 => 20,
+                1 => 66,
+                2 => 19,
+                3 => 15,
             );
             %graph_width = (
                 1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
@@ -1318,7 +1325,7 @@ sub normalize_data_for_output {
             );
          }
      }
-
+print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $graph_width{2} $graph_width{3}\n";
 # bookmark2    
     foreach my $bucket (keys %log_counts) {
         my $processed_time_buckets //= 0;
@@ -1332,14 +1339,18 @@ sub normalize_data_for_output {
 
 # bookmark3 : scale the total values to the printable size
         if( $graph_count > 1 ) {
-            foreach my $key ( @graph_columns ) {			# go through the list of possible columns and populate the scaled value for that metric for the current time bucket
-                my $column_number = 2; 
+            my $column_number = 2; 
+            foreach my $key ( @populated_graph_columns ) {			# go through the list of possible columns and populate the scaled value for that metric for the current time bucket
+                my $key_highlight = "${key}-HL";
                 my $scaled_key = "scaled_${key}";
+                my $scaled_key_highlight = "${scaled_key}-HL";
                 #my $scaled_trend_key = "scaled_${trend_key}";
 
                 # need to subtract a few for additional space for the scaled amount to allow for room for separators
                 #$log_stats{$bucket}{$scaled_trend_key} = ( defined $log_stats{$bucket}{$trend_key} && defined $max_total{$trend_key} && $max_total{$trend_key} != 0 ) ? int(( $log_stats{$bucket}{$trend_key} / $max_total{$trend_key} ) * ( $graph_width{$column_number} - 3 ) ) : 0;
-                $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * ( $graph_width{$column_number++} - 3 ) ) : 0;
+                $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * ( $graph_width{$column_number} - 3 ) ) : 0;
+                $log_stats{$bucket}{$scaled_key_highlight} = ( defined $log_stats{$bucket}{$key_highlight} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key_highlight} / $max_total{$key} ) * ( $graph_width{$column_number} - 3 ) ) : 0;
+                $column_number++;
             }
         }
 
@@ -1350,7 +1361,6 @@ sub normalize_data_for_output {
             #next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0;    # should be caught by below 
             my $count = $log_counts{$bucket}{$category_bucket}{count};
             next if !defined $count;										# skip scaling where varible was left or is undefined (ie; no error or message rate)
-            #my $scaled_count = $max_total_count != 0 ? int(($count / $max_total_count) * $max_graph_width) : 0;
             my $scaled_count = $max_total_count != 0 ? int(($count / $max_total_count) * $graph_width{1} ) : 0;	# Adapting count scaling to multi-graph functionality
             $log_counts{$bucket}{$category_bucket}{scaled_count} = $scaled_count;
             $category_totals{$category_bucket} += $count;							# tally the totals for each category bucket
@@ -1455,20 +1465,20 @@ sub print_bar_graph {
 
 # bookmark5
             ## PRINT ADDITIONAL TRENDED VALUES ##
-            if( $graph_count > 1 && $log_stats{$bucket}{duration} > 0 ) {
+            if( $graph_count > 1 ) {
+                my $column_number = 2;
                 my $missing_chars = ( $graph_width{1} ) - ( $printed_chars - $timestamp_legend_length );
                 # Fill in empty characters to the start of the second graph space
                 print " " x $missing_chars;    # this is the +2 referred to in printed_chars increment
                 $printed_chars += $missing_chars;
 
-                foreach my $key ( @graph_columns ) {		# loop through available data columns to print
-                    next unless defined $log_stats{$bucket}{$key} &&  $log_stats{$bucket}{$key} > 0;
+                foreach my $key ( @populated_graph_columns ) {		# loop through available data columns to print
+                    next unless defined $log_stats{$bucket}{$key} && $log_stats{$bucket}{$key} > 0;
 
                     my $scaled_trend_key = "scaled_${key}";
                     my $scaled_trend_key_highlight = "${scaled_trend_key}-HL";
                     my $scaled_trend_value = $log_stats{$bucket}{$scaled_trend_key};
                     my $trend_value = $log_stats{$bucket}{$key};
-                    my $column_number = 2;
 
 # TO DO: Need to check if the value to be plotted exists for this section; should be done in normalization stage
                     #next unless defined $trend_value;
@@ -1476,32 +1486,33 @@ sub print_bar_graph {
 
                     if( $key =~ /^time|duration$/i ) {
                     #if( $trend_type =~ /^time|duration$/i ) {
-                        $trend_value = " " . format_time( $log_stats{$bucket}{$trend_key}, 'ms', 'long', ' ' );
+                        $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', 'long', ' ' );
                     } elsif( $key =~ /^bytes$/i ) {
                     #} elsif( $trend_type =~ /^bytes$/i ) {
-                        $trend_value = " " . format_bytes( $log_stats{$bucket}{$trend_key}, 'B' );
+                        $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
                     }
 #print "$graph_width{1} / $printed_chars /  $missing_chars\n";
 #print "$scaled_trend_key $scaled_trend_value $log_stats{$bucket}{$trend_key}";
 # bookmark7
                     # SECONDARY TREND Print the secondary trend and associated value
-                    #print "$yellow_bg"; 
                     #print "\033[93;43m";					# 93 is dark yellow foreground, 43 is light yellow background
                     # Blue background 104m, Blue Foreground 94m
                     # Yellow background 103m, Yellow Foreground 93m       184 medium yellow (nice!)  190 pale yellow  226 bright yellow   (184 + 190 are the winners)
-                    # Cyan background 103m, Cyan Foreground 36m, bright Cyan 96m     51 bright cyan    123 medium cyan   159 pale cyan
-                    #print $key =~ /^duration$/i ? "\033[30;103m" : "\033[30;106m";
- 
-                    print $key =~ /^duration$/i ? "\033[48;5;226m\033[38;5;0m" : "\033[48;5;51m\033[38;5;0m";
+                    # Cyan background 103m, Cyan Foreground 36m, bright Cyan 96m     51 bright cyan    123 medium cyan   159 pale cyan  106 light cyan  100 dark cyan
+
+#print "$scaled_trend_key_highlight $log_stats{$bucket}{$scaled_trend_key_highlight}";
+                    # Start the background color with the brighter highlight value if there is anything to highlight
+                    print $key =~ /^duration$/i ? "\033[48;5;226m\033[38;5;0m" : "\033[48;5;123m\033[38;5;0m";
+
                     for my $i ( 0 .. $graph_width{$column_number} - 3) {
                         my $value_char = (split //, $trend_value )[$i];
-                        my $key_highlight = "scaled_${key}-HL";
 
-# FIGURE OUT HOW TO SWITCH FROM HIGHLIGHT TO NORMAL BACKGROUND WHEN APPROPRIATE
-#                        if( !defined $log_stats{$bucket}{$key_highlight} || $log_stats{$bucket}{$key_highlight} < 1 || $i > $log_stats{$bucket}{$key_highlight} ) {
-#                            print $key =~ /^duration$/i ? "\033[48;5;184m\033[38;5;0m" : "\033[48;5;123m\033[38;5;0m";
-#                        }
+                        # Switch over to the standard foreground/background colors once we have printed the required number of highlighted bars
+                        if( defined $log_stats{$bucket}{$scaled_trend_key_highlight} && $log_stats{$bucket}{$scaled_trend_key_highlight} == $i ) {
+                            print $key =~ /^duration$/i ? "\033[48;5;184m\033[38;5;0m" : "\033[48;5;45m\033[38;5;0m";
+                        }
 
+                        # Switch over the graphs standard foreground color with black background once all bars are printed
                         if( $i == $scaled_trend_value ) {
                             print $key =~ /^duration$/i ? "$colors{'NC'}\033[93m" : "$colors{'NC'}\033[36m";
                         }
@@ -1510,7 +1521,8 @@ sub print_bar_graph {
                     }
                     print "$colors{'NC'} ";						# clear the foreground color
                     #$printed_chars += $missing_chars + $scaled_trend_value;
-                    $printed_chars += 2 + ( $graph_width{$column_number++} - 2 );	# +2 for space before and after the sparkline
+                    $printed_chars += 2 + ( $graph_width{$column_number} - 2 );		# +2 for space before and after the sparkline
+                    $column_number++;
                 }
             }
             
