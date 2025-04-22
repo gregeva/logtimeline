@@ -1464,9 +1464,10 @@ sub print_bar_graph {
                 foreach my $key ( @graph_columns ) {		# loop through available data columns to print
                     next unless defined $log_stats{$bucket}{$key} &&  $log_stats{$bucket}{$key} > 0;
 
-                    my $scaled_trend_key = "scaled_${trend_key}";
+                    my $scaled_trend_key = "scaled_${key}";
+                    my $scaled_trend_key_highlight = "${scaled_trend_key}-HL";
                     my $scaled_trend_value = $log_stats{$bucket}{$scaled_trend_key};
-                    my $trend_value = $log_stats{$bucket}{$trend_key};
+                    my $trend_value = $log_stats{$bucket}{$key};
                     my $column_number = 2;
 
 # TO DO: Need to check if the value to be plotted exists for this section; should be done in normalization stage
@@ -1490,6 +1491,7 @@ sub print_bar_graph {
                     # Yellow background 103m, Yellow Foreground 93m       184 medium yellow (nice!)  190 pale yellow  226 bright yellow   (184 + 190 are the winners)
                     # Cyan background 103m, Cyan Foreground 36m, bright Cyan 96m     51 bright cyan    123 medium cyan   159 pale cyan
                     #print $key =~ /^duration$/i ? "\033[30;103m" : "\033[30;106m";
+ 
                     print $key =~ /^duration$/i ? "\033[48;5;226m\033[38;5;0m" : "\033[48;5;51m\033[38;5;0m";
                     for my $i ( 0 .. $graph_width{$column_number} - 3) {
                         my $value_char = (split //, $trend_value )[$i];
