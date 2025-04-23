@@ -67,7 +67,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.4.8";
+my $version_number = "0.4.9";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -462,7 +462,12 @@ sub adapt_to_command_line_options {
     }
 
     # Ensure at least one file is provided
-    @in_files = @ARGV;
+    #@in_files = @ARGV;
+
+    foreach my $pattern (@ARGV) {									# do in process file globbing for common experience across environments (Windows doesn't glob in the shell, passes in the parameters)
+        push @in_files, glob($pattern);
+    }
+
     die print_usage( "unable to open any files" ) unless @in_files;
     die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( count duration time bytes impact );
 # Keeping this around as it will be used for "user-defined" and "thread-pool" options
