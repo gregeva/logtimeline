@@ -14,12 +14,93 @@ xcode-select --install
 brew install gcc
 brew install perl
 brew install cpanminus
+
+
+
+# Clear CPANM work directory
+rm -rf ~/.cpanm/work
+# Clear local::lib directory
+rm -rf ~/perl5
+
+sudo cpan App::cpanminus
+
+curl -L https://cpanmin.us | perl - --self-upgrade
+cpanm local::lib
+
+use lib '/Users/geva/perl5/bin/lib/perl5';
+
+cpanm --uninstall Module::Name
+
 cpanm PAR::Packer
 sudo cpanm DateTime.pm Term::ReadKey.pm Proc::ProcessTable.pm Text::CSV
+sudo cpanm --sudo PDL::Lite PDL::LiteF PDL::Core PDL::Stats
+sudo cpanm PDL Algorithm::KMeans
+sudo /usr/bin/perl -MCPAN -e 'install PDL'
+sudo /usr/bin/perl -MCPAN -e 'remove PDL'
+sudo /usr/bin/perl -MCPAN -e 'remove PDL::Lite'
+sudo /usr/bin/perl -MCPAN -e 'remove PDL::LiteF'
+sudo /usr/bin/perl -MCPAN -e 'remove PDL::Core'
+sudo /usr/bin/perl -MCPAN -e 'remove PDL::Stats'
+sudo /usr/bin/perl -MCPAN -e 'remove Algorithm::KMeans'
+
+sudo /opt/homebrew/bin/perl -MCPAN -e 'install PDL::Lite'
+sudo /opt/homebrew/bin/perl -MCPAN -e 'install PDL::LiteF'
+sudo /opt/homebrew/bin/perl -MCPAN -e 'install PDL::Core'
+sudo /opt/homebrew/bin/perl -MCPAN -e 'install PDL::Stats'
+sudo /opt/homebrew/bin/perl -MCPAN -e 'install Algorithm::KMeans'
+
 sudo /usr/bin/perl -MCPAN -e 'install Text::CSV'
+
+How to use the local::lib module:
+https://metacpan.org/pod/local::lib
+Use the --bootstrap method to install local::lib according to its installation instructions and then
+
+
+Download and unpack the package local::lib
+perl Makefile.PL --bootstrap
+make test && make install
+
+echo 'eval $(perl -I$HOME/perl5/lib/perl5 -Mlocal::lib)' >>~/.zshrc
+
+echo 'eval "$(perl -I$HOME/perl5/lib/perl5 -Mlocal::lib=$HOME/perl5)"' >> ~/.zshrc
+source ~/.zshrc
+
+
+then run cpan shell this way
+
+perl -MCPAN -Mlocal::lib -e shell
+
+you may need to
+cpan> reload cpan
+cpan> o conf init connect_to_internet_ok urllist
+
+cpan> install Crypt::Rijndael  # for example
+
+
+cpanm -l /Users/geva/perl5/bin -f Math::Random
+cpanm -l /Users/geva/perl5/bin -f Math::GSL::Alien
+cpanm -l /Users/geva/perl5/bin -f Math::GSL
+cpanm -l /Users/geva/perl5/bin -f Graphics::GnuplotIF
+
+cpanm -l /Users/geva/perl5/bin -f Algorithm::KMeans
+cpanm -l /Users/geva/perl5/bin -f Pod::Select
+cpanm -l /Users/geva/perl5/bin -f PDL
+
+cpanm -l /Users/geva/perl5/bin -f PDL::Lite
+cpanm -l /Users/geva/perl5/bin -f PDL::LiteF
+cpanm -l /Users/geva/perl5/bin -f PDL::Core
+cpanm -l /Users/geva/perl5/bin -f PDL::Stats
+
+cpanm -l /Users/geva/perl5/bin -f List::Utils
+cpanm -l /Users/geva/perl5/bin -f List::MoreUtils
+cpanm -l /Users/geva/perl5/bin -f Parallel::ForkManager
 
 cpanm PAR::Packer --force
 pp -o ltl_static-binary_macos-arm64 ltl
+
+
+
+curl -L https://install.perlbrew.pl | bash
 
 
 # Windows
