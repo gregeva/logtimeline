@@ -5,8 +5,6 @@
 # - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
 # - Figure out and fix issues using file name glob patterns in Windows (ScriptLog.*.log)
 
-# - Figure out how to work in additional graphs for bytes, duration, count (events/load rows)
-# - Second graph (time): yellow bar chart showing total duration for current time bucket
 # - Adapt message field widths based on terminal width (object field and thread pool)
 # - Add message parse pattern for AkkaCommunications logs
 
@@ -14,7 +12,6 @@
 
 # - Add AND match possibility for include and exclude using RegEx lookahead (?=.*word)
 # - Capture custom log message values for "count=" and "rowCount=" - if present could include it in the message totals
-# - Second graph (bytes): cyan bar chart showing total bytes for current time bucket
 # - Second graph (stats): line chart showing evolution of some of the percentile stats in different colors (with points) 
 # - Second graph (throughput): outbound throughput based on bytes returned
 # - create a conditional path to resize durations stats pane and only print available information if duration value is not present (also don't do the statistical calculations)
@@ -70,7 +67,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.4.7";
+my $version_number = "0.4.8";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -102,21 +99,18 @@ my %filter_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %result_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %filter_range;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
-#my( $output_timestamp_min ) = DateTime->from_epoch( epoch => 1678886400 );
-#my( $output_timestamp_min, $output_timestamp_max );
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex );
 my $pause_output = 0;
 my $omit_values = 0;
-my ( $sort_type, $sort_key, $trend_type, $trend_key ) = ( "count", "count", "count", "count" );
+my ( $sort_type, $sort_key ) = ( "count", "count" );
 my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 my @in_files;
 my %in_files_matched;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
 
 # Define log bucket printing order
-#my @log_levels = qw(ERROR-HL ERROR WARN-HL WARN INFO-HL INFO DEBUG-HL DEBUG TRACE-HL TRACE 5xx-HL 5xx 4xx-HL 4xx 3xx-HL 3xx 2xx-HL 2xx 1xx-HL 1xx empty );
 my @log_levels = (
     'ERROR-HL', 'ERROR', 'WARN-HL', 'WARN', 'INFO-HL', 'INFO', 
     'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx', 
@@ -181,14 +175,6 @@ my %colors = (
     'white-underline' => "\033[4;37m"
 );
 
-# ANSI code for yellow background
-my $white_fg  = "\033[1;37m"; # Bright White Foreground
-#my $yellow_bg = "\033[43m";  # Yellow background
-#my $yellow_bg = "\033[48;5;229m";  # Very pale yellow background
-my $yellow_bg = "\033[48;5;222m";  # Light gold background
-#my $yellow_bg = "\033[48;5;216m";  # Pastel yellow background
-my $reset_all    = "\033[0m";  # Reset ALL attributes
-
 # Standard 8 Colors: Uses codes like \e[30m for black, \e[31m for red, etc.
 # Bright 8 Colors: Uses codes like \e[90m for bright black (grey), \e[91m for bright red, etc.
 # 256 Colors: Uses codes like \e[38;5;<color_code>m for foreground and \e[48;5;<color_code>m for background.
@@ -198,7 +184,6 @@ my $reset_all    = "\033[0m";  # Reset ALL attributes
 foreach my $key (keys %colors) {
     next if $key eq 'NC';  # Skip NC
     my $new_key = "$key-HL";
-    #$colors{$new_key} = "$colors{$key}$yellow_bg";			# Apply a yellow background on top of the existing FG color
     
     my $original_fg_color = $colors{$key}; # Get original foreground
 
@@ -241,7 +226,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--group-similar|-g none] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -252,11 +237,6 @@ sub print_version {
 }
 
 # Function to get current memory usage
-#sub get_memory_usage {
-#    my $t = Proc::ProcessTable->new();
-#    my ($memory_usage) = map { $_->rss } grep { $_->pid == $$ } @{$t->table};
-#    return $memory_usage;
-#}
 sub get_memory_usage {
     my $memory_usage;
 
@@ -369,7 +349,6 @@ sub format_number {
         'Tril' => 1000**4,
     );
 
-
     # Determine the most relevant unit
     my @unit_order = ('1', 'k', 'Mil', 'Bil', 'Tril');
     my $formatted_value = $value;
@@ -471,7 +450,6 @@ sub adapt_to_command_line_options {
 	'memory-usage|mem' => \$track_memory,
         'output-csv|o' => \$write_messages_to_csv,
         'sort|so=s' => \$sort_type,
-        'trend|t=s' => \$trend_type,
         'group-similar|g=s' => \$group_similar_sensitivity
     ) or die print_usage( "required options not provided" ); 
 
@@ -487,7 +465,8 @@ sub adapt_to_command_line_options {
     @in_files = @ARGV;
     die print_usage( "unable to open any files" ) unless @in_files;
     die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( count duration time bytes impact );
-    die print_usage( "invalid trend type used" ) unless grep { $_ eq $sort_type } qw( count duration time bytes );
+# Keeping this around as it will be used for "user-defined" and "thread-pool" options
+#    die print_usage( "invalid trend type used" ) unless grep { $_ eq $sort_type } qw( count duration time bytes );
 
     if( $sort_type =~ /^duration|time$/i ) {
         $sort_key = "total_duration_num";
@@ -497,22 +476,14 @@ sub adapt_to_command_line_options {
         $sort_key = "impact";
     }
 
-    if( $trend_type =~ /^duration|time$/i ) {
-        $trend_key = "duration";
-        $graph_count = 2;
-    } elsif( $trend_type =~ /^bytes$/i ) {
-        $trend_key = "bytes";
-        $graph_count = 2;
-    }
+#    if( $trend_type =~ /^duration|time$/i ) {
+#        $trend_key = "duration";
+#        $graph_count = 2;
+#    } elsif( $trend_type =~ /^bytes$/i ) {
+#        $trend_key = "bytes";
+#        $graph_count = 2;
+#    }
 
-# Should include cleaner handling of possible problems with entering command line options
-#eval {
-#    die "Something bad happened";
-#};
-#if ($@) {
-#    # Handle the error here
-#    print "Caught the error: $@";
-#}
     $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
     #$bucket_size_seconds = $print_seconds ? $bucket_size_minutes : $bucket_size_minutes * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
     if( $print_seconds ) {
@@ -629,14 +600,12 @@ sub read_and_process_logs {
             my $timestamp;
             $total_lines_read++;
 
-#($timestamp_str, $category_bucket, $heap_from, $heap_to, $heap_size, $duration) = (undef, undef, undef, undef, undef, undef);
-
             if ($line_number % 997 == 0) {	# only print processing status update every X lines processed
                 printf("\rProcessing line %d in file %s (%d overall)", $line_number, $in_file, $total_lines_read);
                 $| = 1; # Flush output
             }
 
-            if ($track_memory && $line_number % 100000 == 0) {	# only collect memory in use around every 100000 lines processed
+            if ($track_memory && $line_number % 100000 == 0) {								# only collect memory in use around every 100000 lines processed
                 $current_memory_usage = get_memory_usage();								# track maximum memory usage
                 if ($current_memory_usage > $max_memory_usage) {
                     $max_memory_usage = $current_memory_usage;
@@ -649,9 +618,9 @@ sub read_and_process_logs {
                 $thread =~ s/(.*)-\d+$/$1/;
 
                 # this section is optional, for cases where log line has included additional context which should be interpretted (row count, execution duration, result size)
-                ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)\s/;
+                ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)/;								# 2025-04-22 remove the trailing whitespace as same as below
                 ( $duration ) = $message =~ / durationM[sS]\s*=\s*(\d+)/;						# 2025-04-17 remove the trailing white space as it was not picking up the variable if it was at the end of the line
-                ( $count ) = $message =~ / count\s*=\s*(\d+)\s/;
+                ( $count ) = $message =~ / count\s*=\s*(\d+)/;
                 $is_access_log = 1 if defined $bytes || defined $duration || defined $count;
 
                 $message =~ s/=\d+/=?/g;
@@ -690,7 +659,7 @@ sub read_and_process_logs {
 
                 $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
                 $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
-# TO DO - update RegEx to pull out message, thread name
+# TO DO - update RegEx to pull out message, thread name (2025-04-23 not sure what this implies as match type 3 picks up thread name and session if present)
             } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^{"\@timestamp":"([^"]*).*"level":"([^"]*)/ ) {
                 $is_line_match = 1;
                 $match_type = 5;			# this matches Connection Server JSON formatted logs : {"@timestamp":"2025-02-02T21:03:06.725+00:00","@version":1,"message":"Error encountered, closing WebSocket: endpointId=2608459","logger_name":"com.thingworx.connectionserver.alwayson.AbstractClientEndpoint","thread_name":"vert.x-eventloop-thread-16","level":"WARN","level_value":30000,"stack_trace":"io.vertx.core.http.HttpClosedException: Connection was closed\n"}
@@ -830,19 +799,10 @@ sub read_and_process_logs {
                         $category = 'plain';
                     }
 
-                    #$log_messages{$category}{$log_key}{count} //= 0;
-                    #$log_messages{$category}{$log_key}{count} = 0 if !defined $log_messages{$category}{$log_key}{count};
                     $log_messages{$category}{$log_key}{count}++;
 
                     # Keep track of data for message based statistics
-                    #if( $is_access_log && !$omit_stats ) {                 # removing this as I need the stats for other things than printing the duration stats table (like the total time and bytes trends)
                     if( $is_access_log ) {
-# bookmark1
-# TO DO: I'm doubtful that these duration buckets are even required considering that we are storing each duration value.
-
-                        # Ensure duration and bytes are defined
-                        #$duration = 0 if !defined($duration);
-                        #$bytes = 0 if !defined($bytes);
 
                         # Initialize the hash if not already done
                         $log_messages{$category}{$log_key} //= {
@@ -852,7 +812,6 @@ sub read_and_process_logs {
                             sum_of_squares => 0,
                             durations => [],
                         };
-
 
                 ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
 
@@ -1015,7 +974,6 @@ sub calculate_all_statistics {
         # Update rolling window logic
         push @rolling_window, { mean => $mean, sum_of_squares => $aggregated_data->{sum_of_squares} };
         shift @rolling_window if @rolling_window > $rolling_window_size;
-
     }
 
     ## STATS FOR TOP LOG MESSAGES ##
@@ -1034,7 +992,6 @@ sub calculate_all_statistics {
             my @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)]; 
 
             foreach my $log_key (@top_keys) {
-#print "$log_key // $sort_key : $log_messages{$category}{$log_key}{$sort_key}\n";
                 my $aggregated_data = {
                     count => 0,
                     total_duration_num => undef,
@@ -1052,29 +1009,18 @@ sub calculate_all_statistics {
                     }
                 } 
 
-#foreach my $key ( keys %{$log_messages{$category}{$log_key}}) {
-#    print "$key $log_messages{$category}{$log_key}{$key} \n"; 
-#}
-                #foreach my $duration_bucket (sort {$a <=> $b} grep { $_ ne 'count' } keys %{$log_messages{$category}{$log_key}}) {
-                    #my $message_data = $log_messages{$category}{$log_key}{$duration_bucket};
-                    my $message_data = $log_messages{$category}{$log_key};
+                my $message_data = $log_messages{$category}{$log_key};
 
-                    next if !defined( $message_data->{count} );
+                next if !defined( $message_data->{count} );
     
-                    $aggregated_data->{count} += $message_data->{count};
-                    $aggregated_data->{total_bytes} += $message_data->{total_bytes} if defined $message_data->{total_bytes};
+                $aggregated_data->{count} += $message_data->{count};
+                $aggregated_data->{total_bytes} += $message_data->{total_bytes} if defined $message_data->{total_bytes};
 
-                    if( defined $message_data->{total_duration} ) {
-                        $aggregated_data->{total_duration} += $message_data->{total_duration};
-                        $aggregated_data->{sum_of_squares} += $message_data->{sum_of_squares};
-                        push @{$aggregated_data->{durations}}, @{$message_data->{durations}};
-                    }
-
-                    # free up the memory from the data structure as it is no longer needed
-                    #undef $log_messages{$category}{$log_key}{$duration_bucket}{durations};
-                    #delete $log_messages{$category}{$log_key}{$duration_bucket}{durations};
-# TO DO: I think that I can also delete $log_messages{$category}{$log_key}{$duration_bucket} as it isn't really used for anything
-                #}
+                if( defined $message_data->{total_duration} ) {
+                    $aggregated_data->{total_duration} += $message_data->{total_duration};
+                    $aggregated_data->{sum_of_squares} += $message_data->{sum_of_squares};
+                    push @{$aggregated_data->{durations}}, @{$message_data->{durations}};
+                }
 
 #foreach my $key ( keys %{$aggregated_data} ) {
 #    print "$log_key $key ";
@@ -1131,7 +1077,6 @@ sub log_bucket {
 # Function to calculate Z-score
 sub calculate_z_score {
     my ($current_mean, $rolling_mean, $rolling_std_dev) = @_;
-    #return 'N/A' if $rolling_std_dev == 0;
     return undef if $rolling_std_dev == 0;
     return sprintf("%.2f", ($current_mean - $rolling_mean) / $rolling_std_dev);
 }
@@ -1147,7 +1092,6 @@ sub calculate_statistics {
     my $max = max( @{$bucket_data->{durations}} );
     my $variance = ($bucket_data->{sum_of_squares} / $count) - ($mean ** 2);
     my $std_dev = sqrt($variance);
-    #my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean) : 'N/A';
     my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean ) : undef;
     my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
 
@@ -1173,15 +1117,6 @@ sub initialize_empty_time_windows {
 
         for (my $bucket = $start_bucket; $bucket <= $output_timestamp_max; $bucket += $bucket_size_seconds) {
             $log_counts{$bucket}{'empty'}{'count'} = 0;
-
-                    # Initialize the hash if not already done
-#                    $log_analysis{$bucket}{$duration_bucket} //= {
-#                        count => 0,
-#                        total_bytes => 0,
-#                        total_duration => 0,
-#                        sum_of_squares => 0,
-#                        durations => [],
-#                    };
         }
 
         print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
@@ -1195,16 +1130,12 @@ sub initialize_empty_time_windows {
 
 sub normalize_data_for_output {
     # Determine the maximum total log messages for any time window
-# TO DO : These will be able to be removed soon
-    my $max_total_count = 0;
-    my $max_total_bytes = 0;
-
-# TO DO : user defined value will need to have a max total determined for scaling and printing
     my %max_total = (
         count => 0,
         bytes => 0,
         duration => 0,
     );
+# TO DO : user defined value will need to have a max total determined for scaling and printing
 
     print "\rScaling and normalizing data...";
 
@@ -1216,7 +1147,6 @@ sub normalize_data_for_output {
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
             my $count = $log_counts{$bucket}{$category_bucket}{count};
             next unless $count > 0 && $category_bucket !~ /^empty|err-rate|msg-rate$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
-            #$total_count += $log_counts{$bucket}{$category_bucket}{count};
             $total_count += $count;
             $error_count += $count if $category_bucket =~ /^ERROR|5xx|4xx$/i;
         }
@@ -1227,63 +1157,46 @@ sub normalize_data_for_output {
             $log_counts{$bucket}{'msg-rate'}{count} = $total_count / $bucket_size_seconds * 60;
         }
 
-# TO DO : Duplicate data structures here to be cleaned up
-        $max_total_count = $total_count if $total_count > $max_total_count;
-        $max_total{count} = $total_count if $total_count > $max_total_count;
-        $max_total_bytes = $total_bytes if ( defined $total_bytes && $print_durations && $total_bytes > $max_total_bytes );
-        $max_total{bytes} = $total_bytes if ( defined $total_bytes && $print_durations && $total_bytes > $max_total_bytes );
-
         # Calculate the maximum value of the selected trend type if it is activated
-        #$max_total{$trend_key} = $log_stats{$bucket}{$trend_key} if ( defined $log_stats{$bucket}{$trend_key} && $graph_count > 1 && $log_stats{$bucket}{$trend_key} > $max_total{$trend_key} );
-        $max_total{count} = $log_stats{$bucket}{count} if ( defined $log_stats{$bucket}{count} && $graph_count > 1 && $log_stats{$bucket}{count} > $max_total{count} );
-        $max_total{bytes} = $log_stats{$bucket}{bytes} if ( defined $log_stats{$bucket}{bytes} && $graph_count > 1 && $log_stats{$bucket}{bytes} > $max_total{bytes} );
-        $max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration} && $graph_count > 1 && $log_stats{$bucket}{duration} > $max_total{duration} );
+        $max_total{count} = $total_count if $total_count > $max_total{count};
+        $max_total{bytes} = $total_bytes if ( defined $total_bytes && $print_durations && $total_bytes > $max_total{bytes} );
+        $max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration} && $log_stats{$bucket}{duration} > $max_total{duration} );
     }
 
 #$print "Max totals --- count: $max_total{count}  bytes: $max_total{bytes}  duration: $max_total{duration}\n";
 
     # Calculate the maximum length of log level titles and counts
-#    if( !$omit_values ) {
-        foreach my $bucket (keys %log_counts) {
+    foreach my $bucket (keys %log_counts) {
 
-#my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
-#print "$bucket_time_str : ";
+        my $bucket_legend_length = 0;
+        foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
+            my $count = $log_counts{$bucket}{$category_bucket}{count};
+            my $title_length = 0;
+            #next unless ( $count > 0 || $category_bucket =~ /^(err|msg)-rate$/ ) && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
+            next unless ( $count > 0 || $category_bucket =~ /^(err|msg)-rate$/ ) && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
+            next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate)$/;
+            next if $omit_rate && $category_bucket =~ /^(err-rate|msg-rate)$/;
+            next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0;
 
-            my $bucket_legend_length = 0;
-            foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
-                my $count = $log_counts{$bucket}{$category_bucket}{count};
-                my $title_length = 0;
-                #next unless ( $count > 0 || $category_bucket =~ /^(err|msg)-rate$/ ) && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
-                next unless ( $count > 0 || $category_bucket =~ /^(err|msg)-rate$/ ) && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
-# problem is if err-rate is 0, it is not counted, but then it is still printed.
-                next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate)$/;
-                next if $omit_rate && $category_bucket =~ /^(err-rate|msg-rate)$/;
-                next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0;
-
-                if( $category_bucket =~ /-HL$/ ) {
-                    $title_length = length(" $count ");
-                } elsif( $category_bucket =~ /^err-rate$/ ) {
-                    $title_length = length("  " . format_number( $count ) . ":");
-#print "$category_bucket \"" . format_number( $count ) . "\" title length: $title_length ... ";
-                } elsif( $category_bucket =~ /^msg-rate$/ ) {
-                    $title_length = length( format_number( $count ) . "/m ");
-#print "$category_bucket \"" . format_number( $count ) . "\" title length: $title_length ... ";
-                } else {
-                    $title_length = length("$category_bucket: $count ");
-#print "$category_bucket \"$category_bucket: $count\" title length: $title_length ... ";
-                }
-                $bucket_legend_length += $title_length;
+            if( $category_bucket =~ /-HL$/ ) {
+                $title_length = length(" $count ");
+            } elsif( $category_bucket =~ /^err-rate$/ ) {
+                $title_length = length("  " . format_number( $count ) . ":");
+            } elsif( $category_bucket =~ /^msg-rate$/ ) {
+                $title_length = length( format_number( $count ) . "/m ");
+            } else {
+                $title_length = length("$category_bucket: $count ");
             }
-
-            $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
-#print "-- bucket_legend_length = $bucket_legend_length, legend_length = $legend_length\n";
+            $bucket_legend_length += $title_length;
         }
-#    }
+
+        $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
+    }
 
     #print "Legend length: $legend_length\n";
 
-# TO DO: make this more dynamic, so that empty columns wouldn't be printed (ie; bytes)
-    $durations_graph_width = $print_durations && !$omit_stats ? 59 + 3: 0;
+# bookmark8
+    $durations_graph_width = $print_durations && !$omit_stats ? 50 + 3: 0;
 
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
     $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format ) - $durations_graph_width;
@@ -1293,6 +1206,11 @@ sub normalize_data_for_output {
 
     # Split the graph spacing into parts if more than one graph is to be drawn
 # TO DO : Determine which columns should be printed, and from this determine the column layout
+
+    foreach my $graph_type ( @graph_columns ) {									# Count how many of the to be displayed data columns actually have values to be printed
+        $graph_count += ( $max_total{$graph_type} > 0 );
+    }
+
     if( $graph_count > 1 && ( $max_total{duration} > 0 || $max_total{bytes} > 0 ) ) {
         my %graph_relative_size;
         $graph_count = ( $max_total{count} > 0 ) + ( $max_total{duration} > 0 ) + ( $max_total{bytes} > 0 ); 
@@ -1325,7 +1243,7 @@ sub normalize_data_for_output {
             );
          }
      }
-print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $graph_width{2} $graph_width{3}\n";
+#print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $graph_width{2} $graph_width{3}\n";
 # bookmark2    
     foreach my $bucket (keys %log_counts) {
         my $processed_time_buckets //= 0;
@@ -1334,7 +1252,7 @@ print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $
 # TO DO : need to handle cases where we don't have bytes, but would have duration
         # scale the transferred bytes for printing the statistics table
         my $bytes = $log_stats{$bucket}{bytes};
-        my $scaled_bytes = ( defined $bytes && defined $max_total_bytes && $max_total_bytes != 0 ) ? int(($bytes / $max_total_bytes) * $durations_graph_width) : 0;
+        my $scaled_bytes = ( defined $bytes && defined $max_total{bytes} && $max_total{bytes} != 0 ) ? int(($bytes / $max_total{bytes}) * $durations_graph_width) : 0;
         $log_stats{$bucket}{scaled_bytes} = $scaled_bytes;
 
 # bookmark3 : scale the total values to the printable size
@@ -1344,10 +1262,8 @@ print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $
                 my $key_highlight = "${key}-HL";
                 my $scaled_key = "scaled_${key}";
                 my $scaled_key_highlight = "${scaled_key}-HL";
-                #my $scaled_trend_key = "scaled_${trend_key}";
 
                 # need to subtract a few for additional space for the scaled amount to allow for room for separators
-                #$log_stats{$bucket}{$scaled_trend_key} = ( defined $log_stats{$bucket}{$trend_key} && defined $max_total{$trend_key} && $max_total{$trend_key} != 0 ) ? int(( $log_stats{$bucket}{$trend_key} / $max_total{$trend_key} ) * ( $graph_width{$column_number} - 3 ) ) : 0;
                 $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * ( $graph_width{$column_number} - 3 ) ) : 0;
                 $log_stats{$bucket}{$scaled_key_highlight} = ( defined $log_stats{$bucket}{$key_highlight} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key_highlight} / $max_total{$key} ) * ( $graph_width{$column_number} - 3 ) ) : 0;
                 $column_number++;
@@ -1361,7 +1277,7 @@ print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $
             #next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0;    # should be caught by below 
             my $count = $log_counts{$bucket}{$category_bucket}{count};
             next if !defined $count;										# skip scaling where varible was left or is undefined (ie; no error or message rate)
-            my $scaled_count = $max_total_count != 0 ? int(($count / $max_total_count) * $graph_width{1} ) : 0;	# Adapting count scaling to multi-graph functionality
+            my $scaled_count = $max_total{count} != 0 ? int(($count / $max_total{count}) * $graph_width{1} ) : 0;	# Adapting count scaling to multi-graph functionality
             $log_counts{$bucket}{$category_bucket}{scaled_count} = $scaled_count;
             $category_totals{$category_bucket} += $count;							# tally the totals for each category bucket
             $total_lines_highlighted += $count if $category_bucket =~ /-HL$/;
@@ -1451,14 +1367,13 @@ sub print_bar_graph {
 
             print "$colors{'bright-black'}│$colors{'NC'} ";
 
+            ## PRINT STANDARD 'COUNT' BAR GRAPH ##
             foreach my $category_bucket (@log_levels) {
                 next unless $category_bucket !~ /^empty|err-rate|msg-rate$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
                 if (exists $log_counts{$bucket}{$category_bucket}) {
                     my $scaled_count = $log_counts{$bucket}{$category_bucket}{scaled_count};
                     my $color = $colors{$category_bucket} // $colors{'NC'};
-     #               print "$color" . ('█' x $scaled_count) . "$colors{'NC'}";
-                    # the following provides a mechanism for changing the look of the bars for access logs compared to other logs
-                    print "$color" . ( $category_bucket =~ /^[12345]xx(-HL)?$/ ? $blocks{'A'} : $blocks{$default_chart_block} ) x $scaled_count . "$colors{'NC'}";
+                    print "$color" . ( $category_bucket =~ /^[12345]xx(-HL)?$/ ? $blocks{'A'} : $blocks{$default_chart_block} ) x $scaled_count . "$colors{'NC'}";	# provide a global way to change the bar character
                     $printed_chars += $scaled_count;
                 }
             }
@@ -1491,8 +1406,7 @@ sub print_bar_graph {
                     #} elsif( $trend_type =~ /^bytes$/i ) {
                         $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
                     }
-#print "$graph_width{1} / $printed_chars /  $missing_chars\n";
-#print "$scaled_trend_key $scaled_trend_value $log_stats{$bucket}{$trend_key}";
+
 # bookmark7
                     # SECONDARY TREND Print the secondary trend and associated value
                     #print "\033[93;43m";					# 93 is dark yellow foreground, 43 is light yellow background
@@ -1529,15 +1443,14 @@ sub print_bar_graph {
             # DURATION STATISTICS print duration statistics table
             if( $print_durations && !$omit_stats ) {
                 my $missing_chars;
-                $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width - 2;		# 2 is the magic number to get 1 space after the tallest bar 
+                $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width - 1;		# 2 is the magic number to get 1 space after the tallest bar 
                 print " " x $missing_chars if $missing_chars > 0;
-                print " $colors{'bright-black'}│$colors{'NC'} ";
+                print " $colors{'bright-black'}│$colors{'NC'}  ";
                 if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p90} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{cv} || defined $log_stats{$bucket}{z_score} ) {
 
                     my $cv_color = defined $log_stats{$bucket}{cv} && $log_stats{$bucket}{cv} >= 20 ? 'WARN-HL' : 'white-underline';
                     my $zscore_color = defined $log_stats{$bucket}{z_score} && $log_stats{$bucket}{z_score} >= 5 ? 'WARN-HL' : 'NC';
 
-                    defined $log_stats{$bucket}{bytes} ? printf( "$colors{'cyan'}%8s$colors{'NC'}  ", format_bytes( $log_stats{$bucket}{bytes},'B' ) ) : printf( " " x 9 );
                     defined $log_stats{$bucket}{p50} ? printf( "$colors{'bright-blue'}P50:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p50} ) >= 4 ? format_time( $log_stats{$bucket}{p50}, 'ms' ) : $log_stats{$bucket}{p50} ) ) : printf( " " x 6 );
                     defined $log_stats{$bucket}{p90} ? printf( "$colors{'yellow'}P90:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p90} ) >= 4 ? format_time( $log_stats{$bucket}{p90}, 'ms' ) : $log_stats{$bucket}{p90} ) ) : printf( " " x 6 ); 
                     defined $log_stats{$bucket}{p95} ? printf( "$colors{'red'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 6 );
