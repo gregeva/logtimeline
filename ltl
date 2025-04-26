@@ -77,13 +77,13 @@ my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executio
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary ) = ( 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages ) = ( 0,0,0,0,0,0,0,0,0 );
-my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats, %threadpool_activity );		# this is where the counts of log entries are tallied across the time buckets
+my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity );		# this is where the counts of log entries are tallied across the time buckets
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
 my $durations_graph_width = 0;
 my ( $graph_count, $max_graph_width ) = ( 1, 0 );
 my %graph_width;
 my @graph_columns = qw( duration bytes );
-my @populated_graph_columns;
+my ( @populated_graph_columns, @graph_threadpools_activity );
 my ( $print_durations, $track_memory ) = ( 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -103,7 +103,7 @@ my %filter_range;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
-my( $exclude_regex, $include_regex, $highlight_regex );
+my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
 my $pause_output = 0;
 my $omit_values = 0;
 my ( $sort_type, $sort_key ) = ( "count", "count" );
@@ -453,6 +453,7 @@ sub adapt_to_command_line_options {
         'output-csv|o' => \$write_messages_to_csv,
         'sort|so=s' => \$sort_type,
         'threadpool-activity-summary|tpas' => \$include_threadpool_summary,
+        'threadpool-activity|tpa=s' => \$threadpool_activity_regex,
         'group-similar|g=s' => \$group_similar_sensitivity
     ) or die print_usage( "required options not provided" ); 
 
@@ -890,9 +891,11 @@ sub read_and_process_logs {
                   #  $| = 1; # Flush output
                 }
 
-
+# bookmark18
                 ## CAPTURE THREAD AND THREAD POOL BASED STATISTICS DATA ##
                 if( $threadpool ) {
+#                    $threadpool =~ s/[*\-!\#=\$\?]//g;
+#                    $thread =~ s/[*\-!\#=\$\?]//g;
 
                     # Thread Pool Based Statistics Capture (Overall Summary) #
 #
@@ -909,6 +912,7 @@ sub read_and_process_logs {
 #                            
 #                            # Accumulate the total duration and bytes
 #                            $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
+                    $threadpool_activity{$category}{$threadpool}{$thread} = 0 if !defined $threadpool_activity{$category}{$threadpool}{$thread};
                     $threadpool_activity{$category}{$threadpool}{$thread} += 1;
 #
 #                            if( defined $duration ) {
@@ -946,19 +950,21 @@ sub read_and_process_logs {
 #                    $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
 #                    push @{$log_analysis{$bucket}{durations}}, $duration;
 #
-#                    if( $category_bucket =~ /-HL$/ ) {                  # capture total duration and bytes for highlighted rows
-#                        $log_analysis{$bucket}{'total_duration-HL'} += $duration;
-#                        $log_analysis{$bucket}{'total_bytes-HL'} += $bytes;
-#                    } else {
-#
-                     $log_stats{$bucket}{threadpools}{$threadpool}{$category}{$thread} += 1;
+# bookmark19
 
+#                    $log_stats{$bucket}{threadpools}{$threadpool}{plain}{$thread} = 0 if !defined $log_stats{$bucket}{threadpools}{$threadpool}{plain}{$thread};
+#                    $log_stats{$bucket}{threadpools}{$threadpool}{plain}{$thread} += 1;
+                    $log_threadpools{$bucket}{$threadpool}{plain}{$thread} += 1;
 
-#print "Thread Pool: $threadpool  Thread: $thread   Object: $object   Message: $message\n";
+                    if( $category_bucket =~ /-HL$/ ) {                  # capture total duration and bytes for highlighted rows
+#                        $log_stats{$bucket}{threadpools}{$threadpool}{highlight}{$thread} = 0 if !defined $log_stats{$bucket}{threadpools}{$threadpool}{highlight}{$thread};
+#                        $log_stats{$bucket}{threadpools}{$threadpool}{highlight}{$thread} += 1;
+                        $log_threadpools{$bucket}{$threadpool}{highlight}{$thread} += 1;
+                    }
+
+#print "Thread Pool: $threadpool  Thread: $thread   $log_threadpools{$bucket}{$threadpool}{plain}{$thread}     Object: $object   Message: $message\n";
 #exit if $total_lines_included > 50;
                 }
-
-
 
             }
         }
@@ -976,6 +982,7 @@ sub read_and_process_logs {
 sub calculate_all_statistics {
 
     print "\rCalculating statistics...";
+
 
     foreach my $bucket (sort { $a <=> $b } keys %log_analysis) {
         my $aggregated_data = {
@@ -1061,6 +1068,7 @@ sub calculate_all_statistics {
         # Update rolling window logic
         push @rolling_window, { mean => $mean, sum_of_squares => $aggregated_data->{sum_of_squares} };
         shift @rolling_window if @rolling_window > $rolling_window_size;
+        
     }
 
     ## STATS FOR TOP LOG MESSAGES ##
@@ -1143,6 +1151,82 @@ sub calculate_all_statistics {
                 undef $log_messages{$category}{$log_key}{durations};
                 delete $log_messages{$category}{$log_key}{durations};
             }
+        }
+    }
+
+
+    ## STATS FOR THREAD POOL ACTIVITY ##
+    my %threadpools;
+    my ( @ordered_threadpools );
+    my $threadpools_included = 0;
+
+    foreach my $category ( qw( highlight plain ) ) {
+        foreach my $threadpool ( keys %{$threadpool_activity{$category}} ) {
+            $threadpools{$threadpool}{threads} += scalar keys %{$threadpool_activity{$category}{$threadpool}};
+            foreach my $thread ( keys %{$threadpool_activity{$category}{$threadpool}} ) {
+                $threadpools{$threadpool}{count} += $threadpool_activity{$category}{$threadpool}{$thread};
+            }
+        }
+    }
+
+#$, = "\n";
+
+    @ordered_threadpools = sort { $threadpools{$b}{count} <=> $threadpools{$a}{count} } keys %threadpools;
+
+#print "\nThread Pools\n";
+#print @ordered_threadpools;
+#print "\n----\nThread Pools to Graph\n";
+
+    foreach my $threadpool ( @ordered_threadpools ) {
+        last if $threadpools_included++ > 3;
+        push( @graph_threadpools_activity, $threadpool ) if $threadpool =~ /${threadpool_activity_regex}/i; 
+    }
+
+    push @graph_columns, @graph_threadpools_activity;			# add matched thread pools to the list of data points to be graphed
+
+# bookmark20
+#print @graph_threadpools_activity;
+#print "\n";
+#$, = "";
+
+
+#    foreach my $bucket ( keys %log_threadpools ) {
+#        # Capture Relevant Thread Pool Stats for Graphing
+#print "\n $bucket-- ";
+#        foreach my $threadpool ( @graph_threadpools_activity ) {
+#print "$threadpool ";
+#            my $threadpool_highlight = "$threadpool-HL";
+#
+#            $log_stats{$bucket}{$threadpool} = scalar keys %{$log_threadpools{$bucket}{$threadpool}{plain}};
+#            $log_stats{$bucket}{$threadpool_highlight} = scalar keys %{$log_threadpools{$bucket}{$threadpool}{highlight}};
+#print ".. ";
+#print "$log_stats{$bucket}{$threadpool_highlight}:$log_stats{$bucket}{$threadpool} ";
+#                $| = 1; # Flush output
+#        }
+#    }
+
+    foreach my $bucket (keys %log_threadpools) {
+        # Capture Relevant Thread Pool Stats for Graphing
+    
+        foreach my $threadpool (@graph_threadpools_activity) {
+            my $threadpool_highlight = "$threadpool-HL";
+        
+            # Ensure the keys exist before accessing them
+            if (exists $log_threadpools{$bucket}{$threadpool}{plain} ) {
+                $log_stats{$bucket}{$threadpool} = scalar keys %{$log_threadpools{$bucket}{$threadpool}{plain}};
+                $log_stats{$bucket}{$threadpool_highlight} = scalar keys %{$log_threadpools{$bucket}{$threadpool}{highlight}};
+            
+#                print ".. ";
+#                print "$log_stats{$bucket}{$threadpool_highlight}:$log_stats{$bucket}{$threadpool}\n";
+            } else {
+                 $log_stats{$bucket}{$threadpool} = 0;
+#                print "Error: Missing data for $threadpool in $bucket\n";
+            }
+        
+#            $| = 1; # Flush output
+             # Free up no longer needed memory
+             undef $log_threadpools{$bucket}{$threadpool};
+             delete $log_threadpools{$bucket}{$threadpool};
         }
     }
 
@@ -1250,6 +1334,18 @@ sub normalize_data_for_output {
         $max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration} && $log_stats{$bucket}{duration} > $max_total{duration} );
     }
 
+# bookmark21
+    if( scalar @graph_threadpools_activity > 0 ) {
+        foreach my $bucket ( keys %log_threadpools ) {
+           foreach my $threadpool ( @graph_threadpools_activity ) {
+               $max_total{$threadpool} = 0 if !defined $max_total{$threadpool};
+               $max_total{$threadpool} = $log_stats{$bucket}{$threadpool} if ( defined $log_stats{$bucket}{$threadpool} && $log_stats{$bucket}{$threadpool} > $max_total{$threadpool} );
+#print "$threadpool " . ( defined $log_stats{$bucket}{$threadpool} ? $log_stats{$bucket}{$threadpool} : "N/A" ) . " - Set max-total for $threadpool to $max_total{$threadpool}\n";
+           }
+        }
+    }
+     
+
 #$print "Max totals --- count: $max_total{count}  bytes: $max_total{bytes}  duration: $max_total{duration}\n";
 
     # Calculate the maximum length of log level titles and counts
@@ -1298,9 +1394,9 @@ sub normalize_data_for_output {
         $graph_count += ( $max_total{$graph_type} > 0 );
     }
 
-    if( $graph_count > 1 && ( $max_total{duration} > 0 || $max_total{bytes} > 0 ) ) {
+    #if( $graph_count > 1 && ( $max_total{duration} > 0 || $max_total{bytes} > 0 || scalar @graph_threadpools_activity ) ) {
+    if( $graph_count > 1 ) {
         my %graph_relative_size;
-        $graph_count = ( $max_total{count} > 0 ) + ( $max_total{duration} > 0 ) + ( $max_total{bytes} > 0 ); 
 
         # Determine and store which of the possible columns to print have data
         foreach my $key ( @graph_columns ) {
@@ -1317,19 +1413,65 @@ sub normalize_data_for_output {
                 1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
                 2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
             );
-         } elsif(  $graph_count == 3 ) {
+         } elsif( $graph_count == 3 ) {
             %graph_relative_size = (
-                1 => 66,
-                2 => 19,
-                3 => 15,
+                1 => 62,
+                2 => 21,
+                3 => 17,
             );
             %graph_width = (
                 1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
                 2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
                 3 => round( $graph_relative_size{3} / 100 * $max_graph_width ),
             );
+         } elsif( $graph_count == 4 ) {
+            %graph_relative_size = (
+                1 => 50,
+                2 => 18,
+                3 => 16,
+                4 => 16,
+            );
+            %graph_width = (
+                1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
+                2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
+                3 => round( $graph_relative_size{3} / 100 * $max_graph_width ),
+                4 => round( $graph_relative_size{4} / 100 * $max_graph_width ),
+            );
+         } elsif( $graph_count == 5 ) {
+            %graph_relative_size = (
+                1 => 40,
+                2 => 15,
+                3 => 15,
+                4 => 15,
+                5 => 15,
+            );
+            %graph_width = (
+                1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
+                2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
+                3 => round( $graph_relative_size{3} / 100 * $max_graph_width ),
+                4 => round( $graph_relative_size{4} / 100 * $max_graph_width ),
+                5 => round( $graph_relative_size{5} / 100 * $max_graph_width ),
+            );
+         } elsif( $graph_count == 6 ) {
+            %graph_relative_size = (
+                1 => 30,
+                2 => 14,
+                3 => 14,
+                4 => 14,
+                5 => 14,
+                6 => 14,
+            );
+            %graph_width = (
+                1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
+                2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
+                3 => round( $graph_relative_size{3} / 100 * $max_graph_width ),
+                4 => round( $graph_relative_size{4} / 100 * $max_graph_width ),
+                5 => round( $graph_relative_size{5} / 100 * $max_graph_width ),
+                6 => round( $graph_relative_size{6} / 100 * $max_graph_width ),
+            );
          }
      }
+
 #print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $graph_width{2} $graph_width{3}\n";
 # bookmark2    
     foreach my $bucket (keys %log_counts) {
@@ -1345,11 +1487,12 @@ sub normalize_data_for_output {
 # bookmark3 : scale the total values to the printable size
         if( $graph_count > 1 ) {
             my $column_number = 2; 
+
             foreach my $key ( @populated_graph_columns ) {			# go through the list of possible columns and populate the scaled value for that metric for the current time bucket
+                next if $key =~ /^count$/;					# the counts have already been printed, so should skip this entry even if it is legitimate
                 my $key_highlight = "${key}-HL";
                 my $scaled_key = "scaled_${key}";
                 my $scaled_key_highlight = "${scaled_key}-HL";
-
                 # need to subtract a few for additional space for the scaled amount to allow for room for separators
                 $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * ( $graph_width{$column_number} - 3 ) ) : 0;
                 $log_stats{$bucket}{$scaled_key_highlight} = ( defined $log_stats{$bucket}{$key_highlight} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key_highlight} / $max_total{$key} ) * ( $graph_width{$column_number} - 3 ) ) : 0;
@@ -1398,7 +1541,10 @@ sub print_bar_graph {
     my $lines_printed = 0;
     if( $total_lines_included ) {
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
+        $, = "\t\t"; print "$colors{'bright-black'}timestamp", "", "count", "\t",  @populated_graph_columns; $, = "";
+        print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
         $lines_printed++;
+
         foreach my $bucket (sort keys %log_counts) {
             my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
             my $printed_chars = 0;
@@ -1475,8 +1621,7 @@ sub print_bar_graph {
                 $printed_chars += $missing_chars;
 
                 foreach my $key ( @populated_graph_columns ) {		# loop through available data columns to print
-                    next unless defined $log_stats{$bucket}{$key} && $log_stats{$bucket}{$key} > 0;
-
+                    next if $key =~ /^count$/;					# the counts have already been printed, so should skip this entry even if it is legitimate
                     my $scaled_trend_key = "scaled_${key}";
                     my $scaled_trend_key_highlight = "${scaled_trend_key}-HL";
                     my $scaled_trend_value = $log_stats{$bucket}{$scaled_trend_key};
@@ -1486,12 +1631,13 @@ sub print_bar_graph {
                     #next unless defined $trend_value;
                     print " ";
 
+if( defined $log_stats{$bucket}{$key} ) {
                     if( $key =~ /^time|duration$/i ) {
-                    #if( $trend_type =~ /^time|duration$/i ) {
                         $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', 'long', ' ' );
                     } elsif( $key =~ /^bytes$/i ) {
-                    #} elsif( $trend_type =~ /^bytes$/i ) {
                         $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
+                    } else {
+                        $trend_value = defined $log_stats{$bucket}{$key} ? " $log_stats{$bucket}{$key}" : "";
                     }
 
 # bookmark7
@@ -1499,28 +1645,67 @@ sub print_bar_graph {
                     #print "\033[93;43m";					# 93 is dark yellow foreground, 43 is light yellow background
                     # Blue background 104m, Blue Foreground 94m
                     # Yellow background 103m, Yellow Foreground 93m       184 medium yellow (nice!)  190 pale yellow  226 bright yellow   (184 + 190 are the winners)
-                    # Cyan background 103m, Cyan Foreground 36m, bright Cyan 96m     51 bright cyan    123 medium cyan   159 pale cyan  106 light cyan  100 dark cyan
+                    # Cyan background 103m, Cyan Foreground 36m, bright Cyan 96m   46 Cyan BG   30 Deep Cyan  44 Bright Cyan 36 Darker Cyan 37 Vibrant Cyan 45 Cyan 106 Bright Cyan BG  51 bright cyan    123 medium cyan   159 light cyan  195 pale cyan
+                    # Green                          32 Green FG    42 Green BG     92 Bright Green FG   102  Bright Green BG     34 Medium Green  46 Ultramarine Green  120  Light Green  121  Pale Green
+                    # Blue                           34 Blue FG     44 Blug BG     94 Bright Blue FG   20 Ultramarine Blue   104 Bright Blue BG    20 Medium Blue   117 Light Blue   159  Pale Blue
+                    # Magenta                        35 FG Magenta     45 BG Magenta      105 Bright Magenta    127 Medium magenta   201 Ultramarine Magenta   225 Light Magenta     219 Pale Magenta
 
 #print "$scaled_trend_key_highlight $log_stats{$bucket}{$scaled_trend_key_highlight}";
                     # Start the background color with the brighter highlight value if there is anything to highlight
-                    print $key =~ /^duration$/i ? "\033[48;5;226m\033[38;5;0m" : "\033[48;5;123m\033[38;5;0m";
+                    #print $key =~ /^duration$/i ? "\033[48;5;226m\033[38;5;0m" : "\033[48;5;123m\033[38;5;0m";
+
+                    my ( $highlighted_bg_black_fg, $plain_bg_black_fg, $black_bg_plain_fg );
+
+                    #if( $key =~ /^duration$/i ) {
+                    if( $column_number == 2 ) {						# Yellow
+                        $highlighted_bg_black_fg = "\033[48;5;226m\033[38;5;0m";
+                        $plain_bg_black_fg = "\033[48;5;184m\033[38;5;0m";
+                        $black_bg_plain_fg = "\033[0m\033[93m";
+                    #} elsif( $key =~ /^bytes$/i ) {
+                    } elsif( $column_number == 3 ) {					# Green
+                        $highlighted_bg_black_fg = "\033[48;5;46m\033[38;5;0m";
+                        $plain_bg_black_fg = "\033[48;5;34m\033[38;5;0m";
+                        $black_bg_plain_fg = "\033[0m\033[32m";
+                    } elsif( $column_number == 4 ) {					# Cyan
+                        $highlighted_bg_black_fg = "\033[48;5;36m\033[38;5;0m";
+                        $plain_bg_black_fg = "\033[48;5;30m\033[38;5;0m";
+                        $black_bg_plain_fg = "\033[0m\033[36m";
+                    } elsif( $column_number == 5 ) {					# Blue
+                        $highlighted_bg_black_fg = "\033[48;5;21m\033[38;5;0m";
+                        $plain_bg_black_fg = "\033[48;5;20m\033[38;5;0m";
+                        $black_bg_plain_fg = "\033[0m\033[34m";
+                    } elsif( $column_number == 6 ) {					# Magenta
+                        $highlighted_bg_black_fg = "\033[48;5;201m\033[38;5;0m";
+                        $plain_bg_black_fg = "\033[48;5;127m\033[38;5;0m";
+                        $black_bg_plain_fg = "\033[0m\033[35m";
+                    }
+
+                    print $highlighted_bg_black_fg;
 
                     for my $i ( 0 .. $graph_width{$column_number} - 3) {
                         my $value_char = (split //, $trend_value )[$i];
 
                         # Switch over to the standard foreground/background colors once we have printed the required number of highlighted bars
                         if( defined $log_stats{$bucket}{$scaled_trend_key_highlight} && $log_stats{$bucket}{$scaled_trend_key_highlight} == $i ) {
-                            print $key =~ /^duration$/i ? "\033[48;5;184m\033[38;5;0m" : "\033[48;5;45m\033[38;5;0m";
+                            #print $key =~ /^duration$/i ? "\033[48;5;184m\033[38;5;0m" : "\033[48;5;45m\033[38;5;0m";
+                            print $plain_bg_black_fg;
                         }
 
                         # Switch over the graphs standard foreground color with black background once all bars are printed
                         if( $i == $scaled_trend_value ) {
-                            print $key =~ /^duration$/i ? "$colors{'NC'}\033[93m" : "$colors{'NC'}\033[36m";
+                            #print $key =~ /^duration$/i ? "$colors{'NC'}\033[93m" : "$colors{'NC'}\033[36m";
+                            print "$black_bg_plain_fg";
                         }
 
                         print length( $value_char ) ? $value_char : " ";
                     }
-                    print "$colors{'NC'} ";						# clear the foreground color
+                    print "$colors{'NC'}\033[0m ";						# clear the foreground color
+
+} else {
+ print " " x ( 1 + ( $graph_width{$column_number} - 2 ) );
+
+}
+
                     #$printed_chars += $missing_chars + $scaled_trend_value;
                     $printed_chars += 2 + ( $graph_width{$column_number} - 2 );		# +2 for space before and after the sparkline
                     $column_number++;
@@ -1882,8 +2067,6 @@ sub print_threadpool_summary {
     my %sorted_keys = ( 'highlight' => [], 'plain' => [] );
     foreach my $grouping ( qw( highlight plain ) ) {
         my @sorted_keys = sort {
-            #my $count_a = $threadpool_activity{$grouping}{$a}{$sort_key} // 0;
-            #my $count_b = $threadpool_activity{$grouping}{$b}{$sort_key} // 0;
             my $count_a = scalar keys %{$threadpool_activity{$grouping}{$a}} // 0;
             my $count_b = scalar keys %{$threadpool_activity{$grouping}{$b}} // 0;
             $count_b <=> $count_a; 
