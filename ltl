@@ -2,6 +2,7 @@
 
 # TO DO:
 
+# - PRIORITY - CSV export added to time window bucket data
 # - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
 # - Figure out and fix issues using file name glob patterns in Windows (ScriptLog.*.log)
 
@@ -10,6 +11,7 @@
 
 # - Filter options for min/max impact (count*duration)
 
+# TO DO: the bytes for each message is captured, but not surfaced in the message results
 # - Add AND match possibility for include and exclude using RegEx lookahead (?=.*word)
 # - Capture custom log message values for "count=" and "rowCount=" - if present could include it in the message totals
 # - Second graph (stats): line chart showing evolution of some of the percentile stats in different colors (with points) 
@@ -67,15 +69,15 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.4.9";
+my $version_number = "0.5.0";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats ) = 0;
-my ( $include_query_string, $include_session ) = ( 0, 0 );
+my ( $include_query_string, $include_session, $include_threadpool_summary ) = ( 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages ) = ( 0,0,0,0,0,0,0,0,0 );
-my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats );		# this is where the counts of log entries are tallied across the time buckets
+my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats, %threadpool_activity );		# this is where the counts of log entries are tallied across the time buckets
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
 my $durations_graph_width = 0;
 my ( $graph_count, $max_graph_width ) = ( 1, 0 );
@@ -450,6 +452,7 @@ sub adapt_to_command_line_options {
 	'memory-usage|mem' => \$track_memory,
         'output-csv|o' => \$write_messages_to_csv,
         'sort|so=s' => \$sort_type,
+        'threadpool-activity-summary|tpas' => \$include_threadpool_summary,
         'group-similar|g=s' => \$group_similar_sensitivity
     ) or die print_usage( "required options not provided" ); 
 
@@ -599,10 +602,10 @@ sub read_and_process_logs {
 
         while (<$fh>) {
             $line_number++;
-            my ( $timestamp_str, $log_level, $category_bucket, $object, $instance, $user, $platform, $thread, $session, $message ) = ("") x 10;
+            my ( $timestamp_str, $log_level, $category_bucket, $category, $object, $instance, $user, $platform, $thread, $threadpool, $session, $message ) = ("") x 12;
             my ( $is_line_match, $is_access_log, $match_type, $status_code, $heap_from, $heap_to, $heap_size ) = ( 0, 0, 0, 0, 0, 0, 0 );
             my ( $bytes, $duration, $count ) = ( undef, undef, undef );
-            my $timestamp;
+            my ( $timestamp, $threadname );							# I actually don't want these to be defined
             $total_lines_read++;
 
             if ($line_number % 997 == 0) {	# only print processing status update every X lines processed
@@ -617,10 +620,11 @@ sub read_and_process_logs {
                 }
             }
 
+            ## ThingWorx Standard Log Format (ApplicationLog, ErrorLog, ScriptLog, ...) ##
             if ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
                 $is_line_match = 1;
                 $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
-                $thread =~ s/(.*)-\d+$/$1/;
+#                $thread =~ s/(.*)-\d+$/$1/;
 
                 # this section is optional, for cases where log line has included additional context which should be interpretted (row count, execution duration, result size)
                 ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)/;								# 2025-04-22 remove the trailing whitespace as same as below
@@ -632,13 +636,18 @@ sub read_and_process_logs {
 
 #printf( "$message -- durationMS=%s bytes=%s count=%s\n", defined $duration ? $duration : "-", defined $bytes ? $bytes : "-", defined $count ? $count : "-" );
 
+            ## Generic Java/Logback Pattern with timestamp and level ##
             } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]/) {
                 $is_line_match = 1;
                 $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
+
+            ## ThingWorx Remote Access Client Log Format ##
             } elsif ( ($timestamp_str, $category_bucket ) = $_ =~ /^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3}).*? \[[L: ]*([^\]]*)\]/ ) {
                 $is_line_match = 1;
                 $match_type = 2;			# this is matching RAC client log format [2025-02-04T12:06:22.784] [TRACE]
                 $timestamp_str =~ tr/T/ /;
+
+            ## Apache Tomcat Access Log with Service Execution Time (%D) ##
             } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) (\d+)[ ]?(\S+)?[ ]?(\S+)?/ ) {
                 $is_line_match = 1;
                 $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
@@ -652,7 +661,7 @@ sub read_and_process_logs {
                 $message = "[$session] $message" if defined $session && $include_session;	# include session if we found it in the logs
 
 #print "$message -- $_";
-#            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+)/ ) {    # old, working, updated with $ at the end
+            ## Apache Tomcat Standard/Common Access Log Format ##
             } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+)$/ ) {    # added $ to end to differentiate from later pattern
                 $is_line_match = 1;
                 $match_type = 4;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626
@@ -665,11 +674,16 @@ sub read_and_process_logs {
                 $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
                 $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
 # TO DO - update RegEx to pull out message, thread name (2025-04-23 not sure what this implies as match type 3 picks up thread name and session if present)
+
+            ## ThingWorx Connection Server JSON Formatted Logs ##
             } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^{"\@timestamp":"([^"]*).*"level":"([^"]*)/ ) {
                 $is_line_match = 1;
                 $match_type = 5;			# this matches Connection Server JSON formatted logs : {"@timestamp":"2025-02-02T21:03:06.725+00:00","@version":1,"message":"Error encountered, closing WebSocket: endpointId=2608459","logger_name":"com.thingworx.connectionserver.alwayson.AbstractClientEndpoint","thread_name":"vert.x-eventloop-thread-16","level":"WARN","level_value":30000,"stack_trace":"io.vertx.core.http.HttpClosedException: Connection was closed\n"}
                 $timestamp_str =~ s/\+\d{2}:\d{2}$//;	# chop off the timezone offset
                 $timestamp_str =~ tr/T/ /;
+# TO DO: Pull out thread name
+
+            ## Java 11 GC Log Format with Timestamps Enabled ##
             } elsif ( ( $timestamp_str, $category_bucket, $message, $heap_from, $heap_to, $heap_size, $duration ) = $_ =~ /^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}.*?\[info\]\[gc\s*\] GC\(\d+\) (.+?) (\(.+?\)) (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms/ ) {
                 $is_line_match = 1;
                 $match_type = 6;			# this matches Java GC log info level pause
@@ -678,29 +692,29 @@ sub read_and_process_logs {
 
                 $bytes = convert_bytes( $heap_from ) - convert_bytes( $heap_to );
                 $bytes = $bytes < 0 ? 0 : $bytes;
+
+            ## ThingWorx Analytics Log Formats ##
             } elsif ( ( $category_bucket, $timestamp_str, $message ) = $_ =~ /^([^ ]+)\s+\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[.,]\d{3})\] (.*)$/ ) {  
+            # adaptor     # ERROR [2025-02-19 18:31:00,284] com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!
+            # sync        # INFO  [2025-02-20 04:49:11,450] org.ehcache.core.EhcacheManager: Cache 'scorefunc_cachex' created in EhcacheManager.
+            # async       # WARN  [2025-02-19 18:30:01,437] org.apache.zookeeper.ClientCnxnSocketNetty: future isn't success.
                 $is_line_match = 1;
                 $match_type = 7;			# this matches ThingWorx Analytics V2 types for adaptor, sync, async
                 $timestamp_str =~ tr/,/./;
                 $timestamp_str =~ tr/T/ /;
                 $message =~ s/\s+$//g;
+
             } elsif ( ( $timestamp_str, $thread, $category_bucket, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^ ]*)\s+\[([^]]+)\]\s+(\w+)\s+(.*)$/ ) {  
+            # worker      # 2025-02-20 10:06:10 [nioEventLoopGroup-2-1] WARN  io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]
                 $is_line_match = 1;
                 $match_type = 8;			# this matches ThingWorx Analytics worker type
-                $thread =~ s/(.*)-\d+$/$1/;
+#                $thread =~ s/(.*)-\d+$/$1/;
                 $timestamp_str =~ tr/,/./;
                 $timestamp_str =~ tr/T/ /;
                 $message =~ s/\s+$//g;
 
-                # Analytics log formats
-                # worker   # 2025-02-20 10:06:10 [nioEventLoopGroup-2-1] WARN  io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]
-                # adaptor  # ERROR [2025-02-19 18:31:00,284] com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!
-                # sync     # INFO  [2025-02-20 04:49:11,450] org.ehcache.core.EhcacheManager: Cache 'scorefunc_cachex' created in EhcacheManager.
-                # async    # WARN  [2025-02-19 18:30:01,437] org.apache.zookeeper.ClientCnxnSocketNetty: future isn't success.
-## Analytics Access Log Format ##
-# 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
-
             } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, undef, undef, $duration) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$/ ) {
+            # access logs # 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
                 $is_line_match = 1;
                 $match_type = 9;			# this is matching Jboss access log format with service execution time 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
                 $is_access_log = 1;
@@ -713,7 +727,11 @@ sub read_and_process_logs {
 #print "$message -- $_";
             }
 
-#print "Thread: $thread   Object: $object   Message: $message\n";
+            # Populate Thread Pool name if thread name was found
+            if( defined $thread && $thread ne "" ) {
+                ( $threadpool ) = $thread =~ /(.*)-\d+$/;
+                $threadname = defined $threadpool ? $threadpool : $thread;
+            }
 
             #print "\033[0;32m[$timestamp_str|$category_bucket] HTTP $status_code [$is_line_match/$match_type] \033[0m$_";
             #$| = 1; # Flush output
@@ -767,9 +785,12 @@ sub read_and_process_logs {
                 # determine if this line should be highlighted (matches in result search)
                 if( defined( $highlight_regex ) && /$highlight_regex/ ) {
                     $category_bucket .= '-HL';
+                    $category = 'highlight';
                     $in_files_matched{$in_file} = 2 unless $in_files_matched{$in_file} == 2;
+                } else {
+                    $category = 'plain';
                 }
-
+                
                 # sets earliest and latest timestamp values being displayed (after the range filtering selection)
                 $output_timestamp_min = $timestamp->epoch() if $output_timestamp_min == 0 || $output_timestamp_min > $timestamp->epoch();
                 $output_timestamp_max = $timestamp->epoch() if $output_timestamp_max == 0 || $output_timestamp_max < $timestamp->epoch();
@@ -782,31 +803,24 @@ sub read_and_process_logs {
                 if( defined( $message ) ) {
                     my $log_key = "";
                     my $log_level = $status_code > 0 ? $status_code : $category_bucket;			# If we received an actual HTTP status code, use that for the message statistic data model
-                    my $category = "";
                     $log_level =~ s/-HL$//;
 
-                    if( defined($thread) && defined($object) ) {					# ThingWorx log line parsed and usable for additional analysis
-                        my $truncated_thread = substr( $thread, 0, 20 );
+                    if( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
+                        my $truncated_thread = substr( $threadname, 0, 20 );
                         my $max_object_length = 25;
                         my $truncated_object = substr( $object, length($object) > $max_object_length ? length($object)-$max_object_length : 0, $max_object_length );
                         # truncate the log message key to either the screen width or hardcoded value if writing to output to CSV file
                         $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
-                    } elsif( defined( $thread ) ) {
-                        my $truncated_thread = substr( $thread, 0, 20 );
+                    } elsif( defined( $threadname ) ) {
+                        my $truncated_thread = substr( $threadname, 0, 20 );
                         $log_key = substr("[$log_level] [$truncated_thread] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
                     } else {
                         $log_key = substr("[$log_level] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
                     }
 
-                    if( $category_bucket =~ /-HL$/ ) {
-                        $category = 'highlight';
-                    } else {
-                        $category = 'plain';
-                    }
-
                     $log_messages{$category}{$log_key}{count}++;
 
-                    # Keep track of data for message based statistics
+                    ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
                     if( $is_access_log ) {
 
                         # Initialize the hash if not already done
@@ -818,11 +832,8 @@ sub read_and_process_logs {
                             durations => [],
                         };
 
-                ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
-
                         # Accumulate the total duration and bytes
                         $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
-# TO DO: the bytes for each message is captured, but not surfaced in the message results
 
                         if( defined $duration ) {
                             $log_messages{$category}{$log_key}{total_duration} += $duration;
@@ -878,6 +889,77 @@ sub read_and_process_logs {
                   #  printf "\033[0;35m[status: %s] [duration: %d] [bytes: %d]\033[0m\n", $category_bucket, $log_counts{$bucket}{duration}, $log_counts{$bucket}{bytes};
                   #  $| = 1; # Flush output
                 }
+
+
+                ## CAPTURE THREAD AND THREAD POOL BASED STATISTICS DATA ##
+                if( $threadpool ) {
+
+                    # Thread Pool Based Statistics Capture (Overall Summary) #
+#
+#                    $log_messages{$category}{$log_key}{count}++;
+#
+#                    # Initialize the hash if not already done
+#                    $log_messages{$category}{$log_key} //= {
+#                         count => 0, 
+#                                total_bytes => 0,
+#                                total_duration => 0,
+#                                sum_of_squares => 0,
+#                                durations => [],
+#                            };
+#                            
+#                            # Accumulate the total duration and bytes
+#                            $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
+                    $threadpool_activity{$category}{$threadpool}{$thread} += 1;
+#
+#                            if( defined $duration ) {
+#                                $log_messages{$category}{$log_key}{total_duration} += $duration;
+#                                $log_messages{$category}{$log_key}{total_duration_num} += $duration;
+#
+#                                # Accumulate the sum of squares for variance calculation
+#                                $log_messages{$category}{$log_key}{sum_of_squares} += $duration ** 2;
+#                                push @{$log_messages{$category}{$log_key}{durations}}, $duration;
+#
+#                                # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
+#                                if( $duration > 0 ) {
+#                                    my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{count};
+#                                    $log_messages{$category}{$log_key}{impact} = round( log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{count} ) * 100 ) / 100;
+#                                }
+#                            }
+#
+
+                    # Time Window Based Statistics Capture (Time Window Graphs) #
+
+                    # Initialize the hash if not already done
+#                    $log_analysis{$bucket} //= {
+#                        count => 0,
+#                        total_bytes => 0,
+#                        total_duration => 0,
+#                        sum_of_squares => 0,
+#                        durations => [],
+#                    };
+#
+#                    # Update the hash with the new data
+#                    $log_analysis{$bucket}{count}++;
+#                    $log_analysis{$bucket}{total_duration} += $duration;
+#                    $log_analysis{$bucket}{total_bytes} += $bytes;
+#
+#                    $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
+#                    push @{$log_analysis{$bucket}{durations}}, $duration;
+#
+#                    if( $category_bucket =~ /-HL$/ ) {                  # capture total duration and bytes for highlighted rows
+#                        $log_analysis{$bucket}{'total_duration-HL'} += $duration;
+#                        $log_analysis{$bucket}{'total_bytes-HL'} += $bytes;
+#                    } else {
+#
+                     $log_stats{$bucket}{threadpools}{$threadpool}{$category}{$thread} += 1;
+
+
+#print "Thread Pool: $threadpool  Thread: $thread   Object: $object   Message: $message\n";
+#exit if $total_lines_included > 50;
+                }
+
+
+
             }
         }
         close $fh;
@@ -1476,13 +1558,6 @@ sub print_bar_graph {
     return;
 }
 
-sub access_log_stats {
-	my( $bucket ) = @_;
-	my( $pretty_duration, $pretty_avg_duration, $pretty_bytes );
-        printf "%dms / %d s / %dMB", int( $log_analysis{$bucket}{duration} / $log_analysis{$bucket}{count} ), $log_analysis{$bucket}{duration} / 1000, int( $log_analysis{$bucket}{bytes} / 1024 / 1024 );
-}
-
-
 sub print_summary_table {
     my $category_column_width = 30;
     my $count_column_width = 10;
@@ -1776,9 +1851,128 @@ sub print_message_summary {
     return;
 }
 
-## TOKENIZATION, CLUSTERING, COMPRESSION, AGGREGATION, CLEAN UP ##
+sub print_threadpool_summary {
+    # Define the relative size of each column as a percentage
+    my %col_relative_size;
 
+    print "\n";
 
+    %col_relative_size = (
+       1 => 94,
+       2 => 6,
+    );
+
+    # Initialize the hash to store the character width of each column
+    my %col_width;
+
+    # Define the terminal width and padding values
+    my $table_padding_outer = 1;  # Example outer padding
+    my $table_padding_inner = 1;  # Example inner padding
+
+    # Calculate the total table width after applying outer padding
+    my $table_width = $terminal_width - (2 * $table_padding_outer);
+
+    # Calculate the absolute width for each column based on the relative size and inner padding
+    foreach my $column (keys %col_relative_size) {
+        $col_width{$column} = int($table_width * $col_relative_size{$column} / 100) - (2 * $table_padding_inner);
+    }
+
+    ### DETERMINE CUT OF HIGHLIGHTED VS PLAIN MESSAGES TO PRINT ###
+    # Step 1: Sort and store available messages for each category in a hash of arrays
+    my %sorted_keys = ( 'highlight' => [], 'plain' => [] );
+    foreach my $grouping ( qw( highlight plain ) ) {
+        my @sorted_keys = sort {
+            #my $count_a = $threadpool_activity{$grouping}{$a}{$sort_key} // 0;
+            #my $count_b = $threadpool_activity{$grouping}{$b}{$sort_key} // 0;
+            my $count_a = scalar keys %{$threadpool_activity{$grouping}{$a}} // 0;
+            my $count_b = scalar keys %{$threadpool_activity{$grouping}{$b}} // 0;
+            $count_b <=> $count_a; 
+        } keys %{$threadpool_activity{$grouping}};
+
+        $sorted_keys{$grouping} = \@sorted_keys;
+    }
+
+    # Initialize the hash to store top message counts
+    my %top_message_count = (
+        'highlight' => 0,
+        'plain' => 0,
+    );
+
+    foreach my $grouping ( qw( highlight plain ) ) {
+        for my $i (0 .. $#{$sorted_keys{$grouping}}) {
+            last if $i >= $top_n_messages;
+            $top_message_count{$grouping}++;
+        }
+    }
+
+    # Step 2: Determine how many messages to print from each category
+    my $half_top_n = int($top_n_messages / 2);
+
+    # Initialize the hash to store the number of messages to print
+    my %messages_to_print = (
+        'highlight' => $half_top_n,
+        'plain' => $half_top_n,
+    );
+
+    $messages_to_print{'highlight'}++ if $top_n_messages % 2 != 0;		# if halving doesn't equate to Top N, then add another row to highlighted messages
+
+    # Step 3: Adjust if one category has fewer messages than needed, ensuring the total remains $top_n_messages
+    if ($top_message_count{'highlight'} < $messages_to_print{'highlight'}) {
+        $messages_to_print{'highlight'} = $top_message_count{'highlight'};
+        $messages_to_print{'plain'} = $top_n_messages - $messages_to_print{'highlight'};
+    } elsif ($top_message_count{'plain'} < $messages_to_print{'plain'}) {
+        $messages_to_print{'plain'} = $top_message_count{'plain'};
+        $messages_to_print{'highlight'} = $top_n_messages - $messages_to_print{'plain'};
+    }
+
+    foreach my $grouping ( qw( highlight plain ) ) {
+        my $messages_printed = 0;
+
+        # Ensure the grouping exists and is a hash reference
+        if (exists $threadpool_activity{$grouping} && ref($threadpool_activity{$grouping}) eq 'HASH') {
+            my @top_keys = @{$sorted_keys{$grouping}}[0..($top_n_messages-1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
+
+            next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
+
+            my $header_title = " ";
+
+            if( $grouping eq "highlight" ) {
+                $header_title = " " x $table_padding_outer . "$colors{'bright-yellow-HL'}" . " " x $table_padding_inner . sprintf( "%-$col_width{1}s", "TOP HIGHLIGHTED THREAD POOLS ─ ACTIVE THREADS" ) . " " x $table_padding_inner;
+                $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
+                $header_title .= "$colors{'NC'}$colors{'bright-yellow'}";
+            } elsif( $grouping eq "plain" ) {
+                $header_title = " " x $table_padding_outer . "$colors{'bright-magenta-HL'}" . " " x $table_padding_inner . sprintf( "%-$col_width{1}s", "TOP OVERALL THREAD POOLS ─ ACTIVE THREADS" ) . " " x $table_padding_inner;
+                $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
+                $header_title .= "$colors{'NC'}$colors{'bright-magenta'}";
+            }
+
+            print "$header_title\n";
+            print " " x $table_padding_outer . "─" x $table_width . "$colors{'NC'}\n";
+
+            # Print the top thread pools
+            foreach my $key (@top_keys) {
+                next if $messages_printed++ >= $messages_to_print{$grouping};
+ 
+                my $row = " " x $table_padding_outer;
+
+                if (defined $key && exists $threadpool_activity{$grouping}{$key}) {
+                    my $message = substr( $key, 0, $col_width{1} );
+                    my $count = scalar keys %{$threadpool_activity{$grouping}{$key}};
+#print "$threadpool_activity{$grouping}{$key} $count\n";
+
+                    $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
+                    $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $count ) . " " x $table_padding_inner; 
+
+                    print "$row\n";
+                }
+            }
+
+            print "\n";
+        }
+    }
+
+    return;
+}
 
 
 ## MAIN ##
@@ -1825,19 +2019,20 @@ $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + 
 print_bar_graph();
 print_summary_table();
 
-if( $write_messages_to_csv ) {
-    $csv = Text::CSV->new({ binary => 1, eol => $/ });											 # Create a new CSV object
+if( $write_messages_to_csv ) {														# If write to CSV enabled, open filehandles
+    $csv = Text::CSV->new({ binary => 1, eol => $/ });											# Create a new CSV object
     my ($sec, $min, $hour, $mday, $mon, $year) = localtime();
     my $timestamp = sprintf( "%04d-%02d-%02d_%02d%02d%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec );
     $csv_file_args =~ tr/!@#\$%\^&*()_+{}|:"<>?[\];',.\/\\`~ /_/;
     my $csv_file_name = "${timestamp}-LTL-STATS-${csv_file_args}.csv";
-    open $csv_fh, '>', $csv_file_name or die "Could not open file: $!";									 # Open a file for writing
-    $csv->print($csv_fh, [qw(Category Message Count MeanBytes TotalBytes TotalBytesNice MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact)]);	 # Print the header
+    open $csv_fh, '>', $csv_file_name or die "Could not open file: $!";									# Open a file for writing, then print the header/column names
+    $csv->print($csv_fh, [qw(Category Message Count MeanBytes TotalBytes TotalBytesNice MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact)]);
 }
 
-print_message_summary();														 # Print and write message summaries
+print_message_summary();														# Print and write message summaries
+print_threadpool_summary() if $include_threadpool_summary;										# Print threadpool summaries
 
-close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );					 # Close the file handle
+close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );					# Close the file handle
 
 print "\n";
 exit;
