@@ -18,6 +18,7 @@
 # - Second graph (throughput): outbound throughput based on bytes returned
 # - create a conditional path to resize durations stats pane and only print available information if duration value is not present (also don't do the statistical calculations)
 # - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
+# - add a soft memory limit (after having made most of the tweaks) to avoid accidents in production reading large files with 100k's of different messages - will need to optimize performance of memory checking
 # - multi-threaded file reading
 # - Similar to JMC, percentile calculations should include the representative counts
 
@@ -1177,6 +1178,8 @@ sub calculate_all_statistics {
 #print @ordered_threadpools;
 #print "\n----\nThread Pools to Graph\n";
 
+# TO DO - If I built up the max_totals while going through the files, by the time we calculate the statistics I could removed empty graph fields like duration and bytes,
+#         then we'd be OK to add more custom columns in order to still fit within the 6 column limit.
     foreach my $threadpool ( @ordered_threadpools ) {
         last if $threadpools_included++ > 3;
         push( @graph_threadpools_activity, $threadpool ) if $threadpool =~ /${threadpool_activity_regex}/i; 
