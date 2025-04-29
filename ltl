@@ -919,7 +919,7 @@ sub read_and_process_logs {
 
 # bookmark18
                 ## CAPTURE THREAD AND THREAD POOL BASED STATISTICS DATA ##
-                if( defined( $threadpool_activity_regex ) && $threadpool =~ /$threadpool_activity_regex/ ) {
+                if( defined( $threadpool_activity_regex ) && defined( $threadpool ) && $threadpool =~ /$threadpool_activity_regex/ ) {
                 #if( $threadpool ) {
 #                    $threadpool =~ s/[*\-!\#=\$\?]//g;
 #                    $thread =~ s/[*\-!\#=\$\?]//g;
