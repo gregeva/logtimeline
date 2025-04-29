@@ -634,7 +634,32 @@ sub read_and_process_logs {
                 ( $count ) = $message =~ / count\s*=\s*(\d+)/;
                 $is_access_log = 1 if defined $bytes || defined $duration || defined $count;
 
+# [elapsed 39ms]
+#  [elapsed 20m 47s 399ms] Import completed successfully
+# ApplicationLog.2025-04-29.135.log:2025-04-29 09:07:04.340+0000 [L: INFO] [O: c.t.c.ImportProcessor] [I: ] [U: Administrator] [S: ] [P: ] [T: https-jsse-nio-8443-exec-1] ***  [elapsed 20m 47s 399ms] Import completed successfully
+#( $duration ) = $message =~ /\[elapsed (\d+)ms\]/;
+#$message =~ s/\[elapsed (\d+)ms\]/\[duration ??ms\]/g;
+#                $message =~ s/=\d+/=?/g;
+
                 $message =~ s/=\d+/=?/g;
+                $message =~ s/(session id: )\d+/$1\?\?/g;
+
+                $message =~ s/(\w+_)+\d{14}-/ModelFamily_CustomerPC_DateString-/g;
+                $message =~ s/\S{8}-\S{4}-\S{4}-\S{4}-\S{12}+/########-####-####-####-############/g;
+                
+                $message =~ s/Successfully added for import \/.+$/Successfully added for import \/ThingworxStorage\/repository\/SystemRepository\/\.\.\./g;
+                $message =~ s/Setting visibility permissions for (.+)$/Setting visibility permissions for \.\.\./g;
+                $message =~ s/Ancestors for Entity(.+)$/Ancestors for Entity \.\.\./g;
+                $message =~ s/input document: (.+)$/input document: \.\.\./g;
+                $message =~ s/Transaction was successfully ended for request (.+)$/Transaction was successfully ended for request \.\.\./g;
+                $message =~ s/Ending transaction for request (.+)$/Ending transaction for request \.\.\./g;
+                $message =~ s/(TimerEventHandler|TimerThing)\@(\S+)/$1\@/g;
+
+                # VILINK.Location.b698a817-
+                # VIRTUO_PCOEM_20250221153912-
+                # CONNECT_UP_CUSTOMERPC_20250221085610-
+                # -12fa9d24-faf9-4df0-95b3-ca0f4341d26f
+                # -f9883b39-f19c-4c8f-b21c-141630e3b9a7
 
 #printf( "$message -- durationMS=%s bytes=%s count=%s\n", defined $duration ? $duration : "-", defined $bytes ? $bytes : "-", defined $count ? $count : "-" );
 
@@ -1552,10 +1577,11 @@ sub print_bar_graph {
         foreach my $bucket (sort keys %log_counts) {
             my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
             my $printed_chars = 0;
-            my $timestamp_legend_length = length( $bucket_time_str ) + $legend_length + 2; 
 
             ## PRINT TIMESTAMP IN CHART ROW
             $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
+            my $timestamp_legend_length = length( $bucket_time_str ) + $legend_length + 2; 
+
             print "$bucket_time_str ";
 
             $printed_chars += $timestamp_legend_length;
