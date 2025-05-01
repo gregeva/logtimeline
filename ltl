@@ -925,77 +925,24 @@ sub read_and_process_logs {
 #                    $thread =~ s/[*\-!\#=\$\?]//g;
 
                     # Thread Pool Based Statistics Capture (Overall Summary) #
-#
-#                    $log_messages{$category}{$log_key}{count}++;
-#
-#                    # Initialize the hash if not already done
-#                    $log_messages{$category}{$log_key} //= {
-#                         count => 0, 
-#                                total_bytes => 0,
-#                                total_duration => 0,
-#                                sum_of_squares => 0,
-#                                durations => [],
-#                            };
-#                            
-#                            # Accumulate the total duration and bytes
-#                            $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
                     $threadpool_activity{$category}{$threadpool}{$thread} = 0 if !defined $threadpool_activity{$category}{$threadpool}{$thread};
                     $threadpool_activity{$category}{$threadpool}{$thread} += 1;
-#
-#                            if( defined $duration ) {
-#                                $log_messages{$category}{$log_key}{total_duration} += $duration;
-#                                $log_messages{$category}{$log_key}{total_duration_num} += $duration;
-#
-#                                # Accumulate the sum of squares for variance calculation
-#                                $log_messages{$category}{$log_key}{sum_of_squares} += $duration ** 2;
-#                                push @{$log_messages{$category}{$log_key}{durations}}, $duration;
-#
-#                                # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
-#                                if( $duration > 0 ) {
-#                                    my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{count};
-#                                    $log_messages{$category}{$log_key}{impact} = round( log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{count} ) * 100 ) / 100;
-#                                }
-#                            }
-#
 
                     # Time Window Based Statistics Capture (Time Window Graphs) #
-
-                    # Initialize the hash if not already done
-#                    $log_analysis{$bucket} //= {
-#                        count => 0,
-#                        total_bytes => 0,
-#                        total_duration => 0,
-#                        sum_of_squares => 0,
-#                        durations => [],
-#                    };
-#
-#                    # Update the hash with the new data
-#                    $log_analysis{$bucket}{count}++;
-#                    $log_analysis{$bucket}{total_duration} += $duration;
-#                    $log_analysis{$bucket}{total_bytes} += $bytes;
-#
-#                    $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
-#                    push @{$log_analysis{$bucket}{durations}}, $duration;
-#
 # bookmark19
-
-#                    $log_stats{$bucket}{threadpools}{$threadpool}{plain}{$thread} = 0 if !defined $log_stats{$bucket}{threadpools}{$threadpool}{plain}{$thread};
-#                    $log_stats{$bucket}{threadpools}{$threadpool}{plain}{$thread} += 1;
                     $log_threadpools{$bucket}{$threadpool}{plain}{$thread} += 1;
 
                     if( $category_bucket =~ /-HL$/ ) {                  # capture total duration and bytes for highlighted rows
-#                        $log_stats{$bucket}{threadpools}{$threadpool}{highlight}{$thread} = 0 if !defined $log_stats{$bucket}{threadpools}{$threadpool}{highlight}{$thread};
-#                        $log_stats{$bucket}{threadpools}{$threadpool}{highlight}{$thread} += 1;
                         $log_threadpools{$bucket}{$threadpool}{highlight}{$thread} += 1;
                     }
 
 #print "Thread Pool: $threadpool  Thread: $thread   $log_threadpools{$bucket}{$threadpool}{plain}{$thread}     Object: $object   Message: $message\n";
 #exit if $total_lines_included > 50;
                 }
-
             }
         }
-        close $fh;
+# I don't think that this should be here
+#        close $fh;
 
         print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
     }
@@ -1009,7 +956,6 @@ sub read_and_process_logs {
 sub calculate_all_statistics {
 
     print "\rCalculating statistics...";
-
 
     foreach my $bucket (sort { $a <=> $b } keys %log_analysis) {
         my $aggregated_data = {
@@ -1757,7 +1703,7 @@ if( defined $log_stats{$bucket}{$key} ) {
                     defined $log_stats{$bucket}{p90} ? printf( "$colors{'yellow'}P90:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p90} ) >= 4 ? format_time( $log_stats{$bucket}{p90}, 'ms' ) : $log_stats{$bucket}{p90} ) ) : printf( " " x 6 ); 
                     defined $log_stats{$bucket}{p95} ? printf( "$colors{'red'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 6 );
                     defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%5s$colors{'NC'} ", $log_stats{$bucket}{cv} ) : printf ( " " x 9 );
-                    defined $log_stats{$bucket}{z_score} ? printf( "$colors{$zscore_color}Z:%5s$colors{'NC'}", ( $log_stats{$bucket}{z_score} >= 1000 ? $log_stats{$bucket}{z_score} =~ /(\d+)\.\d*/ : $log_stats{$bucket}{z_score} ) ) : printf( " " x 5 );
+                    defined $log_stats{$bucket}{z_score} ? printf( "$colors{$zscore_color}Z:%5s$colors{'NC'}", ( $log_stats{$bucket}{z_score} >= 100 ? $log_stats{$bucket}{z_score} =~ /(\d+)\.\d*/ : $log_stats{$bucket}{z_score} ) ) : printf( " " x 5 );
                 }
             }
 
