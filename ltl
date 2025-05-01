@@ -518,15 +518,15 @@ sub calculate_start_end_filter_timestamps {
         my $epoch_value;  # Variable to store the epoch time
 
         # Convert timestamp to epoch seconds using Time::Piece -- WARNING -- use of strptime can cause timezone problems, it appears to work here as I've manually set TZ to UTC on input
-        if ( $value =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/ ) {
+        if ( $value =~ /^\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{2}:\d{2}/ ) {
             $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d %H:%M:%S" )->epoch;
-        } elsif ( $value =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/ ) {
+        } elsif ( $value =~ /^\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{2}/ ) {
             $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d %H:%M" )->epoch;
-        } elsif ( $value =~ /^\d{4}-\d{2}-\d{2}/ ) {
+        } elsif ( $value =~ /^\d{4}-\d{1,2}-\d{1,2}/ ) {
             $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d" )->epoch;
-        } elsif ( $value =~ /^\d{2}:\d{2}:\d{2}/ ) {
+        } elsif ( $value =~ /^\d{1,2}:\d{2}:\d{2}/ ) {
             $epoch_value = $log_date + Time::Piece->strptime( $value, "%H:%M:%S" )->epoch;
-        } elsif ( $value =~ /^\d{2}:\d{2}/ ) {
+        } elsif ( $value =~ /^\d{1,2}:\d{2}/ ) {
             $epoch_value = $log_date + Time::Piece->strptime( $value, "%H:%M" )->epoch;
         } else {
             print "Warning: unhandled date/time format - option not taken into account\n";
