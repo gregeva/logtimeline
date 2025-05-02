@@ -70,7 +70,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.5.0";
+my $version_number = "0.5.1";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -109,7 +109,7 @@ my $pause_output = 0;
 my $omit_values = 0;
 my ( $sort_type, $sort_key ) = ( "count", "count" );
 my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
-my @in_files;
+my ( @in_files, @output_columns );
 my %in_files_matched;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
 
@@ -134,7 +134,7 @@ my %blocks = (
     'I' => '■',    # Black Very Heavy
     'J' => '□'     # White square
 );
-my $default_chart_block = $^O ne 'MSWin32' ? "A" : "A";   # had set it to I for Windows
+my $default_chart_block = $^O ne 'MSWin32' ? "A" : "A";   # had initially set it to I for Windows
 
 my %colors = (
     'ERROR' => "\033[0;31m",
@@ -214,6 +214,12 @@ foreach my $key (keys %colors) {
 }
 
 ## SUBS ##
+
+
+# utility functions for trimming spaces off of a string
+sub ltrim { my $s = shift; $s =~ s/^\s+//; return $s }
+sub rtrim { my $s = shift; $s =~ s/\s+$//; return $s }
+sub trim  { my $s = shift; $s =~ s/^\s+|\s+$//g; return $s }
 
 sub print_title {
     my $title = <<"END";
@@ -502,6 +508,13 @@ sub adapt_to_command_line_options {
         $bucket_size_seconds = $bucket_size_minutes / 1000;
     } else {
         $bucket_size_seconds = $bucket_size_minutes * 60;
+    }
+
+    my %argv_hash = map { $_ => 1 } @ARGV;
+    foreach my $arg (@ORIGINAL_ARGV) {
+        unless (exists $argv_hash{$arg}) {
+            $csv_file_args .= "$arg" if $write_messages_to_csv;
+        }
     }
 
     return;
@@ -1281,9 +1294,14 @@ sub normalize_data_for_output {
         bytes => 0,
         duration => 0,
     );
+    my %output_columns;
+
 # TO DO : user defined value will need to have a max total determined for scaling and printing
 
     print "\rScaling and normalizing data...";
+
+# bookmark23
+    push @output_columns, "timestamp";
 
     foreach my $bucket (keys %log_counts) {
         my $total_count = 0;
@@ -1319,14 +1337,13 @@ sub normalize_data_for_output {
            }
         }
     }
-     
 
 #$print "Max totals --- count: $max_total{count}  bytes: $max_total{bytes}  duration: $max_total{duration}\n";
 
     # Calculate the maximum length of log level titles and counts
     foreach my $bucket (keys %log_counts) {
-
         my $bucket_legend_length = 0;
+
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
             my $count = $log_counts{$bucket}{$category_bucket}{count};
             my $title_length = 0;
@@ -1346,10 +1363,19 @@ sub normalize_data_for_output {
                 $title_length = length("$category_bucket: $count ");
             }
             $bucket_legend_length += $title_length;
+            $output_columns{$category_bucket} = 1 if !exists $output_columns{$category_bucket};
         }
 
         $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
     }
+
+    foreach my $category_bucket ( @log_levels ) {
+        if( exists $output_columns{$category_bucket} ) {
+            #push @output_columns, "totalCount" if $category_bucket =~ /^err-rate$/;
+            push @output_columns, $category_bucket;
+        }
+    }
+    push @output_columns, "totalCount"; # if $category_bucket =~ /^err-rate$/;
 
     #print "Legend length: $legend_length\n";
 
@@ -1375,8 +1401,14 @@ sub normalize_data_for_output {
 
         # Determine and store which of the possible columns to print have data
         foreach my $key ( @graph_columns ) {
-            push @populated_graph_columns, $key if defined $max_total{$key} && $max_total{$key} != 0;
+            if( defined $max_total{$key} && $max_total{$key} != 0 ) {
+                push @populated_graph_columns, $key;
+                push @output_columns, "${key}Nice" if $key =~ /^(duration|bytes)$/;
+                push @output_columns, $key;
+            }
         }
+
+        #push @output_columns, @populated_graph_columns;								# Add additionally trended data columns to the file output column list
 
 # bookmark6
         if( $graph_count == 2 ) {
@@ -1447,6 +1479,8 @@ sub normalize_data_for_output {
          }
      }
 
+     push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) if( $print_durations && !$omit_stats );
+
 #print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $graph_width{2} $graph_width{3}\n";
 # bookmark2    
     foreach my $bucket (keys %log_counts) {
@@ -1507,13 +1541,14 @@ sub normalize_data_for_output {
     print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
     print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
     print " " x ( $terminal_width - length( "Scaling and normalizing data completed." ) );
-    print "\n";
 
     return;
 }
 
 sub print_bar_graph {
     my $lines_printed = 0;
+    my @csv_data;
+
     if( $total_lines_included ) {
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
         $, = "\t\t"; print "$colors{'bright-black'}timestamp", "", "count", "\t",  @populated_graph_columns; $, = "";
@@ -1523,6 +1558,7 @@ sub print_bar_graph {
         foreach my $bucket (sort keys %log_counts) {
             my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
             my $printed_chars = 0;
+            my $total_count = 0;
 
             ## PRINT TIMESTAMP IN CHART ROW
             $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
@@ -1563,8 +1599,15 @@ sub print_bar_graph {
                         $log_details .= "$color$category_bucket: $count$colors{'NC'} ";
                         $legend_length_bucket += length("$category_bucket: $count ");
                     }
+
+		    # push bucket count to CSV data list
+                    $total_count += $count if $category_bucket !~ /^(err-rate|msg-rate)$/;
+                    push @csv_data, $count;
                 }
             }
+
+### BUGS ABOVE ### the above approach pushing to @csv_data will not popualte a row if there is no data for that bucket.  Approach needs to iterate on all known log types and print a column regardless.
+            push @csv_data, $total_count;
 
             print $log_details unless $omit_values;
             my $padding = $legend_length - $legend_length_bucket;
@@ -1610,10 +1653,13 @@ sub print_bar_graph {
 if( defined $log_stats{$bucket}{$key} ) {
                     if( $key =~ /^time|duration$/i ) {
                         $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', 'long', ' ' );
+                        push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};				# push trend value to CSV data list
                     } elsif( $key =~ /^bytes$/i ) {
                         $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
+                        push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};				# push trend value to CSV data list
                     } else {
                         $trend_value = defined $log_stats{$bucket}{$key} ? " $log_stats{$bucket}{$key}" : "";
+                        push @csv_data, ltrim( $trend_value );								# push trend value to CSV data list
                     }
 
 # bookmark7
@@ -1704,8 +1750,21 @@ if( defined $log_stats{$bucket}{$key} ) {
                     defined $log_stats{$bucket}{p95} ? printf( "$colors{'red'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 6 );
                     defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%5s$colors{'NC'} ", $log_stats{$bucket}{cv} ) : printf ( " " x 9 );
                     defined $log_stats{$bucket}{z_score} ? printf( "$colors{$zscore_color}Z:%5s$colors{'NC'}", ( $log_stats{$bucket}{z_score} >= 100 ? $log_stats{$bucket}{z_score} =~ /(\d+)\.\d*/ : $log_stats{$bucket}{z_score} ) ) : printf( " " x 5 );
+
+# bookmark23
+                    foreach my $stat ( qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) ) {				# push statistics data to the CSV data list
+                        push @csv_data, $log_stats{$bucket}{$stat};
+                    }
                 }
             }
+
+# bookmark22
+            # Print details to time-window statistics CSV file
+            if( $write_messages_to_csv && defined $csv_fh ) {
+                $csv->print($csv_fh, [ $bucket_time_str, @csv_data ]);
+            }
+
+            undef @csv_data;
 
             print "\n";
     # BUG - if using pause, the summary table won't be paused as it isn't implementing the next line
@@ -1713,6 +1772,7 @@ if( defined $log_stats{$bucket}{$key} ) {
         }
 
         print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
+
     } else {
         printf "Read $total_lines_read lines, however no lines matched any of the patterns within the timeframe.\n";
     }
@@ -1745,7 +1805,6 @@ sub print_summary_table {
     foreach my $arg (@ORIGINAL_ARGV) {
         unless (exists $argv_hash{$arg}) {
             print "$arg ";
-            $csv_file_args .= "$arg" if $write_messages_to_csv;
         }
     }
     print "$colors{'NC'}\n";
@@ -2167,6 +2226,7 @@ calculate_all_statistics();
 $end_time = [gettimeofday];
 $elapsed_calculate_statistics = tv_interval($start_time, $end_time);
 
+
 # NORMALIZE DATA FOR CONSOLE OUTPUT #
 $start_time = [gettimeofday];
 normalize_data_for_output();
@@ -2175,9 +2235,6 @@ $elapsed_normalize_data = tv_interval($start_time, $end_time);
 
 $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
 
-print_bar_graph();
-print_summary_table();
-
 if( $write_messages_to_csv ) {														# If write to CSV enabled, open filehandles
     $csv = Text::CSV->new({ binary => 1, eol => $/ });											# Create a new CSV object
     my ($sec, $min, $hour, $mday, $mon, $year) = localtime();
@@ -2185,13 +2242,29 @@ if( $write_messages_to_csv ) {														# If write to CSV enabled, open file
     $csv_file_args =~ tr/!@#\$%\^&*()_+{}|:"<>?[\];',.\/\\`~ /_/;
     my $csv_file_name = "${timestamp}-LTL-STATS-${csv_file_args}.csv";
     open $csv_fh, '>', $csv_file_name or die "Could not open file: $!";									# Open a file for writing, then print the header/column names
+    $csv->print($csv_fh, [ @output_columns ] );
+}
+
+print_bar_graph();
+close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );					# Close the file handle
+
+print_summary_table();
+
+if( $write_messages_to_csv ) {														# If write to CSV enabled, open filehandles
+    $csv = Text::CSV->new({ binary => 1, eol => $/ });											# Create a new CSV object
+    my ($sec, $min, $hour, $mday, $mon, $year) = localtime();
+    my $timestamp = sprintf( "%04d-%02d-%02d_%02d%02d%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec );
+#    $csv_file_args =~ tr/!@#\$%\^&*()_+{}|:"<>?[\];',.\/\\`~ /_/;
+    my $csv_file_name = "${timestamp}-LTL-MESSAGES-${csv_file_args}.csv";
+    open $csv_fh, '>', $csv_file_name or die "Could not open file: $!";									# Open a file for writing, then print the header/column names
     $csv->print($csv_fh, [qw(Category Message Count MeanBytes TotalBytes TotalBytesNice MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact)]);
 }
 
 print_message_summary();														# Print and write message summaries
+close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );					# Close the file handle
+
 print_threadpool_summary() if $include_threadpool_summary;										# Print threadpool summaries
 
-close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );					# Close the file handle
 
 print "\n";
 exit;
