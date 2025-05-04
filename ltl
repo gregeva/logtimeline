@@ -1250,7 +1250,7 @@ sub calculate_statistics {
     my $mean = int($bucket_data->{total_duration} / $count);
     my $max = max( @{$bucket_data->{durations}} );
     my $variance = ($bucket_data->{sum_of_squares} / $count) - ($mean ** 2);
-    my $std_dev = sqrt($variance);
+    my $std_dev = round( sqrt($variance) * 1000 ) / 1000;
     my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean ) : undef;
     my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
 
@@ -1570,6 +1570,7 @@ sub print_bar_graph {
             my $log_details = "";
             my $rate_metrics = "";
             my $legend_length_bucket = 0;
+            my %output_columns;
 
             ## LOOP THROUGH LOG CATEGORY BUCKETS AND PRINT PER ROW LEGEND COUNTS
             foreach my $category_bucket (@log_levels) {
@@ -1593,7 +1594,7 @@ sub print_bar_graph {
                             $log_details .= "${color}$count$colors{'NC'}" . " " x $category_bucket =~ /-HL$/;
                             $legend_length_bucket += length("$count ");
                         }
-                    } elsif( $count < 1 ) {					 # don't include the empty bucket who's purpose is to normalize the buckets represented
+                    } elsif( $count < 1 ) {					 		# don't include the empty bucket who's purpose is to normalize the buckets represented
                         next;
                     } else {
                         $log_details .= "$color$category_bucket: $count$colors{'NC'} ";
@@ -1602,12 +1603,22 @@ sub print_bar_graph {
 
 		    # push bucket count to CSV data list
                     $total_count += $count if $category_bucket !~ /^(err-rate|msg-rate)$/;
-                    push @csv_data, $count;
+                    $output_columns{$category_bucket} = $count;
                 }
             }
 
-### BUGS ABOVE ### the above approach pushing to @csv_data will not popualte a row if there is no data for that bucket.  Approach needs to iterate on all known log types and print a column regardless.
-            push @csv_data, $total_count;
+            # Add the log level message counts to the output CSV file
+            foreach my $category_bucket ( @output_columns ) {
+               next if $category_bucket =~ /^timestamp$/;								# skip the first column and get to the counts
+               last if $category_bucket =~ /^totalCount$/;								# only fill in empty values up to the totalCount
+               if( exists $output_columns{$category_bucket} ) {								# if there was a count for this log level, add it to the list 
+                   push @csv_data, $output_columns{$category_bucket}; 
+               } else {
+                   push @csv_data, undef;										# if there wasn't a count for this log level, add a blank column
+               }
+            }
+
+            push @csv_data, $total_count;										# add the total message count to the output CSV data
 
             print $log_details unless $omit_values;
             my $padding = $legend_length - $legend_length_bucket;
