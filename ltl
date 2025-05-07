@@ -2,9 +2,9 @@
 
 # TO DO:
 
-# - PRIORITY - CSV export added to time window bucket data
+# - Print nicely formatted column headings in line with the formatted chart data
+# - Capture custom log message values for "count=" and "rowCount=" - if present could include it in the message totals
 # - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
-# - Figure out and fix issues using file name glob patterns in Windows (ScriptLog.*.log)
 
 # - Adapt message field widths based on terminal width (object field and thread pool)
 # - Add message parse pattern for AkkaCommunications logs
@@ -13,10 +13,8 @@
 
 # TO DO: the bytes for each message is captured, but not surfaced in the message results
 # - Add AND match possibility for include and exclude using RegEx lookahead (?=.*word)
-# - Capture custom log message values for "count=" and "rowCount=" - if present could include it in the message totals
 # - Second graph (stats): line chart showing evolution of some of the percentile stats in different colors (with points) 
 # - Second graph (throughput): outbound throughput based on bytes returned
-# - create a conditional path to resize durations stats pane and only print available information if duration value is not present (also don't do the statistical calculations)
 # - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
 # - add a soft memory limit (after having made most of the tweaks) to avoid accidents in production reading large files with 100k's of different messages - will need to optimize performance of memory checking
 # - multi-threaded file reading
@@ -78,13 +76,15 @@ my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executio
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary ) = ( 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages ) = ( 0,0,0,0,0,0,0,0,0 );
-my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity );		# this is where the counts of log entries are tallied across the time buckets
+# this is where the counts of log entries are tallied across the time buckets
+my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_userdefinedmetrics );
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
+my $mask_uuid;									# temporary command line option to mask UUIDs with HASH characters for grouping purposes (to be replaced by more generic group similar feature)
 my $durations_graph_width = 0;
 my ( $graph_count, $max_graph_width ) = ( 1, 0 );
 my %graph_width;
 my @graph_columns = qw( duration bytes );
-my ( @populated_graph_columns, @graph_threadpools_activity );
+my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
 my ( $print_durations, $track_memory ) = ( 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -104,7 +104,7 @@ my %filter_range;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
-my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
+my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex, $user_defined_metrics, $user_defined_metrics_regex, $user_defined_metrics_pre_regex, $user_defined_metrics_post_regex );
 my $pause_output = 0;
 my $omit_values = 0;
 my ( $sort_type, $sort_key ) = ( "count", "count" );
@@ -215,6 +215,8 @@ foreach my $key (keys %colors) {
 
 ## SUBS ##
 
+# utility function for formating numbers to normal format
+sub normalize { $_[0] =~ s/\.0+$//r }
 
 # utility functions for trimming spaces off of a string
 sub ltrim { my $s = shift; $s =~ s/^\s+//; return $s }
@@ -461,6 +463,8 @@ sub adapt_to_command_line_options {
         'sort|so=s' => \$sort_type,
         'threadpool-activity-summary|tpas' => \$include_threadpool_summary,
         'threadpool-activity|tpa=s' => \$threadpool_activity_regex,
+        'user-defined-metrics|udm=s' => \$user_defined_metrics,
+        'mask-uuid|uuid' => \$mask_uuid,
         'group-similar|g=s' => \$group_similar_sensitivity
     ) or die print_usage( "required options not provided" ); 
 
@@ -481,8 +485,6 @@ sub adapt_to_command_line_options {
 
     die print_usage( "unable to open any files" ) unless @in_files;
     die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( count duration time bytes impact );
-# Keeping this around as it will be used for "user-defined" and "thread-pool" options
-#    die print_usage( "invalid trend type used" ) unless grep { $_ eq $sort_type } qw( count duration time bytes );
 
     if( $sort_type =~ /^duration|time$/i ) {
         $sort_key = "total_duration_num";
@@ -492,13 +494,28 @@ sub adapt_to_command_line_options {
         $sort_key = "impact";
     }
 
-#    if( $trend_type =~ /^duration|time$/i ) {
-#        $trend_key = "duration";
-#        $graph_count = 2;
-#    } elsif( $trend_type =~ /^bytes$/i ) {
-#        $trend_key = "bytes";
-#        $graph_count = 2;
-#    }
+# bookmark24
+    if( defined $user_defined_metrics ) {
+        my $separator = qr/\s*[=:]?\s*/;
+        #my $number = qr/-?\d{1,3}(?:[ ,]?\d{3})*(?:\.\d+)?/;								# Number pattern with optional negative, thousands separators, and decimals
+        my $number = qr/-?\d+(?:\.\d+)?/;								# Number pattern with optional negative, thousands separators, and decimals
+        $user_defined_metrics_regex = join( '|', split( ',', $user_defined_metrics ) );
+
+        foreach my $user_metric ( split( ',', $user_defined_metrics ) ) {
+            my $metric = quotemeta($user_metric);  # Escape special characters
+
+            $user_defined_metrics_pre_regex .= qr/\s+$metric$separator(?<$metric>$number)/x;
+            $user_defined_metrics_post_regex .= qr/(?<$metric>$number)$separator$metric\s+/x;
+            #$user_defined_metrics_post_regex .= qr/(?<${metric}>-?\d+(?:\.\d+)?)\s*[=:]?\s*${metric}\s+/;
+            #$user_defined_metrics_post_regex = qr/(?<rows>-?\d+(?:\.\d+)?)\s*[=:]?\s*rows/;
+
+
+#            $user_defined_metrics_regex .= "${metric}[ =:](<${metric}>?[0-9.])";
+        }
+
+#print "udm: $user_defined_metrics\t\tudm regex: $user_defined_metrics_regex udm: metrics post regex: $user_defined_metrics_post_regex\n";
+
+    }
 
     $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
     #$bucket_size_seconds = $print_seconds ? $bucket_size_minutes : $bucket_size_minutes * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
@@ -634,7 +651,7 @@ sub read_and_process_logs {
                     $max_memory_usage = $current_memory_usage;
                 }
             }
-
+# bookmark1
             ## ThingWorx Standard Log Format (ApplicationLog, ErrorLog, ScriptLog, ...) ##
             if ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
                 $is_line_match = 1;
@@ -658,7 +675,6 @@ sub read_and_process_logs {
                 $message =~ s/(session id: )\d+/$1\?\?/g;
 
                 $message =~ s/(\w+_)+\d{14}-/ModelFamily_CustomerPC_DateString-/g;
-                $message =~ s/\S{8}-\S{4}-\S{4}-\S{4}-\S{12}+/########-####-####-####-############/g;
                 
                 $message =~ s/Successfully added for import \/.+$/Successfully added for import \/ThingworxStorage\/repository\/SystemRepository\/\.\.\./g;
                 $message =~ s/Setting visibility permissions for (.+)$/Setting visibility permissions for \.\.\./g;
@@ -667,6 +683,8 @@ sub read_and_process_logs {
                 $message =~ s/Transaction was successfully ended for request (.+)$/Transaction was successfully ended for request \.\.\./g;
                 $message =~ s/Ending transaction for request (.+)$/Ending transaction for request \.\.\./g;
                 $message =~ s/(TimerEventHandler|TimerThing)\@(\S+)/$1\@/g;
+                $message =~ s/correspond to sent message (\S+) \]/correspond to sent message ###################### \]/g;
+
 
                 # VILINK.Location.b698a817-
                 # VIRTUO_PCOEM_20250221153912-
@@ -773,6 +791,21 @@ sub read_and_process_logs {
                 $threadname = defined $threadpool ? $threadpool : $thread;
             }
 
+            ## USER DEFINED METRICS CAPTURE ##
+            if( defined $user_defined_metrics && /$user_defined_metrics_regex/ ) {
+# bookmark25
+                if( /$user_defined_metrics_post_regex/g ) {
+                    foreach my $user_metric ( split( ',', $user_defined_metrics ) ) {
+                        my $metric = quotemeta( $user_metric );
+                        my $regex = qr/(?<$metric>-?\d+(?:\.\d+)?)\s*[=:]?\s*$metric\s+/x;
+                    #foreach my $metric ( keys %+ ) {
+                        my $value = defined $+{$metric} ? normalize( $+{$metric} ) : "N/A"; 
+                        print "$metric=$value ";
+                    }
+                }
+
+            }
+
             #print "\033[0;32m[$timestamp_str|$category_bucket] HTTP $status_code [$is_line_match/$match_type] \033[0m$_";
             #$| = 1; # Flush output
 
@@ -844,6 +877,9 @@ sub read_and_process_logs {
                     my $log_key = "";
                     my $log_level = $status_code > 0 ? $status_code : $category_bucket;			# If we received an actual HTTP status code, use that for the message statistic data model
                     $log_level =~ s/-HL$//;
+
+                    # Substitute UUID with HASH if command line option to do so is present (temporary feature to be eclipsed by group similar feature)
+                    $message =~ s/\S{8}-\S{4}-\S{4}-\S{4}-\S{12}+/########-####-####-####-############/g if defined $mask_uuid && $mask_uuid;
 
                     if( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
                         my $truncated_thread = substr( $threadname, 0, 20 );
@@ -930,10 +966,8 @@ sub read_and_process_logs {
                   #  $| = 1; # Flush output
                 }
 
-# bookmark18
                 ## CAPTURE THREAD AND THREAD POOL BASED STATISTICS DATA ##
                 if( defined( $threadpool_activity_regex ) && defined( $threadpool ) && $threadpool =~ /$threadpool_activity_regex/ ) {
-                #if( $threadpool ) {
 #                    $threadpool =~ s/[*\-!\#=\$\?]//g;
 #                    $thread =~ s/[*\-!\#=\$\?]//g;
 
@@ -942,7 +976,6 @@ sub read_and_process_logs {
                     $threadpool_activity{$category}{$threadpool}{$thread} += 1;
 
                     # Time Window Based Statistics Capture (Time Window Graphs) #
-# bookmark19
                     $log_threadpools{$bucket}{$threadpool}{plain}{$thread} += 1;
 
                     if( $category_bucket =~ /-HL$/ ) {                  # capture total duration and bytes for highlighted rows
@@ -1193,9 +1226,8 @@ sub calculate_all_statistics {
 #        }
 #    }
 
+    # Capture Relevant Thread Pool Stats for Graphing
     foreach my $bucket (keys %log_threadpools) {
-        # Capture Relevant Thread Pool Stats for Graphing
-    
         foreach my $threadpool (@graph_threadpools_activity) {
             my $threadpool_highlight = "$threadpool-HL";
         
@@ -1203,14 +1235,12 @@ sub calculate_all_statistics {
             if (exists $log_threadpools{$bucket}{$threadpool}{plain} ) {
                 $log_stats{$bucket}{$threadpool} = scalar keys %{$log_threadpools{$bucket}{$threadpool}{plain}};
                 $log_stats{$bucket}{$threadpool_highlight} = scalar keys %{$log_threadpools{$bucket}{$threadpool}{highlight}};
-            
 #                print ".. ";
 #                print "$log_stats{$bucket}{$threadpool_highlight}:$log_stats{$bucket}{$threadpool}\n";
             } else {
                  $log_stats{$bucket}{$threadpool} = 0;
 #                print "Error: Missing data for $threadpool in $bucket\n";
             }
-        
 #            $| = 1; # Flush output
              # Free up no longer needed memory
              undef $log_threadpools{$bucket}{$threadpool};
