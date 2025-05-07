@@ -73,7 +73,7 @@ my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats ) = 0;
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary ) = ( 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages ) = ( 0,0,0,0,0,0,0,0,0 );
 # this is where the counts of log entries are tallied across the time buckets
@@ -449,6 +449,7 @@ sub adapt_to_command_line_options {
         'omit-empty|oe' => \$omit_empty,
         'omit-summary|osum' => \$omit_summary,
         'omit-rate|or' => \$omit_rate,
+        'omit-duration|od' => \$omit_durations,
         'include-query-string|iqs' => \$include_query_string,
         'include-session|is' => \$include_session,
         'seconds|s' => \$print_seconds,
@@ -911,7 +912,7 @@ sub read_and_process_logs {
                         # Accumulate the total duration and bytes
                         $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
 
-                        if( defined $duration ) {
+                        if( defined $duration && !$omit_durations ) {
                             $log_messages{$category}{$log_key}{total_duration} += $duration;
                             $log_messages{$category}{$log_key}{total_duration_num} += $duration;
 
@@ -950,15 +951,18 @@ sub read_and_process_logs {
 
                     # Update the hash with the new data
                     $log_analysis{$bucket}{count}++;
-                    $log_analysis{$bucket}{total_duration} += $duration;
-                    $log_analysis{$bucket}{total_bytes} += $bytes;
 
-                    $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
-                    push @{$log_analysis{$bucket}{durations}}, $duration;
-                    
-                    if( $category_bucket =~ /-HL$/ ) {			# capture total duration and bytes for highlighted rows
-                        $log_analysis{$bucket}{'total_duration-HL'} += $duration;
-                        $log_analysis{$bucket}{'total_bytes-HL'} += $bytes;
+                    if( defined $duration && !$omit_durations ) {
+                        $log_analysis{$bucket}{total_duration} += $duration;
+
+                        $log_analysis{$bucket}{'total_duration-HL'} += $duration if $category_bucket =~ /-HL$/;
+                        $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
+                        push @{$log_analysis{$bucket}{durations}}, $duration;
+                    }
+
+                    if( defined $bytes ) {
+                        $log_analysis{$bucket}{total_bytes} += $bytes;
+                        $log_analysis{$bucket}{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;
                     }
 
                   #  printf "\033[0;35m[duration: %d] [bytes: %d]\033[0m\n", $duration, $bytes;
@@ -1037,57 +1041,68 @@ sub calculate_all_statistics {
         undef $log_analysis{$bucket}{durations};
         delete $log_analysis{$bucket}{durations};
     
-        my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
 
-        $log_stats{$bucket} = {
-            count         => $aggregated_data->{count},
-            bytes         => $bucket_data->{total_bytes},
-            'bytes-HL'    => $bucket_data->{'total_bytes-HL'},
-            duration      => $bucket_data->{total_duration},
-            'duration-HL' => $bucket_data->{'total_duration-HL'},
-            min           => $min,
-            mean          => $mean,
-            max           => $max,
-            p1            => $p1,
-            p50           => $p50,
-            p75           => $p75,
-            p90           => $p90,
-            p95           => $p95,
-            p99           => $p99,
-            p999          => $p999,
-            std_dev       => $std_dev,
-            cv            => $cv,
-            z_score       => undef 
-        };
+        if( $print_durations && !$omit_durations ) {
+            my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
+
+            $log_stats{$bucket} = {
+                count         => $aggregated_data->{count},
+                bytes         => $bucket_data->{total_bytes},
+                'bytes-HL'    => $bucket_data->{'total_bytes-HL'},
+                duration      => $bucket_data->{total_duration},
+                'duration-HL' => $bucket_data->{'total_duration-HL'},
+                min           => $min,
+                mean          => $mean,
+                max           => $max,
+                p1            => $p1,
+                p50           => $p50,
+                p75           => $p75,
+                p90           => $p90,
+                p95           => $p95,
+                p99           => $p99,
+                p999          => $p999,
+                std_dev       => $std_dev,
+                cv            => $cv,
+                z_score       => undef 
+            };
     
-        # Calculate rolling mean and std_dev
-        my $rolling_mean = 0;
-        my $rolling_sum_of_squares = 0;
-        my $rolling_count = 0;
-        foreach my $prev_bucket (@rolling_window) {
-            $rolling_mean += $prev_bucket->{mean};
-            $rolling_sum_of_squares += $prev_bucket->{sum_of_squares};
-            $rolling_count++;
-        }
-        if ($rolling_count > 0) {
-            $rolling_mean /= $rolling_count;
-            my $rolling_variance = ($rolling_sum_of_squares / $rolling_count) - ($rolling_mean ** 2);
-            my $rolling_std_dev = sqrt($rolling_variance);
-            my $z_score = calculate_z_score($mean, $rolling_mean, $rolling_std_dev);
+            # Calculate rolling mean and std_dev
+            my $rolling_mean = 0;
+            my $rolling_sum_of_squares = 0;
+            my $rolling_count = 0;
+            foreach my $prev_bucket (@rolling_window) {
+                $rolling_mean += $prev_bucket->{mean};
+                $rolling_sum_of_squares += $prev_bucket->{sum_of_squares};
+                $rolling_count++;
+            }
+            if ($rolling_count > 0) {
+                $rolling_mean /= $rolling_count;
+                my $rolling_variance = ($rolling_sum_of_squares / $rolling_count) - ($rolling_mean ** 2);
+                my $rolling_std_dev = sqrt($rolling_variance);
+                my $z_score = calculate_z_score($mean, $rolling_mean, $rolling_std_dev);
 
-    #        print "Time Bucket: $bucket\n";
-    #        print "Count: $aggregated_data->{count}, Bytes: $aggregated_data->{total_bytes}, Min: $min, Mean: $mean, Max: $max, P1: $p1, P50: $p50, P70: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: $z_score\n";
-	    $log_stats{$bucket}{z_score} = $z_score;
+        #        print "Time Bucket: $bucket\n";
+        #        print "Count: $aggregated_data->{count}, Bytes: $aggregated_data->{total_bytes}, Min: $min, Mean: $mean, Max: $max, P1: $p1, P50: $p50, P70: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: $z_score\n";
+                $log_stats{$bucket}{z_score} = $z_score;
+            } else {
+
+        #        print "Time Bucket: $bucket\n";
+        #        print "Count: $aggregated_data->{count}, Bytes: $aggregated_data->{total_bytes}, Min: $min, Mean: $mean, Max: $max, P1: $p1, P50: $p50, P75: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A\n";
+            }
+
+            # Update rolling window logic
+            push @rolling_window, { mean => $mean, sum_of_squares => $aggregated_data->{sum_of_squares} };
+            shift @rolling_window if @rolling_window > $rolling_window_size;
+
         } else {
 
-    #        print "Time Bucket: $bucket\n";
-    #        print "Count: $aggregated_data->{count}, Bytes: $aggregated_data->{total_bytes}, Min: $min, Mean: $mean, Max: $max, P1: $p1, P50: $p50, P75: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A\n";
-        }
+            $log_stats{$bucket} = {
+                count         => $aggregated_data->{count},
+                bytes         => $bucket_data->{total_bytes},
+                'bytes-HL'    => $bucket_data->{'total_bytes-HL'},
+            }
 
-        # Update rolling window logic
-        push @rolling_window, { mean => $mean, sum_of_squares => $aggregated_data->{sum_of_squares} };
-        shift @rolling_window if @rolling_window > $rolling_window_size;
-        
+        }
     }
 
     ## STATS FOR TOP LOG MESSAGES ##
@@ -1130,7 +1145,7 @@ sub calculate_all_statistics {
                 $aggregated_data->{count} += $message_data->{count};
                 $aggregated_data->{total_bytes} += $message_data->{total_bytes} if defined $message_data->{total_bytes};
 
-                if( defined $message_data->{total_duration} ) {
+                if( defined $message_data->{total_duration} && !$omit_durations ) {
                     $aggregated_data->{total_duration} += $message_data->{total_duration};
                     $aggregated_data->{sum_of_squares} += $message_data->{sum_of_squares};
                     push @{$aggregated_data->{durations}}, @{$message_data->{durations}};
@@ -1142,7 +1157,7 @@ sub calculate_all_statistics {
 #    print "\n"; 
 #}
 
-                if( defined $aggregated_data->{total_duration} ) { 
+                if( defined $aggregated_data->{total_duration} && !$omit_durations ) { 
 
                     my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
                     my $impact = $log_messages{$category}{$log_key}{impact};
@@ -1335,7 +1350,7 @@ sub normalize_data_for_output {
 
     foreach my $bucket (keys %log_counts) {
         my $total_count = 0;
-        my $total_bytes = $log_stats{$bucket}{bytes} if $print_durations;
+        my $total_bytes = $log_stats{$bucket}{bytes};
         my $error_count = 0;
 
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
@@ -1368,7 +1383,7 @@ sub normalize_data_for_output {
         }
     }
 
-#$print "Max totals --- count: $max_total{count}  bytes: $max_total{bytes}  duration: $max_total{duration}\n";
+#print "Max totals --- count: $max_total{count}  bytes: $max_total{bytes}  duration: $max_total{duration}\n";
 
     # Calculate the maximum length of log level titles and counts
     foreach my $bucket (keys %log_counts) {
@@ -1410,7 +1425,7 @@ sub normalize_data_for_output {
     #print "Legend length: $legend_length\n";
 
 # bookmark8
-    $durations_graph_width = $print_durations && !$omit_stats ? 50 + 3: 0;
+    $durations_graph_width = $print_durations && !$omit_durations && !$omit_stats ? 50 + 3: 0;
 
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
     $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format ) - $durations_graph_width;
@@ -1509,7 +1524,7 @@ sub normalize_data_for_output {
          }
      }
 
-     push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) if( $print_durations && !$omit_stats );
+     push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) if( $print_durations && !$omit_durations && !$omit_stats );
 
 #print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $graph_width{2} $graph_width{3}\n";
 # bookmark2    
@@ -1776,7 +1791,7 @@ if( defined $log_stats{$bucket}{$key} ) {
             }
             
             # DURATION STATISTICS print duration statistics table
-            if( $print_durations && !$omit_stats ) {
+            if( $print_durations && !$omit_durations && !$omit_stats ) {
                 my $missing_chars;
                 $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width - 1;		# 2 is the magic number to get 1 space after the tallest bar 
                 print " " x $missing_chars if $missing_chars > 0;
@@ -1916,7 +1931,7 @@ sub print_message_summary {
 
     print "\n";
 
-    if( $print_durations ) {
+    if( $print_durations && !$omit_durations ) {
         %col_relative_size = (
             1 => 65,
             2 => 6,
@@ -2014,7 +2029,7 @@ sub print_message_summary {
             if( $grouping eq "highlight" ) {
                 $header_title = " " x $table_padding_outer . "$colors{'bright-yellow-HL'}" . " " x $table_padding_inner . sprintf( "%-$col_width{1}s", "TOP HIGHLIGHTED MESSAGES (highlighted based on RegEx pattern match)" ) . " " x $table_padding_inner;
 
-                if( $print_durations ) {
+                if( $print_durations && !$omit_durations ) {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", "Min" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P50" ) . " " x $table_padding_inner; 
@@ -2029,7 +2044,7 @@ sub print_message_summary {
             } elsif( $grouping eq "plain" ) {
                 $header_title = " " x $table_padding_outer . "$colors{'bright-cyan-HL'}" . " " x $table_padding_inner . sprintf( "%-$col_width{1}s", "TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)" ) . " " x $table_padding_inner;
 
-                if( $print_durations ) {
+                if( $print_durations && !$omit_durations ) {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", "Count" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", "Min" ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", "P50" ) . " " x $table_padding_inner; 
@@ -2056,7 +2071,7 @@ sub print_message_summary {
                     my $message = substr( $key, 0, $col_width{1} );
                     my $count = $log_messages{$grouping}{$key}{count};
 
-                    if( $print_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
+                    if( $print_durations && !$omit_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
                         my $total_bytes_num = $log_messages{$grouping}{$key}{total_bytes};
                         my $total_bytes = format_bytes( $total_bytes_num,'B' );
                         my $mean_bytes = round( $total_bytes_num / $count ) if defined $total_bytes_num; 
