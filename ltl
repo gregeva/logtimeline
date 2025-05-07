@@ -237,7 +237,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -449,7 +449,7 @@ sub adapt_to_command_line_options {
         'omit-empty|oe' => \$omit_empty,
         'omit-summary|osum' => \$omit_summary,
         'omit-rate|or' => \$omit_rate,
-        'omit-duration|od' => \$omit_durations,
+        'omit-durations|od' => \$omit_durations,
         'include-query-string|iqs' => \$include_query_string,
         'include-session|is' => \$include_session,
         'seconds|s' => \$print_seconds,
