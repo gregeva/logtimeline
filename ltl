@@ -351,7 +351,7 @@ sub format_bytes {
 }
 
 sub format_number {
-    my ($value, $space) = @_;
+    my ($value, $space, $decimals) = @_;
     my %units = (
         '1'  => 1,
         'k' => 1000,
@@ -364,6 +364,7 @@ sub format_number {
     my @unit_order = ('1', 'k', 'Mil', 'Bil', 'Tril');
     my $formatted_value = $value;
     my $formatted_unit = '';
+    $decimals = 1 if !defined $decimals;
 
     foreach my $u (@unit_order) {
         if ($value >= $units{$u}) {
@@ -375,7 +376,7 @@ sub format_number {
     }
 
     # Format the value to 1 decimal place
-    $formatted_value = sprintf("%.1f%s%s", $formatted_value, defined($space) ? " " : "", $formatted_unit eq "1" ? "" : $formatted_unit );
+    $formatted_value = sprintf("%.${decimals}f%s%s", $formatted_value, defined($space) ? " " : "", $formatted_unit eq "1" ? "" : $formatted_unit );
     $formatted_value =~ s/\.0//;
 
     return $formatted_value;
@@ -1805,7 +1806,7 @@ if( defined $log_stats{$bucket}{$key} ) {
                     defined $log_stats{$bucket}{p90} ? printf( "$colors{'yellow'}P90:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p90} ) >= 4 ? format_time( $log_stats{$bucket}{p90}, 'ms' ) : $log_stats{$bucket}{p90} ) ) : printf( " " x 6 ); 
                     defined $log_stats{$bucket}{p95} ? printf( "$colors{'red'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 6 );
                     defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%5s$colors{'NC'} ", $log_stats{$bucket}{cv} ) : printf ( " " x 9 );
-                    defined $log_stats{$bucket}{z_score} ? printf( "$colors{$zscore_color}Z:%5s$colors{'NC'}", ( $log_stats{$bucket}{z_score} >= 100 ? $log_stats{$bucket}{z_score} =~ /(\d+)\.\d*/ : $log_stats{$bucket}{z_score} ) ) : printf( " " x 5 );
+                    defined $log_stats{$bucket}{z_score} ? printf( "$colors{$zscore_color}Z:%5s$colors{'NC'}", ( $log_stats{$bucket}{z_score} >= 100 ? format_number( $log_stats{$bucket}{z_score} =~ /(\d+)\.\d*/, undef, 0 ) : $log_stats{$bucket}{z_score} ) ) : printf( " " x 5 );
 
 # bookmark23
                     foreach my $stat ( qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) ) {				# push statistics data to the CSV data list
