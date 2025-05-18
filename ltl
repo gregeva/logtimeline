@@ -5,7 +5,7 @@
 # - Print nicely formatted column headings in line with the formatted chart data
 # - Capture custom log message values for "count=" and "rowCount=" - if present could include it in the message totals
 # - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
-
+# - potential bug with time window stats output... p999 is showing only 2 values... should be evolving more than this, especially when max is evolving so much (1000 ms versus 50000 ms)
 # - Adapt message field widths based on terminal width (object field and thread pool)
 # - Add message parse pattern for AkkaCommunications logs
 
@@ -16,6 +16,7 @@
 # - Second graph (stats): line chart showing evolution of some of the percentile stats in different colors (with points) 
 # - Second graph (throughput): outbound throughput based on bytes returned
 # - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
+# - adjust the adaptive time window sizes as now they are too small by default (typically a log file is 12-24 hours)
 # - add a soft memory limit (after having made most of the tweaks) to avoid accidents in production reading large files with 100k's of different messages - will need to optimize performance of memory checking
 # - multi-threaded file reading
 # - Similar to JMC, percentile calculations should include the representative counts
@@ -84,6 +85,7 @@ my $durations_graph_width = 0;
 my ( $graph_count, $max_graph_width ) = ( 1, 0 );
 my %graph_width;
 my @graph_columns = qw( duration bytes );
+my ( @printed_column_widths, @printed_column_spacing, @printed_column_names );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
 my ( $print_durations, $track_memory ) = ( 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
@@ -94,6 +96,7 @@ my $total_lines_read = 0;
 my $total_lines_included = 0;
 my $total_lines_highlighted = 0;
 my $legend_length = 0;
+my $timestamp_length = 0;
 my $filter_range_start = "";
 my $filter_range_end = "";
 my $filter_range_start_epoch = 0;
@@ -972,7 +975,7 @@ sub read_and_process_logs {
                 }
 
                 ## CAPTURE THREAD AND THREAD POOL BASED STATISTICS DATA ##
-                if( defined( $threadpool_activity_regex ) && defined( $threadpool ) && $threadpool =~ /$threadpool_activity_regex/ ) {
+                if( defined $threadpool && (( defined $threadpool_activity_regex && $threadpool =~ /$threadpool_activity_regex/ ) || ( !defined $threadpool_activity_regex && $include_threadpool_summary ) ) ) {
 #                    $threadpool =~ s/[*\-!\#=\$\?]//g;
 #                    $thread =~ s/[*\-!\#=\$\?]//g;
 
@@ -1431,6 +1434,19 @@ sub normalize_data_for_output {
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
     $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format ) - $durations_graph_width;
     $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
+    $timestamp_length = length( strftime($output_timestamp_format, gmtime(1) ) ) + ( $print_milliseconds ? 4 : 0 ) ;
+    push @printed_column_widths, $timestamp_length;
+    push @printed_column_names, "timestamp"; 
+
+    if( !$omit_values ) {
+        push @printed_column_widths, $legend_length;
+        push @printed_column_spacing, 1, 3;
+        push @printed_column_names, "legend"; 
+    } else {
+        push @printed_column_spacing, 3;
+    }
+
+    push @printed_column_names, "occurences"; 
 
     %graph_width = ( 1 => $max_graph_width );
 
@@ -1449,6 +1465,7 @@ sub normalize_data_for_output {
         foreach my $key ( @graph_columns ) {
             if( defined $max_total{$key} && $max_total{$key} != 0 ) {
                 push @populated_graph_columns, $key;
+                push @printed_column_names, $key;
                 push @output_columns, "${key}Nice" if $key =~ /^(duration|bytes)$/;
                 push @output_columns, $key;
             }
@@ -1523,9 +1540,34 @@ sub normalize_data_for_output {
                 6 => round( $graph_relative_size{6} / 100 * $max_graph_width ),
             );
          }
+
+         foreach my $column ( 1 .. $graph_count ) {							# capture and build up list containing width and spacing between columns
+             my $column_spacing = 1;
+             push @printed_column_widths, $graph_width{$column} - $column_spacing;
+             push @printed_column_spacing, $column_spacing;
+         }
      }
 
-     push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) if( $print_durations && !$omit_durations && !$omit_stats );
+     if( $print_durations && !$omit_durations && !$omit_stats ) {
+         push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score );
+         push @printed_column_widths, $durations_graph_width - 4;
+         push @printed_column_spacing, 4;
+         push @printed_column_names, "latency statistics";
+     }
+
+    foreach my $column ( 0 .. $#printed_column_names ) {
+        my $title = $printed_column_names[$column];
+        my $max_length = $printed_column_widths[$column] - $printed_column_spacing[$column];
+        $printed_column_names[$column] = substr( $title, 0, $max_length ) if length( $title ) > $max_length;
+    }
+#
+#$, = ", ";
+#print "\nPopulated graph columns:", @populated_graph_columns;
+#print "\nOutput column length:   ", @printed_column_widths;
+#print "\nOutput column spacing:  ", @printed_column_spacing;
+#print "\nOutput column names:    ", @printed_column_names;
+#print "\n";
+#$, = "";
 
 #print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $graph_width{2} $graph_width{3}\n";
 # bookmark2    
@@ -1597,7 +1639,21 @@ sub print_bar_graph {
 
     if( $total_lines_included ) {
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
-        $, = "\t\t"; print "$colors{'bright-black'}timestamp", "", "count", "\t",  @populated_graph_columns; $, = "";
+
+        print $colors{'bright-black'};
+        foreach my $column (0 .. $#printed_column_names) {
+            my $name   = $printed_column_names[$column];
+            my $width  = $printed_column_widths[$column];
+    
+            my $padding = $width - length($name);
+            my $left_pad  = int($padding / 2);
+            my $right_pad = $padding - $left_pad;
+    
+            print ' ' x $left_pad . $name . ' ' x $right_pad;
+            print ' ' x $printed_column_spacing[$column] if $column < $#printed_column_names;
+        }
+
+#        $, = "\t\t"; print "$colors{'bright-black'}timestamp", "", "count", "\t",  @populated_graph_columns; $, = "";
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
         $lines_printed++;
 
