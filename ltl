@@ -1541,11 +1541,12 @@ sub normalize_data_for_output {
             );
          }
 
-         foreach my $column ( 1 .. $graph_count ) {							# capture and build up list containing width and spacing between columns
-             my $column_spacing = 1;
-             push @printed_column_widths, $graph_width{$column} - $column_spacing;
-             push @printed_column_spacing, $column_spacing;
-         }
+     }
+
+     foreach my $column ( 1 .. $graph_count ) {							# capture and build up list containing width and spacing between columns
+         my $column_spacing = 1;
+         push @printed_column_widths, $graph_width{$column} - $column_spacing;
+         push @printed_column_spacing, $column_spacing;
      }
 
      if( $print_durations && !$omit_durations && !$omit_stats ) {
@@ -1558,9 +1559,10 @@ sub normalize_data_for_output {
     foreach my $column ( 0 .. $#printed_column_names ) {
         my $title = $printed_column_names[$column];
         my $max_length = $printed_column_widths[$column] - $printed_column_spacing[$column];
+# print "$column - $title ! $max_length ($printed_column_widths[$column] - $printed_column_spacing[$column])\n";
         $printed_column_names[$column] = substr( $title, 0, $max_length ) if length( $title ) > $max_length;
     }
-#
+
 #$, = ", ";
 #print "\nPopulated graph columns:", @populated_graph_columns;
 #print "\nOutput column length:   ", @printed_column_widths;
