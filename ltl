@@ -1219,7 +1219,7 @@ sub calculate_all_statistics {
 #         then we'd be OK to add more custom columns in order to still fit within the 6 column limit.
     foreach my $threadpool ( @ordered_threadpools ) {
         last if $threadpools_included++ > 3;
-        push( @graph_threadpools_activity, $threadpool ) if $threadpool =~ /${threadpool_activity_regex}/i; 
+        push( @graph_threadpools_activity, $threadpool ) if( $include_threadpool_summary || $threadpool =~ /${threadpool_activity_regex}/i );
     }
 
     push @graph_columns, @graph_threadpools_activity;			# add matched thread pools to the list of data points to be graphed
@@ -1438,7 +1438,7 @@ sub normalize_data_for_output {
     push @printed_column_widths, $timestamp_length;
     push @printed_column_names, "timestamp"; 
 
-    if( !$omit_values ) {
+    if( !$omit_values || !$omit_rate ) {
         push @printed_column_widths, $legend_length;
         push @printed_column_spacing, 1, 3;
         push @printed_column_names, "legend"; 
