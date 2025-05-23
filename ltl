@@ -1766,7 +1766,7 @@ sub print_bar_graph {
                     print " ";
 
 if( defined $log_stats{$bucket}{$key} ) {
-                    if( $key =~ /^time|duration$/i ) {
+                    if( $key =~ /^(time|duration)$/i ) {
                         $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', 'long', ' ' );
                         push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};				# push trend value to CSV data list
                     } elsif( $key =~ /^bytes$/i ) {
