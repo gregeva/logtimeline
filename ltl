@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/opt/homebrew/bin/perl
 
 # TO DO:
 
@@ -20,6 +20,7 @@
 # - add a soft memory limit (after having made most of the tweaks) to avoid accidents in production reading large files with 100k's of different messages - will need to optimize performance of memory checking
 # - multi-threaded file reading
 # - Similar to JMC, percentile calculations should include the representative counts
+# - BUG if the command line options are too long (i.e. with long regex) and output is specified, then the file name creation can fail as filename too long.  In this case, it should be truncated to a maxium file name length.
 
 
 # NOT PRIORITY BACKLOG
@@ -711,13 +712,14 @@ sub read_and_process_logs {
                 $timestamp_str =~ tr/T/ /;
 
             ## Apache Tomcat Access Log with Service Execution Time (%D) ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) (\d+)[ ]?(\S+)?[ ]?(\S+)?/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) (\d+)[ ]?(\S+)?[ ]?(\S+)?/ ) {
                 $is_line_match = 1;
                 $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
                 $is_access_log = 1;
                 $status_code = $category_bucket;
                 $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
+                undef $bytes if $bytes eq "-";
 
                 $message =~ s/ HTTP\/\d\.\d$//;							# chop off the HTTP protocol and version
                 $message =~ s/\?.+$// unless $include_query_string;				# chop off the query string from the URI
@@ -725,7 +727,7 @@ sub read_and_process_logs {
 
 #print "$message -- $_";
             ## Apache Tomcat Standard/Common Access Log Format ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+)$/ ) {    # added $ to end to differentiate from later pattern
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$/ ) {    # added $ to end to differentiate from later pattern
                 $is_line_match = 1;
                 $match_type = 4;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626
                 					# this is matching Nginx ingress access log format 3.133.31.181 - - [18/Nov/2024:14:19:55 +0000] "GET / HTTP/1.1" 404 431 "-" "WizDynamicScanner/1.0"
@@ -733,6 +735,7 @@ sub read_and_process_logs {
                 $status_code = $category_bucket;
                 $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
                 $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
+                undef $bytes if $bytes eq "-";
 
                 $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
                 $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
