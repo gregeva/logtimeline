@@ -24,12 +24,16 @@ rm -rf ~/perl5
 
 sudo cpan App::cpanminus
 
+# Don't do this... as it will install to system perl, not homebrew perl
 curl -L https://cpanmin.us | perl - --self-upgrade
 cpanm local::lib
 
 use lib '/Users/geva/perl5/bin/lib/perl5';
 
 cpanm --uninstall Module::Name
+
+
+sudo /usr/bin/perl -MCPAN -e 'remove App::cpanminus'
 
 cpanm PAR::Packer
 sudo cpanm DateTime.pm Term::ReadKey.pm Proc::ProcessTable.pm Text::CSV
