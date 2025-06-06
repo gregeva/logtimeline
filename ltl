@@ -2,16 +2,15 @@
 
 # TO DO:
 
-# - Print nicely formatted column headings in line with the formatted chart data
-# - Capture custom log message values for "count=" and "rowCount=" - if present could include it in the message totals
-# - group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
-# - potential bug with time window stats output... p999 is showing only 2 values... should be evolving more than this, especially when max is evolving so much (1000 ms versus 50000 ms)
+# - [In progress] Capture custom log message values for "count=" and "rowCount=" - if present could include it in the message totals
+# - [Prototyping] group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
 # - Adapt message field widths based on terminal width (object field and thread pool)
 # - Add message parse pattern for AkkaCommunications logs
 
 # - Filter options for min/max impact (count*duration)
 
 # TO DO: the bytes for each message is captured, but not surfaced in the message results
+# - add total counts for duration and bytes; what makes this harder to fit in is that there should obviously also be seperate counters for "highlight" (bottom of table makes sense, also summary table, or both)
 # - Add AND match possibility for include and exclude using RegEx lookahead (?=.*word)
 # - Second graph (stats): line chart showing evolution of some of the percentile stats in different colors (with points) 
 # - Second graph (throughput): outbound throughput based on bytes returned
