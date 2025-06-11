@@ -69,12 +69,12 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.5.1";
+my $version_number = "0.5.2";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations ) = 0;
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary ) = ( 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages ) = ( 0,0,0,0,0,0,0,0,0 );
 # this is where the counts of log entries are tallied across the time buckets
@@ -240,7 +240,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -454,6 +454,7 @@ sub adapt_to_command_line_options {
         'omit-summary|osum' => \$omit_summary,
         'omit-rate|or' => \$omit_rate,
         'omit-durations|od' => \$omit_durations,
+        'omit-bytes|ob' => \$omit_bytes,
         'include-query-string|iqs' => \$include_query_string,
         'include-session|is' => \$include_session,
         'seconds|s' => \$print_seconds,
@@ -677,6 +678,8 @@ sub read_and_process_logs {
 #                $message =~ s/=\d+/=?/g;
 
                 $message =~ s/=\d+/=?/g;
+
+# START the following are temporary
                 $message =~ s/(session id: )\d+/$1\?\?/g;
 
                 $message =~ s/(\w+_)+\d{14}-/ModelFamily_CustomerPC_DateString-/g;
@@ -696,6 +699,7 @@ sub read_and_process_logs {
                 # CONNECT_UP_CUSTOMERPC_20250221085610-
                 # -12fa9d24-faf9-4df0-95b3-ca0f4341d26f
                 # -f9883b39-f19c-4c8f-b21c-141630e3b9a7
+# END the following are temporary
 
 #printf( "$message -- durationMS=%s bytes=%s count=%s\n", defined $duration ? $duration : "-", defined $bytes ? $bytes : "-", defined $count ? $count : "-" );
 
@@ -710,8 +714,9 @@ sub read_and_process_logs {
                 $match_type = 2;			# this is matching RAC client log format [2025-02-04T12:06:22.784] [TRACE]
                 $timestamp_str =~ tr/T/ /;
 
-            ## Apache Tomcat Access Log with Service Execution Time (%D) ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) (\d+)[ ]?(\S+)?[ ]?(\S+)?/ ) {
+            ## Apache Tomcat Access Log with Service Execution Time (%D), and optionally thread (%I) and session (%S) ##
+            #} elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) (\d+)[ ]?(\S+)?[ ]?(\S+)?/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?(\d+)?[ ]?(\S+)?[ ]?(\S+)?/ ) {
                 $is_line_match = 1;
                 $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
                 $is_access_log = 1;
@@ -905,6 +910,7 @@ sub read_and_process_logs {
 
                     ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
                     if( $is_access_log ) {
+                    #if( defined $duration ) {
 
                         # Initialize the hash if not already done
                         $log_messages{$category}{$log_key} //= {
@@ -966,7 +972,7 @@ sub read_and_process_logs {
                         push @{$log_analysis{$bucket}{durations}}, $duration;
                     }
 
-                    if( defined $bytes ) {
+                    if( defined $bytes && $bytes ) {
                         $log_analysis{$bucket}{total_bytes} += $bytes;
                         $log_analysis{$bucket}{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;
                     }
@@ -1374,7 +1380,7 @@ sub normalize_data_for_output {
 
         # Calculate the maximum value of the selected trend type if it is activated
         $max_total{count} = $total_count if $total_count > $max_total{count};
-        $max_total{bytes} = $total_bytes if ( defined $total_bytes && $print_durations && $total_bytes > $max_total{bytes} );
+        $max_total{bytes} = $total_bytes if ( defined $total_bytes && !$omit_bytes && $total_bytes > $max_total{bytes} );
         $max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration} && $log_stats{$bucket}{duration} > $max_total{duration} );
     }
 
@@ -1431,7 +1437,7 @@ sub normalize_data_for_output {
     #print "Legend length: $legend_length\n";
 
 # bookmark8
-    $durations_graph_width = $print_durations && !$omit_durations && !$omit_stats ? 50 + 3: 0;
+    $durations_graph_width = $print_durations && !$omit_durations && !$omit_bytes && !$omit_stats ? 50 + 3: 0;
 
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
     $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format ) - $durations_graph_width;
