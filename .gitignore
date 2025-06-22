@@ -3,5 +3,7 @@ nytprof/
 .idea
 .vscode
 *.log
+*.txt
+*.csv
 *.out
 
