@@ -1,4 +1,7 @@
+nytprof/
 .DS_Store
 .idea
 .vscode
 *.log
+*.out
+
