@@ -1,4 +1,5 @@
 nytprof/
+logs/
 .DS_Store
 .idea
 .vscode
