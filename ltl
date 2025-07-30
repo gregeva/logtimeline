@@ -69,7 +69,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.5.2";
+my $version_number = "0.5.3";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -115,6 +115,7 @@ my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 my ( @in_files, @output_columns );
 my %in_files_matched;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
+my %timestamp_cache;
 
 # Define log bucket printing order
 my @log_levels = (
@@ -824,33 +825,47 @@ sub read_and_process_logs {
             if( $is_line_match ) {
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
 
+                $timestamp_str =~ s/(:\d{2}:\d{2})\.\d{3}/$1/;	# remove the milliseconds if present, as the code does not presently support them
+
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
                 } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 || $match_type == 7 || $match_type == 8 ) {
-                    $timestamp = DateTime->new(
-                        year      => substr($timestamp_str, 0, 4),
-                        month     => substr($timestamp_str, 5, 2),
-                        day       => substr($timestamp_str, 8, 2),
-                        hour      => substr($timestamp_str, 11, 2),
-                        minute    => substr($timestamp_str, 14, 2),
-                        second    => substr($timestamp_str, 17, 2),
-                        time_zone => 'UTC',
-                    );
-                } elsif( $match_type == 3 || $match_type == 4 || $match_type == 9 ) {
-                    my ($day, $month_str, $year, $hour, $minute, $second) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/;
-                    my $month = $month_map{$month_str};
-                    $timestamp = DateTime->new(
-                        year      => $year,
-                        month     => $month,
-                        day       => $day,
-                        hour      => $hour,
-                        minute    => $minute,
-                        second    => $second,
-                        time_zone => 'UTC',
-                    );
+                    if (exists $timestamp_cache{$timestamp_str}) {
+                        $timestamp = $timestamp_cache{$timestamp_str};
+                    } else {
+                        $timestamp = DateTime->new(
+                            year      => substr($timestamp_str, 0, 4),
+                            month     => substr($timestamp_str, 5, 2),
+                            day       => substr($timestamp_str, 8, 2),
+                            hour      => substr($timestamp_str, 11, 2),
+                            minute    => substr($timestamp_str, 14, 2),
+                            second    => substr($timestamp_str, 17, 2),
+                            time_zone => 'UTC',
+                        );
+                        $timestamp_cache{$timestamp_str} = $timestamp;
+                    }
 
-#                    print "\033[0;35m[%d]\033[0m", $timestamp->epoch();
-#                    $| = 1; # Flush output
+                    # print "\033[0;35m[%d]\033[0m", $timestamp->epoch();
+                    # $| = 1; # Flush output
+                } elsif( $match_type == 3 || $match_type == 4 || $match_type == 9 ) {
+                    if (exists $timestamp_cache{$timestamp_str}) {
+                        $timestamp = $timestamp_cache{$timestamp_str};
+                    } else {
+                        my ($day, $month_str, $year, $hour, $minute, $second) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/;
+                        my $month = $month_map{$month_str};
+                        $timestamp = DateTime->new(
+                            year      => $year,
+                            month     => $month,
+                            day       => $day,
+                            hour      => $hour,
+                            minute    => $minute,
+                            second    => $second,
+                            time_zone => 'UTC',
+                        );
+                        $timestamp_cache{$timestamp_str} = $timestamp;
+                    }
+                    # print "\033[0;35m[%d]\033[0m", $timestamp->epoch();
+                    # $| = 1; # Flush output
                 }
 
                 $filter_range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp ) unless $filter_range_filter_initialized;
@@ -1237,7 +1252,6 @@ sub calculate_all_statistics {
 #print "\n";
 #$, = "";
 
-
 #    foreach my $bucket ( keys %log_threadpools ) {
 #        # Capture Relevant Thread Pool Stats for Graphing
 #print "\n $bucket-- ";
@@ -1597,7 +1611,7 @@ sub normalize_data_for_output {
 
             foreach my $key ( @populated_graph_columns ) {			# go through the list of possible columns and populate the scaled value for that metric for the current time bucket
                 next if $key =~ /^count$/;					# the counts have already been printed, so should skip this entry even if it is legitimate
-                my $key_highlight = "${key}-HL";
+                my $key_highlight = "$key-HL";
                 my $scaled_key = "scaled_${key}";
                 my $scaled_key_highlight = "${scaled_key}-HL";
                 # need to subtract a few for additional space for the scaled amount to allow for room for separators
@@ -2185,9 +2199,6 @@ sub print_message_summary {
             }
 
             print "\n";
-
-        #} else {
-        #    warn "Grouping '$grouping' does not exist or is not a hash reference.\n";
         }
     }
 
