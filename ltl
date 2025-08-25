@@ -69,7 +69,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.5.4";
+my $version_number = "0.5.5";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -119,6 +119,7 @@ my %timestamp_cache;
 
 # Define log bucket printing order
 my @log_levels = (
+    'FORCE-HL', 'FORCE',
     'ERROR-HL', 'ERROR', 'WARN-HL', 'WARN', 'INFO-HL', 'INFO', 
     'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx', 
     '4xx-HL', '4xx', '3xx-HL', '3xx', '2xx-HL', '2xx', '1xx-HL', 
@@ -141,6 +142,7 @@ my %blocks = (
 my $default_chart_block = $^O ne 'MSWin32' ? "A" : "A";   # had initially set it to I for Windows
 
 my %colors = (
+    'FORCE' => "\033[0;35m",
     'ERROR' => "\033[0;31m",
     'WARN'  => "\033[0;33m",
     'INFO'  => "\033[0;32m",
@@ -241,7 +243,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exlude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
     print "\n  Error: $error_reason\n";
     return;
 }
@@ -638,6 +640,7 @@ sub read_and_process_logs {
         my $line_number = 0;
         my $filter_range_filter_initialized = 0;
         my %month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
+        my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
 
         while (<$fh>) {
             $line_number++;
@@ -807,7 +810,34 @@ sub read_and_process_logs {
                 $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
                 $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
 #print "$message -- $_";
+            } elsif ( ( $category_bucket, $timestamp_str, $message ) = $_ =~ /^([^ ]+) (\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}[,.]\d+) (.*)/ ) {  
+                $is_line_match = 1;
+                $match_type = 11;			# this is matching ThingWorx Edge C SDK format # FORCE 2025-08-09 18:27:18,40 8012 twx_connection.cpp:246 Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed]
+                chop $message;
+
+                # INFO 2025-08-09 18:19:04,479 libremotesession::RemoteConnectionManager::ReloadAllowList : Attempting to load the allowlist.
+                # INFO 2025-08-09 18:19:04,479 8012 change_notification_source.cpp:11 OnProvisioningChanged provisioning change update received
+                # ERROR 2025-08-09 18:27:18,38 TW_SSL_READ: Error reading from SSL stream
+                # WARN 2025-08-09 18:19:04,729 getCurrentPropertyValuesForEachHandler -  startType parameter is missing but optional. Assumed to be useDefaultValue
+                # INFO 2025-08-09 18:27:18,128 8012 twx_app_executor.cpp:83 Detach Detach requested
+
+                $message =~ s/\d+ (.*)$/$1/;			# remove process ID if log messages contains it
+                if( $message =~ /\w+\.cpp:\d+ / ) {
+                    $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/;
+                    $object = $1;
+                }
+                
+
+         #       $object = $file_name if defined $file_name;	# set the object to the extracted file name in case it might be an agent identifier
             }
+
+if( 0 ) {
+
+    print "$match_type $category_bucket $object - $message\n";
+    last if $total_lines_included >= 15;
+
+}
+
 
             # Populate Thread Pool name if thread name was found
             if( defined $thread && $thread ne "" ) {
@@ -840,7 +870,7 @@ sub read_and_process_logs {
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
-                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 || $match_type == 7 || $match_type == 8 || $match_type == 10 ) {
+                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 || $match_type == 7 || $match_type == 8 || $match_type == 10 || $match_type == 11 ) {
                     if (exists $timestamp_cache{$timestamp_str}) {
                         $timestamp = $timestamp_cache{$timestamp_str};
                     } else {
@@ -913,6 +943,7 @@ sub read_and_process_logs {
 
                 if( defined( $message ) ) {
                     my $log_key = "";
+                    my $max_object_length = 25;
                     my $log_level = $status_code > 0 ? $status_code : $category_bucket;			# If we received an actual HTTP status code, use that for the message statistic data model
                     $log_level =~ s/-HL$//;
 
@@ -921,10 +952,12 @@ sub read_and_process_logs {
 
                     if( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
                         my $truncated_thread = substr( $threadname, 0, 20 );
-                        my $max_object_length = 25;
                         my $truncated_object = substr( $object, length($object) > $max_object_length ? length($object)-$max_object_length : 0, $max_object_length );
                         # truncate the log message key to either the screen width or hardcoded value if writing to output to CSV file
                         $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
+                    } elsif( defined( $object ) ) {
+                        my $truncated_object = substr( $object, length($object) > $max_object_length ? length($object)-$max_object_length : 0, $max_object_length );
+                        $log_key = substr("[$log_level] [$truncated_object] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
                     } elsif( defined( $threadname ) ) {
                         my $truncated_thread = substr( $threadname, 0, 20 );
                         $log_key = substr("[$log_level] [$truncated_thread] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
@@ -1479,7 +1512,7 @@ sub normalize_data_for_output {
         push @printed_column_spacing, 3;
     }
 
-    push @printed_column_names, "occurences"; 
+    push @printed_column_names, "occurrences"; 
 
     %graph_width = ( 1 => $max_graph_width );
 
