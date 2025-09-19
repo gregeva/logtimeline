@@ -22,6 +22,11 @@
 # - BUG if the command line options are too long (i.e. with long regex) and output is specified, then the file name creation can fail as filename too long.  In this case, it should be truncated to a maxium file name length.
 
 
+# BUGS
+#
+# - when many graph columns present, the line overflows down to the next, this seems that the width calculation of either the "values" or "rate" column is wrong and this is what is adding 1-2 extra characters
+# - when using the -o flag, the provided command line options are used in the file name, however when using a long list of filters, the filename can be too long causing error - need to truncate the filename
+
 # NOT PRIORITY BACKLOG
 # - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
 # - add pagination support for the summary overview and the top messages
