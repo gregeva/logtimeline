@@ -714,13 +714,14 @@ sub read_and_process_logs {
 #printf( "$message -- durationMS=%s bytes=%s count=%s\n", defined $duration ? $duration : "-", defined $bytes ? $bytes : "-", defined $count ? $count : "-" );
 
             ## ThingWorx Connection Server Standard Log Format ##
-            } elsif ( ($timestamp_str, $thread, $category_bucket, $object, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)  ([^ ]*) - (.*)/) {
+            } elsif ( ($timestamp_str, $thread, $category_bucket, $object, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)/) {
                 $is_line_match = 1;
                 # for some reason needed to move this before other more generic patterns which shouldn't be matching this, or are valid
                 $match_type = 10;                       # 2025-08-14 21:00:34.633 [vert.x-eventloop-thread-12] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size
 
                 ( $duration ) = $message =~ / (\d+) milliseconds/;
                 $message =~ s/(from \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:)\d{4,5} /${1}XXXXX /;	# remove the ephemeral port in order to group common messages
+                $message =~ s/=\d+/=?/g;
                 $is_access_log = 1 if defined $bytes || defined $duration || defined $count;
 
             ## Generic Java/Logback Pattern with timestamp and level ##
