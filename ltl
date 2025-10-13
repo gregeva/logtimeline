@@ -1484,9 +1484,10 @@ sub normalize_data_for_output {
                 $title_length = length(format_number( $count ) . ":");
                 $title_length += length(" ") if !$omit_values;		# need to add the spacing between values and rate if it will exist
             } elsif( $category_bucket =~ /^msg-rate$/ ) {
-                $title_length = length( format_number( $count ) . "/m");
+                $title_length = length( format_number( $count ) . "/m ");
             } else {
                 $title_length = length("$category_bucket: $count ");
+#print "$category_bucket: $count = $title_length\n";
             }
             $bucket_legend_length += $title_length;
             $output_columns{$category_bucket} = 1 if !exists $output_columns{$category_bucket};
@@ -1510,18 +1511,22 @@ sub normalize_data_for_output {
     $durations_graph_width = $print_durations && !$omit_durations && !$omit_bytes && !$omit_stats ? 50 + 2: 0;
 
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
-    $max_graph_width = $terminal_width - $legend_length - 2 - 4 - length( $output_timestamp_format ) - $durations_graph_width;
-print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . length( $output_timestamp_format ) . " durations_graph_width: $durations_graph_width\n";
 
-    $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
+    $timestamp_length = length( strftime($output_timestamp_format, gmtime(0) ) ) + 1 + ( $print_milliseconds ? 4 : 0 ) ;     # +1 for built in space after timestamp
+
+    $max_graph_width = $terminal_width - $legend_length - $timestamp_length - $durations_graph_width;
+#print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . length( $output_timestamp_format ) . " durations_graph_width: $durations_graph_width\n";
+print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . $timestamp_length . " durations_graph_width: $durations_graph_width\n";
+
+# Don't think that I need this anymore as I moved the calculation of timestamp length before max_graph_width
+#    $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
 ## WARNING timestamp length is wrong 14 versus 17
-print "$output_timestamp_format - ", strftime($output_timestamp_format, gmtime(1) ), "\n";
-    $timestamp_length = length( strftime($output_timestamp_format, gmtime(1) ) ) + ( $print_milliseconds ? 4 : 0 ) ;
+print "$output_timestamp_format - ", strftime($output_timestamp_format, gmtime(0) ), "\n";
     #$timestamp_length = length( $output_timestamp_format ) + ( $print_milliseconds ? 4 : 0 ) ;
-print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . length( $output_timestamp_format ) . " durations_graph_width: $durations_graph_width\n";
+print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . $timestamp_length . " durations_graph_width: $durations_graph_width\n";
     push @printed_column_widths, $timestamp_length;
     push @printed_column_names, "timestamp"; 
-    push @printed_column_spacing, 1;
+    push @printed_column_spacing, 0;
 
 #herenow
     if( !$omit_values || !$omit_rate ) {
@@ -1630,15 +1635,15 @@ print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_
      }
 
      foreach my $column ( 1 .. $graph_count ) {							# capture and build up list containing width and spacing between columns
-         my $column_spacing = 1;
+         my $column_spacing = 0;
          push @printed_column_widths, $graph_width{$column} - $column_spacing;
          push @printed_column_spacing, $column_spacing;
      }
 
      if( $print_durations && !$omit_durations && !$omit_stats ) {
          push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score );
-         push @printed_column_widths, $durations_graph_width - 4;
-         push @printed_column_spacing, 4;
+         push @printed_column_widths, $durations_graph_width - 0;
+         push @printed_column_spacing, 0;
          push @printed_column_names, "latency statistics";
      }
 
@@ -1692,7 +1697,7 @@ print "$column - $title ! $max_length ($printed_column_widths[$column] - $printe
             #next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0;    # should be caught by below 
             my $count = $log_counts{$bucket}{$category_bucket}{count};
             next if !defined $count;										# skip scaling where varible was left or is undefined (ie; no error or message rate)
-            my $scaled_count = $max_total{count} != 0 ? int(($count / $max_total{count}) * $graph_width{1} ) : 0;	# Adapting count scaling to multi-graph functionality
+            my $scaled_count = $max_total{count} != 0 ? int(($count / $max_total{count}) * $graph_width{1} ) - 1: 0;	# Adapting count scaling to multi-graph functionality
             $log_counts{$bucket}{$category_bucket}{scaled_count} = $scaled_count;
             $category_totals{$category_bucket} += $count;							# tally the totals for each category bucket
             $total_lines_highlighted += $count if $category_bucket =~ /-HL$/;
@@ -1736,8 +1741,14 @@ sub print_bar_graph {
             my $padding = $width - length($name);
             my $left_pad  = int($padding / 2);
             my $right_pad = $padding - $left_pad;
-    
-            print ' ' x $left_pad . $name . ' ' x $right_pad;
+
+## temporary for helping with spacing ##
+   $right_pad -= 1;
+   
+            print ' ' x $left_pad if $left_pad > 0;
+            print $name;
+            print ' ' x $right_pad if $right_pad > 0;
+print '│';
             print ' ' x $printed_column_spacing[$column] if $column < $#printed_column_names;
         }
 
@@ -1752,9 +1763,7 @@ sub print_bar_graph {
 
             ## PRINT TIMESTAMP IN CHART ROW
             $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
-            #my $timestamp_legend_length = length( $bucket_time_str ) + $legend_length + 2; 
-# herenow
-            my $timestamp_legend_length = length( $bucket_time_str ) + $legend_length + 2; 
+            my $timestamp_legend_length = $timestamp_length + $legend_length; 
 
             print "$bucket_time_str ";
 
@@ -1783,8 +1792,8 @@ sub print_bar_graph {
                         } elsif( $category_bucket =~ /^msg-rate$/ ) {
                             #$rate_metrics .= "${color}$count$colors{'NC'}";
                             $rate_metrics .= "${color}" . format_number( $count ) . "$colors{'NC'}";
-                            $rate_metrics .= "$colors{'bright-black'}/m$colors{'NC'}";
-                            $legend_length_bucket += length( format_number( $count ) . "/m" );
+                            $rate_metrics .= "$colors{'bright-black'}/m$colors{'NC'} ";
+                            $legend_length_bucket += length( format_number( $count ) . "/m " );
                         } else {
 # THIS LOOKS VERY FISHY... 
                             #$log_details .= "${color}$count$colors{'NC'}" . " " x $category_bucket =~ /-HL$/;
@@ -1821,13 +1830,14 @@ sub print_bar_graph {
             my $padding = $legend_length - $legend_length_bucket;
             $printed_chars += $legend_length_bucket;
 
-#print " legend_length: $legend_length legend_length_bucket: $legend_length_bucket padding: $padding [$rate_metrics]" . length($rate_metrics) . "\n";
+#print "\n legend_length: $legend_length legend_length_bucket: $legend_length_bucket padding: $padding [$rate_metrics]" . length($rate_metrics) . "\n";
 
             print " " x ($padding >= 0 ? $padding : 0);
             $printed_chars += ($padding >= 0 ? $padding : 0);
             print $rate_metrics unless $omit_rate;
 
-            print " $colors{'bright-black'}│$colors{'NC'} ";
+            print "$colors{'bright-black'}│$colors{'NC'} ";
+            $printed_chars += 2;
 
             ## PRINT STANDARD 'COUNT' BAR GRAPH ##
             foreach my $category_bucket (@log_levels) {
@@ -1859,7 +1869,7 @@ sub print_bar_graph {
 
 # TO DO: Need to check if the value to be plotted exists for this section; should be done in normalization stage
                     #next unless defined $trend_value;
-                    print " ";
+#                    print " ";
 
 if( defined $log_stats{$bucket}{$key} ) {
                     if( $key =~ /^(time|duration)$/i ) {
@@ -1949,10 +1959,10 @@ if( defined $log_stats{$bucket}{$key} ) {
             if( $print_durations && !$omit_durations && !$omit_stats ) {
                 my $missing_chars;
                 $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width;		# 2 is the magic number to get 1 space after the tallest bar 
-$missing_chars -= 4;
+#$missing_chars -= 4;
 #print "\nterminal_width: $terminal_width printed_chars: $printed_chars durations_graph_width: $durations_graph_width missing_chars: $missing_chars\n";
                 print " " x $missing_chars if $missing_chars > 0;
-                print " $colors{'bright-black'}│$colors{'NC'}  ";
+                print "$colors{'bright-black'}│$colors{'NC'}  ";
                 if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p90} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{cv} || defined $log_stats{$bucket}{z_score} ) {
 
                     my $cv_color = defined $log_stats{$bucket}{cv} && $log_stats{$bucket}{cv} >= 20 ? 'WARN-HL' : 'white-underline';
