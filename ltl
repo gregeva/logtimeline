@@ -1571,6 +1571,10 @@ print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_
 
 # bookmark6
         if( $graph_count == 2 ) {
+            my $offset = 1;		# add timestamp column
+	    $offset++ if( !$omit_rate && !$omit_values );
+
+            
             %graph_relative_size = (
                 1 => 65,
                 2 => 35,
@@ -1661,7 +1665,11 @@ print "printed columns: $#printed_column_names graph_count: $graph_count\n";
         my $title = $printed_column_names[$column];
         # my $max_length = $printed_column_widths[$column] - $printed_column_spacing[$column];
         my $max_length = $printed_column_widths[$column];
-print "$column - $title ! width:$graph_width{$column} maxlen:$max_length (colwidth:$printed_column_widths[$column] - colspacing:$printed_column_spacing[$column])\n";
+# 2025-12-07 - next problem to solve, perhaps only diagnostic, but perhaps not - column number relative to which one we are processing doesn't line up with the sizing hash
+        my $column_offset = 0;
+        $column_offset = 0 if( !$omit_rate && !$omit_values );
+
+print "$column - $title ! width:$graph_width{$column-$column_offset} maxlen:$max_length (colwidth:$printed_column_widths[$column] - colspacing:$printed_column_spacing[$column])\n";
         $printed_column_names[$column] = substr( $title, 0, $max_length ) if length( $title ) > $max_length;
     }
 
