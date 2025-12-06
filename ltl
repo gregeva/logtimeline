@@ -1420,6 +1420,7 @@ sub normalize_data_for_output {
         duration => 0,
     );
     my %output_columns;
+    my $count_column_number = 2;
 
 # TO DO : user defined value will need to have a max total determined for scaling and printing
 
@@ -1534,6 +1535,8 @@ print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_
         push @printed_column_widths, $legend_length;
         push @printed_column_spacing, ( $graph_column_padding_all + $graph_column_padding_legend );
         push @printed_column_names, "legend"; 
+    } else {
+	$count_column_number = 1;
     }
 
     push @printed_column_names, "occurrences"; 									# this count column is required, not sure how to make the logic more coherent
@@ -1692,9 +1695,6 @@ print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $
                 my $scaled_key = "scaled_${key}";
                 my $scaled_key_highlight = "${scaled_key}-HL";
                 # need to subtract a few for additional space for the scaled amount to allow for room for separators - also these are wrongly scaled to the column width, not the @printed_column_widths
-# 2025-12-07 - getting rid of all hardcoded padding
-                #$log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * ( $graph_width{$column_number} - 3 ) ) : 0;
-                #$log_stats{$bucket}{$scaled_key_highlight} = ( defined $log_stats{$bucket}{$key_highlight} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key_highlight} / $max_total{$key} ) * ( $graph_width{$column_number} - 3 ) ) : 0;
 
                 $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * $printed_column_widths[$column_number] ) : 0;
                 $log_stats{$bucket}{$scaled_key_highlight} = ( defined $log_stats{$bucket}{$key_highlight} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key_highlight} / $max_total{$key} ) * $printed_column_widths[$column_number] ) : 0;
@@ -1711,10 +1711,10 @@ print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $
             next if !defined $count;										# skip scaling where varible was left or is undefined (ie; no error or message rate)
 # 2025-12-07 removing -1 which I guess was meant as padding, shouldn't be in the scaling algorithm but instead in the graph width calculation
 #            my $scaled_count = $max_total{count} != 0 ? int(($count / $max_total{count}) * $graph_width{1} ) - 1: 0;	# Adapting count scaling to multi-graph functionality
-            my $scaled_count = $max_total{count} != 0 ? int(($count / $max_total{count}) * $printed_column_widths[1] ) : 0;	# Adapting count scaling to multi-graph functionality
-my $tmp = int(($count / $max_total{count}) * $printed_column_widths[1] );
+            my $scaled_count = $max_total{count} != 0 ? int(($count / $max_total{count}) * $printed_column_widths[$count_column_number] ) : 0;	# Adapting count scaling to multi-graph functionality
+my $tmp = int(($count / $max_total{count}) * $printed_column_widths[$count_column_number] );
 
-#print "Scaling bucket $category_bucket:\t\tmax_total{count}=$max_total{count} count=$count graph_width{1}=$graph_width{1} col_width=$printed_column_widths[1] tmp=$tmp scaled_count=$scaled_count\n";
+print "Scaling bucket $category_bucket:\t\tmax_total{count}=$max_total{count} count=$count graph_width{$count_column_number}=$graph_width{$count_column_number} col_width=$printed_column_widths[$count_column_number] tmp=$tmp scaled_count=$scaled_count\n";
 
             $log_counts{$bucket}{$category_bucket}{scaled_count} = $scaled_count;
             $category_totals{$category_bucket} += $count;							# tally the totals for each category bucket
@@ -1785,7 +1785,6 @@ print '│';
             print $bucket_time_str . " " x $graph_column_padding_all;
             $printed_chars += $timestamp_legend_length;
 
-print $printed_chars;
             $timestamp_legend_length += $graph_column_padding_legend + $legend_length + $graph_column_padding_all if( !$omit_values || !$omit_rate );
 
             my $log_details = "";
@@ -1846,8 +1845,6 @@ print $printed_chars;
             print $log_details unless $omit_values;
             my $padding = $legend_length - $legend_length_bucket;
             $printed_chars += $legend_length_bucket ;
-
-print $printed_chars;
 
 #print "\n legend_length: $legend_length legend_length_bucket: $legend_length_bucket padding: $padding [$rate_metrics]" . length($rate_metrics) . "\n";
 
