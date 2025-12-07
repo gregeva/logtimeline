@@ -87,9 +87,10 @@ my ( %log_counts, %category_totals, %log_analysis, %log_messages, %log_stats, %l
 my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
 my $mask_uuid;									# temporary command line option to mask UUIDs with HASH characters for grouping purposes (to be replaced by more generic group similar feature)
 my $durations_graph_width = 0;
-my ( $graph_count, $max_graph_width ) = ( 1, 0 );
-my ( $graph_column_padding_all, $graph_column_padding_legend, $graph_column_padding_count, $graph_column_padding_other, $graph_column_padding_latency ) = ( 1, 0, 2, 1, 1 );	# used to add padding (removed from width) in normalize data function
+my ( $graph_count, $graph_count_max, $max_graph_width ) = ( 1, 6, 0 );
+my ( $graph_column_padding_all, $graph_column_padding_timestamp, $graph_column_padding_legend, $graph_column_padding_count, $graph_column_padding_other, $graph_column_padding_latency ) = ( 1, 1, 0, 2, 1, 3 );	# used to add padding (removed from width) in normalize data function
 my %graph_width;
+my $column_count_pre_graph = 2;		                    # timestamp + legend is the default
 my @graph_columns = qw( duration bytes );
 my ( @printed_column_widths, @printed_column_spacing, @printed_column_names );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
@@ -990,7 +991,7 @@ if( 0 ) {
                         $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
 
                         if( defined $duration && !$omit_durations ) {
-print " duration: $duration -- $_ \n" if !$duration || $duration < 1;
+#print " duration: $duration -- $_ \n" if !$duration || $duration < 1;
                             $log_messages{$category}{$log_key}{total_duration} += $duration;
                             $log_messages{$category}{$log_key}{total_duration_num} += $duration;
 
@@ -1420,7 +1421,7 @@ sub normalize_data_for_output {
         duration => 0,
     );
     my %output_columns;
-    my $count_column_number = 2;
+
 
 # TO DO : user defined value will need to have a max total determined for scaling and printing
 
@@ -1475,7 +1476,7 @@ sub normalize_data_for_output {
             my $title_length = 0;
             #next unless ( $count > 0 || $category_bucket =~ /^(err|msg)-rate$/ ) && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
             next unless ( $count > 0 || $category_bucket =~ /^(err|msg)-rate$/ ) && $category_bucket !~ /^empty$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
-            next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate)$/;
+            next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate|empty)$/;
             next if $omit_rate && $category_bucket =~ /^(err-rate|msg-rate)$/;
             next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0;
 
@@ -1488,6 +1489,7 @@ sub normalize_data_for_output {
             } elsif( $category_bucket =~ /^msg-rate$/ ) {
                 $title_length = length( format_number( $count ) . "/m ");
             } else {
+# 2025-12-07 - WARNING : this space after count should be integrated such that it is only applied on n-1 of the found categories (in the print subroutine)
                 $title_length = length("$category_bucket: $count ");
 #print "$category_bucket: $count = $title_length\n";
             }
@@ -1510,33 +1512,31 @@ sub normalize_data_for_output {
 
 # bookmark8
 # WARNING: statically speaking the durations stats are 52 characters long with the leading double space - meaning the size calculation doesn't account properly for the line and column seperator
-    $durations_graph_width = $print_durations && !$omit_durations && !$omit_bytes && !$omit_stats ? 50 + 2: 0;
+    $durations_graph_width = $print_durations && !$omit_durations && !$omit_bytes && !$omit_stats ? $graph_column_padding_latency + 50 + $graph_column_padding_all : 0;
 
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
-
-    $timestamp_length = length( strftime($output_timestamp_format, gmtime(0) ) ) + 1 + ( $print_milliseconds ? 4 : 0 ) ;     # +1 for built in space after timestamp
+    # $timestamp_length = length( strftime($output_timestamp_format, gmtime(0) ) ) + 1 + ( $print_milliseconds ? 4 : 0 ) ;     # +1 for built in space after timestamp
+    $timestamp_length = $graph_column_padding_timestamp + length( strftime($output_timestamp_format, gmtime(0) ) ) + ( $print_milliseconds ? 4 : 0 ) + $graph_column_padding_all;     # remove spacing from length calculation as it is seperate
 
     $max_graph_width = $terminal_width - $legend_length - $timestamp_length - $durations_graph_width;
-#print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . length( $output_timestamp_format ) . " durations_graph_width: $durations_graph_width\n";
-print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . $timestamp_length . " durations_graph_width: $durations_graph_width\n";
+print "\nmax_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . $timestamp_length . " durations_graph_width: $durations_graph_width\n";
 
 # Don't think that I need this anymore as I moved the calculation of timestamp length before max_graph_width
 #    $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
-## WARNING timestamp length is displaying wrong = 14 versus actual 17 characters
-print "$output_timestamp_format - ", strftime($output_timestamp_format, gmtime(0) ), "\n";
-    #$timestamp_length = length( $output_timestamp_format ) + ( $print_milliseconds ? 4 : 0 ) ;
-print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . $timestamp_length . " durations_graph_width: $durations_graph_width\n";
-    push @printed_column_widths, $timestamp_length;
+
+    push @printed_column_widths, $timestamp_length - ( $graph_column_padding_all + $graph_column_padding_timestamp );
     push @printed_column_names, "timestamp"; 
-    push @printed_column_spacing, ( $graph_column_padding_all );
+    push @printed_column_spacing, ( $graph_column_padding_all + $graph_column_padding_timestamp );
 
 #herenow
-    if( !$omit_values || !$omit_rate ) {
+    if( !( $omit_values && $omit_rate ) ) {
         push @printed_column_widths, $legend_length;
-        push @printed_column_spacing, ( $graph_column_padding_all + $graph_column_padding_legend );
-        push @printed_column_names, "legend"; 
+        # push @printed_column_spacing, ( $graph_column_padding_all + $graph_column_padding_legend );         # this is too hard to get working properly so avoiding it
+        push @printed_column_spacing, 0;                                            # legend column does not need trailing spacing as it is last before graph columns
+        push @printed_column_names, "legend";
+        $column_count_pre_graph = 2;                                            # if legend column is printed, then statically sized columns will be timestamp and legend
     } else {
-	$count_column_number = 1;
+	    $column_count_pre_graph = 1;                                            # if legend column is omitted, then statically sized columns will only be timestamp
     }
 
     push @printed_column_names, "occurrences"; 									# this count column is required, not sure how to make the logic more coherent
@@ -1556,32 +1556,31 @@ print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_
 #    if( $graph_count > 1 ) {
 
         my %graph_relative_size;
-
+        my $graph_column_count = 1;             # will always have count/occurrences column
         # Determine and store which of the possible columns to print have data
         foreach my $key ( @graph_columns ) {
             if( defined $max_total{$key} && $max_total{$key} != 0 ) {
                 push @populated_graph_columns, $key;
-                push @printed_column_names, $key;
-                push @output_columns, "${key}Nice" if $key =~ /^(duration|bytes)$/;
+                push @output_columns, "${key}Nice" if $key =~ /^(duration|bytes)$/; # presently these won't be output to CSV as processing loop to screen will stop at max columns
                 push @output_columns, $key;
+
+                next if ++$graph_column_count > $graph_count_max;					# limit the number of graph columns to 6 max
+                push @printed_column_names, $key;
             }
         }
 
         #push @output_columns, @populated_graph_columns;								# Add additionally trended data columns to the file output column list
-
+        $graph_count = $graph_count_max if $graph_count > $graph_count_max;									# limit the number of graph columns to 6 max
 # bookmark6
+        # 2025-12-07 - disvery that the rounding was causing the total relative column size calcuations to be off significantly and varying in both under and above 100%
         if( $graph_count == 2 ) {
-            my $offset = 1;		# add timestamp column
-	    $offset++ if( !$omit_rate && !$omit_values );
-
-            
             %graph_relative_size = (
                 1 => 65,
                 2 => 35,
             );
             %graph_width = (
-                1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
-                2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
+                1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
+                2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
             );
          } elsif( $graph_count == 3 ) {
             %graph_relative_size = (
@@ -1590,9 +1589,9 @@ print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_
                 3 => 17,
             );
             %graph_width = (
-                1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
-                2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
-                3 => round( $graph_relative_size{3} / 100 * $max_graph_width ),
+                1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
+                2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
+                3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
             );
          } elsif( $graph_count == 4 ) {
             %graph_relative_size = (
@@ -1602,10 +1601,10 @@ print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_
                 4 => 16,
             );
             %graph_width = (
-                1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
-                2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
-                3 => round( $graph_relative_size{3} / 100 * $max_graph_width ),
-                4 => round( $graph_relative_size{4} / 100 * $max_graph_width ),
+                1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
+                2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
+                3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
+                4 => ( $graph_relative_size{4} / 100 * $max_graph_width ),
             );
          } elsif( $graph_count == 5 ) {
             %graph_relative_size = (
@@ -1616,11 +1615,11 @@ print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_
                 5 => 15,
             );
             %graph_width = (
-                1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
-                2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
-                3 => round( $graph_relative_size{3} / 100 * $max_graph_width ),
-                4 => round( $graph_relative_size{4} / 100 * $max_graph_width ),
-                5 => round( $graph_relative_size{5} / 100 * $max_graph_width ),
+                1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
+                2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
+                3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
+                4 => ( $graph_relative_size{4} / 100 * $max_graph_width ),
+                5 => ( $graph_relative_size{5} / 100 * $max_graph_width ),
             );
          } elsif( $graph_count == 6 ) {
             %graph_relative_size = (
@@ -1632,12 +1631,12 @@ print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_
                 6 => 14,
             );
             %graph_width = (
-                1 => round( $graph_relative_size{1} / 100 * $max_graph_width ),
-                2 => round( $graph_relative_size{2} / 100 * $max_graph_width ),
-                3 => round( $graph_relative_size{3} / 100 * $max_graph_width ),
-                4 => round( $graph_relative_size{4} / 100 * $max_graph_width ),
-                5 => round( $graph_relative_size{5} / 100 * $max_graph_width ),
-                6 => round( $graph_relative_size{6} / 100 * $max_graph_width ),
+                1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
+                2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
+                3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
+                4 => ( $graph_relative_size{4} / 100 * $max_graph_width ),
+                5 => ( $graph_relative_size{5} / 100 * $max_graph_width ),
+                6 => ( $graph_relative_size{6} / 100 * $max_graph_width ),
             );
          }
 
@@ -1655,37 +1654,35 @@ print "max_graph_width: $max_graph_width terminal_width: $terminal_width legend_
      if( $print_durations && !$omit_durations && !$omit_stats ) {
          my $column_spacing = ( $graph_column_padding_all + $graph_column_padding_latency );
          push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score );
-         push @printed_column_widths, $durations_graph_width - $column_spacing;
-         push @printed_column_spacing, $column_spacing;
+         push @printed_column_widths, $durations_graph_width;
+         push @printed_column_spacing, 0;
          push @printed_column_names, "latency statistics";
      }
 
-print "printed columns: $#printed_column_names graph_count: $graph_count\n";
+print "pre-graph-columns: $column_count_pre_graph printed columns: $#printed_column_names graph_count: $graph_count\n";
     foreach my $column ( 0 .. $#printed_column_names ) {
         my $title = $printed_column_names[$column];
         # my $max_length = $printed_column_widths[$column] - $printed_column_spacing[$column];
         my $max_length = $printed_column_widths[$column];
-# 2025-12-07 - next problem to solve, perhaps only diagnostic, but perhaps not - column number relative to which one we are processing doesn't line up with the sizing hash
-        my $column_offset = 0;
-        $column_offset = 0 if( !$omit_rate && !$omit_values );
 
-print "$column - $title ! width:$graph_width{$column-$column_offset} maxlen:$max_length (colwidth:$printed_column_widths[$column] - colspacing:$printed_column_spacing[$column])\n";
+print "$column - $title ! width:$graph_width{$column-$column_count_pre_graph+1} maxlen:$max_length (colwidth:$printed_column_widths[$column] - colspacing:$printed_column_spacing[$column])\n";
         $printed_column_names[$column] = substr( $title, 0, $max_length ) if length( $title ) > $max_length;
     }
 
 $, = ", ";
-print "\nPopulated graph columns:", @populated_graph_columns;
-print "\nOutput column length:   ", @printed_column_widths;
-print "\nOutput column spacing:  ", @printed_column_spacing;
-print "\nOutput column names:    ", @printed_column_names;
+print "\nPopulated graph columns:       ", @populated_graph_columns;
+print "\nDetected and sized columns:    ", sort keys %graph_width;
+print "\nCalculated column widths:      ", map { "$_ => $graph_width{$_}" } sort keys %graph_width;  
+print "\nPrinted column length:          ", @printed_column_widths;
+print "\nPrinted column spacing:         ", @printed_column_spacing;
+print "\nPrinted column names:           ", @printed_column_names;
 print "\n";
 $, = "";
 
-print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $graph_width{2} $graph_width{3}\n";
 # bookmark2    
     foreach my $bucket (keys %log_counts) {
         my $processed_time_buckets //= 0;
-	my $check_memory_every = $^O ne 'MSWin32' ? 50 : 500;
+	    my $check_memory_every = $^O ne 'MSWin32' ? 50 : 500;
 		
 # TO DO : need to handle cases where we don't have bytes, but would have duration
         # scale the transferred bytes for printing the statistics table
@@ -1695,14 +1692,17 @@ print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $
 
 # bookmark3 : scale the total values to the printable size
         if( $graph_count > 1 ) {
-            my $column_number = 2; 
+            my $column_number = $column_count_pre_graph + 1;		# start after the timestamp and possibly legend columns
 
             foreach my $key ( @populated_graph_columns ) {			# go through the list of possible columns and populate the scaled value for that metric for the current time bucket
+# 2025-12-07 - counts are handled separately below with additional logic which should be incorporated here in the future for coherence and performance improvements
                 next if $key =~ /^count$/;					# the counts have already been printed, so should skip this entry even if it is legitimate
                 my $key_highlight = "$key-HL";
                 my $scaled_key = "scaled_${key}";
                 my $scaled_key_highlight = "${scaled_key}-HL";
                 # need to subtract a few for additional space for the scaled amount to allow for room for separators - also these are wrongly scaled to the column width, not the @printed_column_widths
+
+#print "Scaling bucket $bucket key $key (col $column_number): max_total{$key}=" . ( defined $max_total{$key} ? $max_total{$key} : "N/A" ) . " log_stats{$bucket}{$key}=" . ( defined $log_stats{$bucket}{$key} ? $log_stats{$bucket}{$key} : "N/A" ) . " printed_column_widths[$column_number]=" . $printed_column_widths[$column_number] . "\n";
 
                 $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * $printed_column_widths[$column_number] ) : 0;
                 $log_stats{$bucket}{$scaled_key_highlight} = ( defined $log_stats{$bucket}{$key_highlight} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key_highlight} / $max_total{$key} ) * $printed_column_widths[$column_number] ) : 0;
@@ -1712,21 +1712,37 @@ print "Graph column count $graph_count -- Graph column widths: $graph_width{1} $
 
 # NEXT TO DO: rebuild column structure to use column names as indexes, not 1, 2, 3
 
+        my $scaled_count_total = 0;
+        my $scaled_max_key = "";
+        my $scaled_max_value = 0;
+
         # Scale the log message counts for printing the graph
         foreach my $category_bucket (keys %{$log_counts{$bucket}}) {
             #next if $category_bucket =~ /^(err|msg)-rate$/ && $log_counts{$bucket}{'err-rate'}{count} == 0 && $log_counts{$bucket}{'msg-rate'}{count} == 0;    # should be caught by below 
+            next if $category_bucket =~ /^(err|msg)-rate|empty$/;
             my $count = $log_counts{$bucket}{$category_bucket}{count};
             next if !defined $count;										# skip scaling where varible was left or is undefined (ie; no error or message rate)
-# 2025-12-07 removing -1 which I guess was meant as padding, shouldn't be in the scaling algorithm but instead in the graph width calculation
+# 2025-12-06 removing -1 which I guess was meant as padding, shouldn't be in the scaling algorithm but instead in the graph width calculation
 #            my $scaled_count = $max_total{count} != 0 ? int(($count / $max_total{count}) * $graph_width{1} ) - 1: 0;	# Adapting count scaling to multi-graph functionality
-            my $scaled_count = $max_total{count} != 0 ? int(($count / $max_total{count}) * $printed_column_widths[$count_column_number] ) : 0;	# Adapting count scaling to multi-graph functionality
-my $tmp = int(($count / $max_total{count}) * $printed_column_widths[$count_column_number] );
+            # my $scaled_count = $max_total{count} != 0 ? int(($count / $max_total{count}) * $printed_column_widths[$column_count_pre_graph] ) : 0;	# Adapting count scaling to multi-graph functionality
+# 2025-12-07 - found that the int() function was causing rounding down issues where small counts would get rounded to zero, changing to round() to improve accuracy
+            my $scaled_count = $max_total{count} != 0 ? round(($count / $max_total{count}) * $printed_column_widths[$column_count_pre_graph] ) : 0;	# Adapting count scaling to multi-graph functionality
+            if( $scaled_count > $scaled_max_value ) {                               # track the maximum scaled count for this time bucket to correct for rounding errors
+                $scaled_max_value = $scaled_count;
+                $scaled_max_key = $category_bucket;
+            }
+            $scaled_count_total += $scaled_count;
 
-print "Scaling bucket $category_bucket:\t\tmax_total{count}=$max_total{count} count=$count graph_width{$count_column_number}=$graph_width{$count_column_number} col_width=$printed_column_widths[$count_column_number] tmp=$tmp scaled_count=$scaled_count\n";
+#print "Scaling bucket $category_bucket:\t\tmax_total{count}=$max_total{count} count=$count graph_width{1}=$graph_width{1} col_width=$printed_column_widths[$column_count_pre_graph] col_padding=$printed_column_spacing[$column_count_pre_graph] scaled_count=$scaled_count scaled_count_total=$scaled_count_total\n";
 
             $log_counts{$bucket}{$category_bucket}{scaled_count} = $scaled_count;
             $category_totals{$category_bucket} += $count;							# tally the totals for each category bucket
             $total_lines_highlighted += $count if $category_bucket =~ /-HL$/;
+        }
+
+        if ( $scaled_count_total > $printed_column_widths[$column_count_pre_graph] ) {	# correct for rounding errors by reducing the largest scaled count by 1 if we went over the allowed width
+            $log_counts{$bucket}{$scaled_max_key}{scaled_count}--;
+            #print "Correcting scaled count for bucket $bucket category $scaled_max_key from $scaled_count_total to " . ( $scaled_count_total - 1 ) . "\n";
         }
 
 # TO DO: Establish more graceful strategy for memory tracking on Windows (with acceptable performance)
@@ -1760,22 +1776,47 @@ sub print_bar_graph {
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
 
         print $colors{'bright-black'};
+        my $printed_chars = 0;
+        my $expected_chars = 0;
+
         foreach my $column (0 .. $#printed_column_names) {
             my $name   = $printed_column_names[$column];
             my $width  = $printed_column_widths[$column];
+            $expected_chars += $printed_column_widths[$column] + $printed_column_spacing[$column];          # rounding issues; this is meant to track expected printed chars
     
             my $padding = $width - length($name);
-            my $left_pad  = int($padding / 2);
+            my $left_pad  = round( $padding / 2 );
             my $right_pad = $padding - $left_pad;
-
-## temporary for helping with spacing ##
-   $right_pad -= 1;
-   
-            print ' ' x $left_pad if $left_pad > 0;
+            my $missing_chars = 0;
+# print "w: $width p: $padding lp: $left_pad rp: $right_pad\n";
+            ## temporary for helping with spacing ##
+            # $right_pad -= 1;
+            print '+' x $graph_column_padding_all;
+            $printed_chars += $graph_column_padding_all;
+            if( $left_pad > 0 ) {
+                print ' ' x $left_pad;
+                $printed_chars += $left_pad;
+            };
             print $name;
-            print ' ' x $right_pad if $right_pad > 0;
-print '│';
-            print ' ' x $printed_column_spacing[$column] if $column < $#printed_column_names;
+            $printed_chars += length($name);
+            if( $right_pad > 0 ) {
+                print ' ' x $right_pad; 
+                $printed_chars += $right_pad;
+            };
+
+            if( $printed_column_spacing[$column] > 0 ) {
+                print '│' x ($printed_column_spacing[$column]-$graph_column_padding_all);
+                $printed_chars += ($printed_column_spacing[$column]-$graph_column_padding_all);
+            }
+            # print ' ' x $printed_column_spacing[$column] if $column < $#printed_column_names;
+            
+            # 2025-12-07 - attempting to fix rounding issue with size of columns for proper alignment, but it isn't working as it shouold true up as the columns are printed
+            $missing_chars = $expected_chars - $printed_chars;
+            if ( $missing_chars > 0 ) {
+                print '.' x $missing_chars;
+                $printed_chars += $missing_chars;
+            }
+            # print int($printed_chars) . "/" . int($expected_chars) . "=" . int($missing_chars);
         }
 
 #        $, = "\t\t"; print "$colors{'bright-black'}timestamp", "", "count", "\t",  @populated_graph_columns; $, = "";
@@ -1789,16 +1830,20 @@ print '│';
 
             ## PRINT TIMESTAMP IN CHART ROW
             $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
-            my $timestamp_legend_length = $timestamp_length + $graph_column_padding_all;
-            print $bucket_time_str . " " x $graph_column_padding_all;
-            $printed_chars += $timestamp_legend_length;
-
-            $timestamp_legend_length += $graph_column_padding_legend + $legend_length + $graph_column_padding_all if( !$omit_values || !$omit_rate );
+            my $timestamp_legend_length = $timestamp_length; # already includes the padding in the value $graph_column_padding_all;
+            print " " x $graph_column_padding_timestamp . $bucket_time_str . " " x $graph_column_padding_all;
+            
+            # 2025-12-07 - basing what has been printed on the expected column widths and spacing (issues with tracking variable values otherwise)
+            # $printed_chars += $timestamp_legend_length;
+            # $timestamp_legend_length += $graph_column_padding_legend + $legend_length + $graph_column_padding_all if( !$omit_values || !$omit_rate );
+            $printed_chars += $printed_column_widths[0] + $printed_column_spacing[0]; # timestamp column width and spacing
+            $timestamp_legend_length += $printed_column_widths[1] + $printed_column_spacing[1] if( !( $omit_values && $omit_rate ) );
 
             my $log_details = "";
             my $rate_metrics = "";
             my $legend_length_bucket = 0;
             my %output_columns;
+            my $scaled_count_total = 0;
 
             ## LOOP THROUGH LOG CATEGORY BUCKETS AND PRINT PER ROW LEGEND COUNTS
             foreach my $category_bucket (@log_levels) {
@@ -1856,20 +1901,22 @@ print '│';
 
 #print "\n legend_length: $legend_length legend_length_bucket: $legend_length_bucket padding: $padding [$rate_metrics]" . length($rate_metrics) . "\n";
 
-            print " " x ($padding >= 0 ? $padding : 0);
-            $printed_chars += ($padding >= 0 ? $padding : 0);
+            print " " x ($padding > 0 ? $padding : 0);
+            $printed_chars += ($padding > 0 ? $padding : 0);
             print $rate_metrics unless $omit_rate;
 
-            if( $graph_column_padding_count >= 1 ) {						# if there is a padding character, make the first one the separator
-                print "$colors{'bright-black'}│$colors{'NC'}";
-		$printed_chars++;
+        # 2025-12-07 - this legend width plus spacing given the possible variations is quite hard to refactor, so leaving it like this
+
+        if( $graph_column_padding_count >= 1 ) {						# if there is a padding character, make the first one the separator
+            print "$colors{'bright-black'}│$colors{'NC'}";
+            $printed_chars++;
 	    }
 
 	    if( $graph_column_padding_count - 1 >= 1 ) {					# and these are the remaining padding characters
-                my $padding = $graph_column_padding_count - 1;
-		print " " x $padding;
-                $printed_chars += $padding;
-            }
+            my $padding = $graph_column_padding_count - 1;
+		    print " " x $padding;
+            $printed_chars += $padding;
+        }
 
             ## PRINT STANDARD 'COUNT' BAR GRAPH ##
             foreach my $category_bucket (@log_levels) {
@@ -1879,6 +1926,7 @@ print '│';
                     my $color = $colors{$category_bucket} // $colors{'NC'};
                     print "$color" . ( $category_bucket =~ /^[12345]xx(-HL)?$/ ? $blocks{'A'} : $blocks{$default_chart_block} ) x $scaled_count . "$colors{'NC'}";	# provide a global way to change the bar character
                     $printed_chars += $scaled_count;
+                    $scaled_count_total += $scaled_count;
                 }
             }
 
@@ -1888,13 +1936,15 @@ print '│';
 # bookmark5
             ## PRINT ADDITIONAL TRENDED VALUES ##
             if( $graph_count > 1 ) {
-                my $column_number = 2;
-                my $padding = $graph_column_padding_all + $graph_column_padding_other;					# used by normalize to remove and scale data, then add spacing between columns here
+                my $column_number = 2;		# start after the timestamp and possibly legend columns
+                # my $padding = $graph_column_padding_all + $graph_column_padding_other;					# used by normalize to remove and scale data, then add spacing between columns here
 ## OCCURRENCES -> DURATION column space/padding is here
 # 2025-12-07 notion of missing chars might be irrelevant here as I'm now purposfully printing out all the spacing along the way to add the padding
-                my $missing_chars = ( length( $bucket_time_str ) + $graph_column_padding_all + $legend_length + $graph_width{1} ) - $printed_chars;
+                # my $missing_chars = ( length( $bucket_time_str ) + $graph_column_padding_all + $legend_length + $graph_width{1} ) - $printed_chars;
+                my $missing_chars = ( $printed_column_widths[$column_count_pre_graph] + $printed_column_spacing[$column_count_pre_graph] ) - ( $scaled_count_total + $printed_column_spacing[$column_count_pre_graph] );
 #print "\ngraph_width_1: $graph_width{1} missing chars column 2: $missing_chars printed_chars: $printed_chars timestamp_legend_length: $timestamp_legend_length\n";
                 # Fill in empty characters to the start of the second graph space
+                # print $missing_chars;
                 print " " x $missing_chars;    # this is the +2 referred to in printed_chars increment
                 $printed_chars += $missing_chars;
 
@@ -1938,7 +1988,7 @@ if( defined $log_stats{$bucket}{$key} ) {
 
                     my ( $highlighted_bg_black_fg, $plain_bg_black_fg, $black_bg_plain_fg );
 
-                    if( $column_number == 2 ) {						# Yellow
+                    if( $column_number == 2 ) {	                        # Yellow				
                         $highlighted_bg_black_fg = "\033[48;5;226m\033[38;5;0m";
                         $plain_bg_black_fg = "\033[48;5;184m\033[38;5;0m";
                         $black_bg_plain_fg = "\033[0m\033[93m";
@@ -1959,15 +2009,22 @@ if( defined $log_stats{$bucket}{$key} ) {
                         $highlighted_bg_black_fg = "\033[48;5;201m\033[38;5;0m";
                         $plain_bg_black_fg = "\033[48;5;127m\033[38;5;0m";
                         $black_bg_plain_fg = "\033[0m\033[35m";
+                    } else {
+                        last;
                     }
 
 
 		    print " " x $graph_column_padding_other;				# if stated, this is the BEFORE column padding specific to these columns
+            $printed_chars += $graph_column_padding_other;
                     print $highlighted_bg_black_fg;
 
 # 2025-12-07 think need to remove these hardcoded spaces and move to a global padding value which is subtracted from column widths
 		    my $character_delta = $graph_column_padding_all + $graph_column_padding_other + 2;		# padding, plus the 1 array offset
-                    for my $i ( 0 .. $graph_width{$column_number} - $character_delta) {
+                    # for my $i ( 0 .. $graph_width{$column_number} - $character_delta) {
+                    # print "pre_graph:$column_count_pre_graph col_num:$column_number\n column_width:$printed_column_widths[$column_count_pre_graph-1+$column_number]\n";
+
+                    for my $i ( 0 .. $printed_column_widths[$column_count_pre_graph-1+$column_number] ) {
+                        # print "i: $i   $column_count_pre_graph column_number: $column_number   graph_width: graph_width{$column_number}  column_width: $printed_column_widths[$column_number]  delta: $character_delta\n";
                         my $value_char = (split //, $trend_value )[$i];
 
                         # Switch over to the standard foreground/background colors once we have printed the required number of highlighted bars
@@ -1983,13 +2040,16 @@ if( defined $log_stats{$bucket}{$key} ) {
                         }
 
                         print length( $value_char ) ? $value_char : " ";
+                        $printed_chars++;
                     }
 
                     print "$colors{'NC'}\033[0m";						# clear the foreground color
 
                 } else {
 		    # This is the special condition where a column has no values/data for a particular interval, in which case we just need to print the column width in spaces
-                    print " " x ( $padding + ( $graph_width{$column_number} - $padding ) );
+                    # print " " x ( $padding + ( $graph_width{$column_number} - $padding ) );
+                    print " " x $printed_column_widths[$column_number];
+                    $printed_chars += $printed_column_widths[$column_number];
                 }
 
                     #$printed_chars += $missing_chars + $scaled_trend_value;
@@ -1998,6 +2058,7 @@ if( defined $log_stats{$bucket}{$key} ) {
                   #  $printed_chars += $graph_width{$column_number};		# +2 for space before and after the sparkline
 
 		    print " " x $graph_column_padding_all;				# if stated, this is the AFTER column padding for ALL columns
+                    $printed_chars += $graph_column_padding_all;
                     $column_number++;
                 }
             }
@@ -2006,6 +2067,8 @@ if( defined $log_stats{$bucket}{$key} ) {
             if( $print_durations && !$omit_durations && !$omit_stats ) {
                 my $missing_chars;
                 $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width;		# 2 is the magic number to get 1 space after the tallest bar 
+                # $missing_chars = 0;
+                # print " mc: $missing_chars pc: $printed_chars";
 #$missing_chars -= 4;
 #print "\nterminal_width: $terminal_width printed_chars: $printed_chars durations_graph_width: $durations_graph_width missing_chars: $missing_chars\n";
                 print " " x $missing_chars if $missing_chars > 0;
