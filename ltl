@@ -1413,6 +1413,32 @@ sub initialize_empty_time_windows {
     return;
 }
 
+sub cumulative_round_widths {
+    my ($w_ref, $M) = @_;
+    my @w = @$w_ref;
+
+    # 1) cumulative sums
+    my @cum;
+    my $acc = 0.0;
+    for my $x (@w) {
+        $acc += $x;
+        push @cum, $acc;
+    }
+
+    # 2) rounded boundaries (nearest), and force the last to M
+    my @b = map { int($_ + 0.5) } @cum;
+    $b[-1] = $M;
+
+    # 3) widths from boundary differences
+    my @widths;
+    $widths[0] = $b[0];
+    for my $i (1 .. $#b) {
+        $widths[$i] = $b[$i] - $b[$i - 1];
+    }
+
+    return @widths;
+}
+
 sub normalize_data_for_output {
     # Determine the maximum total log messages for any time window
     my %max_total = (
@@ -1519,7 +1545,7 @@ sub normalize_data_for_output {
     $timestamp_length = $graph_column_padding_timestamp + length( strftime($output_timestamp_format, gmtime(0) ) ) + ( $print_milliseconds ? 4 : 0 ) + $graph_column_padding_all;     # remove spacing from length calculation as it is seperate
 
     $max_graph_width = $terminal_width - $legend_length - $timestamp_length - $durations_graph_width;
-print "\nmax_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . $timestamp_length . " durations_graph_width: $durations_graph_width\n";
+# print "\nmax_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . $timestamp_length . " durations_graph_width: $durations_graph_width\n";
 
 # Don't think that I need this anymore as I moved the calculation of timestamp length before max_graph_width
 #    $max_graph_width -= 4 if $print_milliseconds;								# remove 4 characters from the X size of graph to leave room for millisecond output
@@ -1659,25 +1685,33 @@ print "\nmax_graph_width: $max_graph_width terminal_width: $terminal_width legen
          push @printed_column_names, "latency statistics";
      }
 
-print "pre-graph-columns: $column_count_pre_graph printed columns: $#printed_column_names graph_count: $graph_count\n";
+# print "pre-graph-columns: $column_count_pre_graph printed columns: $#printed_column_names graph_count: $graph_count\n";
     foreach my $column ( 0 .. $#printed_column_names ) {
         my $title = $printed_column_names[$column];
         # my $max_length = $printed_column_widths[$column] - $printed_column_spacing[$column];
         my $max_length = $printed_column_widths[$column];
 
-print "$column - $title ! width:$graph_width{$column-$column_count_pre_graph+1} maxlen:$max_length (colwidth:$printed_column_widths[$column] - colspacing:$printed_column_spacing[$column])\n";
+# print "$column - $title ! width:$graph_width{$column-$column_count_pre_graph+1} maxlen:$max_length (colwidth:$printed_column_widths[$column] - colspacing:$printed_column_spacing[$column])\n";
         $printed_column_names[$column] = substr( $title, 0, $max_length ) if length( $title ) > $max_length;
     }
 
-$, = ", ";
-print "\nPopulated graph columns:       ", @populated_graph_columns;
-print "\nDetected and sized columns:    ", sort keys %graph_width;
-print "\nCalculated column widths:      ", map { "$_ => $graph_width{$_}" } sort keys %graph_width;  
-print "\nPrinted column length:          ", @printed_column_widths;
-print "\nPrinted column spacing:         ", @printed_column_spacing;
-print "\nPrinted column names:           ", @printed_column_names;
-print "\n";
-$, = "";
+my @rounded_column_widths = cumulative_round_widths( \@printed_column_widths, $terminal_width - eval(join '+', @printed_column_spacing ));
+
+# $, = ", ";
+# print "\nPopulated graph columns:       ", @populated_graph_columns;
+# print "\nDetected and sized columns:    ", sort keys %graph_width;
+# print "\nCalculated column widths:      ", map { "$_ => $graph_width{$_}" } sort keys %graph_width;  
+# print "\nPrinted column length:          ", @printed_column_widths;
+# print " -- total=" . eval(join '+', @printed_column_widths );
+# print "\nRounded column lengths:          ", @rounded_column_widths;
+# print " -- total=" . eval(join '+', @rounded_column_widths );
+# print "\nPrinted column spacing:         ", @printed_column_spacing;
+# print " -- total=" . eval(join '+', @printed_column_spacing );
+# print "\nPrinted column names:           ", @printed_column_names;
+# print "\n";
+# $, = "";
+
+@printed_column_widths = @rounded_column_widths;
 
 # bookmark2    
     foreach my $bucket (keys %log_counts) {
@@ -1782,40 +1816,47 @@ sub print_bar_graph {
         foreach my $column (0 .. $#printed_column_names) {
             my $name   = $printed_column_names[$column];
             my $width  = $printed_column_widths[$column];
-            $expected_chars += $printed_column_widths[$column] + $printed_column_spacing[$column];          # rounding issues; this is meant to track expected printed chars
+            # $expected_chars += $printed_column_widths[$column] + $printed_column_spacing[$column];          # rounding issues; this is meant to track expected printed chars
     
             my $padding = $width - length($name);
             my $left_pad  = round( $padding / 2 );
             my $right_pad = $padding - $left_pad;
-            my $missing_chars = 0;
-# print "w: $width p: $padding lp: $left_pad rp: $right_pad\n";
+            # my $missing_chars = 0;
+# print "\n w: $width len: " . length( $name ) . " p: $padding lp: $left_pad rp: $right_pad  \t";
             ## temporary for helping with spacing ##
             # $right_pad -= 1;
-            print '+' x $graph_column_padding_all;
-            $printed_chars += $graph_column_padding_all;
+            if ( $printed_column_spacing[$column] > 0 ) {
+                my $num_padding_chars = ($printed_column_spacing[$column]-$graph_column_padding_all);
+                print ' ' x 1 if $num_padding_chars > 1;                                                    # set this to pipe to have the column line propagate up (does not work with line in durations)
+                print ' ' x ($num_padding_chars > 1 ? $num_padding_chars - 1 : $num_padding_chars);
+                # $printed_chars += $num_padding_chars;
+            }
+            
             if( $left_pad > 0 ) {
+                # print "$colors{'green'}:$colors{'NC'}" x $left_pad;
                 print ' ' x $left_pad;
-                $printed_chars += $left_pad;
+                # $printed_chars += $left_pad;
             };
             print $name;
             $printed_chars += length($name);
             if( $right_pad > 0 ) {
-                print ' ' x $right_pad; 
-                $printed_chars += $right_pad;
+                # print "$colors{'red'}:$colors{'NC'}" x $right_pad;
+                print ' ' x $right_pad;
+                # $printed_chars += $right_pad;
             };
 
             if( $printed_column_spacing[$column] > 0 ) {
-                print '│' x ($printed_column_spacing[$column]-$graph_column_padding_all);
-                $printed_chars += ($printed_column_spacing[$column]-$graph_column_padding_all);
+                print ' ' x $graph_column_padding_all;
+                # $printed_chars += $graph_column_padding_all;
             }
             # print ' ' x $printed_column_spacing[$column] if $column < $#printed_column_names;
             
             # 2025-12-07 - attempting to fix rounding issue with size of columns for proper alignment, but it isn't working as it shouold true up as the columns are printed
-            $missing_chars = $expected_chars - $printed_chars;
-            if ( $missing_chars > 0 ) {
-                print '.' x $missing_chars;
-                $printed_chars += $missing_chars;
-            }
+            # $missing_chars = $expected_chars - $printed_chars;
+            # if ( $missing_chars > 0 ) {
+            #     print '.' x $missing_chars;
+            #     $printed_chars += $missing_chars;
+            # }
             # print int($printed_chars) . "/" . int($expected_chars) . "=" . int($missing_chars);
         }
 
@@ -2014,17 +2055,14 @@ if( defined $log_stats{$bucket}{$key} ) {
                     }
 
 
-		    print " " x $graph_column_padding_other;				# if stated, this is the BEFORE column padding specific to these columns
-            $printed_chars += $graph_column_padding_other;
+		            print " " x $graph_column_padding_other;				# if stated, this is the BEFORE column padding specific to these columns
+                    $printed_chars += $graph_column_padding_other;
                     print $highlighted_bg_black_fg;
 
 # 2025-12-07 think need to remove these hardcoded spaces and move to a global padding value which is subtracted from column widths
-		    my $character_delta = $graph_column_padding_all + $graph_column_padding_other + 2;		# padding, plus the 1 array offset
-                    # for my $i ( 0 .. $graph_width{$column_number} - $character_delta) {
-                    # print "pre_graph:$column_count_pre_graph col_num:$column_number\n column_width:$printed_column_widths[$column_count_pre_graph-1+$column_number]\n";
 
-                    for my $i ( 0 .. $printed_column_widths[$column_count_pre_graph-1+$column_number] ) {
-                        # print "i: $i   $column_count_pre_graph column_number: $column_number   graph_width: graph_width{$column_number}  column_width: $printed_column_widths[$column_number]  delta: $character_delta\n";
+                    for my $i ( 0 .. $printed_column_widths[$column_count_pre_graph-1+$column_number] - 1) {
+                        # print " to: " . ( $column_count_pre_graph-1+$column_number ) . " i: $i  pre-graph: $column_count_pre_graph column_number: $column_number   graph_width: graph_width{$column_number}  column_width: $printed_column_widths[$column_number]\n";
                         my $value_char = (split //, $trend_value )[$i];
 
                         # Switch over to the standard foreground/background colors once we have printed the required number of highlighted bars
@@ -2057,9 +2095,9 @@ if( defined $log_stats{$bucket}{$key} ) {
                   #  $printed_chars += $padding + ( $graph_width{$column_number} - $padding );		# +2 for space before and after the sparkline
                   #  $printed_chars += $graph_width{$column_number};		# +2 for space before and after the sparkline
 
-		    print " " x $graph_column_padding_all;				# if stated, this is the AFTER column padding for ALL columns
-                    $printed_chars += $graph_column_padding_all;
-                    $column_number++;
+		        print " " x $graph_column_padding_all;				    # if stated, this is the AFTER column padding for ALL columns
+                $printed_chars += $graph_column_padding_all;
+                $column_number++;
                 }
             }
             
