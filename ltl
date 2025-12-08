@@ -499,6 +499,8 @@ sub adapt_to_command_line_options {
         push @in_files, glob($pattern);
     }
 
+	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
+
     die print_usage( "unable to open any files" ) unless @in_files;
     die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( count duration time bytes impact );
 
