@@ -1,0 +1,13 @@
+requires 'DateTime';
+requires 'Getopt::Long';
+requires 'List::Util';
+requires 'Math::Round';
+requires 'POSIX';
+requires 'Proc::ProcessTable';
+requires 'Term::ANSIColor';
+requires 'Term::ReadKey';
+requires 'Text::CSV';
+requires 'Text::CSV_PP';
+requires 'Time::HiRes';
+requires 'Time::Piece';
+requires 'Win32::Process::Info';
