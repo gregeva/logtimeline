@@ -1,3 +1,7 @@
+# Current Version & Release Notes
+
+2025-12-09 : v0.6.0 - introduces many column support architecture with dynamic layout and column padding
+
 # Tools
 
 These scripts and other resources are built to speed and facilitate debugging, diagnostics, and likely other things.
