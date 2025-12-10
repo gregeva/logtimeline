@@ -1712,19 +1712,19 @@ sub normalize_data_for_output {
 
 my @rounded_column_widths = cumulative_round_widths( \@printed_column_widths, $terminal_width - eval(join '+', @printed_column_spacing ));
 
-$, = ", ";
-print "\nPopulated graph columns:       ", @populated_graph_columns;
-print "\nDetected and sized columns:    ", sort keys %graph_width;
-print "\nCalculated column widths:      ", map { "$_ => $graph_width{$_}" } sort keys %graph_width;  
-print "\nPrinted column length:          ", @printed_column_widths;
-print " -- total=" . eval(join '+', @printed_column_widths );
-print "\nRounded column lengths:          ", @rounded_column_widths;
-print " -- total=" . eval(join '+', @rounded_column_widths );
-print "\nPrinted column spacing:         ", @printed_column_spacing;
-print " -- total=" . eval(join '+', @printed_column_spacing );
-print "\nPrinted column names:           ", @printed_column_names;
-print "\n";
-$, = "";
+# $, = ", ";
+# print "\nPopulated graph columns:       ", @populated_graph_columns;
+# print "\nDetected and sized columns:    ", sort keys %graph_width;
+# print "\nCalculated column widths:      ", map { "$_ => $graph_width{$_}" } sort keys %graph_width;  
+# print "\nPrinted column length:          ", @printed_column_widths;
+# print " -- total=" . eval(join '+', @printed_column_widths );
+# print "\nRounded column lengths:          ", @rounded_column_widths;
+# print " -- total=" . eval(join '+', @rounded_column_widths );
+# print "\nPrinted column spacing:         ", @printed_column_spacing;
+# print " -- total=" . eval(join '+', @printed_column_spacing );
+# print "\nPrinted column names:           ", @printed_column_names;
+# print "\n";
+# $, = "";
 
 @printed_column_widths = @rounded_column_widths;
 
