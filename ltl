@@ -67,7 +67,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.6.0";
+my $version_number = "0.6.1";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -1712,19 +1712,19 @@ sub normalize_data_for_output {
 
 my @rounded_column_widths = cumulative_round_widths( \@printed_column_widths, $terminal_width - eval(join '+', @printed_column_spacing ));
 
-# $, = ", ";
-# print "\nPopulated graph columns:       ", @populated_graph_columns;
-# print "\nDetected and sized columns:    ", sort keys %graph_width;
-# print "\nCalculated column widths:      ", map { "$_ => $graph_width{$_}" } sort keys %graph_width;  
-# print "\nPrinted column length:          ", @printed_column_widths;
-# print " -- total=" . eval(join '+', @printed_column_widths );
-# print "\nRounded column lengths:          ", @rounded_column_widths;
-# print " -- total=" . eval(join '+', @rounded_column_widths );
-# print "\nPrinted column spacing:         ", @printed_column_spacing;
-# print " -- total=" . eval(join '+', @printed_column_spacing );
-# print "\nPrinted column names:           ", @printed_column_names;
-# print "\n";
-# $, = "";
+$, = ", ";
+print "\nPopulated graph columns:       ", @populated_graph_columns;
+print "\nDetected and sized columns:    ", sort keys %graph_width;
+print "\nCalculated column widths:      ", map { "$_ => $graph_width{$_}" } sort keys %graph_width;  
+print "\nPrinted column length:          ", @printed_column_widths;
+print " -- total=" . eval(join '+', @printed_column_widths );
+print "\nRounded column lengths:          ", @rounded_column_widths;
+print " -- total=" . eval(join '+', @rounded_column_widths );
+print "\nPrinted column spacing:         ", @printed_column_spacing;
+print " -- total=" . eval(join '+', @printed_column_spacing );
+print "\nPrinted column names:           ", @printed_column_names;
+print "\n";
+$, = "";
 
 @printed_column_widths = @rounded_column_widths;
 
@@ -2015,6 +2015,7 @@ sub print_bar_graph {
                     #next unless defined $trend_value;
 #                    print " ";
 
+                my $printed_column_index = $column_count_pre_graph-1+$column_number;
 if( defined $log_stats{$bucket}{$key} ) {
 
                     if( $key =~ /^(time|duration)$/i ) {
@@ -2030,6 +2031,7 @@ if( defined $log_stats{$bucket}{$key} ) {
 
 # bookmark7
                     # SECONDARY TREND Print the secondary trend and associated value
+
                     #print "\033[93;43m";					# 93 is dark yellow foreground, 43 is light yellow background
                     # Blue background 104m, Blue Foreground 94m
                     # Yellow background 103m, Yellow Foreground 93m       184 medium yellow (nice!)  190 pale yellow  226 bright yellow   (184 + 190 are the winners)
@@ -2076,8 +2078,8 @@ if( defined $log_stats{$bucket}{$key} ) {
 
 # 2025-12-07 think need to remove these hardcoded spaces and move to a global padding value which is subtracted from column widths
 
-                    for my $i ( 0 .. $printed_column_widths[$column_count_pre_graph-1+$column_number] - 1) {
-                        # print " to: " . ( $column_count_pre_graph-1+$column_number ) . " i: $i  pre-graph: $column_count_pre_graph column_number: $column_number   graph_width: graph_width{$column_number}  column_width: $printed_column_widths[$column_number]\n";
+                    for my $i ( 0 .. $printed_column_widths[$printed_column_index] - 1) {
+                        # print " printed_column_index: " . $printed_column_index . " i: $i  pre-graph: $column_count_pre_graph column_number: $column_number   graph_width: graph_width{$column_number}  printed_column_width: $printed_column_widths[$printed_column_index]\n";
                         my $value_char = (split //, $trend_value )[$i];
 
                         # Switch over to the standard foreground/background colors once we have printed the required number of highlighted bars
@@ -2101,8 +2103,8 @@ if( defined $log_stats{$bucket}{$key} ) {
                 } else {
 		    # This is the special condition where a column has no values/data for a particular interval, in which case we just need to print the column width in spaces
                     # print " " x ( $padding + ( $graph_width{$column_number} - $padding ) );
-                    print " " x $printed_column_widths[$column_number];
-                    $printed_chars += $printed_column_widths[$column_number];
+                    print " " x $printed_column_widths[$printed_column_index];
+                    $printed_chars += $printed_column_widths[$printed_column_index];
                 }
 
                     #$printed_chars += $missing_chars + $scaled_trend_value;
