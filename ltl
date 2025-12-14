@@ -10,6 +10,7 @@
 # TO DO: the bytes for each message is captured, but not surfaced in the message results
 # - add total counts for duration and bytes; what makes this harder to fit in is that there should obviously also be seperate counters for "highlight" (bottom of table makes sense, also summary table, or both)
 # - Add AND match possibility for include and exclude using RegEx lookahead (?=.*word)
+# - Add the ability to highlight based on numerical condition matching example -dmin => -hdmin would keep rows smaller, but highlight rows above or something like that.  Need to think carefully about the terminology and naming so that there is coherence between the include/exclude/minimum/maximum/highlight concepts across the tool.
 # - Second graph (stats): line chart showing evolution of some of the percentile stats in different colors (with points) 
 # - Second graph (throughput): outbound throughput based on bytes returned
 # - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
