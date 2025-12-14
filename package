@@ -1,5 +1,9 @@
 # CPAN
 
+Install CPANIMUS on MacOS 
+
+brew install cpanminus
+
 
 ./generate-cpanfile.sh				# generate list of cpan module dependencies from ltl Perl script
 sudo cpanm --notest --installdeps .  		# install required cpan modules listed in the cpanfile

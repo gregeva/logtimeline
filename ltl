@@ -73,7 +73,7 @@ my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes ) = 0;
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $include_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary ) = ( 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages ) = ( 0,0,0,0,0,0,0,0,0 );
 # this is where the counts of log entries are tallied across the time buckets
