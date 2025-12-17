@@ -103,8 +103,7 @@ docker run --rm -it --platform=linux/$architecture \
 
     if [ -f cpanfile ]; then			 # Install your script/module deps
       wine "$STRAWBERRY/perl/bin/perl.exe" /tmp/cpanm.pl --notest --installdeps .
-      find /opt/strawberry/data -type f -name build.log -exec sh -c \'echo "=== {} ==="; tail -n 20 "{}"\' \;
-
+      find /opt/strawberry/data -name "build.log" -print -exec tail -n 20 {} \\;
 #      cpanm --notest --installdeps .
     else
       printf "ERROR: Missing cpanfile (needs to be generated before build process as a dependency)"

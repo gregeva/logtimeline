@@ -22,6 +22,7 @@
 # - when using the -o flag, combined with the -ov flag (and possibly others), metrics are not written to the CSV file as the sections are skipped in print bar chart column (needs refactoring)
 # - when using the -o flag, the provided command line options are used in the file name, however when using a long list of filters, the filename can be too long causing error - need to truncate the filename
 # - on very narrow terminals, the "processed files" heading and potentially file names will wrap and mess up the table
+# - when log files are small, as in less than 1000 lines, the message reading the lines will not print as it starts after 997 lines.  Given a scenario with hundreds of files each very small, there will be no reading indicator showing progress.
 
 # NOT PRIORITY BACKLOG
 # - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
@@ -664,6 +665,7 @@ sub read_and_process_logs {
             my ( $timestamp, $threadname );							# I actually don't want these to be defined
             $total_lines_read++;
 
+print "$line_number\n";
             if ($line_number % 997 == 0) {	# only print processing status update every X lines processed
                 printf("\rProcessing line %d in file %s (%d overall)", $line_number, $in_file, $total_lines_read);
                 $| = 1; # Flush output
