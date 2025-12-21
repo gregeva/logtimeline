@@ -170,10 +170,12 @@ my %colors = (
     'bright-black' => "\033[90m\033[109m",
     'bright-red' => "\033[91m\033[109m",
     'bright-green' => "\033[92m\033[109m",
-    'bright-yellow' => "\033[93m\033[109m",
+    # 'bright-yellow' => "\033[93m\033[109m",
+    'bright-yellow' => "\033[93m",
     'bright-blue' => "\033[94m\033[109m",
     'bright-magenta' => "\033[95m\033[109m",
-    'bright-cyan' => "\033[96m\033[109m",
+    # 'bright-cyan' => "\033[96m\033[109m",
+    'bright-cyan' => "\033[96m",
     'bright-white' => "\033[97m\033[109m",
     'black-underline' => "\033[4;30m",
     'red-underline' => "\033[4;31m",
@@ -201,22 +203,26 @@ foreach my $key (keys %colors) {
     $original_fg_color =~ s/^\e\[(.*?)m/$1/g;
 
     my $bg_color_256;
+    my $has_background = 0;
     if ($original_fg_color eq "0;31") {    # Red
         $bg_color_256 = "196";            # 256-color code for Red
+        $has_background = 1;
     } elsif ($original_fg_color eq "0;33") { # Yellow
         $bg_color_256 = "226";            # 256-color code for Yellow
+        $has_background = 1;
     } elsif ($original_fg_color eq "0;32") { # Green
         $bg_color_256 = "46";             # 256-color code for Green
+        $has_background = 1;
     } elsif ($original_fg_color eq "0;34") { # Blue
         $bg_color_256 = "21";             # 256-color code for Blue
+        $has_background = 1;
     } elsif ($original_fg_color eq "0;35") { # Magenta
         $bg_color_256 = "201";            # 256-color code for Magenta
-    } else {
-        $bg_color_256 = "0";              # Black background as default
+        $has_background = 1;
     }
 
     #$colors{$new_key} = "\033[48;5;${bg_color_256}m${white_fg}";
-    $colors{$new_key} = "$colors{$key}\033[48;5;${bg_color_256}m";
+    $colors{$new_key} = $has_background ? "$colors{$key}\033[48;5;${bg_color_256}m" : "$colors{$key}\033[49m";       # allows specifying background for some highlighted colors only
     #print "$colors{$key}$key$colors{'NC'} -- HIGHLIGHT -- $colors{$new_key}$new_key$colors{'NC'}\n";
 }
 
