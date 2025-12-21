@@ -19,6 +19,7 @@
 
 
 # BUGS
+# - when using the -o flag, combined with the -ov flag (and possibly others), metrics are not written to the CSV file as the sections are skipped in print bar chart column (needs refactoring)
 # - when using the -o flag, the provided command line options are used in the file name, however when using a long list of filters, the filename can be too long causing error - need to truncate the filename
 # - on very narrow terminals, the "processed files" heading and potentially file names will wrap and mess up the table
 
@@ -1551,11 +1552,11 @@ sub normalize_data_for_output {
 
     foreach my $category_bucket ( @log_levels ) {
         if( exists $output_columns{$category_bucket} ) {
-            #push @output_columns, "totalCount" if $category_bucket =~ /^err-rate$/;
+            #push @output_columns, "totalOccurrences" if $category_bucket =~ /^err-rate$/;
             push @output_columns, $category_bucket;
         }
     }
-    push @output_columns, "totalCount"; # if $category_bucket =~ /^err-rate$/;
+    push @output_columns, "totalOccurrences"; # if $category_bucket =~ /^err-rate$/;
 
     #print "Overall Legend length: $legend_length\n";
 
@@ -1949,7 +1950,7 @@ sub print_bar_graph {
             # Add the log level message counts to the output CSV file
             foreach my $category_bucket ( @output_columns ) {
                next if $category_bucket =~ /^timestamp$/;								# skip the first column and get to the counts
-               last if $category_bucket =~ /^totalCount$/;								# only fill in empty values up to the totalCount
+               last if $category_bucket =~ /^totalOccurrences$/;								# only fill in empty values up to the totalOccurrences
                if( exists $output_columns{$category_bucket} ) {								# if there was a count for this log level, add it to the list 
                    push @csv_data, $output_columns{$category_bucket}; 
                } else {
@@ -2678,7 +2679,7 @@ if( $write_messages_to_csv ) {														# If write to CSV enabled, open file
 #    $csv_file_args =~ tr/!@#\$%\^&*()_+{}|:"<>?[\];',.\/\\`~ /_/;
     my $csv_file_name = "${timestamp}-LTL-MESSAGES-${csv_file_args}.csv";
     open $csv_fh, '>', $csv_file_name or die "Could not open file: $!";									# Open a file for writing, then print the header/column names
-    $csv->print($csv_fh, [qw(Category Message Count MeanBytes TotalBytes TotalBytesNice MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact)]);
+    $csv->print($csv_fh, [qw(Category Message Occurrences MeanBytes TotalBytes TotalBytesNice MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact)]);
 }
 
 print_message_summary();														# Print and write message summaries
