@@ -649,6 +649,7 @@ sub read_and_process_logs {
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
 
         while (<$fh>) {
+            s/[\r\n]+$//;  # Remove Windows line endings (CRLF) or Unix line endings (LF) if present
             $line_number++;
             my ( $timestamp_str, $log_level, $category_bucket, $category, $object, $instance, $user, $platform, $thread, $threadpool, $session, $message ) = ("") x 12;
             my ( $is_line_match, $is_access_log, $match_type, $status_code, $heap_from, $heap_to, $heap_size ) = ( 0, 0, 0, 0, 0, 0, 0 );
@@ -668,6 +669,7 @@ sub read_and_process_logs {
                 }
             }
 
+
 # bookmark1
             ## ThingWorx Standard Log Format (ApplicationLog, ErrorLog, ScriptLog, ...) ##
             if ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
@@ -678,7 +680,7 @@ sub read_and_process_logs {
                 # this section is optional, for cases where log line has included additional context which should be interpretted (row count, execution duration, result size)
                 ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)/;								# 2025-04-22 remove the trailing whitespace as same as below
                 ( $duration ) = $message =~ / durationM[sS]\s*=\s*(\d+)/;						# 2025-04-17 remove the trailing white space as it was not picking up the variable if it was at the end of the line
-                ( $count ) = $message =~ / count\s*=\s*(\d+)/;
+#                ( $count ) = $message =~ / count\s*=\s*(\d+)/;
                 $is_access_log = 1 if defined $bytes || defined $duration || defined $count;
 
 # [elapsed 39ms]
@@ -692,7 +694,6 @@ sub read_and_process_logs {
 
 # START the following are temporary
                 $message =~ s/(session id: )\d+/$1\?\?/g;
-
                 $message =~ s/(\w+_)+\d{14}-/ModelFamily_CustomerPC_DateString-/g;
                 
                 $message =~ s/Successfully added for import \/.+$/Successfully added for import \/ThingworxStorage\/repository\/SystemRepository\/\.\.\./g;
