@@ -69,7 +69,7 @@ if ($^O eq 'MSWin32') {
 my $start_time = [gettimeofday];
 
 # Configuration
-my $version_number = "0.6.2";
+my $version_number = "0.6.2-dev-custom-metrics";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
@@ -687,7 +687,7 @@ sub read_and_process_logs {
                 # this section is optional, for cases where log line has included additional context which should be interpretted (row count, execution duration, result size)
                 ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)/;								# 2025-04-22 remove the trailing whitespace as same as below
                 ( $duration ) = $message =~ / durationM[sS]\s*=\s*(\d+)/;						# 2025-04-17 remove the trailing white space as it was not picking up the variable if it was at the end of the line
-#                ( $occurrences ) = $message =~ / count\s*=\s*(\d+)/;
+                ( $occurrences ) = $message =~ / count\s*=\s*(\d+)/;
                 $is_access_log = 1 if defined $bytes || defined $duration || defined $occurrences;
 
 # [elapsed 39ms]
