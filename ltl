@@ -19,9 +19,11 @@
 
 
 # BUGS
+# - bug with top message length which is pre-padded, causing mis-alignment when it is later truncated around line 2486 only when occurences are shown and some lines are too long - need to truncate it at the source and in only one place
 # - when using the -o flag, combined with the -ov flag (and possibly others), metrics are not written to the CSV file as the sections are skipped in print bar chart column (needs refactoring)
 # - when using the -o flag, the provided command line options are used in the file name, however when using a long list of filters, the filename can be too long causing error - need to truncate the filename
 # - on very narrow terminals, the "processed files" heading and potentially file names will wrap and mess up the table
+# - when log files are small, as in less than 1000 lines, the message reading the lines will not print as it starts after 997 lines.  Given a scenario with hundreds of files each very small, there will be no reading indicator showing progress.
 
 # NOT PRIORITY BACKLOG
 # - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
@@ -112,7 +114,7 @@ my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex, $user_defined_metrics, $user_defined_metrics_regex, $user_defined_metrics_pre_regex, $user_defined_metrics_post_regex );
 my $pause_output = 0;
 my $omit_values = 0;
-my ( $sort_type, $sort_key ) = ( "count", "count" );
+my ( $sort_type, $sort_key ) = ( "occurrences", "occurrences" );
 my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 my ( @in_files, @output_columns );
 my %in_files_matched;
@@ -251,7 +253,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so occurrences,duration,bytes,impact] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -326,6 +328,15 @@ sub convert_bytes {
 
     return $bytes;
 }
+
+
+sub visualize_carets {
+    my ($s) = @_;
+    $s =~ s/([\x00-\x1F])/'^' . chr(ord($1) + 64)/eg;  # ^@ .. ^_
+    $s =~ s/\x7F/^?/g;                                 # DEL
+    return $s;
+}
+
 
 sub format_bytes {
     my ($value, $unit) = @_;
@@ -504,7 +515,7 @@ sub adapt_to_command_line_options {
 	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
 
     die print_usage( "unable to open any files" ) unless @in_files;
-    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( count duration time bytes impact );
+    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( occurrences duration time bytes impact );
 
     if( $sort_type =~ /^duration|time$/i ) {
         $sort_key = "total_duration_num";
@@ -1004,7 +1015,7 @@ if( 0 ) {
 
                         # Initialize the hash if not already done
                         $log_messages{$category}{$log_key} //= {
-                            count => 0,
+                            occurrences => 0,
                             total_bytes => 0,
                             total_duration => 0,
                             sum_of_squares => 0,
@@ -1045,7 +1056,7 @@ if( 0 ) {
     
                     # Initialize the hash if not already done
                     $log_analysis{$bucket} //= {
-                        count => 0,
+                        occurrences => 0,
                         total_bytes => 0,
                         total_duration => 0,
                         sum_of_squares => 0,
@@ -1466,7 +1477,7 @@ sub cumulative_round_widths {
 sub normalize_data_for_output {
     # Determine the maximum total log messages for any time window
     my %max_total = (
-        count => 0,
+        occurrences => 0,
         bytes => 0,
         duration => 0,
     );
@@ -2437,7 +2448,7 @@ sub print_message_summary {
                 my $row = " " x $table_padding_outer;
 
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
-                    my $message = substr( $key, 0, $col_width{1} );
+                    my $message = substr( visualize_carets( $key ), 0, $col_width{1} );
                     my $occurrences = $log_messages{$grouping}{$key}{occurrences};
 
                     if( $print_durations && !$omit_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
