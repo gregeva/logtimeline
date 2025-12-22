@@ -253,7 +253,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so occurrences,duration,bytes,impact] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so occurrences,duration,bytes,impact] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -478,6 +478,7 @@ sub adapt_to_command_line_options {
         'omit-rate|or' => \$omit_rate,
         'omit-durations|od' => \$omit_durations,
         'omit-bytes|ob' => \$omit_bytes,
+        'include-count|ic' => \$include_count,
         'include-query-string|iqs' => \$include_query_string,
         'include-session|is' => \$include_session,
         'seconds|s' => \$print_seconds,
@@ -671,7 +672,7 @@ sub read_and_process_logs {
             $line_number++;
             my ( $timestamp_str, $log_level, $category_bucket, $category, $object, $instance, $user, $platform, $thread, $threadpool, $session, $message ) = ("") x 12;
             my ( $is_line_match, $is_access_log, $match_type, $status_code, $heap_from, $heap_to, $heap_size ) = ( 0, 0, 0, 0, 0, 0, 0 );
-            my ( $bytes, $duration, $occurrences ) = ( undef, undef, undef );
+            my ( $bytes, $duration, $occurrences, $count ) = ( undef, undef, undef, undef );
             my ( $timestamp, $threadname );							# I actually don't want these to be defined
             $total_lines_read++;
 
@@ -1018,12 +1019,23 @@ if( 0 ) {
                             occurrences => 0,
                             total_bytes => 0,
                             total_duration => 0,
+                            count_sum => 0,
+                            count_occurrences => 0,
+                            count_min => undef,
+                            count_max => undef,
                             sum_of_squares => 0,
                             durations => [],
                         };
 
                         # Accumulate the total duration and bytes
                         $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
+
+                        if( defined $count && $count ) {
+                            $log_messages{$category}{$log_key}{count_sum} += $count;
+                            $log_messages{$category}{$log_key}{count_occurrences}++;
+                            $log_messages{$category}{$log_key}{count_min} = $count if !defined $log_messages{$category}{$log_key}{count_min} || $count < $log_messages{$category}{$log_key}{count_min};
+                            $log_messages{$category}{$log_key}{count_max} = $count if !defined $log_messages{$category}{$log_key}{count_max} || $count > $log_messages{$category}{$log_key}{count_max};
+                        }
 
                         if( defined $duration && !$omit_durations ) {
 #print " duration: $duration -- $_ \n" if !$duration || $duration < 1;
@@ -1059,6 +1071,10 @@ if( 0 ) {
                         occurrences => 0,
                         total_bytes => 0,
                         total_duration => 0,
+                        count_sum => 0,
+                        count_occurrences => 0,
+                        count_min => undef,
+                        count_max => undef,
                         sum_of_squares => 0,
                         durations => [],
                     };
@@ -1077,6 +1093,19 @@ if( 0 ) {
                     if( defined $bytes && $bytes ) {
                         $log_analysis{$bucket}{total_bytes} += $bytes;
                         $log_analysis{$bucket}{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;
+                    }
+
+                    if( defined $count && $count ) {
+                        $log_analysis{$bucket}{count_sum} += $count;
+                        $log_analysis{$bucket}{count_occurrences}++;
+                        $log_analysis{$bucket}{'count_sum-HL'} += $count if $category_bucket =~ /-HL$/;
+                        $log_analysis{$bucket}{'count_occurrences-HL'}++ if $category_bucket =~ /-HL$/;
+                        
+                        # Track min/max incrementally (needed for comparison, but not calculating statistics here)
+                        $log_analysis{$bucket}{count_min} = $count if !defined $log_analysis{$bucket}{count_min} || $count < $log_analysis{$bucket}{count_min};
+                        $log_analysis{$bucket}{count_max} = $count if !defined $log_analysis{$bucket}{count_max} || $count > $log_analysis{$bucket}{count_max};
+                        $log_analysis{$bucket}{'count_min-HL'} = $count if ( $category_bucket =~ /-HL$/ && ( !defined $log_analysis{$bucket}{'count_min-HL'} || $count < $log_analysis{$bucket}{'count_min-HL'} ) );
+                        $log_analysis{$bucket}{'count_max-HL'} = $count if ( $category_bucket =~ /-HL$/ && ( !defined $log_analysis{$bucket}{'count_max-HL'} || $count > $log_analysis{$bucket}{'count_max-HL'} ) );
                     }
 
                   #  printf "\033[0;35m[duration: %d] [bytes: %d]\033[0m\n", $duration, $bytes;
@@ -1128,6 +1157,14 @@ sub calculate_all_statistics {
             'total_duration-HL' => 0,
             total_bytes         => 0,
             'total_bytes-HL'    => 0,
+            count_sum           => 0,
+            'count_sum-HL'      => 0,
+            count_occurrences   => 0,
+            'count_occurrences-HL' => 0,
+            count_min           => undef,
+            count_max           => undef,
+            'count_min-HL'      => undef,
+            'count_max-HL'      => undef,
             sum_of_squares      => 0,
             durations           => [],
         };
@@ -1150,6 +1187,15 @@ sub calculate_all_statistics {
         $aggregated_data->{total_bytes} += $bucket_data->{total_bytes};
         $aggregated_data->{sum_of_squares} += $bucket_data->{sum_of_squares};
         push @{$aggregated_data->{durations}}, @{$bucket_data->{durations}};
+        
+        $aggregated_data->{count_sum} += $bucket_data->{count_sum} if defined $bucket_data->{count_sum};
+        $aggregated_data->{'count_sum-HL'} += $bucket_data->{'count_sum-HL'} if defined $bucket_data->{'count_sum-HL'};
+        $aggregated_data->{count_occurrences} += $bucket_data->{count_occurrences} if defined $bucket_data->{count_occurrences};
+        $aggregated_data->{'count_occurrences-HL'} += $bucket_data->{'count_occurrences-HL'} if defined $bucket_data->{'count_occurrences-HL'};
+        
+        # Aggregate min/max across buckets
+        $aggregated_data->{count_min} = $bucket_data->{count_min} if defined $bucket_data->{count_min} && ( !defined $aggregated_data->{count_min} || $bucket_data->{count_min} < $aggregated_data->{count_min} );
+        $aggregated_data->{count_max} = $bucket_data->{count_max} if defined $bucket_data->{count_max} && ( !defined $aggregated_data->{count_max} || $bucket_data->{count_max} > $aggregated_data->{count_max} );
 
         # free up the memory from the data structure as it is no longer needed
         undef $log_analysis{$bucket}{durations};
@@ -1165,6 +1211,11 @@ sub calculate_all_statistics {
                 'bytes-HL'    => $bucket_data->{'total_bytes-HL'},
                 duration      => $bucket_data->{total_duration},
                 'duration-HL' => $bucket_data->{'total_duration-HL'},
+                count         => $bucket_data->{count_sum},
+                'count-HL'    => $bucket_data->{'count_sum-HL'},
+                count_min     => $bucket_data->{count_min},
+                count_max     => $bucket_data->{count_max},
+                count_mean    => ( defined $bucket_data->{count_sum} && defined $bucket_data->{count_occurrences} && $bucket_data->{count_occurrences} > 0 ) ? round( $bucket_data->{count_sum} / $bucket_data->{count_occurrences} ) : undef,
                 min           => $min,
                 mean          => $mean,
                 max           => $max,
@@ -1214,6 +1265,11 @@ sub calculate_all_statistics {
                 occurrences   => $aggregated_data->{occurrences},
                 bytes         => $bucket_data->{total_bytes},
                 'bytes-HL'    => $bucket_data->{'total_bytes-HL'},
+                count         => $bucket_data->{count_sum},
+                'count-HL'    => $bucket_data->{'count_sum-HL'},
+                count_min     => $bucket_data->{count_min},
+                count_max     => $bucket_data->{count_max},
+                count_mean    => ( defined $bucket_data->{count_sum} && defined $bucket_data->{count_occurrences} && $bucket_data->{count_occurrences} > 0 ) ? round( $bucket_data->{count_sum} / $bucket_data->{count_occurrences} ) : undef,
             }
 
         }
@@ -1240,6 +1296,10 @@ sub calculate_all_statistics {
                     total_duration_num => undef,
                     total_duration => undef,
                     total_bytes => undef,
+                    count_sum => undef,
+                    count_occurrences => 0,
+                    count_min => undef,
+                    count_max => undef,
                     sum_of_squares => 0,
                     durations => [],
                 };
@@ -1258,6 +1318,11 @@ sub calculate_all_statistics {
     
                 $aggregated_data->{occurrences} += $message_data->{occurrences};
                 $aggregated_data->{total_bytes} += $message_data->{total_bytes} if defined $message_data->{total_bytes};
+                
+                $aggregated_data->{count_sum} += $message_data->{count_sum} if defined $message_data->{count_sum};
+                $aggregated_data->{count_occurrences} += $message_data->{count_occurrences} if defined $message_data->{count_occurrences};
+                $aggregated_data->{count_min} = $message_data->{count_min} if defined $message_data->{count_min} && ( !defined $aggregated_data->{count_min} || $message_data->{count_min} < $aggregated_data->{count_min} );
+                $aggregated_data->{count_max} = $message_data->{count_max} if defined $message_data->{count_max} && ( !defined $aggregated_data->{count_max} || $message_data->{count_max} > $aggregated_data->{count_max} );
 
                 if( defined $message_data->{total_duration} && !$omit_durations ) {
                     $aggregated_data->{total_duration} += $message_data->{total_duration};
@@ -1294,6 +1359,12 @@ sub calculate_all_statistics {
                 }
 
                 $log_messages{$category}{$log_key}{total_bytes} = $aggregated_data->{total_bytes} if defined $aggregated_data->{total_bytes};
+                
+                $log_messages{$category}{$log_key}{count_sum} = $aggregated_data->{count_sum} if defined $aggregated_data->{count_sum};
+                $log_messages{$category}{$log_key}{count_occurrences} = $aggregated_data->{count_occurrences} if defined $aggregated_data->{count_occurrences};
+                $log_messages{$category}{$log_key}{count_min} = $aggregated_data->{count_min} if defined $aggregated_data->{count_min};
+                $log_messages{$category}{$log_key}{count_max} = $aggregated_data->{count_max} if defined $aggregated_data->{count_max};
+                $log_messages{$category}{$log_key}{count_mean} = ( defined $aggregated_data->{count_sum} && defined $aggregated_data->{count_occurrences} && $aggregated_data->{count_occurrences} > 0 ) ? round( $aggregated_data->{count_sum} / $aggregated_data->{count_occurrences} ) : undef;
 
                 # free up the memory from the data structure as it is no longer needed
                 undef $log_messages{$category}{$log_key}{durations};
@@ -1480,6 +1551,7 @@ sub normalize_data_for_output {
         occurrences => 0,
         bytes => 0,
         duration => 0,
+        count => 0,
     );
     my %output_columns;
 
@@ -1513,6 +1585,7 @@ sub normalize_data_for_output {
         $max_total{occurrences} = $total_occurrences if !defined $max_total{occurrences} || $total_occurrences > $max_total{occurrences};
         $max_total{bytes} = $total_bytes if ( defined $total_bytes && !$omit_bytes && $total_bytes > $max_total{bytes} );
         $max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration} && $log_stats{$bucket}{duration} > $max_total{duration} );
+        $max_total{count} = $log_stats{$bucket}{count} if ( defined $log_stats{$bucket}{count} && $include_count && $log_stats{$bucket}{count} > $max_total{count} );
     }
 
 # bookmark21
@@ -1718,6 +1791,10 @@ sub normalize_data_for_output {
          push @printed_column_widths, $durations_graph_width;
          push @printed_column_spacing, 0;
          push @printed_column_names, "latency statistics";
+     }
+     
+     if( $include_count ) {
+         push @output_columns, qw( CountMin CountMean CountMax CountSum );
      }
 
 # print "pre-graph-columns: $column_count_pre_graph printed columns: $#printed_column_names graph_count: $graph_count\n";
@@ -2044,6 +2121,9 @@ if( defined $log_stats{$bucket}{$key} ) {
                     } elsif( $key =~ /^bytes$/i ) {
                         $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
                         push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};				# push trend value to CSV data list
+                    } elsif( $key =~ /^count$/i ) {
+                        $trend_value = defined $log_stats{$bucket}{$key} ? " $log_stats{$bucket}{$key}" : "";
+                        push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};
                     } else {
                         $trend_value = defined $log_stats{$bucket}{$key} ? " $log_stats{$bucket}{$key}" : "";
                         push @csv_data, ltrim( $trend_value );								# push trend value to CSV data list
@@ -2163,6 +2243,10 @@ if( defined $log_stats{$bucket}{$key} ) {
                     foreach my $stat ( qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) ) {				# push statistics data to the CSV data list
                         push @csv_data, $log_stats{$bucket}{$stat};
                     }
+                }
+                
+                if( $include_count && defined $log_stats{$bucket}{count} ) {
+                    push @csv_data, $log_stats{$bucket}{count_min}, $log_stats{$bucket}{count_mean}, $log_stats{$bucket}{count_max}, $log_stats{$bucket}{count};
                 }
             }
 
@@ -2470,6 +2554,10 @@ sub print_message_summary {
                         my $cv = $log_messages{$grouping}{$key}{cv};
                         my $total_duration_num = $log_messages{$grouping}{$key}{total_duration_num};
                         my $total_duration = $log_messages{$grouping}{$key}{total_duration};
+                        my $count_min = $log_messages{$grouping}{$key}{count_min};
+                        my $count_mean = $log_messages{$grouping}{$key}{count_mean};
+                        my $count_max = $log_messages{$grouping}{$key}{count_max};
+                        my $count_sum = $log_messages{$grouping}{$key}{count_sum};
 
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
@@ -2480,7 +2568,7 @@ sub print_message_summary {
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", defined $total_duration ? $total_duration : "" ) . " " x $table_padding_inner; 
 
                         if( $write_messages_to_csv && defined $csv_fh ) {
-                            $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact ]);
+                            $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact ]);
                         }
                     } else {
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
@@ -2690,7 +2778,7 @@ if( $write_messages_to_csv ) {														# If write to CSV enabled, open file
 #    $csv_file_args =~ tr/!@#\$%\^&*()_+{}|:"<>?[\];',.\/\\`~ /_/;
     my $csv_file_name = "${timestamp}-LTL-MESSAGES-${csv_file_args}.csv";
     open $csv_fh, '>', $csv_file_name or die "Could not open file: $!";									# Open a file for writing, then print the header/column names
-    $csv->print($csv_fh, [qw(Category Message Occurrences MeanBytes TotalBytes TotalBytesNice MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact)]);
+    $csv->print($csv_fh, [qw(Category Message Occurrences MeanBytes TotalBytes TotalBytesNice CountMin CountMean CountMax CountSum MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact)]);
 }
 
 print_message_summary();														# Print and write message summaries
