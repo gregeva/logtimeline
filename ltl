@@ -19,6 +19,7 @@
 
 
 # BUGS
+# - bug with top message length which is pre-padded, causing mis-alignment when it is later truncated around line 2200 - need to truncate it at the source and in only one place
 # - when using the -o flag, combined with the -ov flag (and possibly others), metrics are not written to the CSV file as the sections are skipped in print bar chart column (needs refactoring)
 # - when using the -o flag, the provided command line options are used in the file name, however when using a long list of filters, the filename can be too long causing error - need to truncate the filename
 # - on very narrow terminals, the "processed files" heading and potentially file names will wrap and mess up the table
@@ -327,6 +328,15 @@ sub convert_bytes {
 
     return $bytes;
 }
+
+
+sub visualize_carets {
+    my ($s) = @_;
+    $s =~ s/([\x00-\x1F])/'^' . chr(ord($1) + 64)/eg;  # ^@ .. ^_
+    $s =~ s/\x7F/^?/g;                                 # DEL
+    return $s;
+}
+
 
 sub format_bytes {
     my ($value, $unit) = @_;
@@ -2438,7 +2448,7 @@ sub print_message_summary {
                 my $row = " " x $table_padding_outer;
 
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
-                    my $message = substr( $key, 0, $col_width{1} );
+                    my $message = substr( visualize_carets( $key ), 0, $col_width{1} );
                     my $occurrences = $log_messages{$grouping}{$key}{occurrences};
 
                     if( $print_durations && !$omit_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
@@ -2473,7 +2483,7 @@ sub print_message_summary {
                             $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact ]);
                         }
                     } else {
-                        $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "'%-$col_width{1}s'", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
 
                         if( $write_messages_to_csv && defined $csv_fh ) {
