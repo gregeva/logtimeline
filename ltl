@@ -113,7 +113,7 @@ my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex, $user_defined_metrics, $user_defined_metrics_regex, $user_defined_metrics_pre_regex, $user_defined_metrics_post_regex );
 my $pause_output = 0;
 my $omit_values = 0;
-my ( $sort_type, $sort_key ) = ( "count", "count" );
+my ( $sort_type, $sort_key ) = ( "occurrences", "occurrences" );
 my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 my ( @in_files, @output_columns );
 my %in_files_matched;
@@ -252,7 +252,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so count,duration,bytes,impact] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so occurrences,duration,bytes,impact] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -505,7 +505,7 @@ sub adapt_to_command_line_options {
 	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
 
     die print_usage( "unable to open any files" ) unless @in_files;
-    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( count duration time bytes impact );
+    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( occurrences duration time bytes impact );
 
     if( $sort_type =~ /^duration|time$/i ) {
         $sort_key = "total_duration_num";
@@ -665,7 +665,6 @@ sub read_and_process_logs {
             my ( $timestamp, $threadname );							# I actually don't want these to be defined
             $total_lines_read++;
 
-print "$line_number\n";
             if ($line_number % 997 == 0) {	# only print processing status update every X lines processed
                 printf("\rProcessing line %d in file %s (%d overall)", $line_number, $in_file, $total_lines_read);
                 $| = 1; # Flush output
@@ -1006,7 +1005,7 @@ if( 0 ) {
 
                         # Initialize the hash if not already done
                         $log_messages{$category}{$log_key} //= {
-                            count => 0,
+                            occurrences => 0,
                             total_bytes => 0,
                             total_duration => 0,
                             sum_of_squares => 0,
@@ -1047,7 +1046,7 @@ if( 0 ) {
     
                     # Initialize the hash if not already done
                     $log_analysis{$bucket} //= {
-                        count => 0,
+                        occurrences => 0,
                         total_bytes => 0,
                         total_duration => 0,
                         sum_of_squares => 0,
@@ -1468,7 +1467,7 @@ sub cumulative_round_widths {
 sub normalize_data_for_output {
     # Determine the maximum total log messages for any time window
     my %max_total = (
-        count => 0,
+        occurrences => 0,
         bytes => 0,
         duration => 0,
     );
