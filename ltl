@@ -1008,8 +1008,6 @@ if( 0 ) {
                         $log_key = substr("[$log_level] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
                     }
 
-                    $log_messages{$category}{$log_key}{occurrences}++;
-
                     ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
                     if( $is_access_log ) {
                     #if( defined $duration ) {
@@ -1028,6 +1026,8 @@ if( 0 ) {
                             durations => [],
                         };
 
+                        $log_messages{$category}{$log_key}{occurrences}++;
+
                         # Accumulate the total duration and bytes
                         $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
 
@@ -1037,7 +1037,7 @@ if( 0 ) {
                             $log_messages{$category}{$log_key}{count_min} = $count if !defined $log_messages{$category}{$log_key}{count_min} || $count < $log_messages{$category}{$log_key}{count_min};
                             $log_messages{$category}{$log_key}{count_max} = $count if !defined $log_messages{$category}{$log_key}{count_max} || $count > $log_messages{$category}{$log_key}{count_max};
                         
-                            print $bucket . " " . $log_key . "//" . substr( $message, 0, 25 );
+                            print $category . " " . $log_key . "//" . substr( $message, 0, 25 );
                             foreach my $key ( keys %{$log_messages{$category}{$log_key}} ) {
                                 print "\t\t$key -> $log_messages{$category}{$log_key}{$key}\n";
                             }
@@ -1061,6 +1061,8 @@ if( 0 ) {
                                 $log_messages{$category}{$log_key}{impact} = round( log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{occurrences} ) * 100 ) / 100;
                             }
                         }
+                    } else {
+                        $log_messages{$category}{$log_key}{occurrences}++;
                     }
                 }
 
@@ -1306,19 +1308,20 @@ sub calculate_all_statistics {
             my @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)]; 
 
             foreach my $log_key (@top_keys) {
-                my $aggregated_data = {
-                    occurrences => 0,
-                    total_duration_num => undef,
-                    total_duration => undef,
-                    total_bytes => undef,
-                    count_occurrences => 0,
-                    count_min => undef,
-                    count_mean => undef,
-                    count_max => undef,
-                    count_sum => 0,
-                    sum_of_squares => 0,
-                    durations => [],
-                };
+                my $aggregated_data = {};
+                # my $aggregated_data = {
+                #     occurrences => 0,
+                #     total_duration_num => undef,
+                #     total_duration => undef,
+                #     total_bytes => undef,
+                #     count_occurrences => 0,
+                #     count_min => undef,
+                #     count_mean => undef,
+                #     count_max => undef,
+                #     count_sum => 0,
+                #     sum_of_squares => 0,
+                #     durations => [],
+                # };
 
 # TO DO: Shouldn't check memory usage on each pass, only every few
                 if( $track_memory ) {
@@ -1332,12 +1335,13 @@ sub calculate_all_statistics {
                 # print "=count_occurrences: ";
                 # print $log_messages{$category}{$log_key}{count_occurrences} if defined $log_messages{$category}{$log_key}{count_occurrences};
                 # print " category: $category log_key: $log_key\n";
-
-                                        
-                            print $category . " " . substr( $log_key, 0, 50 );
-                            foreach my $key ( keys %{$log_messages{$category}{$log_key}} ) {
-                                print "\t\t$key -> $log_messages{$category}{$log_key}{$key}\n";
-                            }
+                 
+                print $category . " " . substr( $log_key, 0, 50 );
+                # foreach my $key ( keys %{$log_messages{$category}{$log_key}} ) {
+                    # print "\t\t$key -> $log_messages{$category}{$log_key}{$key}\n";
+                foreach my $key ( keys %{$message_data} ) {
+                    print "\t\t$key -> $message_data->{$key}\n";
+                }
 
                 next if !defined( $message_data->{occurrences} );
     
@@ -1385,16 +1389,26 @@ sub calculate_all_statistics {
 
                 $log_messages{$category}{$log_key}{total_bytes} = $aggregated_data->{total_bytes} if defined $aggregated_data->{total_bytes};
   
-                # $log_messages{$category}{$log_key}{count_occurrences} = $message_data->{count_occurrences} if defined $message_data->{count_occurrences};
-                # $log_messages{$category}{$log_key}{count_min} = $message_data->{count_min} if defined $message_data->{count_min};
+                $log_messages{$category}{$log_key}{count_occurrences} = $message_data->{count_occurrences} if defined $message_data->{count_occurrences};
+                $log_messages{$category}{$log_key}{count_min} = $message_data->{count_min} if defined $message_data->{count_min};
                 $log_messages{$category}{$log_key}{count_mean} = ( defined $message_data->{count_sum} && defined $message_data->{count_occurrences} && $message_data->{count_occurrences} > 0 ) ? round( $message_data->{count_sum} / $message_data->{count_occurrences} ) : undef;
-                # $log_messages{$category}{$log_key}{count_max} = $message_data->{count_max} if defined $message_data->{count_max};
-                # $log_messages{$category}{$log_key}{count_sum} = $message_data->{count_sum} if defined $message_data->{count_sum};
+                $log_messages{$category}{$log_key}{count_max} = $message_data->{count_max} if defined $message_data->{count_max};
+                $log_messages{$category}{$log_key}{count_sum} = $message_data->{count_sum} if defined $message_data->{count_sum};
                 
                 # free up the memory from the data structure as it is no longer needed
-                undef $log_messages{$category}{$log_key}{durations};
-                delete $log_messages{$category}{$log_key}{durations};
+                # undef $log_messages{$category}{$log_key}{durations};
+                # delete $log_messages{$category}{$log_key}{durations};
+
+
+                                            print $category . "===" . substr( $log_key, 0, 50 );
+                foreach my $key ( keys %{$log_messages{$category}{$log_key}} ) {
+                    print "\t\t-\t\t$key -> $log_messages{$category}{$log_key}{$key}\n";
+                # foreach my $key ( keys %{$message_data} ) {
+                    # print "\t\t----\t\t$key -> $message_data->{$key}\n";
+                }
             }
+
+
         }
     }
 
@@ -2582,7 +2596,7 @@ sub print_message_summary {
                     my $count_max = $log_messages{$grouping}{$key}{count_max};
                     my $count_sum = $log_messages{$grouping}{$key}{count_sum};
                     print " occurrences: $occurrences";
-                    print " $count_occurrences: $count_occurrences count_min: $count_min count_mean: $count_mean count_max: $count_max count_sum: $count_sum\n" if defined $log_messages{$grouping}{$key}{count};
+                    print " $count_occurrences: $count_occurrences count_min: $count_min count_mean: $count_mean count_max: $count_max count_sum: $count_sum\n" if defined $log_messages{$grouping}{$key}{count_occurrences};
 
                     # WRONG this condition won't allow count, byte, other metrics through unless duration metrics are defifned
                     if( $print_durations && !$omit_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
