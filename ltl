@@ -1682,7 +1682,7 @@ sub normalize_data_for_output {
 
 # bookmark8
 # WARNING: statically speaking the durations stats are 52 characters long with the leading double space - meaning the size calculation doesn't account properly for the line and column seperator
-    $durations_graph_width = $print_durations && !$omit_durations && !$omit_bytes && !$omit_stats ? $graph_column_padding_latency + 50 + $graph_column_padding_all : 0;
+    $durations_graph_width = $print_durations && !$omit_durations && !$omit_stats ? $graph_column_padding_latency + 50 + $graph_column_padding_all : 0;
 
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
     # $timestamp_length = length( strftime($output_timestamp_format, gmtime(0) ) ) + 1 + ( $print_milliseconds ? 4 : 0 ) ;     # +1 for built in space after timestamp
