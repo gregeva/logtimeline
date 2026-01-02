@@ -8,6 +8,7 @@
 # - Filter options for min/max impact (count*duration)
 
 # TO DO: the bytes for each message is captured, but not surfaced in the message results
+# - new command line options for "show-bytes and show-counts" to add these columns to the message table instead of the duration statistics
 # - add total counts for duration and bytes; what makes this harder to fit in is that there should obviously also be seperate counters for "highlight" (bottom of table makes sense, also summary table, or both)
 # - Add AND match possibility for include and exclude using RegEx lookahead (?=.*word)
 # - Add the ability to highlight based on numerical condition matching example -dmin => -hdmin would keep rows smaller, but highlight rows above or something like that.  Need to think carefully about the terminology and naming so that there is coherence between the include/exclude/minimum/maximum/highlight concepts across the tool.
