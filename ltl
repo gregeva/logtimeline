@@ -20,7 +20,6 @@
 
 
 # BUGS
-# - bug with top message length which is pre-padded, causing mis-alignment when it is later truncated around line 2486 only when occurences are shown and some lines are too long - need to truncate it at the source and in only one place
 # - when using the -o flag, combined with the -ov flag (and possibly others), metrics are not written to the CSV file as the sections are skipped in print bar chart column (needs refactoring)
 # - when using the -o flag, the provided command line options are used in the file name, however when using a long list of filters, the filename can be too long causing error - need to truncate the filename
 # - on very narrow terminals, the "processed files" heading and potentially file names will wrap and mess up the table
@@ -993,6 +992,7 @@ if( 0 ) {
 
                     # Substitute UUID with HASH if command line option to do so is present (temporary feature to be eclipsed by group similar feature)
                     $message =~ s/\S{8}-\S{4}-\S{4}-\S{4}-\S{12}+/########-####-####-####-############/g if defined $mask_uuid && $mask_uuid;
+                    $message = visualize_carets( $message );                            # render non-printable characters visually
 
                     if( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
                         my $truncated_thread = substr( $threadname, 0, 20 );
@@ -2461,7 +2461,7 @@ sub print_message_summary {
     # Calculate the total table width after applying outer padding
     my $table_width = $terminal_width - (2 * $table_padding_outer);
 
-    # Calculate the absolute width for each column based on the relative size and inner padding
+    # Calculate the absolute width for each column based on the relative size and inner padding and truncate where necessary
     foreach my $column (keys %col_relative_size) {
         $col_width{$column} = int($table_width * $col_relative_size{$column} / 100) - (2 * $table_padding_inner);
         if ( length( $col_names{$column_list[$column-1]} ) > $col_width{$column} - $truncate_chars ) {
@@ -2586,7 +2586,7 @@ sub print_message_summary {
 # print "$grouping=$key\n";
 
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
-                    my $message = substr( visualize_carets( $key ), 0, $col_width{1} );
+                    my $message = substr( $key, 0, $col_width{1} );                     # truncate message for printing if too long to fit in column
                     my $occurrences = $log_messages{$grouping}{$key}{occurrences};
                     my $count_occurrences = $log_messages{$grouping}{$key}{count_occurrences};
                     my $count_min = $log_messages{$grouping}{$key}{count_min};
