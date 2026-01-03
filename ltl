@@ -8,6 +8,7 @@
 # - Filter options for min/max impact (count*duration)
 
 # TO DO: the bytes for each message is captured, but not surfaced in the message results
+# - investigate moving extraction and processing of bytes out of each of the conditions and put into a common section (be careful of log formats where bytes is implied by column and should not be overwritten)
 # - new command line options for "show-bytes and show-counts" to add these columns to the message table instead of the duration statistics
 # - add total counts for duration and bytes; what makes this harder to fit in is that there should obviously also be seperate counters for "highlight" (bottom of table makes sense, also summary table, or both)
 # - Add AND match possibility for include and exclude using RegEx lookahead (?=.*word)
@@ -76,8 +77,8 @@ my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $include_count ) = 0;
-my ( $include_query_string, $include_session, $include_threadpool_summary ) = ( 0, 0, 0 );
+my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
+my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 1 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages ) = ( 0,0,0,0,0,0,0,0,0 );
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_userdefinedmetrics );
@@ -253,7 +254,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so occurrences,duration,bytes,impact] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so occurrences,duration,bytes,impact] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -478,6 +479,7 @@ sub adapt_to_command_line_options {
         'omit-rate|or' => \$omit_rate,
         'omit-durations|od' => \$omit_durations,
         'omit-bytes|ob' => \$omit_bytes,
+        'omit-count|oc' => \$omit_count,
         'include-count|ic' => \$include_count,
         'include-query-string|iqs' => \$include_query_string,
         'include-session|is' => \$include_session,
@@ -488,7 +490,7 @@ sub adapt_to_command_line_options {
         'duration-max|dmax=i' => \$filter_duration_max,
         'bytes-min|bmin=i' => \$filter_bytes_min,
         'bytes-max|bmax=i' => \$filter_bytes_max,
-	'memory-usage|mem' => \$track_memory,
+	    'memory-usage|mem' => \$track_memory,
         'output-csv|o' => \$write_messages_to_csv,
         'sort|so=s' => \$sort_type,
         'threadpool-activity-summary|tpas' => \$include_threadpool_summary,
@@ -699,18 +701,17 @@ sub read_and_process_logs {
                 # this section is optional, for cases where log line has included additional context which should be interpretted (row count, execution duration, result size)
                 ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)/;								# 2025-04-22 remove the trailing whitespace as same as below
                 ( $duration ) = $message =~ / durationM[sS]\s*=\s*(\d+)/;						# 2025-04-17 remove the trailing white space as it was not picking up the variable if it was at the end of the line
-                ( $count ) = $message =~ / count\s*=\s*(\d+)/;
                 $is_access_log = 1 if defined $bytes || defined $duration || defined $count;
+                $message =~ s/ ((bytes|durationM[sS])\s*=\s*)(\d+)/ $1?/g;		# mask out bytes and duration values for grouping purposes (but leave others for later processing)
+
 
 # [elapsed 39ms]
 #  [elapsed 20m 47s 399ms] Import completed successfully
 # ApplicationLog.2025-04-29.135.log:2025-04-29 09:07:04.340+0000 [L: INFO] [O: c.t.c.ImportProcessor] [I: ] [U: Administrator] [S: ] [P: ] [T: https-jsse-nio-8443-exec-1] ***  [elapsed 20m 47s 399ms] Import completed successfully
 #( $duration ) = $message =~ /\[elapsed (\d+)ms\]/;
 #$message =~ s/\[elapsed (\d+)ms\]/\[duration ??ms\]/g;
-#                $message =~ s/=\d+/=?/g;
 
-                $message =~ s/=\d+/=?/g;
-
+ 
 # START the following are temporary
                 $message =~ s/(session id: )\d+/$1\?\?/g;
                 $message =~ s/(\w+_)+\d{14}-/ModelFamily_CustomerPC_DateString-/g;
@@ -741,8 +742,10 @@ sub read_and_process_logs {
                 $match_type = 10;                       # 2025-08-14 21:00:34.633 [vert.x-eventloop-thread-12] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size
 
                 ( $duration ) = $message =~ / (\d+) milliseconds/;
+                $message =~ s/ (\d+) milliseconds/ ? millseconds/g;
+
                 $message =~ s/(from \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:)\d{4,5} /${1}XXXXX /;	# remove the ephemeral port in order to group common messages
-                $message =~ s/=\d+/=?/g;
+                # $message =~ s/=\d+/=?/g;                                        # shouldn't do this broadly, need to be selective
                 $is_access_log = 1 if defined $bytes || defined $duration;
 
             ## Generic Java/Logback Pattern with timestamp and level ##
@@ -881,12 +884,24 @@ if( 0 ) {
 
 }
 
+# NEXT TO DO
+# should automatically set include_count based on terminal width and other details like if duration stats are printed (omit by default on small terminal, include on large)
+# block below should substitute out the actual count value for grouping purposes
+# automatic width detection should really be done on the printing part, not the reading part, as it is still relevant to output to CSV, however the challenge will be coherence between include and omit logic (should not read if omit is specified)
+# for the above, building the list of which metrics to be printed should be where the evaluation is done, not here
+
+            # Populate workload count metrics if present and expected
+            if( $include_count && !$omit_count ) {
+                ( $count ) = $message =~ / count\s*=\s*(\d+)/;
+                $is_access_log = 1 if defined $count && !$is_access_log;
+            }
 
             # Populate Thread Pool name if thread name was found
             if( defined $thread && $thread ne "" ) {
                 ( $threadpool ) = $thread =~ /(.*)-\d+$/;
                 $threadname = defined $threadpool ? $threadpool : $thread;
             }
+
 
             ## USER DEFINED METRICS CAPTURE ##
             if( defined $user_defined_metrics && /$user_defined_metrics_regex/ ) {
@@ -1622,7 +1637,7 @@ sub normalize_data_for_output {
         $max_total{occurrences} = $total_occurrences if !defined $max_total{occurrences} || $total_occurrences > $max_total{occurrences};
         $max_total{bytes} = $total_bytes if ( defined $total_bytes && !$omit_bytes && $total_bytes > $max_total{bytes} );
         $max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration} && $log_stats{$bucket}{duration} > $max_total{duration} );
-        $max_total{count} = $log_stats{$bucket}{count} if ( defined $log_stats{$bucket}{count} && $include_count && $log_stats{$bucket}{count} > $max_total{count} );
+        $max_total{count} = $log_stats{$bucket}{count} if ( defined $log_stats{$bucket}{count} && $include_count && !$omit_count && $log_stats{$bucket}{count} > $max_total{count} );
     }
 
 # bookmark21
