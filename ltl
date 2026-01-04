@@ -8,8 +8,10 @@
 # - Filter options for min/max impact (count*duration)
 
 # TO DO: the bytes for each message is captured, but not surfaced in the message results
+# - PRIORITY: clean up old shit like comments and code indentation
+# - PRIORITY: refactor data model for the data capture and statistics calculations (excess stuff confusing and wasting memory)
 # - investigate moving extraction and processing of bytes out of each of the conditions and put into a common section (be careful of log formats where bytes is implied by column and should not be overwritten)
-# - new command line options for "show-bytes and show-counts" to add these columns to the message table instead of the duration statistics
+# - new command line options for "show-bytes and show-counts" to add these columns to the message table instead of the duration statistics (plan forward for unknown custom metric as well)
 # - add total counts for duration and bytes; what makes this harder to fit in is that there should obviously also be seperate counters for "highlight" (bottom of table makes sense, also summary table, or both)
 # - Add AND match possibility for include and exclude using RegEx lookahead (?=.*word)
 # - Add the ability to highlight based on numerical condition matching example -dmin => -hdmin would keep rows smaller, but highlight rows above or something like that.  Need to think carefully about the terminology and naming so that there is coherence between the include/exclude/minimum/maximum/highlight concepts across the tool.
@@ -18,7 +20,6 @@
 # - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
 # - add a soft memory limit (after having made most of the tweaks) to avoid accidents in production reading large files with 100k's of different messages - will need to optimize performance of memory checking
 # - Similar to JMC, percentile calculations should include the representative counts (perhaps this is in a summary chart at the end or specified to be added)
-
 
 # BUGS
 # - when using the -o flag, combined with the -ov flag (and possibly others), metrics are not written to the CSV file as the sections are skipped in print bar chart column (needs refactoring)
@@ -889,6 +890,7 @@ if( 0 ) {
 
 # 2026-01-04 TO DO NEXT
 # need to fix statistics calculations where durations may not be present, but counts and bytes should still be calculated
+# make sure that there is a sort by count, as well as occurrences
 
             ## COUNT METRICS # capture count metrics unless explicitly omitted
             if( !$omit_count ) {
