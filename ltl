@@ -78,7 +78,7 @@ my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
-my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 1 );
+my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages ) = ( 0,0,0,0,0,0,0,0,0 );
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_userdefinedmetrics );
@@ -884,19 +884,19 @@ if( 0 ) {
 
 }
 
-# NEXT TO DO
-# should automatically set include_count based on terminal width and other details like if duration stats are printed (omit by default on small terminal, include on large)
-# block below should substitute out the actual count value for grouping purposes
-# automatic width detection should really be done on the printing part, not the reading part, as it is still relevant to output to CSV, however the challenge will be coherence between include and omit logic (should not read if omit is specified)
-# for the above, building the list of which metrics to be printed should be where the evaluation is done, not here
+# 2026-01-04 TO DO NEXT
+# need to fix statistics calculations where durations may not be present, but counts and bytes should still be calculated
+# need to include a cmin and cmax command line option to include min and max counts from the command line for consistency with duration and bytes filtering
+# add a countNice function to format counts with K, M, B suffixes for printing inline with durationNice and bytesNice functions to fit consistently within the given column widths
 
-            # Populate workload count metrics if present and expected
-            if( $include_count && !$omit_count ) {
+            ## COUNT METRICS # capture count metrics unless explicitly omitted
+            if( !$omit_count ) {
                 ( $count ) = $message =~ / count\s*=\s*(\d+)/;
+                $message =~ s/ count\s*=\s*\d+/ count=?/g;		                              # mask out actual count values for grouping purposes
                 $is_access_log = 1 if defined $count && !$is_access_log;
             }
 
-            # Populate Thread Pool name if thread name was found
+            ## THREAD POOL # populate if thread name was found
             if( defined $thread && $thread ne "" ) {
                 ( $threadpool ) = $thread =~ /(.*)-\d+$/;
                 $threadname = defined $threadpool ? $threadpool : $thread;
@@ -1637,7 +1637,7 @@ sub normalize_data_for_output {
         $max_total{occurrences} = $total_occurrences if !defined $max_total{occurrences} || $total_occurrences > $max_total{occurrences};
         $max_total{bytes} = $total_bytes if ( defined $total_bytes && !$omit_bytes && $total_bytes > $max_total{bytes} );
         $max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration} && $log_stats{$bucket}{duration} > $max_total{duration} );
-        $max_total{count} = $log_stats{$bucket}{count} if ( defined $log_stats{$bucket}{count} && $include_count && !$omit_count && $log_stats{$bucket}{count} > $max_total{count} );
+        $max_total{count} = $log_stats{$bucket}{count} if ( defined $log_stats{$bucket}{count} && !$omit_count && $log_stats{$bucket}{count} > $max_total{count} );
     }
 
 # bookmark21
@@ -1688,7 +1688,6 @@ sub normalize_data_for_output {
 
     foreach my $category_bucket ( @log_levels ) {
         if( exists $output_columns{$category_bucket} ) {
-            #push @output_columns, "totalOccurrences" if $category_bucket =~ /^err-rate$/;
             push @output_columns, $category_bucket;
         }
     }
@@ -1734,6 +1733,10 @@ sub normalize_data_for_output {
 # TO DO : Determine which columns should be printed, and from this determine the column layout
 
     foreach my $graph_type ( @graph_columns ) {									# Count how many of the to be displayed data columns actually have values to be printed
+        if( $graph_type eq 'count' && !$include_count && ( $max_graph_width / $graph_count < 25 ) ) {       # remove count column if not enough space to print it, unless explicitly included
+            @graph_columns = grep { $_ !~ /count/ } @graph_columns;
+            next;
+        };
         $graph_count += ( $max_total{$graph_type} > 0 );
     }
 
@@ -1749,7 +1752,7 @@ sub normalize_data_for_output {
                 push @populated_graph_columns, $key;
                 push @output_columns, "${key}Nice" if $key =~ /^(duration|bytes)$/; # presently these won't be output to CSV as processing loop to screen will stop at max columns
                 if( $key =~ /^count$/ ) {
-                    push @output_columns, "${key}_occurrences", "${key}_min", "${key}_mean", "${key}_max", "${key}_sum";
+                    push @output_columns, "${key}_occurrences", "${key}_min", "${key}_mean", "${key}_max", "${key}_sum" if !$omit_count;
                 } else {
                     push @output_columns, $key;
                 }
@@ -1829,7 +1832,6 @@ sub normalize_data_for_output {
                 6 => ( $graph_relative_size{6} / 100 * $max_graph_width ),
             );
          }
-
 
          foreach my $column ( 1 .. $graph_count ) {							# capture and build up list containing width and spacing between columns
              my $column_spacing = $graph_column_padding_all;
@@ -2089,6 +2091,9 @@ sub print_bar_graph {
 		    # push bucket count to CSV data list
                     $total_occurrences += $occurrences if $category_bucket !~ /^(err-rate|msg-rate)$/;
                     $output_columns{$category_bucket} = $occurrences;
+# 2026-01-04 TO DO: this may not be required, test after fixing the count and byte metric collection with no duration stats
+                } else {
+                    $output_columns{$category_bucket} = 0;                                  # push empty value to CSV data list
                 }
             }
 
@@ -2098,7 +2103,9 @@ sub print_bar_graph {
                last if $category_bucket =~ /^totalOccurrences$/;								# only fill in empty values up to the totalOccurrences
 
                if( exists $output_columns{$category_bucket} ) {								# if there was a count for this log level, add it to the list 
-                   push @csv_data, $output_columns{$category_bucket}; 
+                   push @csv_data, $output_columns{$category_bucket};
+
+# 2026-01-04 TO DO: this may not be required, test after fixing the count and byte metric collection with no duration stats
                } else {
                    push @csv_data, undef;										# if there wasn't a count for this log level, add a blank column
                }
