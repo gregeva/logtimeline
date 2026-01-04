@@ -25,6 +25,7 @@
 # - when using the -o flag, the provided command line options are used in the file name, however when using a long list of filters, the filename can be too long causing error - need to truncate the filename
 # - on very narrow terminals, the "processed files" heading and potentially file names will wrap and mess up the table
 # - when log files are small, as in less than 1000 lines, the message reading the lines will not print as it starts after 997 lines.  Given a scenario with hundreds of files each very small, there will be no reading indicator showing progress.
+# - print_durations=0 initiated by --omit-stats should not impeed statistical calculation of statistics for CSV output file
 
 # NOT PRIORITY BACKLOG
 # - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
@@ -704,7 +705,7 @@ sub read_and_process_logs {
                 # this section is optional, for cases where log line has included additional context which should be interpretted (row count, execution duration, result size)
                 ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)/;								# 2025-04-22 remove the trailing whitespace as same as below
                 ( $duration ) = $message =~ / durationM[sS]\s*=\s*(\d+)/;						# 2025-04-17 remove the trailing white space as it was not picking up the variable if it was at the end of the line
-                $is_access_log = 1 if defined $bytes || defined $duration || defined $count;
+                $is_access_log = 1 if defined $bytes || defined $duration;
                 $message =~ s/ ((bytes|durationM[sS])\s*=\s*)(\d+)/ $1?/g;		# mask out bytes and duration values for grouping purposes (but leave others for later processing)
 
 
@@ -887,7 +888,6 @@ if( 0 ) {
 
 # 2026-01-04 TO DO NEXT
 # need to fix statistics calculations where durations may not be present, but counts and bytes should still be calculated
-
 
             ## COUNT METRICS # capture count metrics unless explicitly omitted
             if( !$omit_count ) {
@@ -1294,23 +1294,26 @@ sub calculate_all_statistics {
             shift @rolling_window if @rolling_window > $rolling_window_size;
 
         } else {
-
+            # This will catch the situation where there are no durations, printing them has been disabled, or they were not captured.
             $log_stats{$bucket} = {
                 occurrences   => $aggregated_data->{occurrences},
                 bytes         => $bucket_data->{total_bytes},
                 'bytes-HL'    => $bucket_data->{'total_bytes-HL'},
+                duration      => $bucket_data->{total_duration},
+                'duration-HL' => $bucket_data->{'total_duration-HL'},
                 count         => $bucket_data->{count_sum},
                 'count-HL'    => $bucket_data->{'count_sum-HL'},
+                count_occurrences => $bucket_data->{count_occurrences},
                 count_min     => $bucket_data->{count_min},
                 count_max     => $bucket_data->{count_max},
                 count_mean    => ( defined $bucket_data->{count_sum} && defined $bucket_data->{count_occurrences} && $bucket_data->{count_occurrences} > 0 ) ? round( $bucket_data->{count_sum} / $bucket_data->{count_occurrences} ) : undef,
+                count_sum     => $bucket_data->{count_sum}
             }
-
         }
     }
 
     ## STATS FOR TOP LOG MESSAGES ##
-    if( $print_durations ) {
+    # if( $print_durations ) {
         foreach my $category (keys %log_messages) {
             # Collect and sort the log keys based on the count within each log_key
             my @sorted_log_keys;
@@ -1423,7 +1426,7 @@ sub calculate_all_statistics {
                 # }
             }
 
-        }
+        # }
     }
 
 
@@ -2478,9 +2481,8 @@ sub print_message_summary {
         "TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)"
     );
 
-    # Define the terminal width and padding values
-    my $table_padding_outer = 1;  # Example outer padding
-    my $table_padding_inner = 1;  # Example inner padding
+    my $table_padding_outer = 1;
+    my $table_padding_inner = 1;
 
     # Calculate the total table width after applying outer padding
     my $table_width = $terminal_width - (2 * $table_padding_outer);
@@ -2620,27 +2622,27 @@ sub print_message_summary {
 # print " occurrences: $occurrences";
 # print " $count_occurrences: $count_occurrences count_min: $count_min count_mean: $count_mean count_max: $count_max count_sum: $count_sum\n" if defined $log_messages{$grouping}{$key}{count_occurrences};
 
-                    # WRONG this condition won't allow count, byte, other metrics through unless duration metrics are defifned
+                    my $total_bytes_num = $log_messages{$grouping}{$key}{total_bytes};
+                    my $total_bytes = format_bytes( $total_bytes_num,'B' );
+                    # BUG/ WRONG!!! below assumes all lines have bytes, but not really
+                    my $mean_bytes = round( $total_bytes_num / $occurrences ) if defined $total_bytes_num; 
+                    my $min = $log_messages{$grouping}{$key}{min};
+                    my $mean = $log_messages{$grouping}{$key}{mean};
+                    my $max = $log_messages{$grouping}{$key}{max};
+                    my $std_dev = $log_messages{$grouping}{$key}{std_dev};
+                    my $impact = $log_messages{$grouping}{$key}{impact};
+                    my $p1 = $log_messages{$grouping}{$key}{p1};
+                    my $p50 = $log_messages{$grouping}{$key}{p50};
+                    my $p75 = $log_messages{$grouping}{$key}{p75};
+                    my $p90 = $log_messages{$grouping}{$key}{p90};
+                    my $p95 = $log_messages{$grouping}{$key}{p95};
+                    my $p99 = $log_messages{$grouping}{$key}{p99};
+                    my $p999 = $log_messages{$grouping}{$key}{p999};
+                    my $cv = $log_messages{$grouping}{$key}{cv};
+                    my $total_duration_num = $log_messages{$grouping}{$key}{total_duration_num};
+                    my $total_duration = $log_messages{$grouping}{$key}{total_duration};
+
                     if( $print_durations && !$omit_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
-                        my $total_bytes_num = $log_messages{$grouping}{$key}{total_bytes};
-                        my $total_bytes = format_bytes( $total_bytes_num,'B' );
-                        # BUG/ WRONG!!! below assumes all lines have bytes, but not really
-                        my $mean_bytes = round( $total_bytes_num / $occurrences ) if defined $total_bytes_num; 
-                        my $min = $log_messages{$grouping}{$key}{min};
-                        my $mean = $log_messages{$grouping}{$key}{mean};
-                        my $max = $log_messages{$grouping}{$key}{max};
-                        my $std_dev = $log_messages{$grouping}{$key}{std_dev};
-                        my $impact = $log_messages{$grouping}{$key}{impact};
-                        my $p1 = $log_messages{$grouping}{$key}{p1};
-                        my $p50 = $log_messages{$grouping}{$key}{p50};
-                        my $p75 = $log_messages{$grouping}{$key}{p75};
-                        my $p90 = $log_messages{$grouping}{$key}{p90};
-                        my $p95 = $log_messages{$grouping}{$key}{p95};
-                        my $p99 = $log_messages{$grouping}{$key}{p99};
-                        my $p999 = $log_messages{$grouping}{$key}{p999};
-                        my $cv = $log_messages{$grouping}{$key}{cv};
-                        my $total_duration_num = $log_messages{$grouping}{$key}{total_duration_num};
-                        my $total_duration = $log_messages{$grouping}{$key}{total_duration};
 
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
@@ -2650,22 +2652,27 @@ sub print_message_summary {
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", defined $cv ? $cv : "" ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", defined $total_duration ? $total_duration : "" ) . " " x $table_padding_inner; 
 
-                        if( $write_messages_to_csv && defined $csv_fh ) {
-#print " writing to MESSAGES csv: $count_occurrences, $count_min, $count_mean, $count_max, $count_sum\n";
-                            $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact ]);
-                        }
+#                         if( $write_messages_to_csv && defined $csv_fh ) {
+# #print " writing to MESSAGES csv: $count_occurrences, $count_min, $count_mean, $count_max, $count_sum\n";
+#                             $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact ]);
+#                         }
                     } else {
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
 
-                        if( $write_messages_to_csv && defined $csv_fh ) {
-                            $csv->print($csv_fh, [ $grouping, $key, $occurrences, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef ]);
-                        }
+                        # if( $write_messages_to_csv && defined $csv_fh ) {
+                        #     $csv->print($csv_fh, [ $grouping, $key, $occurrences, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef ]);
+                        # }
+                    }
+
+                    # Separated conditions for CSV output from printed column data
+                    if( $write_messages_to_csv && defined $csv_fh ) {
+#print " writing to MESSAGES csv: $count_occurrences, $count_min, $count_mean, $count_max, $count_sum\n";
+                        $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact ]);
                     }
 
                     #print "$log_messages{$grouping}{$key}{occurrences} | $key | P1: $p1 P50: $p50 P99: $p99 CV: $cv Total: $total_duration\n";
                     print "$row\n";
-
                 }
             }
 
