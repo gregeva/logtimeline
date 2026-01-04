@@ -26,6 +26,7 @@
 # - on very narrow terminals, the "processed files" heading and potentially file names will wrap and mess up the table
 # - when log files are small, as in less than 1000 lines, the message reading the lines will not print as it starts after 997 lines.  Given a scenario with hundreds of files each very small, there will be no reading indicator showing progress.
 # - print_durations=0 initiated by --omit-stats should not impeed statistical calculation of statistics for CSV output file
+# BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
 
 # NOT PRIORITY BACKLOG
 # - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
@@ -1847,13 +1848,14 @@ sub normalize_data_for_output {
 
 #     }
 
-     if( $print_durations && !$omit_durations && !$omit_stats ) {
-         my $column_spacing = ( $graph_column_padding_all + $graph_column_padding_latency );
-         push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score );
-         push @printed_column_widths, $durations_graph_width;
-         push @printed_column_spacing, 0;
-         push @printed_column_names, "latency statistics";
-     }
+    # BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
+    if( $print_durations && !$omit_durations && !$omit_stats ) {
+        my $column_spacing = ( $graph_column_padding_all + $graph_column_padding_latency );
+        push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score );
+        push @printed_column_widths, $durations_graph_width;
+        push @printed_column_spacing, 0;
+        push @printed_column_names, "latency statistics";
+    }
      
     # 2025-12-28 removing this as it was printing heading columns at the end of the CSV header, however the actual fields were already present earlier on
     #  if( $include_count || 1 ) {
