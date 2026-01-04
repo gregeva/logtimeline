@@ -1,7 +1,6 @@
 #!/opt/homebrew/bin/perl
 
 # TO DO
-# - [In progress] Capture custom log message values for "count=" and "rowCount=" - if present could include it in the message totals
 # - [Prototyping] group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
 # - Adapt message field widths based on terminal width (object field and thread pool)
 # - Add message parse pattern for AkkaCommunications logs
@@ -38,18 +37,6 @@
 # - add a feature to allow for grouping of various other log categories like ThreadPool or Object context (instead of errors)
 # - performance improvement: leverage a temp file with cached file stats (log start/end times, num lines, ...) to start/stop reading the file when provided start/end time ranges based on guesses around filesize
 
-## LOG STRUCTURES ##
-# RAC client: [2025-02-04T12:06:22.784] [TRACE] MessageStream - handling data from GAS with chunk size: 88
-# TWX logs: 2025-02-04 12:05:57.481+0000 [L: DEBUG] [O: c.t.p.p.StreamEntryProcessor] [I: ] [U: ] [S: ] [P: ] [T: pool-6-thread-3] Stream Entry Block Size Threshold Reached...
-# Tomcat access logs: 10.224.212.63 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
-# Catalina.out: 20-Feb-2025 08:55:05.055 INFO [main] org.apache.catalina.startup.HostConfig.deployDirectory Deployment of web application directory [/app/opt/apache-tomcat/webapps/Thingworx] has finished in [37,549] ms
-# GC Logs
-# [2024-12-17T06:10:16.351+0000][29576.409s][info][gc             ] GC(25524) Pause Full (G1 Evacuation Pause) 17047M->16380M(17408M) 2459.735ms
-# [2024-12-17T06:10:16.351+0000][29576.409s][info][gc,cpu         ] GC(25524) User=4.73s Sys=0.01s Real=2.46s
-# [2024-12-17T06:10:16.993+0000][29577.052s][info][gc,start       ] GC(25525) Pause Young (Concurrent Start) (G1 Evacuation Pause)
-# [2024-11-21T18:36:30.300+0000][info][gc            ] GC(16) Pause Young (Normal) (G1 Evacuation Pause) 949M->685M(9216M) 106.703ms
-# 2021-05-11T07:41:12.706+0000: 0.578: [GC pause (G1 Evacuation Pause) (young), 0.0069706 secs]
-
 
 use strict;
 use warnings;
@@ -66,32 +53,29 @@ use List::Util qw(min max);
 use Text::CSV;
 use Text::CSV_PP;
 
-# Change code page to UTF-8
-if ($^O eq 'MSWin32') {
+
+if ($^O eq 'MSWin32') {                                                             # Change code page to UTF-8 on Windows to support UTF-8 characters in terminal
 	system("chcp 65001 > nul");
 }
-
-# Start time
+## GLOBALS ##
+my $version_number = "0.7.1-dev-clean-up-code-base";
 my $start_time = [gettimeofday];
-
-# Configuration
-my $version_number = "0.7.0";
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
-my $impact_time_exponent = 7;		# it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
+my $impact_time_exponent = 7;		            # it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages ) = ( 0,0,0,0,0,0,0,0,0 );
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_userdefinedmetrics );
-my $max_log_message_length = 0;							# used to define the maximum key length of the log message bucket counts
+my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
 my $mask_uuid;									# temporary command line option to mask UUIDs with HASH characters for grouping purposes (to be replaced by more generic group similar feature)
 my $durations_graph_width = 0;
 my ( $graph_count, $graph_count_max, $max_graph_width ) = ( 1, 6, 0 );
 my ( $graph_column_padding_all, $graph_column_padding_timestamp, $graph_column_padding_legend, $graph_column_padding_count, $graph_column_padding_other, $graph_column_padding_latency ) = ( 1, 1, 0, 2, 1, 3 );	# used to add padding (removed from width) in normalize data function
 my %graph_width;
-my $column_count_pre_graph = 2;		                    # timestamp + legend is the default
+my $column_count_pre_graph = 2;		            # timestamp + legend is the default
 my @graph_columns = qw( duration bytes count );
 my ( @printed_column_widths, @printed_column_spacing, @printed_column_names );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
@@ -126,7 +110,7 @@ my %in_files_matched;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
 my %timestamp_cache;
 
-# Define log bucket printing order
+# Defines the log level/type buckets and their order for printing and processing
 my @log_levels = (
     'FORCE-HL', 'FORCE',
     'ERROR-HL', 'ERROR', 'WARN-HL', 'WARN', 'INFO-HL', 'INFO', 
@@ -136,6 +120,7 @@ my @log_levels = (
     'err-rate', 'msg-rate', 'empty'
 );
 
+# Characters selected and usable for drawing the bar charts
 my %blocks = (
     'A' => '█',    # Full block
     'B' => '▓',    # Heavy shading
@@ -148,8 +133,10 @@ my %blocks = (
     'I' => '■',    # Black Very Heavy
     'J' => '□'     # White square
 );
-my $default_chart_block = $^O ne 'MSWin32' ? "A" : "A";   # had initially set it to I for Windows
 
+my $default_chart_block = "A";
+
+# Load in ANSI color codes and configure presets for various log levels/types
 my %colors = (
     'FORCE' => "\033[0;35m",
     'ERROR' => "\033[0;31m",
@@ -200,14 +187,11 @@ my %colors = (
 # 256 Colors: Uses codes like \e[38;5;<color_code>m for foreground and \e[48;5;<color_code>m for background.
 # True Color (24-bit): Uses codes like \e[38;2;<r>;<g>;<b>m for foreground and \e[48;2;<r>;<g>;<b>m for background.
 
-# Create new keys with -HL and yellow background
+# Dynamically create new keys with -HL for highlighted versions of each color
 foreach my $key (keys %colors) {
-    next if $key eq 'NC';  # Skip NC
+    next if $key eq 'NC';
     my $new_key = "$key-HL";
-    
-    my $original_fg_color = $colors{$key}; # Get original foreground
-
-    # Extract the original colour code from the FG code
+    my $original_fg_color = $colors{$key};
     $original_fg_color =~ s/^\e\[(.*?)m/$1/g;
 
     my $bg_color_256;
@@ -229,20 +213,10 @@ foreach my $key (keys %colors) {
         $has_background = 1;
     }
 
-    #$colors{$new_key} = "\033[48;5;${bg_color_256}m${white_fg}";
     $colors{$new_key} = $has_background ? "$colors{$key}\033[48;5;${bg_color_256}m" : "$colors{$key}\033[49m";       # allows specifying background for some highlighted colors only
-    #print "$colors{$key}$key$colors{'NC'} -- HIGHLIGHT -- $colors{$new_key}$new_key$colors{'NC'}\n";
 }
 
 ## SUBS ##
-
-# utility function for formating numbers to normal format
-sub normalize { $_[0] =~ s/\.0+$//r }
-
-# utility functions for trimming spaces off of a string
-sub ltrim { my $s = shift; $s =~ s/^\s+//; return $s }
-sub rtrim { my $s = shift; $s =~ s/\s+$//; return $s }
-sub trim  { my $s = shift; $s =~ s/^\s+|\s+$//g; return $s }
 
 sub print_title {
     my $title = <<"END";
@@ -269,12 +243,10 @@ sub print_version {
     return;
 }
 
-# Function to get current memory usage
 sub get_memory_usage {
     my $memory_usage;
 
-    if ($^O eq 'darwin' || $^O eq 'linux') {
-        # For Mac OS and Debian (Linux)
+    if ($^O eq 'darwin' || $^O eq 'linux') {                    # For Mac OS and Debian (Linux)
         eval {
             require Proc::ProcessTable;
             my $t = Proc::ProcessTable->new();
@@ -283,8 +255,7 @@ sub get_memory_usage {
         if ($@) {
             die "Failed to load Proc::ProcessTable: $@";
         }
-    } elsif ($^O eq 'MSWin32') {
-        # For Windows
+    } elsif ($^O eq 'MSWin32') {                                # For Windows
         eval {
             require Win32::Process::Info;
             Win32::Process::Info->import();  # Explicitly call import
@@ -328,13 +299,10 @@ sub convert_bytes {
         'T' => 1024**4,
     );
 
-    # Convert input value to bytes
     my $bytes = $value * $units{$unit};
 
     return $bytes;
 }
-
-
 
 sub format_bytes {
     my ($value, $unit) = @_;
@@ -348,15 +316,15 @@ sub format_bytes {
     );
 
     return undef unless defined $value;
-    # Convert input value to bytes
+
     my $bytes = $value * $units{$unit};
 
-    # Determine the most relevant unit
+
     my @unit_order = ('B', 'kB', 'MB', 'GB', 'TB');
     my $formatted_value = $bytes;
     my $formatted_unit = 'B';
 
-    foreach my $u (@unit_order) {
+    foreach my $u (@unit_order) {                                           # Determine the most relevant unit
         if( length( $bytes ) >= length( $units{$u} ) ) {
 # TO DO: 1000kB should convert to MB
         #if ($bytes >= $units{$u}) {
@@ -367,9 +335,8 @@ sub format_bytes {
         }
     }
 
-    # Format the value to 1 decimal place
     $formatted_value = sprintf("%.1f", $formatted_value);
-    $formatted_value =~ s/\.0//;
+    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;                                                        # remove trailing .0 if present
 
     return "$formatted_value $formatted_unit";
 }
@@ -384,13 +351,12 @@ sub format_number {
         'Tril' => 1000**4,
     );
 
-    # Determine the most relevant unit
     my @unit_order = ('1', 'k', 'Mil', 'Bil', 'Tril');
     my $formatted_value = $value;
     my $formatted_unit = '';
     $decimals = 1 if !defined $decimals;
 
-    foreach my $u (@unit_order) {
+    foreach my $u (@unit_order) {                                                                   # Determine the most relevant unit
         if ($value >= $units{$u}) {
             $formatted_value = $value / $units{$u};
             $formatted_unit = $u;
@@ -399,7 +365,6 @@ sub format_number {
         }
     }
 
-    # Format the value to 1 decimal place
     $formatted_value = sprintf("%.${decimals}f%s%s", $formatted_value, defined($space) ? " " : "", $formatted_unit eq "1" ? "" : $formatted_unit );
     $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;                                                        # remove trailing .0 if present
 
@@ -428,15 +393,14 @@ sub format_time {
 
     $format = "short" if !defined $format;
 
-    # Convert input value to microseconds
     my $microseconds = $value * $units{$unit};
 
-    # Determine the most relevant unit
+
     my @unit_order = ('us', 'ms', 's', 'm', 'h', 'D');
     my $formatted_value = $microseconds;
     my $formatted_unit = 'us';
 
-    foreach my $u (@unit_order) {
+    foreach my $u (@unit_order) {                                                           # Determine the most relevant unit
         if ($microseconds >= $units{$u}) {
             $formatted_value = $microseconds / $units{$u};
             $formatted_unit = $u;
@@ -445,17 +409,18 @@ sub format_time {
         }
     }
 
-    # Format the value to 1 decimal place
     $formatted_value = sprintf("%.1f", $formatted_value);
-    $formatted_value =~ s/\.0+$//;
+    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;                                              # remove trailing .0 if present
+    
 
-    # Get the appropriate unit name based on the format
-    my $unit_name = $unit_names{$formatted_unit}{$format};
+    my $unit_name = $unit_names{$formatted_unit}{$format};                                  # Get the appropriate unit name based on format
+    $unit_name =~ s/s$// if $formatted_value == 1 && $format eq 'long';                     # Singular units for long format
     $unit_name = " " . $unit_name if defined( $space );
 
     return defined $value ? "$formatted_value$unit_name" : undef;
 }
 
+# Utility function to visualize control characters as caret notation to show non-printable characters present in log messages
 sub visualize_carets {
     my ($s) = @_;
     $s =~ s/([\x00-\x1F])/'^' . chr(ord($1) + 64)/eg;  # ^@ .. ^_
@@ -463,10 +428,17 @@ sub visualize_carets {
     return $s;
 }
 
+# utility function for formating numbers to normal format
+sub normalize { $_[0] =~ s/\.0+$//r }
+
+# utility functions for trimming spaces off of a string
+sub ltrim { my $s = shift; $s =~ s/^\s+//; return $s }
+sub rtrim { my $s = shift; $s =~ s/\s+$//; return $s }
+sub trim  { my $s = shift; $s =~ s/^\s+|\s+$//g; return $s }
+
 sub adapt_to_command_line_options {
     @ORIGINAL_ARGV = @ARGV;
 
-    # Get command-line options
     GetOptions(
         'bucket-size|bs=i' => \$bucket_size_minutes,
         'pause|p' => \$pause_output,
@@ -515,9 +487,6 @@ sub adapt_to_command_line_options {
         exit;
     }
 
-    # Ensure at least one file is provided
-    #@in_files = @ARGV;
-
     foreach my $pattern (@ARGV) {									# do in process file globbing for common experience across environments (Windows doesn't glob in the shell, passes in the parameters)
         push @in_files, glob($pattern);
     }
@@ -555,7 +524,6 @@ sub adapt_to_command_line_options {
         $sort_key = "count_max";
     }
 
-# bookmark24
     if( defined $user_defined_metrics ) {
         my $separator = qr/\s*[=:]?\s*/;
         #my $number = qr/-?\d{1,3}(?:[ ,]?\d{3})*(?:\.\d+)?/;								# Number pattern with optional negative, thousands separators, and decimals
@@ -604,7 +572,7 @@ sub calculate_start_end_filter_timestamps {
     my $log_date = $log_time->epoch() - ( $log_time->hour * ( 60 * 60 ) + $log_time->minute * 60 + $log_time->second );
 
     foreach my $key (keys %filter_range) {
-        my $value = $filter_range{$key};  # Get the value (either $filter_range_start or $filter_range_end)
+        my $value = $filter_range{$key};                                                        # Get the value (either $filter_range_start or $filter_range_end)
         next unless length( $filter_range{$key} ) > 0;
         my $epoch_value;  # Variable to store the epoch time
 
@@ -623,17 +591,14 @@ sub calculate_start_end_filter_timestamps {
             print "Warning: unhandled date/time format - option not taken into account\n";
         }
 
-        #print "Epoch value in seconds: $epoch_value\n";
-        $filter_range_epoch{$key} = $epoch_value if defined( $epoch_value );  # Store the epoch value in the hash
+        $filter_range_epoch{$key} = $epoch_value if defined( $epoch_value );
     }
     return 1;
 }
 
 sub adapt_to_terminal_settings {
-    $terminal_width //= 80; # Default to 80 if terminal width cannot be determined
-    $terminal_height //= 24; # Default to 24 if terminal height cannot be determined
-
-#print "Detected terminal size: $colors{'cyan'}$terminal_width x $terminal_height$colors{'NC'}\n";
+    $terminal_width //= 80;                                             # Default to 80 if terminal width cannot be determined
+    $terminal_height //= 24;                                            # Default to 24 if terminal height cannot be determined
 
     # Auto-adjust the bucket size based on the terminal height (larger terminal can handle more rows)
     if( $terminal_height <= 30 ) {
@@ -649,20 +614,19 @@ sub adapt_to_terminal_settings {
     } else {
         $bucket_size_minutes = 60;
     }
-    #print "Terminal is: $terminal_width x $terminal_height -- Bucket size: $bucket_size_minutes\n";
 
     $max_log_message_length = $terminal_width;		# this is the max that we can print without wrapping, depends on the summary table width, and terminal width 
     return;
 }
 
 sub pause_for_keypress {
-    my ($prompt) = @_;  # Get the optional prompt message
+    my ($prompt) = @_;                              # Get the optional prompt message
     $prompt = "Press any key to continue (or Q to quit)..." unless defined $prompt;
     print "\033[0;44m$prompt\033[0m";
 
-    ReadMode 4;  # Turn off line buffering
+    ReadMode 4;                                     # Turn off line buffering
     my $key = ReadKey(0);
-    ReadMode 0;  # Restore normal input mode
+    ReadMode 0;                                     # Restore normal input mode
 
     if (defined $key) {
         if ($key eq "q" || $key eq "Q") {
@@ -674,7 +638,7 @@ sub pause_for_keypress {
             print "\r";
             print " " x length( $prompt );
             print "\r";
-            return 1;  # Return a value indicating "continue"
+            return 1;                               # Return a value indicating "continue"
         }
     } else {
         print "\r";
@@ -697,33 +661,30 @@ sub read_and_process_logs {
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
 
         while (<$fh>) {
-            s/[\r\n]+$//;  # Remove Windows line endings (CRLF) or Unix line endings (LF) if present
+            s/[\r\n]+$//;                                   # Remove Windows line endings (CRLF) or Unix line endings (LF) if present
             $line_number++;
             my ( $timestamp_str, $log_level, $category_bucket, $category, $object, $instance, $user, $platform, $thread, $threadpool, $session, $message ) = ("") x 12;
             my ( $is_line_match, $is_access_log, $match_type, $status_code, $heap_from, $heap_to, $heap_size ) = ( 0, 0, 0, 0, 0, 0, 0 );
             my ( $bytes, $duration, $occurrences, $count ) = ( undef, undef, undef, undef );
-            my ( $timestamp, $threadname );							# I actually don't want these to be defined
+            my ( $timestamp, $threadname );
             $total_lines_read++;
 
-            if ($line_number % 997 == 0) {	# only print processing status update every X lines processed
+            if ($line_number % 997 == 0) {                  # only print processing status update every X lines processed
                 printf("\rProcessing line %d in file %s (%d overall)", $line_number, $in_file, $total_lines_read);
-                $| = 1; # Flush output
+                $| = 1;                                     # Flush output to stdout
             }
 
-            if ($track_memory && $line_number % 100000 == 0) {								# only collect memory in use around every 100000 lines processed
+            if ($track_memory && $line_number % 100000 == 0) {						    # only collect memory in use around every 100000 lines processed
                 $current_memory_usage = get_memory_usage();								# track maximum memory usage
                 if ($current_memory_usage > $max_memory_usage) {
                     $max_memory_usage = $current_memory_usage;
                 }
             }
 
-
-# bookmark1
             ## ThingWorx Standard Log Format (ApplicationLog, ErrorLog, ScriptLog, ...) ##
             if ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
                 $is_line_match = 1;
                 $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
-#                $thread =~ s/(.*)-\d+$/$1/;
 
                 # this section is optional, for cases where log line has included additional context which should be interpretted (row count, execution duration, result size)
                 ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)/;								# 2025-04-22 remove the trailing whitespace as same as below
@@ -738,8 +699,8 @@ sub read_and_process_logs {
 #( $duration ) = $message =~ /\[elapsed (\d+)ms\]/;
 #$message =~ s/\[elapsed (\d+)ms\]/\[duration ??ms\]/g;
 
- 
-# START the following are temporary
+
+# START TEMPORARY the following are temporary
                 $message =~ s/(session id: )\d+/$1\?\?/g;
                 $message =~ s/(\w+_)+\d{14}-/ModelFamily_CustomerPC_DateString-/g;
                 
@@ -751,16 +712,7 @@ sub read_and_process_logs {
                 $message =~ s/Ending transaction for request (.+)$/Ending transaction for request \.\.\./g;
                 $message =~ s/(TimerEventHandler|TimerThing)\@(\S+)/$1\@/g;
                 $message =~ s/correspond to sent message (\S+) \]/correspond to sent message ###################### \]/g;
-
-
-                # VILINK.Location.b698a817-
-                # VIRTUO_PCOEM_20250221153912-
-                # CONNECT_UP_CUSTOMERPC_20250221085610-
-                # -12fa9d24-faf9-4df0-95b3-ca0f4341d26f
-                # -f9883b39-f19c-4c8f-b21c-141630e3b9a7
-# END the following are temporary
-
-#printf( "$message -- durationMS=%s bytes=%s count=%s\n", defined $duration ? $duration : "-", defined $bytes ? $bytes : "-", defined $occurrences ? $occurrences : "-" );
+# END TEMPORARY
 
             ## ThingWorx Connection Server Standard Log Format ##
             } elsif ( ($timestamp_str, $thread, $category_bucket, $object, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)/) {
@@ -772,7 +724,6 @@ sub read_and_process_logs {
                 $message =~ s/ (\d+) milliseconds/ ? millseconds/g;
 
                 $message =~ s/(from \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:)\d{4,5} /${1}XXXXX /;	# remove the ephemeral port in order to group common messages
-                # $message =~ s/=\d+/=?/g;                                        # shouldn't do this broadly, need to be selective
                 $is_access_log = 1 if defined $bytes || defined $duration;
 
             ## Generic Java/Logback Pattern with timestamp and level ##
@@ -801,9 +752,7 @@ sub read_and_process_logs {
                 $message =~ s/\?.+$// unless $include_query_string;				# chop off the query string from the URI
                 $message = "[$session] $message" if defined $session && $include_session;	# include session if we found it in the logs
 
-#print "$message -- $_";
             ## Apache Tomcat Access Log with Service Execution Time (%D), and optionally thread (%I) and session (%S) ##
-            #} elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) (\d+)[ ]?(\S+)?[ ]?(\S+)?/ ) {
             } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?(\d+)?[ ]?(\S+)?[ ]?(\S+)?/ ) {
                 $is_line_match = 1;
                 $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
@@ -817,7 +766,6 @@ sub read_and_process_logs {
                 $message =~ s/\?.+$// unless $include_query_string;				# chop off the query string from the URI
                 $message = "[$session] $message" if defined $session && $include_session;	# include session if we found it in the logs
 
-#print "$message -- $_";
             ## Apache Tomcat Standard/Common Access Log Format ##
             } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$/ ) {    # added $ to end to differentiate from later pattern
                 $is_line_match = 1;
@@ -866,7 +814,6 @@ sub read_and_process_logs {
             # worker      # 2025-02-20 10:06:10 [nioEventLoopGroup-2-1] WARN  io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]
                 $is_line_match = 1;
                 $match_type = 8;			# this matches ThingWorx Analytics worker type
-#                $thread =~ s/(.*)-\d+$/$1/;
                 $timestamp_str =~ tr/,/./;
                 $timestamp_str =~ tr/T/ /;
                 $message =~ s/\s+$//g;
@@ -882,7 +829,7 @@ sub read_and_process_logs {
 
                 $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
                 $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
-#print "$message -- $_";
+
             } elsif ( ( $category_bucket, $timestamp_str, $message ) = $_ =~ /^([^ ]+) (\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}[,.]\d+) (.*)/ ) {  
                 $is_line_match = 1;
                 $match_type = 11;			# this is matching ThingWorx Edge C SDK format # FORCE 2025-08-09 18:27:18,40 8012 twx_connection.cpp:246 Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed]
@@ -901,7 +848,6 @@ sub read_and_process_logs {
                 }
                 
 
-         #       $object = $file_name if defined $file_name;	# set the object to the extracted file name in case it might be an agent identifier
             }
 
 if( 0 ) {
