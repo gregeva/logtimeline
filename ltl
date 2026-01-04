@@ -27,6 +27,7 @@
 # - when log files are small, as in less than 1000 lines, the message reading the lines will not print as it starts after 997 lines.  Given a scenario with hundreds of files each very small, there will be no reading indicator showing progress.
 # - print_durations=0 initiated by --omit-stats should not impeed statistical calculation of statistics for CSV output file
 # BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
+# - when using the -p (pause) option, the summary table and message lists do not pause for keypresses
 
 # NOT PRIORITY BACKLOG
 # - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
@@ -2019,11 +2020,7 @@ sub print_bar_graph {
             # DURATION STATISTICS print duration statistics table
             if( $print_durations && !$omit_durations && !$omit_stats ) {
                 my $missing_chars;
-                $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width;		# 2 is the magic number to get 1 space after the tallest bar 
-                # $missing_chars = 0;
-                # print " mc: $missing_chars pc: $printed_chars";
-#$missing_chars -= 4;
-#print "\nterminal_width: $terminal_width printed_chars: $printed_chars durations_graph_width: $durations_graph_width missing_chars: $missing_chars\n";
+                $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width;
                 print " " x $missing_chars if $missing_chars > 0;
                 print "$colors{'bright-black'}│$colors{'NC'}  ";
                 if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p90} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{cv} || defined $log_stats{$bucket}{z_score} ) {
@@ -2037,28 +2034,24 @@ sub print_bar_graph {
                     defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%5s$colors{'NC'} ", $log_stats{$bucket}{cv} ) : printf ( " " x 9 );
                     defined $log_stats{$bucket}{z_score} ? printf( "$colors{$zscore_color}Z:%5s$colors{'NC'}", ( $log_stats{$bucket}{z_score} >= 100 ? format_number( $log_stats{$bucket}{z_score} =~ /(\d+)\.\d*/, undef, 0 ) : $log_stats{$bucket}{z_score} ) ) : printf( " " x 5 );
 
-# bookmark23
                     foreach my $stat ( qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) ) {				# push statistics data to the CSV data list
                         push @csv_data, $log_stats{$bucket}{$stat};
                     }
                 }
             }
 
-# bookmark22
-            # Print details to time-window statistics CSV file
+            # Print statistics for time-bucket statistics to the CSV file if activated
             if( $write_messages_to_csv && defined $csv_fh ) {
                 $csv->print($csv_fh, [ $bucket_time_str, @csv_data ]);
             }
 
             undef @csv_data;
 
-            print "\n";
-    # BUG - if using pause, the summary table won't be paused as it isn't implementing the next line
+            print "\n";    
             pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
         }
 
         print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
-
     } else {
         printf "Read $total_lines_read lines, however no lines matched any of the patterns within the timeframe.\n";
     }
@@ -2084,8 +2077,6 @@ sub print_summary_table {
     $max_timestamp_str .= sprintf ".%03d", ($output_timestamp_max-int($output_timestamp_max))*1000 if $print_milliseconds;
 
     ## PRINT COMMAND AND ARGUMENTS ##
-# TO DO: Will need to carve this out for full setup pagination
-
     print "\n$colors{'bright-black'}options: ";
     my %argv_hash = map { $_ => 1 } @ARGV;
     foreach my $arg (@ORIGINAL_ARGV) {
@@ -2107,10 +2098,7 @@ sub print_summary_table {
         next unless $category_totals{$category_bucket};
 	
         my ( $legend_title ) =  "$category_bucket:" . " " x ( 14 - length( $category_bucket ) );
-        #print "$legend_title$category_totals{$category_bucket}\n"; 
-        #printf "%-${category_column_width}s %${occurrences_column_width}d\n", $category_bucket, $category_totals{$category_bucket}; 
         push @summary_table, sprintf( $table_format, $category_bucket, $category_totals{$category_bucket} ); 
-
     }
 
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
@@ -2125,8 +2113,6 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) ); 
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) ) if $track_memory;
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
-
-
 
     push @file_details, "\n";
     push @file_details, sprintf( "$column_padding$padding$colors{'white-underline'}These file(s) were processed with analysis including results between $min_timestamp_str and $max_timestamp_str$colors{'NC'}\n" );
@@ -2222,11 +2208,6 @@ sub print_message_summary {
 
     ### DETERMINE CUT OF HIGHLIGHTED VS PLAIN MESSAGES TO PRINT ###
     # Step 1: Sort and store available messages for each category in a hash of arrays
-#    my %sorted_keys = (
-#        'highlight' => [ sort { $log_messages{'highlight'}{$b}{$sort_key} <=> $log_messages{'highlight'}{$a}{$sort_key} } keys %{$log_messages{'highlight'}} ],
-#        'plain' => [ sort { $log_messages{'plain'}{$b}{$sort_key} <=> $log_messages{'plain'}{$a}{$sort_key} } keys %{$log_messages{'plain'}} ],
-#    );
-
     my %sorted_keys = ( 'highlight' => [], 'plain' => [] );
 
     foreach my $grouping ( qw( highlight plain ) ) {
@@ -2241,7 +2222,6 @@ sub print_message_summary {
         } keys %{$log_messages{$grouping}};
 
         $sorted_keys{$grouping} = \@sorted_keys;
-
     }
 
     # Initialize the hash to store top message counts
@@ -2282,11 +2262,8 @@ sub print_message_summary {
 
         # Ensure the grouping exists and is a hash reference
         if (exists $log_messages{$grouping} && ref($log_messages{$grouping}) eq 'HASH') {
-            #my @top_keys = (sort { $log_messages{$grouping}{$b}{occurrences} <=> $log_messages{$grouping}{$a}{occurrences} } keys %{$log_messages{$grouping}})[0..($top_n_messages-1)];
             my @top_keys = @{$sorted_keys{$grouping}}[0..($top_n_messages-1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
-
             next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
-
             my $header_title = " ";
 
             if( $grouping eq "highlight" ) {
@@ -2330,19 +2307,14 @@ sub print_message_summary {
                 next if !defined $key;
                 my $row = " " x $table_padding_outer;
 
-# print "$grouping=$key\n";
-
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
-                    my $message = substr( $key, 0, $col_width{1} );                     # truncate message for printing if too long to fit in column
+                    my $message = substr( $key, 0, $col_width{1} );                         # truncate message for printing if too long to fit in column
                     my $occurrences = $log_messages{$grouping}{$key}{occurrences};
                     my $count_occurrences = $log_messages{$grouping}{$key}{count_occurrences};
                     my $count_min = $log_messages{$grouping}{$key}{count_min};
                     my $count_mean = $log_messages{$grouping}{$key}{count_mean};
                     my $count_max = $log_messages{$grouping}{$key}{count_max};
                     my $count_sum = $log_messages{$grouping}{$key}{count_sum};
-# print " occurrences: $occurrences";
-# print " $count_occurrences: $count_occurrences count_min: $count_min count_mean: $count_mean count_max: $count_max count_sum: $count_sum\n" if defined $log_messages{$grouping}{$key}{count_occurrences};
-
                     my $total_bytes_num = $log_messages{$grouping}{$key}{total_bytes};
                     my $total_bytes = format_bytes( $total_bytes_num,'B' );
                     # BUG/ WRONG!!! below assumes all lines have bytes, but not really
@@ -2364,7 +2336,6 @@ sub print_message_summary {
                     my $total_duration = $log_messages{$grouping}{$key}{total_duration};
 
                     if( $print_durations && !$omit_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
-
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", defined $min ? ( length( $min ) >= 4 ? format_time( $min, 'ms', 'short' ) : $min ) : "" ) . " " x $table_padding_inner; 
@@ -2372,27 +2343,16 @@ sub print_message_summary {
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", defined $p999 ? ( length( $p999 ) >= 4 ? format_time( $p999, 'ms', 'short' ) : $p999 ) : "" ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", defined $cv ? $cv : "" ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", defined $total_duration ? $total_duration : "" ) . " " x $table_padding_inner; 
-
-#                         if( $write_messages_to_csv && defined $csv_fh ) {
-# #print " writing to MESSAGES csv: $count_occurrences, $count_min, $count_mean, $count_max, $count_sum\n";
-#                             $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact ]);
-#                         }
                     } else {
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
-
-                        # if( $write_messages_to_csv && defined $csv_fh ) {
-                        #     $csv->print($csv_fh, [ $grouping, $key, $occurrences, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef ]);
-                        # }
                     }
 
                     # Separated conditions for CSV output from printed column data
                     if( $write_messages_to_csv && defined $csv_fh ) {
-#print " writing to MESSAGES csv: $count_occurrences, $count_min, $count_mean, $count_max, $count_sum\n";
                         $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact ]);
                     }
 
-                    #print "$log_messages{$grouping}{$key}{occurrences} | $key | P1: $p1 P50: $p50 P99: $p99 CV: $cv Total: $total_duration\n";
                     print "$row\n";
                 }
             }
