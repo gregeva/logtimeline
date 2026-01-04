@@ -95,6 +95,7 @@ my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_
 my ( $print_durations, $track_memory ) = ( 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
+my ( $filter_count_min, $filter_count_max );
 my $top_n_messages = 10;
 my ( $write_messages_to_csv, $csv, $csv_fh, $csv_file_args ) = ( 0, undef, undef, "" );
 my $total_lines_read = 0;
@@ -254,7 +255,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--sort|-so occurrences,duration,bytes,impact] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort|-so occurrences,duration,bytes,impact] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -490,6 +491,8 @@ sub adapt_to_command_line_options {
         'duration-max|dmax=i' => \$filter_duration_max,
         'bytes-min|bmin=i' => \$filter_bytes_min,
         'bytes-max|bmax=i' => \$filter_bytes_max,
+        'count-min|cmin=i' => \$filter_count_min,
+        'count-max|cmax=i' => \$filter_count_max,
 	    'memory-usage|mem' => \$track_memory,
         'output-csv|o' => \$write_messages_to_csv,
         'sort|so=s' => \$sort_type,
@@ -878,16 +881,15 @@ sub read_and_process_logs {
             }
 
 if( 0 ) {
-
     print "$match_type $category_bucket $object - $message\n";
     last if $total_lines_included >= 15;
-
 }
 
 # 2026-01-04 TO DO NEXT
-# need to fix statistics calculations where durations may not be present, but counts and bytes should still be calculated
 # need to include a cmin and cmax command line option to include min and max counts from the command line for consistency with duration and bytes filtering
 # add a countNice function to format counts with K, M, B suffixes for printing inline with durationNice and bytesNice functions to fit consistently within the given column widths
+# need to fix statistics calculations where durations may not be present, but counts and bytes should still be calculated
+
 
             ## COUNT METRICS # capture count metrics unless explicitly omitted
             if( !$omit_count ) {
@@ -901,7 +903,6 @@ if( 0 ) {
                 ( $threadpool ) = $thread =~ /(.*)-\d+$/;
                 $threadname = defined $threadpool ? $threadpool : $thread;
             }
-
 
             ## USER DEFINED METRICS CAPTURE ##
             if( defined $user_defined_metrics && /$user_defined_metrics_regex/ ) {
@@ -971,12 +972,14 @@ if( 0 ) {
 
                 # a number of conditions determine if this read row should be skipped
                 next if( $timestamp->epoch() < $filter_range_epoch{'start'} || $timestamp->epoch() >= $filter_range_epoch{'end'} );
-                next if( defined( $exclude_regex ) && /$exclude_regex/ );
-                next if( defined( $include_regex ) && !/$include_regex/ );
-                next if( defined( $filter_duration_min ) && ( !defined( $duration ) || $duration <= $filter_duration_min ));		# skip if duration value is below specified minimum filter
-                next if( defined( $filter_duration_max ) && ( !defined( $duration ) || $duration >= $filter_duration_max ));		# skip if duration value is above specified maximum filter
-                next if( defined( $filter_bytes_min ) && ( !defined( $bytes ) || $bytes < $filter_bytes_min ));				# skip if bytes value is below specified minimum filter
-                next if( defined( $filter_bytes_max ) && ( !defined( $bytes ) || $bytes > $filter_bytes_max ));				# skip if bytes value is above specified maximum filter
+                next if( defined( $exclude_regex )          && /$exclude_regex/ );
+                next if( defined( $include_regex )          && !/$include_regex/ );
+                next if( defined( $filter_duration_min )    && ( !defined( $duration )  || $duration <= $filter_duration_min ));		# skip if duration value is below specified minimum filter
+                next if( defined( $filter_duration_max )    && ( !defined( $duration )  || $duration >= $filter_duration_max ));		# skip if duration value is above specified maximum filter
+                next if( defined( $filter_bytes_min )       && ( !defined( $bytes )     || $bytes < $filter_bytes_min ));				# skip if bytes value is below specified minimum filter
+                next if( defined( $filter_bytes_max )       && ( !defined( $bytes )     || $bytes > $filter_bytes_max ));				# skip if bytes value is above specified maximum filter
+                next if( defined( $filter_count_min )       && ( !defined( $count )     || $count < $filter_count_min ));				# skip if count value is below specified minimum filter
+                next if( defined( $filter_count_max )       && ( !defined( $count )     || $count > $filter_count_max ));				# skip if count value is above specified maximum filter
 
                 # take note if any results were found in this file
                 $in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
