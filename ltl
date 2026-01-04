@@ -850,11 +850,6 @@ sub read_and_process_logs {
 
             }
 
-if( 0 ) {
-    print "$match_type $category_bucket $object - $message\n";
-    last if $total_lines_included >= 15;
-}
-
             ## COUNT METRICS # capture count metrics unless explicitly omitted
             if( !$omit_count ) {
                 ( $count ) = $message =~ / count\s*=\s*(\d+)/;
@@ -870,7 +865,6 @@ if( 0 ) {
 
             ## USER DEFINED METRICS CAPTURE ##
             if( defined $user_defined_metrics && /$user_defined_metrics_regex/ ) {
-# bookmark25
                 if( /$user_defined_metrics_post_regex/g ) {
                     foreach my $user_metric ( split( ',', $user_defined_metrics ) ) {
                         my $metric = quotemeta( $user_metric );
@@ -880,16 +874,11 @@ if( 0 ) {
                         print "$metric=$value ";
                     }
                 }
-
             }
-
-            #print "\033[0;32m[$timestamp_str|$category_bucket] HTTP $status_code [$is_line_match/$match_type] \033[0m$_";
-            #$| = 1; # Flush output
 
             if( $is_line_match ) {
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
-
-                $timestamp_str =~ s/(:\d{2}:\d{2})\.\d{3}/$1/;	# remove the milliseconds if present, as the code does not presently support them
+                $timestamp_str =~ s/(:\d{2}:\d{2})\.\d{3}/$1/;                      # remove the milliseconds if present, as the code does not presently support them
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
@@ -908,9 +897,6 @@ if( 0 ) {
                         );
                         $timestamp_cache{$timestamp_str} = $timestamp;
                     }
-
-                    # print "\033[0;35m[%d]\033[0m", $timestamp->epoch();
-                    # $| = 1; # Flush output
                 } elsif( $match_type == 3 || $match_type == 4 || $match_type == 9 || $match_type == 12 ) {
                     if (exists $timestamp_cache{$timestamp_str}) {
                         $timestamp = $timestamp_cache{$timestamp_str};
@@ -928,13 +914,11 @@ if( 0 ) {
                         );
                         $timestamp_cache{$timestamp_str} = $timestamp;
                     }
-                    # print "\033[0;35m[%d]\033[0m", $timestamp->epoch();
-                    # $| = 1; # Flush output
                 }
 
                 $filter_range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp ) unless $filter_range_filter_initialized;
 
-                # a number of conditions determine if this read row should be skipped
+                ## FILTERING CONDITIONS ##
                 next if( $timestamp->epoch() < $filter_range_epoch{'start'} || $timestamp->epoch() >= $filter_range_epoch{'end'} );
                 next if( defined( $exclude_regex )          && /$exclude_regex/ );
                 next if( defined( $include_regex )          && !/$include_regex/ );
@@ -993,7 +977,6 @@ if( 0 ) {
 
                     ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
                     if( $is_access_log ) {
-                    #if( defined $duration ) {
 
                         # Initialize the hash if not already done (don't initialize it all, allowing for lazy population of only the fields we need)
                         $log_messages{$category}{$log_key} //= {
@@ -1010,8 +993,6 @@ if( 0 ) {
                         };
 
                         $log_messages{$category}{$log_key}{occurrences}++;
-
-                        # Accumulate the total duration and bytes
                         $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
 
                         if( defined $count ) {
@@ -1019,17 +1000,9 @@ if( 0 ) {
                             $log_messages{$category}{$log_key}{count_occurrences}++;
                             $log_messages{$category}{$log_key}{count_min} = $count if !defined $log_messages{$category}{$log_key}{count_min} || $count < $log_messages{$category}{$log_key}{count_min};
                             $log_messages{$category}{$log_key}{count_max} = $count if !defined $log_messages{$category}{$log_key}{count_max} || $count > $log_messages{$category}{$log_key}{count_max};
-                        
-# print $category . "}" . $log_key . "///" . substr( $message, 0, 50 ) . "\n";
-# foreach my $key ( keys %{$log_messages{$category}{$log_key}} ) {
-#     print "\t\t$key -> $log_messages{$category}{$log_key}{$key}\n";
-# }
-
-                            # print "-- OCCURRENCES: $log_messages{$category}{$log_key}{count_occurrences} SUM: $log_messages{$category}{$log_key}{count_sum} MIN: $log_messages{$category}{$log_key}{count_min} MAX: $log_messages{$category}{$log_key}{count_max}\n";
                         }
 
                         if( defined $duration && !$omit_durations ) {
-#print " duration: $duration -- $_ \n" if !$duration || $duration < 1;
                             $log_messages{$category}{$log_key}{total_duration} += $duration;
                             $log_messages{$category}{$log_key}{total_duration_num} += $duration;
 
@@ -1040,7 +1013,6 @@ if( 0 ) {
                             # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
                             if( $duration > 0 ) {
                                 my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{occurrences}; 
-#print "Count: $log_messages{$category}{$log_key}{occurrences} Duration: $log_messages{$category}{$log_key}{total_duration} Mean : $mean\n";
                                 $log_messages{$category}{$log_key}{impact} = round( log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{occurrences} ) * 100 ) / 100;
                             }
                         }
@@ -1050,17 +1022,12 @@ if( 0 ) {
                 }
 
                 ## CAPTURE TIME-WINDOWS BASED STATISTICS DATA ##
-                #if( $is_access_log && !$omit_stats ) {			# removing this as I need the stats for other things than printing the duration stats table (like the total time and bytes trends)
                 if( $is_access_log  ) {
                     $print_durations = 1 if $print_durations != 1;
 
                     ## STATISTICAL DATA CAPTURE ##
-                    #print "$duration -- $_";
                     $duration = 0 if !defined( $duration );
                     $bytes = 0 if !defined( $bytes );
-                    # $count = 0 if !defined( $count );
-
-                    # print ".BUCKET: $bucket COUNT: $count ";
     
                     # Initialize the hash if not already done (don't initialize it all, allowing for lazy population of only the fields we need)
                     $log_analysis{$bucket} //= {
@@ -1075,7 +1042,6 @@ if( 0 ) {
                         durations => [],
                     };
 
-                    # Update the hash with the new data
                     $log_analysis{$bucket}{occurrences}++;
 
                     if( defined $duration && !$omit_durations && $duration >= 0 ) {
@@ -1099,22 +1065,12 @@ if( 0 ) {
                         
                         # Track min/max incrementally (needed for comparison, but not calculating statistics here)
                         $log_analysis{$bucket}{count_min} = $count if !defined $log_analysis{$bucket}{count_min} || $count < $log_analysis{$bucket}{count_min};
-                        $log_analysis{$bucket}{count_max} = $count if !defined $log_analysis{$bucket}{count_max} || $count > $log_analysis{$bucket}{count_max};
-
-                        # print " OCCURRENCES: $log_analysis{$bucket}{count_occurrences} SUM: $log_analysis{$bucket}{count_sum} MIN: $log_analysis{$bucket}{count_min} MAX: $log_analysis{$bucket}{count_max}\n";
-                       
+                        $log_analysis{$bucket}{count_max} = $count if !defined $log_analysis{$bucket}{count_max} || $count > $log_analysis{$bucket}{count_max};                       
                     }
-
-                  #  printf "\033[0;35m[duration: %d] [bytes: %d]\033[0m\n", $duration, $bytes;
-                  #  printf "\033[0;35m[status: %s] [duration: %d] [bytes: %d]\033[0m\n", $category_bucket, $log_occurrences{$bucket}{duration}, $log_occurrences{$bucket}{bytes};
-                  #  $| = 1; # Flush output
                 }
 
                 ## CAPTURE THREAD AND THREAD POOL BASED STATISTICS DATA ##
                 if( ( defined $threadpool && $threadpool ne "" ) && ( ( defined $threadpool_activity_regex && $threadpool =~ /$threadpool_activity_regex/ ) || ( !defined $threadpool_activity_regex && $include_threadpool_summary ) ) ) {
-#                    $threadpool =~ s/[*\-!\#=\$\?]//g;
-#                    $thread =~ s/[*\-!\#=\$\?]//g;
-
                     # Thread Pool Based Statistics Capture (Overall Summary) #
                     $threadpool_activity{$category}{$threadpool}{$thread} = 0 if !defined $threadpool_activity{$category}{$threadpool}{$thread};
                     $threadpool_activity{$category}{$threadpool}{$thread} += 1;
@@ -1125,14 +1081,11 @@ if( 0 ) {
                     if( $category_bucket =~ /-HL$/ ) {                  # capture total duration and bytes for highlighted rows
                         $log_threadpools{$bucket}{$threadpool}{highlight}{$thread} += 1;
                     }
-
-#print "Thread Pool: $threadpool  Thread: $thread   $log_threadpools{$bucket}{$threadpool}{plain}{$thread}     Object: $object   Message: $message\n";
-#exit if $total_lines_included > 50;
                 }
             }
         }
-# I don't think that this should be here
-#        close $fh;
+
+        close $fh;
 
         print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
     }
