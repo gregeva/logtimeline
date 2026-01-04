@@ -119,7 +119,7 @@ my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex, $user_defined_metrics, $user_defined_metrics_regex, $user_defined_metrics_pre_regex, $user_defined_metrics_post_regex );
 my $pause_output = 0;
 my $omit_values = 0;
-my ( $sort_type, $sort_key ) = ( "occurrences", "occurrences" );
+my ( $sort_type, $sort_key, $sort_ascending ) = ( "occurrences", "occurrences", 0 );
 my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 my ( @in_files, @output_columns );
 my %in_files_matched;
@@ -258,7 +258,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort|-so occurrences,duration,bytes,impact] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -498,7 +498,8 @@ sub adapt_to_command_line_options {
         'count-max|cmax=i' => \$filter_count_max,
 	    'memory-usage|mem' => \$track_memory,
         'output-csv|o' => \$write_messages_to_csv,
-        'sort|so=s' => \$sort_type,
+        'sort-on|so=s' => \$sort_type,
+        'sort-ascending|sa' => \$sort_ascending,
         'threadpool-activity-summary|tpas' => \$include_threadpool_summary,
         'threadpool-activity|tpa=s' => \$threadpool_activity_regex,
         'user-defined-metrics|udm=s' => \$user_defined_metrics,
@@ -524,14 +525,34 @@ sub adapt_to_command_line_options {
 	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
 
     die print_usage( "unable to open any files" ) unless @in_files;
-    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( occurrences duration time bytes impact );
+    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( occurrences total duration time bytes size impact count count_occurrences count_total count_sum count_min count_mean count_avg count_max std_dev stddev min mean avg max);
 
     if( $sort_type =~ /^duration|time$/i ) {
         $sort_key = "total_duration_num";
-    } elsif( $sort_type =~ /^bytes$/i ) {
+    } elsif( $sort_type =~ /^min$/i ) {
+        $sort_key = "min";
+    } elsif( $sort_type =~ /^mean|avg$/i ) {
+        $sort_key = "mean";
+    } elsif( $sort_type =~ /^max$/i ) {
+        $sort_key = "max";
+    } elsif( $sort_type =~ /^std_dev|stddev$/i ) {
+        $sort_key = "std_dev";
+    } elsif( $sort_type =~ /^occurrences|total$/i ) {
+        $sort_key = "occurrences";
+    } elsif( $sort_type =~ /^bytes|size$/i ) {
         $sort_key = "total_bytes";
     } elsif( $sort_type =~ /^impact$/i ) {
         $sort_key = "impact";
+    } elsif( $sort_type =~ /^count_occurrences|count_total$/i ) {
+        $sort_key = "count_occurrences";
+    } elsif( $sort_type =~ /^count|count_sum$/i ) {
+        $sort_key = "count_sum";
+    } elsif( $sort_type =~ /^count_min$/i ) {
+        $sort_key = "count_min";
+    } elsif( $sort_type =~ /^count_mean|count_avg$/i ) {
+        $sort_key = "count_mean";
+    } elsif( $sort_type =~ /^count_max$/i ) {
+        $sort_key = "count_max";
     }
 
 # bookmark24
@@ -887,10 +908,6 @@ if( 0 ) {
     print "$match_type $category_bucket $object - $message\n";
     last if $total_lines_included >= 15;
 }
-
-# 2026-01-04 TO DO NEXT
-# need to fix statistics calculations where durations may not be present, but counts and bytes should still be calculated
-# make sure that there is a sort by count, as well as occurrences
 
             ## COUNT METRICS # capture count metrics unless explicitly omitted
             if( !$omit_count ) {
@@ -1319,16 +1336,29 @@ sub calculate_all_statistics {
     # if( $print_durations ) {
         foreach my $category (keys %log_messages) {
             # Collect and sort the log keys based on the count within each log_key
-            my @sorted_log_keys;
+            my (@sorted_log_keys, @top_keys);
 
-            @sorted_log_keys = sort {
-               my $occurrences_a = $log_messages{$category}{$a}{$sort_key} // 0;
-               my $occurrences_b = $log_messages{$category}{$b}{$sort_key} // 0;
-               $occurrences_b <=> $occurrences_a;
-            } keys %{$log_messages{$category}};
+            if( $sort_key !~ /min|mean|max|p1|p50|p75|p90|p95|p99|p999|sdt_dev|cv/ ) {
 
-            # Process only the top N log keys
-            my @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)]; 
+                @sorted_log_keys = sort {
+                    my $occurrences_a = $log_messages{$category}{$a}{$sort_key} // 0;
+                    my $occurrences_b = $log_messages{$category}{$b}{$sort_key} // 0;
+                    if( $sort_ascending ) {
+                        $occurrences_a <=> $occurrences_b;
+                    } else {
+                        $occurrences_b <=> $occurrences_a;
+                    }
+                } keys %{$log_messages{$category}};
+
+                # Process only the top N log keys
+                @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)]; 
+
+            } else {
+
+                # Sort by statistical metric which first needs to be calculated for all messages (will inevitably take longer)   
+                @top_keys = keys %{$log_messages{$category}}
+
+            }
 
             foreach my $log_key (@top_keys) {
                 my $aggregated_data = {};
@@ -1388,7 +1418,6 @@ sub calculate_all_statistics {
 #}
 
                 if( defined $aggregated_data->{total_duration} && !$omit_durations ) { 
-
                     my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
                     my $impact = $log_messages{$category}{$log_key}{impact};
                     #print "--- $log_key ---\n     Count: $aggregated_data->{occurrences}, Min: $min, Mean: $mean, Max: $max, P1: $p1, P50: $p50, P75: $p75, P90: $p90, P95: $p95, P99: $p99, P99.9: $p999, Std Dev: $std_dev, Coefficient of Variance: $cv, Z-score: N/A, Total duration: $aggregated_data->{total_duration}\n";
@@ -2517,14 +2546,20 @@ sub print_message_summary {
 #    );
 
     my %sorted_keys = ( 'highlight' => [], 'plain' => [] );
+
     foreach my $grouping ( qw( highlight plain ) ) {
         my @sorted_keys = sort {
             my $occurrences_a = $log_messages{$grouping}{$a}{$sort_key} // 0;
             my $occurrences_b = $log_messages{$grouping}{$b}{$sort_key} // 0;
-            $occurrences_b <=> $occurrences_a; 
+            if( $sort_ascending ) {
+                $occurrences_a <=> $occurrences_b;
+            } else {
+                $occurrences_b <=> $occurrences_a;
+            }
         } keys %{$log_messages{$grouping}};
 
         $sorted_keys{$grouping} = \@sorted_keys;
+
     }
 
     # Initialize the hash to store top message counts
@@ -2720,7 +2755,11 @@ sub print_threadpool_summary {
         my @sorted_keys = sort {
             my $occurrences_a = scalar keys %{$threadpool_activity{$grouping}{$a}} // 0;
             my $occurrences_b = scalar keys %{$threadpool_activity{$grouping}{$b}} // 0;
-            $occurrences_b <=> $occurrences_a; 
+            if( $sort_ascending ) {
+                $occurrences_a <=> $occurrences_b;
+            } else {
+                $occurrences_b <=> $occurrences_a;
+            }
         } keys %{$threadpool_activity{$grouping}};
 
         $sorted_keys{$grouping} = \@sorted_keys;
