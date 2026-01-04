@@ -22,15 +22,14 @@ Each request in the logs allow statistical analysis on number of requests, total
 
 ### Functional Requirements
 <!-- List what the feature must do -->
-1. Log lines containing RegEx pattern matching /\s[Cc]ount\s?=\s?(\d+)/ should extract and store the metric in the relevant parts of the data model
-2. The statistics calculated for the count metric should be the same as for the bytes metric
-3. The statistics should be included in the output CSV file if present
+1. Log lines containing RegEx pattern matching / count\s*=\s*(\d+)/ should extract and store the metric in the relevant parts of the data model
+2. The statistics calculated for the count metric should be the same ones calculated for the bytes metric
+3. The statistics should be included in the output CSV file if they are present and the CSF output is activated
 4. Message-based and time bucket based statistics should be calculated and stored in each of those hash data models
-5. The value of the 'count' metric should be replaced with ? so as to ensure proper message grouping
+5. The value of the 'count' metric in the original message text should be replaced with ? so as to ensure proper message grouping
 
 ### Non-Functional Requirements
 <!-- List performance, usability, compatibility, etc. requirements -->
-- Current implementation and use of 'Count', 'count' should be replaced with 'Occurences', 'occurrences' in order to avoid confusion with lexicon
 - Implementation approach should resemble what is presently used for the metric 'bytes', and be adapted to other user specified metrics capable of being used in combination with 'bytes' and 'count'
 - Data model should use legitmate and compatible Perl hash keys
 
