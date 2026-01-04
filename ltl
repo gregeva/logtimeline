@@ -332,13 +332,6 @@ sub convert_bytes {
 }
 
 
-sub visualize_carets {
-    my ($s) = @_;
-    $s =~ s/([\x00-\x1F])/'^' . chr(ord($1) + 64)/eg;  # ^@ .. ^_
-    $s =~ s/\x7F/^?/g;                                 # DEL
-    return $s;
-}
-
 
 sub format_bytes {
     my ($value, $unit) = @_;
@@ -405,7 +398,7 @@ sub format_number {
 
     # Format the value to 1 decimal place
     $formatted_value = sprintf("%.${decimals}f%s%s", $formatted_value, defined($space) ? " " : "", $formatted_unit eq "1" ? "" : $formatted_unit );
-    $formatted_value =~ s/\.0//;
+    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;                                                        # remove trailing .0 if present
 
     return $formatted_value;
 }
@@ -458,6 +451,13 @@ sub format_time {
     $unit_name = " " . $unit_name if defined( $space );
 
     return defined $value ? "$formatted_value$unit_name" : undef;
+}
+
+sub visualize_carets {
+    my ($s) = @_;
+    $s =~ s/([\x00-\x1F])/'^' . chr(ord($1) + 64)/eg;  # ^@ .. ^_
+    $s =~ s/\x7F/^?/g;                                 # DEL
+    return $s;
 }
 
 sub adapt_to_command_line_options {
@@ -886,8 +886,6 @@ if( 0 ) {
 }
 
 # 2026-01-04 TO DO NEXT
-# need to include a cmin and cmax command line option to include min and max counts from the command line for consistency with duration and bytes filtering
-# add a countNice function to format counts with K, M, B suffixes for printing inline with durationNice and bytesNice functions to fit consistently within the given column widths
 # need to fix statistics calculations where durations may not be present, but counts and bytes should still be calculated
 
 
@@ -2190,7 +2188,8 @@ if( defined $log_stats{$bucket}{$key} ) {
                         $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
                         push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};				# push trend value to CSV data list
                     } elsif( $key =~ /^count$/i ) {
-                        $trend_value = defined $log_stats{$bucket}{$key} ? " $log_stats{$bucket}{$key}" : "";
+                        # $trend_value = defined $log_stats{$bucket}{$key} ? " $log_stats{$bucket}{$key}" : "";
+                        $trend_value = " " . format_number( $log_stats{$bucket}{$key}, ' ', 2);
                         # push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};
                         foreach my $metric ( qw( occurrences min mean max sum ) ) {
                             my $key_metric = "${key}_${metric}";
