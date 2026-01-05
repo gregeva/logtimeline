@@ -849,15 +849,16 @@ sub read_and_process_logs {
                     $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/;
                     $object = $1;
                 }
-                
-
+            
             }
 
             ## COUNT METRICS # capture count metrics unless explicitly omitted
-            if( !$omit_count ) {
+            if( !$omit_count && defined $message ) {
                 ( $count ) = $message =~ / count\s*=\s*(\d+)/;
-                $message =~ s/ count\s*=\s*\d+/ count=?/g;		                              # mask out actual count values for grouping purposes
-                $is_access_log = 1 if defined $count && !$is_access_log;
+                if( defined $count ) {
+                    $message =~ s/ count\s*=\s*\d+/ count=?/g;                  # mask out actual count values for grouping purposes
+                    $is_access_log = 1;
+                }
             }
 
             ## THREAD POOL # populate if thread name was found
