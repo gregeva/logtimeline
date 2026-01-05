@@ -173,6 +173,6 @@ cpan install DateTime.pm
 cpan Win32::Process::Info
 cpanm Text::CSV
 
-pp -o ltl_static-binary_windows-amd64 ltl
+pp -o ltl_static-binary_windows-amd64.exe ltl
 
 
