@@ -4,6 +4,7 @@
 os=ubuntu
 version=20.04  # or ubuntu:22.04 if that’s your target baseline
 architecture=amd64
+#architecture=arm64
 export SCRIPT_NAME=ltl
 export PACKAGE_NAME="${SCRIPT_NAME}_static-binary_${os}-${architecture}"
 
