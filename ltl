@@ -10,6 +10,7 @@
 # - PRIORITY: clean up old shit like comments and code indentation
 # - PRIORITY: refactor data model for the data capture and statistics calculations (excess stuff confusing and wasting memory)
 # - investigate moving extraction and processing of bytes out of each of the conditions and put into a common section (be careful of log formats where bytes is implied by column and should not be overwritten)
+# - I'd like a way to change the normalization of messages per minute to second
 # - new command line options for "show-bytes and show-counts" to add these columns to the message table instead of the duration statistics (plan forward for unknown custom metric as well)
 # - add total counts for duration and bytes; what makes this harder to fit in is that there should obviously also be seperate counters for "highlight" (bottom of table makes sense, also summary table, or both)
 # - Add AND match possibility for include and exclude using RegEx lookahead (?=.*word)
@@ -741,7 +742,7 @@ sub read_and_process_logs {
                 $timestamp_str =~ tr/T/ /;
 
             ## Apache Tomcat Access Log with CodeBeamer format for Service Execution Time in ms ([%Dms]) and seconds ([%Ts])  ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, undef) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[(\d+.*)ms\] \[(.+)s\]/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, undef) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.])ms\] \[(.+)s\]/ ) {
                 $is_line_match = 1;
                 $match_type = 12;			# matching Tomcat access log CodeBeamer format 192.168.223.1 - - [29/Oct/2025:08:52:11 +0000] "GET /urlversioned/202510290803/images/newskin/login_page/icon_qa.png HTTP/1.1" 200 20097 [5ms] [0.005s]
 
@@ -756,7 +757,7 @@ sub read_and_process_logs {
                 $message = "[$session] $message" if defined $session && $include_session;	# include session if we found it in the logs
 
             ## Apache Tomcat Access Log with Service Execution Time (%D), and optionally thread (%I) and session (%S) ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?(\d+.*)?[ ]?(\S+)?[ ]?(\S+)?/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?/ ) {
                 $is_line_match = 1;
                 $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
                 $is_access_log = 1;
