@@ -741,7 +741,7 @@ sub read_and_process_logs {
                 $timestamp_str =~ tr/T/ /;
 
             ## Apache Tomcat Access Log with CodeBeamer format for Service Execution Time in ms ([%Dms]) and seconds ([%Ts])  ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, undef) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[(\d+)ms\] \[(.+)s\]/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, undef) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[(\d+.*)ms\] \[(.+)s\]/ ) {
                 $is_line_match = 1;
                 $match_type = 12;			# matching Tomcat access log CodeBeamer format 192.168.223.1 - - [29/Oct/2025:08:52:11 +0000] "GET /urlversioned/202510290803/images/newskin/login_page/icon_qa.png HTTP/1.1" 200 20097 [5ms] [0.005s]
 
@@ -756,7 +756,7 @@ sub read_and_process_logs {
                 $message = "[$session] $message" if defined $session && $include_session;	# include session if we found it in the logs
 
             ## Apache Tomcat Access Log with Service Execution Time (%D), and optionally thread (%I) and session (%S) ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?(\d+)?[ ]?(\S+)?[ ]?(\S+)?/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?(\d+.*)?[ ]?(\S+)?[ ]?(\S+)?/ ) {
                 $is_line_match = 1;
                 $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
                 $is_access_log = 1;
