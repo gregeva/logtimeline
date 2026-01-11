@@ -9,6 +9,10 @@
 # TO DO: the bytes for each message is captured, but not surfaced in the message results
 # - PRIORITY: clean up old shit like comments and code indentation
 # - PRIORITY: refactor data model for the data capture and statistics calculations (excess stuff confusing and wasting memory)
+# - Get Windows automated build working
+# - Try to get a Mac OS automated build working
+# - GitHub Actions to do automated packaging with versions and release notes
+# - Work in a "Test Mode" which would output a number of parameters and values during the run which could then be tested against for automated testing
 # - investigate moving extraction and processing of bytes out of each of the conditions and put into a common section (be careful of log formats where bytes is implied by column and should not be overwritten)
 # - I'd like a way to change the normalization of messages per minute to second
 # - new command line options for "show-bytes and show-counts" to add these columns to the message table instead of the duration statistics (plan forward for unknown custom metric as well)
