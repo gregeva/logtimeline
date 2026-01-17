@@ -1,17 +1,17 @@
 #!/opt/homebrew/bin/perl
 
 # TO DO
-# - [Prototyping] group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
-# - Adapt message field widths based on terminal width (object field and thread pool)
-# - Add message parse pattern for AkkaCommunications logs
-# - Filter options for min/max impact (count*duration)
-
-# TO DO: the bytes for each message is captured, but not surfaced in the message results
-# - PRIORITY: clean up old shit like comments and code indentation
 # - PRIORITY: refactor data model for the data capture and statistics calculations (excess stuff confusing and wasting memory)
+# - add sort for Coefficient of Variance, as this would allow similar sorting options like on stddev for the services with the greatest variability and would be more aligned with the displayed data
 # - Get Windows automated build working
 # - Try to get a Mac OS automated build working
 # - GitHub Actions to do automated packaging with versions and release notes
+# -----
+# - [Prototyping] group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
+# - Adapt message field widths based on terminal width (object field and thread pool)
+# - Add message parse pattern for AkkaCommunications logs
+# - Add message parse pattern for Windchill Apache 2 and Tomcat servers
+# - Filter options for min/max impact (count*duration)
 # - Work in a "Test Mode" which would output a number of parameters and values during the run which could then be tested against for automated testing
 # - investigate moving extraction and processing of bytes out of each of the conditions and put into a common section (be careful of log formats where bytes is implied by column and should not be overwritten)
 # - I'd like a way to change the normalization of messages per minute to second
@@ -24,20 +24,24 @@
 # - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
 # - add a soft memory limit (after having made most of the tweaks) to avoid accidents in production reading large files with 100k's of different messages - will need to optimize performance of memory checking
 # - Similar to JMC, percentile calculations should include the representative counts (perhaps this is in a summary chart at the end or specified to be added)
+#    - three graphs across the bottom, same colors as bytes, duration, count.  auto-centers and scales if there are 1, 2, 3.   shows percentiles, 50% value, 100% value in Y-Axis - give overall population representation in a glance of size, records, time
+#    - above could be optional (takes a lot of space), however a smaller one just for duration like in JMC could go next to file names
+# - rejig the overall totals in the section with the file names to show a table with the headings and counts per file, with overall totals at the bottom.  Would be tighter with far more information density.
+# - move execution times to the "options" line on the right side to show execution times discretely without taking up so much space (coded for easy testing/extraction)
 
 # BUGS
 # - when using the -o flag, combined with the -ov flag (and possibly others), metrics are not written to the CSV file as the sections are skipped in print bar chart column (needs refactoring)
 # - when using the -o flag, the provided command line options are used in the file name, however when using a long list of filters, the filename can be too long causing error - need to truncate the filename
 # - on very narrow terminals, the "processed files" heading and potentially file names will wrap and mess up the table
-# - when log files are small, as in less than 1000 lines, the message reading the lines will not print as it starts after 997 lines.  Given a scenario with hundreds of files each very small, there will be no reading indicator showing progress.
+# - when log files are small, as in less than 1000 lines, the message reading the lines will not print as it starts after 997 lines.  Given a scenario with hundreds of files each very small, there will be no reading indicator showing progress. (use Rolex ThingWorx Log files of 10 MB)
 # - print_durations=0 initiated by --omit-stats should not impeed statistical calculation of statistics for CSV output file
 # BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
-# - when using the -p (pause) option, the summary table and message lists do not pause for keypresses
+
 
 # NOT PRIORITY BACKLOG
 # - refactor thread pool summary and message summary views to use common code base for printing tables
 # - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
-# - add pagination support for the summary overview and the top messages
+# - add pagination support for the summary overview and the top messages - when using the -p (pause) option, the summary table and message lists do not pause for keypresses
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize) - would have to go thought all input files
 # - reading duration should have a variable which will determine what the units are and this will depend on the detected log file.  For example nginx uses seconds, most other use milliseconds.  Then convert to MS before adding to the stats map so that you can mix and match files with different units.
 # - add a feature to include/exclude HTTP status codes which would need to be converted to RegEx as 4xx isn't going to be matched to the actual line text from what the user enters
