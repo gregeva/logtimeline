@@ -15,6 +15,12 @@
 
 set -euo pipefail
 
+# Check Docker is available
+if ! command -v docker &>/dev/null; then
+    echo "[error] Docker not found. Please install Docker (Linux) or Rancher Desktop (macOS)."
+    exit 1
+fi
+
 # Configuration
 base_os=ubuntu
 target_os=windows
