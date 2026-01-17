@@ -70,7 +70,7 @@ if ($^O eq 'MSWin32') {                                                         
 }
 
 ## GLOBALS ##
-my $version_number = "redundant-data-structure-removal";
+my $version_number = "0.7.2";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
