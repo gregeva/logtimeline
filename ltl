@@ -70,7 +70,7 @@ if ($^O eq 'MSWin32') {                                                         
 }
 
 ## GLOBALS ##
-my $version_number = "0.7.2";
+my $version_number = "0.7.3";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
@@ -1530,8 +1530,8 @@ sub normalize_data_for_output {
     }
     push @output_columns, "totalOccurrences"; # if $category_bucket =~ /^err-rate$/;
 
-# WARNING: statically speaking the durations stats are 52 characters long with the leading double space - meaning the size calculation doesn't account properly for the line and column seperator
-    $durations_graph_width = $print_durations && !$omit_durations && !$omit_stats ? $graph_column_padding_latency + 50 + $graph_column_padding_all : 0;
+# Latency statistics column width: │ + 2 spaces + P50(11) + P95(11) + P99(11) + P999(11) + CV(7) = 54 chars
+    $durations_graph_width = $print_durations && !$omit_durations && !$omit_stats ? $graph_column_padding_latency + 52 + $graph_column_padding_all : 0;
 
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
     # $timestamp_length = length( strftime($output_timestamp_format, gmtime(0) ) ) + 1 + ( $print_milliseconds ? 4 : 0 ) ;     # +1 for built in space after timestamp
@@ -2030,16 +2030,15 @@ sub print_bar_graph {
                 $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width;
                 print " " x $missing_chars if $missing_chars > 0;
                 print "$colors{'bright-black'}│$colors{'NC'}  ";
-                if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p90} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{cv} || defined $log_stats{$bucket}{z_score} ) {
+                if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{p99} || defined $log_stats{$bucket}{p999} || defined $log_stats{$bucket}{cv} ) {
 
                     my $cv_color = defined $log_stats{$bucket}{cv} && $log_stats{$bucket}{cv} >= 20 ? 'WARN-HL' : 'white-underline';
-                    my $zscore_color = defined $log_stats{$bucket}{z_score} && $log_stats{$bucket}{z_score} >= 5 ? 'WARN-HL' : 'NC';
 
-                    defined $log_stats{$bucket}{p50} ? printf( "$colors{'bright-blue'}P50:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p50} ) >= 4 ? format_time( $log_stats{$bucket}{p50}, 'ms' ) : $log_stats{$bucket}{p50} ) ) : printf( " " x 6 );
-                    defined $log_stats{$bucket}{p90} ? printf( "$colors{'yellow'}P90:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p90} ) >= 4 ? format_time( $log_stats{$bucket}{p90}, 'ms' ) : $log_stats{$bucket}{p90} ) ) : printf( " " x 6 ); 
-                    defined $log_stats{$bucket}{p95} ? printf( "$colors{'red'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 6 );
-                    defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%5s$colors{'NC'} ", $log_stats{$bucket}{cv} ) : printf ( " " x 9 );
-                    defined $log_stats{$bucket}{z_score} ? printf( "$colors{$zscore_color}Z:%5s$colors{'NC'}", ( $log_stats{$bucket}{z_score} >= 100 ? format_number( $log_stats{$bucket}{z_score} =~ /(\d+)\.\d*/, undef, 0 ) : $log_stats{$bucket}{z_score} ) ) : printf( " " x 5 );
+                    defined $log_stats{$bucket}{p50} ? printf( "$colors{'cyan'}P50:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p50} ) >= 4 ? format_time( $log_stats{$bucket}{p50}, 'ms' ) : $log_stats{$bucket}{p50} ) ) : printf( " " x 11 );
+                    defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 11 );
+                    defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p99} ) >= 4 ? format_time( $log_stats{$bucket}{p99}, 'ms' ) : $log_stats{$bucket}{p99} ) ) : printf( " " x 11 );
+                    defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-5s$colors{'NC'} ", ( length( $log_stats{$bucket}{p999} ) >= 4 ? format_time( $log_stats{$bucket}{p999}, 'ms' ) : $log_stats{$bucket}{p999} ) ) : printf( " " x 11 );
+                    defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", $log_stats{$bucket}{cv} ) : printf ( " " x 7 );
 
                     foreach my $stat ( qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) ) {				# push statistics data to the CSV data list
                         push @csv_data, $log_stats{$bucket}{$stat};
