@@ -1,10 +1,10 @@
 #!/bin/bash
 #
 # Windows Automated Build Script
-# Builds Windows amd64 static binary using Docker + Wine + Strawberry Perl
+# Builds Windows amd64 static binary using Rancher Desktop + Wine + Strawberry Perl
 #
 # Requirements:
-#   - Docker (Linux) or Rancher Desktop (macOS)
+#   - Rancher Desktop (https://rancherdesktop.io/)
 #   - cpanfile generated (run ./build/generate-cpanfile.sh first)
 #
 # Usage:
@@ -15,9 +15,9 @@
 
 set -euo pipefail
 
-# Check Docker is available
+# Check container runtime is available (Rancher Desktop provides 'docker' command)
 if ! command -v docker &>/dev/null; then
-    echo "[error] Docker not found. Please install Docker (Linux) or Rancher Desktop (macOS)."
+    echo "[error] Container runtime not found. Please install Rancher Desktop: https://rancherdesktop.io/"
     exit 1
 fi
 
