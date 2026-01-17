@@ -119,7 +119,7 @@ docker run --rm -it --platform=linux/$architecture \
 
 
     # Build Windows exe
-    wine "$STRAWBERRY/perl/bin/perl.exe" -S pp -o ${PACKAGE_NAME}.exe ${SCRIPT_NAME}
+    wine "$STRAWBERRY/perl/bin/perl.exe" -S pp -o ../${PACKAGE_NAME}.exe ${SCRIPT_NAME}
 
     # Show result type
     file ${PACKAGE_NAME}.exe
