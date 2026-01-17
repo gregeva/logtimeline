@@ -141,7 +141,7 @@ This should output the version number (e.g., "0.7.3"). If this command fails or 
 
 **Expected Results**:
 - Script exits immediately with error
-- Error message: `[error] Rancher Desktop not found. Please install Rancher Desktop (Linux) or Rancher Desktop (macOS).`
+- Error message: `[error] Container runtime not found. Please install Rancher Desktop: https://rancherdesktop.io/`
 - Exit code is 1
 
 ##### Scenario 4: Missing cpanfile
@@ -223,6 +223,67 @@ file ltl_static-binary_windows-amd64.exe
 ## Documentation Requirements
 - Update build_notes if necessary
 - Ensure README mentions Windows build capability
+
+## Implementation Status
+
+### Completed
+- [x] Created feature branch `windows-automated-build`
+- [x] Removed `sleep infinity` that blocked script completion
+- [x] Removed `-it` flag to allow non-interactive execution
+- [x] Added Rancher Desktop availability check with clear error message
+- [x] Added cpanfile pre-check before build
+- [x] Added numbered progress steps (1/7 through 7/7)
+- [x] Added build verification using `wine ltl.exe -version`
+- [x] Documented ARM64 limitations (Strawberry Perl x64 only)
+- [x] Created comprehensive test plan with 7 scenarios
+
+### Commits
+1. `1dd376f` - Add automated Windows build with verification
+2. `e552c2d` - Add Rancher Desktop check and comprehensive test plan
+3. `5735aba` - Update references from Docker to Rancher Desktop
+
+### Remaining
+- [ ] Test Scenario 1: Successful build on Linux with Rancher Desktop
+- [ ] Test Scenario 2: Successful build on macOS with Rancher Desktop
+- [ ] Test Scenario 6: Verify built executable on actual Windows
+- [ ] Update acceptance criteria checkboxes based on test results
+- [ ] Merge to main once all tests pass
+
+## Next Steps (Pickup Point)
+
+To resume testing this feature:
+
+1. **Ensure Rancher Desktop is running**:
+   ```bash
+   docker --version  # Should return version info
+   ```
+
+2. **Run the build**:
+   ```bash
+   cd /Users/gregeva/Documents/GitHub/logtimeline
+   ./build/windows-package.sh
+   ```
+
+3. **Expected output progression**:
+   - `[1/7] Installing system packages...`
+   - `[2/7] Initializing Wine...`
+   - `[3/7] Downloading Strawberry Perl...`
+   - `[4/7] Extracting Strawberry Perl...`
+   - `[5/7] Installing PAR::Packer...`
+   - `[6/7] Installing dependencies from cpanfile...`
+   - `[7/7] Building Windows executable...`
+   - `Build Verification` section with version output
+   - `BUILD SUCCESSFUL: ltl_static-binary_windows-amd64.exe`
+
+4. **If build succeeds**, verify the output:
+   ```bash
+   file ltl_static-binary_windows-amd64.exe
+   # Expected: PE32+ executable (console) x86-64, for MS Windows
+   ```
+
+5. **If build fails**, check the error output and update the script as needed.
+
+6. **Once all tests pass**, update the acceptance criteria checkboxes and merge to main.
 
 ## Notes
 - The Strawberry Perl portable ZIP is ~200MB download
