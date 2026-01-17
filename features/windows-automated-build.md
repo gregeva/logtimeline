@@ -4,7 +4,7 @@
 `windows-automated-build`
 
 ## Overview
-Automate the Windows static binary build process using Docker with Wine and Strawberry Perl, enabling fully scripted builds from a Linux environment without manual intervention. Support both amd64 and arm64 architectures.
+Automate the Windows static binary build process using Rancher Desktop with Wine and Strawberry Perl, enabling fully scripted builds from a Linux environment without manual intervention. Support both amd64 and arm64 architectures.
 
 ## Background / Problem Statement
 The current `windows-package.sh` script has several issues preventing full automation:
@@ -33,7 +33,7 @@ The goal is to have a fully automated Windows build that can be triggered from C
 5. Consistent output naming: `ltl_static-binary_windows-{architecture}.exe`
 
 ### Non-Functional Requirements
-- Build must work on Linux host with Docker installed
+- Build must work on Linux host with Rancher Desktop installed
 - Build must work on macOS host with Rancher Desktop
 - Reasonable build time (under 15 minutes on typical hardware)
 - Clear error messages on failure
@@ -47,20 +47,20 @@ The goal is to have a fully automated Windows build that can be triggered from C
 - [ ] `./build/windows-package.sh` completes without hanging
 - [ ] Script exits with code 0 on success, non-zero on failure
 - [ ] Built executable verified by running `wine ltl.exe -version` and confirming version output
-- [ ] Build works on Linux Docker host
+- [ ] Build works on Linux Rancher Desktop host
 - [ ] Build works on macOS Rancher Desktop host
 - [ ] ARM64 support documented (feasibility, limitations)
 
 ## Technical Considerations
 
 ### Architecture: Wine + Strawberry Perl Approach
-The build uses a Docker container running Ubuntu with Wine to execute Strawberry Perl (a Windows Perl distribution). This allows:
+The build uses a Rancher Desktop container running Ubuntu with Wine to execute Strawberry Perl (a Windows Perl distribution). This allows:
 - Running Windows perl.exe and pp.exe via Wine
 - Using Windows-native PAR::Packer to create proper Windows executables
 - Building from any Linux/macOS host without a Windows machine
 
 ### Key Components
-1. **Docker base**: Ubuntu 20.04 (oldest LTS for glibc compatibility)
+1. **Rancher Desktop base**: Ubuntu 20.04 (oldest LTS for glibc compatibility)
 2. **Wine**: Executes Windows binaries in Linux
 3. **Strawberry Perl Portable**: Windows Perl distribution with full toolchain (gcc, gmake)
 4. **PAR::Packer (pp)**: Creates standalone executable from Perl script
@@ -100,14 +100,14 @@ This should output the version number (e.g., "0.7.3"). If this command fails or 
 ### Test Plan
 
 #### Prerequisites
-- Docker installed (Linux) or Rancher Desktop installed (macOS)
-- Docker daemon running
+- Rancher Desktop installed (Linux) or Rancher Desktop installed (macOS)
+- Rancher Desktop daemon running
 - Repository cloned with cpanfile generated
 
 #### Test Scenarios
 
 ##### Scenario 1: Successful Build on Linux
-**Environment**: Linux host with Docker
+**Environment**: Linux host with Rancher Desktop
 **Steps**:
 1. Ensure cpanfile exists: `ls build/cpanfile`
 2. Run build: `./build/windows-package.sh`
@@ -125,7 +125,7 @@ This should output the version number (e.g., "0.7.3"). If this command fails or 
 ##### Scenario 2: Successful Build on macOS with Rancher Desktop
 **Environment**: macOS host with Rancher Desktop
 **Steps**:
-1. Start Rancher Desktop and ensure Docker compatibility mode is enabled
+1. Start Rancher Desktop and ensure Rancher Desktop compatibility mode is enabled
 2. Verify docker command works: `docker --version`
 3. Ensure cpanfile exists: `ls build/cpanfile`
 4. Run build: `./build/windows-package.sh`
@@ -133,19 +133,19 @@ This should output the version number (e.g., "0.7.3"). If this command fails or 
 **Expected Results**:
 - Same as Scenario 1
 
-##### Scenario 3: Missing Docker
-**Environment**: Host without Docker installed
+##### Scenario 3: Missing Rancher Desktop
+**Environment**: Host without Rancher Desktop installed
 **Steps**:
-1. Uninstall or stop Docker
+1. Uninstall or stop Rancher Desktop
 2. Run build: `./build/windows-package.sh`
 
 **Expected Results**:
 - Script exits immediately with error
-- Error message: `[error] Docker not found. Please install Docker (Linux) or Rancher Desktop (macOS).`
+- Error message: `[error] Rancher Desktop not found. Please install Rancher Desktop (Linux) or Rancher Desktop (macOS).`
 - Exit code is 1
 
 ##### Scenario 4: Missing cpanfile
-**Environment**: Linux/macOS with Docker
+**Environment**: Linux/macOS with Rancher Desktop
 **Steps**:
 1. Remove or rename cpanfile: `mv build/cpanfile build/cpanfile.bak`
 2. Run build: `./build/windows-package.sh`
@@ -157,7 +157,7 @@ This should output the version number (e.g., "0.7.3"). If this command fails or 
 - Exit code is 1
 
 ##### Scenario 5: Network Failure During Strawberry Perl Download
-**Environment**: Linux/macOS with Docker but no internet access
+**Environment**: Linux/macOS with Rancher Desktop but no internet access
 **Steps**:
 1. Disconnect network or block github.com and sourceforge.net
 2. Run build: `./build/windows-package.sh`
@@ -185,7 +185,7 @@ This should output the version number (e.g., "0.7.3"). If this command fails or 
 ##### Scenario 7: CI/CD Integration Test
 **Environment**: CI/CD pipeline (GitHub Actions, Jenkins, etc.)
 **Steps**:
-1. Configure CI job with Docker support
+1. Configure CI job with Rancher Desktop support
 2. Run: `./build/windows-package.sh && echo "SUCCESS" || echo "FAILED"`
 3. Archive artifact: `ltl_static-binary_windows-amd64.exe`
 
