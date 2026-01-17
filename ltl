@@ -70,7 +70,7 @@ if ($^O eq 'MSWin32') {                                                         
 }
 
 ## GLOBALS ##
-my $version_number = "0.7.1";
+my $version_number = "redundant-data-structure-removal";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
@@ -1138,20 +1138,18 @@ sub calculate_all_statistics {
             }
         }
    
-        my $bucket_data = $log_analysis{$bucket};
-
         next if !defined( $log_analysis{$bucket}{occurrences} );
 
 # TO DO: I think that I can get rid of aggregate_data now that I've simplified the data model
-        $aggregated_data->{occurrences} += $bucket_data->{occurrences};
-        $aggregated_data->{total_duration} += $bucket_data->{total_duration};
-        $aggregated_data->{total_bytes} += $bucket_data->{total_bytes};
-        $aggregated_data->{sum_of_squares} += $bucket_data->{sum_of_squares};
-        push @{$aggregated_data->{durations}}, @{$bucket_data->{durations}};
-    
+        $aggregated_data->{occurrences} += $log_analysis{$bucket}{occurrences};
+        $aggregated_data->{total_duration} += $log_analysis{$bucket}{total_duration};
+        $aggregated_data->{total_bytes} += $log_analysis{$bucket}{total_bytes};
+        $aggregated_data->{sum_of_squares} += $log_analysis{$bucket}{sum_of_squares};
+        push @{$aggregated_data->{durations}}, @{$log_analysis{$bucket}{durations}};
+
         # Aggregate min/max across buckets
-        $aggregated_data->{count_min} = $bucket_data->{count_min} if defined $bucket_data->{count_min} && ( !defined $aggregated_data->{count_min} || $bucket_data->{count_min} < $aggregated_data->{count_min} );
-        $aggregated_data->{count_max} = $bucket_data->{count_max} if defined $bucket_data->{count_max} && ( !defined $aggregated_data->{count_max} || $bucket_data->{count_max} > $aggregated_data->{count_max} );
+        $aggregated_data->{count_min} = $log_analysis{$bucket}{count_min} if defined $log_analysis{$bucket}{count_min} && ( !defined $aggregated_data->{count_min} || $log_analysis{$bucket}{count_min} < $aggregated_data->{count_min} );
+        $aggregated_data->{count_max} = $log_analysis{$bucket}{count_max} if defined $log_analysis{$bucket}{count_max} && ( !defined $aggregated_data->{count_max} || $log_analysis{$bucket}{count_max} > $aggregated_data->{count_max} );
 
         # free up the memory from the data structure as it is no longer needed
         undef $log_analysis{$bucket}{durations};
@@ -1163,17 +1161,17 @@ sub calculate_all_statistics {
 
             $log_stats{$bucket} = {
                 occurrences   => $aggregated_data->{occurrences},
-                bytes         => $bucket_data->{total_bytes},
-                'bytes-HL'    => $bucket_data->{'total_bytes-HL'},
-                duration      => $bucket_data->{total_duration},
-                'duration-HL' => $bucket_data->{'total_duration-HL'},
-                count         => $bucket_data->{count_sum},
-                'count-HL'    => $bucket_data->{'count_sum-HL'},
-                count_occurrences => $bucket_data->{count_occurrences},
-                count_min     => $bucket_data->{count_min},
-                count_max     => $bucket_data->{count_max},
-                count_mean    => ( defined $bucket_data->{count_sum} && defined $bucket_data->{count_occurrences} && $bucket_data->{count_occurrences} > 0 ) ? round( $bucket_data->{count_sum} / $bucket_data->{count_occurrences} ) : undef,
-                count_sum     => $bucket_data->{count_sum},
+                bytes         => $log_analysis{$bucket}{total_bytes},
+                'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
+                duration      => $log_analysis{$bucket}{total_duration},
+                'duration-HL' => $log_analysis{$bucket}{'total_duration-HL'},
+                count         => $log_analysis{$bucket}{count_sum},
+                'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
+                count_occurrences => $log_analysis{$bucket}{count_occurrences},
+                count_min     => $log_analysis{$bucket}{count_min},
+                count_max     => $log_analysis{$bucket}{count_max},
+                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? round( $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences} ) : undef,
+                count_sum     => $log_analysis{$bucket}{count_sum},
                 min           => $min,
                 mean          => $mean,
                 max           => $max,
@@ -1186,7 +1184,7 @@ sub calculate_all_statistics {
                 p999          => $p999,
                 std_dev       => $std_dev,
                 cv            => $cv,
-                z_score       => undef 
+                z_score       => undef
             };
     
             # Calculate rolling mean and std_dev
@@ -1214,17 +1212,17 @@ sub calculate_all_statistics {
             # This will catch the situation where there are no durations, printing them has been disabled, or they were not captured.
             $log_stats{$bucket} = {
                 occurrences   => $aggregated_data->{occurrences},
-                bytes         => $bucket_data->{total_bytes},
-                'bytes-HL'    => $bucket_data->{'total_bytes-HL'},
-                duration      => $bucket_data->{total_duration},
-                'duration-HL' => $bucket_data->{'total_duration-HL'},
-                count         => $bucket_data->{count_sum},
-                'count-HL'    => $bucket_data->{'count_sum-HL'},
-                count_occurrences => $bucket_data->{count_occurrences},
-                count_min     => $bucket_data->{count_min},
-                count_max     => $bucket_data->{count_max},
-                count_mean    => ( defined $bucket_data->{count_sum} && defined $bucket_data->{count_occurrences} && $bucket_data->{count_occurrences} > 0 ) ? round( $bucket_data->{count_sum} / $bucket_data->{count_occurrences} ) : undef,
-                count_sum     => $bucket_data->{count_sum}
+                bytes         => $log_analysis{$bucket}{total_bytes},
+                'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
+                duration      => $log_analysis{$bucket}{total_duration},
+                'duration-HL' => $log_analysis{$bucket}{'total_duration-HL'},
+                count         => $log_analysis{$bucket}{count_sum},
+                'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
+                count_occurrences => $log_analysis{$bucket}{count_occurrences},
+                count_min     => $log_analysis{$bucket}{count_min},
+                count_max     => $log_analysis{$bucket}{count_max},
+                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? round( $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences} ) : undef,
+                count_sum     => $log_analysis{$bucket}{count_sum}
             }
         }
     }
@@ -1263,23 +1261,20 @@ sub calculate_all_statistics {
                     }
                 } 
 
-                my $message_data = $log_messages{$category}{$log_key};
+                next if !defined( $log_messages{$category}{$log_key}{occurrences} );
 
-                next if !defined( $message_data->{occurrences} );
-    
-                $aggregated_data->{occurrences} += $message_data->{occurrences};
-                $aggregated_data->{total_bytes} += $message_data->{total_bytes} if defined $message_data->{total_bytes};
-                
-                if( defined $message_data->{total_duration} && !$omit_durations ) {
-                    $aggregated_data->{total_duration} += $message_data->{total_duration};
-                    $aggregated_data->{sum_of_squares} += $message_data->{sum_of_squares};
-                    push @{$aggregated_data->{durations}}, @{$message_data->{durations}};
+                $aggregated_data->{occurrences} += $log_messages{$category}{$log_key}{occurrences};
+                $aggregated_data->{total_bytes} += $log_messages{$category}{$log_key}{total_bytes} if defined $log_messages{$category}{$log_key}{total_bytes};
+
+                if( defined $log_messages{$category}{$log_key}{total_duration} && !$omit_durations ) {
+                    $aggregated_data->{total_duration} += $log_messages{$category}{$log_key}{total_duration};
+                    $aggregated_data->{sum_of_squares} += $log_messages{$category}{$log_key}{sum_of_squares};
+                    push @{$aggregated_data->{durations}}, @{$log_messages{$category}{$log_key}{durations}};
                 }
 
-                if( defined $aggregated_data->{total_duration} && !$omit_durations ) { 
+                if( defined $aggregated_data->{total_duration} && !$omit_durations ) {
                     my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
-                    my $impact = $log_messages{$category}{$log_key}{impact};
-    
+
                     $log_messages{$category}{$log_key}{min} = $min;
                     $log_messages{$category}{$log_key}{mean} = $mean;
                     $log_messages{$category}{$log_key}{max} = $max;
@@ -1297,12 +1292,12 @@ sub calculate_all_statistics {
                 }
 
                 $log_messages{$category}{$log_key}{total_bytes} = $aggregated_data->{total_bytes} if defined $aggregated_data->{total_bytes};
-  
-                $log_messages{$category}{$log_key}{count_occurrences} = $message_data->{count_occurrences} if defined $message_data->{count_occurrences};
-                $log_messages{$category}{$log_key}{count_min} = $message_data->{count_min} if defined $message_data->{count_min};
-                $log_messages{$category}{$log_key}{count_mean} = ( defined $message_data->{count_sum} && defined $message_data->{count_occurrences} && $message_data->{count_occurrences} > 0 ) ? round( $message_data->{count_sum} / $message_data->{count_occurrences} ) : undef if defined $message_data->{count_occurrences};
-                $log_messages{$category}{$log_key}{count_max} = $message_data->{count_max} if defined $message_data->{count_max};
-                $log_messages{$category}{$log_key}{count_sum} = $message_data->{count_sum} if defined $message_data->{count_sum};
+
+                $log_messages{$category}{$log_key}{count_occurrences} = $log_messages{$category}{$log_key}{count_occurrences} if defined $log_messages{$category}{$log_key}{count_occurrences};
+                $log_messages{$category}{$log_key}{count_min} = $log_messages{$category}{$log_key}{count_min} if defined $log_messages{$category}{$log_key}{count_min};
+                $log_messages{$category}{$log_key}{count_mean} = ( defined $log_messages{$category}{$log_key}{count_sum} && defined $log_messages{$category}{$log_key}{count_occurrences} && $log_messages{$category}{$log_key}{count_occurrences} > 0 ) ? round( $log_messages{$category}{$log_key}{count_sum} / $log_messages{$category}{$log_key}{count_occurrences} ) : undef if defined $log_messages{$category}{$log_key}{count_occurrences};
+                $log_messages{$category}{$log_key}{count_max} = $log_messages{$category}{$log_key}{count_max} if defined $log_messages{$category}{$log_key}{count_max};
+                $log_messages{$category}{$log_key}{count_sum} = $log_messages{$category}{$log_key}{count_sum} if defined $log_messages{$category}{$log_key}{count_sum};
                 
                 # 2026-01-04 TO DO: free up the memory from the data structure as it is no longer needed (don't think that below logic was actually working as intended)
                 # undef $log_messages{$category}{$log_key}{durations};
