@@ -2,6 +2,7 @@
 
 # TO DO
 # - PRIORITY: refactor data model for the data capture and statistics calculations (excess stuff confusing and wasting memory)
+# - Build heat map prototype (width 51 chars) for reflection as to optional replacement for the latency statistics (min -> max for range showing the entire population in each row)
 # - add sort for Coefficient of Variance, as this would allow similar sorting options like on stddev for the services with the greatest variability and would be more aligned with the displayed data
 # - Get Windows automated build working
 # - Try to get a Mac OS automated build working
