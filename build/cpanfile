@@ -10,4 +10,3 @@ requires 'Text::CSV';
 requires 'Text::CSV_PP';
 requires 'Time::HiRes';
 requires 'Time::Piece';
-requires 'Win32::Process::Info';

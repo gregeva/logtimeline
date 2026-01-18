@@ -60,7 +60,8 @@ use Term::ReadKey;
 use Getopt::Long;
 use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
-use Proc::ProcessTable;
+# Proc::ProcessTable is loaded conditionally in get_memory_usage() based on platform
+# On Windows, Win32::Process::Info is used instead
 use List::Util qw(min max);
 use Text::CSV;
 use Text::CSV_PP;
