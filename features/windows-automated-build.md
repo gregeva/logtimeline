@@ -4,21 +4,19 @@
 `windows-automated-build`
 
 ## Overview
-Automate the Windows static binary build process using Rancher Desktop with Wine and Strawberry Perl, enabling fully scripted builds from a Linux environment without manual intervention. Support both amd64 and arm64 architectures.
+Automate the Windows static binary build process using Rancher Desktop with Wine and Strawberry Perl, enabling fully scripted builds from a Linux environment without manual intervention. The x86_64 (amd64) build works on both native x64 and ARM64 Windows devices.
 
 ## Background / Problem Statement
 The current `windows-package.sh` script has several issues preventing full automation:
 - Contains `sleep infinity` at the end which blocks script completion
 - Lacks proper error handling and exit status reporting
-- No ARM64 Windows support
 - Output path handling inconsistencies
 - Missing verification of the built executable
 
 The goal is to have a fully automated Windows build that can be triggered from CI/CD or command line on Linux/macOS, similar to the Ubuntu build process.
 
 ## Goals
-- Fully automated Windows amd64 static binary build with no manual intervention
-- Investigate and document ARM64 Windows build feasibility
+- Fully automated Windows x86_64 static binary build with no manual intervention
 - Consistent build artifact naming and placement
 - Proper exit status for CI/CD integration
 - Build verification using `ltl -version` to confirm executable runs
@@ -26,11 +24,10 @@ The goal is to have a fully automated Windows build that can be triggered from C
 ## Requirements
 
 ### Functional Requirements
-1. Windows amd64 build completes without manual intervention
+1. Windows x86_64 build completes without manual intervention
 2. Build script exits with proper status code (0 for success, non-zero for failure)
 3. Built executable is verified by running `ltl -version` via Wine
-4. Support architecture selection via variable or parameter
-5. Consistent output naming: `ltl_static-binary_windows-{architecture}.exe`
+4. Consistent output naming: `ltl_static-binary_windows-amd64.exe`
 
 ### Non-Functional Requirements
 - Build must work on Linux host with Rancher Desktop installed
@@ -49,7 +46,7 @@ The goal is to have a fully automated Windows build that can be triggered from C
 - [x] Built executable verified by running `wine ltl.exe -version` and confirming version output
 - [ ] Build works on Linux Rancher Desktop host
 - [x] Build works on macOS Rancher Desktop host
-- [x] ARM64 support documented (feasibility, limitations)
+- [x] ARM64 Windows compatibility documented (x86_64 build runs via emulation)
 
 ## Technical Considerations
 
@@ -70,12 +67,11 @@ The build uses a Rancher Desktop container running Ubuntu with Wine to execute S
 - Fallback: SourceForge mirror
 - Asset pattern: `*64bit-portable.zip`
 
-### ARM64 Windows Considerations
-ARM64 Windows support is limited:
-- Strawberry Perl does not currently provide ARM64 builds
-- Wine on ARM64 Linux can emulate x86_64 Windows (via qemu-user)
-- Most ARM64 Windows devices run x64 emulation layer anyway
-- Recommendation: Focus on x64 which runs natively or emulated on ARM64 Windows
+### ARM64 Windows Compatibility
+The x86_64 (amd64) build works on ARM64 Windows devices:
+- **No native ARM64 build needed**: Windows 11 on ARM includes an excellent x86_64 emulation layer that runs the amd64 executable seamlessly
+- **Strawberry Perl limitation**: Strawberry Perl does not provide native ARM64 Windows builds ([GitHub issue #28](https://github.com/StrawberryPerl/Perl-Dist-Strawberry/issues/28), [issue #218](https://github.com/StrawberryPerl/Perl-Dist-Strawberry/issues/218))
+- **Recommendation**: Use `ltl_static-binary_windows-amd64.exe` on all Windows devices (x64 and ARM64)
 
 ### Build Output
 - Location: Repository root (one level up from build/)
