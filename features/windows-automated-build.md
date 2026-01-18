@@ -44,12 +44,12 @@ The goal is to have a fully automated Windows build that can be triggered from C
 - As a release manager, I want consistent artifact naming for predictable deployment
 
 ## Acceptance Criteria
-- [ ] `./build/windows-package.sh` completes without hanging
-- [ ] Script exits with code 0 on success, non-zero on failure
-- [ ] Built executable verified by running `wine ltl.exe -version` and confirming version output
+- [x] `./build/windows-package.sh` completes without hanging
+- [x] Script exits with code 0 on success, non-zero on failure
+- [x] Built executable verified by running `wine ltl.exe -version` and confirming version output
 - [ ] Build works on Linux Rancher Desktop host
-- [ ] Build works on macOS Rancher Desktop host
-- [ ] ARM64 support documented (feasibility, limitations)
+- [x] Build works on macOS Rancher Desktop host
+- [x] ARM64 support documented (feasibility, limitations)
 
 ## Technical Considerations
 
@@ -236,18 +236,25 @@ file ltl_static-binary_windows-amd64.exe
 - [x] Added build verification using `wine ltl.exe -version`
 - [x] Documented ARM64 limitations (Strawberry Perl x64 only)
 - [x] Created comprehensive test plan with 7 scenarios
+- [x] Fixed platform-specific module loading (Proc::ProcessTable vs Win32::Process::Info)
+- [x] Created platform-specific cpanfiles (cpanfile for Unix, cpanfile.windows for Windows)
+- [x] Updated generate-cpanfile.sh to support platform argument
+- [x] Added explicit -M flags for dynamically loaded DateTime modules
+- [x] Configured Wine PATH for Strawberry Perl toolchain (gmake, gcc)
+- [x] Verified successful build on macOS with Rancher Desktop
 
 ### Commits
 1. `1dd376f` - Add automated Windows build with verification
 2. `e552c2d` - Add Rancher Desktop check and comprehensive test plan
 3. `5735aba` - Update references from Docker to Rancher Desktop
+4. (pending) - Fix platform-specific modules and cpanfile generation
 
 ### Remaining
 - [ ] Test Scenario 1: Successful build on Linux with Rancher Desktop
-- [ ] Test Scenario 2: Successful build on macOS with Rancher Desktop
+- [x] Test Scenario 2: Successful build on macOS with Rancher Desktop
 - [ ] Test Scenario 6: Verify built executable on actual Windows
-- [ ] Update acceptance criteria checkboxes based on test results
-- [ ] Merge to main once all tests pass
+- [x] Update acceptance criteria checkboxes based on test results
+- [ ] Commit changes and merge to main
 
 ## Next Steps (Pickup Point)
 
@@ -270,7 +277,7 @@ To resume testing this feature:
    - `[3/7] Downloading Strawberry Perl...`
    - `[4/7] Extracting Strawberry Perl...`
    - `[5/7] Installing PAR::Packer...`
-   - `[6/7] Installing dependencies from cpanfile...`
+   - `[6/7] Installing dependencies from cpanfile.windows...`
    - `[7/7] Building Windows executable...`
    - `Build Verification` section with version output
    - `BUILD SUCCESSFUL: ltl_static-binary_windows-amd64.exe`
@@ -289,4 +296,6 @@ To resume testing this feature:
 - The Strawberry Perl portable ZIP is ~200MB download
 - Wine initialization takes some time on first run
 - Full build typically takes 5-10 minutes depending on network and CPU
-- cpanfile must be generated before running build (see `generate-cpanfile.sh`)
+- cpanfile.windows must be generated before running build (run `./build/generate-cpanfile.sh`)
+- The generate-cpanfile.sh script now generates both Unix and Windows cpanfiles by default
+- Platform-specific modules: Unix uses Proc::ProcessTable, Windows uses Win32::Process::Info
