@@ -200,7 +200,7 @@ sub generate_realistic_data {
     return (\@data, $max_requests);
 }
 
-# Generate highlight data (subset - e.g., requests matching a filter)
+# Generate multiple highlight datasets for different filter scenarios
 sub generate_highlight_data {
     my ($main_data_ref) = @_;
     my @highlight_data;
@@ -209,10 +209,77 @@ sub generate_highlight_data {
         my @hl_row;
         for my $i (0 .. $#$row) {
             my $val = $row->[$i];
-            # Highlight: requests in the "slow" range (middle-right of heatmap)
-            # Simulates: -highlight "GET /api/slow-endpoint"
-            if ($i > 20 && $i < 40 && $val > 0.05) {
-                push @hl_row, $val * (0.3 + rand() * 0.4);  # Portion of requests
+            # Highlight pattern: every other bucket with significant density
+            # This creates a diverse pattern across ALL density levels
+            # Simulates: -highlight "POST" (which appears across fast and slow requests)
+            if ($i % 2 == 0 && $val > 0.01) {
+                push @hl_row, $val * (0.6 + rand() * 0.4);  # 60-100% of requests match
+            } else {
+                push @hl_row, 0;
+            }
+        }
+        push @highlight_data, \@hl_row;
+    }
+
+    return @highlight_data;
+}
+
+# Generate highlight for fast requests only (left side, high density)
+sub generate_highlight_fast {
+    my ($main_data_ref) = @_;
+    my @highlight_data;
+
+    for my $row (@$main_data_ref) {
+        my @hl_row;
+        for my $i (0 .. $#$row) {
+            my $val = $row->[$i];
+            # Highlight fast requests (buckets 0-12, the bright yellow area)
+            if ($i <= 12 && $val > 0.02) {
+                push @hl_row, $val * (0.5 + rand() * 0.5);
+            } else {
+                push @hl_row, 0;
+            }
+        }
+        push @highlight_data, \@hl_row;
+    }
+
+    return @highlight_data;
+}
+
+# Generate highlight for slow requests only
+sub generate_highlight_slow {
+    my ($main_data_ref) = @_;
+    my @highlight_data;
+
+    for my $row (@$main_data_ref) {
+        my @hl_row;
+        for my $i (0 .. $#$row) {
+            my $val = $row->[$i];
+            # Highlight slow requests (buckets 15+)
+            if ($i >= 15 && $val > 0.005) {
+                push @hl_row, $val * (0.7 + rand() * 0.3);
+            } else {
+                push @hl_row, 0;
+            }
+        }
+        push @highlight_data, \@hl_row;
+    }
+
+    return @highlight_data;
+}
+
+# Generate highlight for middle/DB range
+sub generate_highlight_db {
+    my ($main_data_ref) = @_;
+    my @highlight_data;
+
+    for my $row (@$main_data_ref) {
+        my @hl_row;
+        for my $i (0 .. $#$row) {
+            my $val = $row->[$i];
+            # Highlight DB query range (buckets 5-20)
+            if ($i >= 5 && $i <= 20 && $val > 0.01) {
+                push @hl_row, $val * (0.5 + rand() * 0.5);
             } else {
                 push @hl_row, 0;
             }
@@ -470,6 +537,351 @@ sub render_with_highlight {
     print " normal\n";
 }
 
+# Side-by-side highlight comparison - normal vs filtered for each row
+sub render_highlight_sidebyside {
+    my ($data_ref, $highlight_ref, $metric) = @_;
+
+    print_header("Side-by-Side Highlight Comparison", "Each time bucket shown with and without highlight filter");
+    print "  Compare 'normal' (all traffic) vs 'filter' (highlighted subset)\n";
+    print "  Filter simulates: -highlight 'GET /api/slow' (slow requests in 400-1500ms range)\n\n";
+
+    my $hl_bg = $highlight_bg_colors{$metric};
+
+    # Show latency scale once at top
+    print "                    │ ";
+    print "0ms        500ms       1s         2s        5s\n";
+    print "  " . "─" x 16 . "┼" . "─" x ($heatmap_width + 2) . "\n";
+
+    for my $i (0 .. $#$data_ref) {
+        my $row = $data_ref->[$i];
+        my $hl_row = $highlight_ref->[$i];
+        my $hour = 8 + $i;
+
+        # Print normal row
+        my $label_normal = sprintf("  %02d:00 normal │ ", $hour);
+        print $label_normal;
+        for my $j (0 .. $#$row) {
+            my $density = $row->[$j];
+            if ($density < 0.02) {
+                print " ";
+            } else {
+                my $color = get_density_color($metric, $density);
+                print fg_color($color) . $blocks{'full'} . $RESET;
+            }
+        }
+        print "\n";
+
+        # Print highlighted row
+        my $label_filter = "        filter │ ";
+        print $label_filter;
+        for my $j (0 .. $#$row) {
+            my $density = $row->[$j];
+            my $hl_density = $hl_row->[$j];
+
+            if ($density < 0.02) {
+                print " ";
+            } elsif ($hl_density > 0.02) {
+                my $color = get_density_color($metric, $density);
+                print bg_color($hl_bg) . fg_color($color) . $blocks{'full'} . $RESET;
+            } else {
+                my $color = get_density_color($metric, $density);
+                print fg_color($color) . $blocks{'full'} . $RESET;
+            }
+        }
+        print "\n";
+
+        # Add spacing between time bucket pairs
+        print "\n" if $i < $#$data_ref;
+    }
+
+    print "\n  Legend: ";
+    print bg_color($hl_bg) . fg_color(0) . "█" . $RESET . " = highlighted requests  ";
+    my @gradient = @{$color_gradients{$metric}};
+    print fg_color($gradient[0]) . "█" . $RESET . "→";
+    print fg_color($gradient[$#gradient]) . "█" . $RESET . " = density (few→many)\n";
+}
+
+# Different highlight filter scenarios on same data
+sub render_highlight_scenarios {
+    my ($data_ref, $metric) = @_;
+
+    print_header("Highlight Filter Scenarios", "Different filters applied to the same time bucket");
+    print "  Shows how different -highlight patterns isolate different request populations\n\n";
+
+    my $sample_row = $data_ref->[7];  # Use middle row
+
+    # Define filter scenarios
+    my @scenarios = (
+        {
+            name => "No filter (baseline)",
+            desc => "all traffic",
+            filter => sub { return 0; },
+            bg => undef
+        },
+        {
+            name => "Fast requests (<100ms)",
+            desc => "-highlight 'cache hit'",
+            filter => sub { my ($idx, $w) = @_; return $idx < int($w * 0.15); },
+            bg => 51   # cyan
+        },
+        {
+            name => "Medium requests (100-500ms)",
+            desc => "-highlight 'DB query'",
+            filter => sub { my ($idx, $w) = @_; return $idx >= int($w * 0.15) && $idx < int($w * 0.4); },
+            bg => 201  # magenta
+        },
+        {
+            name => "Slow requests (500ms-2s)",
+            desc => "-highlight 'API call'",
+            filter => sub { my ($idx, $w) = @_; return $idx >= int($w * 0.4) && $idx < int($w * 0.7); },
+            bg => 226  # yellow
+        },
+        {
+            name => "Very slow requests (>2s)",
+            desc => "-highlight 'timeout'",
+            filter => sub { my ($idx, $w) = @_; return $idx >= int($w * 0.7); },
+            bg => 231  # white
+        },
+    );
+
+    # Print latency scale
+    print "                              │ ";
+    print "0ms        500ms       1s         2s        5s\n";
+    print "  " . "─" x 28 . "┼" . "─" x ($heatmap_width + 2) . "\n\n";
+
+    for my $scenario (@scenarios) {
+        my $label = sprintf("  %-28s│ ", $scenario->{name});
+        print $label;
+
+        for my $j (0 .. $#$sample_row) {
+            my $density = $sample_row->[$j];
+            my $is_highlighted = $scenario->{filter}->($j, $heatmap_width);
+
+            if ($density < 0.02) {
+                print " ";
+            } elsif ($is_highlighted && defined $scenario->{bg}) {
+                my $color = get_density_color($metric, $density);
+                print bg_color($scenario->{bg}) . fg_color($color) . $blocks{'full'} . $RESET;
+            } else {
+                my $color = get_density_color($metric, $density);
+                print fg_color($color) . $blocks{'full'} . $RESET;
+            }
+        }
+        print "  $scenario->{desc}\n";
+    }
+
+    print "\n  Legend:\n";
+    print "    " . bg_color(51) . fg_color(0) . "█" . $RESET . " cyan bg    = fast/cache hits\n";
+    print "    " . bg_color(201) . fg_color(0) . "█" . $RESET . " magenta bg = DB queries\n";
+    print "    " . bg_color(226) . fg_color(0) . "█" . $RESET . " yellow bg  = API calls\n";
+    print "    " . bg_color(231) . fg_color(0) . "█" . $RESET . " white bg   = timeouts\n";
+}
+
+# Compare different background colors for highlighting
+sub render_highlight_bg_comparison {
+    my ($data_ref, $highlight_ref, $metric) = @_;
+
+    print_header("Highlight Background Color Options", "Same highlight with different background colors");
+    print "  Helps choose the best background color for visibility on your terminal\n\n";
+
+    my $sample_row = $data_ref->[10];  # Use a row with good highlight data
+    my $hl_row = $highlight_ref->[10];
+
+    my @bg_options = (
+        { name => "Yellow (226)",   bg => 226 },
+        { name => "White (231)",    bg => 231 },
+        { name => "Cyan (51)",      bg => 51 },
+        { name => "Magenta (201)",  bg => 201 },
+        { name => "Orange (208)",   bg => 208 },
+        { name => "Green (46)",     bg => 46 },
+        { name => "Red (196)",      bg => 196 },
+        { name => "Blue (21)",      bg => 21 },
+    );
+
+    for my $opt (@bg_options) {
+        my $label = sprintf("  %-16s│ ", $opt->{name});
+        print $label;
+
+        for my $j (0 .. $#$sample_row) {
+            my $density = $sample_row->[$j];
+            my $hl_density = $hl_row->[$j];
+
+            if ($density < 0.02) {
+                print " ";
+            } elsif ($hl_density > 0.02) {
+                my $color = get_density_color($metric, $density);
+                print bg_color($opt->{bg}) . fg_color($color) . $blocks{'full'} . $RESET;
+            } else {
+                my $color = get_density_color($metric, $density);
+                print fg_color($color) . $blocks{'full'} . $RESET;
+            }
+        }
+        print "\n";
+    }
+
+    print "\n  Recommendation: Yellow or White typically provide best contrast\n";
+    print "  with the yellow/brown density gradient.\n";
+}
+
+# Side-by-side with multiple highlight types
+sub render_highlight_sidebyside_multi {
+    my ($data_ref, $hl_fast_ref, $hl_db_ref, $hl_slow_ref, $metric) = @_;
+
+    print_header("Multi-Filter Side-by-Side Comparison", "Same time buckets with different highlight filters");
+    print "  Shows how different filters highlight different density regions\n\n";
+
+    my $hl_bg = $highlight_bg_colors{$metric};
+
+    # Show a subset of rows for clarity
+    my @rows_to_show = (2, 5, 8, 11);  # Peak traffic times
+
+    print "                        │ ";
+    print "0ms        500ms       1s         2s        5s\n";
+    print "  " . "─" x 20 . "┼" . "─" x ($heatmap_width + 2) . "\n";
+
+    for my $i (@rows_to_show) {
+        my $row = $data_ref->[$i];
+        my $hl_fast = $hl_fast_ref->[$i];
+        my $hl_db = $hl_db_ref->[$i];
+        my $hl_slow = $hl_slow_ref->[$i];
+        my $hour = 8 + $i;
+
+        # Normal (no highlight)
+        print sprintf("  %02d:00 %-12s│ ", $hour, "normal");
+        for my $j (0 .. $#$row) {
+            my $density = $row->[$j];
+            if ($density < 0.02) { print " "; }
+            else {
+                my $color = get_density_color($metric, $density);
+                print fg_color($color) . $blocks{'full'} . $RESET;
+            }
+        }
+        print "\n";
+
+        # Fast requests highlighted (bright yellow bg on bright chars)
+        print sprintf("        %-12s│ ", "fast filter");
+        for my $j (0 .. $#$row) {
+            my $density = $row->[$j];
+            my $hl = $hl_fast->[$j];
+            if ($density < 0.02) { print " "; }
+            elsif ($hl > 0.02) {
+                my $color = get_density_color($metric, $density);
+                print bg_color($hl_bg) . fg_color($color) . $blocks{'full'} . $RESET;
+            } else {
+                my $color = get_density_color($metric, $density);
+                print fg_color($color) . $blocks{'full'} . $RESET;
+            }
+        }
+        print "  ← bright yellow on bright yellow\n";
+
+        # DB range highlighted (medium density)
+        print sprintf("        %-12s│ ", "DB filter");
+        for my $j (0 .. $#$row) {
+            my $density = $row->[$j];
+            my $hl = $hl_db->[$j];
+            if ($density < 0.02) { print " "; }
+            elsif ($hl > 0.02) {
+                my $color = get_density_color($metric, $density);
+                print bg_color(201) . fg_color($color) . $blocks{'full'} . $RESET;  # magenta bg
+            } else {
+                my $color = get_density_color($metric, $density);
+                print fg_color($color) . $blocks{'full'} . $RESET;
+            }
+        }
+        print "  ← magenta on medium\n";
+
+        # Slow requests highlighted
+        print sprintf("        %-12s│ ", "slow filter");
+        for my $j (0 .. $#$row) {
+            my $density = $row->[$j];
+            my $hl = $hl_slow->[$j];
+            if ($density < 0.02) { print " "; }
+            elsif ($hl > 0.005) {
+                my $color = get_density_color($metric, $density);
+                print bg_color(231) . fg_color($color) . $blocks{'full'} . $RESET;  # white bg
+            } else {
+                my $color = get_density_color($metric, $density);
+                print fg_color($color) . $blocks{'full'} . $RESET;
+            }
+        }
+        print "  ← white on dim\n";
+
+        print "\n" if $i != $rows_to_show[-1];
+    }
+
+    print "\n  Key insight: Notice how highlights appear across ALL density levels,\n";
+    print "  from bright yellow (many requests) to dark (few requests).\n";
+}
+
+# Background color comparison with diverse density coverage
+sub render_highlight_bg_comparison_diverse {
+    my ($data_ref, $hl_fast_ref, $hl_db_ref, $metric) = @_;
+
+    print_header("Background Colors on Different Densities", "Comparing highlight visibility across density levels");
+    print "  Top section: Fast requests (HIGH density, bright foreground)\n";
+    print "  Bottom section: DB range (MEDIUM density, moderate foreground)\n\n";
+
+    my $sample_row = $data_ref->[5];  # Good traffic row
+    my $hl_fast = $hl_fast_ref->[5];
+    my $hl_db = $hl_db_ref->[5];
+
+    my @bg_options = (
+        { name => "Yellow (226)",   bg => 226 },
+        { name => "White (231)",    bg => 231 },
+        { name => "Cyan (51)",      bg => 51 },
+        { name => "Magenta (201)",  bg => 201 },
+        { name => "Orange (208)",   bg => 208 },
+        { name => "Green (46)",     bg => 46 },
+    );
+
+    print "  ${BOLD}Fast requests (bright yellow foreground):${RESET}\n";
+    for my $opt (@bg_options) {
+        my $label = sprintf("  %-16s│ ", $opt->{name});
+        print $label;
+
+        for my $j (0 .. $#$sample_row) {
+            my $density = $sample_row->[$j];
+            my $hl = $hl_fast->[$j];
+
+            if ($density < 0.02) {
+                print " ";
+            } elsif ($hl > 0.02) {
+                my $color = get_density_color($metric, $density);
+                print bg_color($opt->{bg}) . fg_color($color) . $blocks{'full'} . $RESET;
+            } else {
+                my $color = get_density_color($metric, $density);
+                print fg_color($color) . $blocks{'full'} . $RESET;
+            }
+        }
+        print "\n";
+    }
+
+    print "\n  ${BOLD}DB range (medium brown/olive foreground):${RESET}\n";
+    for my $opt (@bg_options) {
+        my $label = sprintf("  %-16s│ ", $opt->{name});
+        print $label;
+
+        for my $j (0 .. $#$sample_row) {
+            my $density = $sample_row->[$j];
+            my $hl = $hl_db->[$j];
+
+            if ($density < 0.02) {
+                print " ";
+            } elsif ($hl > 0.02) {
+                my $color = get_density_color($metric, $density);
+                print bg_color($opt->{bg}) . fg_color($color) . $blocks{'full'} . $RESET;
+            } else {
+                my $color = get_density_color($metric, $density);
+                print fg_color($color) . $blocks{'full'} . $RESET;
+            }
+        }
+        print "\n";
+    }
+
+    print "\n  Note: Observe how visibility changes based on foreground brightness.\n";
+    print "  Cyan/Magenta work well for bright foreground; White works for dark.\n";
+}
+
 # Demonstrate different metric color schemes
 sub render_metric_comparison {
     my ($data_ref) = @_;
@@ -517,7 +929,12 @@ print "  and HOW MANY requests are at each latency level.\n";
 
 # Generate realistic test data
 my ($data_ref, $max_requests) = generate_realistic_data($num_time_buckets, $heatmap_width);
-my @highlight = generate_highlight_data($data_ref);
+
+# Generate different highlight patterns for diverse comparisons
+my @highlight_mixed = generate_highlight_data($data_ref);     # Mixed pattern across all densities
+my @highlight_fast = generate_highlight_fast($data_ref);      # Fast/bright area
+my @highlight_slow = generate_highlight_slow($data_ref);      # Slow/dim area
+my @highlight_db = generate_highlight_db($data_ref);          # Middle DB range
 
 print "\n  Test data simulates:\n";
 print "  • Primary mode: Fast requests (0-200ms) - most traffic\n";
@@ -538,8 +955,30 @@ render_hybrid($data_ref, 'duration', 'Approach 3: Hybrid (3 Shades + Color)');
 print "\n" . "─" x 72 . "\n";
 render_bg_color($data_ref, 'duration', 'Approach 4: Background Color');
 
+# Highlight demos with FAST requests (bright yellow areas)
 print "\n" . "─" x 72 . "\n";
-render_with_highlight($data_ref, \@highlight, 'duration', 'Highlight Overlay Demo');
+render_with_highlight($data_ref, \@highlight_fast, 'duration', 'Highlight: Fast Requests (bright yellow areas)');
+
+# Highlight demos with DB range (medium density)
+print "\n" . "─" x 72 . "\n";
+render_with_highlight($data_ref, \@highlight_db, 'duration', 'Highlight: DB Query Range (medium density)');
+
+# Highlight demos with SLOW requests
+print "\n" . "─" x 72 . "\n";
+render_with_highlight($data_ref, \@highlight_slow, 'duration', 'Highlight: Slow Requests (dim areas)');
+
+# Highlight demos with MIXED pattern (shows all density levels)
+print "\n" . "─" x 72 . "\n";
+render_with_highlight($data_ref, \@highlight_mixed, 'duration', 'Highlight: Mixed Pattern (all density levels)');
+
+print "\n" . "─" x 72 . "\n";
+render_highlight_sidebyside_multi($data_ref, \@highlight_fast, \@highlight_db, \@highlight_slow, 'duration');
+
+print "\n" . "─" x 72 . "\n";
+render_highlight_scenarios($data_ref, 'duration');
+
+print "\n" . "─" x 72 . "\n";
+render_highlight_bg_comparison_diverse($data_ref, \@highlight_fast, \@highlight_db, 'duration');
 
 print "\n" . "─" x 72 . "\n";
 render_metric_comparison($data_ref);
