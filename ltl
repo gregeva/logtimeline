@@ -128,7 +128,6 @@ my %timestamp_cache;
 my $heatmap_enabled = 0;                    # Flag: heatmap mode active
 my $heatmap_metric;                         # Metric: duration|bytes|count (undef until set by CLI)
 my $heatmap_width = 52;                     # Number of histogram buckets (default matches latency stats width)
-my $heatmap_linear = 0;                     # Flag: use linear scale instead of logarithmic (default: log)
 my %heatmap_data;                           # {$bucket}{$range_index} = count
 my %heatmap_data_hl;                        # {$bucket}{$range_index} = highlighted count
 my %heatmap_raw;                            # {$bucket} = [raw values] - temporary
@@ -277,7 +276,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--heatmap-linear|-hml] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -523,8 +522,7 @@ sub adapt_to_command_line_options {
         'mask-uuid|uuid' => \$mask_uuid,
         'group-similar|g=s' => \$group_similar_sensitivity,
         'heatmap|hm:s' => \$heatmap_metric,
-        'heatmap-width|hmw=i' => \$heatmap_width,
-        'heatmap-linear|hml' => \$heatmap_linear
+        'heatmap-width|hmw=i' => \$heatmap_width
     ) or die print_usage( "required options not provided" ); 
 
     $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
@@ -1206,25 +1204,13 @@ sub calculate_heatmap_buckets {
     # Handle edge case where min equals max or min is zero
     my $effective_max = $heatmap_max > $heatmap_min ? $heatmap_max : $heatmap_min + 1;
 
-    if ($heatmap_linear) {
-        # LINEAR bucket boundaries (--heatmap-linear flag)
-        # Each bucket represents an equal portion of the value range
-        # Note: Linear scale works poorly for latency data where most values cluster at low end
-        my $effective_min = $heatmap_min > 0 ? $heatmap_min : 0;
-        my $range = $effective_max - $effective_min;
-        my $bucket_size = $range / $heatmap_bucket_count;
-        for my $i (0 .. $heatmap_bucket_count) {
-            $heatmap_boundaries[$i] = $effective_min + ($bucket_size * $i);
-        }
-    } else {
-        # LOGARITHMIC bucket boundaries (default)
-        # Formula: boundary[i] = min * (max/min)^(i/num_buckets)
-        # Log scale provides better resolution at low values where most latency data clusters
-        my $effective_min = $heatmap_min > 0 ? $heatmap_min : 1;
-        my $ratio = $effective_max / $effective_min;
-        for my $i (0 .. $heatmap_bucket_count) {
-            $heatmap_boundaries[$i] = $effective_min * ($ratio ** ($i / $heatmap_bucket_count));
-        }
+    # LOGARITHMIC bucket boundaries
+    # Formula: boundary[i] = min * (max/min)^(i/num_buckets)
+    # Log scale provides better resolution at low values where most latency data clusters
+    my $effective_min = $heatmap_min > 0 ? $heatmap_min : 1;
+    my $ratio = $effective_max / $effective_min;
+    for my $i (0 .. $heatmap_bucket_count) {
+        $heatmap_boundaries[$i] = $effective_min * ($ratio ** ($i / $heatmap_bucket_count));
     }
 
     # Distribute raw values into histogram buckets and calculate percentiles
