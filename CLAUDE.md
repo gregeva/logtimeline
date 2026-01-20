@@ -273,6 +273,93 @@ Fields: IP, -, -, [timestamp], "method path protocol", status_code, bytes, durat
 ./ltl -n 5 logs/ApplicationLog.2025-12-12.282-Windows.log
 ```
 
+## Heatmap Visualization
+
+### Background: SRE Best Practices
+
+The heatmap feature is inspired by SRE best practices for analyzing load profiles and latency distributions. While percentile statistics (P50, P95, P99, P99.9) provide valuable insights, they reduce complex multi-modal distributions to a handful of numbers. Heatmaps address this by showing the entire distribution visually.
+
+**Industry Research Sources:**
+- **Brendan Gregg's Latency Heatmaps**: Heatmaps transform temporal latency data into visual representations where X-axis is time, Y-axis is latency ranges, and color intensity represents frequency/density. Bi-modal distributions become immediately visible, suggesting "fast path" and "slow path" behaviors.
+- **Datadog Heatmap Engineering**: Distributing histogram boundaries approximately exponentially is effective for visualizing request distributions. Logarithmic scale is important for latency data spanning orders of magnitude.
+- **Google SRE Monitoring**: The Four Golden Signals (latency, traffic, errors, saturation) are foundational. Latency distributions reveal more than averages.
+- **ACM Queue**: Response time is crucial to understand in detail, but common presentations hide important patterns that heatmaps reveal.
+
+**Key Implementation Insights:**
+1. **Logarithmic bucket boundaries** work better for latency data than linear (values span orders of magnitude)
+2. **Color intensity** represents request count/density (bright = many, dark = few)
+3. **Fixed range** uses global min/max across all time buckets for consistent scale
+4. **Position** tells you "at what latency", color tells you "how many requests"
+
+### Heatmap Axes and Color Model
+
+- **X-axis (horizontal position)**: Metric value range
+  - Left edge = minimum value (fast requests / small responses / low count)
+  - Right edge = maximum value (slow requests / large responses / high count)
+- **Y-axis (rows)**: Time buckets (same as existing bar graph rows)
+- **Color intensity**: Request COUNT/density at that value
+  - Bright/intense color = MANY requests fell into this bucket
+  - Dark/dim color = FEW requests fell into this bucket
+  - Empty/space = NO requests at this level
+
+### Color Gradients (256-color ANSI)
+
+Each metric uses a 10-step gradient from dim (index 0) to bright (index 9):
+
+**Duration (Yellow)** - column 2 color:
+```perl
+@yellow = (233, 234, 58, 94, 136, 142, 178, 184, 220, 226);
+# dark gray → olive → brown → yellow → bright yellow
+```
+
+**Bytes (Green)** - column 3 color:
+```perl
+@green = (233, 234, 22, 28, 34, 40, 46, 82, 118, 154);
+# dark gray → dark green → green → bright green
+```
+
+**Count (Cyan)** - column 4 color:
+```perl
+@cyan = (233, 234, 23, 29, 30, 36, 37, 43, 44, 51);
+# dark gray → dark cyan → cyan → bright cyan
+```
+
+### Logarithmic Bucket Boundaries
+
+Formula: `boundary[i] = min * (max/min)^(i/num_buckets)`
+
+For a 52-column heatmap with latency range 1ms to 100,000ms:
+- Bucket 0: ~1ms
+- Bucket 26: ~316ms (geometric midpoint)
+- Bucket 52: ~100,000ms
+
+Log scale provides better resolution at low values where most latency data clusters.
+
+### Terminal Rendering
+
+**256-Color ANSI Codes:**
+- Foreground: `ESC[38;5;⟨n⟩m`
+- Background: `ESC[48;5;⟨n⟩m`
+- Color cube (216 colors): indices 16-231, formula: `16 + 36×r + 6×g + b` (0 ≤ r,g,b ≤ 5)
+- Grayscale: indices 232-255 (24 shades)
+
+**Unicode Block Characters:**
+- U+2588 `█` - Full block (used for all density levels with color-only approach)
+- U+2591 `░` - Light shade (~25%)
+- U+2592 `▒` - Medium shade (~50%)
+- U+2593 `▓` - Dark shade (~75%)
+
+**Rendering Approach:** Color-only with full blocks (`█`) - provides clean appearance and universal terminal compatibility.
+
+### Highlight Support
+
+When `-highlight` is used with `-hm`, highlighted requests use background colors matching bar graph column `plain_bg` values:
+- Duration: 184 (yellow background)
+- Bytes: 34 (green background)
+- Count: 30 (cyan background)
+
+Foreground color (density) remains the same, allowing users to see both: which requests matched the filter AND their density.
+
 ## Active Feature Branches
 
 ### feature/heatmap
@@ -285,8 +372,9 @@ Adds heatmap visualization mode (`-hm`/`--heatmap`) replacing duration statistic
 - `-hmw` or `--heatmap-width <N>` - Set heatmap width (default: 52)
 
 **Key Features**:
-- Logarithmic scale (default) for better latency distribution visualization
+- Logarithmic scale for better latency distribution visualization
 - Percentile markers (P50, P95, P99, P99.9) shown as `|` in gray
+- Header scale with min/max values (33%/66% markers when width > 75)
 - Footer scale with value labels at 0%, 25%, 50%, 75%, 100% positions
 - Color gradients: yellow (duration), green (bytes), cyan (count)
 - Highlight support with background colors
