@@ -33,7 +33,7 @@ docker run --rm -it --platform=linux/$architecture \
 
     # Build the executable with pp
     # Add --link/--addfile for non-glibc .so if needed
-    pp -o ../${PACKAGE_NAME} ${SCRIPT_NAME}
+    pp -o ${PACKAGE_NAME} ${SCRIPT_NAME}
 
     # Verify glibc baseline
     ldd --version
