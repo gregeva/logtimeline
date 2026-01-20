@@ -124,6 +124,37 @@ my %in_files_matched;
 my ($terminal_width, $terminal_height) = GetTerminalSize();
 my %timestamp_cache;
 
+# Heatmap data structures
+my $heatmap_enabled = 0;                    # Flag: heatmap mode active
+my $heatmap_metric;                         # Metric: duration|bytes|count (undef until set by CLI)
+my $heatmap_width = 52;                     # Number of histogram buckets (default matches latency stats width)
+my $heatmap_linear = 0;                     # Flag: use linear scale instead of logarithmic (default: log)
+my %heatmap_data;                           # {$bucket}{$range_index} = count
+my %heatmap_data_hl;                        # {$bucket}{$range_index} = highlighted count
+my %heatmap_raw;                            # {$bucket} = [raw values] - temporary
+my %heatmap_raw_hl;                         # {$bucket} = [highlighted raw values] - temporary
+my @heatmap_boundaries;                     # Pre-calculated bucket boundaries
+my ($heatmap_min, $heatmap_max) = (undef, undef);   # Global min/max for normalization (undef = not yet set)
+my $heatmap_max_density = 0;                # Maximum density across all cells
+my %heatmap_percentiles;                    # {$bucket} = { p50 => index, p95 => index, p99 => index, p999 => index } - percentile marker positions
+
+# Heatmap color gradients (10 steps from dim to bright)
+# Index 0 = lowest density (dim), Index 9 = highest density (bright)
+my %heatmap_colors = (
+    'yellow' => [233, 234, 58, 94, 136, 142, 178, 184, 220, 226],   # Duration (column 2)
+    'green'  => [233, 234, 22, 28, 34, 40, 46, 82, 118, 154],       # Bytes (column 3)
+    'cyan'   => [233, 234, 23, 29, 30, 36, 37, 43, 44, 51],         # Count (column 4)
+    'blue'   => [233, 234, 17, 18, 19, 20, 21, 27, 33, 39],         # Future metrics (column 5)
+    'magenta'=> [233, 234, 53, 89, 125, 127, 163, 165, 201, 207],   # Future metrics (column 6)
+);
+
+# Map metric names to column numbers and colors
+my %heatmap_metric_map = (
+    'duration' => { column => 2, color => 'yellow' },
+    'bytes'    => { column => 3, color => 'green' },
+    'count'    => { column => 4, color => 'cyan' },
+);
+
 # Defines the log level/type buckets and their order for printing and processing
 my @log_levels = (
     'FORCE-HL', 'FORCE',
@@ -246,7 +277,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--heatmap-linear|-hml] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -332,14 +363,14 @@ sub format_bytes {
     return undef unless defined $value;
 
     my $bytes = $value * $units{$unit};
-
+    my $bytes_int = int($bytes);  # Use integer for unit comparison to avoid float string length issues
 
     my @unit_order = ('B', 'kB', 'MB', 'GB', 'TB');
     my $formatted_value = $bytes;
     my $formatted_unit = 'B';
 
     foreach my $u (@unit_order) {                                           # Determine the most relevant unit
-        if( length( $bytes ) >= length( $units{$u} ) ) {
+        if( length( $bytes_int ) >= length( $units{$u} ) ) {
 # TO DO: 1000kB should convert to MB
         #if ($bytes >= $units{$u}) {
             $formatted_value = $bytes / $units{$u};
@@ -490,11 +521,28 @@ sub adapt_to_command_line_options {
         'threadpool-activity|tpa=s' => \$threadpool_activity_regex,
         'user-defined-metrics|udm=s' => \$user_defined_metrics,
         'mask-uuid|uuid' => \$mask_uuid,
-        'group-similar|g=s' => \$group_similar_sensitivity
+        'group-similar|g=s' => \$group_similar_sensitivity,
+        'heatmap|hm:s' => \$heatmap_metric,
+        'heatmap-width|hmw=i' => \$heatmap_width,
+        'heatmap-linear|hml' => \$heatmap_linear
     ) or die print_usage( "required options not provided" ); 
 
     $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
     $filter_range{'end'} = $filter_range_end if defined(  $filter_range_end );
+
+    # Heatmap option processing
+    if (defined $heatmap_metric) {
+        $heatmap_enabled = 1;
+        # Handle case where -hm is followed by a filename (GetOptions captures it as optional value)
+        if ($heatmap_metric eq '' || !grep { $_ eq $heatmap_metric } qw(duration bytes count)) {
+            # If the value doesn't match a valid metric, it's likely a filename
+            # Push it back to @ARGV and use default metric
+            if ($heatmap_metric ne '' && $heatmap_metric !~ /^(duration|bytes|count)$/) {
+                unshift @ARGV, $heatmap_metric;
+            }
+            $heatmap_metric = 'duration';  # Default metric
+        }
+    }
 
     if( $print_version ) {
         print_version();
@@ -1077,10 +1125,34 @@ sub read_and_process_logs {
                         $log_analysis{$bucket}{count_occurrences}++;
                         $log_analysis{$bucket}{'count_sum-HL'} += $count if $category_bucket =~ /-HL$/;
                         $log_analysis{$bucket}{'count_occurrences-HL'}++ if $category_bucket =~ /-HL$/;
-                        
+
                         # Track min/max incrementally (needed for comparison, but not calculating statistics here)
                         $log_analysis{$bucket}{count_min} = $count if !defined $log_analysis{$bucket}{count_min} || $count < $log_analysis{$bucket}{count_min};
-                        $log_analysis{$bucket}{count_max} = $count if !defined $log_analysis{$bucket}{count_max} || $count > $log_analysis{$bucket}{count_max};                       
+                        $log_analysis{$bucket}{count_max} = $count if !defined $log_analysis{$bucket}{count_max} || $count > $log_analysis{$bucket}{count_max};
+                    }
+
+                    ## HEATMAP RAW VALUE CAPTURE ##
+                    if ($heatmap_enabled) {
+                        my $heatmap_value;
+                        if ($heatmap_metric eq 'duration' && defined $duration && $duration >= 0) {
+                            $heatmap_value = $duration;
+                        } elsif ($heatmap_metric eq 'bytes' && defined $bytes && $bytes > 0) {
+                            # bytes > 0 (not >= 0) to exclude "-" values converted to 0
+                            $heatmap_value = $bytes;
+                        } elsif ($heatmap_metric eq 'count' && defined $count && $count >= 0) {
+                            $heatmap_value = $count;
+                        }
+
+                        if (defined $heatmap_value && $heatmap_value > 0) {
+                            # Track global min/max for boundary calculation
+                            # Note: Using !defined for initial state check since 0 can be a valid value
+                            $heatmap_min = $heatmap_value if !defined $heatmap_min || $heatmap_value < $heatmap_min;
+                            $heatmap_max = $heatmap_value if !defined $heatmap_max || $heatmap_value > $heatmap_max;
+
+                            # Store raw values for later bucketing (after min/max known)
+                            push @{$heatmap_raw{$bucket}}, $heatmap_value;
+                            push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $category_bucket =~ /-HL$/;
+                        }
                     }
                 }
 
@@ -1107,6 +1179,97 @@ sub read_and_process_logs {
     print "\r$colors{'bright-green'}Processing completed.$colors{'NC'}";
     print " " x ( $terminal_width - length( "Processing completed." ) );
     print "\n";
+
+    return;
+}
+
+sub find_heatmap_bucket {
+    my ($value, $bucket_count) = @_;
+    for my $i (0 .. $#heatmap_boundaries - 1) {
+        return $i if $value >= $heatmap_boundaries[$i] && $value < $heatmap_boundaries[$i + 1];
+    }
+    return $bucket_count - 1;  # Last bucket catches max values
+}
+
+sub calculate_heatmap_buckets {
+    return unless $heatmap_enabled;
+    return unless defined $heatmap_min && defined $heatmap_max && $heatmap_max > $heatmap_min && $heatmap_max > 0;
+
+    print "\rCalculating heatmap buckets...";
+
+    # Clear any previous boundary values
+    @heatmap_boundaries = ();
+
+    # Use $heatmap_width (default 52, or set via --heatmap-width)
+    my $heatmap_bucket_count = $heatmap_width;
+
+    # Handle edge case where min equals max or min is zero
+    my $effective_max = $heatmap_max > $heatmap_min ? $heatmap_max : $heatmap_min + 1;
+
+    if ($heatmap_linear) {
+        # LINEAR bucket boundaries (--heatmap-linear flag)
+        # Each bucket represents an equal portion of the value range
+        # Note: Linear scale works poorly for latency data where most values cluster at low end
+        my $effective_min = $heatmap_min > 0 ? $heatmap_min : 0;
+        my $range = $effective_max - $effective_min;
+        my $bucket_size = $range / $heatmap_bucket_count;
+        for my $i (0 .. $heatmap_bucket_count) {
+            $heatmap_boundaries[$i] = $effective_min + ($bucket_size * $i);
+        }
+    } else {
+        # LOGARITHMIC bucket boundaries (default)
+        # Formula: boundary[i] = min * (max/min)^(i/num_buckets)
+        # Log scale provides better resolution at low values where most latency data clusters
+        my $effective_min = $heatmap_min > 0 ? $heatmap_min : 1;
+        my $ratio = $effective_max / $effective_min;
+        for my $i (0 .. $heatmap_bucket_count) {
+            $heatmap_boundaries[$i] = $effective_min * ($ratio ** ($i / $heatmap_bucket_count));
+        }
+    }
+
+    # Distribute raw values into histogram buckets and calculate percentiles
+    foreach my $bucket (keys %heatmap_raw) {
+        # Sort values to calculate percentiles
+        my @sorted_values = sort { $a <=> $b } @{$heatmap_raw{$bucket}};
+        my $count = scalar @sorted_values;
+
+        if ($count > 0) {
+            # Calculate percentile values (P50, P95, P99, P99.9)
+            my $p50_value  = $sorted_values[int($count * 0.50)];
+            my $p95_value  = $sorted_values[int($count * 0.95)];
+            my $p99_value  = $sorted_values[int($count * 0.99)];
+            my $p999_value = $sorted_values[int($count * 0.999)] // $sorted_values[-1];
+
+            # Convert percentile values to bucket indices
+            $heatmap_percentiles{$bucket} = {
+                p50  => find_heatmap_bucket($p50_value, $heatmap_bucket_count),
+                p95  => find_heatmap_bucket($p95_value, $heatmap_bucket_count),
+                p99  => find_heatmap_bucket($p99_value, $heatmap_bucket_count),
+                p999 => find_heatmap_bucket($p999_value, $heatmap_bucket_count),
+            };
+        }
+
+        foreach my $value (@sorted_values) {
+            my $range_index = find_heatmap_bucket($value, $heatmap_bucket_count);
+            $heatmap_data{$bucket}{$range_index}++;
+
+            # Track max density for color normalization
+            $heatmap_max_density = $heatmap_data{$bucket}{$range_index}
+                if $heatmap_data{$bucket}{$range_index} > $heatmap_max_density;
+        }
+
+        # Process highlighted values
+        if (exists $heatmap_raw_hl{$bucket}) {
+            foreach my $value (@{$heatmap_raw_hl{$bucket}}) {
+                my $range_index = find_heatmap_bucket($value, $heatmap_bucket_count);
+                $heatmap_data_hl{$bucket}{$range_index}++;
+            }
+        }
+
+        # Free memory
+        delete $heatmap_raw{$bucket};
+        delete $heatmap_raw_hl{$bucket};
+    }
 
     return;
 }
@@ -1533,7 +1696,14 @@ sub normalize_data_for_output {
     push @output_columns, "totalOccurrences"; # if $category_bucket =~ /^err-rate$/;
 
 # Latency statistics column width: │ + 2 spaces + P50(11) + P95(11) + P99(11) + P999(11) + CV(7) = 54 chars
-    $durations_graph_width = $print_durations && !$omit_durations && !$omit_stats ? $graph_column_padding_latency + 52 + $graph_column_padding_all : 0;
+    # When heatmap is enabled, use $heatmap_width (which may be customized via -hmw) instead of hardcoded 52
+    if ($heatmap_enabled) {
+        $durations_graph_width = $graph_column_padding_latency + $heatmap_width + $graph_column_padding_all;
+    } elsif ($print_durations && !$omit_durations && !$omit_stats) {
+        $durations_graph_width = $graph_column_padding_latency + 52 + $graph_column_padding_all;
+    } else {
+        $durations_graph_width = 0;
+    }
 
     # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
     # $timestamp_length = length( strftime($output_timestamp_format, gmtime(0) ) ) + 1 + ( $print_milliseconds ? 4 : 0 ) ;     # +1 for built in space after timestamp
@@ -1664,7 +1834,13 @@ sub normalize_data_for_output {
     }
 
     # BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
-    if( $print_durations && !$omit_durations && !$omit_stats ) {
+    if ($heatmap_enabled) {
+        # Heatmap column header replaces latency statistics
+        push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) if $print_durations && !$omit_durations;
+        push @printed_column_widths, $durations_graph_width;
+        push @printed_column_spacing, 0;
+        push @printed_column_names, get_heatmap_column_header();
+    } elsif( $print_durations && !$omit_durations && !$omit_stats ) {
         my $column_spacing = ( $graph_column_padding_all + $graph_column_padding_latency );
         push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score );
         push @printed_column_widths, $durations_graph_width;
@@ -1768,6 +1944,261 @@ sub normalize_data_for_output {
     print " " x ( $terminal_width - length( "Scaling and normalizing data completed." ) );
 
     return;
+}
+
+sub get_heatmap_highlight_bg_color {
+    my ($metric) = @_;
+    # Return highlight background color for heatmap
+    # Uses same colors as plain_bg in bar graph columns for consistency
+    my %highlight_colors = (
+        'duration' => 184,  # Yellow - matches bar graph column 2 plain_bg
+        'bytes'    => 34,   # Green - matches bar graph column 3 plain_bg
+        'count'    => 30,   # Cyan - matches bar graph column 4 plain_bg
+    );
+    return $highlight_colors{$metric} // 184;
+}
+
+sub format_heatmap_value {
+    my ($value, $metric) = @_;
+    if ($metric eq 'duration') {
+        return format_time($value, 'ms');
+    } elsif ($metric eq 'bytes') {
+        return format_bytes($value, 'B');
+    } elsif ($metric eq 'count') {
+        return format_number($value);
+    } else {
+        return $value;
+    }
+}
+
+sub get_heatmap_column_header {
+    # Returns the heatmap legend string for use as column header
+    # Format depends on width:
+    # - Width <= 75: [prefix] min_str [spaces] heatmap [metric] [spaces] max_str [suffix]
+    # - Width > 75:  [prefix] min_str [spaces] 33%_val [spaces] heatmap [metric] [spaces] 66%_val [spaces] max_str [suffix]
+    # The string must be exactly $durations_graph_width characters so that:
+    # - min_str aligns with the first heatmap data character (after │ and space)
+    # - max_str right-aligns to end at the last heatmap data character position
+    my $metric = $heatmap_metric;
+    my $min_val = defined $heatmap_min ? $heatmap_min : 0;
+    my $max_val = defined $heatmap_max ? $heatmap_max : 0;
+    my $min_str = format_heatmap_value($min_val, $metric);
+    my $max_str = format_heatmap_value($max_val, $metric);
+
+    # Column structure: │(1) + space(1) + content(heatmap_width) + trailing(1) + padding(1) = durations_graph_width
+    # Header needs: prefix(2) + content(heatmap_width+1) + suffix(1) to match column width
+    # Content area: min_str left-aligned, max_str right-aligned, "heatmap [metric]" centered
+    my $prefix_width = 2;   # Aligns with "│ " in data rows
+    my $suffix_width = 1;   # One trailing character after content
+
+    # Build the content area (heatmap_width + 1 characters to shift max_str right by one)
+    my $label = "heatmap [$metric]";
+    my $content_width = $heatmap_width + 1;
+
+    my $content;
+
+    if ($heatmap_width > 75) {
+        # Include 33% and 66% axis values
+        # Get boundary values at 33% and 66% positions
+        my $idx_33 = int(0.33 * $heatmap_width + 0.5);
+        my $idx_66 = int(0.66 * $heatmap_width + 0.5);
+        my $val_33 = (scalar(@heatmap_boundaries) > $idx_33) ? $heatmap_boundaries[$idx_33] : $min_val;
+        my $val_66 = (scalar(@heatmap_boundaries) > $idx_66) ? $heatmap_boundaries[$idx_66] : $max_val;
+        my $str_33 = format_heatmap_value($val_33, $metric);
+        my $str_66 = format_heatmap_value($val_66, $metric);
+
+        # Calculate fill space with 5 elements: min, 33%, label, 66%, max
+        # Format: min_str + fill + 33%_str + fill + label + fill + 66%_str + fill + max_str
+        my $fixed_text_len = length($min_str) + length($str_33) + length($label) + length($str_66) + length($max_str) + 4;  # 4 spaces minimum
+        my $total_fill = $content_width - $fixed_text_len;
+        $total_fill = 0 if $total_fill < 0;
+
+        # Distribute fill across 4 gaps
+        my $fill_per_gap = int($total_fill / 4);
+        my $extra_fill = $total_fill - ($fill_per_gap * 4);
+
+        # Build content with 33% and 66% values
+        $content = $min_str . (" " x ($fill_per_gap + ($extra_fill > 0 ? 1 : 0))) .
+                   $str_33 . (" " x ($fill_per_gap + ($extra_fill > 1 ? 1 : 0))) .
+                   " " . $label . " " .
+                   (" " x ($fill_per_gap + ($extra_fill > 2 ? 1 : 0))) . $str_66 .
+                   (" " x $fill_per_gap) . $max_str;
+    } else {
+        # Standard format without 33%/66% values
+        # Calculate fill space: total width - min - max - label - 2 spaces (one on each side of label)
+        my $fixed_text_len = length($min_str) + length($max_str) + length($label) + 2;
+        my $total_fill = $content_width - $fixed_text_len;
+        $total_fill = 0 if $total_fill < 0;
+
+        my $left_fill = int($total_fill / 2);
+        my $right_fill = $total_fill - $left_fill;
+
+        # Build content: min_str + left_fill + space + label + space + right_fill + max_str
+        $content = $min_str . (" " x $left_fill) . " " . $label . " " . (" " x $right_fill) . $max_str;
+    }
+
+    # Ensure content is exactly content_width characters
+    if (length($content) < $content_width) {
+        # Pad before max_str to right-align it
+        my $pad_needed = $content_width - length($content);
+        # Insert padding before the last element (max_str)
+        my $max_len = length($max_str);
+        $content = substr($content, 0, length($content) - $max_len) . (" " x $pad_needed) . $max_str;
+    } elsif (length($content) > $content_width) {
+        $content = substr($content, 0, $content_width);
+    }
+
+    return (" " x $prefix_width) . $content . (" " x $suffix_width);
+}
+
+sub print_heatmap_row {
+    my ($bucket, $printed_chars) = @_;
+
+    # Use $heatmap_width for content width
+    my $heatmap_content_width = $heatmap_width;
+
+    my $missing_chars = $terminal_width - $printed_chars - $durations_graph_width;
+    print " " x $missing_chars if $missing_chars > 0;
+    print "$colors{'bright-black'}│$colors{'NC'} ";
+
+    my $color_key = $heatmap_metric_map{$heatmap_metric}{color};
+    my @gradient = @{$heatmap_colors{$color_key}};
+    my $highlight_bg = get_heatmap_highlight_bg_color($heatmap_metric);
+
+    # Get percentile positions for this bucket
+    my $percentiles = $heatmap_percentiles{$bucket} // {};
+    my %percentile_positions;
+    $percentile_positions{$percentiles->{p50}}  = 1 if defined $percentiles->{p50};
+    $percentile_positions{$percentiles->{p95}}  = 1 if defined $percentiles->{p95};
+    $percentile_positions{$percentiles->{p99}}  = 1 if defined $percentiles->{p99};
+    $percentile_positions{$percentiles->{p999}} = 1 if defined $percentiles->{p999};
+
+    for my $i (0 .. $heatmap_content_width - 1) {
+        my $density = $heatmap_data{$bucket}{$i} // 0;
+        my $density_hl = $heatmap_data_hl{$bucket}{$i} // 0;
+        my $is_percentile = exists $percentile_positions{$i};
+
+        if ($is_percentile) {
+            # Percentile marker - use | character with bright-black (gray) for differentiation from data
+            if ($density_hl > 0 && defined $highlight_regex) {
+                print "\033[48;5;${highlight_bg}m$colors{'bright-black'}|$colors{'NC'}";
+            } else {
+                print "$colors{'bright-black'}|$colors{'NC'}";
+            }
+        } elsif ($density == 0) {
+            # Empty cell - use NC/RESET (no background color)
+            print " ";
+        } else {
+            # Calculate color index based on density (logarithmic scaling)
+            my $color_index = 0;
+            if ($heatmap_max_density > 1) {
+                $color_index = int(log($density) / log($heatmap_max_density) * 9);
+                $color_index = 9 if $color_index > 9;
+                $color_index = 0 if $color_index < 0;
+            }
+
+            my $fg_color = $gradient[$color_index];
+
+            if ($density_hl > 0 && defined $highlight_regex) {
+                # Highlighted cell: use metric's column color as background
+                print "\033[48;5;${highlight_bg}m\033[38;5;${fg_color}m█\033[0m";
+            } else {
+                # Normal cell: foreground color only, no background
+                print "\033[38;5;${fg_color}m█\033[0m";
+            }
+        }
+    }
+    print " ";
+}
+
+sub print_heatmap_footer_scale {
+    # Print the footer line with embedded scale showing values at key positions
+    # Integrates directly into the horizontal separator line using ─ characters
+    # with value labels replacing portions of the line at marker positions
+
+    my $metric = $heatmap_metric;
+    my $heatmap_content_width = $heatmap_width;
+
+    # Calculate width before the heatmap column
+    # This must match the position where │ is printed in print_heatmap_row()
+    # Total width = timestamp + legend + bar_graph_columns + heatmap_column
+    # So pre_heatmap = terminal_width - durations_graph_width gives us the position
+    # But we need to account for all the content before the heatmap │
+    my $pre_heatmap_width = $terminal_width - $durations_graph_width;
+
+    # Build the scale with markers at positions 0%, 25%, 50%, 75%, 100%
+    my @marker_positions = (0, 0.25, 0.50, 0.75, 1.0);
+    my @marker_indices;
+    my @marker_values;
+
+    for my $pct (@marker_positions) {
+        # Calculate display position (0 to width-1 for the 52 columns)
+        my $display_idx = int($pct * ($heatmap_content_width - 1));
+        $display_idx = $heatmap_content_width - 1 if $display_idx >= $heatmap_content_width;
+        push @marker_indices, $display_idx;
+
+        # Calculate boundary index for the value at this position
+        # For positions 0-51, we want boundaries[0] through boundaries[52]
+        # The boundary index = position percentage * bucket_count (not width-1)
+        # This maps: 0% -> boundaries[0], 100% -> boundaries[52]
+        my $boundary_idx = int($pct * $heatmap_content_width + 0.5);  # Round to nearest
+        $boundary_idx = $heatmap_content_width if $boundary_idx > $heatmap_content_width;
+
+        my $value;
+        if (scalar(@heatmap_boundaries) > $boundary_idx) {
+            $value = $heatmap_boundaries[$boundary_idx];
+        } else {
+            $value = $heatmap_max // 0;
+        }
+        push @marker_values, format_heatmap_value($value, $metric);
+    }
+
+    # Print the leading horizontal line (before heatmap column)
+    print "$colors{'bright-black'}";
+    print "─" x $pre_heatmap_width;
+    print "┴";  # Connection to the column separator (aligns with │ in data rows)
+    print "─";  # Padding character (aligns with space after │ in data rows)
+
+    # Build the heatmap scale section with embedded labels
+    # This is exactly heatmap_content_width characters to align with the 52 data columns
+    my @scale_chars = ("─") x $heatmap_content_width;
+
+    # Place labels at marker positions, avoiding overlap
+    # Labels are positioned within the 52-char content area:
+    # - First label (0%) left-aligned at position 0
+    # - Last label (100%) right-aligned to end at position 51
+    # - Middle labels centered at their respective positions
+    my $last_end = -1;
+    for my $i (0 .. $#marker_indices) {
+        my $pos = $marker_indices[$i];
+        my $label = $marker_values[$i];
+        my $label_len = length($label);
+
+        # Position label: first one left-aligned, last one right-aligned, others centered
+        my $start;
+        if ($i == 0) {
+            $start = 0;  # Left-align first label
+        } elsif ($i == $#marker_indices) {
+            $start = $heatmap_content_width - $label_len;  # Right-align last label
+        } else {
+            $start = $pos - int($label_len / 2);  # Center others
+        }
+
+        $start = 0 if $start < 0;
+        $start = $last_end + 1 if $start <= $last_end;  # Avoid overlap
+
+        # Place the label if it fits
+        if ($start + $label_len <= $heatmap_content_width) {
+            for my $j (0 .. $label_len - 1) {
+                $scale_chars[$start + $j] = substr($label, $j, 1);
+            }
+            $last_end = $start + $label_len - 1;
+        }
+    }
+
+    print join("", @scale_chars);
+    print "─";  # Trailing character (aligns with trailing space in data rows)
+    print "$colors{'NC'}\n";
 }
 
 sub print_bar_graph {
@@ -1912,6 +2343,7 @@ sub print_bar_graph {
                 next unless $category_bucket !~ /^empty|err-rate|msg-rate$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
                 if (exists $log_occurrences{$bucket}{$category_bucket}) {
                     my $scaled_occurrences = $log_occurrences{$bucket}{$category_bucket}{scaled_occurrences};
+                    $scaled_occurrences = 0 if $scaled_occurrences < 0;  # Guard against negative values
                     my $color = $colors{$category_bucket} // $colors{'NC'};
                     print "$color" . ( $category_bucket =~ /^[12345]xx(-HL)?$/ ? $blocks{'A'} : $blocks{$default_chart_block} ) x $scaled_occurrences . "$colors{'NC'}";	# provide a global way to change the bar character
                     $printed_chars += $scaled_occurrences;
@@ -1926,6 +2358,7 @@ sub print_bar_graph {
             if( $graph_count > 1 ) {
                 my $column_number = 2;		                            # start after the timestamp and possibly legend columns
                 my $missing_chars = ( $printed_column_widths[$column_count_pre_graph] + $printed_column_spacing[$column_count_pre_graph] ) - ( $scaled_occurrences_total + $printed_column_spacing[$column_count_pre_graph] );
+                $missing_chars = 0 if $missing_chars < 0;  # Guard against negative values
                 # Fill in empty characters to the start of the second graph space
                 print " " x $missing_chars;
                 $printed_chars += $missing_chars;
@@ -2026,8 +2459,10 @@ sub print_bar_graph {
                 }
             }
 
-            # DURATION STATISTICS print duration statistics table
-            if( $print_durations && !$omit_durations && !$omit_stats ) {
+            # HEATMAP OR DURATION STATISTICS - print heatmap if enabled, otherwise duration statistics table
+            if ($heatmap_enabled) {
+                print_heatmap_row($bucket, $printed_chars);
+            } elsif( $print_durations && !$omit_durations && !$omit_stats ) {
                 my $missing_chars;
                 $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width;
                 print " " x $missing_chars if $missing_chars > 0;
@@ -2055,11 +2490,16 @@ sub print_bar_graph {
 
             undef @csv_data;
 
-            print "\n";    
+            print "\n";
             pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
         }
 
-        print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
+        # Print footer line - with embedded heatmap scale if enabled
+        if ($heatmap_enabled) {
+            print_heatmap_footer_scale();
+        } else {
+            print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
+        }
     } else {
         printf "Read $total_lines_read lines, however no lines matched any of the patterns within the timeframe.\n";
     }
@@ -2529,6 +2969,8 @@ calculate_all_statistics();
 $end_time = [gettimeofday];
 $elapsed_calculate_statistics = tv_interval($start_time, $end_time);
 
+# CALCULATE HEATMAP BUCKETS (if enabled) #
+calculate_heatmap_buckets() if $heatmap_enabled;
 
 # NORMALIZE DATA FOR CONSOLE OUTPUT #
 $start_time = [gettimeofday];

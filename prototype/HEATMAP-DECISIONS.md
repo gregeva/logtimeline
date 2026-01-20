@@ -20,7 +20,7 @@ Run `perl prototype/heatmap-mini.pl` to compare:
 **Recommendation from spec:** Start with **Approach 2 (Color-Only)** as default.
 
 **Decision needed:**
-- [ ] Confirm default approach
+- [X] Confirm default approach
 - [ ] Should other approaches be available via command-line option (e.g., `--heatmap-style shade`)?
 
 ---
@@ -41,9 +41,9 @@ $boundary[$i] = $min * ($max / $min) ** ($i / $num_buckets)
 ```
 
 **Decision needed:**
-- [ ] Confirm logarithmic for duration
-- [ ] Choose approach for bytes: logarithmic or linear?
-- [ ] Choose approach for count: linear or logarithmic?
+- [Yes] Confirm logarithmic for duration?
+- [Log] Choose approach for bytes: logarithmic or linear?
+- [Log] Choose approach for count: linear or logarithmic?
 
 ---
 
@@ -70,10 +70,10 @@ The prototypes tested these combinations:
 - White works well for dim areas but may be too stark
 
 **Decision needed:**
-- [ ] Which background color for duration metric highlights? (Recommend: Cyan or Magenta)
-- [ ] Which background color for bytes metric highlights?
-- [ ] Which background color for count metric highlights?
-- [ ] Or should the user be able to configure this?
+- [Should be the same as the core color of the selected metric given that metrics column number; which is what determines that metrics display color based on how many are to be displayed.  Duration = yellow] Which background color for duration metric highlights? (Recommend: Cyan or Magenta)
+- [If duration exists, then bytes would be the 3rd graph column, if no duration, bytes would be 2nd] Which background color for bytes metric highlights?
+- [Count metric comes after duration, then bytes, so with both of those metrics it should be the 4th column] Which background color for count metric highlights?
+- [No.  Column color order is yellow (2), green (3), cyan (4), blue (5), magenta (6)] Or should the user be able to configure this?
 
 ---
 
@@ -102,9 +102,9 @@ Current prototype uses 10-12 color steps:
 ```
 
 **Decision needed:**
-- [ ] Are these color gradients acceptable?
-- [ ] Should gradients be configurable or fixed?
-- [ ] Do you need to test on different terminal emulators first?
+- [No.  10-12 steps are fine, but the colors are not] Are these color gradients acceptable?
+- [The root color needs to be determined from the selected heapmap metrics column color] Should gradients be configurable or fixed?
+- [No] Do you need to test on different terminal emulators first?
 
 ---
 
@@ -133,8 +133,8 @@ D. **Per-row markers** - Show P50/P95/P99 position markers on each row
 ```
 
 **Decision needed:**
-- [ ] Which legend approach?
-- [ ] Should legend be optional (command-line flag)?
+- [Option B] Which legend approach?
+- [No] Should legend be optional (command-line flag)?
 
 ---
 
@@ -153,8 +153,8 @@ D. **Per-row markers** - Show P50/P95/P99 position markers on each row
 - Foreground color (density) remains the same
 
 **Decision needed:**
-- [ ] Confirm the bright-background approach for heatmap highlights
-- [ ] Should highlighted cells show ONLY the highlighted requests' density, or the total density with highlight overlay?
+- [Yes] Confirm the bright-background approach for heatmap highlights
+- [Total density, the highlight is only indicating relevance to that spot] Should highlighted cells show ONLY the highlighted requests' density, or the total density with highlight overlay?
 
 ---
 
@@ -179,8 +179,8 @@ D. **Per-row markers** - Show P50/P95/P99 position markers on each row
 **Consideration:** 51 histogram buckets may be more than needed. With logarithmic distribution, the resolution at high latencies may be too fine.
 
 **Decision needed:**
-- [ ] Is 51 buckets appropriate, or should it be fewer (e.g., 40, 30)?
-- [ ] Should bucket count be configurable via command-line?
+- [51 is good] Is 51 buckets appropriate, or should it be fewer (e.g., 40, 30)?
+- [Sure] Should bucket count be configurable via command-line?
 
 ---
 
@@ -196,8 +196,8 @@ C. **Histogram summary** - Add columns for non-empty bucket count, max density
 D. **JSON blob** - Include histogram as JSON string in one column
 
 **Decision needed:**
-- [ ] Which CSV output approach?
-- [ ] Should `-o` (CSV) and `-hm` (heatmap) be mutually exclusive?
+- [A] Which CSV output approach?
+- [No, they are unrelated] Should `-o` (CSV) and `-hm` (heatmap) be mutually exclusive?
 
 ---
 
@@ -229,8 +229,8 @@ D. **JSON blob** - Include histogram as JSON string in one column
 - `--heatmap-width N` - Number of histogram buckets
 
 **Decision needed:**
-- [ ] Confirm basic `-hm`/`--heatmap` interface
-- [ ] Should additional options be implemented in v1 or deferred?
+- [Yes] Confirm basic `-hm`/`--heatmap` interface
+- [Should be able to specify -hm, -hm count, -hm bytes, -hm duration] Should additional options be implemented in v1 or deferred?
 
 ---
 
@@ -260,8 +260,8 @@ D. **JSON blob** - Include histogram as JSON string in one column
 - Documentation and examples
 
 **Decision needed:**
-- [ ] Confirm phased approach
-- [ ] What's the priority order if not as proposed?
+- [No, implement all features in one shot, however what should be phased are the planning, scheduling, implementation, testing, validation, and then documentation]] Confirm phased approach
+- [Mentioned stages need to be executed in the logical order] What's the priority order if not as proposed?
 
 ---
 
@@ -316,10 +316,11 @@ Please list any new requirements or modifications to consider:
 
 Please add any requirements specific to your use cases:
 
-- [ ] _________________________________
-- [ ] _________________________________
-- [ ] _________________________________
-- [ ] _________________________________
+- [2] This can be implemented as a command line option to test the concept
+- [ ] data normalization should take care of getting the metrics time bucket min and max and scaling appropriately
+- [ ] base color should match the display color of the selected metrics color
+- [ ] heatmap width on each row/line must strictly stick to the $durations_graph_width length
+- [ ] background color for no character should be blank (ANSI NC or RESET) not black so that the concept works on a white or black background - background color is only used for highlighting.
 
 ---
 
