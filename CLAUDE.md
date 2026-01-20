@@ -61,6 +61,56 @@ The main script is organized into three sections:
 - `%log_stats` - Statistical calculations (min/max/avg/stddev/percentiles)
 - `%log_threadpools` / `%threadpool_activity` - Thread pool tracking
 - `%log_userdefinedmetrics` - Custom metrics framework
+- `%heatmap_data` - Histogram bucket counts per time bucket for heatmap visualization
+- `@heatmap_boundaries` - Pre-calculated logarithmic/linear bucket boundaries (array has bucket_count+1 elements; boundaries[0]=min, boundaries[bucket_count]=max)
+
+### Output Column Layout System
+
+The bar graph output uses a sophisticated column layout system with spacing and padding. Understanding this is critical for alignment.
+
+**Key Width Variables:**
+- `$terminal_width` - Total terminal width (e.g., 120)
+- `$timestamp_length` - Width allocated for timestamp column
+- `$legend_length` - Width allocated for legend column (log level counts)
+- `$max_graph_width` - Space for all bar graph columns (calculated as `$terminal_width - $legend_length - $timestamp_length - $durations_graph_width`)
+- `$durations_graph_width` - Width for heatmap/statistics column (= `$graph_column_padding_latency + $heatmap_width + $graph_column_padding_all`)
+- `%graph_width` - Hash mapping column numbers to their allocated widths
+
+**Padding Constants (line ~90):**
+- `$graph_column_padding_all = 1` - Trailing padding after all columns
+- `$graph_column_padding_timestamp = 1` - Padding for timestamp column
+- `$graph_column_padding_legend = 0` - Padding for legend column
+- `$graph_column_padding_count = 2` - Padding for count column (includes `│` separator)
+- `$graph_column_padding_other = 1` - Padding for other metric columns
+- `$graph_column_padding_latency = 3` - Padding before heatmap/latency column
+
+**Column Separator Behavior:**
+- The `│` character is used as a column separator
+- For the heatmap column: `│` (1 char) + space (1 char padding) + content (`$heatmap_width` chars) + trailing space (1 char)
+- The `$printed_chars` variable tracks how many characters have been printed on the current line
+- Missing padding is calculated as: `$terminal_width - $printed_chars - $durations_graph_width`
+
+**Heatmap Column Structure:**
+When heatmap is enabled, the heatmap column replaces the latency statistics column:
+- Separator: `│` (1 char)
+- Padding: ` ` (1 space)
+- Content: heatmap data or scale values (`$heatmap_width` chars, default 52)
+- Trailing: ` ` (1 space)
+
+**Footer Alignment:**
+The footer scale must align with the heatmap data rows:
+- Footer uses `┴` at the same position as the data row's `│`
+- Scale content starts after one padding character (like the space after `│`)
+- Scale labels at 0% position should left-align with first heatmap column
+- Scale labels at 100% position should right-align with last heatmap column
+
+**Boundary Array Indexing:**
+For a heatmap with N display columns (default 52):
+- `@heatmap_boundaries` has N+1 elements (indices 0 through N)
+- `boundaries[0]` = minimum value
+- `boundaries[N]` = maximum value
+- Display column i covers range `[boundaries[i], boundaries[i+1])`
+- To get the value at 100% position, use `boundaries[N]`, NOT `boundaries[N-1]`
 
 ### Core Processing Flow
 1. `adapt_to_command_line_options()` - Parse command line
@@ -94,24 +144,46 @@ Active development items are documented in comments at the top of the `ltl` scri
 
 ## Feature Development Workflow
 
-When working on new features, follow this workflow to keep the project documentation current:
+When working on new features, follow this workflow to keep the project documentation current. **This workflow is mandatory** - always check and update feature documentation as you progress through each phase.
 
 ### 1. Planning & Research Phase
 - Create a feature document in `features/<feature-name>.md` describing requirements, design decisions, and test plan
 - Review existing TO-DO comments in `ltl` (lines 3-50) for related work
 - Check `features/` directory for similar or dependent features
+- For features requiring prototyping:
+  - Create prototypes in `prototype/` directory
+  - Document design decisions and questions in `prototype/<FEATURE>-DECISIONS.md`
+  - Collect user feedback on decisions before proceeding
+- Create implementation plan in `features/<feature-name>-implementation-plan.md` with:
+  - Data structures and their locations
+  - Integration points in the codebase
+  - Step-by-step implementation order
+  - Test cases and acceptance criteria
 
-### 2. Implementation Phase
+### 2. Scheduling Phase
+- Review implementation plan with user
+- Confirm implementation order and dependencies
+- Update feature document progress tracking section
+
+### 3. Implementation Phase
 - Update the version number in `ltl` (line 75: `$version_number`) when making significant changes
 - If adding new Perl modules, run `./build/generate-cpanfile.sh` to update dependency files
 - For platform-specific code, ensure both Unix and Windows paths are handled
+- **Update feature document progress tracking** as each task is completed
 
-### 3. Testing Phase
+### 4. Testing Phase
 - Test with sample log files in `logs/` directory
 - Verify CSV output if `-o` flag behavior is affected
 - Test on multiple platforms if changes involve platform-specific code
+- **Update feature document** with test results and any issues found
 
-### 4. Documentation Updates
+### 5. Validation Phase
+- Verify all acceptance criteria are met
+- Verify visual output matches prototypes (if applicable)
+- Verify compatibility with existing command-line flags
+- **Update feature document** validation status
+
+### 6. Documentation Updates
 - Update `README.md` with new features and capabilities
 - Update `features/<feature-name>.md` with implementation status and any deviations from the original plan
 - Update TO-DO comments in `ltl` to mark completed items or add new ones
@@ -121,9 +193,199 @@ When working on new features, follow this workflow to keep the project documenta
   - New command-line options are added
   - Known limitations change
 
-### 5. Keeping CLAUDE.md Current
-This file should reflect the current state of the project. When making changes:
-- Add new key data structures to the Architecture section
-- Update line number references if code reorganization shifts them significantly
-- Document new build requirements or dependencies
-- Add new known limitations discovered during development
+### 7. Keeping Documentation Current
+**IMPORTANT**: Always ensure decisions and current status are reflected in the feature documentation:
+- `features/<feature-name>.md` - Main feature document with requirements, decisions, and progress tracking
+- `features/<feature-name>-implementation-plan.md` - Detailed implementation plan (if created)
+- `prototype/<FEATURE>-DECISIONS.md` - Design decisions from prototyping phase (if applicable)
+
+When resuming work on a feature:
+1. Read the feature document to understand current state
+2. Check the progress tracking section for what's completed and what's next
+3. Update progress tracking as you work
+4. Ensure any new decisions or changes are documented before ending the session
+
+## Test Log Files
+
+The `logs/` directory contains sample log files for testing. **Always use these known files for testing - do not search for log files.**
+
+### Access Logs (HTTP request logs with duration, bytes, status)
+| File | Metrics Available | Size | Use Case |
+|------|-------------------|------|----------|
+| `logs/accessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | duration, bytes, count | 277MB | Primary access log test (duration: 1ms-8.6m range) |
+| `logs/accessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | duration, bytes, count | 220MB | Secondary access log test |
+| `logs/accessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | duration, bytes, count | 148MB | Smaller access log test |
+
+**Format**: Apache combined log with duration in milliseconds at end
+```
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /path HTTP/1.1" 200 261 1
+```
+Fields: IP, -, -, [timestamp], "method path protocol", status_code, bytes, duration_ms
+
+### CustomThingworxLogs (ScriptLogs with duration, count, bytes)
+| File | Metrics Available | Size | Use Case |
+|------|-------------------|------|----------|
+| `logs/CustomThingworxLogs/ScriptLog-clean.log` | duration, count | 29MB | Cleaned ScriptLog (durationMS: 167ms-1186ms) |
+| `logs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log` | duration, count | 98MB | Large ScriptLog with durationMS |
+| `logs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log` | duration, count | 98MB | Large ScriptLog with durationMS |
+| `logs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log` | duration, count | 98MB | Large ScriptLog with durationMS |
+| `logs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log` | duration, count | 72MB | Large ScriptLog with durationMS |
+| `logs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log` | duration, count | 98MB | Large ScriptLog with durationMS |
+| `logs/CustomThingworxLogs/ScriptLog.log` | duration, count | 54MB | ScriptLog with durationMS |
+
+**Format**: ThingWorx ScriptLog format with embedded durationMS
+```
+2025-04-10 04:46:35.844+0000 [L: WARN] ... durationMS=167 events to be processed count=0
+```
+
+### Other Script/Application Logs
+| File | Metrics Available | Size | Use Case |
+|------|-------------------|------|----------|
+| `logs/ScriptLog.2025-12-17.0.log` | count only | 1.6MB | Basic ScriptLog without duration |
+
+**Format**: ThingWorx log format
+```
+2025-04-10 04:46:35.844+0000 [L: WARN] [O: ...] [T: ...] message
+```
+
+### Application Logs (INFO/WARN/ERROR categories)
+| File | Metrics Available | Size | Use Case |
+|------|-------------------|------|----------|
+| `logs/ApplicationLog.2025-12-12.282-Windows.log` | count only | 10MB | Windows ApplicationLog (no duration data) |
+
+**Format**: ThingWorx ApplicationLog format
+```
+2025-12-12 15:38:13.648+0100 [L: INFO] [O: c.t.t.c.RemoteThing] ...
+```
+
+### Quick Test Commands
+```bash
+# Duration heatmap (access logs)
+./ltl -hm duration logs/accessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt
+
+# Bytes heatmap (access logs)
+./ltl -hm bytes logs/accessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt
+
+# Count heatmap (script logs - no duration data needed)
+./ltl -hm count logs/CustomThingworxLogs/ScriptLog-clean.log
+
+# Standard bar graph (any log)
+./ltl -n 5 logs/ApplicationLog.2025-12-12.282-Windows.log
+```
+
+## Heatmap Visualization
+
+### Background: SRE Best Practices
+
+The heatmap feature is inspired by SRE best practices for analyzing load profiles and latency distributions. While percentile statistics (P50, P95, P99, P99.9) provide valuable insights, they reduce complex multi-modal distributions to a handful of numbers. Heatmaps address this by showing the entire distribution visually.
+
+**Industry Research Sources:**
+- **Brendan Gregg's Latency Heatmaps**: Heatmaps transform temporal latency data into visual representations where X-axis is time, Y-axis is latency ranges, and color intensity represents frequency/density. Bi-modal distributions become immediately visible, suggesting "fast path" and "slow path" behaviors.
+- **Datadog Heatmap Engineering**: Distributing histogram boundaries approximately exponentially is effective for visualizing request distributions. Logarithmic scale is important for latency data spanning orders of magnitude.
+- **Google SRE Monitoring**: The Four Golden Signals (latency, traffic, errors, saturation) are foundational. Latency distributions reveal more than averages.
+- **ACM Queue**: Response time is crucial to understand in detail, but common presentations hide important patterns that heatmaps reveal.
+
+**Key Implementation Insights:**
+1. **Logarithmic bucket boundaries** work better for latency data than linear (values span orders of magnitude)
+2. **Color intensity** represents request count/density (bright = many, dark = few)
+3. **Fixed range** uses global min/max across all time buckets for consistent scale
+4. **Position** tells you "at what latency", color tells you "how many requests"
+
+### Heatmap Axes and Color Model
+
+- **X-axis (horizontal position)**: Metric value range
+  - Left edge = minimum value (fast requests / small responses / low count)
+  - Right edge = maximum value (slow requests / large responses / high count)
+- **Y-axis (rows)**: Time buckets (same as existing bar graph rows)
+- **Color intensity**: Request COUNT/density at that value
+  - Bright/intense color = MANY requests fell into this bucket
+  - Dark/dim color = FEW requests fell into this bucket
+  - Empty/space = NO requests at this level
+
+### Color Gradients (256-color ANSI)
+
+Each metric uses a 10-step gradient from dim (index 0) to bright (index 9):
+
+**Duration (Yellow)** - column 2 color:
+```perl
+@yellow = (233, 234, 58, 94, 136, 142, 178, 184, 220, 226);
+# dark gray → olive → brown → yellow → bright yellow
+```
+
+**Bytes (Green)** - column 3 color:
+```perl
+@green = (233, 234, 22, 28, 34, 40, 46, 82, 118, 154);
+# dark gray → dark green → green → bright green
+```
+
+**Count (Cyan)** - column 4 color:
+```perl
+@cyan = (233, 234, 23, 29, 30, 36, 37, 43, 44, 51);
+# dark gray → dark cyan → cyan → bright cyan
+```
+
+### Logarithmic Bucket Boundaries
+
+Formula: `boundary[i] = min * (max/min)^(i/num_buckets)`
+
+For a 52-column heatmap with latency range 1ms to 100,000ms:
+- Bucket 0: ~1ms
+- Bucket 26: ~316ms (geometric midpoint)
+- Bucket 52: ~100,000ms
+
+Log scale provides better resolution at low values where most latency data clusters.
+
+### Terminal Rendering
+
+**256-Color ANSI Codes:**
+- Foreground: `ESC[38;5;⟨n⟩m`
+- Background: `ESC[48;5;⟨n⟩m`
+- Color cube (216 colors): indices 16-231, formula: `16 + 36×r + 6×g + b` (0 ≤ r,g,b ≤ 5)
+- Grayscale: indices 232-255 (24 shades)
+
+**Unicode Block Characters:**
+- U+2588 `█` - Full block (used for all density levels with color-only approach)
+- U+2591 `░` - Light shade (~25%)
+- U+2592 `▒` - Medium shade (~50%)
+- U+2593 `▓` - Dark shade (~75%)
+
+**Rendering Approach:** Color-only with full blocks (`█`) - provides clean appearance and universal terminal compatibility.
+
+### Highlight Support
+
+When `-highlight` is used with `-hm`, highlighted requests use background colors matching bar graph column `plain_bg` values:
+- Duration: 184 (yellow background)
+- Bytes: 34 (green background)
+- Count: 30 (cyan background)
+
+Foreground color (density) remains the same, allowing users to see both: which requests matched the filter AND their density.
+
+## Active Feature Branches
+
+### feature/heatmap
+**Status**: Implementation complete (v0.8.0)
+
+Adds heatmap visualization mode (`-hm`/`--heatmap`) replacing duration statistics with color-intensity histogram.
+
+**Command Line Options**:
+- `-hm` or `--heatmap [duration|bytes|count]` - Enable heatmap mode (default: duration)
+- `-hmw` or `--heatmap-width <N>` - Set heatmap width (default: 52)
+
+**Key Features**:
+- Logarithmic scale for better latency distribution visualization
+- Percentile markers (P50, P95, P99, P99.9) shown as `|` in gray
+- Header scale with min/max values (33%/66% markers when width > 75)
+- Footer scale with value labels at 0%, 25%, 50%, 75%, 100% positions
+- Color gradients: yellow (duration), green (bytes), cyan (count)
+- Highlight support with background colors
+
+**Key Files**:
+- `features/heatmap.md` - Feature requirements and acceptance criteria
+- `features/heatmap-implementation-plan.md` - Implementation plan
+- `prototype/HEATMAP-DECISIONS.md` - Design decisions
+
+**Known Issues Fixed (v0.8.0)**:
+- **Footer 100% boundary value**: Must use `$heatmap_boundaries[$heatmap_content_width]` not `[$heatmap_content_width - 1]` - the boundaries array has bucket_count+1 elements
+- **format_bytes() float handling**: Use `int($bytes)` for unit length comparison, not the raw float value (floats like `801.000765678898` have string length 16, exceeding TB threshold)
+- **Heatmap width affecting layout**: When heatmap is enabled, `$durations_graph_width` must use `$heatmap_width`, not hardcoded 52
+- **Highlight background colors**: Use same colors as bar graph column `plain_bg` values (184 yellow, 34 green, 30 cyan) for visual consistency
