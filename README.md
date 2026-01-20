@@ -1,5 +1,7 @@
 # Current Version & Release Notes
 
+2026-01-20 : v0.8.0 - adds heatmap visualization mode for SRE-grade latency distribution analysis
+
 2025-12-09 : v0.6.0 - introduces many column support architecture with dynamic layout and column padding
 
 # Tools
@@ -17,6 +19,46 @@ When dealing with logs which have a very large amount of lines/errors/whatever, 
 ltl, or log time line has come a long way since its initial release a few months ago.  The usage principle is basically to a) read log lines and try to establish the included time, b) also pull out message details and stats, c) filter in or out the lines based on provided command line options.  Use it to search for patterns, slowness, determine frequency and spacing of calls, and establish performance profile/baseline of your APIs or services.  See help for a list of all of the options and try them out yourself.
 
 Static binary packages are provided for Windows, Ubuntu, and Mac OS.  Download, rename to ltl, and place somewhere in your path.
+
+### Heatmap Visualization (v0.8.0)
+
+The heatmap mode (`-hm` or `--heatmap`) replaces the latency statistics column with a visual heat distribution showing request density across latency ranges. This feature is inspired by SRE best practices for analyzing load profiles and latency distributions.
+
+**Why heatmaps?** While percentile statistics (P50, P95, P99) are valuable, they reduce complex distributions to a few numbers. Heatmaps reveal:
+- **Distribution shape**: Is latency bi-modal (cache hit/miss)? Multi-modal (different code paths)?
+- **Outlier clustering**: Are slow requests evenly distributed or clustered at specific times?
+- **Population density**: Where do most requests fall within the latency range?
+- **Temporal patterns**: How does the distribution shift over time?
+
+**Usage:**
+```bash
+# Duration heatmap (default)
+./ltl --heatmap logs/access.log
+./ltl -hm duration logs/access.log
+
+# Bytes heatmap (response size distribution)
+./ltl -hm bytes logs/access.log
+
+# Count heatmap (request count distribution)
+./ltl -hm count logs/access.log
+
+# With highlight filter
+./ltl -hm -highlight "POST /api" logs/access.log
+
+# Custom width (default: 52, use >75 to show 33%/66% markers)
+./ltl -hm -hmw 80 logs/access.log
+```
+
+**Reading the heatmap:**
+- **Position (left to right)**: Metric value (left = fast/small, right = slow/large)
+- **Color intensity**: Request density (bright = many requests, dark = few requests)
+- **Percentile markers**: `|` characters in gray show P50, P95, P99, P99.9 positions
+- **Scale**: Header shows min/max values, footer shows 0%/25%/50%/75%/100% positions
+
+**Color schemes:**
+- Duration: Yellow gradient (dark gray → bright yellow)
+- Bytes: Green gradient (dark gray → bright green)
+- Count: Cyan gradient (dark gray → bright cyan)
 
 ## cleanlogs : removes unwanted lines and partial lines to faciliate analysis
 
