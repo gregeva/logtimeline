@@ -513,9 +513,9 @@ Based on prototype evaluation and user feedback, the following decisions have be
 - [x] Verify compatibility with existing flags (-h highlight)
 
 ### Documentation Phase
-- [ ] Update README.md
-- [x] Update CLAUDE.md with heatmap data structures and column layout
-- [ ] Update ltl script version and TO-DO comments
+- [x] Update README.md with heatmap usage and explanation
+- [x] Update CLAUDE.md with heatmap data structures, column layout, and SRE research
+- [x] Update ltl script version (0.8.0) and TO-DO comments
 - [ ] Create example screenshots
 
 ## Debugging Notes (v0.8.0)
