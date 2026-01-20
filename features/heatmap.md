@@ -169,7 +169,7 @@ Based on research from industry leaders in observability and SRE:
 - [x] No line wrapping occurs on standard terminal widths
 - [x] Percentile markers (P50, P95, P99, P99.9) shown with | character in gray
 - [x] Footer scale shows value labels at 0%, 25%, 50%, 75%, 100% positions
-- [x] Logarithmic scale (default) with `--heatmap-linear|-hml` option for linear
+- [x] Logarithmic scale for better resolution at low values
 - [ ] CSV output includes histogram bucket counts when `-o` flag used
 
 ## Technical Considerations

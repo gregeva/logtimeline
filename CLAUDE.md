@@ -283,7 +283,6 @@ Adds heatmap visualization mode (`-hm`/`--heatmap`) replacing duration statistic
 **Command Line Options**:
 - `-hm` or `--heatmap [duration|bytes|count]` - Enable heatmap mode (default: duration)
 - `-hmw` or `--heatmap-width <N>` - Set heatmap width (default: 52)
-- `-hml` or `--heatmap-linear` - Use linear scale instead of logarithmic
 
 **Key Features**:
 - Logarithmic scale (default) for better latency distribution visualization
