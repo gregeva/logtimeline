@@ -156,17 +156,20 @@ Based on research from industry leaders in observability and SRE:
 
 ## Acceptance Criteria
 
-- [ ] `-hm` and `--heatmap` command line options are recognized
-- [ ] Default metric is `duration` when no metric specified
-- [ ] `bytes` and `count` metrics work when specified
-- [ ] Heatmap replaces latency statistics column (not shown together)
-- [ ] Column heading changes to "duration heatmap", "bytes heatmap", or "count heatmap"
-- [ ] Heatmap cells show density with block characters
-- [ ] Color gradient reflects density (dark=low, bright=high)
-- [ ] Different color schemes for different metrics
-- [ ] Global scale used (min-max consistent across all rows)
-- [ ] Highlight filter works with heatmap mode
-- [ ] No line wrapping occurs on standard terminal widths
+- [x] `-hm` and `--heatmap` command line options are recognized
+- [x] Default metric is `duration` when no metric specified
+- [x] `bytes` and `count` metrics work when specified
+- [x] Heatmap replaces latency statistics column (not shown together)
+- [x] Column heading changes to "heatmap [duration]", "heatmap [bytes]", or "heatmap [count]"
+- [x] Heatmap cells show density with block characters
+- [x] Color gradient reflects density (dark=low, bright=high)
+- [x] Different color schemes for different metrics (yellow/green/cyan)
+- [x] Global scale used (min-max consistent across all rows)
+- [x] Highlight filter works with heatmap mode
+- [x] No line wrapping occurs on standard terminal widths
+- [x] Percentile markers (P50, P95, P99, P99.9) shown with | character in gray
+- [x] Footer scale shows value labels at 0%, 25%, 50%, 75%, 100% positions
+- [x] Logarithmic scale (default) with `--heatmap-linear|-hml` option for linear
 - [ ] CSV output includes histogram bucket counts when `-o` flag used
 
 ## Technical Considerations
@@ -410,6 +413,43 @@ COLUMNS=120 ./ltl --heatmap logs/accessLogs/localhost_access_log*.log
 - Document color scheme and interpretation
 - Add section on heatmap visualization for SRE analysis
 
+## Finalized Design Decisions
+
+Based on prototype evaluation and user feedback, the following decisions have been finalized (see `prototype/HEATMAP-DECISIONS.md` for full details):
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **Rendering approach** | Color-only (Approach 2) | Clean appearance, universal terminal compatibility |
+| **Bucket boundaries** | Logarithmic for ALL metrics | Duration, bytes, and count all span wide ranges |
+| **Base color** | Matches metric column color | Yellow(2), Green(3), Cyan(4), Blue(5), Magenta(6) |
+| **Highlight background** | Same as metric's column color | Consistent with existing ltl highlight behavior |
+| **Legend** | Inline (Option B) | Scale shown in header row above heatmap |
+| **Heatmap width** | Derived from `$durations_graph_width` | Dynamic, not hardcoded; ~52 characters content |
+| **CSV output** | No heatmap data | CSV and heatmap are unrelated features |
+| **CLI interface** | `-hm`, `-hm duration`, `-hm bytes`, `-hm count` | Simple, consistent with other options |
+| **Empty cell background** | NC/RESET (transparent) | Works on both light and dark terminals |
+| **Implementation approach** | All features in one phase | Planning→Scheduling→Implementation→Testing→Validation→Documentation |
+
+### Additional Requirements (from user feedback)
+- Percentile markers can be implemented as optional command-line feature (future)
+- Data normalization handles per-time-bucket min/max scaling
+- Heatmap width must strictly match `$durations_graph_width` content area
+- Background color only used for highlighting, not for empty cells
+
+---
+
+## Implementation Plan
+
+**See:** `features/heatmap-implementation-plan.md` for detailed implementation plan including:
+- New data structures and color definitions
+- Command-line option parsing
+- Data collection modifications
+- Histogram bucketing logic
+- Rendering functions
+- Integration points in ltl
+
+---
+
 ## Progress Tracking
 
 ### Research Phase
@@ -425,30 +465,121 @@ COLUMNS=120 ./ltl --heatmap logs/accessLogs/localhost_access_log*.log
 - [x] Implement hybrid rendering approach
 - [x] Implement background color approach
 - [x] Prototype highlight overlay
-- [ ] Test on multiple terminals
-- [ ] Select optimal rendering approach
-- [ ] Document prototype findings
+- [x] Add diverse highlight scenarios covering all density levels
+- [x] Add highlight background color comparison demos
+- [x] Select optimal rendering approach (Color-only)
+- [x] Document prototype findings in HEATMAP-DECISIONS.md
+
+### Planning Phase
+- [x] Collect implementation decisions and questions
+- [x] Review and finalize all design decisions
+- [x] Create detailed implementation plan
+- [x] Update feature documentation with decisions
+
+### Scheduling Phase
+- [x] Review implementation plan
+- [x] Confirm implementation order and dependencies
+- [x] Update feature document progress tracking
 
 ### Implementation Phase
-- [ ] Add command line options
-- [ ] Implement histogram data collection during log processing
-- [ ] Implement bucket boundary calculation
-- [ ] Implement heatmap rendering function
-- [ ] Implement highlight differentiation
-- [ ] Integrate with existing output flow
+- [x] Add global variables (heatmap data structures, colors)
+- [x] Add command line option `-hm`/`--heatmap`
+- [x] Add command line option `-hmw`/`--heatmap-width`
+- [x] Implement histogram data collection during log processing
+- [x] Ensure `$durations_graph_width` is set when heatmap enabled
+- [x] Implement bucket boundary calculation (`calculate_heatmap_buckets`, `find_heatmap_bucket`)
+- [x] Implement heatmap rendering function (`print_heatmap_row`)
+- [x] Implement column header function (`get_heatmap_column_header`)
+- [x] Implement highlight differentiation
+- [x] Integrate with existing output flow (`print_bar_graph`)
+- [x] Add call to `calculate_heatmap_buckets()` in MAIN section
+- [x] Update `print_usage()` with heatmap options
 
 ### Testing Phase
-- [ ] Test all three metric types
-- [ ] Test with highlight filter
-- [ ] Test on macOS, Linux, Windows
+- [x] Test duration heatmap (basic) - yellow gradient working
+- [x] Test bytes heatmap - green gradient working
+- [x] Test count heatmap - cyan gradient working
+- [x] Test all three metric types - all working with correct colors
+- [x] Test with highlight filter - background highlight overlay working
+- [x] Test on macOS (ARM64) - working
+- [ ] Test on Linux, Windows
 - [ ] Test narrow terminal widths
 - [ ] Test with large log files
 - [ ] Performance benchmarking
 
+### Validation Phase
+- [x] Verify acceptance criteria met (basic functionality)
+- [x] Verify visual output matches prototype colors
+- [x] Verify compatibility with existing flags (-h highlight)
+
 ### Documentation Phase
 - [ ] Update README.md
-- [ ] Update CLAUDE.md if needed
+- [x] Update CLAUDE.md with heatmap data structures and column layout
+- [ ] Update ltl script version and TO-DO comments
 - [ ] Create example screenshots
+
+## Debugging Notes (v0.8.0)
+
+### Issues Found and Fixed
+
+#### 1. Footer 100% Value Mismatch
+**Symptom**: Footer showed `2.4m` while header showed `3.1m` for max value.
+
+**Root Cause**: Footer scale was using `$heatmap_boundaries[$heatmap_content_width - 1]` instead of `$heatmap_boundaries[$heatmap_content_width]`.
+
+**Understanding**: The boundaries array has `bucket_count + 1` elements (indices 0 through bucket_count). For a 52-column heatmap:
+- `boundaries[0]` = minimum value (0% position)
+- `boundaries[52]` = maximum value (100% position)
+- Display column `i` covers range `[boundaries[i], boundaries[i+1])`
+
+**Fix**: Use correct boundary index for 100% position in `print_heatmap_footer_scale()`.
+
+#### 2. format_bytes() Float Handling Bug
+**Symptom**: Intermediate axis values (25%, 33%, 50%, 66%, 75%) showing "0 TB" for bytes metric.
+
+**Root Cause**: `format_bytes()` uses string length comparison to determine unit. Float values like `801.000765678898` have string length 16, which exceeds the TB threshold (13 characters).
+
+**Fix**: Use `int($bytes)` for the length comparison:
+```perl
+my $bytes_int = int($bytes);
+if( length( $bytes_int ) >= length( $units{$u} ) ) {
+```
+
+#### 3. Heatmap Width Not Affecting Layout
+**Symptom**: Using `-hmw 80` didn't adjust other graph columns.
+
+**Root Cause**: `$durations_graph_width` was hardcoded to use 52 instead of `$heatmap_width` when heatmap is enabled.
+
+**Fix**: Always use `$heatmap_width` in the calculation:
+```perl
+if ($heatmap_enabled) {
+    $durations_graph_width = $graph_column_padding_latency + $heatmap_width + $graph_column_padding_all;
+}
+```
+
+#### 4. Highlight Background Colors Too Bright/Inconsistent
+**Symptom**: Duration and count highlights were too bright, bytes highlight didn't appear to work.
+
+**Root Cause**: Initial highlight colors (94, 22, 23) didn't match existing bar graph conventions.
+
+**Fix**: Changed `get_heatmap_highlight_bg_color()` to use same colors as bar graph column `plain_bg` values:
+- Duration: 184 (yellow, matches column 2)
+- Bytes: 34 (green, matches column 3)
+- Count: 30 (cyan, matches column 4)
+
+#### 5. Header Alignment Off by One
+**Symptom**: Header max value needed to be one character to the right.
+
+**Fix**: Adjusted `get_heatmap_column_header()` to use `$content_width = $heatmap_width + 1` and `$suffix_width = 1`.
+
+### Column Layout Understanding
+The heatmap column structure is critical for alignment:
+- `│` (1 char separator)
+- ` ` (1 char padding from `$graph_column_padding_latency`)
+- Content (`$heatmap_width` chars, default 52)
+- ` ` (1 char trailing from `$graph_column_padding_all`)
+
+Footer uses `┴` at the same position as the data row's `│`, with scale content starting after one padding character.
 
 ## External References
 
