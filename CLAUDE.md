@@ -209,12 +209,25 @@ When resuming work on a feature:
 
 The `logs/` directory contains sample log files for testing. **Always use these known files for testing - do not search for log files.**
 
-### Access Logs (HTTP request logs with duration, bytes, status)
-| File | Metrics Available | Size | Use Case |
-|------|-------------------|------|----------|
-| `logs/accessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | duration, bytes, count | 277MB | Primary access log test (duration: 1ms-8.6m range) |
-| `logs/accessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | duration, bytes, count | 220MB | Secondary access log test |
-| `logs/accessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | duration, bytes, count | 148MB | Smaller access log test |
+### Directory Structure
+```
+logs/
+├── AccessLogs/              # HTTP access logs (duration, bytes, status)
+├── Codebeamber/             # Codebeamer access logs
+└── ThingworxLogs/           # ThingWorx application logs
+    └── CustomThingworxLogs/ # Custom ScriptLogs with durationMS
+```
+
+---
+
+### AccessLogs/ - HTTP Request Logs (duration, bytes, status)
+
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | duration, bytes, count | 277MB | Primary access log test |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | duration, bytes, count | 220MB | Secondary access log test |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | duration, bytes, count | 148MB | Smaller access log test |
+| `localhost_access_log.2025-03-21.txt` | duration, bytes, count | 2.6MB | Small access log for quick tests |
 
 **Format**: Apache combined log with duration in milliseconds at end
 ```
@@ -222,56 +235,163 @@ The `logs/` directory contains sample log files for testing. **Always use these 
 ```
 Fields: IP, -, -, [timestamp], "method path protocol", status_code, bytes, duration_ms
 
-### CustomThingworxLogs (ScriptLogs with duration, count, bytes)
-| File | Metrics Available | Size | Use Case |
-|------|-------------------|------|----------|
-| `logs/CustomThingworxLogs/ScriptLog-clean.log` | duration, count | 29MB | Cleaned ScriptLog (durationMS: 167ms-1186ms) |
-| `logs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log` | duration, count | 98MB | Large ScriptLog with durationMS |
-| `logs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log` | duration, count | 98MB | Large ScriptLog with durationMS |
-| `logs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log` | duration, count | 98MB | Large ScriptLog with durationMS |
-| `logs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log` | duration, count | 72MB | Large ScriptLog with durationMS |
-| `logs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log` | duration, count | 98MB | Large ScriptLog with durationMS |
-| `logs/CustomThingworxLogs/ScriptLog.log` | duration, count | 54MB | ScriptLog with durationMS |
+---
 
-**Format**: ThingWorx ScriptLog format with embedded durationMS
+### Codebeamber/ - Codebeamer Access Logs
+
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `codebeamer_access_log.2025-10-29.txt` | duration, bytes, count | 83KB | Codebeamer format testing |
+
+**Format**: Apache-style with duration in brackets
+```
+127.0.0.1 - - [29/Oct/2025:08:03:31 +0000] "GET /hc/ping.spr HTTP/1.1" 200 112 [293ms] [0.293s]
+```
+
+---
+
+### ThingworxLogs/ - ThingWorx Application Logs
+
+All ThingWorx logs use this standard format:
+```
+2025-05-05 00:00:00.006+0000 [L: ERROR] [O: c.p.a.u.JobPurgeScheduler] [I: ] [U: SuperUser] [S: ] [P: ] [T: ThreadName] Message
+```
+Fields: timestamp [L: level] [O: origin] [I: instance] [U: user] [S: session] [P: process] [T: thread] message
+
+#### ApplicationLog (General platform activity)
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `ApplicationLog.2025-05-05.0.log` | count only | 85MB | Large Linux ApplicationLog |
+| `ApplicationLog.2025-05-06.0.log` | count only | 6.5MB | Medium ApplicationLog |
+| `ApplicationLog.2025-12-12.282-Windows.log` | count only | 10MB | Windows ApplicationLog |
+| `ApplicationLog.log` | count only | 5.8MB | Current ApplicationLog |
+| `ApplicationLog-improperlyRead.log` | count only | 468B | Edge case - malformed reads |
+
+#### ScriptLog (Script execution logs)
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `ScriptLog.2025-05-05.0.log` | count only | 13MB | Standard ScriptLog |
+| `ScriptLog.2025-05-06.0.log` | count only | 15MB | Standard ScriptLog |
+| `ScriptLog.2025-12-17.0.Rolex.log` | count only | 1.6MB | Basic ScriptLog test |
+| `ScriptLog.log` | count only | 4.4MB | Current ScriptLog |
+
+#### ErrorLog (Error-level messages)
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `ErrorLog.2025-05-05.1.log` | count only | 61MB | Large error log (auth failures, etc.) |
+| `ErrorLog.2025-05-06.0.log` | count only | 3.3MB | Medium error log |
+| `ErrorLog.log` | count only | 3.7MB | Current error log |
+
+#### SecurityLog (Security events)
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `SecurityLog.2025-05-05.1.log` | count only | 70MB | Large security log (nonce rejections) |
+| `SecurityLog.2025-05-06.0.log` | count only | 3.0MB | Medium security log |
+| `SecurityLog.log` | count only | 3.6MB | Current security log |
+
+#### ScriptErrorLog (Script-specific errors)
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `ScriptErrorLog.2025-05-05.0.log` | count only | 14MB | Script error analysis |
+| `ScriptErrorLog.2025-05-06.0.log` | count only | 14MB | Script error analysis |
+| `ScriptErrorLog.log` | count only | 2.5MB | Current script errors |
+
+#### DatabaseLog (Database operations)
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `DatabaseLog.2025-05-05.0.log` | count only | 700KB | Database error tracking |
+| `DatabaseLog.2025-05-06.0.log` | count only | 693KB | Database error tracking |
+| `DatabaseLog.log` | count only | 29KB | Current database log |
+
+#### AuthLog (Authentication events)
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `AuthLog.2025-05-05.0.log` | count only | 324KB | SAML/SSO authentication events |
+| `AuthLog.2025-05-06.0.log` | count only | 257KB | Authentication events |
+| `AuthLog.log` | count only | 167KB | Current auth log |
+
+#### ConfigurationLog (Configuration changes)
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `ConfigurationLog.2025-05-05.0.log` | count only | 30KB | Configuration tracking |
+| `ConfigurationLog.2025-05-06.0.log` | count only | 31KB | Configuration tracking |
+| `ConfigurationLog.log` | count only | 31KB | Current configuration log |
+
+#### Other ThingWorx Logs
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `CommunicationLog.2025-05-06.0.log` | count only | 190B | Communication events (minimal) |
+| `AkkaCommunicationLog.log` | count only | 2.2KB | Akka communication events |
+
+---
+
+### ThingworxLogs/CustomThingworxLogs/ - ScriptLogs with Full Metrics
+
+These logs contain `durationMS=`, `result bytes=`, and `result count=` fields enabling all metric types for analysis and heatmaps.
+
+| File | Metrics | Size | Use Case |
+|------|---------|------|----------|
+| `ScriptLog-DPMExtended-clean.log` | duration, bytes, count | 29MB | Cleaned DPM ScriptLog - ideal for all heatmap types |
+| `ScriptLog.2025-04-09.1.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
+| `ScriptLog.2025-04-09.2.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
+| `ScriptLog.2025-04-09.3.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
+| `ScriptLog.2025-04-09.4.log` | duration, bytes, count | 72MB | Large ScriptLog with full metrics |
+| `ScriptLog.2025-04-10.0.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
+| `ScriptLog.GetComplexPlotByIndex.log` | duration, bytes, count | 739KB | Specific service analysis |
+| `ScriptLog.log` | duration, bytes, count | 54MB | ScriptLog with full metrics |
+
+**Format**: ThingWorx ScriptLog with embedded metrics
 ```
 2025-04-10 04:46:35.844+0000 [L: WARN] ... durationMS=167 events to be processed count=0
+2025-04-10 05:00:03.529+0000 [L: INFO] ... durationMS=1041 result count=12 result bytes=6059
 ```
 
-### Other Script/Application Logs
-| File | Metrics Available | Size | Use Case |
-|------|-------------------|------|----------|
-| `logs/ScriptLog.2025-12-17.0.log` | count only | 1.6MB | Basic ScriptLog without duration |
-
-**Format**: ThingWorx log format
-```
-2025-04-10 04:46:35.844+0000 [L: WARN] [O: ...] [T: ...] message
-```
-
-### Application Logs (INFO/WARN/ERROR categories)
-| File | Metrics Available | Size | Use Case |
-|------|-------------------|------|----------|
-| `logs/ApplicationLog.2025-12-12.282-Windows.log` | count only | 10MB | Windows ApplicationLog (no duration data) |
-
-**Format**: ThingWorx ApplicationLog format
-```
-2025-12-12 15:38:13.648+0100 [L: INFO] [O: c.t.t.c.RemoteThing] ...
-```
+---
 
 ### Quick Test Commands
+
 ```bash
-# Duration heatmap (access logs)
-./ltl -hm duration logs/accessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt
+# Duration heatmap (access logs - best for latency analysis)
+./ltl -hm duration logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt
 
-# Bytes heatmap (access logs)
-./ltl -hm bytes logs/accessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt
+# Bytes heatmap (access logs - response size distribution)
+./ltl -hm bytes logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt
 
-# Count heatmap (script logs - no duration data needed)
-./ltl -hm count logs/CustomThingworxLogs/ScriptLog-clean.log
+# Count heatmap (any log - message frequency distribution)
+./ltl -hm count logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log
+
+# Duration heatmap from ThingWorx ScriptLogs with durationMS
+./ltl -hm duration logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log
 
 # Standard bar graph (any log)
-./ltl -n 5 logs/ApplicationLog.2025-12-12.282-Windows.log
+./ltl -n 5 logs/ThingworxLogs/ApplicationLog.2025-12-12.282-Windows.log
+
+# Quick test with small access log
+./ltl -n 10 logs/AccessLogs/localhost_access_log.2025-03-21.txt
+
+# Error analysis
+./ltl -n 20 logs/ThingworxLogs/ErrorLog.2025-05-05.1.log
+
+# Security event analysis
+./ltl -n 10 logs/ThingworxLogs/SecurityLog.2025-05-05.1.log
+
+# Codebeamer access log
+./ltl -hm duration logs/Codebeamber/codebeamer_access_log.2025-10-29.txt
 ```
+
+### Logs by Use Case
+
+| Use Case | Recommended Log Files |
+|----------|----------------------|
+| **Duration/latency heatmap** | `AccessLogs/*.txt`, `ThingworxLogs/CustomThingworxLogs/*` |
+| **Bytes/response size analysis** | `AccessLogs/*.txt`, `ThingworxLogs/CustomThingworxLogs/*` |
+| **Count/frequency analysis** | Any log file |
+| **All three metrics (duration, bytes, count)** | `AccessLogs/*.txt`, `ThingworxLogs/CustomThingworxLogs/*` |
+| **Error analysis** | `ThingworxLogs/ErrorLog.*`, `ThingworxLogs/ScriptErrorLog.*` |
+| **Security events** | `ThingworxLogs/SecurityLog.*`, `ThingworxLogs/AuthLog.*` |
+| **Database issues** | `ThingworxLogs/DatabaseLog.*` |
+| **Quick tests (small files)** | `AccessLogs/localhost_access_log.2025-03-21.txt`, `Codebeamber/*`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log` |
+| **Large file stress tests** | `AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.*.log` |
 
 ## Heatmap Visualization
 
@@ -304,25 +424,23 @@ The heatmap feature is inspired by SRE best practices for analyzing load profile
 
 ### Color Gradients (256-color ANSI)
 
-Each metric uses a 10-step gradient from dim (index 0) to bright (index 9):
+Each metric uses a 10-step gradient from dim (index 0) to bright (index 9).
 
-**Duration (Yellow)** - column 2 color:
+**Dark Background (default)** - fades from dark gray to bright:
 ```perl
-@yellow = (233, 234, 58, 94, 136, 142, 178, 184, 220, 226);
-# dark gray → olive → brown → yellow → bright yellow
+@yellow = (233, 234, 58, 94, 136, 142, 178, 184, 220, 226);   # Duration
+@green  = (233, 234, 22, 28, 34, 40, 46, 82, 118, 154);       # Bytes
+@cyan   = (233, 234, 23, 29, 30, 36, 37, 43, 44, 51);         # Count
 ```
 
-**Bytes (Green)** - column 3 color:
+**Light Background (`-lbg` flag)** - fades from pale to bright, avoids dark grays:
 ```perl
-@green = (233, 234, 22, 28, 34, 40, 46, 82, 118, 154);
-# dark gray → dark green → green → bright green
+@yellow = (230, 229, 228, 227, 220, 214, 208, 202, 196, 226); # Duration
+@green  = (194, 157, 156, 120, 84, 48, 47, 46, 82, 118);      # Bytes
+@cyan   = (195, 159, 123, 87, 51, 50, 49, 43, 44, 51);        # Count
 ```
 
-**Count (Cyan)** - column 4 color:
-```perl
-@cyan = (233, 234, 23, 29, 30, 36, 37, 43, 44, 51);
-# dark gray → dark cyan → cyan → bright cyan
-```
+Terminal background is auto-detected using OSC 11 query when heatmap is enabled. Use `-lbg` or `--light-background` to explicitly force light background mode (overrides auto-detection).
 
 ### Logarithmic Bucket Boundaries
 
@@ -370,13 +488,16 @@ Adds heatmap visualization mode (`-hm`/`--heatmap`) replacing duration statistic
 **Command Line Options**:
 - `-hm` or `--heatmap [duration|bytes|count]` - Enable heatmap mode (default: duration)
 - `-hmw` or `--heatmap-width <N>` - Set heatmap width (default: 52)
+- `-lbg` or `--light-background` - Use light background color gradients (for white/light terminals)
 
 **Key Features**:
 - Logarithmic scale for better latency distribution visualization
 - Percentile markers (P50, P95, P99, P99.9) shown as `|` in gray
-- Header scale with min/max values (33%/66% markers when width > 75)
+- Header scale with min/max values (25%/75% markers when width > 75)
 - Footer scale with value labels at 0%, 25%, 50%, 75%, 100% positions
 - Color gradients: yellow (duration), green (bytes), cyan (count)
+- Auto-detection of terminal background color (light/dark) using OSC 11
+- Light background mode (`-lbg`) for terminals with white/light backgrounds
 - Highlight support with background colors
 
 **Key Files**:
