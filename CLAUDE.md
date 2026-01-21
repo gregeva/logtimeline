@@ -424,25 +424,23 @@ The heatmap feature is inspired by SRE best practices for analyzing load profile
 
 ### Color Gradients (256-color ANSI)
 
-Each metric uses a 10-step gradient from dim (index 0) to bright (index 9):
+Each metric uses a 10-step gradient from dim (index 0) to bright (index 9).
 
-**Duration (Yellow)** - column 2 color:
+**Dark Background (default)** - fades from dark gray to bright:
 ```perl
-@yellow = (233, 234, 58, 94, 136, 142, 178, 184, 220, 226);
-# dark gray → olive → brown → yellow → bright yellow
+@yellow = (233, 234, 58, 94, 136, 142, 178, 184, 220, 226);   # Duration
+@green  = (233, 234, 22, 28, 34, 40, 46, 82, 118, 154);       # Bytes
+@cyan   = (233, 234, 23, 29, 30, 36, 37, 43, 44, 51);         # Count
 ```
 
-**Bytes (Green)** - column 3 color:
+**Light Background (`-lbg` flag)** - fades from pale to bright, avoids dark grays:
 ```perl
-@green = (233, 234, 22, 28, 34, 40, 46, 82, 118, 154);
-# dark gray → dark green → green → bright green
+@yellow = (230, 229, 228, 227, 220, 214, 208, 202, 196, 226); # Duration
+@green  = (194, 157, 156, 120, 84, 48, 47, 46, 82, 118);      # Bytes
+@cyan   = (195, 159, 123, 87, 51, 50, 49, 43, 44, 51);        # Count
 ```
 
-**Count (Cyan)** - column 4 color:
-```perl
-@cyan = (233, 234, 23, 29, 30, 36, 37, 43, 44, 51);
-# dark gray → dark cyan → cyan → bright cyan
-```
+Terminal background is auto-detected using OSC 11 query when heatmap is enabled. Use `-lbg` or `--light-background` to explicitly force light background mode (overrides auto-detection).
 
 ### Logarithmic Bucket Boundaries
 
@@ -490,13 +488,16 @@ Adds heatmap visualization mode (`-hm`/`--heatmap`) replacing duration statistic
 **Command Line Options**:
 - `-hm` or `--heatmap [duration|bytes|count]` - Enable heatmap mode (default: duration)
 - `-hmw` or `--heatmap-width <N>` - Set heatmap width (default: 52)
+- `-lbg` or `--light-background` - Use light background color gradients (for white/light terminals)
 
 **Key Features**:
 - Logarithmic scale for better latency distribution visualization
 - Percentile markers (P50, P95, P99, P99.9) shown as `|` in gray
-- Header scale with min/max values (33%/66% markers when width > 75)
+- Header scale with min/max values (25%/75% markers when width > 75)
 - Footer scale with value labels at 0%, 25%, 50%, 75%, 100% positions
 - Color gradients: yellow (duration), green (bytes), cyan (count)
+- Auto-detection of terminal background color (light/dark) using OSC 11
+- Light background mode (`-lbg`) for terminals with white/light backgrounds
 - Highlight support with background colors
 
 **Key Files**:
