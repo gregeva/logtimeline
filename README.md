@@ -1,5 +1,7 @@
 # Current Version & Release Notes
 
+2026-01-21 : v0.8.1 - fixes heatmap axis alignment, adds light background terminal support with auto-detection
+
 2026-01-20 : v0.8.0 - adds heatmap visualization mode for SRE-grade latency distribution analysis
 
 2025-12-09 : v0.6.0 - introduces many column support architecture with dynamic layout and column padding
@@ -45,8 +47,11 @@ The heatmap mode (`-hm` or `--heatmap`) replaces the latency statistics column w
 # With highlight filter
 ./ltl -hm -highlight "POST /api" logs/access.log
 
-# Custom width (default: 52, use >75 to show 33%/66% markers)
+# Custom width (default: 52, use >75 to show 25%/75% markers)
 ./ltl -hm -hmw 80 logs/access.log
+
+# Light background terminal (auto-detected, or force with -lbg)
+./ltl -hm -lbg logs/access.log
 ```
 
 **Reading the heatmap:**
@@ -54,11 +59,15 @@ The heatmap mode (`-hm` or `--heatmap`) replaces the latency statistics column w
 - **Color intensity**: Request density (bright = many requests, dark = few requests)
 - **Percentile markers**: `|` characters in gray show P50, P95, P99, P99.9 positions
 - **Scale**: Header shows min/max values, footer shows 0%/25%/50%/75%/100% positions
+- **Axis labels**: Each label shows the start of the range for that column (logarithmic scale)
 
 **Color schemes:**
 - Duration: Yellow gradient (dark gray → bright yellow)
 - Bytes: Green gradient (dark gray → bright green)
 - Count: Cyan gradient (dark gray → bright cyan)
+
+**Light background support (v0.8.1):**
+Terminal background color is auto-detected using OSC 11 query. On light/white backgrounds, the heatmap uses pale-to-bright color gradients instead of dark-gray-to-bright, improving visibility. Use `-lbg` or `--light-background` to explicitly force light background mode.
 
 ## cleanlogs : removes unwanted lines and partial lines to faciliate analysis
 
