@@ -90,6 +90,15 @@ Based on research from industry leaders in observability and SRE:
 
    **Key Insight**: The position tells you "at what latency", the color tells you "how many requests".
 
+   **Reading Axis Labels**:
+   The header and footer show scale values at key positions (0%, 25%, 50%, 75%, 100%).
+   - Each label indicates the **start** of the range for that display column
+   - Example: A label showing "100ms" at position X means display column X shows data for requests with latency >= 100ms (up to the next bucket boundary)
+   - The 100% label (rightmost) shows the maximum value in the data
+   - Labels use logarithmic scale, so middle positions represent geometric means, not arithmetic means
+   - Header shows 0%, 25%, 50% (title), 75%, 100% when width > 75 characters
+   - Footer always shows 0%, 25%, 50%, 75%, 100%
+
 4. **Density Representation**
    - Highest density (many requests): Bright color + full block (█)
    - Medium density: Medium color + partial blocks (▒ or ▓)
@@ -170,7 +179,6 @@ Based on research from industry leaders in observability and SRE:
 - [x] Percentile markers (P50, P95, P99, P99.9) shown with | character in gray
 - [x] Footer scale shows value labels at 0%, 25%, 50%, 75%, 100% positions
 - [x] Logarithmic scale for better resolution at low values
-- [ ] CSV output includes histogram bucket counts when `-o` flag used
 
 ## Technical Considerations
 
@@ -581,6 +589,98 @@ The heatmap column structure is critical for alignment:
 
 Footer uses `┴` at the same position as the data row's `│`, with scale content starting after one padding character.
 
+#### 6. Header/Footer Axis Value Accuracy (v0.8.0 bugfix)
+**Symptom**: Header 33%/66% axis values appeared misaligned with footer 25%/50%/75% values - drawing a vertical line between corresponding labels showed a slant rather than alignment.
+
+**Root Cause**: Two issues:
+1. Header was using 33%/66% positions while footer used 25%/50%/75%
+2. Both were calculating boundary index incorrectly for middle positions
+
+**Understanding - How Axis Labels Map to Data**:
+
+The heatmap uses logarithmic bucket boundaries. For a width of N columns:
+- `@heatmap_boundaries` array has N+1 elements (indices 0 through N)
+- Display column `i` (0-indexed) shows data from bucket `i`
+- Bucket `i` covers the value range `[boundaries[i], boundaries[i+1])`
+
+For axis labels to be accurate:
+- A label at display position `i` should show `boundaries[i]` (the START of that column's range)
+- Exception: The 100% position (last column) shows `boundaries[N]` (the MAX value, end of the last bucket's range)
+
+**Example** with width=80:
+```
+Position:   0       19      39      59      79
+Percent:    0%      25%     50%     75%     100%
+Shows:      boundaries[0]   [19]    [39]    [59]    [80]
+```
+
+The label at position 19 (25%) shows `boundaries[19]`, which is the start of the range for display column 19. Any data point in column 19 has a value >= boundaries[19] and < boundaries[20].
+
+**Incorrect approach** (previous bug): Used `int($pct * $width + 0.5)` for boundary index, which gave `boundaries[20]` for 25% position - showing the END of column 19's range instead of the START.
+
+**Fix**: For positions 0% through 75%, use `boundary_idx = display_position`. For 100%, use `boundary_idx = width` to show the max value.
+
+**Visual Verification**: Header and footer labels at the same percentage should now be vertically aligned when the output is viewed in a terminal.
+
+#### 7. Dark Gray Colors on Light Background Terminals (v0.8.0 bugfix)
+**Symptom**: On terminals with white/light backgrounds, the low-density heatmap cells (using dark gray colors 233, 234) appear as dark squares that look ugly and reduce readability.
+
+**Root Cause**: The default color gradients fade from dark gray (near-black) to bright colors, optimized for dark background terminals. On light backgrounds, these dark grays create poor contrast.
+
+**Research - Terminal Background Detection**:
+
+Detecting terminal background color programmatically is possible but complex:
+
+1. **OSC 11 Query Method**: Send `\e]11;?\e\\` to stdout, terminal responds with `rgb:XXXX/XXXX/XXXX` format. Calculate luma (brightness) to determine light vs dark. Threshold of luma > 0.6 typically indicates "light" terminal.
+   - Source: [Knowledge Bits — Getting a Terminal's Default Foreground & Background Colors](https://jwodder.github.io/kbits/posts/term-fgbg/)
+   - Source: [Adjust your application for a light or dark terminal](https://dystroy.org/blog/terminal-light/)
+
+2. **Caveats**:
+   - Terminal must be in cbreak/noecho mode to read the response
+   - Takes 5-10ms for the round-trip query
+   - Not all terminals support it (though most modern xterm-compatible ones do)
+   - Response parsing is complex
+
+3. **Environment Variable**: Some terminals set `$COLORFGBG` (urxvt, Konsole), but this is not standardized.
+
+**Solution - Auto-detection with `-lbg` override**:
+
+The heatmap now auto-detects the terminal background color using OSC 11 when heatmap mode is enabled. If detection fails or runs in a non-interactive context (pipes, redirects), it defaults to dark background.
+
+Users can explicitly override with `-lbg` / `--light-background`:
+
+```bash
+./ltl -hm -lbg logs/access.log
+```
+
+**Implementation**:
+- `$heatmap_light_bg_auto = 1` - Flag to enable auto-detection (disabled if `-lbg` explicitly set)
+- `detect_light_terminal_background()` - Function that queries terminal using OSC 11
+- Auto-detection runs only when heatmap is enabled and `-lbg` wasn't explicitly set
+- Luma threshold of 0.5 determines light vs dark (using ITU-R BT.709 coefficients)
+
+When light background is detected (or `-lbg` is set), use alternate color gradients that fade from light/pale shades to bright saturated colors, avoiding the dark grays (233, 234) that look bad on white backgrounds.
+
+**Light Background Color Gradients**:
+```perl
+# Light background: fade from light/pale shades to bright saturated color
+my %heatmap_colors_light = (
+    'yellow' => [230, 229, 228, 227, 220, 214, 208, 202, 196, 226],   # pale yellow to bright
+    'green'  => [194, 157, 156, 120, 84, 48, 47, 46, 82, 118],        # pale green to bright
+    'cyan'   => [195, 159, 123, 87, 51, 50, 49, 43, 44, 51],          # pale cyan to bright
+);
+```
+
+Compared to dark background gradients:
+```perl
+# Dark background: fade from dark gray to bright color
+my %heatmap_colors = (
+    'yellow' => [233, 234, 58, 94, 136, 142, 178, 184, 220, 226],
+    'green'  => [233, 234, 22, 28, 34, 40, 46, 82, 118, 154],
+    'cyan'   => [233, 234, 23, 29, 30, 36, 37, 43, 44, 51],
+);
+```
+
 ## External References
 
 ### SRE & Observability
@@ -595,6 +695,11 @@ Footer uses `┴` at the same position as the data row's `│`, with scale conte
 - [Unicode Block Elements](https://en.wikipedia.org/wiki/Block_Elements)
 - [Term::ANSIColor Perl Module](https://metacpan.org/pod/Term::ANSIColor)
 - [ANSI::Heatmap Perl Module](https://github.com/richardjharris/ANSI-Heatmap)
+
+### Terminal Background Detection
+- [Knowledge Bits — Getting a Terminal's Default Foreground & Background Colors](https://jwodder.github.io/kbits/posts/term-fgbg/)
+- [Adjust your application for a light or dark terminal](https://dystroy.org/blog/terminal-light/)
+- [iTerm2 Proprietary Escape Codes](https://iterm2.com/documentation-escape-codes.html)
 
 ### Percentile Analysis
 - [P50 vs P95 vs P99 Latency Percentiles](https://oneuptime.com/blog/post/2025-09-15-p50-vs-p95-vs-p99-latency-percentiles/view)
