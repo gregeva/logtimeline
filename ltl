@@ -1,6 +1,7 @@
 #!/opt/homebrew/bin/perl
 
 # TO DO
+# - Improve Ubuntu build process to take the architecture as a command line option as well as to run the packaged executable and validate this way like the Windows build does (align with Windows build for better CI)
 # - PRIORITY: refactor data model for the data capture and statistics calculations (excess stuff confusing and wasting memory)
 # - add sort for Coefficient of Variance, as this would allow similar sorting options like on stddev for the services with the greatest variability and would be more aligned with the displayed data
 # - Get Windows automated build working
