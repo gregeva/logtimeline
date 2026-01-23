@@ -2,19 +2,14 @@
 
 # TO DO
 # - Improve Ubuntu build process to take the architecture as a command line option as well as to run the packaged executable and validate this way like the Windows build does (align with Windows build for better CI)
-# - PRIORITY: refactor data model for the data capture and statistics calculations (excess stuff confusing and wasting memory)
-# - add sort for Coefficient of Variance, as this would allow similar sorting options like on stddev for the services with the greatest variability and would be more aligned with the displayed data
-# - Get Windows automated build working
 # - Try to get a Mac OS automated build working
 # - GitHub Actions to do automated packaging with versions and release notes
-#
-# DONE (v0.8.0):
-# - [DONE] Build heat map prototype and implement as optional replacement for latency statistics (-hm/--heatmap)
-# -----
+# - adjust sorting to appropriately handle messages with missing sort metric values when they are missing
 # - [Prototyping] group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
 # - Adapt message field widths based on terminal width (object field and thread pool)
+# - Figure out how to try to auto-detect the duration units (milliseconds, microseconds, seconds) and adapt accordingly line by line in a file
+# - Add Integration Runtime log parsing pattern
 # - Add message parse pattern for AkkaCommunications logs
-# - Add message parse pattern for Windchill Apache 2 and Tomcat servers
 # - Filter options for min/max impact (count*duration)
 # - Work in a "Test Mode" which would output a number of parameters and values during the run which could then be tested against for automated testing
 # - investigate moving extraction and processing of bytes out of each of the conditions and put into a common section (be careful of log formats where bytes is implied by column and should not be overwritten)
