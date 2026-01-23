@@ -621,13 +621,15 @@ sub adapt_to_command_line_options {
     if (defined $heatmap_metric) {
         $heatmap_enabled = 1;
         # Handle case where -hm is followed by a filename (GetOptions captures it as optional value)
-        if ($heatmap_metric eq '' || !grep { $_ eq $heatmap_metric } qw(duration bytes count)) {
+        if ($heatmap_metric eq '' || !grep { $_ eq $heatmap_metric } qw(duration time bytes count)) {
             # If the value doesn't match a valid metric, it's likely a filename
             # Push it back to @ARGV and use default metric
-            if ($heatmap_metric ne '' && $heatmap_metric !~ /^(duration|bytes|count)$/) {
+            if ($heatmap_metric ne '' && $heatmap_metric !~ /^(duration|time|bytes|count)$/) {
                 unshift @ARGV, $heatmap_metric;
             }
             $heatmap_metric = 'duration';  # Default metric
+        } elsif( $heatmap_metric =~ /^time$/i ) {
+            $heatmap_metric = 'duration';  # time is allowed for consistency, but what is really meant is duration
         }
 
         # Auto-detect light terminal background if -lbg wasn't explicitly set
