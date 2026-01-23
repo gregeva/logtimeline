@@ -27,17 +27,131 @@ cpanm PAR::Packer
 cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
 ```
 
-### Build Static Binaries
+### Build Static Binaries (Local)
 ```bash
-# macOS ARM64
-cd build && ./macos-package.sh    # Output: ltl_static-binary_macos-arm64
+# macOS (specify architecture)
+./build/macos-package.sh arm64    # Output: ltl_static-binary_macos-arm64
+./build/macos-package.sh x86_64   # Output: ltl_static-binary_macos-x86_64
 
-# Ubuntu amd64 (requires Docker)
-cd build && ./ubuntu-package.sh   # Output: ltl_static-binary_ubuntu-amd64
+# Ubuntu/Linux (requires Docker)
+./build/ubuntu-package.sh amd64   # Output: ltl_static-binary_ubuntu-amd64
+./build/ubuntu-package.sh arm64   # Output: ltl_static-binary_ubuntu-arm64
 
-# Windows (requires Rancher Desktop + Wine)
-cd build && ./windows-package.sh  # Output: ltl_static-binary_windows-amd64.exe
+# Windows (requires Docker + Wine)
+./build/windows-package.sh        # Output: ltl_static-binary_windows-amd64.exe
 ```
+
+### CI/CD Automated Builds
+
+The project uses GitHub Actions for automated cross-platform builds. See `.github/workflows/release-build.yml`.
+
+**Triggers:**
+- Version tags (`v*`) - creates GitHub Release with all binaries attached
+- `workflow_dispatch` - manual trigger for testing (no release created)
+
+**Output Binaries (7 total):**
+| Platform | Binary Name |
+|----------|-------------|
+| macOS ARM64 | `ltl_static-binary_macos-arm64` |
+| macOS x86_64 | `ltl_static-binary_macos-x86_64` |
+| macOS Universal | `ltl_static-binary_macos-universal` |
+| Ubuntu amd64 | `ltl_static-binary_ubuntu-amd64` |
+| Ubuntu arm64 | `ltl_static-binary_ubuntu-arm64` |
+| Windows amd64 | `ltl_static-binary_windows-amd64.exe` |
+
+**Manual Testing:**
+```bash
+# Trigger workflow manually
+gh workflow run release-build.yml
+
+# Watch progress
+gh run watch
+
+# Download artifacts from latest run
+gh run download
+```
+
+## Release Process
+
+### Overview
+Every release requires a release notes file in the `releases/` folder. The workflow will fail if release notes are not found.
+
+### Steps
+
+1. **Update version number** in `ltl` (line 75: `$version_number`)
+
+2. **Create release notes** at `releases/v{version}.md` (e.g., `releases/v0.8.2.md`):
+   ```markdown
+   ## What's New
+   - Feature 1 description
+   - Feature 2 description
+
+   ## Bug Fixes
+   - Fix 1 description
+
+   ## Breaking Changes
+   - Any breaking changes (or "None")
+
+   ## Upgrade Notes
+   - Migration instructions if needed (or "No special steps required")
+   ```
+
+3. **Commit changes** to feature branch
+
+4. **Create PR and merge** to `main`
+
+5. **Create and push version tag** from `main`:
+   ```bash
+   git checkout main && git pull
+   git tag v0.8.2
+   git push origin v0.8.2
+   ```
+
+6. **Workflow automatically**:
+   - Builds all 7 binaries
+   - Creates GitHub Release with your release notes
+   - Attaches binaries to release
+
+### Pre-Release Versions
+Tags containing `-` are marked as pre-releases (e.g., `v0.8.2-beta`, `v0.8.2-rc1`).
+Release notes are still required: `releases/v0.8.2-rc1.md`
+
+```bash
+git tag v0.8.2-rc1
+git push origin v0.8.2-rc1
+```
+
+### Release Checklist
+- [ ] Version number updated in `ltl` (line 75)
+- [ ] Release notes created at `releases/v{version}.md`
+- [ ] All tests pass locally
+- [ ] Feature documentation updated in `features/`
+- [ ] CLAUDE.md updated if architecture changed
+- [ ] PR created, reviewed, and merged to `main`
+- [ ] Tag created and pushed from `main` branch
+
+### Verifying a Release
+After the workflow completes:
+```bash
+# View the release
+gh release view v0.8.2
+
+# Download and test binaries
+gh release download v0.8.2
+./ltl_static-binary_macos-arm64 -version
+```
+
+### Troubleshooting
+If the release workflow fails with "Release notes file not found":
+1. Ensure `releases/v{version}.md` exists (e.g., `releases/v0.8.2.md`)
+2. Commit and push the release notes file
+3. Delete the tag and re-create it:
+   ```bash
+   git tag -d v0.8.2
+   git push origin :refs/tags/v0.8.2
+   git tag v0.8.2
+   git push origin v0.8.2
+   ```
 
 ### Run Directly
 ```bash
