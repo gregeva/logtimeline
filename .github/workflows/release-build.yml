@@ -27,7 +27,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-15
+          - os: macos-13-large
             arch: x86_64
           - os: macos-14
             arch: arm64

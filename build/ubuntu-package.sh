@@ -87,7 +87,7 @@ docker run --rm --platform=linux/$architecture \
     fi
 
     file "${PACKAGE_NAME}"
-    ldd --version | head -1
+    ldd --version 2>&1 | head -1 || true
     echo ""
 
     # Test execution
