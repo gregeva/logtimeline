@@ -292,7 +292,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -648,7 +648,7 @@ sub adapt_to_command_line_options {
 	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
 
     die print_usage( "unable to open any files" ) unless @in_files;
-    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( occurrences total duration time bytes size impact count count_occurrences count_total count_sum count_min count_mean count_avg count_max std_dev stddev min mean avg max);
+    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( occurrences total duration time bytes size impact cv count count_occurrences count_total count_sum count_min count_mean count_avg count_max std_dev stddev min mean avg max);
 
     if( $sort_type =~ /^duration|time$/i ) {
         $sort_key = "total_duration_num";
@@ -666,6 +666,8 @@ sub adapt_to_command_line_options {
         $sort_key = "total_bytes";
     } elsif( $sort_type =~ /^impact$/i ) {
         $sort_key = "impact";
+    } elsif( $sort_type =~ /^cv$/i ) {
+        $sort_key = "cv";
     } elsif( $sort_type =~ /^count_occurrences|count_total$/i ) {
         $sort_key = "count_occurrences";
     } elsif( $sort_type =~ /^count|count_sum$/i ) {
