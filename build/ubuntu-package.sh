@@ -53,16 +53,27 @@ docker run --rm --platform=linux/$architecture \
       cpanminus ca-certificates file >/dev/null
 
     echo "[2/4] Installing PAR::Packer..."
-    cpanm --notest PAR::Packer 2>&1 | tail -3
+    cpanm --notest PAR::Packer
 
     echo "[3/4] Installing dependencies from cpanfile..."
     if [ -f build/cpanfile ]; then
-      cd build && cpanm --notest --installdeps . 2>&1 | tail -5
+      cd build && cpanm --notest --installdeps .
       cd ..
     fi
 
     echo "[4/4] Building static binary..."
-    pp -o ${PACKAGE_NAME} ${SCRIPT_NAME}
+    # Use -M to explicitly include modules that are loaded dynamically at runtime
+    # (PAR::Packer static analysis cannot detect modules loaded via Module::Runtime)
+    pp \
+      -M Specio::PP \
+      -M DateTime::Locale::FromData \
+      -M DateTime::Locale::Base \
+      -M DateTime::Locale::Data \
+      -M DateTime::Locale::Util \
+      -M DateTime::TimeZone::Local \
+      -M DateTime::TimeZone::UTC \
+      -M DateTime::TimeZone::Floating \
+      -o ${PACKAGE_NAME} ${SCRIPT_NAME}
 
     # Verify the build
     echo ""
