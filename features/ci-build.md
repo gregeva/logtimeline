@@ -15,17 +15,14 @@ GitHub Actions CI/CD pipeline for automated cross-platform binary builds of LogT
 1. **Automated builds on release tags** - Trigger builds when version tags (e.g., `v0.8.2`) are pushed
 2. **Manual trigger support** - `workflow_dispatch` for testing builds without creating tags
 3. **Cross-platform support** - Build binaries for macOS, Ubuntu/Linux, and Windows
-4. **Multi-architecture support** - ARM64 and x86_64/amd64 where applicable
-5. **Universal binary for macOS** - Combine architectures using `lipo`
-6. **Release artifact attachment** - Automatically attach all binaries to GitHub Releases
-7. **Build verification** - Verify executables run and report correct version
+4. **Multi-architecture support** - ARM64 and amd64 for Ubuntu
+5. **Release artifact attachment** - Automatically attach all binaries to GitHub Releases
+6. **Build verification** - Verify executables run and report correct version
 
 ### Technical Requirements
 
 1. **GitHub Actions workflow** in `.github/workflows/release-build.yml`
-2. **macOS runners**:
-   - `macos-13` for x86_64 (Intel)
-   - `macos-14` for ARM64 (Apple Silicon)
+2. **macOS runner**: `macos-latest` for ARM64 (Apple Silicon)
 3. **Ubuntu runners** with Docker for Linux builds
 4. **QEMU emulation** for ARM64 Linux builds
 5. **Docker + Wine** for Windows builds
@@ -33,13 +30,11 @@ GitHub Actions CI/CD pipeline for automated cross-platform binary builds of LogT
 7. **PAR::Packer** for creating standalone executables
 8. **Artifact naming** consistent with existing convention
 
-## Output Binaries (7 total)
+## Output Binaries (4 total)
 
 | Platform | Binary Name | Architecture |
 |----------|-------------|--------------|
 | macOS | `ltl_static-binary_macos-arm64` | Apple Silicon |
-| macOS | `ltl_static-binary_macos-x86_64` | Intel |
-| macOS | `ltl_static-binary_macos-universal` | Universal (both) |
 | Ubuntu | `ltl_static-binary_ubuntu-amd64` | x86_64 |
 | Ubuntu | `ltl_static-binary_ubuntu-arm64` | ARM64 |
 | Windows | `ltl_static-binary_windows-amd64.exe` | x86_64 |
@@ -49,9 +44,7 @@ GitHub Actions CI/CD pipeline for automated cross-platform binary builds of LogT
 ```
 Tag Push (v*) or Manual Trigger
      │
-     ├── build-macos (matrix: macos-13/x86_64, macos-14/arm64)
-     │        │
-     │        └── create-universal (lipo both architectures)
+     ├── build-macos (macos-latest, ARM64)
      │
      ├── build-ubuntu (matrix: amd64, arm64 via Docker+QEMU)
      │
@@ -74,40 +67,28 @@ Tag Push (v*) or Manual Trigger
 - `workflow_dispatch` allows testing without creating tags
 - Developers can run local builds for testing
 
-### Architecture Matrix
+### macOS Build
 
-**Decision**: Use GitHub's matrix strategy with separate runners per architecture.
+**Decision**: Build only ARM64 using `macos-latest` (free runner).
 
-**macOS**:
-```yaml
-matrix:
-  include:
-    - os: macos-13
-      arch: x86_64
-    - os: macos-14
-      arch: arm64
-```
+**Rationale**:
+- Intel macOS runners (`-large` variants) require paid GitHub plan
+- ARM64 covers modern Mac hardware (Apple Silicon)
+- Users with Intel Macs can use Ubuntu or Windows binaries, or build locally
 
-**Ubuntu**:
+### Ubuntu Architecture Matrix
+
+**Decision**: Use matrix strategy for amd64 and arm64.
+
 ```yaml
 matrix:
   arch: [amd64, arm64]
 ```
 
 **Rationale**:
-- Native builds avoid cross-compilation complexity
-- `macos-13` is the last Intel runner available
-- `macos-14` is ARM64-only
-- Ubuntu arm64 uses QEMU emulation via `docker/setup-qemu-action`
-
-### Universal Binary
-
-**Decision**: Create universal binary as additional artifact.
-
-**Rationale**:
-- Single download works on all Macs
-- Users don't need to know their architecture
-- Standard practice for macOS distribution
+- amd64 runs natively on GitHub runners
+- arm64 uses QEMU emulation via `docker/setup-qemu-action`
+- Covers both common server architectures
 
 ### Windows Build Approach
 
@@ -157,11 +138,10 @@ matrix:
 - [x] Create `.github/workflows/` directory
 - [x] Create `release-build.yml` workflow file
 - [x] Configure workflow triggers (version tags + workflow_dispatch)
-- [x] Configure macOS matrix for both architectures
+- [x] Configure macOS ARM64 build
 - [x] Set up Perl environment for macOS
 - [x] Install PAR::Packer and dependencies
-- [x] Build macOS executables with `pp`
-- [x] Create universal binary with `lipo`
+- [x] Build macOS executable with `pp`
 - [x] Configure Ubuntu matrix for both architectures
 - [x] Set up QEMU for arm64 Linux builds
 - [x] Build Ubuntu executables via Docker
@@ -178,11 +158,11 @@ matrix:
 
 1. Push changes to feature branch
 2. Manually trigger workflow: `gh workflow run release-build.yml`
-3. Verify all 5 jobs complete successfully
-4. Verify all 7 artifacts uploaded
+3. Verify all 4 jobs complete successfully
+4. Verify all 4 artifacts uploaded
 5. Create test tag `v0.8.2-test` and verify release attachment
 6. Download and test binaries on each platform
-7. Verify release notes appear correctly (test both auto-generated and custom)
+7. Verify release notes appear correctly
 
 ### Verification Commands
 
@@ -203,13 +183,11 @@ gh run download <run-id>
 ## Acceptance Criteria
 
 - [x] Pushing `v*` tag triggers workflow automatically
-- [x] ARM64 binary builds successfully on `macos-14` runner
-- [x] x86_64 binary builds successfully on `macos-13` runner
-- [x] Universal binary created from both architectures
+- [x] ARM64 binary builds successfully on `macos-latest` runner
 - [x] Ubuntu amd64 binary builds successfully
 - [x] Ubuntu arm64 binary builds successfully via QEMU
 - [x] Windows binary builds successfully via Docker + Wine
-- [x] All 7 binaries attached to GitHub Release
+- [x] All 4 binaries attached to GitHub Release
 - [x] Build verification confirms executables run
 - [x] Manual trigger works without creating release
 
