@@ -49,12 +49,10 @@ The project uses GitHub Actions for automated cross-platform builds. See `.githu
 - Version tags (`v*`) - creates GitHub Release with all binaries attached
 - `workflow_dispatch` - manual trigger for testing (no release created)
 
-**Output Binaries (7 total):**
+**Output Binaries (4 total):**
 | Platform | Binary Name |
 |----------|-------------|
 | macOS ARM64 | `ltl_static-binary_macos-arm64` |
-| macOS x86_64 | `ltl_static-binary_macos-x86_64` |
-| macOS Universal | `ltl_static-binary_macos-universal` |
 | Ubuntu amd64 | `ltl_static-binary_ubuntu-amd64` |
 | Ubuntu arm64 | `ltl_static-binary_ubuntu-arm64` |
 | Windows amd64 | `ltl_static-binary_windows-amd64.exe` |
@@ -108,7 +106,7 @@ Every release requires a release notes file in the `releases/` folder. The workf
    ```
 
 6. **Workflow automatically**:
-   - Builds all 7 binaries
+   - Builds all 4 binaries
    - Creates GitHub Release with your release notes
    - Attaches binaries to release
 
