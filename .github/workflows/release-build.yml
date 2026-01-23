@@ -1,0 +1,231 @@
+# Cross-Platform Release Build Pipeline
+#
+# Builds static binaries for macOS, Ubuntu/Linux, and Windows
+# Triggered on version tags (v*) or manual workflow dispatch
+#
+# Output binaries (7 total):
+#   - ltl_static-binary_macos-arm64
+#   - ltl_static-binary_macos-x86_64
+#   - ltl_static-binary_macos-universal
+#   - ltl_static-binary_ubuntu-amd64
+#   - ltl_static-binary_ubuntu-arm64
+#   - ltl_static-binary_windows-amd64.exe
+
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  # ==========================================================================
+  # macOS Builds (ARM64 and x86_64)
+  # ==========================================================================
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - os: macos-13
+            arch: x86_64
+          - os: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.38'
+
+      - name: Install PAR::Packer
+        run: cpanm --notest PAR::Packer
+
+      - name: Generate and install dependencies
+        run: |
+          cd build && ./generate-cpanfile.sh
+          cpanm --notest --installdeps .
+
+      - name: Build static binary
+        run: |
+          ./build/macos-package.sh ${{ matrix.arch }}
+
+      - name: Verify build
+        run: |
+          echo "Verifying ltl_static-binary_macos-${{ matrix.arch }}..."
+          ./ltl_static-binary_macos-${{ matrix.arch }} -version
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ltl_static-binary_macos-${{ matrix.arch }}
+          path: ltl_static-binary_macos-${{ matrix.arch }}
+          retention-days: 7
+
+  # ==========================================================================
+  # macOS Universal Binary (combines ARM64 and x86_64)
+  # ==========================================================================
+  create-universal:
+    needs: build-macos
+    runs-on: macos-14
+    steps:
+      - name: Download ARM64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ltl_static-binary_macos-arm64
+
+      - name: Download x86_64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ltl_static-binary_macos-x86_64
+
+      - name: Create universal binary
+        run: |
+          lipo -create -output ltl_static-binary_macos-universal \
+            ltl_static-binary_macos-arm64 \
+            ltl_static-binary_macos-x86_64
+          chmod +x ltl_static-binary_macos-universal
+
+      - name: Verify universal binary
+        run: |
+          echo "Verifying universal binary architectures..."
+          lipo -info ltl_static-binary_macos-universal
+          echo ""
+          echo "Testing execution..."
+          ./ltl_static-binary_macos-universal -version
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ltl_static-binary_macos-universal
+          path: ltl_static-binary_macos-universal
+          retention-days: 7
+
+  # ==========================================================================
+  # Ubuntu/Linux Builds (amd64 and arm64)
+  # ==========================================================================
+  build-ubuntu:
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU for cross-platform builds
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Generate cpanfile
+        run: cd build && ./generate-cpanfile.sh
+
+      - name: Build static binary
+        run: |
+          ./build/ubuntu-package.sh ${{ matrix.arch }}
+
+      - name: Verify build
+        run: |
+          echo "Verifying ltl_static-binary_ubuntu-${{ matrix.arch }}..."
+          # For arm64, we need QEMU to run the binary
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            file ltl_static-binary_ubuntu-${{ matrix.arch }}
+            echo "[info] ARM64 binary verified via file type (execution requires ARM64 host)"
+          else
+            ./ltl_static-binary_ubuntu-${{ matrix.arch }} -version
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ltl_static-binary_ubuntu-${{ matrix.arch }}
+          path: ltl_static-binary_ubuntu-${{ matrix.arch }}
+          retention-days: 7
+
+  # ==========================================================================
+  # Windows Build (Docker + Wine on Ubuntu)
+  # ==========================================================================
+  build-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate cpanfile
+        run: cd build && ./generate-cpanfile.sh
+
+      - name: Build Windows executable
+        run: |
+          ./build/windows-package.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ltl_static-binary_windows-amd64.exe
+          path: ltl_static-binary_windows-amd64.exe
+          retention-days: 7
+
+  # ==========================================================================
+  # Release Job - Attach all binaries to GitHub Release
+  # ==========================================================================
+  release:
+    needs: [build-macos, create-universal, build-ubuntu, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f -ls
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          # Move all binaries to release directory (flatten structure)
+          find artifacts -type f -exec mv {} release/ \;
+          echo ""
+          echo "Release files:"
+          ls -la release/
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Check for release notes file
+        id: release_notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Release notes are required in releases/ folder
+          # Check for version-specific release notes (e.g., releases/v0.8.2.md)
+          if [ -f "releases/${VERSION}.md" ]; then
+            echo "file=releases/${VERSION}.md" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Release notes file not found: releases/${VERSION}.md"
+            echo "Please create release notes before tagging a release."
+            echo "See CLAUDE.md for release process documentation."
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          body_path: ${{ steps.release_notes.outputs.file }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+          name: ${{ steps.version.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
