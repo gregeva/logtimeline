@@ -524,11 +524,13 @@ A future enhancement will add a config directory for commonly used pattern files
 - `%APPDATA%\ltl\patterns\` on Windows
 - Allow referencing patterns by name: `--exclude-file @health-checks`
 
-### Multiple Files per Option (Out of Scope for v1)
-Allow specifying multiple files per option:
+### Multiple Files per Option (Implemented in v1.1)
+Specify multiple pattern files by repeating the option for each file:
 ```bash
 ./ltl --exclude-file noise.txt --exclude-file debug.txt logs/*.log
+./ltl -ef noise.txt -ef debug.txt -ef health.txt logs/*.log
 ```
+**Status:** ✅ Implemented - patterns from all files are merged together.
 
 ### Regex Mode in Files (Out of Scope for v1)
 Allow regex patterns in files with special prefix:
@@ -546,7 +548,7 @@ regex:^DEBUG.*$
 |----------|--------|-----------|
 | **Pattern type in files** | Literal strings only | Security - prevents regex injection; simplicity |
 | **Regex escaping** | Perl `quotemeta` | Comprehensive, well-tested, handles all edge cases |
-| **Multiple files per option** | Single file only | Simplicity for v1; can extend later |
+| **Multiple files per option** | Multiple files supported | Patterns from all files merged with OR; each file has its own status indicator |
 | **Case sensitivity** | Case-sensitive | Patterns match exactly as written |
 | **Whitespace handling** | Preserve exactly | Log messages may require whitespace for unique matching |
 | **Whitespace-only lines** | Treated as empty | Lines with only spaces/tabs are ignored |
@@ -741,6 +743,18 @@ ltl --exclude-file noise.txt --exclude "DEBUG|TRACE" logs/app.log
 
 # Include from file, exclude from CLI
 ltl --include-file my-apis.txt --exclude "health" logs/access.log
+```
+
+#### Using Multiple Pattern Files
+
+You can specify multiple pattern files for the same filter type. Each file must be preceded by its own option flag:
+
+```bash
+# Multiple exclude files
+ltl -ef noise.txt -ef health.txt -ef debug.txt logs/access.log
+
+# Combine multiple exclude files with a highlight file
+ltl -ef probes.txt -ef metrics.txt -hf my-apis.txt logs/access.log
 ```
 
 #### Examples
