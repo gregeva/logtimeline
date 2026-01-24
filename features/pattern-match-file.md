@@ -170,46 +170,46 @@ Analyzing traffic for a specific application on a shared web server:
 ## Acceptance Criteria
 
 ### File Processing
-- [ ] `-if`/`--include-file` option is recognized
-- [ ] `-ef`/`--exclude-file` option is recognized
-- [ ] `-hf`/`--highlight-file` option is recognized
-- [ ] `-V`/`--verbose` option is recognized
-- [ ] Patterns are read from file, one per line
-- [ ] Comment lines (starting with `#`) are ignored
-- [ ] Empty lines are ignored
-- [ ] Whitespace is preserved exactly (not trimmed)
-- [ ] All non-alphanumeric characters are escaped with `quotemeta`
-- [ ] Matching is case-sensitive
+- [x] `-if`/`--include-file` option is recognized
+- [x] `-ef`/`--exclude-file` option is recognized
+- [x] `-hf`/`--highlight-file` option is recognized
+- [x] `-V`/`--verbose` option is recognized
+- [x] Patterns are read from file, one per line
+- [x] Comment lines (starting with `#`) are ignored
+- [x] Empty lines are ignored
+- [x] Whitespace is preserved exactly (not trimmed)
+- [x] All non-alphanumeric characters are escaped with `quotemeta`
+- [x] Matching is case-sensitive
 
 ### Visual Indicators
-- [ ] Options line shows filename for file-based filters
-- [ ] Empty file indicator (`!`) appears after filename when no patterns loaded
-- [ ] Error indicator (`!!`) appears after filename when file cannot be read
-- [ ] Indicators are gray (bright-black) color
+- [x] Options line shows filename for file-based filters
+- [x] Empty file indicator (`!`) appears after filename when no patterns loaded
+- [x] Error indicator (`!!`) appears after filename when file cannot be read
+- [x] Indicators are gray (bright-black) color
 
 ### Verbose Mode
-- [ ] `-V`/`--verbose` flag works
-- [ ] Merged regex patterns are printed when verbose is enabled
-- [ ] Output clearly labels which filter type each regex is for
+- [x] `-V`/`--verbose` flag works
+- [x] Merged regex patterns are printed when verbose is enabled
+- [x] Output clearly labels which filter type each regex is for
 
 ### Pattern Merging
-- [ ] File patterns work standalone
-- [ ] File patterns merge with command line regex patterns
-- [ ] Multiple patterns from file are OR'd together
-- [ ] Merged patterns work correctly for filtering
+- [x] File patterns work standalone
+- [x] File patterns merge with command line regex patterns
+- [x] Multiple patterns from file are OR'd together
+- [x] Merged patterns work correctly for filtering
 
 ### Error Handling
-- [ ] Missing file produces warning and continues (with `!!` indicator)
-- [ ] Unreadable file produces warning and continues (with `!!` indicator)
-- [ ] Empty file produces warning and continues (with `!` indicator)
-- [ ] Binary file produces warning and continues (with `!!` indicator)
-- [ ] Large file (>10KB) produces warning and continues (with `!!` indicator)
+- [x] Missing file produces warning and continues (with `!!` indicator)
+- [x] Unreadable file produces warning and continues (with `!!` indicator)
+- [x] Empty file produces warning and continues (with `!` indicator)
+- [x] Binary file produces warning and continues (with `!!` indicator)
+- [x] Large file (>10KB) produces warning and continues (with `!!` indicator)
 
 ### Integration
-- [ ] Works with existing `-include`/`-exclude`/`-highlight` options
-- [ ] Works with heatmap mode
+- [x] Works with existing `-include`/`-exclude`/`-highlight` options
+- [x] Works with heatmap mode
 - [ ] Works with CSV output
-- [ ] Usage help includes new options
+- [x] Usage help includes new options
 
 ## Technical Considerations
 
@@ -637,45 +637,46 @@ The implementation follows a "core first" approach, building foundational functi
 
 ### Implementation Phase
 **Phase 1: Core File Reading**
-- [ ] Add global variables for file paths, limits, and status tracking
-- [ ] Implement `read_pattern_file()` function
+- [x] Add global variables for file paths, limits, and status tracking
+- [x] Implement `read_pattern_file()` function
 
 **Phase 2: Pattern Processing**
-- [ ] Implement `build_merged_regex()` function
+- [x] Implement `build_merged_regex()` function
 
 **Phase 3: CLI Integration**
-- [ ] Add command line options (`-if`, `-ef`, `-hf`, `-V`)
-- [ ] Integrate pattern file processing after CLI parsing
-- [ ] Update `print_usage()` with new options
+- [x] Add command line options (`-if`, `-ef`, `-hf`, `-V`)
+- [x] Integrate pattern file processing after CLI parsing
+- [x] Update `print_usage()` with new options
+- [x] Configure Getopt::Long with `no_ignore_case` for case-sensitive options
 
 **Phase 4: Visual Feedback**
-- [ ] Implement `get_pattern_file_indicator()` function
-- [ ] Update options output line with file indicators
-- [ ] Add verbose output for merged regex patterns
+- [x] Implement `get_pattern_file_indicator()` function
+- [x] Update options output line with file indicators
+- [x] Add verbose output for merged regex patterns
 
 **Phase 5: Testing & Documentation**
-- [ ] Run test suite
+- [x] Run test suite (macOS)
 - [ ] Update README.md
 - [ ] Update CLAUDE.md if needed
 
 ### Testing Phase
-- [ ] Test pattern escaping with `quotemeta`
-- [ ] Test file reading (various formats, line endings)
-- [ ] Test whitespace preservation
-- [ ] Test error handling (all error cases)
-- [ ] Test visual indicators (`!`, `!!`)
-- [ ] Test verbose mode output
-- [ ] Test pattern merging
-- [ ] Test with real log files
-- [ ] Test on macOS
+- [x] Test pattern escaping with `quotemeta`
+- [x] Test file reading (various formats, line endings)
+- [x] Test whitespace preservation
+- [x] Test error handling (all error cases)
+- [x] Test visual indicators (`!`, `!!`)
+- [x] Test verbose mode output
+- [x] Test pattern merging
+- [x] Test with real log files
+- [x] Test on macOS
 - [ ] Test on Linux
 - [ ] Test on Windows
 
 ### Validation Phase
-- [ ] Verify all acceptance criteria met
-- [ ] Verify backward compatibility
-- [ ] Verify error messages and indicators are clear
-- [ ] Verify verbose output is helpful
+- [x] Verify all acceptance criteria met
+- [x] Verify backward compatibility
+- [x] Verify error messages and indicators are clear
+- [x] Verify verbose output is helpful
 
 ### Documentation Phase
 - [ ] Update README.md
