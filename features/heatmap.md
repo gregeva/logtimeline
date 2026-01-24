@@ -643,6 +643,13 @@ Detecting terminal background color programmatically is possible but complex:
 
 3. **Environment Variable**: Some terminals set `$COLORFGBG` (urxvt, Konsole), but this is not standardized.
 
+4. **Windows Limitation**: OSC 11 query is not reliably supported on Windows:
+   - Windows Terminal 1.22+ supports it ([source](https://github.com/microsoft/terminal/discussions/14142))
+   - Windows 11 conhost supports it (shares codebase with Windows Terminal)
+   - Windows 10 conhost does NOT support it
+   - Legacy cmd.exe does NOT support it
+   - The `stty` command used for terminal raw mode is Unix-only
+
 **Solution - Auto-detection with `-lbg` override**:
 
 The heatmap now auto-detects the terminal background color using OSC 11 when heatmap mode is enabled. If detection fails or runs in a non-interactive context (pipes, redirects), it defaults to dark background.
@@ -658,6 +665,7 @@ Users can explicitly override with `-lbg` / `--light-background`:
 - `detect_light_terminal_background()` - Function that queries terminal using OSC 11
 - Auto-detection runs only when heatmap is enabled and `-lbg` wasn't explicitly set
 - Luma threshold of 0.5 determines light vs dark (using ITU-R BT.709 coefficients)
+- **Windows**: Auto-detection is skipped entirely (`return 0 if $^O eq 'MSWin32'`); users should use `-lbg` flag explicitly
 
 When light background is detected (or `-lbg` is set), use alternate color gradients that fade from light/pale shades to bright saturated colors, avoiding the dark grays (233, 234) that look bad on white backgrounds.
 
@@ -679,6 +687,34 @@ my %heatmap_colors = (
     'green'  => [233, 234, 22, 28, 34, 40, 46, 82, 118, 154],
     'cyan'   => [233, 234, 23, 29, 30, 36, 37, 43, 44, 51],
 );
+```
+
+#### 8. Windows Terminal Background Detection Error (v0.8.2 bugfix)
+**Symptom**: On Windows, running ltl with `-hm` (heatmap) caused an error because the terminal background auto-detection code attempted to use Unix-only commands.
+
+**Root Cause**: The `detect_light_terminal_background()` function used:
+1. `stty` command - Unix-only terminal control command
+2. `select()` on STDIN filehandle - not reliable on Windows
+3. OSC 11 escape sequence - only supported in Windows Terminal 1.22+, not in legacy conhost or cmd.exe
+
+**Research Findings**:
+- OSC 11 query support on Windows is fragmented:
+  - Windows Terminal Preview 1.22+ supports it
+  - Windows 11 conhost supports it (shares codebase with Windows Terminal)
+  - Windows 10 conhost does NOT support it
+  - Legacy cmd.exe does NOT support it
+- Microsoft acknowledges that "Windows command-line apps have no way of determining the default foreground and background colors"
+- Alternative approaches (Win32::Console, PowerShell `$Host.UI.RawUI.BackgroundColor`) are either insufficient or require running inside PowerShell
+
+**Fix**: Skip auto-detection entirely on Windows by checking `$^O eq 'MSWin32'` at the start of `detect_light_terminal_background()`. Windows users who need light background colors should use the `-lbg` flag explicitly.
+
+```perl
+sub detect_light_terminal_background {
+    # Skip auto-detection on Windows - use -lbg flag instead
+    return 0 if $^O eq 'MSWin32';
+
+    # ... rest of Unix implementation
+}
 ```
 
 ## External References

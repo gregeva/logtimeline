@@ -307,6 +307,14 @@ sub detect_light_terminal_background {
     # References:
     # - https://jwodder.github.io/kbits/posts/term-fgbg/
     # - https://dystroy.org/blog/terminal-light/
+    #
+    # Note: On Windows, OSC 11 query is not reliably supported (only works in
+    # Windows Terminal 1.22+, not in legacy conhost or cmd.exe). The stty command
+    # used for terminal raw mode is also Unix-only. Users on Windows should use
+    # the -lbg flag explicitly if they have a light background terminal.
+
+    # Skip auto-detection on Windows - use -lbg flag instead
+    return 0 if $^O eq 'MSWin32';
 
     return 0 unless -t STDIN && -t STDOUT;  # Only works on interactive terminals
 
