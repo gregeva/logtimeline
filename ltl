@@ -116,16 +116,12 @@ my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex, $user_defined_metrics, $user_defined_metrics_regex, $user_defined_metrics_pre_regex, $user_defined_metrics_post_regex );
 
 # Pattern file filter options (Issue #19)
-my ($include_file, $exclude_file, $highlight_file);     # File paths from command line
+my (@include_files, @exclude_files, @highlight_files);   # File paths from command line (arrays for multiple files)
 my $verbose = 0;                                         # Verbose mode flag (-V)
 my $pattern_file_max_size = 10 * 1024;                   # 10KB file size limit
 my $pattern_file_max_patterns = 1000;                    # Max patterns per file (warn if exceeded)
 my $pattern_regex_max_length = 10240;                    # 10KB regex length warning threshold
-my %pattern_file_status = (                              # Track file status for visual indicators
-    'include'   => { file => undef, status => 'ok', count => 0 },   # status: ok, empty, error
-    'exclude'   => { file => undef, status => 'ok', count => 0 },
-    'highlight' => { file => undef, status => 'ok', count => 0 },
-);
+my %pattern_file_status;                                 # {filter_type}{filename} => { status => 'ok'|'empty'|'error', count => N }
 
 my $pause_output = 0;
 my $omit_values = 0;
@@ -317,32 +313,29 @@ sub read_pattern_file {
     my ($filename, $filter_type) = @_;
     my @patterns;
 
-    # Record the file being processed
-    $pattern_file_status{$filter_type}{file} = $filename;
-
     # Use File::Spec for cross-platform path handling
-    $filename = File::Spec->canonpath($filename);
+    my $canonical_filename = File::Spec->canonpath($filename);
 
     # Validate file exists
-    unless (-e $filename) {
+    unless (-e $canonical_filename) {
         print STDERR "Warning: Pattern file not found: $filename\n";
-        $pattern_file_status{$filter_type}{status} = 'error';
+        $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
 
     # Check file size
-    my $size = -s $filename;
+    my $size = -s $canonical_filename;
     if ($size > $pattern_file_max_size) {
         print STDERR "Warning: Pattern file exceeds maximum size (10KB): $filename\n";
-        $pattern_file_status{$filter_type}{status} = 'error';
+        $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
 
     # Check for binary (null bytes in first 8KB)
     my $fh;
-    unless (open $fh, '<:raw', $filename) {
+    unless (open $fh, '<:raw', $canonical_filename) {
         print STDERR "Warning: Cannot read pattern file: $filename ($!)\n";
-        $pattern_file_status{$filter_type}{status} = 'error';
+        $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
     my $header;
@@ -350,15 +343,15 @@ sub read_pattern_file {
     if (defined $header && $header =~ /\x00/) {
         close $fh;
         print STDERR "Warning: Pattern file appears to be binary: $filename\n";
-        $pattern_file_status{$filter_type}{status} = 'error';
+        $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
     close $fh;
 
     # Read file as text
-    unless (open $fh, '<:encoding(UTF-8)', $filename) {
+    unless (open $fh, '<:encoding(UTF-8)', $canonical_filename) {
         print STDERR "Warning: Cannot read pattern file: $filename ($!)\n";
-        $pattern_file_status{$filter_type}{status} = 'error';
+        $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
     while (<$fh>) {
@@ -373,7 +366,7 @@ sub read_pattern_file {
 
     if (@patterns == 0) {
         print STDERR "Warning: Pattern file is empty: $filename\n";
-        $pattern_file_status{$filter_type}{status} = 'empty';
+        $pattern_file_status{$filter_type}{$filename} = { status => 'empty', count => 0 };
         return ();
     }
 
@@ -383,8 +376,7 @@ sub read_pattern_file {
                      " patterns (exceeds recommended limit of $pattern_file_max_patterns): $filename\n";
     }
 
-    $pattern_file_status{$filter_type}{status} = 'ok';
-    $pattern_file_status{$filter_type}{count} = scalar(@patterns);
+    $pattern_file_status{$filter_type}{$filename} = { status => 'ok', count => scalar(@patterns) };
     return @patterns;
 }
 
@@ -414,8 +406,9 @@ sub build_merged_regex {
 }
 
 sub get_pattern_file_indicator {
-    my ($filter_type) = @_;
-    my $status = $pattern_file_status{$filter_type}{status};
+    my ($filter_type, $filename) = @_;
+    return '' unless exists $pattern_file_status{$filter_type}{$filename};
+    my $status = $pattern_file_status{$filter_type}{$filename}{status};
     return '' if $status eq 'ok';
     return '!' if $status eq 'empty';
     return '!!' if $status eq 'error';
@@ -698,9 +691,9 @@ sub adapt_to_command_line_options {
         'exclude|e=s' => \$exclude_regex,
         'include|i=s' => \$include_regex,
         'highlight|h=s' => \$highlight_regex,
-        'exclude-file|ef=s' => \$exclude_file,
-        'include-file|if=s' => \$include_file,
-        'highlight-file|hf=s' => \$highlight_file,
+        'exclude-file|ef=s' => \@exclude_files,
+        'include-file|if=s' => \@include_files,
+        'highlight-file|hf=s' => \@highlight_files,
         'verbose|V' => \$verbose,
         'top-messages|n=i' => \$top_n_messages,
         'omit-values|ov' => \$omit_values,
@@ -761,17 +754,17 @@ sub adapt_to_command_line_options {
         }
     }
 
-    # Process pattern files (Issue #19)
-    if ($include_file) {
-        my @patterns = read_pattern_file($include_file, 'include');
+    # Process pattern files (Issue #19) - supports multiple files per filter type
+    foreach my $file (@include_files) {
+        my @patterns = read_pattern_file($file, 'include');
         $include_regex = build_merged_regex($include_regex, @patterns) if @patterns;
     }
-    if ($exclude_file) {
-        my @patterns = read_pattern_file($exclude_file, 'exclude');
+    foreach my $file (@exclude_files) {
+        my @patterns = read_pattern_file($file, 'exclude');
         $exclude_regex = build_merged_regex($exclude_regex, @patterns) if @patterns;
     }
-    if ($highlight_file) {
-        my @patterns = read_pattern_file($highlight_file, 'highlight');
+    foreach my $file (@highlight_files) {
+        my @patterns = read_pattern_file($file, 'highlight');
         $highlight_regex = build_merged_regex($highlight_regex, @patterns) if @patterns;
     }
 
@@ -2813,17 +2806,17 @@ sub print_summary_table {
         # Handle pattern file options with indicators
         if ($arg =~ /^(-ef|--exclude-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
-            my $indicator = get_pattern_file_indicator('exclude');
+            my $indicator = get_pattern_file_indicator('exclude', $file);
             print "$arg $file$indicator ";
             $i++;  # Skip the filename in next iteration
         } elsif ($arg =~ /^(-if|--include-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
-            my $indicator = get_pattern_file_indicator('include');
+            my $indicator = get_pattern_file_indicator('include', $file);
             print "$arg $file$indicator ";
             $i++;  # Skip the filename in next iteration
         } elsif ($arg =~ /^(-hf|--highlight-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
-            my $indicator = get_pattern_file_indicator('highlight');
+            my $indicator = get_pattern_file_indicator('highlight', $file);
             print "$arg $file$indicator ";
             $i++;  # Skip the filename in next iteration
         } else {
