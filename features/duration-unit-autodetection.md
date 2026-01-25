@@ -300,30 +300,34 @@ foreach my $buffered_line (@lookahead_buffer) {
 - [x] Create feature requirements document
 - [x] Update GitHub issue #17
 - [x] Create implementation plan
-- [x] Document decisions (look-ahead: 1000 samples/10000 lines, 5% warning threshold, -du sets default)
+- [x] Architect review of autodetection approach (2025-01-25)
 
-### Implementation Phase
+### Implementation Phase (Manual Override - Completed)
 - [x] Add command-line option `-du`/`--duration-unit` with validation
 - [x] Add conversion function `convert_duration_to_ms()`
-- [x] Add detection function `detect_duration_unit()`
-- [x] Add global variables for duration unit tracking
-- [ ] **BLOCKED: Architect review needed** - Implement look-ahead buffer for detection
-- [ ] Integrate conversion at duration capture points
+- [x] Integrate conversion at duration capture points
+- [x] Update help text
+
+### Autodetection Phase (Deferred - Requires Architecture Refactor)
+- [ ] Refactor parsing to data-driven format registry (see Issue #23 / features/log-format-registry.md)
+- [ ] Implement per-format duration unit definitions
+- [ ] Add autodetection based on format identification
 - [ ] Add progress line unit display
 - [ ] Add runtime validation warnings
 - [ ] Add verbose output section
 
 ### Testing Phase
-- [ ] Test with nginx logs (seconds)
-- [ ] Test with Apache logs (microseconds)
-- [ ] Test with ThingWorx logs (pattern hint)
-- [ ] Test warning scenarios
-- [ ] Test verbose output
+- [x] Test with `-du us` (microseconds conversion)
+- [x] Test with `-du s` (seconds conversion)
+- [x] Test with `-du ns` (nanoseconds conversion)
+- [x] Test with `-du ms` (explicit milliseconds, same as default)
+- [x] Test invalid unit error message
+- [x] Test with Apache HTTP Server logs (microseconds) - ApacheHTTP2Server-access_log
+- [ ] Test with nginx logs (seconds) - needs real nginx logs
 
 ### Documentation Phase
-- [ ] Update CLAUDE.md
-- [ ] Update help text
-- [ ] Add to release notes
+- [x] Update help text
+- [x] Feature branch complete - ready for merge to release
 
 ## Decisions Made
 
@@ -333,23 +337,33 @@ From implementation planning session:
 3. **Warning threshold**: 5% suspicious values triggers warning
 4. **-du scope**: Sets default, but explicit pattern hints can override per-file
 
-## Architectural Decision Required
+### 2025-01-25: Architect Review - Autodetection Deferred
 
-### Issue: Look-Ahead Detection Mechanism
+After architect review, the following decision was made:
 
-The current implementation uses a **separate file scan** approach:
-- `scan_file_for_duration_unit()` opens the file, reads up to 10000 lines to collect 1000 duration samples
-- Uses simplified regex patterns to extract durations (not the full parsing infrastructure)
-- Then the main file processing loop opens the file again and processes normally with detected unit
+**Problem**: The autodetection implementation used a separate file scan with simplified regex patterns that:
+1. Did not integrate with the existing match type system (12+ log format patterns)
+2. Could not accurately identify which field is "duration" without knowing the exact log format
+3. Would inevitably diverge from main parsing patterns, causing maintenance issues
+4. Cannot distinguish between similar fields (e.g., nginx: request_time vs upstream_response_time vs time_to_first_byte)
 
-### Concerns Raised
+**Decision**: Split this feature into two parts:
 
-This approach bypasses the existing application parsing context:
-1. **Duplicate file reads** - opens and reads the file twice
-2. **Pattern mismatch risk** - simplified detection patterns may not match actual parsing patterns
-3. **Not integrated with match types** - doesn't leverage the existing log format detection (match_type 1-12)
+1. **Manual Override (This Branch)**: Ship `-du`/`--duration-unit` option for users who know their log format's duration unit. This provides immediate value.
 
-### Alternative Approaches to Consider
+2. **Autodetection (Future)**: Requires refactoring the core parsing architecture to a data-driven format registry where each log format definition includes its duration unit. This is tracked as a separate enhancement request (see Issue #23 / features/log-format-registry.md).
+
+**Rationale**: Duration unit knowledge is fundamentally tied to log format identification. The correct design is for format definitions to include unit information, not to have a parallel detection system that guesses based on value magnitude.
+
+## Architecture Notes
+
+The manual override applies the same unit conversion to all files in a single run. This is appropriate because:
+- Users analyzing logs from a single server type will use one unit
+- Mixed-source analysis with different units should use separate runs or wait for the format registry refactor
+
+## Autodetection Approaches (For Future Reference)
+
+These approaches were considered for autodetection and should be revisited once the log format registry refactor is complete:
 
 **Option A: Buffered Look-Ahead Within Main Loop**
 - On first duration found, buffer subsequent lines
@@ -359,7 +373,7 @@ This approach bypasses the existing application parsing context:
 - Con: More complex state management, lines processed twice
 
 **Option B: Two-Pass Processing**
-- First pass: lightweight scan for duration samples only (current approach)
+- First pass: lightweight scan for duration samples only
 - Second pass: full processing with detected unit
 - Pro: Simple, clean separation
 - Con: File read twice, detection patterns may drift from parsing patterns
@@ -378,9 +392,16 @@ This approach bypasses the existing application parsing context:
 - Pro: Single pass, no buffering
 - Con: Cannot retroactively fix already-processed values
 
-### Questions for Chief Architect
+### Architect Questions (Resolved)
 
-1. Which approach best fits the existing architecture philosophy?
-2. Is the duplicate file read acceptable for the simplicity it provides?
-3. Should detection patterns mirror the exact parsing patterns used in match types?
-4. How should detection interact with the existing `$is_access_log` flag?
+1. **Which approach best fits the existing architecture philosophy?**
+   - None of these - duration unit must be tied to format definition, not separate detection
+
+2. **Is the duplicate file read acceptable for the simplicity it provides?**
+   - I/O overhead is acceptable, but the pattern mismatch risk is not
+
+3. **Should detection patterns mirror the exact parsing patterns used in match types?**
+   - Yes - this is the core issue. A data-driven format registry solves this.
+
+4. **How should detection interact with the existing `$is_access_log` flag?**
+   - Format registry will replace `$is_access_log` with richer format metadata
