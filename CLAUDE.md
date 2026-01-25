@@ -333,18 +333,26 @@ logs/
 
 ### AccessLogs/ - HTTP Request Logs (duration, bytes, status)
 
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | duration, bytes, count | 277MB | Primary access log test |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | duration, bytes, count | 220MB | Secondary access log test |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | duration, bytes, count | 148MB | Smaller access log test |
-| `localhost_access_log.2025-03-21.txt` | duration, bytes, count | 2.6MB | Small access log for quick tests |
+| File | Server | Latency Unit | Metrics | Size | Use Case |
+|------|--------|--------------|---------|------|----------|
+| `ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` | Apache HTTP Server 2.x | microseconds (%D) | duration, bytes, count | 658KB | Apache HTTP2 with microsecond latency |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 277MB | Primary Tomcat 9 access log test |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 220MB | Secondary Tomcat 9 access log test |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 148MB | Smaller Tomcat 9 access log test |
+| `localhost_access_log.2025-03-21.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 2.6MB | Small access log for quick tests |
+| *(placeholder for Tomcat 11 logs)* | Tomcat 11 | milliseconds (%D) | duration, bytes, count | - | - |
 
-**Format**: Apache combined log with duration in milliseconds at end
+**Format**: Apache combined log with duration at end (units vary by server)
 ```
+# Apache HTTP Server 2.x - microseconds
+127.0.0.1 - - [22/Jan/2026:08:49:51 +0000] "GET /path HTTP/1.1" 200 209 173542
+
+# Tomcat 9 - milliseconds
 10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /path HTTP/1.1" 200 261 1
 ```
-Fields: IP, -, -, [timestamp], "method path protocol", status_code, bytes, duration_ms
+Fields: IP, -, -, [timestamp], "method path protocol", status_code, bytes, duration
+
+**Note**: Apache HTTP Server uses `%D` for microseconds, while Tomcat uses `%D` for milliseconds. The ltl tool auto-detects the unit based on value ranges.
 
 ---
 
