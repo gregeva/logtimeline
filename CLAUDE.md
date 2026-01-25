@@ -258,44 +258,59 @@ Active development items are documented in comments at the top of the `ltl` scri
 
 When working on new features, follow this workflow to keep the project documentation current. **This workflow is mandatory** - always check and update feature documentation as you progress through each phase.
 
+**CRITICAL: Do not write production code until the implementation plan has been reviewed and approved by the user.** Implementing before planning is complete wastes effort and creates cleanup work when the approach is rejected.
+
 ### 1. Planning & Research Phase
 - Create a feature document in `features/<feature-name>.md` describing requirements, design decisions, and test plan
 - Review existing TO-DO comments in `ltl` (lines 3-50) for related work
 - Check `features/` directory for similar or dependent features
-- For features requiring prototyping:
-  - Create prototypes in `prototype/` directory
-  - Document design decisions and questions in `prototype/<FEATURE>-DECISIONS.md`
-  - Collect user feedback on decisions before proceeding
 - Create implementation plan in `features/<feature-name>-implementation-plan.md` with:
   - Data structures and their locations
   - Integration points in the codebase
   - Step-by-step implementation order
   - Test cases and acceptance criteria
 
-### 2. Scheduling Phase
+### 2. Prototyping Phase (for non-trivial features)
+
+**Before integrating into the main application**, validate the approach with a standalone prototype:
+
+- Create prototypes in `prototype/` directory as isolated scripts
+- Prototype should prove the core algorithm/approach works correctly
+- Document design decisions and questions in `prototype/<FEATURE>-DECISIONS.md`
+- Test the prototype independently to verify correctness
+- **Get user approval of prototype behavior before proceeding**
+
+Only after the prototype validates the approach should you determine how to integrate it into the existing application. This prevents wasted effort from implementing an approach that doesn't work or isn't approved.
+
+### 3. Scheduling Phase
+
+**GATE: Do not proceed past this phase without explicit user approval of the implementation plan.**
+
 - Review implementation plan with user
 - Confirm implementation order and dependencies
+- Discuss integration approach based on prototype learnings
 - Update feature document progress tracking section
+- **Obtain explicit approval to begin implementation**
 
-### 3. Implementation Phase
+### 4. Implementation Phase
 - If adding new Perl modules, run `./build/generate-cpanfile.sh` to update dependency files
 - For platform-specific code, ensure both Unix and Windows paths are handled
 - **Update feature document progress tracking** as each task is completed
 
-### 4. Testing Phase
+### 5. Testing Phase
 - Test with sample log files in `logs/` directory
 - Verify CSV output if `-o` flag behavior is affected
 - Test on multiple platforms if changes involve platform-specific code
 - **Update feature document** with test results and any issues found
 
-### 5. Validation Phase
+### 6. Validation Phase
 - Verify all acceptance criteria are met
 - Verify visual output matches prototypes (if applicable)
 - Verify compatibility with existing command-line flags
 - **Update feature document** validation status
 
-### 6. Documentation Updates
-- Update `README.md` with new features and capabilities
+### 7. Documentation Updates
+- Update `features/<feature-name>.md` with feature details to be included in the release notes
 - Update `features/<feature-name>.md` with implementation status and any deviations from the original plan
 - Update TO-DO comments in `ltl` to mark completed items or add new ones
 - Update this CLAUDE.md file if:
@@ -304,7 +319,7 @@ When working on new features, follow this workflow to keep the project documenta
   - New command-line options are added
   - Known limitations change
 
-### 7. Keeping Documentation Current
+### 8. Keeping Documentation Current
 **IMPORTANT**: Always ensure decisions and current status are reflected in the feature documentation:
 - `features/<feature-name>.md` - Main feature document with requirements, decisions, and progress tracking
 - `features/<feature-name>-implementation-plan.md` - Detailed implementation plan (if created)
