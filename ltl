@@ -123,14 +123,8 @@ my $pattern_file_max_patterns = 1000;                    # Max patterns per file
 my $pattern_regex_max_length = 10240;                    # 10KB regex length warning threshold
 my %pattern_file_status;                                 # {filter_type}{filename} => { status => 'ok'|'empty'|'error', count => N }
 
-# Duration unit autodetection variables (Issue #17)
+# Duration unit override (Issue #17)
 my $duration_unit_override = undef;                      # User-specified unit via -du (ns, us, ms, s)
-my %file_duration_unit;                                  # {filename} => detected/assigned unit
-my %file_detection_method;                               # {filename} => detection method description
-my $duration_detection_max_samples = 1000;               # Max samples to collect for detection
-my $duration_detection_max_lines = 10000;                # Max lines to read for detection
-my $duration_detection_min_samples = 100;                # Min samples needed for reliable detection
-my $duration_suspicious_threshold = 0.05;                # 5% suspicious values triggers warning
 
 my $pause_output = 0;
 my $omit_values = 0;
@@ -306,7 +300,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -433,130 +427,6 @@ sub convert_duration_to_ms {
     return $value / 1000         if $unit eq 'us';
     return $value / 1000000      if $unit eq 'ns';
     return $value;  # default: assume milliseconds
-}
-
-sub detect_duration_unit {
-    my ($samples_ref, $patterns_seen_ref) = @_;
-
-    return ('ms', 'default (no samples)') unless @$samples_ref;
-
-    # Priority 1: Pattern hints (most specific wins)
-    if ($patterns_seen_ref->{'durationMS'}) {
-        return ('ms', 'pattern hint: durationMS');
-    }
-    if ($patterns_seen_ref->{'bracket_ms'}) {
-        return ('ms', 'pattern hint: [Xms]');
-    }
-    if ($patterns_seen_ref->{'bracket_s'}) {
-        return ('s', 'pattern hint: [X.XXXs]');
-    }
-
-    # Priority 2: Decimal detection (values like 0.250 typically indicate seconds)
-    my @decimals = grep { /^\d+\.\d+$/ && $_ < 10 } @$samples_ref;
-    if (@decimals > @$samples_ref * 0.5) {
-        return ('s', 'decimal values detected (>50% are small decimals)');
-    }
-
-    # Priority 3: Statistical analysis based on value ranges
-    my @sorted = sort { $a <=> $b } @$samples_ref;
-    my $median = $sorted[int(@sorted/2)];
-    my $max = $sorted[-1];
-    my $p95_idx = int(@sorted * 0.95);
-    my $p95 = $sorted[$p95_idx] // $max;
-
-    # Nanoseconds: median > 100M (100ms = 100,000,000ns)
-    if ($median > 100_000_000) {
-        return ('ns', "statistical: median=$median suggests nanoseconds");
-    }
-
-    # Microseconds: median > 100K and max > 1M (100ms = 100,000us, 1s = 1,000,000us)
-    if ($median > 100_000 && $max > 1_000_000) {
-        return ('us', "statistical: median=$median, max=$max suggests microseconds");
-    }
-
-    # For access logs, high values often indicate microseconds
-    # Apache uses %D for microseconds: typical values 173542 (173ms), 736049 (736ms)
-    if ($median > 10_000 && $p95 > 100_000) {
-        return ('us', "statistical: median=$median, p95=$p95 suggests microseconds");
-    }
-
-    # Priority 4: Default to milliseconds
-    return ('ms', 'default');
-}
-
-# Scan a file to detect duration unit without full parsing
-# Returns early once sufficient samples collected
-sub scan_file_for_duration_unit {
-    my ($filename) = @_;
-
-    # If user override is set, use it
-    if (defined $duration_unit_override) {
-        $file_duration_unit{$filename} = $duration_unit_override;
-        $file_detection_method{$filename} = "user override: -du $duration_unit_override";
-        return $duration_unit_override;
-    }
-
-    my @samples;
-    my %patterns_seen;
-    my $lines_read = 0;
-
-    open my $fh, '<', $filename or return 'ms';  # Default on error
-
-    while (<$fh>) {
-        $lines_read++;
-        last if @samples >= $duration_detection_max_samples;
-        last if $lines_read >= $duration_detection_max_lines;
-
-        my $duration;
-
-        # Pattern 1: durationMS=N or durationMs=N (ThingWorx ScriptLog)
-        if (/durationM[sS]\s*=\s*(\d+)/) {
-            $duration = $1;
-            $patterns_seen{'durationMS'} = 1;
-        }
-        # Pattern 2: [Nms] [X.XXXs] (Codebeamer format)
-        elsif (/\[(\d+)ms\]/) {
-            $duration = $1;
-            $patterns_seen{'bracket_ms'} = 1;
-        }
-        elsif (/\[(\d+\.?\d*)s\]/) {
-            $duration = $1;
-            $patterns_seen{'bracket_s'} = 1;
-        }
-        # Pattern 3: N milliseconds (Connection Server)
-        elsif (/ (\d+) milliseconds/) {
-            $duration = $1;
-            $patterns_seen{'milliseconds_word'} = 1;
-        }
-        # Pattern 4: Access log format - duration at end of line
-        # Matches: ... 200 17626 295 (status bytes duration)
-        # Also matches: ... 200 17626 295 thread session (with optional fields)
-        elsif (/^\S+\s+\S+\s+\S+\s+\[[^\]]+\]\s+"[^"]+"\s+(\d{3})\s+(\d+|-)\s+(\d+(?:\.\d+)?)\s*/) {
-            $duration = $3;
-        }
-        # Pattern 5: GC log - Xms at end
-        elsif (/(\d+(?:\.\d+)?)ms\s*$/) {
-            $duration = $1;
-            $patterns_seen{'suffix_ms'} = 1;
-        }
-
-        push @samples, $duration if defined $duration && $duration =~ /^\d+(?:\.\d+)?$/;
-    }
-
-    close $fh;
-
-    # Warn if insufficient samples
-    if (@samples < $duration_detection_min_samples && @samples > 0) {
-        print STDERR "Warning: Only found " . scalar(@samples) .
-                     " duration samples in $filename (wanted $duration_detection_min_samples). Detection may be less reliable.\n"
-            if $verbose;
-    }
-
-    my ($unit, $method) = detect_duration_unit(\@samples, \%patterns_seen);
-    $file_duration_unit{$filename} = $unit;
-    $file_detection_method{$filename} = $method . " (" . scalar(@samples) . " samples)";
-
-    return $unit;
 }
 
 sub detect_light_terminal_background {
@@ -1101,9 +971,6 @@ sub read_and_process_logs {
     %in_files_matched = map { $_ => 0 } @in_files;			# set hash key per file to match boolean = false
 
     foreach my $in_file (@in_files) {
-        # Duration unit detection (Issue #17) - scan file before processing
-        my $detected_unit = scan_file_for_duration_unit($in_file);
-
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
         push @files_processed, $in_file;
         my $line_number = 0;
@@ -1331,9 +1198,9 @@ sub read_and_process_logs {
             if( $is_line_match ) {
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
 
-                # Duration unit conversion (Issue #17) - convert to milliseconds
-                if (defined $duration && exists $file_duration_unit{$in_file}) {
-                    $duration = convert_duration_to_ms($duration, $file_duration_unit{$in_file});
+                # Duration unit conversion (Issue #17) - convert to milliseconds if user specified a unit
+                if (defined $duration && defined $duration_unit_override) {
+                    $duration = convert_duration_to_ms($duration, $duration_unit_override);
                 }
 
                 $timestamp_str =~ s/(:\d{2}:\d{2})\.\d{3}/$1/;                      # remove the milliseconds if present, as the code does not presently support them
