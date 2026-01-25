@@ -71,7 +71,7 @@ if ($^O eq 'MSWin32') {                                                         
 }
 
 ## GLOBALS ##
-my $version_number = "0.8.1";
+my $version_number = "0.9.0";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
