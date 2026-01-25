@@ -2514,7 +2514,12 @@ sub print_bar_graph {
 
                     if( defined $log_stats{$bucket}{$key} ) {
                         if( $key =~ /^(time|duration)$/i ) {
-                            $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', 'long', ' ' );
+                            # Select duration unit format based on column width: long (>=15), medium (>=10), short (<10)
+                            # Short format omits space between value and unit to save space
+                            my $column_width = $printed_column_widths[$printed_column_index];
+                            my $time_format = $column_width >= 15 ? 'long' : ($column_width >= 10 ? 'medium' : 'short');
+                            my $time_space = $time_format eq 'short' ? undef : ' ';
+                            $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', $time_format, $time_space );
                             push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};				# push trend value to CSV data list
                         } elsif( $key =~ /^bytes$/i ) {
                             $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
