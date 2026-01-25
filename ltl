@@ -1629,22 +1629,30 @@ sub calculate_statistics {
     my $occurrences = $bucket_data->{occurrences};
     return unless $occurrences > 0;
 
-    my $min = min( @{$bucket_data->{durations}} );
-    my $mean = int($bucket_data->{total_duration} / $occurrences);
-    my $max = max( @{$bucket_data->{durations}} );
-    my $variance = ($bucket_data->{sum_of_squares} / $occurrences) - ($mean ** 2);
+    # Guard against empty durations array - not all entries may have duration data
+    return unless defined $bucket_data->{durations} && @{$bucket_data->{durations}};
+
+    my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
+    my $duration_count = scalar @sorted;
+
+    # Use duration_count (entries with duration data) for statistics, not occurrences (total entries)
+    my $min = min(@sorted);
+    my $mean = int($bucket_data->{total_duration} / $duration_count);
+    my $max = max(@sorted);
+    my $variance = ($bucket_data->{sum_of_squares} / $duration_count) - ($mean ** 2);
     my $std_dev = round( sqrt($variance) * 1000 ) / 1000;
     my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean ) : undef;
-    my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
 
-    my $p1   = int($sorted[int($occurrences * 0.01)]);
-    my $p50  = int($sorted[int($occurrences * 0.5)]);
-    my $p75  = int($sorted[int($occurrences * 0.75)]);
-    my $p90  = int($sorted[int($occurrences * 0.9)]);
-    my $p95  = int($sorted[int($occurrences * 0.95)]);
-    my $p99  = int($sorted[int($occurrences * 0.99)]);
-    my $p999 = int($sorted[int($occurrences * 0.999)]);
-    
+    # Percentile calculations must use duration_count, not occurrences
+    # to correctly index into the sorted durations array
+    my $p1   = int($sorted[int($duration_count * 0.01)]);
+    my $p50  = int($sorted[int($duration_count * 0.5)]);
+    my $p75  = int($sorted[int($duration_count * 0.75)]);
+    my $p90  = int($sorted[int($duration_count * 0.9)]);
+    my $p95  = int($sorted[int($duration_count * 0.95)]);
+    my $p99  = int($sorted[int($duration_count * 0.99)]);
+    my $p999 = int($sorted[int($duration_count * 0.999)]);
+
     return ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv);
 }
 
