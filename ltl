@@ -137,25 +137,28 @@ my ($heatmap_min, $heatmap_max) = (undef, undef);   # Global min/max for normali
 my $heatmap_max_density = 0;                # Maximum density across all cells
 my %heatmap_percentiles;                    # {$bucket} = { p50 => index, p95 => index, p99 => index, p999 => index } - percentile marker positions
 
-# Heatmap color gradients (10 steps from dim to bright)
-# Index 0 = lowest density (dim), Index 9 = highest density (bright)
-# Dark background gradients: fade from dark gray to bright color
+# Heatmap color gradients (8 steps from dim to bright)
+# Index 0 = lowest density (dim), Index 7 = highest density (bright)
+# Dark background gradients: visible colors only (no near-black grays)
 my %heatmap_colors = (
-    'yellow' => [233, 234, 58, 94, 136, 142, 178, 184, 220, 226],   # Duration (column 2)
-    'green'  => [233, 234, 22, 28, 34, 40, 46, 82, 118, 154],       # Bytes (column 3)
-    'cyan'   => [233, 234, 23, 29, 30, 36, 37, 43, 44, 51],         # Count (column 4)
-    'blue'   => [233, 234, 17, 18, 19, 20, 21, 27, 33, 39],         # Future metrics (column 5)
-    'magenta'=> [233, 234, 53, 89, 125, 127, 163, 165, 201, 207],   # Future metrics (column 6)
+    'yellow'  => [58, 94, 136, 142, 178, 184, 220, 226],     # Duration (column 2)
+    'green'   => [22, 28, 34, 40, 46, 82, 118, 154],         # Bytes (column 3)
+    'cyan'    => [23, 30, 37, 44, 51, 80, 86, 123],          # Count (column 4)
+    'blue'    => [17, 18, 19, 20, 21, 27, 33, 39],           # Future metrics
+    'magenta' => [53, 89, 125, 161, 162, 163, 199, 200],     # Future metrics
+    'red'     => [52, 88, 124, 160, 196, 197, 203, 209],     # Future metrics
+    'white'   => [238, 240, 242, 244, 246, 248, 252, 255],   # Future metrics
 );
 
 # Light background gradients: fade from light/pale shades to bright saturated color
-# Avoids dark grays (233, 234) which look bad on white/light terminals
 my %heatmap_colors_light = (
-    'yellow' => [230, 229, 228, 227, 220, 214, 208, 202, 196, 226],   # Duration: pale yellow to bright
-    'green'  => [194, 157, 156, 120, 84, 48, 47, 46, 82, 118],        # Bytes: pale green to bright
-    'cyan'   => [195, 159, 123, 87, 51, 50, 49, 43, 44, 51],          # Count: pale cyan to bright
-    'blue'   => [189, 153, 117, 81, 45, 39, 33, 27, 21, 39],          # Future: pale blue to bright
-    'magenta'=> [225, 219, 213, 207, 201, 200, 199, 198, 197, 207],   # Future: pale magenta to bright
+    'yellow'  => [230, 229, 228, 227, 220, 214, 208, 202],   # Duration: pale yellow to saturated
+    'green'   => [194, 157, 120, 84, 48, 42, 36, 35],        # Bytes: pale green to saturated
+    'cyan'    => [195, 159, 123, 87, 51, 44, 37, 30],        # Count: pale cyan to saturated
+    'blue'    => [189, 153, 117, 81, 45, 39, 33, 27],        # Future: pale blue to saturated
+    'magenta' => [225, 219, 213, 207, 201, 165, 129, 93],    # Future: pale magenta to saturated
+    'red'     => [224, 218, 212, 206, 200, 196, 160, 124],   # Future: pale red to saturated
+    'white'   => [255, 254, 253, 250, 247, 244, 241, 238],   # Future: white to gray
 );
 
 # Map metric names to column numbers and colors
@@ -2210,8 +2213,8 @@ sub print_heatmap_row {
             # Calculate color index based on density (logarithmic scaling)
             my $color_index = 0;
             if ($heatmap_max_density > 1) {
-                $color_index = int(log($density) / log($heatmap_max_density) * 9);
-                $color_index = 9 if $color_index > 9;
+                $color_index = int(log($density) / log($heatmap_max_density) * 7);
+                $color_index = 7 if $color_index > 7;
                 $color_index = 0 if $color_index < 0;
             }
 
