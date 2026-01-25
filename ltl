@@ -123,6 +123,9 @@ my $pattern_file_max_patterns = 1000;                    # Max patterns per file
 my $pattern_regex_max_length = 10240;                    # 10KB regex length warning threshold
 my %pattern_file_status;                                 # {filter_type}{filename} => { status => 'ok'|'empty'|'error', count => N }
 
+# Duration unit override (Issue #17)
+my $duration_unit_override = undef;                      # User-specified unit via -du (ns, us, ms, s)
+
 my $pause_output = 0;
 my $omit_values = 0;
 my ( $sort_type, $sort_key, $sort_ascending ) = ( "occurrences", "occurrences", 0 );
@@ -300,7 +303,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -416,6 +419,17 @@ sub get_pattern_file_indicator {
     return '!' if $status eq 'empty';
     return '!!' if $status eq 'error';
     return '';
+}
+
+# Duration unit autodetection functions (Issue #17)
+sub convert_duration_to_ms {
+    my ($value, $unit) = @_;
+    return undef unless defined $value;
+    return $value * 1000         if $unit eq 's';
+    return $value                if $unit eq 'ms';
+    return $value / 1000         if $unit eq 'us';
+    return $value / 1000000      if $unit eq 'ns';
+    return $value;  # default: assume milliseconds
 }
 
 sub detect_light_terminal_background {
@@ -723,6 +737,7 @@ sub adapt_to_command_line_options {
         'version|v' => \$print_version,
         'duration-min|dmin=i' => \$filter_duration_min,
         'duration-max|dmax=i' => \$filter_duration_max,
+        'duration-unit|du=s' => \$duration_unit_override,
         'bytes-min|bmin=i' => \$filter_bytes_min,
         'bytes-max|bmax=i' => \$filter_bytes_max,
         'count-min|cmin=i' => \$filter_count_min,
@@ -763,6 +778,12 @@ sub adapt_to_command_line_options {
         if ($heatmap_light_bg_auto) {
             $heatmap_light_bg = detect_light_terminal_background();
         }
+    }
+
+    # Duration unit option validation (Issue #17)
+    if (defined $duration_unit_override) {
+        die print_usage("Invalid duration unit '$duration_unit_override'. Valid values: ns, us, ms, s")
+            unless $duration_unit_override =~ /^(ns|us|ms|s)$/;
     }
 
     # Process pattern files (Issue #19) - supports multiple files per filter type
@@ -1187,6 +1208,12 @@ sub read_and_process_logs {
 
             if( $is_line_match ) {
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
+
+                # Duration unit conversion (Issue #17) - convert to milliseconds if user specified a unit
+                if (defined $duration && defined $duration_unit_override) {
+                    $duration = convert_duration_to_ms($duration, $duration_unit_override);
+                }
+
                 $timestamp_str =~ s/(:\d{2}:\d{2})\.\d{3}/$1/;                      # remove the milliseconds if present, as the code does not presently support them
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
