@@ -183,7 +183,7 @@ If the release workflow fails with "Release notes file not found":
 ./ltl [options] <logfile(s)>
 ```
 
-Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-help` (full help)
+Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-if/-ef/-hf` (pattern files), `-du` (duration unit), `-hm` (heatmap), `-help` (full help)
 
 ## Architecture
 
@@ -357,6 +357,22 @@ When resuming work on a feature:
 2. Check the progress tracking section for what's completed and what's next
 3. Update progress tracking as you work
 4. Ensure any new decisions or changes are documented before ending the session
+
+## Pattern Files
+
+The `patterns/` directory contains reusable filter pattern files for use with `-if`, `-ef`, and `-hf` options.
+
+| File | Purpose |
+|------|---------|
+| `metrics` | ThingWorx metrics endpoints |
+| `navigate-app-calls` | Windchill Navigate application API calls |
+| `probes` | Health check and probe endpoints |
+| `thingworx` | ThingWorx-specific patterns |
+
+Example usage:
+```bash
+./ltl -ef patterns/probes -hf patterns/navigate-app-calls logs/AccessLogs/*.log
+```
 
 ## Test Log Files
 
