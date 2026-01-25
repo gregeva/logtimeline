@@ -183,7 +183,7 @@ If the release workflow fails with "Release notes file not found":
 ./ltl [options] <logfile(s)>
 ```
 
-Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-help` (full help)
+Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-if/-ef/-hf` (pattern files), `-du` (duration unit), `-hm` (heatmap), `-help` (full help)
 
 ## Architecture
 
@@ -357,6 +357,22 @@ When resuming work on a feature:
 2. Check the progress tracking section for what's completed and what's next
 3. Update progress tracking as you work
 4. Ensure any new decisions or changes are documented before ending the session
+
+## Pattern Files
+
+The `patterns/` directory contains reusable filter pattern files for use with `-if`, `-ef`, and `-hf` options.
+
+| File | Purpose |
+|------|---------|
+| `metrics` | ThingWorx metrics endpoints |
+| `navigate-app-calls` | Windchill Navigate application API calls |
+| `probes` | Health check and probe endpoints |
+| `thingworx` | ThingWorx-specific patterns |
+
+Example usage:
+```bash
+./ltl -ef patterns/probes -hf patterns/navigate-app-calls logs/AccessLogs/*.log
+```
 
 ## Test Log Files
 
@@ -585,21 +601,33 @@ The heatmap feature is inspired by SRE best practices for analyzing load profile
 
 ### Color Gradients (256-color ANSI)
 
-Each metric uses a 10-step gradient from dim (index 0) to bright (index 9).
+Each metric uses an 8-step gradient from dim (index 0) to bright (index 7). The dark background gradients no longer use near-black grays (233, 234) which were invisible on many terminals.
 
-**Dark Background (default)** - fades from dark gray to bright:
-```perl
-@yellow = (233, 234, 58, 94, 136, 142, 178, 184, 220, 226);   # Duration
-@green  = (233, 234, 22, 28, 34, 40, 46, 82, 118, 154);       # Bytes
-@cyan   = (233, 234, 23, 29, 30, 36, 37, 43, 44, 51);         # Count
-```
+**Dark Background (default)** - visible colors only, dim to bright:
 
-**Light Background (`-lbg` flag)** - fades from pale to bright, avoids dark grays:
-```perl
-@yellow = (230, 229, 228, 227, 220, 214, 208, 202, 196, 226); # Duration
-@green  = (194, 157, 156, 120, 84, 48, 47, 46, 82, 118);      # Bytes
-@cyan   = (195, 159, 123, 87, 51, 50, 49, 43, 44, 51);        # Count
-```
+| Color    | Codes                                    | Use Case |
+|----------|------------------------------------------|----------|
+| yellow   | 58, 94, 136, 142, 178, 184, 220, 226     | Duration |
+| green    | 22, 28, 34, 40, 46, 82, 118, 154         | Bytes    |
+| cyan     | 23, 30, 37, 44, 51, 80, 86, 123          | Count    |
+| blue     | 17, 18, 19, 20, 21, 27, 33, 39           | Future   |
+| magenta  | 53, 89, 125, 161, 162, 163, 199, 200     | Future   |
+| red      | 52, 88, 124, 160, 196, 197, 203, 209     | Future   |
+| white    | 238, 240, 242, 244, 246, 248, 252, 255   | Future   |
+
+**Light Background (`-lbg` flag)** - pale to saturated:
+
+| Color    | Codes                                    | Use Case |
+|----------|------------------------------------------|----------|
+| yellow   | 230, 229, 228, 227, 220, 214, 208, 202   | Duration |
+| green    | 194, 157, 120, 84, 48, 42, 36, 35        | Bytes    |
+| cyan     | 195, 159, 123, 87, 51, 44, 37, 30        | Count    |
+| blue     | 189, 153, 117, 81, 45, 39, 33, 27        | Future   |
+| magenta  | 225, 219, 213, 207, 201, 165, 129, 93    | Future   |
+| red      | 224, 218, 212, 206, 200, 196, 160, 124   | Future   |
+| white    | 255, 254, 253, 250, 247, 244, 241, 238   | Future   |
+
+Gradient prototype for visual comparison: `prototype/gradient-comparison.pl`
 
 Terminal background is auto-detected using OSC 11 query when heatmap is enabled. Use `-lbg` or `--light-background` to explicitly force light background mode (overrides auto-detection).
 

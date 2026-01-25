@@ -55,12 +55,13 @@ use Math::Round;
 use Time::Piece;
 use DateTime;
 use Term::ReadKey;
-use Getopt::Long;
+use Getopt::Long qw(:config no_ignore_case);
 use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
 # Proc::ProcessTable is loaded conditionally in get_memory_usage() based on platform
 # On Windows, Win32::Process::Info is used instead
 use List::Util qw(min max);
+use File::Spec;
 use Text::CSV;
 use Text::CSV_PP;
 
@@ -70,7 +71,7 @@ if ($^O eq 'MSWin32') {                                                         
 }
 
 ## GLOBALS ##
-my $version_number = "0.8.1";
+my $version_number = "0.9.0";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
@@ -113,6 +114,18 @@ my $output_timestamp_format = "%Y-%m-%d %H:%M";
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex, $user_defined_metrics, $user_defined_metrics_regex, $user_defined_metrics_pre_regex, $user_defined_metrics_post_regex );
+
+# Pattern file filter options (Issue #19)
+my (@include_files, @exclude_files, @highlight_files);   # File paths from command line (arrays for multiple files)
+my $verbose = 0;                                         # Verbose mode flag (-V)
+my $pattern_file_max_size = 10 * 1024;                   # 10KB file size limit
+my $pattern_file_max_patterns = 1000;                    # Max patterns per file (warn if exceeded)
+my $pattern_regex_max_length = 10240;                    # 10KB regex length warning threshold
+my %pattern_file_status;                                 # {filter_type}{filename} => { status => 'ok'|'empty'|'error', count => N }
+
+# Duration unit override (Issue #17)
+my $duration_unit_override = undef;                      # User-specified unit via -du (ns, us, ms, s)
+
 my $pause_output = 0;
 my $omit_values = 0;
 my ( $sort_type, $sort_key, $sort_ascending ) = ( "occurrences", "occurrences", 0 );
@@ -137,25 +150,28 @@ my ($heatmap_min, $heatmap_max) = (undef, undef);   # Global min/max for normali
 my $heatmap_max_density = 0;                # Maximum density across all cells
 my %heatmap_percentiles;                    # {$bucket} = { p50 => index, p95 => index, p99 => index, p999 => index } - percentile marker positions
 
-# Heatmap color gradients (10 steps from dim to bright)
-# Index 0 = lowest density (dim), Index 9 = highest density (bright)
-# Dark background gradients: fade from dark gray to bright color
+# Heatmap color gradients (8 steps from dim to bright)
+# Index 0 = lowest density (dim), Index 7 = highest density (bright)
+# Dark background gradients: visible colors only (no near-black grays)
 my %heatmap_colors = (
-    'yellow' => [233, 234, 58, 94, 136, 142, 178, 184, 220, 226],   # Duration (column 2)
-    'green'  => [233, 234, 22, 28, 34, 40, 46, 82, 118, 154],       # Bytes (column 3)
-    'cyan'   => [233, 234, 23, 29, 30, 36, 37, 43, 44, 51],         # Count (column 4)
-    'blue'   => [233, 234, 17, 18, 19, 20, 21, 27, 33, 39],         # Future metrics (column 5)
-    'magenta'=> [233, 234, 53, 89, 125, 127, 163, 165, 201, 207],   # Future metrics (column 6)
+    'yellow'  => [58, 94, 136, 142, 178, 184, 220, 226],     # Duration (column 2)
+    'green'   => [22, 28, 34, 40, 46, 82, 118, 154],         # Bytes (column 3)
+    'cyan'    => [23, 30, 37, 44, 51, 80, 86, 123],          # Count (column 4)
+    'blue'    => [17, 18, 19, 20, 21, 27, 33, 39],           # Future metrics
+    'magenta' => [53, 89, 125, 161, 162, 163, 199, 200],     # Future metrics
+    'red'     => [52, 88, 124, 160, 196, 197, 203, 209],     # Future metrics
+    'white'   => [238, 240, 242, 244, 246, 248, 252, 255],   # Future metrics
 );
 
 # Light background gradients: fade from light/pale shades to bright saturated color
-# Avoids dark grays (233, 234) which look bad on white/light terminals
 my %heatmap_colors_light = (
-    'yellow' => [230, 229, 228, 227, 220, 214, 208, 202, 196, 226],   # Duration: pale yellow to bright
-    'green'  => [194, 157, 156, 120, 84, 48, 47, 46, 82, 118],        # Bytes: pale green to bright
-    'cyan'   => [195, 159, 123, 87, 51, 50, 49, 43, 44, 51],          # Count: pale cyan to bright
-    'blue'   => [189, 153, 117, 81, 45, 39, 33, 27, 21, 39],          # Future: pale blue to bright
-    'magenta'=> [225, 219, 213, 207, 201, 200, 199, 198, 197, 207],   # Future: pale magenta to bright
+    'yellow'  => [230, 229, 228, 227, 220, 214, 208, 202],   # Duration: pale yellow to saturated
+    'green'   => [194, 157, 120, 84, 48, 42, 36, 35],        # Bytes: pale green to saturated
+    'cyan'    => [195, 159, 123, 87, 51, 44, 37, 30],        # Count: pale cyan to saturated
+    'blue'    => [189, 153, 117, 81, 45, 39, 33, 27],        # Future: pale blue to saturated
+    'magenta' => [225, 219, 213, 207, 201, 165, 129, 93],    # Future: pale magenta to saturated
+    'red'     => [224, 218, 212, 206, 200, 196, 160, 124],   # Future: pale red to saturated
+    'white'   => [255, 254, 253, 250, 247, 244, 241, 238],   # Future: white to gray
 );
 
 # Map metric names to column numbers and colors
@@ -287,7 +303,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -296,6 +312,124 @@ sub print_usage {
 sub print_version {
     print "Version: $version_number\n\n";
     return;
+}
+
+# Pattern file functions (Issue #19)
+sub read_pattern_file {
+    my ($filename, $filter_type) = @_;
+    my @patterns;
+
+    # Use File::Spec for cross-platform path handling
+    my $canonical_filename = File::Spec->canonpath($filename);
+
+    # Validate file exists
+    unless (-e $canonical_filename) {
+        print STDERR "Warning: Pattern file not found: $filename\n";
+        $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
+        return ();
+    }
+
+    # Check file size
+    my $size = -s $canonical_filename;
+    if ($size > $pattern_file_max_size) {
+        print STDERR "Warning: Pattern file exceeds maximum size (10KB): $filename\n";
+        $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
+        return ();
+    }
+
+    # Check for binary (null bytes in first 8KB)
+    my $fh;
+    unless (open $fh, '<:raw', $canonical_filename) {
+        print STDERR "Warning: Cannot read pattern file: $filename ($!)\n";
+        $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
+        return ();
+    }
+    my $header;
+    read($fh, $header, 8192);
+    if (defined $header && $header =~ /\x00/) {
+        close $fh;
+        print STDERR "Warning: Pattern file appears to be binary: $filename\n";
+        $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
+        return ();
+    }
+    close $fh;
+
+    # Read file as text
+    unless (open $fh, '<:encoding(UTF-8)', $canonical_filename) {
+        print STDERR "Warning: Cannot read pattern file: $filename ($!)\n";
+        $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
+        return ();
+    }
+    while (<$fh>) {
+        s/\r?\n$//;               # Remove line endings (handles LF, CRLF)
+        next if /^#/;             # Skip comment lines
+        next if /^$/;             # Skip empty lines
+        next if /^\s+$/;          # Skip whitespace-only lines
+        # Whitespace within content is preserved - no trimming
+        push @patterns, $_;
+    }
+    close $fh;
+
+    if (@patterns == 0) {
+        print STDERR "Warning: Pattern file is empty: $filename\n";
+        $pattern_file_status{$filter_type}{$filename} = { status => 'empty', count => 0 };
+        return ();
+    }
+
+    # Warn if pattern count exceeds limit (but use all patterns)
+    if (@patterns > $pattern_file_max_patterns) {
+        print STDERR "Warning: Pattern file contains " . scalar(@patterns) .
+                     " patterns (exceeds recommended limit of $pattern_file_max_patterns): $filename\n";
+    }
+
+    $pattern_file_status{$filter_type}{$filename} = { status => 'ok', count => scalar(@patterns) };
+    return @patterns;
+}
+
+sub build_merged_regex {
+    my ($cli_regex, @file_patterns) = @_;
+
+    # Escape file patterns using quotemeta
+    my @escaped = map { quotemeta($_) } @file_patterns;
+
+    # Build merged regex
+    my $file_regex = join('|', @escaped);
+
+    my $merged;
+    if (defined $cli_regex && $cli_regex ne '') {
+        $merged = "$cli_regex|$file_regex";
+    } else {
+        $merged = $file_regex;
+    }
+
+    # Warn if merged regex exceeds length threshold
+    if (length($merged) > $pattern_regex_max_length) {
+        print STDERR "Warning: Merged regex pattern is " . length($merged) .
+                     " characters (exceeds recommended limit of $pattern_regex_max_length)\n";
+    }
+
+    return $merged;
+}
+
+sub get_pattern_file_indicator {
+    my ($filter_type, $filename) = @_;
+    return '' unless exists $pattern_file_status{$filter_type}{$filename};
+    my $status = $pattern_file_status{$filter_type}{$filename}{status};
+    return '' if $status eq 'ok';
+    return '!' if $status eq 'empty';
+    return '!!' if $status eq 'error';
+    return '';
+}
+
+# Duration unit autodetection functions (Issue #17)
+sub convert_duration_to_ms {
+    my ($value, $unit) = @_;
+    return undef unless defined $value;
+    return $value * 1000         if $unit eq 's';
+    return $value                if $unit eq 'ms';
+    return $value / 1000         if $unit eq 'us';
+    return $value / 1000000      if $unit eq 'ns';
+    return $value;  # default: assume milliseconds
 }
 
 sub detect_light_terminal_background {
@@ -307,6 +441,14 @@ sub detect_light_terminal_background {
     # References:
     # - https://jwodder.github.io/kbits/posts/term-fgbg/
     # - https://dystroy.org/blog/terminal-light/
+    #
+    # Note: On Windows, OSC 11 query is not reliably supported (only works in
+    # Windows Terminal 1.22+, not in legacy conhost or cmd.exe). The stty command
+    # used for terminal raw mode is also Unix-only. Users on Windows should use
+    # the -lbg flag explicitly if they have a light background terminal.
+
+    # Skip auto-detection on Windows - use -lbg flag instead
+    return 0 if $^O eq 'MSWin32';
 
     return 0 unless -t STDIN && -t STDOUT;  # Only works on interactive terminals
 
@@ -574,6 +716,10 @@ sub adapt_to_command_line_options {
         'exclude|e=s' => \$exclude_regex,
         'include|i=s' => \$include_regex,
         'highlight|h=s' => \$highlight_regex,
+        'exclude-file|ef=s' => \@exclude_files,
+        'include-file|if=s' => \@include_files,
+        'highlight-file|hf=s' => \@highlight_files,
+        'verbose|V' => \$verbose,
         'top-messages|n=i' => \$top_n_messages,
         'omit-values|ov' => \$omit_values,
         'omit-stats|os' => \$omit_stats,
@@ -591,6 +737,7 @@ sub adapt_to_command_line_options {
         'version|v' => \$print_version,
         'duration-min|dmin=i' => \$filter_duration_min,
         'duration-max|dmax=i' => \$filter_duration_max,
+        'duration-unit|du=s' => \$duration_unit_override,
         'bytes-min|bmin=i' => \$filter_bytes_min,
         'bytes-max|bmax=i' => \$filter_bytes_max,
         'count-min|cmin=i' => \$filter_count_min,
@@ -631,6 +778,35 @@ sub adapt_to_command_line_options {
         if ($heatmap_light_bg_auto) {
             $heatmap_light_bg = detect_light_terminal_background();
         }
+    }
+
+    # Duration unit option validation (Issue #17)
+    if (defined $duration_unit_override) {
+        die print_usage("Invalid duration unit '$duration_unit_override'. Valid values: ns, us, ms, s")
+            unless $duration_unit_override =~ /^(ns|us|ms|s)$/;
+    }
+
+    # Process pattern files (Issue #19) - supports multiple files per filter type
+    foreach my $file (@include_files) {
+        my @patterns = read_pattern_file($file, 'include');
+        $include_regex = build_merged_regex($include_regex, @patterns) if @patterns;
+    }
+    foreach my $file (@exclude_files) {
+        my @patterns = read_pattern_file($file, 'exclude');
+        $exclude_regex = build_merged_regex($exclude_regex, @patterns) if @patterns;
+    }
+    foreach my $file (@highlight_files) {
+        my @patterns = read_pattern_file($file, 'highlight');
+        $highlight_regex = build_merged_regex($highlight_regex, @patterns) if @patterns;
+    }
+
+    # Verbose output (Issue #19)
+    if ($verbose) {
+        print "=== Verbose ===\n";
+        print "include: " . (defined $include_regex ? $include_regex : "(not set)") . "\n";
+        print "exclude: " . (defined $exclude_regex ? $exclude_regex : "(not set)") . "\n";
+        print "highlight: " . (defined $highlight_regex ? $highlight_regex : "(not set)") . "\n";
+        print "\n";
     }
 
     if( $print_version ) {
@@ -1032,6 +1208,12 @@ sub read_and_process_logs {
 
             if( $is_line_match ) {
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
+
+                # Duration unit conversion (Issue #17) - convert to milliseconds if user specified a unit
+                if (defined $duration && defined $duration_unit_override) {
+                    $duration = convert_duration_to_ms($duration, $duration_unit_override);
+                }
+
                 $timestamp_str =~ s/(:\d{2}:\d{2})\.\d{3}/$1/;                      # remove the milliseconds if present, as the code does not presently support them
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
@@ -1621,22 +1803,30 @@ sub calculate_statistics {
     my $occurrences = $bucket_data->{occurrences};
     return unless $occurrences > 0;
 
-    my $min = min( @{$bucket_data->{durations}} );
-    my $mean = int($bucket_data->{total_duration} / $occurrences);
-    my $max = max( @{$bucket_data->{durations}} );
-    my $variance = ($bucket_data->{sum_of_squares} / $occurrences) - ($mean ** 2);
+    # Guard against empty durations array - not all entries may have duration data
+    return unless defined $bucket_data->{durations} && @{$bucket_data->{durations}};
+
+    my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
+    my $duration_count = scalar @sorted;
+
+    # Use duration_count (entries with duration data) for statistics, not occurrences (total entries)
+    my $min = min(@sorted);
+    my $mean = int($bucket_data->{total_duration} / $duration_count);
+    my $max = max(@sorted);
+    my $variance = ($bucket_data->{sum_of_squares} / $duration_count) - ($mean ** 2);
     my $std_dev = round( sqrt($variance) * 1000 ) / 1000;
     my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean ) : undef;
-    my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
 
-    my $p1   = int($sorted[int($occurrences * 0.01)]);
-    my $p50  = int($sorted[int($occurrences * 0.5)]);
-    my $p75  = int($sorted[int($occurrences * 0.75)]);
-    my $p90  = int($sorted[int($occurrences * 0.9)]);
-    my $p95  = int($sorted[int($occurrences * 0.95)]);
-    my $p99  = int($sorted[int($occurrences * 0.99)]);
-    my $p999 = int($sorted[int($occurrences * 0.999)]);
-    
+    # Percentile calculations must use duration_count, not occurrences
+    # to correctly index into the sorted durations array
+    my $p1   = int($sorted[int($duration_count * 0.01)]);
+    my $p50  = int($sorted[int($duration_count * 0.5)]);
+    my $p75  = int($sorted[int($duration_count * 0.75)]);
+    my $p90  = int($sorted[int($duration_count * 0.9)]);
+    my $p95  = int($sorted[int($duration_count * 0.95)]);
+    my $p99  = int($sorted[int($duration_count * 0.99)]);
+    my $p999 = int($sorted[int($duration_count * 0.999)]);
+
     return ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv);
 }
 
@@ -2210,8 +2400,8 @@ sub print_heatmap_row {
             # Calculate color index based on density (logarithmic scaling)
             my $color_index = 0;
             if ($heatmap_max_density > 1) {
-                $color_index = int(log($density) / log($heatmap_max_density) * 9);
-                $color_index = 9 if $color_index > 9;
+                $color_index = int(log($density) / log($heatmap_max_density) * 7);
+                $color_index = 7 if $color_index > 7;
                 $color_index = 0 if $color_index < 0;
             }
 
@@ -2495,7 +2685,12 @@ sub print_bar_graph {
 
                     if( defined $log_stats{$bucket}{$key} ) {
                         if( $key =~ /^(time|duration)$/i ) {
-                            $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', 'long', ' ' );
+                            # Select duration unit format based on column width: long (>=15), medium (>=10), short (<10)
+                            # Short format omits space between value and unit to save space
+                            my $column_width = $printed_column_widths[$printed_column_index];
+                            my $time_format = $column_width >= 15 ? 'long' : ($column_width >= 10 ? 'medium' : 'short');
+                            my $time_space = $time_format eq 'short' ? undef : ' ';
+                            $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', $time_format, $time_space );
                             push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};				# push trend value to CSV data list
                         } elsif( $key =~ /^bytes$/i ) {
                             $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
@@ -2649,8 +2844,28 @@ sub print_summary_table {
     ## PRINT COMMAND AND ARGUMENTS ##
     print "\n$colors{'bright-black'}options: ";
     my %argv_hash = map { $_ => 1 } @ARGV;
-    foreach my $arg (@ORIGINAL_ARGV) {
-        unless (exists $argv_hash{$arg}) {
+    my $skip_next = 0;
+    for (my $i = 0; $i < @ORIGINAL_ARGV; $i++) {
+        my $arg = $ORIGINAL_ARGV[$i];
+        next if exists $argv_hash{$arg};  # Skip log files
+
+        # Handle pattern file options with indicators
+        if ($arg =~ /^(-ef|--exclude-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
+            my $file = $ORIGINAL_ARGV[$i + 1];
+            my $indicator = get_pattern_file_indicator('exclude', $file);
+            print "$arg $file$indicator ";
+            $i++;  # Skip the filename in next iteration
+        } elsif ($arg =~ /^(-if|--include-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
+            my $file = $ORIGINAL_ARGV[$i + 1];
+            my $indicator = get_pattern_file_indicator('include', $file);
+            print "$arg $file$indicator ";
+            $i++;  # Skip the filename in next iteration
+        } elsif ($arg =~ /^(-hf|--highlight-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
+            my $file = $ORIGINAL_ARGV[$i + 1];
+            my $indicator = get_pattern_file_indicator('highlight', $file);
+            print "$arg $file$indicator ";
+            $i++;  # Skip the filename in next iteration
+        } else {
             print "$arg ";
         }
     }
