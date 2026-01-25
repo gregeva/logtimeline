@@ -132,7 +132,15 @@ my ( $sort_type, $sort_key, $sort_ascending ) = ( "occurrences", "occurrences", 
 my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 my ( @in_files, @output_columns );
 my %in_files_matched;
-my ($terminal_width, $terminal_height) = GetTerminalSize();
+my ($terminal_width, $terminal_height);
+{
+    local *STDERR;
+    open(STDERR, '>', '/dev/null') or open(STDERR, '>', 'NUL');
+    ($terminal_width, $terminal_height) = eval { GetTerminalSize() };
+}
+if ($@ || !$terminal_width) {
+    ($terminal_width, $terminal_height) = (120, 24);
+}
 my %timestamp_cache;
 
 # Heatmap data structures
