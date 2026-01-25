@@ -585,21 +585,33 @@ The heatmap feature is inspired by SRE best practices for analyzing load profile
 
 ### Color Gradients (256-color ANSI)
 
-Each metric uses a 10-step gradient from dim (index 0) to bright (index 9).
+Each metric uses an 8-step gradient from dim (index 0) to bright (index 7). The dark background gradients no longer use near-black grays (233, 234) which were invisible on many terminals.
 
-**Dark Background (default)** - fades from dark gray to bright:
-```perl
-@yellow = (233, 234, 58, 94, 136, 142, 178, 184, 220, 226);   # Duration
-@green  = (233, 234, 22, 28, 34, 40, 46, 82, 118, 154);       # Bytes
-@cyan   = (233, 234, 23, 29, 30, 36, 37, 43, 44, 51);         # Count
-```
+**Dark Background (default)** - visible colors only, dim to bright:
 
-**Light Background (`-lbg` flag)** - fades from pale to bright, avoids dark grays:
-```perl
-@yellow = (230, 229, 228, 227, 220, 214, 208, 202, 196, 226); # Duration
-@green  = (194, 157, 156, 120, 84, 48, 47, 46, 82, 118);      # Bytes
-@cyan   = (195, 159, 123, 87, 51, 50, 49, 43, 44, 51);        # Count
-```
+| Color    | Codes                                    | Use Case |
+|----------|------------------------------------------|----------|
+| yellow   | 58, 94, 136, 142, 178, 184, 220, 226     | Duration |
+| green    | 22, 28, 34, 40, 46, 82, 118, 154         | Bytes    |
+| cyan     | 23, 30, 37, 44, 51, 80, 86, 123          | Count    |
+| blue     | 17, 18, 19, 20, 21, 27, 33, 39           | Future   |
+| magenta  | 53, 89, 125, 161, 162, 163, 199, 200     | Future   |
+| red      | 52, 88, 124, 160, 196, 197, 203, 209     | Future   |
+| white    | 238, 240, 242, 244, 246, 248, 252, 255   | Future   |
+
+**Light Background (`-lbg` flag)** - pale to saturated:
+
+| Color    | Codes                                    | Use Case |
+|----------|------------------------------------------|----------|
+| yellow   | 230, 229, 228, 227, 220, 214, 208, 202   | Duration |
+| green    | 194, 157, 120, 84, 48, 42, 36, 35        | Bytes    |
+| cyan     | 195, 159, 123, 87, 51, 44, 37, 30        | Count    |
+| blue     | 189, 153, 117, 81, 45, 39, 33, 27        | Future   |
+| magenta  | 225, 219, 213, 207, 201, 165, 129, 93    | Future   |
+| red      | 224, 218, 212, 206, 200, 196, 160, 124   | Future   |
+| white    | 255, 254, 253, 250, 247, 244, 241, 238   | Future   |
+
+Gradient prototype for visual comparison: `prototype/gradient-comparison.pl`
 
 Terminal background is auto-detected using OSC 11 query when heatmap is enabled. Use `-lbg` or `--light-background` to explicitly force light background mode (overrides auto-detection).
 
