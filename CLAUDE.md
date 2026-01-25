@@ -278,7 +278,6 @@ When working on new features, follow this workflow to keep the project documenta
 - Update feature document progress tracking section
 
 ### 3. Implementation Phase
-- Update the version number in `ltl` (line 75: `$version_number`) when making significant changes
 - If adding new Perl modules, run `./build/generate-cpanfile.sh` to update dependency files
 - For platform-specific code, ensure both Unix and Windows paths are handled
 - **Update feature document progress tracking** as each task is completed
