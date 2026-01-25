@@ -166,6 +166,10 @@ The system needs a strategy for disambiguation:
 4. How to handle logs that switch formats mid-file?
 5. Should there be a "strict mode" that fails on unrecognized formats vs. current permissive behavior?
 
+## GitHub Issue
+
+[Issue #23: Log Format Registry - Refactor core parsing architecture](https://github.com/gregeva/logtimeline/issues/23)
+
 ## Related
 
 - Issue #17: Duration unit autodetection (blocked by this refactor)
