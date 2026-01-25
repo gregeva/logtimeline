@@ -299,13 +299,15 @@ foreach my $buffered_line (@lookahead_buffer) {
 - [x] Document unit variations across platforms
 - [x] Create feature requirements document
 - [x] Update GitHub issue #17
-- [ ] Review detection algorithm with user
+- [x] Create implementation plan
+- [x] Document decisions (look-ahead: 1000 samples/10000 lines, 5% warning threshold, -du sets default)
 
 ### Implementation Phase
-- [ ] Add command-line option `-du`/`--duration-unit`
-- [ ] Add conversion function `convert_duration_to_ms()`
-- [ ] Implement look-ahead buffer for detection
-- [ ] Implement detection heuristics
+- [x] Add command-line option `-du`/`--duration-unit` with validation
+- [x] Add conversion function `convert_duration_to_ms()`
+- [x] Add detection function `detect_duration_unit()`
+- [x] Add global variables for duration unit tracking
+- [ ] **BLOCKED: Architect review needed** - Implement look-ahead buffer for detection
 - [ ] Integrate conversion at duration capture points
 - [ ] Add progress line unit display
 - [ ] Add runtime validation warnings
@@ -323,9 +325,62 @@ foreach my $buffered_line (@lookahead_buffer) {
 - [ ] Update help text
 - [ ] Add to release notes
 
-## Open Questions
+## Decisions Made
 
-1. **Look-ahead size**: 1000 lines with duration values, or 1000 total lines?
-2. **Multiple pattern hints**: What if a file has both `durationMS=` and bare integers?
-3. **Warning threshold**: How many "suspicious" values before warning?
-4. **Per-file vs global**: Should `-du` apply to all files, or just those without pattern hints?
+From implementation planning session:
+1. **Look-ahead**: Collect up to 1000 latency samples; give up after 10000 lines if < 100 samples
+2. **Pattern hints**: Most specific wins (e.g., `durationMS=` beats bare integers)
+3. **Warning threshold**: 5% suspicious values triggers warning
+4. **-du scope**: Sets default, but explicit pattern hints can override per-file
+
+## Architectural Decision Required
+
+### Issue: Look-Ahead Detection Mechanism
+
+The current implementation uses a **separate file scan** approach:
+- `scan_file_for_duration_unit()` opens the file, reads up to 10000 lines to collect 1000 duration samples
+- Uses simplified regex patterns to extract durations (not the full parsing infrastructure)
+- Then the main file processing loop opens the file again and processes normally with detected unit
+
+### Concerns Raised
+
+This approach bypasses the existing application parsing context:
+1. **Duplicate file reads** - opens and reads the file twice
+2. **Pattern mismatch risk** - simplified detection patterns may not match actual parsing patterns
+3. **Not integrated with match types** - doesn't leverage the existing log format detection (match_type 1-12)
+
+### Alternative Approaches to Consider
+
+**Option A: Buffered Look-Ahead Within Main Loop**
+- On first duration found, buffer subsequent lines
+- Continue collecting samples without adding to data model
+- After detection, replay buffered lines through normal processing
+- Pro: Uses actual parsing infrastructure
+- Con: More complex state management, lines processed twice
+
+**Option B: Two-Pass Processing**
+- First pass: lightweight scan for duration samples only (current approach)
+- Second pass: full processing with detected unit
+- Pro: Simple, clean separation
+- Con: File read twice, detection patterns may drift from parsing patterns
+
+**Option C: Deferred Conversion**
+- Process all lines normally, store raw duration values
+- At end of file, analyze all durations and detect unit
+- Retroactively convert all stored values
+- Pro: Uses actual parsed values
+- Con: Memory intensive, requires data structure changes
+
+**Option D: Streaming Detection with Correction**
+- Start with default assumption (ms)
+- Collect samples during normal processing
+- After N samples, if detection differs from assumption, warn user
+- Pro: Single pass, no buffering
+- Con: Cannot retroactively fix already-processed values
+
+### Questions for Chief Architect
+
+1. Which approach best fits the existing architecture philosophy?
+2. Is the duplicate file read acceptable for the simplicity it provides?
+3. Should detection patterns mirror the exact parsing patterns used in match types?
+4. How should detection interact with the existing `$is_access_log` flag?
