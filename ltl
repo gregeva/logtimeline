@@ -1,9 +1,6 @@
 #!/opt/homebrew/bin/perl
 
 # TO DO
-# - Improve Ubuntu build process to take the architecture as a command line option as well as to run the packaged executable and validate this way like the Windows build does (align with Windows build for better CI)
-# - Try to get a Mac OS automated build working
-# - GitHub Actions to do automated packaging with versions and release notes
 # - adjust sorting to appropriately handle messages with missing sort metric values when they are missing
 # - [Prototyping] group similar messages together with unique part replacement mask #### based on memory used >50MB and messages where count is 1 (only group the lower ones) option to change the number considered which would essetially create different sets of message groups
 # - Adapt message field widths based on terminal width (object field and thread pool)
@@ -39,7 +36,6 @@
 
 # NOT PRIORITY BACKLOG
 # - refactor thread pool summary and message summary views to use common code base for printing tables
-# - color and highlight CV and Z-score according to their values (want to make larger numbers jump out)
 # - add pagination support for the summary overview and the top messages - when using the -p (pause) option, the summary table and message lists do not pause for keypresses
 # - add feature to auto-calculate time window bucket based on terminal height and min and max time range in file (this would be based on previous file reads, or better filesize) - would have to go thought all input files
 # - reading duration should have a variable which will determine what the units are and this will depend on the detected log file.  For example nginx uses seconds, most other use milliseconds.  Then convert to MS before adding to the stats map so that you can mix and match files with different units.
