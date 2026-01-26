@@ -1,16 +1,15 @@
 # Current Version & Release Notes
 
+Access and download releases from the [*Releases*](https://github.com/gregeva/logtimeline/releases) page.
+
 2026-01-21 : v0.8.1 - fixes heatmap axis alignment, adds light background terminal support with auto-detection
 
 2026-01-20 : v0.8.0 - adds heatmap visualization mode for SRE-grade latency distribution analysis
 
 2025-12-09 : v0.6.0 - introduces many column support architecture with dynamic layout and column padding
 
-# Tools
 
-These scripts and other resources are built to speed and facilitate debugging, diagnostics, and likely other things.
-
-## llt : Log Time Line
+# llt : Log Time Line
 
 Have you ever wished that you could quickly identify areas of interest or hotspots in very large log files so that you could navigate there directly?  That's what this timeline view is for!!
 
@@ -22,7 +21,7 @@ ltl, or log time line has come a long way since its initial release a few months
 
 Static binary packages are provided for Windows, Ubuntu, and Mac OS.  Download, rename to ltl, and place somewhere in your path.
 
-### Heatmap Visualization (v0.8.0)
+## Heatmap Visualization (v0.8.0)
 
 The heatmap mode (`-hm` or `--heatmap`) replaces the latency statistics column with a visual heat distribution showing request density across latency ranges. This feature is inspired by SRE best practices for analyzing load profiles and latency distributions.
 
@@ -69,21 +68,7 @@ The heatmap mode (`-hm` or `--heatmap`) replaces the latency statistics column w
 **Light background support (v0.8.1):**
 Terminal background color is auto-detected using OSC 11 query. On light/white backgrounds, the heatmap uses pale-to-bright color gradients instead of dark-gray-to-bright, improving visibility. Use `-lbg` or `--light-background` to explicitly force light background mode.
 
-## cleanlogs : removes unwanted lines and partial lines to faciliate analysis
-
-Partial lines where one node or thread have written over another log appender make programmatic analysis of logs quite challenging.  Similarly useless things like when there is a multi-line output like a thread dump or nuissance aspects like 100's of thousands of health probes.
-
-Clean logs takes care of some of these scenarios, outputting a "clean" version of one or many log files.
-
-## twxsummarize : ThingWorx Log Summary tool
-
-Similar to the above, this tool is not time-based, but instead groups and summarizes ThingWorx log lines using the common log pattern from Logback.  This helps to answer questions like if certain subsystems are starting to have errors all of a sudden, or if errors present where your diagnostic efforts should focus.
-
-![twxsummarize](images/twxsummarize-10lines-2files.png)
-
-In a future release I'll add other capabilities like a message grouping view.
-
-## Known Issues
+# Known Issues
 
 - **Millisecond Precision Not Supported:**
   Although the application allows for selection of millisecond precision, reading and comparing timestamps with millisecond precision does not work at present. All timestamp parsing and comparison is currently performed at the second level, so any features or filters relying on millisecond accuracy will not function as expected.
