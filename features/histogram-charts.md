@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add ASCII terminal histogram charts that visualize the value distribution of key metrics (duration, bytes, count) across all processed log entries. Unlike the time-series heatmap which shows how values change over time, histograms show the overall shape of the data distribution.
+Add ASCII terminal histogram charts that visualize the value distribution of key metrics (duration, bytes, count) across all processed log entries. Unlike the time-series heatmap which shows how values change over time, histograms show the overall shape of the data distribution.  Data points are sorted and counted in buckets or bins of a specific size where the amount of data points counted in a bucket represents the height of the bar which will be draw.  The Y-axis then represents the number of data points (in absolute or relative terms), and the X-axis represents the range of values.
 
 ## Goals
 
@@ -46,21 +46,21 @@ If a metric has no data, it is omitted and remaining histograms shift to fill th
 ### Visual Design
 
 ```
-                     Duration Distribution                                    Bytes Distribution
- Count  %                                                              Count  %
- 1247 ─┤          ██                              ├─ 100%               523 ─┤     ██                              ├─ 100%
-       │         ████                             │                          │    ████
-       │        ██████                            │                          │   ██████  ██
-  623 ─┼       ████████ ▄▄                        ├─  50%               261 ─┼  ████████████                       ├─  50%
-       │      ██████████████                      │                          │ ██████████████
-       │ ▂▂  ████████████████ ▂▂                  │                          │██████████████████ ▂▂
-    0 ─┤▁▁▁▁██████████████████████▁▁              ├─   0%                 0 ─┤████████████████████████▁            ├─   0%
+                     Duration Distribution                                         Bytes Distribution
+ Count                                                %                 Count                                         %
+ 1247 ─┤          ██                              ├─ 100%               523 ─┤     ██                             ├─ 100%
+       │         ████                             │                          │    ████                            │
+       │        ██████                            │                          │   ██████  ██                       │
+  623 ─┼       ████████ ▄▄                        ├─  50%               261 ─┼  ████████████                      ├─  50%
+       │      ██████████████                      │                          │ ██████████████                     │
+       │ ▂▂  ████████████████ ▂▂                  │                          │██████████████████ ▂▂               │
+    0 ─┤▁▁▁▁██████████████████████▁▁              ├─   0%                 0 ─┤████████████████████████▁           ├─   0%
        └─┬────┬────┬────┬────┬────┬─                                         └─┬────┬────┬────┬────┬────┬─
         1ms 10ms 100ms 1s  10s 100s                                           1KB 10KB 100KB 1MB 10MB 100MB
-                                              P50:  127ms                                                       P50:  45KB
-                                              P90:  892ms                                                       P90: 234KB
-                                              P99: 4.2s                                                         P99: 1.2MB
-                                            P99.9: 12.3s                                                      P99.9: 8.7MB
+                                              P50:    127ms                                                       P50:  45KB
+                                              P90:    892ms                                                       P90: 234KB
+                                              P99:    4.2s                                                        P99: 1.2MB
+                                              P99.9: 12.3s                                                      P99.9: 8.7MB
 ```
 
 #### Bar Characters (8 levels per character height)
@@ -104,7 +104,7 @@ Each bar column's color intensity reflects the count in that bucket relative to 
 
 #### X-Axis
 
-- Corner character (`└`) at origin
+- Corner character (`└`) at origin (far left)
 - Downward-facing tick markers (`┬`) aligned with bucket boundaries
 - Labels showing bucket boundary values using smart formatting:
   - Duration: 1ms, 10ms, 100ms, 1s, 10s, 100s
@@ -116,13 +116,16 @@ Each bar column's color intensity reflects the count in that bucket relative to 
 
 Display population-wide percentiles below each histogram:
 ```
-P50:  127ms
-P90:  892ms
-P99: 4.2s
+P50:    127ms
+P90:    892ms
+P99:    4.2s
 P99.9: 12.3s
 ```
 
+The percentile labels should be left aligned, and the values right aligned meeting standard text and number table formatting rules.  A maximum of one decimal place should be used in the value output, with no decimal place if the digit after the decimal is a zero.  There should be a space between the value and the unit.
+
 These represent percentiles for the **entire population** of values, distinct from the time-bucket or message-based percentiles shown elsewhere.
+
 
 ### Data Collection
 
@@ -191,7 +194,7 @@ Match bar graph column colors for consistency:
 10. [ ] Right Y-axis shows percentage (0%/50%/100%) with tick marks
 11. [ ] X-axis has tick markers aligned with bucket boundary labels
 12. [ ] Logarithmic bucket scaling works correctly
-13. [ ] Legend shows P50, P90, P99, P99.9 for entire population
+13. [ ] Legend shows P50, P90, P99, P99.9 for entire population with left aigned labels and right aligned values
 14. [ ] Works with all log formats that provide duration/bytes/count
 
 ## Test Plan
