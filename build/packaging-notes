@@ -1,7 +1,11 @@
-# CPAN
 
-Install CPANIMUS on MacOS 
 
+# Mac
+
+xcode-select --install
+brew install gcc
+brew install perl
+brew install cpanminus
 brew install cpanminus
 
 
@@ -17,34 +21,9 @@ sudo apt-get install libperl-dev
 sudo apt-get update
 sudo apt-get install build-essential
 sudo apt-get install cpanminus
-sudo cpanm PAR::Packer
-system("perl ./ltl /ThingworxStorage/logs/ApplicationLog.log");
-pp -x -o ltl_static-binary_ubuntu-amd64 ltl
-
-
-## Including LibC
-
-Generate cpanfile for the dependency installation
-
-perl -ne '
-  if (/^\s*(?:use|require)\s+([A-Za-z0-9_:]+)(?:\s+([\d\._]+))?/) {
-    my ($m,$ver) = ($1,$2);
-    next if $m =~ /^(?:strict|warnings|feature|utf8|open|mro|base|parent|lib|constant|vars|attributes?|diagnostics|subs)$/;
-    next if $m eq "perl";
-    print "requires \x27$m\x27", ($ver ? ", \x27>= $ver\x27" : ""), ";\n";
-  }
-' ltl | sort -u > cpanfile
-
-
-docker run --rm -it -v "$PWD":/work -w /work ubuntu:20.04 bash -lc '
-  cd /work &&
-  apt-get update &&
-  apt-get install -y build-essential perl cpanminus libperl-dev &&
-  cpanm PAR::Packer &&
-  pp -x -o ltl_static-binary_ubuntu-amd64 ltl
-'
-
-
+./generate-cpanfile.sh				# generate list of cpan module dependencies from ltl Perl script
+sudo cpanm --notest --installdeps .  		# install required cpan modules listed in the cpanfile
+pp -o ltl_static-binary_ubuntu-amd64 ltl
 
 
 # Mac
@@ -56,12 +35,6 @@ brew install cpanminus
 
 
 
-# Clear CPANM work directory
-rm -rf ~/.cpanm/work
-# Clear local::lib directory
-rm -rf ~/perl5
-
-sudo cpan App::cpanminus
 
 # Don't do this... as it will install to system perl, not homebrew perl
 curl -L https://cpanmin.us | perl - --self-upgrade
