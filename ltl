@@ -26,6 +26,8 @@
 # - move execution times to the "options" line on the right side to show execution times discretely without taking up so much space (coded for easy testing/extraction)
 
 # BUGS
+# - message based sorting and statistics seems to be occurring after the timeline is printed, not during all of the calculation and reading stages
+# - Line printing that heatmap calculation is being processed is not overwritten with a green message stating that it is complete like the other stages (it dissappears)
 # - when using the -o flag, combined with the -ov flag (and possibly others), metrics are not written to the CSV file as the sections are skipped in print bar chart column (needs refactoring)
 # - when using the -o flag, the provided command line options are used in the file name, however when using a long list of filters, the filename can be too long causing error - need to truncate the filename
 # - on very narrow terminals, the "processed files" heading and potentially file names will wrap and mess up the table
