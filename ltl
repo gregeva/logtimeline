@@ -28,7 +28,8 @@
 # BUGS
 # - message based sorting and statistics seems to be occurring after the timeline is printed, not during all of the calculation and reading stages
 # - Line printing that heatmap calculation is being processed is not overwritten with a green message stating that it is complete like the other stages (it dissappears)
-# - when using the -o flag, combined with the -ov flag (and possibly others), metrics are not written to the CSV file as the sections are skipped in print bar chart column (needs refactoring)
+# - FIXED v0.9.1: heatmap mode no longer collects individual durations for percentiles (memory optimization); CSV excludes percentile columns when heatmap enabled
+# - FIXED v0.9.1: totalOccurrences CSV field now correctly populated when using -ov (omit-values)
 # - FIXED v0.9.1: CSV output filenames now truncate long regex arguments and enforce max filename length to avoid filesystem errors
 # - FIXED v0.9.1: narrow terminal handling - heading text wraps on word boundaries, filenames shortened with '...' in middle
 # - FIXED v0.9.1: progress indicator now based on total lines read (not per-file), shows lines/sec rolling average
@@ -1499,7 +1500,8 @@ sub read_and_process_logs {
 
                         $log_analysis{$bucket}{'total_duration-HL'} += $duration if $category_bucket =~ /-HL$/;
                         $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
-                        push @{$log_analysis{$bucket}{durations}}, $duration;
+                        # Skip collecting individual durations for percentiles when heatmap is enabled (memory optimization)
+                        push @{$log_analysis{$bucket}{durations}}, $duration unless $heatmap_enabled;
                     }
 
                     if( defined $bytes && $bytes ) {
@@ -2218,8 +2220,8 @@ sub normalize_data_for_output {
 
     # BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
     if ($heatmap_enabled) {
-        # Heatmap column header replaces latency statistics
-        push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) if $print_durations && !$omit_durations;
+        # Heatmap column header replaces latency statistics - don't add percentile columns to CSV
+        # (individual duration values are not collected when heatmap is enabled)
         push @printed_column_widths, $durations_graph_width;
         push @printed_column_spacing, 0;
         push @printed_column_names, get_heatmap_column_header();
@@ -2695,8 +2697,12 @@ sub print_bar_graph {
                 if (exists $log_occurrences{$bucket}{$category_bucket}) {
                     my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
                     my $color = $colors{$category_bucket} // $colors{'NC'};
+
+                    # Always accumulate total occurrences for CSV output, regardless of display options
+                    $total_occurrences += $occurrences if $category_bucket !~ /^(err-rate|msg-rate|empty|-HL$)/;
+
                     next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate)$/;	# we don't want to count data that won't be printed
-                    next if $category_bucket =~ /^(err|msg)-rate$/ && $log_occurrences{$bucket}{'err-rate'}{occurrences} == 0 && $log_occurrences{$bucket}{'msg-rate'}{occurrences} == 0; 
+                    next if $category_bucket =~ /^(err|msg)-rate$/ && $log_occurrences{$bucket}{'err-rate'}{occurrences} == 0 && $log_occurrences{$bucket}{'msg-rate'}{occurrences} == 0;
 
                     if( $category_bucket =~ /(-HL|err-rate|msg-rate)$/ ) {
                         if( $category_bucket =~ /^err-rate$/ ) {
@@ -2720,7 +2726,6 @@ sub print_bar_graph {
                         $legend_length_bucket += length("$category_bucket: $occurrences ");
                     }
 
-                    $total_occurrences += $occurrences if $category_bucket !~ /^(err-rate|msg-rate)$/;
                     $output_columns{$category_bucket} = $occurrences;
 # 2026-01-04 TO DO: this may not be required, test after fixing the count and byte metric collection with no duration stats
                 } else {
