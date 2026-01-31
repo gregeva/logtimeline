@@ -281,9 +281,11 @@ Feature requirements and test plans are in `features/` directory. Recent feature
 ### TO-DO Items
 Active development items are documented in comments at the top of the `ltl` script (lines 3-50), including data model refactoring, heatmap visualization, and additional log format support.
 
-## Feature Development Workflow
+## Development Workflow
 
-When working on new features, follow this workflow to keep the project documentation current. **This workflow is mandatory** - always check and update feature documentation as you progress through each phase.
+When working on issues and new features, follow this workflow to keep the project documentation current. **This workflow is mandatory** - always check and update feature documentation as you progress through each phase.
+
+Each issue being worked on should have its own branch with the GitHub Issue ID number as the start of the branch name, followed by an appropriate short name for the given issue (which fits git branch naming rules).  Work progress should be tracked against this branch with commits containing details included and changes made.
 
 **CRITICAL: Do not write production code until the implementation plan has been reviewed and approved by the user.** Implementing before planning is complete wastes effort and creates cleanup work when the approach is rejected.
 
@@ -339,7 +341,8 @@ Only after the prototype validates the approach should you determine how to inte
 ### 7. Documentation Updates
 - Update `features/<feature-name>.md` with feature details to be included in the release notes
 - Update `features/<feature-name>.md` with implementation status and any deviations from the original plan
-- Update TO-DO comments in `ltl` to mark completed items or add new ones
+- Update GitHub Issue with details of the work done (what was implemented, fixed, etc.) including details for the release notes
+- Update `ltl` *usage* and *help* outputs if command line options are changed
 - Update this CLAUDE.md file if:
   - New data structures are added to the architecture
   - Build process changes
