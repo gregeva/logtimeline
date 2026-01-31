@@ -203,16 +203,18 @@ my @log_levels = (
 
 # Characters selected and usable for drawing the bar charts
 my %blocks = (
-    'A' => '█',    # Full block
-    'B' => '▓',    # Heavy shading
-    'C' => '▒',    # Medium shading
-    'D' => '░',    # Light shading
-    'E' => '▪',    # Black Square
-    'F' => '▫',    # White Square
-    'G' => '☰',    # Menu
-    'H' => '•',    # Bullet Point
-    'I' => '■',    # Black Very Heavy
-    'J' => '□'     # White square
+    # Full and partial blocks
+    'A' => '█',    # Full block (U+2588)
+    'B' => '▓',    # Dark shade (U+2593) - ~75% fill
+    'C' => '▒',    # Medium shade (U+2592) - ~50% fill
+    'D' => '░',    # Light shade (U+2591) - ~25% fill
+    # Half blocks - show 50% background color
+    'E' => '▀',    # Upper half block (U+2580)
+    'F' => '▄',    # Lower half block (U+2584)
+    # Squares - large to small
+    'G' => '■',    # Black square (U+25A0)
+    'H' => '▪',    # Black small square (U+25AA)
+    'I' => '•',    # Bullet (U+2022)
 );
 
 my $default_chart_block = "A";
