@@ -30,7 +30,7 @@
 # - Line printing that heatmap calculation is being processed is not overwritten with a green message stating that it is complete like the other stages (it dissappears)
 # - when using the -o flag, combined with the -ov flag (and possibly others), metrics are not written to the CSV file as the sections are skipped in print bar chart column (needs refactoring)
 # - FIXED v0.9.1: CSV output filenames now truncate long regex arguments and enforce max filename length to avoid filesystem errors
-# - on very narrow terminals, the "processed files" heading and potentially file names will wrap and mess up the table
+# - FIXED v0.9.1: narrow terminal handling - heading text wraps on word boundaries, filenames shortened with '...' in middle
 # - FIXED v0.9.1: progress indicator now based on total lines read (not per-file), shows lines/sec rolling average
 # - print_durations=0 initiated by --omit-stats should not impeed statistical calculation of statistics for CSV output file
 # BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
@@ -642,6 +642,53 @@ sub build_csv_filename {
     return "${base}${extension}";
 }
 
+# Wrap text to fit within max_width, breaking on spaces
+# Returns array of lines
+sub wrap_text {
+    my ($text, $max_width) = @_;
+    return ($text) if length($text) <= $max_width;
+
+    my @words = split /\s+/, $text;
+    my @lines;
+    my $current_line = '';
+
+    foreach my $word (@words) {
+        if ($current_line eq '') {
+            $current_line = $word;
+        } elsif (length($current_line) + 1 + length($word) <= $max_width) {
+            $current_line .= ' ' . $word;
+        } else {
+            push @lines, $current_line;
+            $current_line = $word;
+        }
+    }
+    push @lines, $current_line if $current_line ne '';
+
+    return @lines;
+}
+
+# Shorten filename to fit within max_length, keeping start and end with '...' in middle
+# If $strip_path is true, removes directory path first (keeps only basename)
+sub shorten_filename {
+    my ($filename, $max_length, $strip_path) = @_;
+
+    # Optionally strip directory path, keeping only the filename
+    if ($strip_path) {
+        $filename =~ s{.*/}{};  # Remove everything up to and including last /
+        $filename =~ s{.*\\}{}; # Also handle Windows backslashes
+    }
+
+    return $filename if length($filename) <= $max_length;
+    return $filename if $max_length < 10;  # Too short to meaningfully shorten
+
+    my $ellipsis = '...';
+    my $available = $max_length - length($ellipsis);
+    my $left_len = int($available / 2);
+    my $right_len = $available - $left_len;
+
+    return substr($filename, 0, $left_len) . $ellipsis . substr($filename, -$right_len);
+}
+
 sub format_number {
     my ($value, $space, $decimals) = @_;
     my %units = (
@@ -1059,7 +1106,14 @@ sub read_and_process_logs {
                     }
                 }
 
-                printf("\rProcessing line %d in file %s (%s overall%s)", $line_number, $in_file, format_number($total_lines_read), $lines_per_sec);
+                # Calculate available space for filename to prevent line wrapping
+                my $line_num_str = $line_number;
+                my $overall_str = format_number($total_lines_read);
+                my $fixed_len = length("Processing line $line_num_str in file  ($overall_str overall$lines_per_sec)");
+                my $available_for_filename = $terminal_width - $fixed_len - 1;  # -1 for safety margin
+                my $display_filename = shorten_filename($in_file, $available_for_filename, 1);  # strip path, then shorten
+
+                printf("\rProcessing line %d in file %s (%s overall%s)", $line_number, $display_filename, $overall_str, $lines_per_sec);
                 $| = 1;                                     # Flush output to stdout
             }
 
@@ -2960,12 +3014,29 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
 
     push @file_details, "\n";
-    push @file_details, sprintf( "$column_padding$padding$colors{'white-underline'}These file(s) were processed with analysis including results between $min_timestamp_str and $max_timestamp_str$colors{'NC'}\n" );
+
+    # Wrap heading text if it exceeds available width
+    my $heading_text = "These file(s) were processed with analysis including results between $min_timestamp_str and $max_timestamp_str";
+    my $heading_content_width = $file_detail_width - length($column_padding) - length($padding);
+    if ($heading_content_width > 20) {
+        my @heading_lines = wrap_text($heading_text, $heading_content_width);
+        for my $idx (0 .. $#heading_lines) {
+            my $line = $heading_lines[$idx];
+            # Apply underline to text only (not padding), reset immediately after text
+            push @file_details, "$column_padding$padding$colors{'white-underline'}$line$colors{'NC'}\n";
+        }
+    } else {
+        # Terminal too narrow - just truncate
+        my $truncated = substr($heading_text, 0, $heading_content_width > 0 ? $heading_content_width : 1);
+        push @file_details, "$column_padding$padding$colors{'white-underline'}$truncated$colors{'NC'}\n";
+    }
+
     push @file_details, "\n";
     foreach my $in_file (@files_processed) {
-         my $filename_max_length = $file_detail_width - length( $column_padding ) - 3 - 4; 
-         my $filename = length( $in_file ) > $filename_max_length ? "..." . substr( $in_file, length( $in_file ) - $filename_max_length ) : $in_file;  # -3 for '...', -4 for '[x] '
-         push @file_details, sprintf( "$column_padding$padding$colors{'white'}\[%s$colors{'NC'}$colors{'white'}\] %-${filename_max_length}s$colors{'NC'}\n", $match_char[$in_files_matched{$in_file}], $filename );
+         my $filename_max_length = $file_detail_width - length($column_padding) - length($padding) - 4;  # -4 for '[x] '
+         $filename_max_length = 10 if $filename_max_length < 10;  # Minimum reasonable length
+         my $filename = shorten_filename($in_file, $filename_max_length);
+         push @file_details, sprintf("$column_padding$padding$colors{'white'}\[%s$colors{'NC'}$colors{'white'}\] %-${filename_max_length}s$colors{'NC'}\n", $match_char[$in_files_matched{$in_file}], $filename);
     }
 
     for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {
