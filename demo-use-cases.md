@@ -41,3 +41,13 @@ https://thingworx.jira.com/wiki/spaces/IIoTP/pages/4400316501/Event+Performance+
         p90(duration) AS p90_time
 
 I'll need to investigate the source of these logs, and if I could adapt ltl in order to process this as well as this could be quite handy.  Noting that this use case requires matching up various log entries and so would be quite challenging given the current software architecture and data model of ltl. 
+
+
+
+# Comparison of Performance and Load across Multiple Files
+
+A scenario that presented recently which the tool doesn't really have a way to surface is when you are dealing with a cluster and would have multiple access log files from the various pods/nodes.  You can process them all together which is really nice, but this is going to mush together their differences which would have otherwise been apparent if you had been looking at them seperately (ie; one node is much slower than the rest).
+
+To accomplish this, you need to leverage time instead of file, where you'd pick a different days file from each node, so that they'd come one after the other in the output.  The overall minimums and maximums would give you the comparative range, and using the heatmap would show visually their load and performance compared to each other.  Using --omit-empty would ensure empty time windows are not printed to get things close together on the screen, and this would also allow chosing days far from each other.
+
+The idea of chosing days from from each other also introduces a technique to compare load and performance from one period to another on a specific system.  Simply providing multiple files from the early time, and the later time, enabling omit-empty, activating heatmap should then do this for you.  If you want statistics calculated for external analysis or simply saving the results you'll have to turn off heatmap.
