@@ -28,10 +28,11 @@
 # BUGS
 # - message based sorting and statistics seems to be occurring after the timeline is printed, not during all of the calculation and reading stages
 # - Line printing that heatmap calculation is being processed is not overwritten with a green message stating that it is complete like the other stages (it dissappears)
-# - when using the -o flag, combined with the -ov flag (and possibly others), metrics are not written to the CSV file as the sections are skipped in print bar chart column (needs refactoring)
-# - when using the -o flag, the provided command line options are used in the file name, however when using a long list of filters, the filename can be too long causing error - need to truncate the filename
-# - on very narrow terminals, the "processed files" heading and potentially file names will wrap and mess up the table
-# - when log files are small, as in less than 1000 lines, the message reading the lines will not print as it starts after 997 lines.  Given a scenario with hundreds of files each very small, there will be no reading indicator showing progress. (use Rolex ThingWorx Log files of 10 MB)
+# - FIXED v0.9.1: heatmap mode no longer collects individual durations for percentiles (memory optimization); CSV excludes percentile columns when heatmap enabled
+# - FIXED v0.9.1: totalOccurrences CSV field now correctly populated when using -ov (omit-values)
+# - FIXED v0.9.1: CSV output filenames now truncate long regex arguments and enforce max filename length to avoid filesystem errors
+# - FIXED v0.9.1: narrow terminal handling - heading text wraps on word boundaries, filenames shortened with '...' in middle
+# - FIXED v0.9.1: progress indicator now based on total lines read (not per-file), shows lines/sec rolling average
 # - print_durations=0 initiated by --omit-stats should not impeed statistical calculation of statistics for CSV output file
 # BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
 
@@ -98,6 +99,7 @@ my $top_n_messages = 10;
 my ( $write_messages_to_csv, $csv, $csv_fh, $csv_file_args ) = ( 0, undef, undef, "" );
 my $total_lines_read = 0;
 my $total_lines_included = 0;
+my @progress_history = ();                                                      # rolling history for lines/sec calculation: [ [timestamp, lines_read], ... ]
 my $total_lines_highlighted = 0;
 my $legend_length = 0;
 my $timestamp_length = 0;
@@ -119,6 +121,8 @@ my $verbose = 0;                                         # Verbose mode flag (-V
 my $pattern_file_max_size = 10 * 1024;                   # 10KB file size limit
 my $pattern_file_max_patterns = 1000;                    # Max patterns per file (warn if exceeded)
 my $pattern_regex_max_length = 10240;                    # 10KB regex length warning threshold
+my $csv_filename_max_length = 200;                       # Max CSV output filename length (conservative for cross-platform compatibility)
+my $csv_regex_arg_max_length = 30;                       # Max length for regex arguments in CSV filename
 my %pattern_file_status;                                 # {filter_type}{filename} => { status => 'ok'|'empty'|'error', count => N }
 
 # Duration unit override (Issue #17)
@@ -199,16 +203,18 @@ my @log_levels = (
 
 # Characters selected and usable for drawing the bar charts
 my %blocks = (
-    'A' => '█',    # Full block
-    'B' => '▓',    # Heavy shading
-    'C' => '▒',    # Medium shading
-    'D' => '░',    # Light shading
-    'E' => '▪',    # Black Square
-    'F' => '▫',    # White Square
-    'G' => '☰',    # Menu
-    'H' => '•',    # Bullet Point
-    'I' => '■',    # Black Very Heavy
-    'J' => '□'     # White square
+    # Full and partial blocks
+    'A' => '█',    # Full block (U+2588)
+    'B' => '▓',    # Dark shade (U+2593) - ~75% fill
+    'C' => '▒',    # Medium shade (U+2592) - ~50% fill
+    'D' => '░',    # Light shade (U+2591) - ~25% fill
+    # Half blocks - show 50% background color
+    'E' => '▀',    # Upper half block (U+2580)
+    'F' => '▄',    # Lower half block (U+2584)
+    # Squares - large to small
+    'G' => '■',    # Black square (U+25A0)
+    'H' => '▪',    # Black small square (U+25AA)
+    'I' => '•',    # Bullet (U+2022)
 );
 
 my $default_chart_block = "A";
@@ -616,6 +622,76 @@ sub format_bytes {
     return "$formatted_value $formatted_unit";
 }
 
+# Build CSV output filename with truncation to avoid filesystem errors
+sub build_csv_filename {
+    my ($file_type) = @_;  # 'STATS' or 'MESSAGES'
+    my ($sec, $min, $hour, $mday, $mon, $year) = localtime();
+    my $timestamp = sprintf("%04d-%02d-%02d_%02d%02d%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec);
+
+    # Sanitize args: replace special characters with underscores
+    my $safe_args = $csv_file_args;
+    $safe_args =~ tr/!@#\$%\^&*()_+{}|:"<>?[\];',.\/\\`~ /_/;
+
+    # Build base filename
+    my $base = "${timestamp}-LTL-${file_type}-${safe_args}";
+    my $extension = ".csv";
+
+    # Truncate if exceeds max length (accounting for extension)
+    my $max_base_length = $csv_filename_max_length - length($extension);
+    if (length($base) > $max_base_length) {
+        $base = substr($base, 0, $max_base_length - 3) . '...';
+    }
+
+    return "${base}${extension}";
+}
+
+# Wrap text to fit within max_width, breaking on spaces
+# Returns array of lines
+sub wrap_text {
+    my ($text, $max_width) = @_;
+    return ($text) if length($text) <= $max_width;
+
+    my @words = split /\s+/, $text;
+    my @lines;
+    my $current_line = '';
+
+    foreach my $word (@words) {
+        if ($current_line eq '') {
+            $current_line = $word;
+        } elsif (length($current_line) + 1 + length($word) <= $max_width) {
+            $current_line .= ' ' . $word;
+        } else {
+            push @lines, $current_line;
+            $current_line = $word;
+        }
+    }
+    push @lines, $current_line if $current_line ne '';
+
+    return @lines;
+}
+
+# Shorten filename to fit within max_length, keeping start and end with '...' in middle
+# If $strip_path is true, removes directory path first (keeps only basename)
+sub shorten_filename {
+    my ($filename, $max_length, $strip_path) = @_;
+
+    # Optionally strip directory path, keeping only the filename
+    if ($strip_path) {
+        $filename =~ s{.*/}{};  # Remove everything up to and including last /
+        $filename =~ s{.*\\}{}; # Also handle Windows backslashes
+    }
+
+    return $filename if length($filename) <= $max_length;
+    return $filename if $max_length < 10;  # Too short to meaningfully shorten
+
+    my $ellipsis = '...';
+    my $available = $max_length - length($ellipsis);
+    my $left_len = int($available / 2);
+    my $right_len = $available - $left_len;
+
+    return substr($filename, 0, $left_len) . $ellipsis . substr($filename, -$right_len);
+}
+
 sub format_number {
     my ($value, $space, $decimals) = @_;
     my %units = (
@@ -892,9 +968,24 @@ sub adapt_to_command_line_options {
     }
 
     my %argv_hash = map { $_ => 1 } @ARGV;
+    my $skip_next = 0;
     foreach my $arg (@ORIGINAL_ARGV) {
+        if ($skip_next) {
+            $skip_next = 0;
+            next;
+        }
+        # Skip -o/--output and its value (redundant since we're creating the file)
+        if ($arg =~ /^(-o|--output-csv|--output)$/) {
+            next;  # -o is a flag with no value, just skip it
+        }
         unless (exists $argv_hash{$arg}) {
-            $csv_file_args .= "$arg" if $write_messages_to_csv;
+            if ($write_messages_to_csv) {
+                # Truncate long arguments (likely regex patterns) to configured max length
+                my $truncated_arg = length($arg) > $csv_regex_arg_max_length
+                    ? substr($arg, 0, $csv_regex_arg_max_length) . '...'
+                    : $arg;
+                $csv_file_args .= $truncated_arg;
+            }
         }
     }
 
@@ -1004,8 +1095,28 @@ sub read_and_process_logs {
             my ( $timestamp, $threadname );
             $total_lines_read++;
 
-            if ($line_number % 997 == 0) {                  # only print processing status update every X lines processed
-                printf("\rProcessing line %d in file %s (%d overall)", $line_number, $in_file, $total_lines_read);
+            if ($total_lines_read % 4999 == 0) {             # print progress based on total lines read (not per-file) to handle many small files
+                my $now = Time::HiRes::time();
+                push @progress_history, [ $now, $total_lines_read ];
+                shift @progress_history if @progress_history > 50;          # keep last 50 samples for rolling average
+
+                my $lines_per_sec = "";
+                if (@progress_history >= 2) {
+                    my $time_diff = $progress_history[-1][0] - $progress_history[0][0];
+                    my $lines_diff = $progress_history[-1][1] - $progress_history[0][1];
+                    if ($time_diff > 0) {
+                        $lines_per_sec = " - " . format_number($lines_diff / $time_diff) . " lines/sec";
+                    }
+                }
+
+                # Calculate available space for filename to prevent line wrapping
+                my $line_num_str = $line_number;
+                my $overall_str = format_number($total_lines_read);
+                my $fixed_len = length("Processing line $line_num_str in file  ($overall_str overall$lines_per_sec)");
+                my $available_for_filename = $terminal_width - $fixed_len - 1;  # -1 for safety margin
+                my $display_filename = shorten_filename($in_file, $available_for_filename, 1);  # strip path, then shorten
+
+                printf("\rProcessing line %d in file %s (%s overall%s)", $line_number, $display_filename, $overall_str, $lines_per_sec);
                 $| = 1;                                     # Flush output to stdout
             }
 
@@ -1391,7 +1502,8 @@ sub read_and_process_logs {
 
                         $log_analysis{$bucket}{'total_duration-HL'} += $duration if $category_bucket =~ /-HL$/;
                         $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
-                        push @{$log_analysis{$bucket}{durations}}, $duration;
+                        # Skip collecting individual durations for percentiles when heatmap is enabled (memory optimization)
+                        push @{$log_analysis{$bucket}{durations}}, $duration unless $heatmap_enabled;
                     }
 
                     if( defined $bytes && $bytes ) {
@@ -2110,8 +2222,8 @@ sub normalize_data_for_output {
 
     # BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
     if ($heatmap_enabled) {
-        # Heatmap column header replaces latency statistics
-        push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) if $print_durations && !$omit_durations;
+        # Heatmap column header replaces latency statistics - don't add percentile columns to CSV
+        # (individual duration values are not collected when heatmap is enabled)
         push @printed_column_widths, $durations_graph_width;
         push @printed_column_spacing, 0;
         push @printed_column_names, get_heatmap_column_header();
@@ -2587,8 +2699,12 @@ sub print_bar_graph {
                 if (exists $log_occurrences{$bucket}{$category_bucket}) {
                     my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
                     my $color = $colors{$category_bucket} // $colors{'NC'};
+
+                    # Always accumulate total occurrences for CSV output, regardless of display options
+                    $total_occurrences += $occurrences if $category_bucket !~ /^(err-rate|msg-rate|empty|-HL$)/;
+
                     next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate)$/;	# we don't want to count data that won't be printed
-                    next if $category_bucket =~ /^(err|msg)-rate$/ && $log_occurrences{$bucket}{'err-rate'}{occurrences} == 0 && $log_occurrences{$bucket}{'msg-rate'}{occurrences} == 0; 
+                    next if $category_bucket =~ /^(err|msg)-rate$/ && $log_occurrences{$bucket}{'err-rate'}{occurrences} == 0 && $log_occurrences{$bucket}{'msg-rate'}{occurrences} == 0;
 
                     if( $category_bucket =~ /(-HL|err-rate|msg-rate)$/ ) {
                         if( $category_bucket =~ /^err-rate$/ ) {
@@ -2612,7 +2728,6 @@ sub print_bar_graph {
                         $legend_length_bucket += length("$category_bucket: $occurrences ");
                     }
 
-                    $total_occurrences += $occurrences if $category_bucket !~ /^(err-rate|msg-rate)$/;
                     $output_columns{$category_bucket} = $occurrences;
 # 2026-01-04 TO DO: this may not be required, test after fixing the count and byte metric collection with no duration stats
                 } else {
@@ -2906,12 +3021,29 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
 
     push @file_details, "\n";
-    push @file_details, sprintf( "$column_padding$padding$colors{'white-underline'}These file(s) were processed with analysis including results between $min_timestamp_str and $max_timestamp_str$colors{'NC'}\n" );
+
+    # Wrap heading text if it exceeds available width
+    my $heading_text = "These file(s) were processed with analysis including results between $min_timestamp_str and $max_timestamp_str";
+    my $heading_content_width = $file_detail_width - length($column_padding) - length($padding);
+    if ($heading_content_width > 20) {
+        my @heading_lines = wrap_text($heading_text, $heading_content_width);
+        for my $idx (0 .. $#heading_lines) {
+            my $line = $heading_lines[$idx];
+            # Apply underline to text only (not padding), reset immediately after text
+            push @file_details, "$column_padding$padding$colors{'white-underline'}$line$colors{'NC'}\n";
+        }
+    } else {
+        # Terminal too narrow - just truncate
+        my $truncated = substr($heading_text, 0, $heading_content_width > 0 ? $heading_content_width : 1);
+        push @file_details, "$column_padding$padding$colors{'white-underline'}$truncated$colors{'NC'}\n";
+    }
+
     push @file_details, "\n";
     foreach my $in_file (@files_processed) {
-         my $filename_max_length = $file_detail_width - length( $column_padding ) - 3 - 4; 
-         my $filename = length( $in_file ) > $filename_max_length ? "..." . substr( $in_file, length( $in_file ) - $filename_max_length ) : $in_file;  # -3 for '...', -4 for '[x] '
-         push @file_details, sprintf( "$column_padding$padding$colors{'white'}\[%s$colors{'NC'}$colors{'white'}\] %-${filename_max_length}s$colors{'NC'}\n", $match_char[$in_files_matched{$in_file}], $filename );
+         my $filename_max_length = $file_detail_width - length($column_padding) - length($padding) - 4;  # -4 for '[x] '
+         $filename_max_length = 10 if $filename_max_length < 10;  # Minimum reasonable length
+         my $filename = shorten_filename($in_file, $filename_max_length);
+         push @file_details, sprintf("$column_padding$padding$colors{'white'}\[%s$colors{'NC'}$colors{'white'}\] %-${filename_max_length}s$colors{'NC'}\n", $match_char[$in_files_matched{$in_file}], $filename);
     }
 
     for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {
@@ -3323,13 +3455,10 @@ $elapsed_normalize_data = tv_interval($start_time, $end_time);
 
 $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
 
-if( $write_messages_to_csv ) {														                # If write to CSV enabled, open filehandles
-    $csv = Text::CSV->new({ binary => 1, eol => $/ });											    # Create a new CSV object
-    my ($sec, $min, $hour, $mday, $mon, $year) = localtime();
-    my $timestamp = sprintf( "%04d-%02d-%02d_%02d%02d%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec );
-    $csv_file_args =~ tr/!@#\$%\^&*()_+{}|:"<>?[\];',.\/\\`~ /_/;
-    my $csv_file_name = "${timestamp}-LTL-STATS-${csv_file_args}.csv";
-    open $csv_fh, '>', $csv_file_name or die "Could not open file: $!";								# Open a file for writing, then print the header/column names
+if( $write_messages_to_csv ) {                                                                      # If write to CSV enabled, open filehandles
+    $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
+    my $csv_file_name = build_csv_filename('STATS');
+    open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
     $csv->print($csv_fh, [ @output_columns ] );
 }
 
@@ -3338,12 +3467,10 @@ close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && de
 
 print_summary_table();
 
-if( $write_messages_to_csv ) {														                # If write to CSV enabled, open filehandles
-    $csv = Text::CSV->new({ binary => 1, eol => $/ });											    # Create a new CSV object
-    my ($sec, $min, $hour, $mday, $mon, $year) = localtime();
-    my $timestamp = sprintf( "%04d-%02d-%02d_%02d%02d%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec );
-    my $csv_file_name = "${timestamp}-LTL-MESSAGES-${csv_file_args}.csv";
-    open $csv_fh, '>', $csv_file_name or die "Could not open file: $!";								# Open a file for writing, then print the header/column names
+if( $write_messages_to_csv ) {                                                                      # If write to CSV enabled, open filehandles
+    $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
+    my $csv_file_name = build_csv_filename('MESSAGES');
+    open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
     $csv->print($csv_fh, [qw(Category Message Occurrences MeanBytes TotalBytes TotalBytesNice CountOccurrences CountMin CountMean CountMax CountSum MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact)]);
 }
 
