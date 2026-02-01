@@ -24,6 +24,8 @@ Add ASCII terminal histogram charts that visualize the value distribution of key
 | `-hg duration,bytes` | Show specific metrics (comma-separated) |
 | `-hgw <N>` or `--histogram-width <N>` | Set histogram display width as percentage of terminal (default: 95) |
 
+Multiple uses of command line options for -hg should be additive in case the overall environment states displaying -hg duration, and the user adds -hg bytes then both duration and bytes should be included.
+
 ### Output Placement
 
 - Histograms appear **after** the time-based bar graph
@@ -81,14 +83,30 @@ Use Unicode block elements for sub-character resolution:
 
 This provides 8 levels of resolution per character row, enabling smooth gradients and accurate representation even with limited vertical height.
 
-#### Optional: Color Gradient Bars
+#### Chart Axes Characters
+
+Characters for use in drawing the axes should be all contained in an in-memory data structure ready to be used to draw the axis differently depending on line and tick mark configuration.
+
+Configurations should be available to easily change the internal and external tick marks and length.  The section below specifying the Y-axis should be used as the example of what might be configurable, as the proposed axis drawing has inconsistent application of the tick marks (inside/outside) for both of the Y-axis and at the different levels.  Configuration should hence existing for Y-axis left, Y-axis right, and X-axis.
+
+Corner characters connecting the X and Y axis should also be included and configurable through a sub-local variable.
+
+### Other Metric Support
+
+The *count* metric included here is an example of a custom metric not typical to standard log analysis but which has been added to logs for specific usage and load pattern detailed analysis.  As this tool evolves, as well as its adoption and broader use, other custom metrics will be added - especially a feature request to specify a custom metric name at runtime and have that calculated and treated as the in-built ones.
+
+Given this situation, the histogram data model, layout design, command line options, and all other requirements should plan for the fact that in the future it is a CERTAINTY that other metrics will exist and require their own treatment (color, placement, units, etc.).
+
+#### Color Gradient Bars
 
 Use existing 8-level heatmap color gradients to color the bars based on count density:
 - Duration: Yellow gradient (58, 94, 136, 142, 178, 184, 220, 226)
 - Bytes: Green gradient (22, 28, 34, 40, 46, 82, 118, 154)
 - Count: Cyan gradient (23, 30, 37, 44, 51, 80, 86, 123)
 
-Each bar column's color intensity reflects the count in that bucket relative to the maximum bucket count. This is an optional enhancement to be tested for visual appeal.
+Each bar column's color intensity reflects the count in that bucket relative to the maximum bucket count. This is an optional enhancement to be tested for visual appeal.  Other custom metrics would leverage the other defined color gradients.
+
+Color gradients should support light background detection used in the heatmap.  If that heatmap pattern is not made common/global to the whole application, then it should become generalized so that this feature only needs to reference the detected color gradient variables and not bother itself with doing the detection.
 
 #### Y-Axes (Dual)
 
@@ -104,6 +122,8 @@ Each bar column's color intensity reflects the count in that bucket relative to 
 
 #### X-Axis
 
+CLAUDE: Please clarify why you have only put a corner character joining X and Y axis on the far left, and not on the right?
+
 - Corner character (`└`) at origin (far left)
 - Downward-facing tick markers (`┬`) aligned with bucket boundaries
 - Labels showing bucket boundary values using smart formatting:
@@ -114,20 +134,23 @@ Each bar column's color intensity reflects the count in that bucket relative to 
 
 #### Legend (Right side, below histogram)
 
+CLAUDE: make sure that there are configurable variables for spacing between the Histogram and legend, and between the histograms, and that legend text and values are correctly aligned (left, right).  Update this section accordingly and remove this comment.
+
 Display population-wide percentiles below each histogram:
 ```
 P50:    127ms
 P90:    892ms
-P99:    4.2s
-P99.9: 12.3s
+P99:     4.2s
+P99.9:  12.3s
 ```
 
-The percentile labels should be left aligned, and the values right aligned meeting standard text and number table formatting rules.  A maximum of one decimal place should be used in the value output, with no decimal place if the digit after the decimal is a zero.  There should be a space between the value and the unit.
+The percentile labels should be left aligned, and the values right aligned meeting standard text and number table formatting rules.  A maximum of one decimal place should be used in the value output, with no decimal place if the digit after the decimal is a zero.  There should be a space between the value and the unit (which is provided by the helper function).
 
 These represent percentiles for the **entire population** of values, distinct from the time-bucket or message-based percentiles shown elsewhere.
 
-
 ### Data Collection
+
+CLAUDE: This is wrong, the data structure should be Hash, containing arrays.  The same pattern elsewhere so that new metrics can be added programatically.  What you have proposed here is static and repetitive where the base code, data model should be the same.  Update this section accordingly to be aligned with the section "Other Metric Support", ensuring a more flexible, dynamic data model; and then remove this comment once resolved.
 
 New data structures to capture values during log parsing:
 
@@ -153,16 +176,21 @@ my @histogram_count_boundaries;
 1. **Determine range**: Find global min/max across all values
 2. **Calculate logarithmic boundaries**: Similar to heatmap approach
    - `boundary[i] = min * (max/min)^(i/num_buckets)`
-3. **Default bucket count**: Based on available display width
+3. **Default bucket count**: Based on available display width for the histogram (will depend on terminal width and number of histograms being calculated)
 4. **Assign values to buckets**: Binary search for efficiency with large datasets
 
 ### Layout Calculation
 
-1. Get terminal width
+CLAUDE: I have updated this section with a few added steps as your layout planning was quite insufficient given the feature requirements and challenges to layout such a complex grid of trends with legends and spacing.  Please ensure that the order fits your algorithmic plan, and determine if there are any other missing layout calculation stages which are missing.  Once the section is updated, you can remove this comment as resolved.
+
+1. Get terminal width (this comes from the global variable)
 2. Calculate display width: `terminal_width * (histogram_width_percent / 100)`
 3. Determine which metrics have data (in order: duration, bytes, count)
 4. Divide display width equally among active histograms (with spacing between them)
-5. Center the histogram group in terminal
+5. Apply a configurable amount of padding between each histogram
+6. Allow for space for the printed legend
+7. Each histogram size is then known
+6. Center the histogram group in terminal
 
 ### Color Scheme
 
@@ -177,7 +205,6 @@ Match bar graph column colors for consistency:
 - User-defined bucket boundaries (future enhancement)
 - Configurable histogram height (future enhancement - design for it)
 - CSV output of histogram data (future enhancement)
-- Light background color support (follow heatmap pattern when implemented)
 - Linear scale option (removed - logarithmic only)
 
 ## Acceptance Criteria
@@ -196,6 +223,7 @@ Match bar graph column colors for consistency:
 12. [ ] Logarithmic bucket scaling works correctly
 13. [ ] Legend shows P50, P90, P99, P99.9 for entire population with left aigned labels and right aligned values
 14. [ ] Works with all log formats that provide duration/bytes/count
+15. [ ] Light background support has been added for automatically switching color gradients on light terminals
 
 ## Test Plan
 
@@ -235,6 +263,8 @@ The Unicode Block Elements range (U+2580-U+259F) provides the characters needed:
 - These are widely supported in modern terminal emulators
 
 ### Box Drawing Characters
+
+CLAUDE: It is unclear why you have left out bottom-right corner character.  The defined and used characters should be complete surrounding all drawing of parts of such lines, tick marks, and corners.  Resolve, and remove this comment once done.
 
 For axes and tick marks:
 - `─` (U+2500) Horizontal line
@@ -287,3 +317,4 @@ For axes and tick marks:
 | Optional color gradient bars | Reuse heatmap gradients, test for visual appeal | 2026-01-25 |
 | Layout order matches bar graph | Duration, bytes, count (left to right) for consistency | 2026-01-25 |
 | Colors match bar graph columns | Yellow, green, cyan to maintain visual consistency | 2026-01-25 |
+| Color gradient bars should be configurable, but required | Reuse heatmap gradients, test for visual appeal | 2026-02-01 |
