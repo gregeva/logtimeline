@@ -26,6 +26,9 @@ my $histogram_legend_spacing = 1;  # Gap between histogram and legend
 my $tick_inside = 1;               # 1 = draw ticks pointing INTO the chart
 my $tick_outside = 0;              # 1 = draw ticks pointing AWAY from the chart
 
+# Gridline configuration
+my $gridlines_enabled = 1;         # 1 = draw horizontal gridlines at Y-axis tick positions
+
 # ============================================================================
 # CHARACTER CONSTANTS
 # ============================================================================
@@ -75,6 +78,9 @@ my %colors = (
     bytes    => [22, 28, 34, 40, 46, 82, 118, 154],       # Green
     count    => [23, 30, 37, 44, 51, 80, 86, 123],        # Cyan
 );
+
+# Gridline color - dark grey (bright black / ANSI 8)
+my $gridline_color = 8;
 
 # ============================================================================
 # SYNTHETIC TEST DATA
@@ -540,6 +546,9 @@ sub render_histogram {
         print $y_label . $left_tick;
 
         # Render bar characters for this row
+        # Gridlines use light horizontal line (always), regardless of box drawing weight
+        my $gridline_char = '─';  # U+2500 Light horizontal line
+
         for my $col (0 .. $bar_width - 1) {
             my $bucket_idx = $col;  # 1:1 mapping
             last if $bucket_idx >= scalar(@buckets);
@@ -555,7 +564,12 @@ sub render_histogram {
                 my $partial = ($bucket_fill - $row_bottom) / (1 / $height);
                 $char = get_bar_char($partial);
             } else {
-                # Empty
+                # Empty - check if we should draw a gridline
+                if ($gridlines_enabled && $has_tick) {
+                    # Draw gridline in dark grey (bright black)
+                    print ansi_color_fg($gridline_color) . $gridline_char . ansi_reset();
+                    next;
+                }
                 $char = ' ';
             }
 
