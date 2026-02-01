@@ -30,19 +30,41 @@ my $tick_outside = 0;              # 1 = draw ticks pointing AWAY from the chart
 # CHARACTER CONSTANTS
 # ============================================================================
 
-my %box_chars = (
-    h_line    => '─',  # U+2500
-    v_line    => '│',  # U+2502
-    corner_tl => '┌',  # U+250C
-    corner_tr => '┐',  # U+2510
-    corner_bl => '└',  # U+2514
-    corner_br => '┘',  # U+2518
-    t_right   => '├',  # U+251C
-    t_left    => '┤',  # U+2524
-    t_down    => '┬',  # U+252C
-    t_up      => '┴',  # U+2534
-    cross     => '┼',  # U+253C
+# Box drawing character sets - configurable for terminal/OS compatibility
+# Set to 'heavy' or 'light' based on terminal rendering capabilities
+my $box_drawing_weight = 'heavy';  # 'heavy' or 'light'
+
+my %box_char_sets = (
+    light => {
+        h_line    => '─',  # U+2500
+        v_line    => '│',  # U+2502
+        corner_tl => '┌',  # U+250C
+        corner_tr => '┐',  # U+2510
+        corner_bl => '└',  # U+2514
+        corner_br => '┘',  # U+2518
+        t_right   => '├',  # U+251C
+        t_left    => '┤',  # U+2524
+        t_down    => '┬',  # U+252C
+        t_up      => '┴',  # U+2534
+        cross     => '┼',  # U+253C
+    },
+    heavy => {
+        h_line    => '━',  # U+2501
+        v_line    => '┃',  # U+2503
+        corner_tl => '┏',  # U+250F
+        corner_tr => '┓',  # U+2513
+        corner_bl => '┗',  # U+2517
+        corner_br => '┛',  # U+251B
+        t_right   => '┣',  # U+2523
+        t_left    => '┫',  # U+252B
+        t_down    => '┳',  # U+2533
+        t_up      => '┻',  # U+253B
+        cross     => '╋',  # U+254B
+    },
 );
+
+# Active character set - code references this hash directly
+my %box_chars = %{$box_char_sets{$box_drawing_weight}};
 
 # 8-level block characters for sub-character resolution
 my @block_chars = (' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█');
@@ -281,9 +303,14 @@ sub calculate_layout {
 # RENDERING
 # ============================================================================
 
-sub ansi_color {
+sub ansi_color_fg {
     my ($color_code) = @_;
     return "\e[38;5;${color_code}m";
+}
+
+sub ansi_color_fg_bg {
+    my ($color_code) = @_;
+    return "\e[38;5;${color_code};48;5;${color_code}m";
 }
 
 sub ansi_reset {
@@ -502,8 +529,12 @@ sub render_histogram {
             $intensity = 7 if $intensity > 7;
             my $color = $color_gradient->[$intensity];
 
-            if ($char ne ' ') {
-                print ansi_color($color) . $char . ansi_reset();
+            if ($char eq $block_chars[8]) {
+                # Full block: use matching fg+bg color to fill any whitespace gaps
+                print ansi_color_fg_bg($color) . $char . ansi_reset();
+            } elsif ($char ne ' ') {
+                # Partial block: fg color only
+                print ansi_color_fg($color) . $char . ansi_reset();
             } else {
                 print $char;
             }
