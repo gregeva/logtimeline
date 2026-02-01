@@ -53,6 +53,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 <!-- Add dated entries here as patterns are noticed -->
 - 2026-02-01: GitHub issue updates were missed during v0.9.1 development, requiring 11% session usage for retroactive updates. Root cause: documentation step existed but wasn't prominent/mandatory enough. Fix: Added explicit "GitHub Issue Updates (MANDATORY)" section with specific triggers and commands.
 - 2026-02-01: Made code changes for issue #13 while on branch `25-histogram-charts`. Root cause: didn't verify branch before starting work. Fix: Added "Branch Verification (MANDATORY - FIRST STEP)" section requiring branch check before any code changes.
+- 2026-02-01: Version number in `ltl` (line 73) was not updated for v0.9.1 release. Root cause: Release Checklist exists but version update step not enforced. Fix: Added verification step to release process.
 
 ## Project Overview
 
@@ -172,13 +173,14 @@ git push origin v0.8.2-rc1
 ```
 
 ### Release Checklist
-- [ ] Version number updated in `ltl` (line 75)
+- [ ] Version number updated in `ltl` (line 73: `$version_number`) - **VERIFY with `grep version_number ltl | head -1`**
 - [ ] Release notes created at `releases/v{version}.md`
 - [ ] All tests pass locally
 - [ ] Feature documentation updated in `features/`
 - [ ] CLAUDE.md updated if architecture changed
 - [ ] PR created, reviewed, and merged to `main`
 - [ ] Tag created and pushed from `main` branch
+- [ ] After tagging, verify version matches: `./ltl -version` should show the tagged version
 
 ### Verifying a Release
 After the workflow completes:
