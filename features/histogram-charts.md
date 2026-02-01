@@ -24,8 +24,23 @@ Add ASCII terminal histogram charts that visualize the value distribution of key
 | `-hg duration,bytes` | Show specific metrics (comma-separated) |
 | `-hgw <N>` or `--histogram-width <N>` | Set histogram display width as percentage of terminal (default: 95) |
 | `-hgh <N>` or `--histogram-height <N>` | Set histogram height in rows/lines (default: 10) |
+| `-hgbpd <N>` | Buckets per decade for precision control (default: 8) |
+| `-hgb <N>` | Override: use exactly N buckets total |
 
 Multiple uses of command line options for -hg should be additive in case the overall environment states displaying -hg duration, and the user adds -hg bytes then both duration and bytes should be included.
+
+### Verbose Output (-V flag)
+
+When the `-V` (verbose) flag is used with histograms enabled, output bucket calculation details for each metric:
+
+```
+Histogram bucket calculation:
+  Duration: samples=48,293, min=1ms, max=97.2s, range=4.99 decades, buckets_per_decade=8, total_buckets=40
+  Bytes:    samples=48,293, min=128B, max=12.4MB, range=4.99 decades, buckets_per_decade=8, total_buckets=40
+  Count:    samples=12,847, min=1, max=847, range=2.93 decades, buckets_per_decade=8, total_buckets=24
+```
+
+This helps users understand the data population and how bucket counts were derived, and supports tuning via `-hgbpd` if needed.
 
 ### Output Placement
 
@@ -134,23 +149,53 @@ Color gradients should support light background detection used in the heatmap.  
 
 #### Legend (Below Histogram)
 
-Display population-wide percentiles below each histogram, using the minimum number of rows possible.
+Display population-wide percentiles below each histogram on a single centered line, dynamically selecting which percentiles to show based on available width.
 
 **Configurable spacing variables:**
 - `$histogram_legend_spacing` - vertical gap between histogram bottom and legend
 - `$histogram_gap` - horizontal padding between adjacent histograms
 
-**Legend layout:**
-- Percentiles displayed in compact rows (e.g., `P50: 127ms   P90: 892ms` on one line)
-- Labels left-aligned, values right-aligned within their column
-- Maximum one decimal place (omit if zero, e.g., "4s" not "4.0s")
-- Space between value and unit (provided by helper function)
+**Percentile Selection:**
 
-**Example (2 rows for 4 percentiles):**
+Percentiles are selected based on a priority order reflecting SRE and performance analysis best practices. The selection algorithm takes percentiles from this priority list until the available width is exhausted, then displays them in ascending order.
+
+| Priority | Percentile | Rationale |
+|----------|------------|-----------|
+| 1 | P50 (median) | The typical user experience; always the most important baseline |
+| 2 | P99 | Critical for SLO/SLA monitoring; catches "1 in 100" degraded experiences |
+| 3 | P99.9 | Important for high-volume systems (1 in 1,000 requests); tail behavior |
+| 4 | P95 | Common SLO target; fills the gap between P50 and P99 |
+| 5 | P90 | Shows where "good" experiences end; only after P95/P99 for finer granularity |
+| 6 | P75 | Upper quartile; helps understand distribution shape |
+| 7 | P99.99 | For very high-volume systems (1 in 10,000 requests) |
+| 8 | P25 | Lower quartile; shows "fast path" performance |
+| 9 | P10 | Best-case typical performance |
+| 10 | P1 | The fastest requests; understanding the floor |
+
+**Selection Algorithm:**
+1. Start with empty selection
+2. For each percentile in priority order, check if adding it (with separator) fits in available width
+3. If it fits, add to selection
+4. After all percentiles checked, sort selection by ascending percentile value
+5. Display as single centered line with 3-space separators
+
+**Example outputs at various widths:**
 ```
-P50: 127ms   P90: 892ms
-P99: 4.2s    P99.9: 12.3s
+# Narrow (50 chars): 4 percentiles
+P50: 11ms   P90: 697ms   P95: 2.1s   P99: 10.3s
+
+# Medium (120 chars): 6 percentiles
+P50: 11ms   P90: 697ms   P95: 2.1s   P99: 10.3s   P99.9: 45.2s   P99.99: 1.2m
+
+# Wide (250 chars): 8+ percentiles
+P10: 2ms   P25: 5ms   P50: 11ms   P75: 89ms   P90: 697ms   P95: 2.1s   P99: 10.3s   P99.9: 45.2s
 ```
+
+**Legend layout:**
+- Single line, centered under histogram
+- Percentiles displayed in ascending order (e.g., `P50: 127ms   P90: 892ms   P99: 4.2s`)
+- 3-space separator between percentile entries
+- Maximum one decimal place (omit if zero, e.g., "4s" not "4.0s")
 
 These represent percentiles for the **entire population** of values, distinct from the time-bucket or message-based percentiles shown elsewhere.
 
@@ -189,10 +234,33 @@ This hash-based structure allows new metrics to be added programmatically withou
 ### Bucket Calculation
 
 1. **Determine range**: Find global min/max across all values
-2. **Calculate logarithmic boundaries**: Similar to heatmap approach
+2. **Calculate dynamic range**: Number of decades (orders of magnitude) the data spans
+3. **Calculate bucket count**: `decades × buckets_per_decade`
+4. **Calculate logarithmic boundaries**:
    - `boundary[i] = min * (max/min)^(i/num_buckets)`
-3. **Default bucket count**: Based on available display width for the histogram (will depend on terminal width and number of histograms being calculated)
-4. **Assign values to buckets**: Binary search for efficiency with large datasets
+5. **Assign values to buckets**: Binary search for efficiency with large datasets
+6. **Display scaling**: Render each bucket across multiple characters if display width exceeds bucket count
+
+### Bucket Count Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `-hgbpd <N>` | 8 | Buckets per decade (order of magnitude) |
+| `-hgb <N>` | (auto) | Override: use exactly N buckets total |
+
+**Bucket count is derived from data range:**
+- Calculate decades: `log10(max) - log10(min)`
+- Total buckets: `decades × buckets_per_decade`
+- Example: latency from 1ms to 100s = 5 decades × 8 = 40 buckets
+
+**Precision levels:**
+| Buckets/Decade | Precision | Use Case |
+|----------------|-----------|----------|
+| 4 | ~10% | Quick overview, narrow displays |
+| 8 | ~5% | Default, good balance |
+| 16 | ~2.5% | Detailed analysis, wide displays |
+
+**Display width vs bucket count**: These are decoupled. A 200-character wide histogram with 40 buckets renders each bucket as 5 characters wide. This provides visual prominence while maintaining statistical validity.
 
 ### Layout Calculation
 
@@ -231,23 +299,25 @@ Match bar graph column colors for consistency:
 
 ## Acceptance Criteria
 
-1. [ ] `-hg` flag enables histogram output with all available metrics
-2. [ ] `-hg <metric>` enables histogram for specific metric(s)
-3. [ ] Histograms display after bar graph, before options output
-4. [ ] Multiple histograms display side by side, centered
-5. [ ] Histogram order follows bar graph column order: duration, bytes, count
-6. [ ] Histogram colors match bar graph column colors
-7. [ ] Metrics with no data are omitted from display
-8. [ ] Vertical bars use 8-level Unicode block characters
-9. [ ] Left Y-axis shows count with min/mid/max labels and tick marks
-10. [ ] Right Y-axis shows percentage (0%/50%/100%) with tick marks
-11. [ ] X-axis has tick markers aligned with bucket boundary labels
-12. [ ] Logarithmic bucket scaling works correctly
-13. [ ] Legend shows P50, P90, P99, P99.9 for entire population with left aigned labels and right aligned values
-14. [ ] Works with all log formats that provide duration/bytes/count
-15. [ ] Color gradients are used for displaying the bars, but can be disabled and switched to solid color
-16. [ ] Light background support has been added for automatically switching color gradients on light terminals
-17. [ ] Histogram section display height is configurable from a command line option
+1. [x] `-hg` flag enables histogram output with all available metrics
+2. [x] `-hg <metric>` enables histogram for specific metric(s)
+3. [x] Histograms display after bar graph, before options output
+4. [x] Multiple histograms display side by side, centered
+5. [x] Histogram order follows bar graph column order: duration, bytes, count
+6. [x] Histogram colors match bar graph column colors
+7. [x] Metrics with no data are omitted from display
+8. [x] Vertical bars use 8-level Unicode block characters
+9. [x] Left Y-axis shows count with dynamic tick marks
+10. [x] Right Y-axis shows percentage with dynamic tick marks
+11. [x] X-axis has tick markers aligned with bucket boundary labels
+12. [x] Logarithmic bucket scaling works correctly
+13. [x] Legend shows percentiles for entire population with priority-based selection
+14. [x] Works with all log formats that provide duration/bytes/count
+15. [x] Color gradients are used for displaying the bars, but can be disabled and switched to solid color
+16. [x] Light background support has been added for automatically switching color gradients on light terminals
+17. [x] Histogram section display height is configurable from a command line option
+18. [x] Dynamic height scaling based on terminal height (4-15 rows)
+19. [x] Progress messages and timing displayed for histogram statistics
 
 ## Test Plan
 
@@ -279,6 +349,69 @@ Match bar graph column colors for consistency:
 6. Optional color gradients enhance readability (if implemented)
 
 ## Research & References
+
+### Logarithmic Histogram Bucket Selection
+
+#### Why Traditional Bin Selection Rules Don't Apply
+
+Traditional histogram bin selection methods (Sturges, Rice, Scott, Freedman-Diaconis) are designed for **linear histograms** with equal-width bins. They calculate an optimal fixed bin width based on data characteristics like sample size, standard deviation, or interquartile range.
+
+These methods are **not applicable** to logarithmic histograms because:
+- They assume equal-width bins in the value space
+- Logarithmic bins have exponentially increasing widths
+- The "bin width" concept doesn't translate to log scale
+
+For latency and performance data that spans multiple orders of magnitude, **logarithmic binning is the correct approach** - but it requires a different method for determining bucket count.
+
+#### Industry Standard: HdrHistogram Approach
+
+[HdrHistogram](https://github.com/HdrHistogram/HdrHistogram), created by Gil Tene and widely adopted in performance analysis tools, uses a **log-linear** bucketing approach that is the industry standard for latency histograms.
+
+**Key insight from HdrHistogram:**
+> "Internally, data in HdrHistogram variants is maintained using a concept somewhat similar to that of floating point number representation: Using an exponent and a (non-normalized) mantissa to support a wide dynamic range at a high but varying (by exponent value) resolution."
+
+This means:
+- **Exponentially increasing bucket ranges** (like our logarithmic scale)
+- **Linear sub-buckets within each exponential range** for precision
+- Bucket count is determined by **dynamic range** and **precision level**
+
+#### Buckets Per Decade Model
+
+From the [wingolog HDR histogram analysis](https://www.wingolog.org/archives/2023/12/10/a-simple-hdr-histogram):
+
+> "A log-linear bucket spacing has two parts: a logarithm of the value to cover a large dynamic range with a few bits... Linear, evenly spaced buckets between logarithms provide more precision. **4 buckets per log are enough for 10% precision; 32 buckets per log gives 1% precision.**"
+
+This gives us a principled approach:
+1. Calculate the **dynamic range** (number of decades/orders of magnitude)
+2. Choose a **buckets per decade** value based on desired precision
+3. Total buckets = decades × buckets_per_decade
+
+**Example:**
+- Latency range: 1ms to 100s
+- Decades: log₁₀(100000) - log₁₀(1) = 5 decades
+- At 8 buckets/decade: 5 × 8 = 40 buckets total
+
+#### Precision Levels
+
+| Buckets/Decade | Relative Precision | Use Case |
+|----------------|-------------------|----------|
+| 4 | ~10% | Quick overview, constrained displays |
+| 8 | ~5% | **Default** - good balance of detail and clarity |
+| 16 | ~2.5% | Detailed analysis, wide displays |
+| 32 | ~1% | High-precision analysis |
+
+The precision represents the minimum distinguishable difference between values within a decade. At 8 buckets/decade, values must differ by ~5% to land in different buckets.
+
+#### Why This Works for SRE Analysis
+
+1. **Adapts to data range** - narrow range (1ms-100ms) gets fewer buckets than wide range (1ms-100s)
+2. **Consistent resolution across magnitudes** - same relative precision at 10ms as at 10s
+3. **Natural fit for log-scale X-axis** - bucket boundaries align with logarithmic display
+4. **Decoupled from display width** - statistical bucketing is independent of visual rendering
+
+**Sources:**
+- [HdrHistogram - GitHub](https://github.com/HdrHistogram/HdrHistogram)
+- [A simple HDR histogram - wingolog](https://www.wingolog.org/archives/2023/12/10/a-simple-hdr-histogram)
 
 ### Unicode Block Elements
 
@@ -338,11 +471,14 @@ Complete set for axes, tick marks, and corners:
 |------|--------|-------|
 | Feature document created | Done | |
 | GitHub issue created | Done | [#25](https://github.com/gregeva/logtimeline/issues/25) |
-| Implementation plan | Not started | |
-| Prototype | Not started | |
-| Implementation | Not started | |
-| Testing | Not started | |
-| Documentation | Not started | |
+| Implementation plan | Done | `features/histogram-charts-implementation-plan.md` |
+| Prototype | Done | `prototype/histogram-prototype.pl` |
+| HdrHistogram bucket calculation | Done | Buckets-per-decade model implemented in prototype |
+| Display scaling | Done | Decoupled bucket count from display width |
+| X-axis label alignment verified | Done | Labels correctly aligned with log-scale bucket boundaries |
+| Implementation | Done | All phases complete |
+| Testing | Done | Visual verification complete |
+| Documentation | In Progress | Feature doc updated, help text and release notes pending |
 
 ## Decisions Log
 
@@ -364,6 +500,21 @@ Complete set for axes, tick marks, and corners:
 | Legend placement below histogram | Better fit for narrow terminals, use minimum rows | 2026-02-01 |
 | Hash-based data model | Dynamic metric support via `%histogram_values`, `%histogram_buckets`, `%histogram_boundaries` | 2026-02-01 |
 | Enclosed X-axis frame | Both `└` (left) and `┘` (right) corners for complete frame | 2026-02-01 |
-| 1:1 bucket-to-character mapping | Finest granularity; revisit after real-world usage if needed | 2026-02-01 |
+| 1:1 bucket-to-character mapping | ~~Finest granularity~~ **SUPERSEDED** - now decoupled; bucket count is statistical, display width scales rendering | 2026-02-01 |
 | Automatic X-axis label reduction | Reduce labels based on space/length to avoid overlap | 2026-02-01 |
 | Auto-reduce histogram count for narrow terminals | Prioritize duration > bytes > count; user can override with explicit `-hg <metric>` | 2026-02-01 |
+| Heavy box drawing characters preferred | Heavy set (`┃━┣┫┳┻╋┏┓┗┛`) renders better than light set on most terminals; configurable via `$box_drawing_weight` | 2026-02-01 |
+| Full block fg+bg color matching | Apply same ANSI color to both foreground and background for full blocks (`█`) to eliminate whitespace gaps between characters | 2026-02-01 |
+| Dynamic X-axis tick scaling | Number of ticks scales with histogram width; target ~12 character spacing; minimum 5 ticks, no maximum | 2026-02-01 |
+| Dynamic Y-axis tick scaling | Use "nice" tick counts (2, 3, 5, 6, 9, 11, 21) that produce clean percentage intervals (10%, 20%, 25%, 50%); target ~3 row spacing | 2026-02-01 |
+| 0% baseline on X-axis | The X-axis line IS the 0% baseline; all data rows represent values > 0%; bars sit ON TOP of the axis floor | 2026-02-01 |
+| Horizontal gridlines at Y-axis ticks | Optional gridlines using light horizontal line (`─`) in dark grey (ANSI 8); only in empty columns; configurable via `$gridlines_enabled` | 2026-02-01 |
+| Base colors match bar graph plain_bg | Duration: 184 (yellow), Bytes: 34 (green), Count: 30 (cyan) - matching ltl bar graph column colors | 2026-02-01 |
+| Color gradient toggle | `$color_gradient_enabled` controls intensity variation vs flat base color; default off for testing clarity | 2026-02-01 |
+| Decouple bucket count from display width | Bucket count based on data range and precision, display width determines character-per-bucket rendering | 2026-02-01 |
+| ~~Freedman-Diaconis for bucket count~~ | **SUPERSEDED** - Freedman-Diaconis assumes linear bins; not applicable to logarithmic histograms | 2026-02-01 |
+| Buckets-per-decade model (HdrHistogram approach) | Industry standard for latency histograms; bucket count = decades × buckets_per_decade; default 8 buckets/decade (~5% precision) | 2026-02-01 |
+| `-hgbpd` option for precision control | Configure buckets per decade (4=10%, 8=5%, 16=2.5%); `-hgb` overrides with explicit total | 2026-02-01 |
+| X-axis label alignment with log buckets | Labels calculated using same logarithmic formula as bucket boundaries; verified alignment across all display widths | 2026-02-01 |
+| Display bucket expansion/compression | When display > buckets: each bucket spans multiple columns; when display < buckets: multiple buckets aggregate per column | 2026-02-01 |
+| ANSI color reset before Y-axis | Prevents color bleeding on wide displays; `ansi_reset()` called before right Y-axis rendering | 2026-02-01 |
