@@ -355,20 +355,42 @@ For each row (0 = bottom, height-1 = top):
 
 **Location**: New constant hash (in GLOBALS section)
 
+**Note from prototyping**: Heavy box drawing characters render better on most terminals (no gaps between vertical lines). The implementation should support both heavy and light sets with a configuration variable.
+
 ```perl
-my %box_chars = (
-    h_line      => '─',  # U+2500
-    v_line      => '│',  # U+2502
-    corner_tl   => '┌',  # U+250C
-    corner_tr   => '┐',  # U+2510
-    corner_bl   => '└',  # U+2514
-    corner_br   => '┘',  # U+2518
-    t_right     => '├',  # U+251C
-    t_left      => '┤',  # U+2524
-    t_down      => '┬',  # U+252C
-    t_up        => '┴',  # U+2534
-    cross       => '┼',  # U+253C
+# Box drawing character sets - configurable for terminal/OS compatibility
+my $box_drawing_weight = 'heavy';  # 'heavy' or 'light'
+
+my %box_char_sets = (
+    light => {
+        h_line    => '─',  # U+2500
+        v_line    => '│',  # U+2502
+        corner_tl => '┌',  # U+250C
+        corner_tr => '┐',  # U+2510
+        corner_bl => '└',  # U+2514
+        corner_br => '┘',  # U+2518
+        t_right   => '├',  # U+251C
+        t_left    => '┤',  # U+2524
+        t_down    => '┬',  # U+252C
+        t_up      => '┴',  # U+2534
+        cross     => '┼',  # U+253C
+    },
+    heavy => {
+        h_line    => '━',  # U+2501
+        v_line    => '┃',  # U+2503
+        corner_tl => '┏',  # U+250F
+        corner_tr => '┓',  # U+2513
+        corner_bl => '┗',  # U+2517
+        corner_br => '┛',  # U+251B
+        t_right   => '┣',  # U+2523
+        t_left    => '┫',  # U+252B
+        t_down    => '┳',  # U+2533
+        t_up      => '┻',  # U+253B
+        cross     => '╋',  # U+254B
+    },
 );
+
+my %box_chars = %{$box_char_sets{$box_drawing_weight}};
 
 my @block_chars = (' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█');
 ```
@@ -387,37 +409,114 @@ calculate_histogram_buckets() if $histogram_enabled;
 print_histograms() if $histogram_enabled;
 ```
 
-### Phase 8: Color Gradient Support
+### Phase 8: Color Support
 
-**Reuse existing heatmap color infrastructure:**
+**Base colors** (match bar graph column plain_bg colors from ltl):
 
 ```perl
-sub get_histogram_color {
-    my ($metric, $intensity) = @_;  # intensity: 0-7
+my %histogram_base_colors = (
+    duration => 184,  # Yellow - matches bar graph column 2 plain_bg
+    bytes    => 34,   # Green - matches bar graph column 3 plain_bg
+    count    => 30,   # Cyan - matches bar graph column 4 plain_bg
+);
+```
 
-    my $color_name = $heatmap_metric_map{$metric}{color};
-    my $colors = $light_background ? \%heatmap_colors_light : \%heatmap_colors;
+**Color gradients** (for optional intensity variation):
 
-    return $colors->{$color_name}[$intensity];
+```perl
+my %histogram_color_gradients = (
+    duration => [58, 94, 136, 142, 178, 184, 220, 226],   # Yellow gradient
+    bytes    => [22, 28, 34, 40, 46, 82, 118, 154],       # Green gradient
+    count    => [23, 30, 37, 44, 51, 80, 86, 123],        # Cyan gradient
+);
+
+my $color_gradient_enabled = 0;  # Toggle between flat base color and gradients
+```
+
+**Color application** (from prototyping - critical for eliminating whitespace gaps):
+
+```perl
+sub ansi_color_fg {
+    my ($color_code) = @_;
+    return "\e[38;5;${color_code}m";
 }
+
+sub ansi_color_fg_bg {
+    my ($color_code) = @_;
+    # Apply same color to both fg AND bg - eliminates whitespace gaps in full blocks
+    return "\e[38;5;${color_code};48;5;${color_code}m";
+}
+
+# For full blocks (█): use ansi_color_fg_bg() to fill gaps
+# For partial blocks (▁▂▃▄▅▆▇): use ansi_color_fg() only
+```
+
+### Phase 9: Dynamic Axis Scaling
+
+**From prototyping**: Both X and Y axes need dynamic tick scaling based on available space.
+
+**X-axis tick scaling:**
+
+```perl
+# Target: approximately one tick every 12 characters
+my $target_spacing = 12;
+my $num_ticks = int($bar_width / $target_spacing) + 1;
+$num_ticks = 5 if $num_ticks < 5;  # Minimum 5 ticks (no maximum)
+```
+
+**Y-axis tick scaling:**
+
+```perl
+# Use "nice" tick counts that produce clean percentage intervals
+my @nice_tick_counts = (2, 3, 5, 6, 9, 11, 21);
+# 2 ticks = 50% intervals, 5 ticks = 25% intervals, 11 ticks = 10% intervals
+
+my $y_target_spacing = 3;  # Target ~3 rows between ticks
+my $ideal_ticks = int($height / $y_target_spacing) + 1;
+
+# Select largest nice count that fits
+my $num_y_ticks = 2;
+for my $nice (@nice_tick_counts) {
+    $num_y_ticks = $nice if $nice <= $ideal_ticks;
+}
+```
+
+**Critical: 0% baseline on X-axis**
+
+The X-axis line IS the 0% baseline. All height rows (0 to height-1) represent data > 0%. The X-axis shows "0" count on left and "0%" on right. Bars sit ON TOP of the X-axis floor.
+
+### Phase 10: Optional Gridlines
+
+**Horizontal gridlines at Y-axis tick positions:**
+
+```perl
+my $gridlines_enabled = 1;  # Toggle gridlines
+my $gridline_color = 8;     # Dark grey (bright black / ANSI 8)
+
+# Gridlines use light horizontal line (─) regardless of box drawing weight
+# Only drawn in columns where there's no data (empty space)
+# Only on rows with Y-axis tick marks
 ```
 
 ## Implementation Order
 
-| Step | Description | Dependencies | Estimated Complexity |
-|------|-------------|--------------|---------------------|
-| 1 | Add global variables and CLI options | None | Low |
-| 2 | Add data collection in parsing loop | Step 1 | Low |
-| 3 | Implement `calculate_histogram_buckets()` | Step 2 | Medium |
-| 4 | Implement `calculate_histogram_layout()` | Step 1 | Medium |
-| 5 | Implement box/block character constants | None | Low |
-| 6 | Implement `print_histograms()` skeleton | Steps 3-5 | Medium |
-| 7 | Implement row rendering with bar chars | Step 6 | High |
-| 8 | Implement X-axis with labels | Step 6 | Medium |
-| 9 | Implement legend output | Step 3 | Low |
-| 10 | Integrate into main flow | Steps 1-9 | Low |
-| 11 | Add color gradient support | Step 7 | Low |
-| 12 | Testing and visual verification | All | Medium |
+| Step | Description | Dependencies | Complexity | Notes from Prototype |
+|------|-------------|--------------|------------|---------------------|
+| 1 | Add global variables and CLI options | None | Low | Include all new config vars |
+| 2 | Add data collection in parsing loop | Step 1 | Low | |
+| 3 | Implement `calculate_histogram_buckets()` | Step 2 | Medium | Include expanded percentile set (P1-P99.99) |
+| 4 | Implement `calculate_histogram_layout()` | Step 1 | Medium | Y-axis overhead = 16 chars (validated in prototype) |
+| 5 | Implement box/block character constants | None | Low | Include both heavy and light sets |
+| 6 | Implement `print_histograms()` skeleton | Steps 3-5 | Medium | |
+| 7 | Implement row rendering with bar chars | Step 6 | High | Use fg+bg color for full blocks |
+| 8 | Implement dynamic Y-axis tick scaling | Step 7 | Medium | Use "nice" tick counts |
+| 9 | Implement X-axis with dynamic ticks | Step 6 | Medium | Target 12-char spacing |
+| 10 | Implement X-axis labels with collision avoidance | Step 9 | Medium | |
+| 11 | Implement legend with priority-based percentile selection | Step 3 | Medium | See priority order in feature doc |
+| 12 | Implement optional gridlines | Steps 7-8 | Low | Light h-line in dark grey |
+| 13 | Add color support (base + gradients) | Step 7 | Low | Match bar graph plain_bg colors |
+| 14 | Integrate into main flow | Steps 1-13 | Low | |
+| 15 | Testing and visual verification | All | Medium | Use prototype as reference |
 
 ## Testing Strategy
 
@@ -452,15 +551,23 @@ sub get_histogram_color {
 
 ### Visual Verification Checklist
 
-- [ ] Bars are continuous pillars (no whitespace gaps)
+- [ ] Bars are continuous pillars (no whitespace gaps) - use fg+bg color for full blocks
 - [ ] Left Y-axis labels align with tick marks
 - [ ] Right Y-axis percentage labels align with tick marks
-- [ ] X-axis has `└` and `┘` corners (enclosed frame)
-- [ ] X-axis tick marks (`┬`) align with bucket boundaries
-- [ ] X-axis labels are readable and properly spaced
+- [ ] Y-axis tick marks scale dynamically with histogram height
+- [ ] Percentage intervals are "nice" values (10%, 20%, 25%, 50%)
+- [ ] 0% baseline is on X-axis line (not a data row)
+- [ ] X-axis has `┗` and `┛` corners (heavy) or `└` and `┘` (light)
+- [ ] X-axis tick marks scale dynamically with histogram width
+- [ ] X-axis labels are readable and properly spaced (no overlap)
 - [ ] Multiple histograms are evenly spaced and centered
-- [ ] Legend percentiles are below each histogram
-- [ ] Colors match bar graph columns (yellow/green/cyan)
+- [ ] Legend percentiles use priority-based selection
+- [ ] Legend displays percentiles in ascending order
+- [ ] Colors match bar graph column plain_bg values (184, 34, 30)
+- [ ] Color gradient toggle works correctly
+- [ ] Gridlines appear only at Y-axis tick rows and only in empty columns
+- [ ] Gridlines use light horizontal line in dark grey
+- [ ] Heavy/light box drawing weight is configurable
 - [ ] Light background mode works correctly
 
 ## Design Decisions (Resolved)
@@ -491,3 +598,25 @@ sub get_histogram_color {
 
 - #25: Feature request (parent)
 - #34: Memory optimization enhancement (deferred)
+
+## Prototype Reference
+
+The prototype at `prototype/histogram-prototype.pl` validates all rendering logic and should be used as the reference implementation for:
+
+- Box drawing character configuration (heavy/light sets)
+- Dynamic X-axis tick calculation
+- Dynamic Y-axis tick calculation with "nice" intervals
+- 0% baseline handling (X-axis is the floor)
+- Priority-based percentile legend selection
+- fg+bg color application for full blocks
+- Gridline rendering
+- Color gradient toggle
+
+Key configuration variables validated in prototype:
+- `$box_drawing_weight` = 'heavy' (recommended)
+- `$gridlines_enabled` = 1
+- `$color_gradient_enabled` = 0 (for testing), 1 (for production)
+- `$histogram_height` = 10 (default)
+- `$histogram_width_percent` = 95
+- `$histogram_gap` = 4
+- `$histogram_legend_spacing` = 1

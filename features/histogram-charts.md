@@ -368,8 +368,8 @@ Complete set for axes, tick marks, and corners:
 |------|--------|-------|
 | Feature document created | Done | |
 | GitHub issue created | Done | [#25](https://github.com/gregeva/logtimeline/issues/25) |
-| Implementation plan | Not started | |
-| Prototype | Not started | |
+| Implementation plan | Done | `features/histogram-charts-implementation-plan.md` |
+| Prototype | Done | `prototype/histogram-prototype.pl` |
 | Implementation | Not started | |
 | Testing | Not started | |
 | Documentation | Not started | |
@@ -397,3 +397,11 @@ Complete set for axes, tick marks, and corners:
 | 1:1 bucket-to-character mapping | Finest granularity; revisit after real-world usage if needed | 2026-02-01 |
 | Automatic X-axis label reduction | Reduce labels based on space/length to avoid overlap | 2026-02-01 |
 | Auto-reduce histogram count for narrow terminals | Prioritize duration > bytes > count; user can override with explicit `-hg <metric>` | 2026-02-01 |
+| Heavy box drawing characters preferred | Heavy set (`┃━┣┫┳┻╋┏┓┗┛`) renders better than light set on most terminals; configurable via `$box_drawing_weight` | 2026-02-01 |
+| Full block fg+bg color matching | Apply same ANSI color to both foreground and background for full blocks (`█`) to eliminate whitespace gaps between characters | 2026-02-01 |
+| Dynamic X-axis tick scaling | Number of ticks scales with histogram width; target ~12 character spacing; minimum 5 ticks, no maximum | 2026-02-01 |
+| Dynamic Y-axis tick scaling | Use "nice" tick counts (2, 3, 5, 6, 9, 11, 21) that produce clean percentage intervals (10%, 20%, 25%, 50%); target ~3 row spacing | 2026-02-01 |
+| 0% baseline on X-axis | The X-axis line IS the 0% baseline; all data rows represent values > 0%; bars sit ON TOP of the axis floor | 2026-02-01 |
+| Horizontal gridlines at Y-axis ticks | Optional gridlines using light horizontal line (`─`) in dark grey (ANSI 8); only in empty columns; configurable via `$gridlines_enabled` | 2026-02-01 |
+| Base colors match bar graph plain_bg | Duration: 184 (yellow), Bytes: 34 (green), Count: 30 (cyan) - matching ltl bar graph column colors | 2026-02-01 |
+| Color gradient toggle | `$color_gradient_enabled` controls intensity variation vs flat base color; default off for testing clarity | 2026-02-01 |
