@@ -299,23 +299,25 @@ Match bar graph column colors for consistency:
 
 ## Acceptance Criteria
 
-1. [ ] `-hg` flag enables histogram output with all available metrics
-2. [ ] `-hg <metric>` enables histogram for specific metric(s)
-3. [ ] Histograms display after bar graph, before options output
-4. [ ] Multiple histograms display side by side, centered
-5. [ ] Histogram order follows bar graph column order: duration, bytes, count
-6. [ ] Histogram colors match bar graph column colors
-7. [ ] Metrics with no data are omitted from display
-8. [ ] Vertical bars use 8-level Unicode block characters
-9. [ ] Left Y-axis shows count with min/mid/max labels and tick marks
-10. [ ] Right Y-axis shows percentage (0%/50%/100%) with tick marks
-11. [ ] X-axis has tick markers aligned with bucket boundary labels
-12. [ ] Logarithmic bucket scaling works correctly
-13. [ ] Legend shows P50, P90, P99, P99.9 for entire population with left aigned labels and right aligned values
-14. [ ] Works with all log formats that provide duration/bytes/count
-15. [ ] Color gradients are used for displaying the bars, but can be disabled and switched to solid color
-16. [ ] Light background support has been added for automatically switching color gradients on light terminals
-17. [ ] Histogram section display height is configurable from a command line option
+1. [x] `-hg` flag enables histogram output with all available metrics
+2. [x] `-hg <metric>` enables histogram for specific metric(s)
+3. [x] Histograms display after bar graph, before options output
+4. [x] Multiple histograms display side by side, centered
+5. [x] Histogram order follows bar graph column order: duration, bytes, count
+6. [x] Histogram colors match bar graph column colors
+7. [x] Metrics with no data are omitted from display
+8. [x] Vertical bars use 8-level Unicode block characters
+9. [x] Left Y-axis shows count with dynamic tick marks
+10. [x] Right Y-axis shows percentage with dynamic tick marks
+11. [x] X-axis has tick markers aligned with bucket boundary labels
+12. [x] Logarithmic bucket scaling works correctly
+13. [x] Legend shows percentiles for entire population with priority-based selection
+14. [x] Works with all log formats that provide duration/bytes/count
+15. [x] Color gradients are used for displaying the bars, but can be disabled and switched to solid color
+16. [x] Light background support has been added for automatically switching color gradients on light terminals
+17. [x] Histogram section display height is configurable from a command line option
+18. [x] Dynamic height scaling based on terminal height (4-15 rows)
+19. [x] Progress messages and timing displayed for histogram statistics
 
 ## Test Plan
 
@@ -474,9 +476,9 @@ Complete set for axes, tick marks, and corners:
 | HdrHistogram bucket calculation | Done | Buckets-per-decade model implemented in prototype |
 | Display scaling | Done | Decoupled bucket count from display width |
 | X-axis label alignment verified | Done | Labels correctly aligned with log-scale bucket boundaries |
-| Implementation | Not started | |
-| Testing | Not started | |
-| Documentation | Not started | |
+| Implementation | Done | All phases complete |
+| Testing | Done | Visual verification complete |
+| Documentation | In Progress | Feature doc updated, help text and release notes pending |
 
 ## Decisions Log
 
