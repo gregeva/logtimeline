@@ -23,6 +23,7 @@ Add ASCII terminal histogram charts that visualize the value distribution of key
 | `-hg count` | Show only count histogram |
 | `-hg duration,bytes` | Show specific metrics (comma-separated) |
 | `-hgw <N>` or `--histogram-width <N>` | Set histogram display width as percentage of terminal (default: 95) |
+| `-hgh <N>` or `--histogram-height <N>` | Set histogram height in rows/lines (default: 10) |
 
 Multiple uses of command line options for -hg should be additive in case the overall environment states displaying -hg duration, and the user adds -hg bytes then both duration and bytes should be included.
 
@@ -57,13 +58,13 @@ If a metric has no data, it is omitted and remaining histograms shift to fill th
        │      ██████████████                      │                          │ ██████████████                     │
        │ ▂▂  ████████████████ ▂▂                  │                          │██████████████████ ▂▂               │
     0 ─┤▁▁▁▁██████████████████████▁▁              ├─   0%                 0 ─┤████████████████████████▁           ├─   0%
-       └─┬────┬────┬────┬────┬────┬─                                         └─┬────┬────┬────┬────┬────┬─
+       └─┬────┬────┬────┬────┬────┬─┘                                        └─┬────┬────┬────┬────┬────┬─┘
         1ms 10ms 100ms 1s  10s 100s                                           1KB 10KB 100KB 1MB 10MB 100MB
-                                              P50:    127ms                                                       P50:  45KB
-                                              P90:    892ms                                                       P90: 234KB
-                                              P99:    4.2s                                                        P99: 1.2MB
-                                              P99.9: 12.3s                                                      P99.9: 8.7MB
+       P50: 127ms   P90: 892ms                                               P50: 45KB    P90: 234KB
+       P99: 4.2s    P99.9: 12.3s                                             P99: 1.2MB   P99.9: 8.7MB
 ```
+
+**CRITICAL REQUIREMENT**: Vertical bars must be continuous pillars from bottom to top with no whitespace gaps. The mockup above is illustrative only - actual bar rendering fills solidly upward. Final visual design requires architect approval before implementation.
 
 #### Bar Characters (8 levels per character height)
 
@@ -122,9 +123,8 @@ Color gradients should support light background detection used in the heatmap.  
 
 #### X-Axis
 
-CLAUDE: Please clarify why you have only put a corner character joining X and Y axis on the far left, and not on the right?
-
-- Corner character (`└`) at origin (far left)
+- Corner character (`└`) at origin (bottom-left)
+- Corner character (`┘`) at bottom-right to enclose the frame
 - Downward-facing tick markers (`┬`) aligned with bucket boundaries
 - Labels showing bucket boundary values using smart formatting:
   - Duration: 1ms, 10ms, 100ms, 1s, 10s, 100s
@@ -132,44 +132,59 @@ CLAUDE: Please clarify why you have only put a corner character joining X and Y 
   - Count: 1, 10, 100, 1K, 10K, 100K
 - Logarithmic scale (no linear option)
 
-#### Legend (Right side, below histogram)
+#### Legend (Below Histogram)
 
-CLAUDE: make sure that there are configurable variables for spacing between the Histogram and legend, and between the histograms, and that legend text and values are correctly aligned (left, right).  Update this section accordingly and remove this comment.
+Display population-wide percentiles below each histogram, using the minimum number of rows possible.
 
-Display population-wide percentiles below each histogram:
+**Configurable spacing variables:**
+- `$histogram_legend_spacing` - vertical gap between histogram bottom and legend
+- `$histogram_gap` - horizontal padding between adjacent histograms
+
+**Legend layout:**
+- Percentiles displayed in compact rows (e.g., `P50: 127ms   P90: 892ms` on one line)
+- Labels left-aligned, values right-aligned within their column
+- Maximum one decimal place (omit if zero, e.g., "4s" not "4.0s")
+- Space between value and unit (provided by helper function)
+
+**Example (2 rows for 4 percentiles):**
 ```
-P50:    127ms
-P90:    892ms
-P99:     4.2s
-P99.9:  12.3s
+P50: 127ms   P90: 892ms
+P99: 4.2s    P99.9: 12.3s
 ```
-
-The percentile labels should be left aligned, and the values right aligned meeting standard text and number table formatting rules.  A maximum of one decimal place should be used in the value output, with no decimal place if the digit after the decimal is a zero.  There should be a space between the value and the unit (which is provided by the helper function).
 
 These represent percentiles for the **entire population** of values, distinct from the time-bucket or message-based percentiles shown elsewhere.
 
 ### Data Collection
 
-CLAUDE: This is wrong, the data structure should be Hash, containing arrays.  The same pattern elsewhere so that new metrics can be added programatically.  What you have proposed here is static and repetitive where the base code, data model should be the same.  Update this section accordingly to be aligned with the section "Other Metric Support", ensuring a more flexible, dynamic data model; and then remove this comment once resolved.
-
-New data structures to capture values during log parsing:
+New data structures use hashes containing arrays to support dynamic metric addition:
 
 ```perl
 # Raw value arrays (populated during parsing)
-my @histogram_duration_values;   # All duration values
-my @histogram_bytes_values;      # All bytes values
-my @histogram_count_values;      # All count values
+# Keys: 'duration', 'bytes', 'count', and future metric names
+my %histogram_values = (
+    duration => [],
+    bytes    => [],
+    count    => [],
+);
 
 # Computed histogram buckets (populated before output)
-my @histogram_duration_buckets;  # Count per bucket
-my @histogram_bytes_buckets;
-my @histogram_count_buckets;
+# Each array contains count per bucket
+my %histogram_buckets = (
+    duration => [],
+    bytes    => [],
+    count    => [],
+);
 
 # Bucket boundaries (logarithmic scale)
-my @histogram_duration_boundaries;
-my @histogram_bytes_boundaries;
-my @histogram_count_boundaries;
+# Each array has bucket_count+1 elements (boundaries[0]=min, boundaries[N]=max)
+my %histogram_boundaries = (
+    duration => [],
+    bytes    => [],
+    count    => [],
+);
 ```
+
+This hash-based structure allows new metrics to be added programmatically without code changes to the core histogram logic.
 
 ### Bucket Calculation
 
@@ -181,16 +196,24 @@ my @histogram_count_boundaries;
 
 ### Layout Calculation
 
-CLAUDE: I have updated this section with a few added steps as your layout planning was quite insufficient given the feature requirements and challenges to layout such a complex grid of trends with legends and spacing.  Please ensure that the order fits your algorithmic plan, and determine if there are any other missing layout calculation stages which are missing.  Once the section is updated, you can remove this comment as resolved.
-
-1. Get terminal width (this comes from the global variable)
-2. Calculate display width: `terminal_width * (histogram_width_percent / 100)`
+1. Get terminal width from global variable
+2. Calculate total display width: `terminal_width * (histogram_width_percent / 100)`
 3. Determine which metrics have data (in order: duration, bytes, count)
-4. Divide display width equally among active histograms (with spacing between them)
-5. Apply a configurable amount of padding between each histogram
-6. Allow for space for the printed legend
-7. Each histogram size is then known
-6. Center the histogram group in terminal
+4. Count active histograms (N)
+5. Calculate inter-histogram spacing: `$histogram_gap` (configurable padding between histograms)
+6. Calculate total spacing needed: `(N - 1) * $histogram_gap`
+7. Calculate legend height: `$histogram_legend_spacing` + number of legend rows needed
+8. Calculate available width for histograms: `display_width - total_spacing`
+9. Calculate individual histogram width: `available_width / N`
+10. For each histogram, calculate internal layout:
+    - Left Y-axis label width (count values)
+    - Left Y-axis tick/line width
+    - Bar area width (determines bucket count)
+    - Right Y-axis tick/line width
+    - Right Y-axis label width (percentage)
+11. Calculate legend row count (minimize rows while fitting P50, P90, P99, P99.9 with labels/values)
+12. Calculate total histogram group width: `(N * histogram_width) + ((N - 1) * $histogram_gap)`
+13. Calculate centering offset: `(terminal_width - total_group_width) / 2`
 
 ### Color Scheme
 
@@ -203,7 +226,6 @@ Match bar graph column colors for consistency:
 
 - Highlight filter support (future enhancement)
 - User-defined bucket boundaries (future enhancement)
-- Configurable histogram height (future enhancement - design for it)
 - CSV output of histogram data (future enhancement)
 - Linear scale option (removed - logarithmic only)
 
@@ -223,7 +245,9 @@ Match bar graph column colors for consistency:
 12. [ ] Logarithmic bucket scaling works correctly
 13. [ ] Legend shows P50, P90, P99, P99.9 for entire population with left aigned labels and right aligned values
 14. [ ] Works with all log formats that provide duration/bytes/count
-15. [ ] Light background support has been added for automatically switching color gradients on light terminals
+15. [ ] Color gradients are used for displaying the bars, but can be disabled and switched to solid color
+16. [ ] Light background support has been added for automatically switching color gradients on light terminals
+17. [ ] Histogram section display height is configurable from a command line option
 
 ## Test Plan
 
@@ -264,16 +288,35 @@ The Unicode Block Elements range (U+2580-U+259F) provides the characters needed:
 
 ### Box Drawing Characters
 
-CLAUDE: It is unclear why you have left out bottom-right corner character.  The defined and used characters should be complete surrounding all drawing of parts of such lines, tick marks, and corners.  Resolve, and remove this comment once done.
+Complete set for axes, tick marks, and corners:
 
-For axes and tick marks:
-- `─` (U+2500) Horizontal line
-- `│` (U+2502) Vertical line
-- `┬` (U+252C) Down-facing T (X-axis ticks)
-- `├` (U+251C) Right-facing T (right Y-axis ticks)
-- `┤` (U+2524) Left-facing T (left Y-axis ticks)
-- `┼` (U+253C) Cross (midpoint ticks)
-- `└` (U+2514) Bottom-left corner
+| Character | Unicode | Description |
+|-----------|---------|-------------|
+| `─` | U+2500 | Horizontal line |
+| `│` | U+2502 | Vertical line |
+| `┌` | U+250C | Top-left corner |
+| `┐` | U+2510 | Top-right corner |
+| `└` | U+2514 | Bottom-left corner |
+| `┘` | U+2518 | Bottom-right corner |
+| `├` | U+251C | Right-facing T (left side ticks) |
+| `┤` | U+2524 | Left-facing T (right side ticks) |
+| `┬` | U+252C | Down-facing T (top/X-axis ticks) |
+| `┴` | U+2534 | Up-facing T (bottom ticks) |
+| `┼` | U+253C | Cross (midpoint ticks) |
+
+### Block Characters (8 levels per character height)
+
+| Character | Unicode | Fill Level |
+|-----------|---------|------------|
+| ` ` | U+0020 | 0/8 (empty) |
+| `▁` | U+2581 | 1/8 |
+| `▂` | U+2582 | 2/8 |
+| `▃` | U+2583 | 3/8 |
+| `▄` | U+2584 | 4/8 (half) |
+| `▅` | U+2585 | 5/8 |
+| `▆` | U+2586 | 6/8 |
+| `▇` | U+2587 | 7/8 |
+| `█` | U+2588 | 8/8 (full) |
 
 ### Similar Tools
 
@@ -285,10 +328,9 @@ For axes and tick marks:
 
 1. **Highlight support**: Show filtered subset distribution overlaid on full distribution
 2. **Custom bucket boundaries**: Allow users to specify bucket ranges via command line
-3. **Configurable height**: `-hgh <N>` to set histogram height in rows
-4. **Cumulative distribution**: Show CDF alongside histogram
-5. **CSV export**: Include histogram bucket data in CSV output
-6. **Percentile markers on chart**: Visual indicators (e.g., vertical lines or markers) showing P50/P90/P99/P99.9 positions directly on the histogram bars
+3. **Cumulative distribution**: Show CDF alongside histogram
+4. **CSV export**: Include histogram bucket data in CSV output
+5. **Percentile markers on chart**: Visual indicators (e.g., vertical lines or markers) showing P50/P90/P99/P99.9 positions directly on the histogram bars
 
 ## Progress Tracking
 
@@ -318,3 +360,7 @@ For axes and tick marks:
 | Layout order matches bar graph | Duration, bytes, count (left to right) for consistency | 2026-01-25 |
 | Colors match bar graph columns | Yellow, green, cyan to maintain visual consistency | 2026-01-25 |
 | Color gradient bars should be configurable, but required | Reuse heatmap gradients, test for visual appeal | 2026-02-01 |
+| Configurable height is initial requirement | Default 10 rows, `-hgh <N>` option | 2026-02-01 |
+| Legend placement below histogram | Better fit for narrow terminals, use minimum rows | 2026-02-01 |
+| Hash-based data model | Dynamic metric support via `%histogram_values`, `%histogram_buckets`, `%histogram_boundaries` | 2026-02-01 |
+| Enclosed X-axis frame | Both `└` (left) and `┘` (right) corners for complete frame | 2026-02-01 |
