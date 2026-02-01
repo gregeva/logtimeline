@@ -289,6 +289,45 @@ Each issue being worked on should have its own branch with the GitHub Issue ID n
 
 **CRITICAL: Do not write production code until the implementation plan has been reviewed and approved by the user.** Implementing before planning is complete wastes effort and creates cleanup work when the approach is rejected.
 
+### GitHub Issue Updates (MANDATORY)
+
+**GitHub Issues are the source of truth for project tracking.** Update issues throughout the development process, not just at the end.
+
+**When to update GitHub issues:**
+- **Starting work**: Add a comment noting work has begun and the approach being taken
+- **During investigation**: Document findings, root cause analysis, and any blockers discovered
+- **Design decisions**: Record architectural choices and trade-offs considered
+- **Implementation complete**: Add detailed resolution comment with:
+  - Commit hash(es) and brief description of changes
+  - What was implemented/fixed
+  - Testing performed
+  - Any performance implications
+- **Issue blocked**: Document what's blocking and link to blocking issue
+- **Work paused**: Note current status and next steps before ending session
+
+**Closing issues:**
+- Add resolution comment BEFORE closing
+- Use `gh issue close <number> --reason completed` for fixed issues
+- Use `gh issue close <number> --reason "not planned"` for won't-fix
+
+**For issues NOT fully resolved in a session:**
+- Add progress comment documenting what was investigated/attempted
+- Document findings and conclusions reached
+- Note recommended next steps
+- Update issue labels if status changed (e.g., add "blocked" label)
+
+**Commands reference:**
+```bash
+# Add comment to issue
+gh issue comment <number> --body "Comment text"
+
+# Close issue with reason
+gh issue close <number> --reason completed --comment "Fixed in vX.Y.Z"
+
+# View issue with comments
+gh issue view <number> --comments
+```
+
 ### 1. Planning & Research Phase
 - Create a feature document in `features/<feature-name>.md` describing requirements, design decisions, and test plan
 - Review existing TO-DO comments in `ltl` (lines 3-50) for related work
@@ -341,7 +380,10 @@ Only after the prototype validates the approach should you determine how to inte
 ### 7. Documentation Updates
 - Update `features/<feature-name>.md` with feature details to be included in the release notes
 - Update `features/<feature-name>.md` with implementation status and any deviations from the original plan
-- Update GitHub Issue with details of the work done (what was implemented, fixed, etc.) including details for the release notes
+- **Update GitHub Issue** (see "GitHub Issue Updates" section above):
+  - Add resolution comment with commit hash, implementation details, and testing performed
+  - Close the issue with `gh issue close <number> --reason completed`
+  - For issues not fully resolved: document findings, status, and next steps
 - Update `ltl` *usage* and *help* outputs if command line options are changed
 - Update this CLAUDE.md file if:
   - New data structures are added to the architecture
