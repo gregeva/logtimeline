@@ -52,6 +52,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Current observations log:**
 <!-- Add dated entries here as patterns are noticed -->
 - 2026-02-01: GitHub issue updates were missed during v0.9.1 development, requiring 11% session usage for retroactive updates. Root cause: documentation step existed but wasn't prominent/mandatory enough. Fix: Added explicit "GitHub Issue Updates (MANDATORY)" section with specific triggers and commands.
+- 2026-02-01: Made code changes for issue #13 while on branch `25-histogram-charts`. Root cause: didn't verify branch before starting work. Fix: Added "Branch Verification (MANDATORY - FIRST STEP)" section requiring branch check before any code changes.
 
 ## Project Overview
 
@@ -312,6 +313,21 @@ When working on issues and new features, follow this workflow to keep the projec
 Each issue being worked on should have its own branch with the GitHub Issue ID number as the start of the branch name, followed by an appropriate short name for the given issue (which fits git branch naming rules).  Work progress should be tracked against this branch with commits containing details included and changes made.
 
 **CRITICAL: Do not write production code until the implementation plan has been reviewed and approved by the user.** Implementing before planning is complete wastes effort and creates cleanup work when the approach is rejected.
+
+### Branch Verification (MANDATORY - FIRST STEP)
+
+**BEFORE making any code changes for an issue, verify you are on the correct branch.**
+
+When the user says "let's work on issue #N" or similar:
+1. Run `git branch --show-current` to check current branch
+2. Verify the branch name starts with the issue number (e.g., `13-windows-character-rendering` for issue #13)
+3. If on the wrong branch:
+   - Check if the correct branch exists: `git branch -a | grep "^..13-"` (for issue #13)
+   - If it exists, switch to it: `git checkout 13-branch-name`
+   - If it doesn't exist, create it from main: `git checkout main && git pull && git checkout -b 13-descriptive-name`
+4. Only proceed with code changes after confirming you're on the correct branch
+
+**Never make changes on an unrelated issue's branch.** This causes merge conflicts and requires manual cleanup to move changes to the correct branch.
 
 ### GitHub Issue Updates (MANDATORY)
 
