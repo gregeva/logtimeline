@@ -76,6 +76,15 @@ my %histogram_stats = (
 'histogram|hg:s'        => \&handle_histogram_option,   # Optional argument
 'histogram-width|hgw=i' => \$histogram_width_percent,
 'histogram-height|hgh=i' => \$histogram_height,
+'hgbpd=i'               => \$histogram_buckets_per_decade,  # Buckets per decade (precision)
+'hgb=i'                 => \$histogram_bucket_override,     # Override: explicit bucket count
+```
+
+**Bucket calculation configuration:**
+
+```perl
+my $histogram_buckets_per_decade = 8;   # Default: ~5% precision (4=10%, 8=5%, 16=2.5%, 32=1%)
+my $histogram_bucket_override = 0;      # If > 0, use this exact bucket count instead of calculating
 ```
 
 **Handler function for -hg option:**
@@ -123,20 +132,45 @@ if ($histogram_enabled) {
 
 **Note**: This is independent of heatmap collection - both can be enabled simultaneously.
 
-### Phase 3: Bucket Calculation
+### Phase 3: Bucket Calculation (HdrHistogram Approach)
 
 **Location**: New subroutine `calculate_histogram_buckets()` (after `calculate_heatmap_buckets()`, around line 1654)
+
+**Key Change from Original Design**: Bucket count is now determined by data range (decades) and precision setting, NOT display width. This follows the HdrHistogram industry standard approach.
 
 **Algorithm:**
 
 1. For each metric with data:
    - Find min/max values
-   - Calculate logarithmic bucket boundaries (reuse heatmap formula)
+   - Calculate dynamic range in decades: `log₁₀(max) - log₁₀(min)`
+   - Calculate bucket count: `decades × buckets_per_decade` (or use override if set)
+   - Calculate logarithmic bucket boundaries
    - Assign values to buckets using binary search
    - Calculate population percentiles (P50, P90, P99, P99.9)
    - Free raw values array to reclaim memory
 
 ```perl
+# Calculate bucket count based on data range (HdrHistogram approach)
+sub calculate_histogram_bucket_count {
+    my ($min, $max) = @_;
+
+    # Use explicit override if set
+    return $histogram_bucket_override if $histogram_bucket_override > 0;
+
+    # Ensure valid range for log calculation
+    $min = 0.1 if $min <= 0;
+    $max = $min * 10 if $max <= $min;
+
+    # Calculate number of decades (orders of magnitude)
+    my $decades = (log($max) - log($min)) / log(10);
+
+    # Calculate bucket count
+    my $bucket_count = int($decades * $histogram_buckets_per_decade + 0.5);
+    $bucket_count = 5 if $bucket_count < 5;  # Minimum 5 buckets
+
+    return $bucket_count;
+}
+
 sub calculate_histogram_buckets {
     my @metrics = keys %histogram_values;
 
@@ -150,13 +184,19 @@ sub calculate_histogram_buckets {
 
         # Calculate percentiles
         $histogram_stats{$metric} = {
-            min   => $sorted[0],
-            max   => $sorted[-1],
-            p50   => $sorted[int($n * 0.50)],
-            p90   => $sorted[int($n * 0.90)],
-            p99   => $sorted[int($n * 0.99)],
-            p999  => $sorted[int($n * 0.999)] // $sorted[-1],
-            count => $n,
+            min    => $sorted[0],
+            max    => $sorted[-1],
+            p1     => $sorted[int($n * 0.01)],
+            p10    => $sorted[int($n * 0.10)],
+            p25    => $sorted[int($n * 0.25)],
+            p50    => $sorted[int($n * 0.50)],
+            p75    => $sorted[int($n * 0.75)],
+            p90    => $sorted[int($n * 0.90)],
+            p95    => $sorted[int($n * 0.95)],
+            p99    => $sorted[int($n * 0.99)],
+            p999   => $sorted[int($n * 0.999)] // $sorted[-1],
+            p9999  => $sorted[int($n * 0.9999)] // $sorted[-1],
+            count  => $n,
         };
 
         my $min = $sorted[0];
@@ -166,13 +206,17 @@ sub calculate_histogram_buckets {
         if ($min == $max) {
             $min = $min * 0.9 if $min > 0;
             $max = $max * 1.1 if $max > 0;
-            $min = 0 if $min == $max;  # fallback
+            $min = 0.1 if $min <= 0;
             $max = 1 if $min == $max;
         }
 
-        # Bucket count determined by available width (calculated later in layout)
-        # For now, use a default that will be adjusted
-        my $bucket_count = 50;  # Placeholder, adjusted during layout
+        # Ensure min > 0 for logarithmic scale
+        $min = 0.1 if $min <= 0;
+
+        # Calculate bucket count using HdrHistogram approach
+        my $bucket_count = calculate_histogram_bucket_count($min, $max);
+        $histogram_stats{$metric}{bucket_count} = $bucket_count;
+        $histogram_stats{$metric}{decades} = (log($max) - log($min)) / log(10);
 
         # Calculate logarithmic boundaries
         @{$histogram_boundaries{$metric}} = ();
@@ -294,8 +338,8 @@ sub print_histograms {
     my $bar_width = $layout->{bar_area_width};
     my $offset = $layout->{centering_offset};
 
-    # Recalculate buckets with correct width
-    recalculate_histogram_buckets($bar_width);
+    # Note: Buckets are calculated once based on data range (HdrHistogram approach)
+    # Display scaling happens during rendering, not by recalculating buckets
 
     # Find max bucket count for scaling
     my %max_count;
@@ -341,15 +385,49 @@ sub get_bar_char {
 }
 ```
 
+**Display scaling (decoupled from bucket count):**
+
+Since bucket count is determined by data range (not display width), rendering must scale buckets to display columns:
+
+```perl
+# Calculate display scaling
+my $bucket_count = scalar(@{$histogram_buckets{$metric}});
+my $cols_per_bucket = $bar_width / $bucket_count;
+
+# Create display buckets (scaled to bar_width)
+my @display_buckets;
+if ($cols_per_bucket >= 1) {
+    # Expand: each bucket maps to one or more display columns
+    for my $i (0 .. $bar_width - 1) {
+        my $bucket_idx = int($i / $cols_per_bucket);
+        $bucket_idx = $bucket_count - 1 if $bucket_idx >= $bucket_count;
+        push @display_buckets, $histogram_buckets{$metric}[$bucket_idx];
+    }
+} else {
+    # Compress: multiple buckets aggregate to each display column
+    my $buckets_per_col = $bucket_count / $bar_width;
+    for my $i (0 .. $bar_width - 1) {
+        my $start_bucket = int($i * $buckets_per_col);
+        my $end_bucket = int(($i + 1) * $buckets_per_col) - 1;
+        $end_bucket = $bucket_count - 1 if $end_bucket >= $bucket_count;
+        my $sum = 0;
+        for my $j ($start_bucket .. $end_bucket) {
+            $sum += $histogram_buckets{$metric}[$j];
+        }
+        push @display_buckets, $sum;
+    }
+}
+```
+
 **Row rendering logic:**
 
 For each row (0 = bottom, height-1 = top):
 - Calculate the threshold: `row_threshold = (row + 1) / height`
-- For each bucket:
-  - Calculate bucket fill: `bucket_fill = bucket_count / max_count`
+- For each display column (not bucket):
+  - Calculate bucket fill: `bucket_fill = display_buckets[$col] / max_count`
   - If `bucket_fill >= row_threshold`: print full block `█`
   - Else if `bucket_fill > (row / height)`: print partial block based on remainder
-  - Else: print space
+  - Else: print space (or gridline if enabled and at tick row)
 
 ### Phase 6: Box Drawing Characters
 
@@ -502,21 +580,25 @@ my $gridline_color = 8;     # Dark grey (bright black / ANSI 8)
 
 | Step | Description | Dependencies | Complexity | Notes from Prototype |
 |------|-------------|--------------|------------|---------------------|
-| 1 | Add global variables and CLI options | None | Low | Include all new config vars |
+| 1 | Add global variables and CLI options | None | Low | Include `-hgbpd` and `-hgb` options |
 | 2 | Add data collection in parsing loop | Step 1 | Low | |
-| 3 | Implement `calculate_histogram_buckets()` | Step 2 | Medium | Include expanded percentile set (P1-P99.99) |
-| 4 | Implement `calculate_histogram_layout()` | Step 1 | Medium | Y-axis overhead = 16 chars (validated in prototype) |
-| 5 | Implement box/block character constants | None | Low | Include both heavy and light sets |
-| 6 | Implement `print_histograms()` skeleton | Steps 3-5 | Medium | |
-| 7 | Implement row rendering with bar chars | Step 6 | High | Use fg+bg color for full blocks |
-| 8 | Implement dynamic Y-axis tick scaling | Step 7 | Medium | Use "nice" tick counts |
-| 9 | Implement X-axis with dynamic ticks | Step 6 | Medium | Target 12-char spacing |
-| 10 | Implement X-axis labels with collision avoidance | Step 9 | Medium | |
-| 11 | Implement legend with priority-based percentile selection | Step 3 | Medium | See priority order in feature doc |
-| 12 | Implement optional gridlines | Steps 7-8 | Low | Light h-line in dark grey |
-| 13 | Add color support (base + gradients) | Step 7 | Low | Match bar graph plain_bg colors |
-| 14 | Integrate into main flow | Steps 1-13 | Low | |
-| 15 | Testing and visual verification | All | Medium | Use prototype as reference |
+| 3 | Implement `calculate_histogram_bucket_count()` | Step 2 | Low | HdrHistogram approach: decades × buckets_per_decade |
+| 4 | Implement `calculate_histogram_buckets()` | Step 3 | Medium | Include expanded percentile set (P1-P99.99) |
+| 5 | Implement `calculate_histogram_layout()` | Step 1 | Medium | Y-axis overhead = 16 chars (validated in prototype) |
+| 6 | Implement box/block character constants | None | Low | Include both heavy and light sets |
+| 7 | Implement `print_histograms()` skeleton | Steps 4-6 | Medium | |
+| 8 | Implement display scaling (expand/compress) | Step 7 | Medium | Decouple bucket count from display width |
+| 9 | Implement row rendering with bar chars | Step 8 | High | Use fg+bg color for full blocks |
+| 10 | Implement dynamic Y-axis tick scaling | Step 9 | Medium | Use "nice" tick counts |
+| 11 | Implement X-axis with dynamic ticks | Step 7 | Medium | Target 12-char spacing |
+| 12 | Implement X-axis labels with collision avoidance | Step 11 | Medium | Same log formula as bucket boundaries |
+| 13 | Implement legend with priority-based percentile selection | Step 4 | Medium | See priority order in feature doc |
+| 14 | Implement optional gridlines | Steps 9-10 | Low | Light h-line in dark grey |
+| 15 | Add color support (base + gradients) | Step 9 | Low | Match bar graph plain_bg colors |
+| 16 | Add ANSI reset before right Y-axis | Step 9 | Low | Prevents color bleeding on wide displays |
+| 17 | Integrate into main flow | Steps 1-16 | Low | |
+| 18 | Add verbose output for bucket calculation | Step 4 | Low | Output when `-V` flag enabled |
+| 19 | Testing and visual verification | All | Medium | Use prototype as reference |
 
 ## Testing Strategy
 
@@ -560,6 +642,7 @@ my $gridline_color = 8;     # Dark grey (bright black / ANSI 8)
 - [ ] X-axis has `┗` and `┛` corners (heavy) or `└` and `┘` (light)
 - [ ] X-axis tick marks scale dynamically with histogram width
 - [ ] X-axis labels are readable and properly spaced (no overlap)
+- [ ] X-axis labels correctly aligned with logarithmic bucket boundaries
 - [ ] Multiple histograms are evenly spaced and centered
 - [ ] Legend percentiles use priority-based selection
 - [ ] Legend displays percentiles in ascending order
@@ -569,10 +652,14 @@ my $gridline_color = 8;     # Dark grey (bright black / ANSI 8)
 - [ ] Gridlines use light horizontal line in dark grey
 - [ ] Heavy/light box drawing weight is configurable
 - [ ] Light background mode works correctly
+- [ ] No color bleeding after right Y-axis (ANSI reset applied)
+- [ ] Display scaling works correctly when display width > bucket count (expand)
+- [ ] Display scaling works correctly when display width < bucket count (compress)
+- [ ] Verbose output shows bucket calculation details when `-V` flag enabled
 
 ## Design Decisions (Resolved)
 
-1. **Bucket count**: Use 1:1 mapping (1 character = 1 bucket) for finest granularity. This may use more memory and could be revisited after real-world usage experience.
+1. **Bucket count**: ~~Use 1:1 mapping (1 character = 1 bucket)~~ **SUPERSEDED** - Use HdrHistogram-style buckets-per-decade approach. Bucket count is determined by data range (decades) × buckets_per_decade, not display width. This follows industry standards for latency histograms and provides statistically meaningful bucketing. Display width determines how buckets are rendered (expanded across multiple columns or compressed via aggregation).
 
 2. **Label collision avoidance**: Automatically reduce the number of X-axis labels based on available space. Approach:
    - Define a set of preferred tick mark positions (e.g., at 0%, 25%, 50%, 75%, 100% of range)
@@ -603,16 +690,21 @@ my $gridline_color = 8;     # Dark grey (bright black / ANSI 8)
 
 The prototype at `prototype/histogram-prototype.pl` validates all rendering logic and should be used as the reference implementation for:
 
+- **HdrHistogram-style bucket calculation** (buckets-per-decade model)
+- **Display scaling** (expand/compress buckets to fit display width)
 - Box drawing character configuration (heavy/light sets)
 - Dynamic X-axis tick calculation
 - Dynamic Y-axis tick calculation with "nice" intervals
+- X-axis label alignment with logarithmic bucket boundaries
 - 0% baseline handling (X-axis is the floor)
 - Priority-based percentile legend selection
 - fg+bg color application for full blocks
 - Gridline rendering
 - Color gradient toggle
+- ANSI color reset before right Y-axis (prevents color bleeding on wide displays)
 
 Key configuration variables validated in prototype:
+- `$buckets_per_decade` = 8 (default, ~5% precision)
 - `$box_drawing_weight` = 'heavy' (recommended)
 - `$gridlines_enabled` = 1
 - `$color_gradient_enabled` = 0 (for testing), 1 (for production)
@@ -620,3 +712,11 @@ Key configuration variables validated in prototype:
 - `$histogram_width_percent` = 95
 - `$histogram_gap` = 4
 - `$histogram_legend_spacing` = 1
+
+**Verbose output** (when `-V` flag enabled):
+```
+Histogram bucket calculation:
+  Duration:  min=1ms      max=97.2s    decades=4.99 buckets_per_decade=8 total_buckets=40
+  Bytes:     min=128B     max=12.4MB   decades=4.99 buckets_per_decade=8 total_buckets=40
+  Count:     min=1        max=847      decades=2.93 buckets_per_decade=8 total_buckets=24
+```
