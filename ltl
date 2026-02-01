@@ -199,6 +199,7 @@ my $histogram_enabled = 0;                    # Flag: histogram mode active
 my %histogram_metrics = ();                   # Metrics to display: {duration => 1, bytes => 1, count => 1}
 my $histogram_width_percent = 95;             # Width as percentage of terminal
 my $histogram_height = 8;                     # Height in rows (default 8, auto-scaled based on terminal)
+my $histogram_height_explicit = 0;            # Flag: true if user explicitly set -hgh
 my $histogram_gap = 6;                        # Horizontal padding between histograms
 my $histogram_legend_spacing = 1;             # Vertical gap between histogram and legend
 
@@ -975,7 +976,7 @@ sub adapt_to_command_line_options {
         'light-background|lbg' => sub { $heatmap_light_bg = 1; $heatmap_light_bg_auto = 0; },
         'histogram|hg:s' => \&handle_histogram_option,
         'histogram-width|hgw=i' => \$histogram_width_percent,
-        'histogram-height|hgh=i' => \$histogram_height,
+        'histogram-height|hgh=i' => sub { $histogram_height = $_[1]; $histogram_height_explicit = 1; },
         'hgbpd=i' => \$histogram_buckets_per_decade,
         'hgb=i' => \$histogram_bucket_override
     ) or die print_usage( "required options not provided" );
@@ -2057,7 +2058,10 @@ sub calculate_histogram_layout {
 
     my $effective_height;
 
-    if (!$terminal_height_detected) {
+    if ($histogram_height_explicit) {
+        # User explicitly set -hgh, honor their choice
+        $effective_height = $histogram_height;
+    } elsif (!$terminal_height_detected) {
         # Piped/redirected output - use configured default
         $effective_height = $histogram_height;
     } elsif ($terminal_height < 50) {
