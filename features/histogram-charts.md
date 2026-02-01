@@ -410,7 +410,6 @@ The precision represents the minimum distinguishable difference between values w
 **Sources:**
 - [HdrHistogram - GitHub](https://github.com/HdrHistogram/HdrHistogram)
 - [A simple HDR histogram - wingolog](https://www.wingolog.org/archives/2023/12/10/a-simple-hdr-histogram)
-- [Dynatrace Engineering - Latency Measurements](https://www.dynatrace.com/engineering/blog/summarizing-high-frequency-latency-measurements-with-strict-error-guarantees/index.html)
 
 ### Unicode Block Elements
 
