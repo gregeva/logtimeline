@@ -78,7 +78,7 @@ my $rolling_window_size = 5;					# Adjust this value as needed - more time bucke
 my $impact_time_exponent = 7;		            # it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
-my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages ) = ( 0,0,0,0,0,0,0,0,0 );
+my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages, $elapsed_heatmap_statistics, $elapsed_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_userdefinedmetrics );
 my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
@@ -135,6 +135,7 @@ my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 my ( @in_files, @output_columns );
 my %in_files_matched;
 my ($terminal_width, $terminal_height);
+my $terminal_height_detected = 0;  # Flag: was terminal height actually detected?
 {
     local *STDERR;
     open(STDERR, '>', '/dev/null') or open(STDERR, '>', 'NUL');
@@ -142,6 +143,8 @@ my ($terminal_width, $terminal_height);
 }
 if ($@ || !$terminal_width) {
     ($terminal_width, $terminal_height) = (120, 24);
+} else {
+    $terminal_height_detected = 1;  # Terminal height was successfully detected
 }
 my %timestamp_cache;
 
@@ -190,6 +193,96 @@ my %heatmap_metric_map = (
     'bytes'    => { column => 3, color => 'green' },
     'count'    => { column => 4, color => 'cyan' },
 );
+
+# Histogram data structures and settings (Issue #25)
+my $histogram_enabled = 0;                    # Flag: histogram mode active
+my %histogram_metrics = ();                   # Metrics to display: {duration => 1, bytes => 1, count => 1}
+my $histogram_width_percent = 95;             # Width as percentage of terminal
+my $histogram_height = 8;                     # Height in rows (default 8, auto-scaled based on terminal)
+my $histogram_gap = 6;                        # Horizontal padding between histograms
+my $histogram_legend_spacing = 1;             # Vertical gap between histogram and legend
+
+# Histogram bucket calculation (HdrHistogram-style)
+my $histogram_buckets_per_decade = 8;         # Default: ~5% precision (4=10%, 8=5%, 16=2.5%, 32=1%)
+my $histogram_bucket_override = 0;            # If > 0, use this exact bucket count instead of calculating
+
+# Histogram data collection (hash-based for dynamic metrics)
+my %histogram_values = (
+    duration => [],
+    bytes    => [],
+    count    => [],
+);
+
+my %histogram_buckets = (
+    duration => [],
+    bytes    => [],
+    count    => [],
+);
+
+my %histogram_boundaries = (
+    duration => [],
+    bytes    => [],
+    count    => [],
+);
+
+my %histogram_stats = (
+    duration => {},  # Will contain: min, max, p1, p10, p25, p50, p75, p90, p95, p99, p999, p9999, count, bucket_count
+    bytes    => {},
+    count    => {},
+);
+
+# Box drawing character sets for histogram axes (Issue #25)
+my $histogram_box_weight = 'heavy';  # 'heavy' or 'light'
+
+my %histogram_box_sets = (
+    light => {
+        h_line    => '─',  # U+2500
+        v_line    => '│',  # U+2502
+        corner_tl => '┌',  # U+250C
+        corner_tr => '┐',  # U+2510
+        corner_bl => '└',  # U+2514
+        corner_br => '┘',  # U+2518
+        t_right   => '├',  # U+251C
+        t_left    => '┤',  # U+2524
+        t_down    => '┬',  # U+252C
+        t_up      => '┴',  # U+2534
+        cross     => '┼',  # U+253C
+    },
+    heavy => {
+        h_line    => '━',  # U+2501
+        v_line    => '┃',  # U+2503
+        corner_tl => '┏',  # U+250F
+        corner_tr => '┓',  # U+2513
+        corner_bl => '┗',  # U+2517
+        corner_br => '┛',  # U+251B
+        t_right   => '┣',  # U+2523
+        t_left    => '┫',  # U+252B
+        t_down    => '┳',  # U+2533
+        t_up      => '┻',  # U+253B
+        cross     => '╋',  # U+254B
+    },
+);
+
+# 8-level block characters for sub-character resolution in histograms
+my @histogram_block_chars = (' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█');
+
+# Histogram base colors - match bar graph column plain_bg colors
+my %histogram_base_colors = (
+    duration => 184,  # Yellow - matches bar graph column 2 plain_bg
+    bytes    => 34,   # Green - matches bar graph column 3 plain_bg
+    count    => 30,   # Cyan - matches bar graph column 4 plain_bg
+);
+
+# Histogram color gradients (256-color ANSI) for optional intensity variation
+my %histogram_color_gradients = (
+    duration => [58, 94, 136, 142, 178, 184, 220, 226],   # Yellow gradient
+    bytes    => [22, 28, 34, 40, 46, 82, 118, 154],       # Green gradient
+    count    => [23, 30, 37, 44, 51, 80, 86, 123],        # Cyan gradient
+);
+
+my $histogram_color_gradient_enabled = 0;     # Toggle: 1 = intensity gradients, 0 = flat base color
+my $histogram_gridlines_enabled = 1;          # Toggle: horizontal gridlines at Y-axis tick positions
+my $histogram_gridline_color = 8;             # Dark grey (bright black / ANSI 8)
 
 # Defines the log level/type buckets and their order for printing and processing
 my @log_levels = (
@@ -787,6 +880,50 @@ sub ltrim { my $s = shift; $s =~ s/^\s+//; return $s }
 sub rtrim { my $s = shift; $s =~ s/\s+$//; return $s }
 sub trim  { my $s = shift; $s =~ s/^\s+|\s+$//g; return $s }
 
+# Handler for -hg/--histogram option (Issue #25)
+# Supports: -hg (all metrics), -hg duration, -hg bytes, -hg count, -hg duration,bytes
+# Multiple uses are additive
+sub handle_histogram_option {
+    my ($opt_name, $opt_value) = @_;
+    $histogram_enabled = 1;
+
+    if (defined $opt_value && $opt_value ne '') {
+        # Check if the value looks like a filename (not a valid metric)
+        # This handles the case where -hg is followed by a filename
+        my @parts = split /,/, $opt_value;
+        my $has_valid_metric = 0;
+
+        for my $part (@parts) {
+            my $metric = lc(trim($part));
+            if ($metric =~ /^(duration|time|bytes|count)$/) {
+                $has_valid_metric = 1;
+                last;
+            }
+        }
+
+        if (!$has_valid_metric) {
+            # Value doesn't contain any valid metrics - it's likely a filename
+            # Push it back to @ARGV so it can be processed as a file
+            unshift @ARGV, $opt_value;
+            return;
+        }
+
+        # Parse comma-separated metrics, additive behavior
+        for my $metric (split /,/, $opt_value) {
+            $metric = lc(trim($metric));
+            if ($metric =~ /^(duration|bytes|count)$/) {
+                $histogram_metrics{$metric} = 1;
+            } elsif ($metric =~ /^time$/) {
+                # 'time' is an alias for 'duration' for consistency
+                $histogram_metrics{'duration'} = 1;
+            } else {
+                warn "Unknown histogram metric: $metric (valid: duration, bytes, count)\n";
+            }
+        }
+    }
+    # If no specific metrics given, will default to all available after parsing
+}
+
 sub adapt_to_command_line_options {
     @ORIGINAL_ARGV = @ARGV;
 
@@ -835,7 +972,12 @@ sub adapt_to_command_line_options {
         'group-similar|g=s' => \$group_similar_sensitivity,
         'heatmap|hm:s' => \$heatmap_metric,
         'heatmap-width|hmw=i' => \$heatmap_width,
-        'light-background|lbg' => sub { $heatmap_light_bg = 1; $heatmap_light_bg_auto = 0; }
+        'light-background|lbg' => sub { $heatmap_light_bg = 1; $heatmap_light_bg_auto = 0; },
+        'histogram|hg:s' => \&handle_histogram_option,
+        'histogram-width|hgw=i' => \$histogram_width_percent,
+        'histogram-height|hgh=i' => \$histogram_height,
+        'hgbpd=i' => \$histogram_buckets_per_decade,
+        'hgb=i' => \$histogram_bucket_override
     ) or die print_usage( "required options not provided" );
 
     $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
@@ -859,6 +1001,29 @@ sub adapt_to_command_line_options {
         # Auto-detect light terminal background if -lbg wasn't explicitly set
         if ($heatmap_light_bg_auto) {
             $heatmap_light_bg = detect_light_terminal_background();
+        }
+    }
+
+    # Histogram option processing (Issue #25)
+    # If histogram enabled but no specific metrics requested, default to all available after parsing
+    # The handler already sets $histogram_enabled = 1 and populates %histogram_metrics
+    # Validation of buckets_per_decade: must be positive
+    if ($histogram_enabled) {
+        if ($histogram_buckets_per_decade < 1) {
+            warn "Invalid buckets-per-decade value: $histogram_buckets_per_decade. Using default (8).\n";
+            $histogram_buckets_per_decade = 8;
+        }
+        if ($histogram_bucket_override < 0) {
+            warn "Invalid bucket override value: $histogram_bucket_override. Disabling override.\n";
+            $histogram_bucket_override = 0;
+        }
+        if ($histogram_height < 3) {
+            warn "Histogram height too small: $histogram_height. Using minimum (3).\n";
+            $histogram_height = 3;
+        }
+        if ($histogram_width_percent < 20 || $histogram_width_percent > 100) {
+            warn "Invalid histogram width percent: $histogram_width_percent. Using default (95).\n";
+            $histogram_width_percent = 95;
         }
     }
 
@@ -1544,6 +1709,23 @@ sub read_and_process_logs {
                             push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $category_bucket =~ /-HL$/;
                         }
                     }
+
+                    ## HISTOGRAM RAW VALUE CAPTURE (Issue #25) ##
+                    # Histogram collects values across entire population (not per time-bucket like heatmap)
+                    if ($histogram_enabled) {
+                        # Collect duration values if requested (or if no specific metrics requested)
+                        if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration >= 0 && !$omit_durations) {
+                            push @{$histogram_values{duration}}, $duration;
+                        }
+                        # Collect bytes values if requested
+                        if ((!%histogram_metrics || $histogram_metrics{bytes}) && defined $bytes && $bytes > 0 && !$omit_bytes) {
+                            push @{$histogram_values{bytes}}, $bytes;
+                        }
+                        # Collect count values if requested
+                        if ((!%histogram_metrics || $histogram_metrics{count}) && defined $count && $count >= 0 && !$omit_count) {
+                            push @{$histogram_values{count}}, $count;
+                        }
+                    }
                 }
 
                 ## CAPTURE THREAD AND THREAD POOL BASED STATISTICS DATA ##
@@ -1649,7 +1831,259 @@ sub calculate_heatmap_buckets {
         delete $heatmap_raw_hl{$bucket};
     }
 
+    print "\r$colors{'bright-green'}Calculating heatmap buckets completed.$colors{'NC'}";
+    print " " x ( $terminal_width - length( "Calculating heatmap buckets completed." ) );
+
     return;
+}
+
+# Calculate bucket count based on data range (HdrHistogram approach) - Issue #25
+# Bucket count scales with dynamic range: decades × buckets_per_decade
+sub calculate_histogram_bucket_count {
+    my ($min, $max) = @_;
+
+    # Use explicit override if set
+    return $histogram_bucket_override if $histogram_bucket_override > 0;
+
+    # Ensure valid range for log calculation
+    $min = 0.1 if $min <= 0;
+    $max = $min * 10 if $max <= $min;
+
+    # Calculate number of decades (orders of magnitude)
+    my $decades = (log($max) - log($min)) / log(10);
+
+    # Calculate bucket count
+    my $bucket_count = int($decades * $histogram_buckets_per_decade + 0.5);
+    $bucket_count = 5 if $bucket_count < 5;  # Minimum 5 buckets
+
+    return ($bucket_count, $decades);
+}
+
+# Find bucket index for a value using binary search - Issue #25
+sub find_histogram_bucket_index {
+    my ($value, $boundaries_ref) = @_;
+    my $n = scalar(@$boundaries_ref) - 1;  # Number of buckets
+
+    # Binary search
+    my ($lo, $hi) = (0, $n - 1);
+    while ($lo < $hi) {
+        my $mid = int(($lo + $hi) / 2);
+        if ($value < $boundaries_ref->[$mid + 1]) {
+            $hi = $mid;
+        } else {
+            $lo = $mid + 1;
+        }
+    }
+    return $lo;
+}
+
+# Calculate histogram buckets for all collected metrics - Issue #25
+sub calculate_histogram_buckets {
+    return unless $histogram_enabled;
+
+    print "Calculating histogram statistics...";
+
+    my @metrics_with_data = ();
+
+    for my $metric (qw(duration bytes count)) {
+        my $values_ref = $histogram_values{$metric};
+        next unless defined $values_ref && @$values_ref > 0;
+
+        push @metrics_with_data, $metric;
+
+        # Sort values for percentile calculation
+        my @sorted = sort { $a <=> $b } @$values_ref;
+        my $n = scalar @sorted;
+
+        # Calculate percentiles - comprehensive set for dynamic legend display
+        $histogram_stats{$metric} = {
+            min    => $sorted[0],
+            max    => $sorted[-1],
+            count  => $n,
+            p1     => $sorted[int($n * 0.01)],
+            p10    => $sorted[int($n * 0.10)],
+            p25    => $sorted[int($n * 0.25)],
+            p50    => $sorted[int($n * 0.50)],
+            p75    => $sorted[int($n * 0.75)],
+            p90    => $sorted[int($n * 0.90)],
+            p95    => $sorted[int($n * 0.95)],
+            p99    => $sorted[int($n * 0.99)],
+            p999   => $sorted[int($n * 0.999)] // $sorted[-1],
+            p9999  => $sorted[int($n * 0.9999)] // $sorted[-1],
+        };
+
+        my $min = $sorted[0];
+        my $max = $sorted[-1];
+
+        # Handle edge case: all values identical
+        if ($min == $max) {
+            $min = $min * 0.9 if $min > 0;
+            $max = $max * 1.1 if $max > 0;
+            $min = 0.1 if $min <= 0;
+            $max = 1 if $min == $max;
+        }
+
+        # Ensure min > 0 for logarithmic scale
+        $min = 0.1 if $min <= 0;
+
+        # Calculate bucket count using HdrHistogram approach
+        my ($bucket_count, $decades) = calculate_histogram_bucket_count($min, $max);
+        $histogram_stats{$metric}{bucket_count} = $bucket_count;
+        $histogram_stats{$metric}{decades} = $decades;
+
+        # Calculate logarithmic boundaries
+        @{$histogram_boundaries{$metric}} = ();
+        for my $i (0 .. $bucket_count) {
+            my $boundary = $min * (($max / $min) ** ($i / $bucket_count));
+            push @{$histogram_boundaries{$metric}}, $boundary;
+        }
+
+        # Initialize bucket counts
+        @{$histogram_buckets{$metric}} = (0) x $bucket_count;
+
+        # Assign values to buckets using binary search
+        for my $value (@sorted) {
+            my $bucket_idx = find_histogram_bucket_index($value, $histogram_boundaries{$metric});
+            $histogram_buckets{$metric}[$bucket_idx]++;
+        }
+
+        # Free memory - raw values no longer needed
+        @{$histogram_values{$metric}} = ();
+    }
+
+    print "\r$colors{'bright-green'}Calculating histogram statistics completed.$colors{'NC'}";
+    print " " x ( $terminal_width - length( "Calculating histogram statistics completed." ) );
+
+    # Verbose output for bucket calculation (Issue #25)
+    if ($verbose && @metrics_with_data) {
+        print "\nHistogram bucket calculation:\n";
+        for my $metric (@metrics_with_data) {
+            my $stats = $histogram_stats{$metric};
+            # Reuse format_heatmap_value which wraps format_time, format_bytes, format_number
+            my $min_fmt = format_heatmap_value($stats->{min}, $metric);
+            my $max_fmt = format_heatmap_value($stats->{max}, $metric);
+            printf "  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d\n",
+                   ucfirst($metric) . ":",
+                   $stats->{count},
+                   $min_fmt,
+                   $max_fmt,
+                   $stats->{decades},
+                   $histogram_buckets_per_decade,
+                   $stats->{bucket_count};
+        }
+        print "\n";
+    }
+
+    return;
+}
+
+# Calculate histogram layout dimensions - Issue #25
+# Returns a hash with layout information for rendering histograms side by side
+sub calculate_histogram_layout {
+    # Step 1: Get terminal width and calculate display width
+    my $display_width = int($terminal_width * $histogram_width_percent / 100);
+
+    # Step 2: Determine which metrics have data (in display order: duration, bytes, count)
+    my @active_metrics = ();
+    for my $metric (qw(duration bytes count)) {
+        # Check if metric was requested (or all metrics if none specified)
+        if ((!%histogram_metrics || $histogram_metrics{$metric}) &&
+            exists $histogram_stats{$metric} &&
+            defined $histogram_stats{$metric}{count} &&
+            $histogram_stats{$metric}{count} > 0) {
+            push @active_metrics, $metric;
+        }
+    }
+
+    return {} unless @active_metrics;
+
+    my $n = scalar @active_metrics;
+
+    # Step 3: Calculate spacing
+    my $total_gap = ($n - 1) * $histogram_gap;
+
+    # Step 4: Calculate available width for histograms
+    my $available_width = $display_width - $total_gap;
+    my $single_histogram_width = int($available_width / $n);
+
+    # Step 5: Calculate internal layout for each histogram
+    # Left Y-axis: count label (6 chars + space) + tick (1 char) = 8
+    # Right Y-axis: tick (1 char) + percentage label (5 chars) = 6
+    # Total overhead per histogram: 14 chars
+    my $y_axis_overhead = 14;
+    my $bar_area_width = $single_histogram_width - $y_axis_overhead;
+
+    # Minimum bar width to be useful
+    my $min_bar_width = 15;
+    if ($bar_area_width < $min_bar_width) {
+        # Try to reduce number of histograms to fit
+        while ($n > 1 && $bar_area_width < $min_bar_width) {
+            # Remove lowest priority metric (count > bytes > duration)
+            pop @active_metrics;
+            $n = scalar @active_metrics;
+            $total_gap = ($n - 1) * $histogram_gap;
+            $available_width = $display_width - $total_gap;
+            $single_histogram_width = int($available_width / $n);
+            $bar_area_width = $single_histogram_width - $y_axis_overhead;
+        }
+        # Still enforce minimum
+        $bar_area_width = $min_bar_width if $bar_area_width < $min_bar_width;
+    }
+
+    # Step 6: Calculate centering offset
+    my $total_width = ($n * $single_histogram_width) + $total_gap;
+    my $centering_offset = int(($terminal_width - $total_width) / 2);
+    $centering_offset = 0 if $centering_offset < 0;
+
+    # Step 7: Calculate dynamic height based on terminal height (if not explicitly set via -hgh)
+    # Heights that produce clean percentage intervals for Y-axis ticks:
+    #   4 rows: 2 ticks (50%, 100%)
+    #   5 rows: 5 ticks (20%, 40%, 60%, 80%, 100%)
+    #   6 rows: 3 ticks (33%, 67%, 100%) or 6 ticks - use 6
+    #   8 rows: 4 ticks (25%, 50%, 75%, 100%)
+    #   10 rows: 5 ticks (20%, 40%, 60%, 80%, 100%)
+    #   12 rows: 4 or 6 ticks
+    #   15 rows: 5 ticks (20%, 40%, 60%, 80%, 100%)
+    # Preferred heights for clean percentages: 4, 5, 8, 10, 12, 15
+    # Dynamic height scaling based on terminal height
+    # Histograms should be compact - only grow for users with large displays
+    # Terminal height -> histogram rows:
+    #   < 50 rows:  4 rows (minimum, compact)
+    #   50-64:      5 rows
+    #   65-79:      8 rows (default for medium terminals)
+    #   80-99:     10 rows
+    #  100-119:    12 rows
+    #  120+:       15 rows (maximum for very large displays)
+
+    my $effective_height;
+
+    if (!$terminal_height_detected) {
+        # Piped/redirected output - use configured default
+        $effective_height = $histogram_height;
+    } elsif ($terminal_height < 50) {
+        $effective_height = 4;
+    } elsif ($terminal_height < 65) {
+        $effective_height = 5;
+    } elsif ($terminal_height < 80) {
+        $effective_height = 8;
+    } elsif ($terminal_height < 100) {
+        $effective_height = 10;
+    } elsif ($terminal_height < 120) {
+        $effective_height = 12;
+    } else {
+        $effective_height = 15;
+    }
+
+    return {
+        active_metrics       => \@active_metrics,
+        histogram_count      => $n,
+        single_width         => $single_histogram_width,
+        bar_area_width       => $bar_area_width,
+        total_width          => $total_width,
+        centering_offset     => $centering_offset,
+        height               => $effective_height,
+        y_axis_overhead      => $y_axis_overhead,
+    };
 }
 
 sub calculate_all_statistics {
@@ -2943,6 +3377,511 @@ sub print_bar_graph {
     return;
 }
 
+# ============================================================================
+# HISTOGRAM RENDERING FUNCTIONS (Issue #25)
+# ============================================================================
+
+# Main histogram printing function
+sub print_histograms {
+    return unless $histogram_enabled;
+
+    my $layout = calculate_histogram_layout();
+    return unless $layout->{histogram_count};
+
+    my @metrics = @{$layout->{active_metrics}};
+    my $height = $layout->{height};
+    my $bar_width = $layout->{bar_area_width};
+    my $single_width = $layout->{single_width};
+    my $centering_offset = $layout->{centering_offset};
+    my $gap = $histogram_gap;
+
+    # Get box drawing characters for current weight setting
+    my %box = %{$histogram_box_sets{$histogram_box_weight}};
+
+    print "\n";  # Separator from bar graph
+
+    # Build all histogram output line by line for side-by-side rendering
+    my @all_lines = ();
+
+    # For each metric, pre-calculate display data
+    my %metric_data = ();
+    for my $metric (@metrics) {
+        my $boundaries = $histogram_boundaries{$metric};
+        my @buckets = @{$histogram_buckets{$metric}};
+        my $bucket_count = scalar(@buckets);
+        my $stats = $histogram_stats{$metric};
+
+        # Calculate display scaling
+        my @display_buckets = calculate_histogram_display_buckets(\@buckets, $bar_width);
+
+        # Find max for scaling
+        my $max_bucket = 0;
+        for my $b (@display_buckets) {
+            $max_bucket = $b if $b > $max_bucket;
+        }
+        $max_bucket = 1 if $max_bucket == 0;
+
+        # Calculate Y-axis tick positions
+        my $y_ticks = calculate_histogram_y_ticks($height);
+
+        # Calculate X-axis labels
+        my $x_labels = calculate_histogram_x_labels($boundaries, $bar_width, $metric);
+
+        $metric_data{$metric} = {
+            display_buckets => \@display_buckets,
+            max_bucket      => $max_bucket,
+            y_ticks         => $y_ticks,
+            x_labels        => $x_labels,
+            boundaries      => $boundaries,
+            stats           => $stats,
+        };
+    }
+
+    # Title row - center title within each histogram's single_width
+    my $title_line = " " x $centering_offset;
+    for my $i (0 .. $#metrics) {
+        my $metric = $metrics[$i];
+        my $title = ucfirst($metric) . " Distribution";
+        my $title_padding_left = int(($single_width - length($title)) / 2);
+        $title_padding_left = 0 if $title_padding_left < 0;
+        my $title_padding_right = $single_width - $title_padding_left - length($title);
+        $title_padding_right = 0 if $title_padding_right < 0;
+        $title_line .= " " x $title_padding_left . $title . " " x $title_padding_right;
+        $title_line .= " " x $gap if $i < $#metrics;
+    }
+    push @all_lines, $title_line;
+
+    # Column headers (Count / %) - "Count" over left Y-axis, "%" over right Y-axis
+    # Left Y-axis area: 7 chars (6 digits + 1 space) + 1 tick = 8 chars, "Count" is 5 chars
+    # Right Y-axis area: 1 tick + 5 chars (space + 3 digits + %) = 6 chars, "%" is 1 char
+    my $header_line = " " x $centering_offset;
+    for my $i (0 .. $#metrics) {
+        # Center "Count" in left margin (8 chars): pad to center 5-char word
+        my $count_label = " Count  ";  # 8 chars total
+        # Bar area
+        my $bar_area = " " x $bar_width;
+        # Center "%" in right margin (6 chars): pad to center 1-char symbol
+        my $pct_label = "   %  ";  # 6 chars total
+        $header_line .= $count_label . $bar_area . $pct_label;
+        $header_line .= " " x $gap if $i < $#metrics;
+    }
+    push @all_lines, $header_line;
+
+    # Bar rows (top to bottom)
+    for my $row (reverse 0 .. $height - 1) {
+        my $row_line = " " x $centering_offset;
+
+        for my $i (0 .. $#metrics) {
+            my $metric = $metrics[$i];
+            my $data = $metric_data{$metric};
+            my $row_str = render_histogram_row(
+                $metric, $row, $height, $bar_width,
+                $data->{display_buckets}, $data->{max_bucket},
+                $data->{y_ticks}, \%box
+            );
+            $row_line .= $row_str;
+            $row_line .= " " x $gap if $i < $#metrics;
+        }
+
+        push @all_lines, $row_line;
+    }
+
+    # X-axis line
+    my $xaxis_line = " " x $centering_offset;
+    for my $i (0 .. $#metrics) {
+        my $metric = $metrics[$i];
+        my $data = $metric_data{$metric};
+        my $xaxis_str = render_histogram_x_axis($bar_width, $data->{x_labels}, \%box);
+        $xaxis_line .= $xaxis_str;
+        $xaxis_line .= " " x $gap if $i < $#metrics;
+    }
+    push @all_lines, $xaxis_line;
+
+    # X-axis labels
+    my $xlabel_line = " " x $centering_offset;
+    for my $i (0 .. $#metrics) {
+        my $metric = $metrics[$i];
+        my $data = $metric_data{$metric};
+        my $xlabel_str = render_histogram_x_labels($bar_width, $data->{x_labels}, $single_width);
+        $xlabel_line .= $xlabel_str;
+        $xlabel_line .= " " x $gap if $i < $#metrics;
+    }
+    push @all_lines, $xlabel_line;
+
+    # Legend (percentiles)
+    my $legend_line = " " x $centering_offset;
+    for my $i (0 .. $#metrics) {
+        my $metric = $metrics[$i];
+        my $data = $metric_data{$metric};
+        my $legend_str = render_histogram_legend($metric, $data->{stats}, $bar_width, $single_width);
+        $legend_line .= $legend_str;
+        $legend_line .= " " x $gap if $i < $#metrics;
+    }
+
+    # Add spacing before legend
+    for (1 .. $histogram_legend_spacing) {
+        push @all_lines, "";
+    }
+    push @all_lines, $legend_line;
+
+    # Print all lines
+    for my $line (@all_lines) {
+        print "$line\n";
+    }
+
+    return;
+}
+
+# Calculate display buckets (scale statistical buckets to display width)
+sub calculate_histogram_display_buckets {
+    my ($buckets_ref, $bar_width) = @_;
+    my @buckets = @$buckets_ref;
+    my $bucket_count = scalar(@buckets);
+
+    my @display_buckets;
+    my $cols_per_bucket = $bar_width / $bucket_count;
+
+    if ($cols_per_bucket >= 1) {
+        # Expand: each bucket maps to one or more display columns
+        for my $i (0 .. $bar_width - 1) {
+            my $bucket_idx = int($i / $cols_per_bucket);
+            $bucket_idx = $bucket_count - 1 if $bucket_idx >= $bucket_count;
+            push @display_buckets, $buckets[$bucket_idx];
+        }
+    } else {
+        # Compress: multiple buckets aggregate to each display column
+        my $buckets_per_col = $bucket_count / $bar_width;
+        for my $i (0 .. $bar_width - 1) {
+            my $start_bucket = int($i * $buckets_per_col);
+            my $end_bucket = int(($i + 1) * $buckets_per_col) - 1;
+            $end_bucket = $bucket_count - 1 if $end_bucket >= $bucket_count;
+            my $sum = 0;
+            for my $j ($start_bucket .. $end_bucket) {
+                $sum += $buckets[$j];
+            }
+            push @display_buckets, $sum;
+        }
+    }
+
+    return @display_buckets;
+}
+
+# Calculate Y-axis tick positions
+sub calculate_histogram_y_ticks {
+    my ($height) = @_;
+
+    # Determine number of ticks based on height to produce clean percentage intervals
+    # Heights chosen to work well with these tick counts:
+    #   height 4:  2 ticks → 50%, 100%
+    #   height 5:  5 ticks → 20%, 40%, 60%, 80%, 100%
+    #   height 6:  3 ticks → 33%, 67%, 100% (not ideal) or 2 ticks
+    #   height 8:  4 ticks → 25%, 50%, 75%, 100%
+    #   height 10: 5 ticks → 20%, 40%, 60%, 80%, 100%
+    #   height 12: 4 ticks → 25%, 50%, 75%, 100%
+    #   height 15: 5 ticks → 20%, 40%, 60%, 80%, 100%
+    # Note: 0% is on the X-axis, not counted as a data row tick
+    my $num_ticks;
+    if ($height <= 4) {
+        $num_ticks = 2;      # 50%, 100%
+    } elsif ($height == 5) {
+        $num_ticks = 5;      # 20%, 40%, 60%, 80%, 100%
+    } elsif ($height <= 7) {
+        $num_ticks = 3;      # 33%, 67%, 100%
+    } elsif ($height <= 9) {
+        $num_ticks = 4;      # 25%, 50%, 75%, 100%
+    } elsif ($height <= 14) {
+        $num_ticks = 5;      # 20%, 40%, 60%, 80%, 100%
+    } else {
+        $num_ticks = 5;      # Keep at 5 for 15+ rows (20% intervals)
+    }
+
+    # Calculate percentage interval
+    my $pct_interval = 100 / $num_ticks;
+
+    # Build lookup: row -> percentage value
+    # Ticks are at pct_interval, 2*pct_interval, ... num_ticks*pct_interval (=100%)
+    my %y_tick_info = ();
+    for my $i (1 .. $num_ticks) {
+        my $pct = $i * $pct_interval;
+        # Map percentage to row: 100% = row height-1 (top), lower percentages map proportionally
+        my $row = int(($pct / 100) * $height - 0.5);
+        $row = 0 if $row < 0;
+        $row = $height - 1 if $row > $height - 1;
+        $y_tick_info{$row} = {
+            pct            => int($pct + 0.5),
+            count_fraction => $pct / 100,
+        };
+    }
+
+    return \%y_tick_info;
+}
+
+# Calculate X-axis label positions
+sub calculate_histogram_x_labels {
+    my ($boundaries_ref, $bar_width, $metric) = @_;
+
+    my $min_val = $boundaries_ref->[0];
+    my $max_val = $boundaries_ref->[-1];
+
+    # Dynamic tick count based on width
+    my $target_spacing = 12;
+    my $num_ticks = int($bar_width / $target_spacing) + 1;
+    $num_ticks = 5 if $num_ticks < 5;
+
+    # Generate evenly spaced positions
+    my @positions;
+    for my $i (0 .. $num_ticks - 1) {
+        push @positions, $i / ($num_ticks - 1);
+    }
+
+    # Calculate values at each position (logarithmic scale)
+    my @label_info;
+    for my $pos (@positions) {
+        my $value = $min_val * (($max_val / $min_val) ** $pos);
+        my $label = format_heatmap_value($value, $metric);
+        my $col = int($pos * ($bar_width - 1));
+        push @label_info, { pos => $pos, col => $col, value => $value, label => $label };
+    }
+
+    # Filter out overlapping labels
+    my @filtered;
+    my $min_gap = 2;
+
+    for my $info (@label_info) {
+        my $label_len = length($info->{label});
+        my $start_col = $info->{col};
+
+        # Center label on tick (except edges)
+        if ($info->{pos} > 0 && $info->{pos} < 1) {
+            $start_col = $info->{col} - int($label_len / 2);
+        } elsif ($info->{pos} == 1) {
+            $start_col = $info->{col} - $label_len + 1;
+        }
+
+        $start_col = 0 if $start_col < 0;
+        my $end_col = $start_col + $label_len - 1;
+
+        # Check overlap
+        my $overlaps = 0;
+        for my $existing (@filtered) {
+            if ($start_col <= $existing->{end_col} + $min_gap &&
+                $end_col >= $existing->{start_col} - $min_gap) {
+                $overlaps = 1;
+                last;
+            }
+        }
+
+        unless ($overlaps) {
+            $info->{start_col} = $start_col;
+            $info->{end_col} = $end_col;
+            push @filtered, $info;
+        }
+    }
+
+    return \@filtered;
+}
+
+# Render a single histogram row
+sub render_histogram_row {
+    my ($metric, $row, $height, $bar_width, $display_buckets, $max_bucket, $y_ticks, $box) = @_;
+
+    my $row_threshold = ($row + 1) / $height;
+    my $row_bottom = $row / $height;
+
+    my $has_tick = exists $y_ticks->{$row};
+    my ($left_tick, $right_tick) = get_histogram_y_tick_chars($has_tick, $box);
+
+    # Left Y-axis label - use format_number for large values
+    # Format: 6 chars right-justified + 1 space = 7 chars, then tick
+    my ($y_label, $y_pct);
+    if ($has_tick) {
+        my $pct_val = $y_ticks->{$row}{pct};
+        my $count_val = int($max_bucket * $y_ticks->{$row}{count_fraction} + 0.5);
+        my $count_str = format_number($count_val, undef, 0);  # No space, 0 decimals
+        $y_label = sprintf("%6s ", $count_str);  # 6 chars + space = 7
+        $y_pct = sprintf(" %3d%%", $pct_val);
+    } else {
+        $y_label = sprintf("%6s ", "");
+        $y_pct = sprintf(" %4s", "");
+    }
+
+    my $result = $y_label . $left_tick;
+
+    # Get color for this metric
+    my $base_color = $histogram_base_colors{$metric};
+    my $gradient = $histogram_color_gradients{$metric};
+
+    # Render bar characters
+    for my $col (0 .. $bar_width - 1) {
+        last if $col >= scalar(@$display_buckets);
+
+        my $bucket_fill = $display_buckets->[$col] / $max_bucket;
+        my $char;
+
+        if ($bucket_fill >= $row_threshold) {
+            $char = $histogram_block_chars[8];  # Full block
+        } elsif ($bucket_fill > $row_bottom) {
+            my $partial = ($bucket_fill - $row_bottom) / (1 / $height);
+            my $index = int($partial * 8 + 0.5);
+            $index = 8 if $index > 8;
+            $index = 0 if $index < 0;
+            $char = $histogram_block_chars[$index];
+        } else {
+            # Empty - check for gridline
+            if ($histogram_gridlines_enabled && $has_tick) {
+                $result .= "\e[38;5;${histogram_gridline_color}m─\e[0m";
+                next;
+            }
+            $char = ' ';
+        }
+
+        # Apply color
+        my $color;
+        if ($histogram_color_gradient_enabled) {
+            my $intensity = int(($display_buckets->[$col] / $max_bucket) * 7);
+            $intensity = 7 if $intensity > 7;
+            $color = $gradient->[$intensity];
+        } else {
+            $color = $base_color;
+        }
+
+        if ($char eq $histogram_block_chars[8]) {
+            # Full block: fg+bg color to eliminate gaps
+            $result .= "\e[38;5;${color};48;5;${color}m${char}\e[0m";
+        } elsif ($char ne ' ') {
+            # Partial block: fg only
+            $result .= "\e[38;5;${color}m${char}\e[0m";
+        } else {
+            $result .= $char;
+        }
+    }
+
+    # Right Y-axis
+    $result .= "\e[0m" . $right_tick . $y_pct;
+
+    return $result;
+}
+
+# Get Y-axis tick characters
+sub get_histogram_y_tick_chars {
+    my ($has_tick, $box) = @_;
+
+    if (!$has_tick) {
+        return ($box->{v_line}, $box->{v_line});
+    }
+
+    # Ticks pointing into chart
+    return ($box->{t_right}, $box->{t_left});
+}
+
+# Render X-axis line
+sub render_histogram_x_axis {
+    my ($bar_width, $x_labels, $box) = @_;
+
+    my %tick_positions = map { $_->{col} => 1 } @$x_labels;
+
+    # Left side: "     0 " + corner (6 chars + space = 7 to match Y-axis labels)
+    my $result = sprintf("%6s ", "0") . $box->{corner_bl};
+
+    for my $col (0 .. $bar_width - 1) {
+        if (exists $tick_positions{$col}) {
+            $result .= $box->{t_down};
+        } else {
+            $result .= $box->{h_line};
+        }
+    }
+
+    # Right side: corner + " 0%"
+    $result .= $box->{corner_br} . sprintf(" %3d%%", 0);
+
+    return $result;
+}
+
+# Render X-axis labels
+sub render_histogram_x_labels {
+    my ($bar_width, $x_labels, $single_width) = @_;
+
+    my $left_margin = 8;  # "     0 " + corner
+    my @label_line = (' ') x ($single_width);
+
+    for my $info (@$x_labels) {
+        my $start = $left_margin + $info->{start_col};
+        for my $i (0 .. length($info->{label}) - 1) {
+            my $pos = $start + $i;
+            $label_line[$pos] = substr($info->{label}, $i, 1) if $pos < scalar(@label_line);
+        }
+    }
+
+    return join('', @label_line);
+}
+
+# Render legend with percentiles
+sub render_histogram_legend {
+    my ($metric, $stats, $bar_width, $single_width) = @_;
+
+    # Priority order for percentile selection (SRE best practices)
+    my @percentile_priority = (
+        { key => 'p50',   label => 'P50',    sort_order => 50 },
+        { key => 'p99',   label => 'P99',    sort_order => 99 },
+        { key => 'p999',  label => 'P99.9',  sort_order => 99.9 },
+        { key => 'p95',   label => 'P95',    sort_order => 95 },
+        { key => 'p90',   label => 'P90',    sort_order => 90 },
+        { key => 'p75',   label => 'P75',    sort_order => 75 },
+        { key => 'p9999', label => 'P99.99', sort_order => 99.99 },
+        { key => 'p25',   label => 'P25',    sort_order => 25 },
+        { key => 'p10',   label => 'P10',    sort_order => 10 },
+        { key => 'p1',    label => 'P1',     sort_order => 1 },
+    );
+
+    my $separator = "   ";
+    my $available_width = $bar_width;
+
+    # Build all entry strings
+    my @all_entries;
+    for my $pct (@percentile_priority) {
+        my $value_str = format_heatmap_value($stats->{$pct->{key}}, $metric);
+        my $entry_str = $pct->{label} . ": " . $value_str;
+        push @all_entries, {
+            sort_order => $pct->{sort_order},
+            str        => $entry_str,
+            len        => length($entry_str),
+        };
+    }
+
+    # Find max entries that fit
+    my $max_entries = 0;
+    my $total_len = 0;
+    for my $i (0 .. $#all_entries) {
+        my $needed = $all_entries[$i]{len};
+        $needed += length($separator) if $i > 0;
+        if ($total_len + $needed <= $available_width) {
+            $total_len += $needed;
+            $max_entries = $i + 1;
+        } else {
+            last;
+        }
+    }
+
+    return " " x $single_width unless $max_entries > 0;
+
+    # Take first N items by priority, sort for display
+    my @selected = @all_entries[0 .. $max_entries - 1];
+    @selected = sort { $a->{sort_order} <=> $b->{sort_order} } @selected;
+
+    my $legend_line = join($separator, map { $_->{str} } @selected);
+
+    # Center within single_width
+    my $left_margin = 8;
+    my $legend_padding = $left_margin + int(($bar_width - length($legend_line)) / 2);
+    $legend_padding = 0 if $legend_padding < 0;
+
+    my $result = " " x $legend_padding . $legend_line;
+    # Pad to single_width
+    $result .= " " x ($single_width - length($result)) if length($result) < $single_width;
+
+    return $result;
+}
+
 sub print_summary_table {
     my $category_column_width = 30;
     my $occurrences_column_width = 10;
@@ -3013,7 +3952,9 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FILE PROCESSING TIME", format_time( $elapsed_read_files, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "INITIALIZE EMPTY BUCKETS", format_time( $elapsed_initialize_empty_time_windows, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "GROUP SIMILAR MESSAGES", format_time( $elapsed_group_similar_messages, 's', 'medium', " " ) ) unless $group_similar_sensitivity =~ /^none$/;
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'medium', " " ) ); 
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'medium', " " ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "HEATMAP STATISTICS", format_time( $elapsed_heatmap_statistics, 's', 'medium', " " ) ) if $heatmap_enabled;
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "HISTOGRAM STATISTICS", format_time( $elapsed_histogram_statistics, 's', 'medium', " " ) ) if $histogram_enabled;
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) ); 
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) ) if $track_memory;
@@ -3444,7 +4385,20 @@ $end_time = [gettimeofday];
 $elapsed_calculate_statistics = tv_interval($start_time, $end_time);
 
 # CALCULATE HEATMAP BUCKETS (if enabled) #
-calculate_heatmap_buckets() if $heatmap_enabled;
+if ($heatmap_enabled) {
+    $start_time = [gettimeofday];
+    calculate_heatmap_buckets();
+    $end_time = [gettimeofday];
+    $elapsed_heatmap_statistics = tv_interval($start_time, $end_time);
+}
+
+# CALCULATE HISTOGRAM BUCKETS (if enabled) - Issue #25 #
+if ($histogram_enabled) {
+    $start_time = [gettimeofday];
+    calculate_histogram_buckets();
+    $end_time = [gettimeofday];
+    $elapsed_histogram_statistics = tv_interval($start_time, $end_time);
+}
 
 # NORMALIZE DATA FOR CONSOLE OUTPUT #
 $start_time = [gettimeofday];
@@ -3452,7 +4406,7 @@ normalize_data_for_output();
 $end_time = [gettimeofday];
 $elapsed_normalize_data = tv_interval($start_time, $end_time);
 
-$elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
+$elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_heatmap_statistics + $elapsed_histogram_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
 
 if( $write_messages_to_csv ) {                                                                      # If write to CSV enabled, open filehandles
     $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
@@ -3462,6 +4416,7 @@ if( $write_messages_to_csv ) {                                                  
 }
 
 print_bar_graph();
+print_histograms() if $histogram_enabled;  # Issue #25: Histograms appear after bar graph
 close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
 
 print_summary_table();
