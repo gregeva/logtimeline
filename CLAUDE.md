@@ -507,67 +507,67 @@ Fields: timestamp [L: level] [O: origin] [I: instance] [U: user] [S: session] [P
 #### ApplicationLog (General platform activity)
 | File | Metrics | Size | Use Case |
 |------|---------|------|----------|
-| `ApplicationLog.2025-05-05.0.log` | count only | 85MB | Large Linux ApplicationLog |
-| `ApplicationLog.2025-05-06.0.log` | count only | 6.5MB | Medium ApplicationLog |
-| `ApplicationLog.2025-12-12.282-Windows.log` | count only | 10MB | Windows ApplicationLog |
-| `ApplicationLog.log` | count only | 5.8MB | Current ApplicationLog |
-| `ApplicationLog-improperlyRead.log` | count only | 468B | Edge case - malformed reads |
+| `ApplicationLog.2025-05-05.0.log` | occurrences only | 85MB | Large Linux ApplicationLog |
+| `ApplicationLog.2025-05-06.0.log` | occurrences only | 6.5MB | Medium ApplicationLog |
+| `ApplicationLog.2025-12-12.282-Windows.log` | occurrences only | 10MB | Windows ApplicationLog |
+| `ApplicationLog.log` | occurrences only | 5.8MB | Current ApplicationLog |
+| `ApplicationLog-improperlyRead.log` | occurrences only | 468B | Edge case - malformed reads |
 
 #### ScriptLog (Script execution logs)
 | File | Metrics | Size | Use Case |
 |------|---------|------|----------|
-| `ScriptLog.2025-05-05.0.log` | count only | 13MB | Standard ScriptLog |
-| `ScriptLog.2025-05-06.0.log` | count only | 15MB | Standard ScriptLog |
-| `ScriptLog.2025-12-17.0.Rolex.log` | count only | 1.6MB | Basic ScriptLog test |
-| `ScriptLog.log` | count only | 4.4MB | Current ScriptLog |
+| `ScriptLog.2025-05-05.0.log` | occurrences only | 13MB | Standard ScriptLog |
+| `ScriptLog.2025-05-06.0.log` | occurrences only | 15MB | Standard ScriptLog |
+| `ScriptLog.2025-12-17.0.Rolex.log` | occurrences only | 1.6MB | Basic ScriptLog test |
+| `ScriptLog.log` | occurrences only | 4.4MB | Current ScriptLog |
 
 #### ErrorLog (Error-level messages)
 | File | Metrics | Size | Use Case |
 |------|---------|------|----------|
-| `ErrorLog.2025-05-05.1.log` | count only | 61MB | Large error log (auth failures, etc.) |
-| `ErrorLog.2025-05-06.0.log` | count only | 3.3MB | Medium error log |
-| `ErrorLog.log` | count only | 3.7MB | Current error log |
+| `ErrorLog.2025-05-05.1.log` | occurrences only | 61MB | Large error log (auth failures, etc.) |
+| `ErrorLog.2025-05-06.0.log` | occurrences only | 3.3MB | Medium error log |
+| `ErrorLog.log` | occurrences only | 3.7MB | Current error log |
 
 #### SecurityLog (Security events)
 | File | Metrics | Size | Use Case |
 |------|---------|------|----------|
-| `SecurityLog.2025-05-05.1.log` | count only | 70MB | Large security log (nonce rejections) |
-| `SecurityLog.2025-05-06.0.log` | count only | 3.0MB | Medium security log |
-| `SecurityLog.log` | count only | 3.6MB | Current security log |
+| `SecurityLog.2025-05-05.1.log` | occurrences only | 70MB | Large security log (nonce rejections) |
+| `SecurityLog.2025-05-06.0.log` | occurrences only | 3.0MB | Medium security log |
+| `SecurityLog.log` | occurrences only | 3.6MB | Current security log |
 
 #### ScriptErrorLog (Script-specific errors)
 | File | Metrics | Size | Use Case |
 |------|---------|------|----------|
-| `ScriptErrorLog.2025-05-05.0.log` | count only | 14MB | Script error analysis |
-| `ScriptErrorLog.2025-05-06.0.log` | count only | 14MB | Script error analysis |
-| `ScriptErrorLog.log` | count only | 2.5MB | Current script errors |
+| `ScriptErrorLog.2025-05-05.0.log` | occurrences only | 14MB | Script error analysis |
+| `ScriptErrorLog.2025-05-06.0.log` | occurrences only | 14MB | Script error analysis |
+| `ScriptErrorLog.log` | occurrences only | 2.5MB | Current script errors |
 
 #### DatabaseLog (Database operations)
 | File | Metrics | Size | Use Case |
 |------|---------|------|----------|
-| `DatabaseLog.2025-05-05.0.log` | count only | 700KB | Database error tracking |
-| `DatabaseLog.2025-05-06.0.log` | count only | 693KB | Database error tracking |
-| `DatabaseLog.log` | count only | 29KB | Current database log |
+| `DatabaseLog.2025-05-05.0.log` | occurrences only | 700KB | Database error tracking |
+| `DatabaseLog.2025-05-06.0.log` | occurrences only | 693KB | Database error tracking |
+| `DatabaseLog.log` | occurrences only | 29KB | Current database log |
 
 #### AuthLog (Authentication events)
 | File | Metrics | Size | Use Case |
 |------|---------|------|----------|
-| `AuthLog.2025-05-05.0.log` | count only | 324KB | SAML/SSO authentication events |
-| `AuthLog.2025-05-06.0.log` | count only | 257KB | Authentication events |
-| `AuthLog.log` | count only | 167KB | Current auth log |
+| `AuthLog.2025-05-05.0.log` | occurrences only | 324KB | SAML/SSO authentication events |
+| `AuthLog.2025-05-06.0.log` | occurrences only | 257KB | Authentication events |
+| `AuthLog.log` | occurrences only | 167KB | Current auth log |
 
 #### ConfigurationLog (Configuration changes)
 | File | Metrics | Size | Use Case |
 |------|---------|------|----------|
-| `ConfigurationLog.2025-05-05.0.log` | count only | 30KB | Configuration tracking |
-| `ConfigurationLog.2025-05-06.0.log` | count only | 31KB | Configuration tracking |
-| `ConfigurationLog.log` | count only | 31KB | Current configuration log |
+| `ConfigurationLog.2025-05-05.0.log` | occurrences only | 30KB | Configuration tracking |
+| `ConfigurationLog.2025-05-06.0.log` | occurrences only | 31KB | Configuration tracking |
+| `ConfigurationLog.log` | occurrences only | 31KB | Current configuration log |
 
 #### Other ThingWorx Logs
 | File | Metrics | Size | Use Case |
 |------|---------|------|----------|
-| `CommunicationLog.2025-05-06.0.log` | count only | 190B | Communication events (minimal) |
-| `AkkaCommunicationLog.log` | count only | 2.2KB | Akka communication events |
+| `CommunicationLog.2025-05-06.0.log` | occurrences only | 190B | Communication events (minimal) |
+| `AkkaCommunicationLog.log` | occurrences only | 2.2KB | Akka communication events |
 
 ---
 

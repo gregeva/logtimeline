@@ -263,7 +263,7 @@ Match bar graph column colors for consistency:
 
 1. Run with access logs (duration + bytes): `./ltl -hg logs/AccessLogs/localhost_access_log.2025-03-21.txt`
 2. Run with ThingWorx ScriptLogs (all metrics): `./ltl -hg logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log`
-3. Run with count-only logs: `./ltl -hg logs/ThingworxLogs/ApplicationLog.log`
+3. Run with logs containing count metric: `./ltl -hg count logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log`
 4. Verify single histogram centers properly
 5. Verify two histograms display side by side
 6. Verify three histograms display correctly
@@ -364,3 +364,6 @@ Complete set for axes, tick marks, and corners:
 | Legend placement below histogram | Better fit for narrow terminals, use minimum rows | 2026-02-01 |
 | Hash-based data model | Dynamic metric support via `%histogram_values`, `%histogram_buckets`, `%histogram_boundaries` | 2026-02-01 |
 | Enclosed X-axis frame | Both `└` (left) and `┘` (right) corners for complete frame | 2026-02-01 |
+| 1:1 bucket-to-character mapping | Finest granularity; revisit after real-world usage if needed | 2026-02-01 |
+| Automatic X-axis label reduction | Reduce labels based on space/length to avoid overlap | 2026-02-01 |
+| Auto-reduce histogram count for narrow terminals | Prioritize duration > bytes > count; user can override with explicit `-hg <metric>` | 2026-02-01 |
