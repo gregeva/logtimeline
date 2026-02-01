@@ -29,6 +29,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Assuming silence means approval
 - Trying to solve everything in one pass instead of iterating
 
+### Continuous Improvement
+
+**Context usage and efficiency matter.** Session limits and user time are finite resources. Always consider:
+- Can this be done in fewer steps?
+- Can multiple independent actions be parallelized?
+- Is this output necessary, or am I over-explaining?
+- Am I doing work now that should be part of the normal workflow (and wasn't)?
+- **Stop and ask for direction** rather than autonomously exploring multiple paths. A quick yes/no question costs far less than going down the wrong rabbit hole.
+
+**Track observations for process improvement.** Note patterns during collaboration:
+- What workflows are working well?
+- What's causing friction, rework, or wasted effort?
+- What steps keep getting missed or forgotten?
+- What could be automated or templated?
+
+**Review after releases.** After minor version releases, initiate a brief retrospective discussion:
+- Share observations noted during the release cycle
+- Propose specific workflow improvements
+- Update CLAUDE.md with agreed changes
+
+**Current observations log:**
+<!-- Add dated entries here as patterns are noticed -->
+- 2026-02-01: GitHub issue updates were missed during v0.9.1 development, requiring 11% session usage for retroactive updates. Root cause: documentation step existed but wasn't prominent/mandatory enough. Fix: Added explicit "GitHub Issue Updates (MANDATORY)" section with specific triggers and commands.
+
 ## Project Overview
 
 LogTimeLine (ltl) is a Perl-based command-line log analysis tool that identifies hotspots in large log files through statistical analysis and time-bucket visualization. It displays horizontal bar graphs with color-coded performance bands and calculates percentile latency statistics (P1 through P99.9).
