@@ -22,6 +22,10 @@ my $histogram_width_percent = 95;  # Percentage of terminal to use
 my $histogram_gap = 4;             # Gap between histograms
 my $histogram_legend_spacing = 1;  # Gap between histogram and legend
 
+# Bucket calculation configuration (HdrHistogram-style)
+my $buckets_per_decade = 8;        # Default: ~5% precision (4=10%, 8=5%, 16=2.5%, 32=1%)
+my $verbose = 1;                   # Show bucket calculation details
+
 # Tick mark configuration (independent options)
 my $tick_inside = 1;               # 1 = draw ticks pointing INTO the chart
 my $tick_outside = 0;              # 1 = draw ticks pointing AWAY from the chart
@@ -135,8 +139,34 @@ sub generate_test_data {
 # BUCKET CALCULATION
 # ============================================================================
 
+# Calculate bucket count based on data range and buckets-per-decade setting
+# This follows the HdrHistogram approach: bucket count scales with dynamic range
+sub calculate_bucket_count {
+    my ($min, $max, $metric) = @_;
+
+    # Ensure valid range for log calculation
+    $min = 0.1 if $min <= 0;
+    $max = $min * 10 if $max <= $min;
+
+    # Calculate number of decades (orders of magnitude)
+    my $decades = (log($max) - log($min)) / log(10);
+
+    # Calculate bucket count
+    my $bucket_count = int($decades * $buckets_per_decade + 0.5);
+    $bucket_count = 5 if $bucket_count < 5;  # Minimum 5 buckets
+
+    if ($verbose) {
+        my $min_fmt = format_value($min, $metric);
+        my $max_fmt = format_value($max, $metric);
+        printf "  %-10s min=%-8s max=%-8s decades=%.2f buckets_per_decade=%d total_buckets=%d\n",
+               ucfirst($metric) . ":", $min_fmt, $max_fmt, $decades, $buckets_per_decade, $bucket_count;
+    }
+
+    return $bucket_count;
+}
+
 sub calculate_buckets {
-    my ($values_ref, $bucket_count) = @_;
+    my ($values_ref, $metric) = @_;
 
     return ([], [], {}) unless @$values_ref > 0;
 
@@ -178,6 +208,10 @@ sub calculate_buckets {
 
     # Ensure min > 0 for logarithmic scale
     $min = 0.1 if $min <= 0;
+
+    # Calculate bucket count based on data range (HdrHistogram approach)
+    my $bucket_count = calculate_bucket_count($min, $max, $metric);
+    $stats{bucket_count} = $bucket_count;
 
     # Calculate logarithmic boundaries
     my @boundaries;
@@ -461,11 +495,41 @@ sub render_histogram {
     my $bar_width = $layout->{bar_area_width};
     my $height = $histogram_height;
     my @buckets = @$buckets_ref;
+    my $bucket_count = scalar(@buckets);
     my $single_width = $layout->{single_width};
 
-    # Find max bucket count for scaling
+    # Calculate display scaling: how many display columns per bucket
+    # If bar_width > bucket_count, each bucket spans multiple columns
+    # If bar_width < bucket_count, multiple buckets map to each column (aggregate)
+    my $cols_per_bucket = $bar_width / $bucket_count;
+
+    # Create display buckets (scaled to bar_width)
+    my @display_buckets;
+    if ($cols_per_bucket >= 1) {
+        # Expand: each bucket maps to one or more display columns
+        for my $i (0 .. $bar_width - 1) {
+            my $bucket_idx = int($i / $cols_per_bucket);
+            $bucket_idx = $bucket_count - 1 if $bucket_idx >= $bucket_count;
+            push @display_buckets, $buckets[$bucket_idx];
+        }
+    } else {
+        # Compress: multiple buckets aggregate to each display column
+        my $buckets_per_col = $bucket_count / $bar_width;
+        for my $i (0 .. $bar_width - 1) {
+            my $start_bucket = int($i * $buckets_per_col);
+            my $end_bucket = int(($i + 1) * $buckets_per_col) - 1;
+            $end_bucket = $bucket_count - 1 if $end_bucket >= $bucket_count;
+            my $sum = 0;
+            for my $j ($start_bucket .. $end_bucket) {
+                $sum += $buckets[$j];
+            }
+            push @display_buckets, $sum;
+        }
+    }
+
+    # Find max bucket count for scaling (from display buckets)
     my $max_bucket = 0;
-    for my $b (@buckets) {
+    for my $b (@display_buckets) {
         $max_bucket = $b if $b > $max_bucket;
     }
     $max_bucket = 1 if $max_bucket == 0;
@@ -563,10 +627,9 @@ sub render_histogram {
         my $gridline_char = '─';  # U+2500 Light horizontal line
 
         for my $col (0 .. $bar_width - 1) {
-            my $bucket_idx = $col;  # 1:1 mapping
-            last if $bucket_idx >= scalar(@buckets);
+            last if $col >= scalar(@display_buckets);
 
-            my $bucket_fill = $buckets[$bucket_idx] / $max_bucket;
+            my $bucket_fill = $display_buckets[$col] / $max_bucket;
 
             my $char;
             if ($bucket_fill >= $row_threshold) {
@@ -590,7 +653,7 @@ sub render_histogram {
             my $color;
             if ($color_gradient_enabled) {
                 # Color intensity based on bucket density
-                my $intensity = int(($buckets[$bucket_idx] / $max_bucket) * 7);
+                my $intensity = int(($display_buckets[$col] / $max_bucket) * 7);
                 $intensity = 7 if $intensity > 7;
                 $color = $color_gradient->[$intensity];
             } else {
@@ -609,8 +672,8 @@ sub render_histogram {
             }
         }
 
-        # Right Y-axis
-        print $right_tick . $y_pct . "\n";
+        # Right Y-axis - ensure colors are reset before printing axis
+        print ansi_reset() . $right_tick . $y_pct . "\n";
     }
 
     # X-axis line with tick marks
@@ -726,8 +789,17 @@ print "=" x $terminal_width . "\n";
 print "HISTOGRAM PROTOTYPE - Testing rendering with synthetic data\n";
 print "=" x $terminal_width . "\n\n";
 
+print "Configuration: buckets_per_decade=$buckets_per_decade (~" . int(100/$buckets_per_decade) . "% precision)\n\n";
+
 # Test with different metric combinations
 my @test_metrics = ('duration', 'bytes', 'count');
+
+print "Histogram bucket calculation:\n" if $verbose;
+for my $metric (@test_metrics) {
+    my $values = generate_test_data($metric);
+    my ($boundaries, $buckets, $stats) = calculate_buckets($values, $metric);
+}
+print "\n" if $verbose;
 
 for my $metric (@test_metrics) {
     print "-" x 60 . "\n";
@@ -738,11 +810,15 @@ for my $metric (@test_metrics) {
     my $layout = calculate_layout([$metric]);
     my $bar_width = $layout->{bar_area_width};
 
-    my ($boundaries, $buckets, $stats) = calculate_buckets($values, $bar_width);
+    # Suppress verbose output for individual renders (already shown above)
+    my $saved_verbose = $verbose;
+    $verbose = 0;
+    my ($boundaries, $buckets, $stats) = calculate_buckets($values, $metric);
+    $verbose = $saved_verbose;
 
     print "Data points: " . $stats->{count} . "\n";
     print "Range: " . format_value($stats->{min}, $metric) . " - " . format_value($stats->{max}, $metric) . "\n";
-    print "Buckets: " . scalar(@$buckets) . "\n\n";
+    print "Statistical buckets: " . scalar(@$buckets) . ", Display width: $bar_width\n\n";
 
     render_histogram($metric, $boundaries, $buckets, $stats, $layout);
     print "\n\n";
@@ -762,10 +838,10 @@ print "(Side-by-side rendering to be implemented in main integration)\n\n";
 
 # Test different terminal widths for X-axis label adjustment
 print "=" x $terminal_width . "\n";
-print "TERMINAL WIDTH TESTS (X-axis label adjustment)\n";
+print "TERMINAL WIDTH TESTS (bucket count stays constant, display scales)\n";
 print "=" x $terminal_width . "\n\n";
 
-for my $test_width (50, 60, 70, 80, 100, 120, 150, 200, 250, 400) {
+for my $test_width (50, 80, 120, 200, 400) {
     print "-" x 40 . "\n";
     print "Terminal width: $test_width\n";
     print "-" x 40 . "\n\n";
@@ -778,9 +854,9 @@ for my $test_width (50, 60, 70, 80, 100, 120, 150, 200, 250, 400) {
     my $layout = calculate_layout(['duration']);
     my $bar_width = $layout->{bar_area_width};
 
-    my ($boundaries, $buckets, $stats) = calculate_buckets($values, $bar_width);
+    my ($boundaries, $buckets, $stats) = calculate_buckets($values, 'duration');
 
-    print "Bar width: $bar_width buckets\n\n";
+    print "Statistical buckets: " . scalar(@$buckets) . ", Display width: $bar_width\n\n";
 
     render_histogram('duration', $boundaries, $buckets, $stats, $layout);
     print "\n\n";
@@ -804,9 +880,8 @@ for my $test_height (5, 10, 15, 20, 25, 30) {
 
     my $values = generate_test_data('duration');
     my $layout = calculate_layout(['duration']);
-    my $bar_width = $layout->{bar_area_width};
 
-    my ($boundaries, $buckets, $stats) = calculate_buckets($values, $bar_width);
+    my ($boundaries, $buckets, $stats) = calculate_buckets($values, 'duration');
 
     render_histogram('duration', $boundaries, $buckets, $stats, $layout);
     print "\n\n";
