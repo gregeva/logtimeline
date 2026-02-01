@@ -469,32 +469,67 @@ sub render_histogram {
     # - "%" (1 char) centered in 6 chars (tick + 5) = 3 spaces + % + 2 spaces
     printf " Count  %*s   %%\n", $bar_width, "";
 
+    # Calculate dynamic Y-axis tick positions based on height
+    # The 0% tick is on the X-axis line (separate from data rows)
+    # Data rows (0 to height-1) represent values > 0% up to 100%
+    # So we need ticks for the data area only (excluding 0% which is on X-axis)
+
+    # Target: approximately one tick every 3-4 rows for good readability
+    # Use tick counts that produce clean percentage intervals
+    # Valid counts: 2 (100% only), 3 (50%, 100%), 5 (25%, 50%, 75%, 100%), etc.
+    # Note: these counts are for data area ticks, 0% is always on X-axis
+    my @nice_tick_counts = (2, 3, 5, 6, 9, 11, 21);
+
+    my $y_target_spacing = 3;
+    my $ideal_ticks = int($height / $y_target_spacing) + 1;
+
+    # Find the closest nice tick count that doesn't exceed what fits
+    my $num_y_ticks = 2;  # Default minimum (just 100% on data, 0% on X-axis)
+    for my $nice (@nice_tick_counts) {
+        if ($nice <= $ideal_ticks) {
+            $num_y_ticks = $nice;
+        }
+    }
+
+    # Calculate consistent percentage intervals for data area ticks
+    # 0% is on X-axis, so data ticks are from first interval to 100%
+    my $pct_interval = 100 / ($num_y_ticks - 1);
+
+    # Build lookup: row -> percentage value (only for tick rows in data area)
+    # Row 0 = lowest data (first interval %), Row height-1 = 100%
+    my %y_tick_info = ();
+    for my $i (1 .. $num_y_ticks - 1) {  # Skip i=0 (0% is on X-axis)
+        my $pct = $i * $pct_interval;
+        # Map percentage to row: 0% would be row -1 (X-axis), 100% is row height-1
+        # So row = (pct / 100) * height - 1, but we want pct > 0 to map to rows 0+
+        # Simpler: row = (pct / 100) * (height) - 1
+        my $row = int($pct / 100 * $height - 0.5);
+        $row = 0 if $row < 0;
+        $row = $height - 1 if $row > $height - 1;
+        $y_tick_info{$row} = {
+            pct => int($pct + 0.5),
+            count_fraction => $pct / 100,
+        };
+    }
+
     # Render rows from top to bottom
     for my $row (reverse 0 .. $height - 1) {
         my $row_threshold = ($row + 1) / $height;
         my $row_bottom = $row / $height;
 
-        # Determine tick position for this row
-        my $tick_pos = 'none';
-        if ($row == $height - 1) {
-            $tick_pos = 'top';
-        } elsif ($row == int(($height - 1) / 2)) {
-            $tick_pos = 'mid';
-        } elsif ($row == 0) {
-            $tick_pos = 'bottom';
-        }
+        # Determine if this row has a tick mark
+        my $has_tick = exists $y_tick_info{$row};
 
-        my ($left_tick, $right_tick) = get_y_tick_chars($tick_pos);
+        my ($left_tick, $right_tick) = get_y_tick_chars($has_tick ? 'tick' : 'none');
 
         # Left Y-axis label - always same width for alignment
         # Format: 6 chars for number + 1 space = 7 chars, then tick
         my $y_label;
         my $y_pct;
-        if ($tick_pos ne 'none') {
-            my $count_val = ($tick_pos eq 'top') ? $max_bucket :
-                            ($tick_pos eq 'mid') ? int($max_bucket / 2) : 0;
-            my $pct_val = ($tick_pos eq 'top') ? 100 :
-                          ($tick_pos eq 'mid') ? 50 : 0;
+        if ($has_tick) {
+            # Use pre-calculated consistent percentage values
+            my $pct_val = $y_tick_info{$row}{pct};
+            my $count_val = int($max_bucket * $y_tick_info{$row}{count_fraction} + 0.5);
             $y_label = sprintf("%6d ", $count_val);
             $y_pct = sprintf(" %3d%%", $pct_val);
         } else {
@@ -545,14 +580,13 @@ sub render_histogram {
     }
 
     # X-axis line with tick marks
+    # This is the 0% baseline - includes 0 count on left and 0% on right
     my $x_labels = calculate_x_labels($boundaries_ref, $bar_width, $metric);
     my %tick_positions = map { $_->{col} => 1 } @$x_labels;
 
-    # Left margin to align with bar area
-    # Bar rows print: $y_label (7 chars: "    123 ") + $left_tick (1 char) = 8 chars before bars
-    # X-axis should have: margin (7 chars) + corner (1 char replaces tick) = aligned with bars
-    printf "%*s", $left_margin + 1, "";  # 7 chars of spacing
-    print $box_chars{corner_bl};         # Corner at position 8 (where tick was)
+    # Left side: "     0 " (0 count, 6 chars right-justified + space = 7 chars)
+    printf "%6d ", 0;
+    print $box_chars{corner_bl};         # Corner at axis intersection
 
     for my $col (0 .. $bar_width - 1) {
         if (exists $tick_positions{$col}) {
@@ -561,7 +595,8 @@ sub render_histogram {
             print $box_chars{h_line};
         }
     }
-    print $box_chars{corner_br} . "\n";
+    # Right side: corner + " 0%" (space + 3 chars + %)
+    print $box_chars{corner_br} . sprintf(" %3d%%", 0) . "\n";
 
     # X-axis labels
     # The corner is at position 7 (after 7 chars margin)
@@ -717,6 +752,32 @@ for my $test_width (50, 60, 70, 80, 100, 120, 150, 200, 250, 400) {
     print "\n\n";
 
     $terminal_width = $saved_width;
+}
+
+# Test different histogram heights for Y-axis label adjustment
+print "=" x $terminal_width . "\n";
+print "HISTOGRAM HEIGHT TESTS (Y-axis label adjustment)\n";
+print "=" x $terminal_width . "\n\n";
+
+for my $test_height (5, 10, 15, 20, 25, 30) {
+    print "-" x 40 . "\n";
+    print "Histogram height: $test_height rows\n";
+    print "-" x 40 . "\n\n";
+
+    # Temporarily change histogram height
+    my $saved_height = $histogram_height;
+    $histogram_height = $test_height;
+
+    my $values = generate_test_data('duration');
+    my $layout = calculate_layout(['duration']);
+    my $bar_width = $layout->{bar_area_width};
+
+    my ($boundaries, $buckets, $stats) = calculate_buckets($values, $bar_width);
+
+    render_histogram('duration', $boundaries, $buckets, $stats, $layout);
+    print "\n\n";
+
+    $histogram_height = $saved_height;
 }
 
 print "Prototype complete.\n";
