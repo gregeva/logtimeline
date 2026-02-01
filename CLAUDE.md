@@ -63,6 +63,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 2026-02-01: Forgot to do post-mortem and continuous improvement activities after release. Root cause: no explicit step in release workflow requiring observations log update. Fix: Add "Update CLAUDE.md observations log" as mandatory post-release step.
 - 2026-02-02: Skipped continuous improvement step again after v0.10.1 patch release despite having added it as mandatory in previous session. Root cause: the fix from previous observation (adding to release checklist) was never actually implemented - only noted as a fix. Fix: Actually add "Update CLAUDE.md observations log" to the Release Checklist section below.
 - 2026-02-02: Release branch `release/0.10.0` was never merged back to `main` after v0.10.0 release. Discovered when bug fix branch based on `main` didn't have the histogram feature code. Root cause: release workflow doesn't include step to merge release branch back to main after tagging. Fix: Add "Merge release branch to main" as post-release step in Release Checklist.
+- 2026-02-02: Patch release v0.10.1 was done on existing `release/0.10.0` branch instead of creating a new `release/0.10.1` branch. Root cause: assumed patch releases could reuse existing release branch. Fix: Every release (major, minor, or patch) must have its own release branch named `release/X.Y.Z`.
 
 ## Project Overview
 
@@ -158,7 +159,8 @@ Every release requires a release notes file in the `releases/` folder. The workf
 
 3. **Commit changes** to feature branch
 
-4. **Create release branch** from `main` (naming convention: `release/X.Y.Z` without `v` prefix):
+4. **Create release branch** from `main` (naming convention: `release/X.Y.Z` without `v` prefix).
+   **Every release must have its own branch** - including patch releases (e.g., `release/0.10.1` not reusing `release/0.10.0`):
    ```bash
    git checkout main && git pull
    git checkout -b release/0.10.0
