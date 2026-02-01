@@ -472,6 +472,9 @@ Complete set for axes, tick marks, and corners:
 | GitHub issue created | Done | [#25](https://github.com/gregeva/logtimeline/issues/25) |
 | Implementation plan | Done | `features/histogram-charts-implementation-plan.md` |
 | Prototype | Done | `prototype/histogram-prototype.pl` |
+| HdrHistogram bucket calculation | Done | Buckets-per-decade model implemented in prototype |
+| Display scaling | Done | Decoupled bucket count from display width |
+| X-axis label alignment verified | Done | Labels correctly aligned with log-scale bucket boundaries |
 | Implementation | Not started | |
 | Testing | Not started | |
 | Documentation | Not started | |
@@ -511,3 +514,6 @@ Complete set for axes, tick marks, and corners:
 | ~~Freedman-Diaconis for bucket count~~ | **SUPERSEDED** - Freedman-Diaconis assumes linear bins; not applicable to logarithmic histograms | 2026-02-01 |
 | Buckets-per-decade model (HdrHistogram approach) | Industry standard for latency histograms; bucket count = decades × buckets_per_decade; default 8 buckets/decade (~5% precision) | 2026-02-01 |
 | `-hgbpd` option for precision control | Configure buckets per decade (4=10%, 8=5%, 16=2.5%); `-hgb` overrides with explicit total | 2026-02-01 |
+| X-axis label alignment with log buckets | Labels calculated using same logarithmic formula as bucket boundaries; verified alignment across all display widths | 2026-02-01 |
+| Display bucket expansion/compression | When display > buckets: each bucket spans multiple columns; when display < buckets: multiple buckets aggregate per column | 2026-02-01 |
+| ANSI color reset before Y-axis | Prevents color bleeding on wide displays; `ansi_reset()` called before right Y-axis rendering | 2026-02-01 |
