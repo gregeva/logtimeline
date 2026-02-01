@@ -61,6 +61,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 2026-02-01: Attempted to create PR directly to main instead of to release branch first. Root cause: release workflow not clearly documented. Fix: Document the release branch workflow (create release branch → PR feature into release → tag from release branch).
 - 2026-02-01: Dynamic height scaling for histograms was initially too aggressive (scaling up at small terminal heights). Root cause: misunderstood user intent - histograms should be compact by default, only grow for large displays. Fix: Always clarify scaling direction (up vs down) and thresholds with user before implementing.
 - 2026-02-01: Forgot to do post-mortem and continuous improvement activities after release. Root cause: no explicit step in release workflow requiring observations log update. Fix: Add "Update CLAUDE.md observations log" as mandatory post-release step.
+- 2026-02-02: Skipped continuous improvement step again after v0.10.1 patch release despite having added it as mandatory in previous session. Root cause: the fix from previous observation (adding to release checklist) was never actually implemented - only noted as a fix. Fix: Actually add "Update CLAUDE.md observations log" to the Release Checklist section below.
+- 2026-02-02: Release branch `release/0.10.0` was never merged back to `main` after v0.10.0 release. Discovered when bug fix branch based on `main` didn't have the histogram feature code. Root cause: release workflow doesn't include step to merge release branch back to main after tagging. Fix: Add "Merge release branch to main" as post-release step in Release Checklist.
 
 ## Project Overview
 
@@ -199,6 +201,7 @@ git push origin v0.8.2-rc1
 - [ ] PR created from feature branch to release branch and merged
 - [ ] Tag created and pushed from release branch (`v` prefix on tag)
 - [ ] After tagging, verify version matches: `./ltl -version` should show the tagged version
+- [ ] Merge release branch to `main`: `git checkout main && git merge release/X.Y.Z && git push origin main`
 - [ ] GitHub issue closed with completion comment
 - [ ] CLAUDE.md observations log updated with lessons learned
 
