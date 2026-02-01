@@ -54,6 +54,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 2026-02-01: GitHub issue updates were missed during v0.9.1 development, requiring 11% session usage for retroactive updates. Root cause: documentation step existed but wasn't prominent/mandatory enough. Fix: Added explicit "GitHub Issue Updates (MANDATORY)" section with specific triggers and commands.
 - 2026-02-01: Made code changes for issue #13 while on branch `25-histogram-charts`. Root cause: didn't verify branch before starting work. Fix: Added "Branch Verification (MANDATORY - FIRST STEP)" section requiring branch check before any code changes.
 - 2026-02-01: Version number in `ltl` (line 73) was not updated for v0.9.1 release. Root cause: Release Checklist exists but version update step not enforced. Fix: Added verification step to release process.
+- 2026-02-01: Insisted that Unicode full block characters (█) would render seamlessly between rows without researching terminal/font rendering issues. When user challenged this, defended position rather than investigating. Root cause: overconfidence in assumptions about rendering without researching how terminals and fonts actually handle block characters. Fix: When dealing with visual/rendering concerns, research how different terminals and fonts behave, and look for established developer solutions (in this case: applying same ANSI color to both foreground AND background eliminates whitespace gaps).
+- 2026-02-01: Researched and proposed linear bin sizing algorithms (Sturges, Rice, Scott, Freedman-Diaconis) for logarithmic histogram bucketing. When user questioned applicability, doubled down trying to force-fit rather than stepping back. Root cause: failed to validate that research matched the actual problem domain (log-scale vs linear-scale). Fix: When an approach requires forcing or workarounds, treat this as a red flag that the fundamental approach may be wrong. Step back, re-evaluate assumptions, and research domain-specific solutions (in this case, HdrHistogram's buckets-per-decade model).
+- 2026-02-01: Marked documentation as "Done" in feature progress tracking before actually completing it (help text, release notes). Root cause: premature status update without verifying all documentation tasks. Fix: Don't mark documentation complete until help/usage text updated, release notes created, and feature doc finalized.
+- 2026-02-01: Created release branch with wrong naming convention (`release/v0.10.0` instead of `release/0.10.0`). Root cause: no documented release branch naming convention in CLAUDE.md. Fix: Document release branch naming convention.
+- 2026-02-01: Attempted to create PR directly to main instead of to release branch first. Root cause: release workflow not clearly documented. Fix: Document the release branch workflow (create release branch → PR feature into release → tag from release branch).
+- 2026-02-01: Dynamic height scaling for histograms was initially too aggressive (scaling up at small terminal heights). Root cause: misunderstood user intent - histograms should be compact by default, only grow for large displays. Fix: Always clarify scaling direction (up vs down) and thresholds with user before implementing.
+- 2026-02-01: Forgot to do post-mortem and continuous improvement activities after release. Root cause: no explicit step in release workflow requiring observations log update. Fix: Add "Update CLAUDE.md observations log" as mandatory post-release step.
 
 ## Project Overview
 
@@ -149,19 +156,28 @@ Every release requires a release notes file in the `releases/` folder. The workf
 
 3. **Commit changes** to feature branch
 
-4. **Create PR and merge** to `main`
-
-5. **Create and push version tag** from `main`:
+4. **Create release branch** from `main` (naming convention: `release/X.Y.Z` without `v` prefix):
    ```bash
    git checkout main && git pull
-   git tag v0.8.2
-   git push origin v0.8.2
+   git checkout -b release/0.10.0
+   git push origin release/0.10.0
    ```
 
-6. **Workflow automatically**:
+5. **Create PR from feature branch to release branch** and merge
+
+6. **Create and push version tag** from release branch:
+   ```bash
+   git checkout release/0.10.0 && git pull
+   git tag v0.10.0
+   git push origin v0.10.0
+   ```
+
+7. **Workflow automatically**:
    - Builds all 4 binaries
    - Creates GitHub Release with your release notes
    - Attaches binaries to release
+
+8. **Post-release**: Update CLAUDE.md observations log with lessons learned
 
 ### Pre-Release Versions
 Tags containing `-` are marked as pre-releases (e.g., `v0.8.2-beta`, `v0.8.2-rc1`).
@@ -177,10 +193,14 @@ git push origin v0.8.2-rc1
 - [ ] Release notes created at `releases/v{version}.md`
 - [ ] All tests pass locally
 - [ ] Feature documentation updated in `features/`
+- [ ] Help/usage text updated in `ltl` if new options added
 - [ ] CLAUDE.md updated if architecture changed
-- [ ] PR created, reviewed, and merged to `main`
-- [ ] Tag created and pushed from `main` branch
+- [ ] Release branch created (`release/X.Y.Z` - no `v` prefix)
+- [ ] PR created from feature branch to release branch and merged
+- [ ] Tag created and pushed from release branch (`v` prefix on tag)
 - [ ] After tagging, verify version matches: `./ltl -version` should show the tagged version
+- [ ] GitHub issue closed with completion comment
+- [ ] CLAUDE.md observations log updated with lessons learned
 
 ### Verifying a Release
 After the workflow completes:
