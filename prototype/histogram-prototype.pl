@@ -29,6 +29,9 @@ my $tick_outside = 0;              # 1 = draw ticks pointing AWAY from the chart
 # Gridline configuration
 my $gridlines_enabled = 1;         # 1 = draw horizontal gridlines at Y-axis tick positions
 
+# Color configuration
+my $color_gradient_enabled = 0;    # 1 = use intensity gradients, 0 = single color (for testing)
+
 # ============================================================================
 # CHARACTER CONSTANTS
 # ============================================================================
@@ -72,11 +75,20 @@ my %box_chars = %{$box_char_sets{$box_drawing_weight}};
 # 8-level block characters for sub-character resolution
 my @block_chars = (' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█');
 
+# Base colors - match bar graph column plain_bg colors from ltl
+# Duration (column 2): 184, Bytes (column 3): 34, Count (column 4): 30
+my %base_colors = (
+    duration => 184,  # Yellow - matches bar graph column 2 plain_bg
+    bytes    => 34,   # Green - matches bar graph column 3 plain_bg
+    count    => 30,   # Cyan - matches bar graph column 4 plain_bg
+);
+
 # Color gradients (256-color ANSI) - dark background
-my %colors = (
-    duration => [58, 94, 136, 142, 178, 184, 220, 226],   # Yellow
-    bytes    => [22, 28, 34, 40, 46, 82, 118, 154],       # Green
-    count    => [23, 30, 37, 44, 51, 80, 86, 123],        # Cyan
+# Used when $color_gradient_enabled is true
+my %color_gradients = (
+    duration => [58, 94, 136, 142, 178, 184, 220, 226],   # Yellow gradient
+    bytes    => [22, 28, 34, 40, 46, 82, 118, 154],       # Green gradient
+    count    => [23, 30, 37, 44, 51, 80, 86, 123],        # Cyan gradient
 );
 
 # Gridline color - dark grey (bright black / ANSI 8)
@@ -458,7 +470,8 @@ sub render_histogram {
     }
     $max_bucket = 1 if $max_bucket == 0;
 
-    my $color_gradient = $colors{$metric};
+    my $color_gradient = $color_gradients{$metric};
+    my $base_color = $base_colors{$metric};
 
     # Title - centered
     my $title = ucfirst($metric) . " Distribution";
@@ -573,10 +586,17 @@ sub render_histogram {
                 $char = ' ';
             }
 
-            # Color based on bucket density
-            my $intensity = int(($buckets[$bucket_idx] / $max_bucket) * 7);
-            $intensity = 7 if $intensity > 7;
-            my $color = $color_gradient->[$intensity];
+            # Determine color: gradient based on density, or flat base color
+            my $color;
+            if ($color_gradient_enabled) {
+                # Color intensity based on bucket density
+                my $intensity = int(($buckets[$bucket_idx] / $max_bucket) * 7);
+                $intensity = 7 if $intensity > 7;
+                $color = $color_gradient->[$intensity];
+            } else {
+                # Flat color: use base color matching bar graph columns
+                $color = $base_color;
+            }
 
             if ($char eq $block_chars[8]) {
                 # Full block: use matching fg+bg color to fill any whitespace gaps
