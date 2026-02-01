@@ -1,4 +1,4 @@
-# llt : Log Time Line
+# ltl : Log Time Line
 
 Have you ever wished that you could quickly identify areas of interest or hotspots in very large log files so that you could navigate there directly?  That's what this timeline view is for!!
 
