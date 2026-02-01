@@ -1,14 +1,3 @@
-# Current Version & Release Notes
-
-Access and download releases from the [*Releases*](https://github.com/gregeva/logtimeline/releases) page.
-
-2026-01-21 : v0.8.1 - fixes heatmap axis alignment, adds light background terminal support with auto-detection
-
-2026-01-20 : v0.8.0 - adds heatmap visualization mode for SRE-grade latency distribution analysis
-
-2025-12-09 : v0.6.0 - introduces many column support architecture with dynamic layout and column padding
-
-
 # llt : Log Time Line
 
 Have you ever wished that you could quickly identify areas of interest or hotspots in very large log files so that you could navigate there directly?  That's what this timeline view is for!!
