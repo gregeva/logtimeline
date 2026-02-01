@@ -134,23 +134,53 @@ Color gradients should support light background detection used in the heatmap.  
 
 #### Legend (Below Histogram)
 
-Display population-wide percentiles below each histogram, using the minimum number of rows possible.
+Display population-wide percentiles below each histogram on a single centered line, dynamically selecting which percentiles to show based on available width.
 
 **Configurable spacing variables:**
 - `$histogram_legend_spacing` - vertical gap between histogram bottom and legend
 - `$histogram_gap` - horizontal padding between adjacent histograms
 
-**Legend layout:**
-- Percentiles displayed in compact rows (e.g., `P50: 127ms   P90: 892ms` on one line)
-- Labels left-aligned, values right-aligned within their column
-- Maximum one decimal place (omit if zero, e.g., "4s" not "4.0s")
-- Space between value and unit (provided by helper function)
+**Percentile Selection:**
 
-**Example (2 rows for 4 percentiles):**
+Percentiles are selected based on a priority order reflecting SRE and performance analysis best practices. The selection algorithm takes percentiles from this priority list until the available width is exhausted, then displays them in ascending order.
+
+| Priority | Percentile | Rationale |
+|----------|------------|-----------|
+| 1 | P50 (median) | The typical user experience; always the most important baseline |
+| 2 | P99 | Critical for SLO/SLA monitoring; catches "1 in 100" degraded experiences |
+| 3 | P99.9 | Important for high-volume systems (1 in 1,000 requests); tail behavior |
+| 4 | P95 | Common SLO target; fills the gap between P50 and P99 |
+| 5 | P90 | Shows where "good" experiences end; only after P95/P99 for finer granularity |
+| 6 | P75 | Upper quartile; helps understand distribution shape |
+| 7 | P99.99 | For very high-volume systems (1 in 10,000 requests) |
+| 8 | P25 | Lower quartile; shows "fast path" performance |
+| 9 | P10 | Best-case typical performance |
+| 10 | P1 | The fastest requests; understanding the floor |
+
+**Selection Algorithm:**
+1. Start with empty selection
+2. For each percentile in priority order, check if adding it (with separator) fits in available width
+3. If it fits, add to selection
+4. After all percentiles checked, sort selection by ascending percentile value
+5. Display as single centered line with 3-space separators
+
+**Example outputs at various widths:**
 ```
-P50: 127ms   P90: 892ms
-P99: 4.2s    P99.9: 12.3s
+# Narrow (50 chars): 4 percentiles
+P50: 11ms   P90: 697ms   P95: 2.1s   P99: 10.3s
+
+# Medium (120 chars): 6 percentiles
+P50: 11ms   P90: 697ms   P95: 2.1s   P99: 10.3s   P99.9: 45.2s   P99.99: 1.2m
+
+# Wide (250 chars): 8+ percentiles
+P10: 2ms   P25: 5ms   P50: 11ms   P75: 89ms   P90: 697ms   P95: 2.1s   P99: 10.3s   P99.9: 45.2s
 ```
+
+**Legend layout:**
+- Single line, centered under histogram
+- Percentiles displayed in ascending order (e.g., `P50: 127ms   P90: 892ms   P99: 4.2s`)
+- 3-space separator between percentile entries
+- Maximum one decimal place (omit if zero, e.g., "4s" not "4.0s")
 
 These represent percentiles for the **entire population** of values, distinct from the time-bucket or message-based percentiles shown elsewhere.
 
