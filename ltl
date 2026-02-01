@@ -2164,26 +2164,28 @@ sub calculate_all_statistics {
                 z_score       => undef
             };
     
-            # Calculate rolling mean and std_dev
-            my $rolling_mean = 0;
-            my $rolling_sum_of_squares = 0;
-            my $rolling_count = 0;
-            foreach my $prev_bucket (@rolling_window) {
-                $rolling_mean += $prev_bucket->{mean};
-                $rolling_sum_of_squares += $prev_bucket->{sum_of_squares};
-                $rolling_count++;
-            }
-            if ($rolling_count > 0) {
-                $rolling_mean /= $rolling_count;
-                my $rolling_variance = ($rolling_sum_of_squares / $rolling_count) - ($rolling_mean ** 2);
-                my $rolling_std_dev = sqrt($rolling_variance);
-                my $z_score = calculate_z_score($mean, $rolling_mean, $rolling_std_dev);
-               $log_stats{$bucket}{z_score} = $z_score;
-            }
+            # Calculate rolling mean and std_dev (only if we have valid statistics)
+            if (defined $mean) {
+                my $rolling_mean = 0;
+                my $rolling_sum_of_squares = 0;
+                my $rolling_count = 0;
+                foreach my $prev_bucket (@rolling_window) {
+                    $rolling_mean += $prev_bucket->{mean};
+                    $rolling_sum_of_squares += $prev_bucket->{sum_of_squares};
+                    $rolling_count++;
+                }
+                if ($rolling_count > 0) {
+                    $rolling_mean /= $rolling_count;
+                    my $rolling_variance = ($rolling_sum_of_squares / $rolling_count) - ($rolling_mean ** 2);
+                    my $rolling_std_dev = sqrt($rolling_variance);
+                    my $z_score = calculate_z_score($mean, $rolling_mean, $rolling_std_dev);
+                   $log_stats{$bucket}{z_score} = $z_score;
+                }
 
-            # Update rolling window logic
-            push @rolling_window, { mean => $mean, sum_of_squares => $aggregated_data->{sum_of_squares} };
-            shift @rolling_window if @rolling_window > $rolling_window_size;
+                # Update rolling window logic
+                push @rolling_window, { mean => $mean, sum_of_squares => $aggregated_data->{sum_of_squares} };
+                shift @rolling_window if @rolling_window > $rolling_window_size;
+            }
 
         } else {
             # This will catch the situation where there are no durations, printing them has been disabled, or they were not captured.
