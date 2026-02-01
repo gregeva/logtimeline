@@ -217,7 +217,7 @@ my %blocks = (
     'I' => '•',    # Bullet (U+2022)
 );
 
-my $default_chart_block = "A";
+my $default_chart_block = ($^O eq 'MSWin32') ? 'G' : 'A';
 
 # Load in ANSI color codes and configure presets for various log levels/types
 my %colors = (
@@ -1240,7 +1240,6 @@ sub read_and_process_logs {
                 $is_line_match = 1;
                 $match_type = 6;			# this matches Java GC log info level pause
                 $is_access_log = 1;			# need this to have statistics calculated
-                $default_chart_block = 'C' unless $default_chart_block ne 'C';
 
                 $bytes = convert_bytes( $heap_from ) - convert_bytes( $heap_to );
                 $bytes = $bytes < 0 ? 0 : $bytes;
@@ -2527,10 +2526,10 @@ sub print_heatmap_row {
 
             if ($density_hl > 0 && defined $highlight_regex) {
                 # Highlighted cell: use metric's column color as background
-                print "\033[48;5;${highlight_bg}m\033[38;5;${fg_color}m█\033[0m";
+                print "\033[48;5;${highlight_bg}m\033[38;5;${fg_color}m$blocks{$default_chart_block}\033[0m";
             } else {
                 # Normal cell: foreground color only, no background
-                print "\033[38;5;${fg_color}m█\033[0m";
+                print "\033[38;5;${fg_color}m$blocks{$default_chart_block}\033[0m";
             }
         }
     }
@@ -2778,7 +2777,7 @@ sub print_bar_graph {
                     my $scaled_occurrences = $log_occurrences{$bucket}{$category_bucket}{scaled_occurrences};
                     $scaled_occurrences = 0 if $scaled_occurrences < 0;  # Guard against negative values
                     my $color = $colors{$category_bucket} // $colors{'NC'};
-                    print "$color" . ( $category_bucket =~ /^[12345]xx(-HL)?$/ ? $blocks{'A'} : $blocks{$default_chart_block} ) x $scaled_occurrences . "$colors{'NC'}";	# provide a global way to change the bar character
+                    print "$color" . $blocks{$default_chart_block} x $scaled_occurrences . "$colors{'NC'}";
                     $printed_chars += $scaled_occurrences;
                     $scaled_occurrences_total += $scaled_occurrences;
                 }
