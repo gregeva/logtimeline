@@ -136,12 +136,26 @@ Capture and store performance measurements to validate the improvement:
 
 #### Baseline (before changes)
 
-| Platform | Method | Per Call | Test File Runtime |
-|----------|--------|----------|-------------------|
-| macOS | `Proc::ProcessTable` | 9.84 ms | TBD |
-| macOS | `ps` command | 2.03 ms | N/A (not currently used) |
-| Linux | TBD | TBD | TBD |
-| Windows | TBD | TBD | TBD |
+**Per-call overhead (from `prototype/memory-benchmark.pl`):**
+
+| Platform | Method | Per Call |
+|----------|--------|----------|
+| macOS | `Proc::ProcessTable` | 9.84 ms |
+| macOS | `ps` command | 2.03 ms |
+| Linux | TBD | TBD |
+| Windows | TBD | TBD |
+
+**Test file: `ScriptLog-DPMExtended-clean.log` (122,808 lines)**
+
+| Mode | Total Time | CALCULATE STATISTICS | SCALE DATA TO TERMINAL |
+|------|------------|---------------------|------------------------|
+| Without `-mem` | 2.0 sec | 28.9 msec | 486 usec |
+| With `-mem` | 2.1 sec | 101.2 msec | 30.1 msec |
+
+**Overhead from `-mem` flag:**
+- CALCULATE STATISTICS: 3.5x slower (72.3ms added)
+- SCALE DATA TO TERMINAL: 62x slower (29.6ms added)
+- Total added overhead: ~102ms
 
 #### After Implementation
 
