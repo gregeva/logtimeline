@@ -80,6 +80,7 @@ my $impact_time_exponent = 7;		            # it was 5, and was weighting a few s
 my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages, $elapsed_heatmap_statistics, $elapsed_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
+my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_userdefinedmetrics );
 my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
@@ -92,7 +93,7 @@ my $column_count_pre_graph = 2;		            # timestamp + legend is the default
 my @graph_columns = qw( duration bytes count );
 my ( @printed_column_widths, @printed_column_spacing, @printed_column_names );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
-my ( $print_durations, $track_memory, $disable_progress ) = ( 0, 0, 0 );
+my ( $print_durations, $show_memory, $disable_progress ) = ( 0, 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
 my ( $filter_count_min, $filter_count_max );
@@ -410,7 +411,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--histogram|-hg [duration|bytes|count]] [--histogram-width|-hgw <N>] [--histogram-height|-hgh <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--histogram|-hg [duration|bytes|count]] [--histogram-width|-hgw <N>] [--histogram-height|-hgh <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--memory-usage|-mem] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -647,6 +648,46 @@ sub get_memory_usage {
     }
 
     return $memory_usage;
+}
+
+# Issue #45: Measure all data structures and update high-water marks
+# Called after each major subroutine to capture peak memory usage
+sub measure_memory_structures {
+    # Always capture RSS high-water mark
+    $current_memory_usage = get_memory_usage();
+    if ($current_memory_usage > $max_memory_usage) {
+        $max_memory_usage = $current_memory_usage;
+    }
+
+    # Only measure individual structures when -mem flag is used
+    return unless $show_memory;
+
+    require Devel::Size;
+
+    # Measure all key data structures
+    my %current_sizes = (
+        log_occurrences        => Devel::Size::total_size(\%log_occurrences),
+        log_analysis           => Devel::Size::total_size(\%log_analysis),
+        log_messages           => Devel::Size::total_size(\%log_messages),
+        log_stats              => Devel::Size::total_size(\%log_stats),
+        log_threadpools        => Devel::Size::total_size(\%log_threadpools),
+        threadpool_activity    => Devel::Size::total_size(\%threadpool_activity),
+        log_userdefinedmetrics => Devel::Size::total_size(\%log_userdefinedmetrics),
+        heatmap_data           => Devel::Size::total_size(\%heatmap_data),
+        heatmap_data_hl        => Devel::Size::total_size(\%heatmap_data_hl),
+        heatmap_raw            => Devel::Size::total_size(\%heatmap_raw),
+        heatmap_raw_hl         => Devel::Size::total_size(\%heatmap_raw_hl),
+        histogram_values       => Devel::Size::total_size(\%histogram_values),
+    );
+
+    # Update high-water marks (only if current value is larger)
+    for my $struct (keys %current_sizes) {
+        my $current = $current_sizes{$struct};
+        my $hwm = $memory_high_water_marks{$struct} // 0;
+        if ($current > $hwm) {
+            $memory_high_water_marks{$struct} = $current;
+        }
+    }
 }
 
 sub convert_bytes {
@@ -963,7 +1004,7 @@ sub adapt_to_command_line_options {
         'bytes-max|bmax=i' => \$filter_bytes_max,
         'count-min|cmin=i' => \$filter_count_min,
         'count-max|cmax=i' => \$filter_count_max,
-	    'memory-usage|mem' => \$track_memory,
+	    'memory-usage|mem' => \$show_memory,
         'disable-progress' => \$disable_progress,
         'output-csv|o' => \$write_messages_to_csv,
         'sort-on|so=s' => \$sort_type,
@@ -1286,13 +1327,6 @@ sub read_and_process_logs {
 
                 printf("\rProcessing line %d in file %s (%s overall%s)", $line_number, $display_filename, $overall_str, $lines_per_sec);
                 $| = 1;                                     # Flush output to stdout
-            }
-
-            if ($track_memory && $line_number % 100000 == 0) {						    # only collect memory in use around every 100000 lines processed
-                $current_memory_usage = get_memory_usage();								# track maximum memory usage
-                if ($current_memory_usage > $max_memory_usage) {
-                    $max_memory_usage = $current_memory_usage;
-                }
             }
 
             ## ThingWorx Standard Log Format (ApplicationLog, ErrorLog, ScriptLog, ...) ##
@@ -2119,14 +2153,6 @@ sub calculate_all_statistics {
             durations           => [],
         };
 
-# TO DO: shouldn't check memory on each pass; use approach like reading lines
-        if( $track_memory ) {
-            $current_memory_usage = get_memory_usage();								# track maximum memory usage
-            if ($current_memory_usage > $max_memory_usage) {
-                $max_memory_usage = $current_memory_usage;
-            }
-        }
-   
         next if !defined( $log_analysis{$bucket}{occurrences} );
 
 # TO DO: I think that I can get rid of aggregate_data now that I've simplified the data model
@@ -2243,14 +2269,6 @@ sub calculate_all_statistics {
 
             foreach my $log_key (@top_keys) {
                 my $aggregated_data = {};
-
-                # TO DO: Shouldn't check memory usage on each pass, only every few
-                if( $track_memory ) {
-                    $current_memory_usage = get_memory_usage();								# track maximum memory usage
-                    if ($current_memory_usage > $max_memory_usage) {
-                        $max_memory_usage = $current_memory_usage;
-                    }
-                } 
 
                 next if !defined( $log_messages{$category}{$log_key}{occurrences} );
 
@@ -2711,9 +2729,6 @@ sub normalize_data_for_output {
     @printed_column_widths = @rounded_column_widths;
 
     foreach my $bucket (keys %log_occurrences) {
-        my $processed_time_buckets //= 0;
-	    my $check_memory_every = $^O ne 'MSWin32' ? 50 : 500;
-		
         # scale the transferred bytes for printing the statistics table
         my $bytes = $log_stats{$bucket}{bytes};
         my $scaled_bytes = ( defined $bytes && defined $max_total{bytes} && $max_total{bytes} != 0 ) ? int(($bytes / $max_total{bytes}) * $durations_graph_width) : 0;
@@ -2761,21 +2776,7 @@ sub normalize_data_for_output {
             $log_occurrences{$bucket}{$scaled_max_key}{scaled_occurrences}--;
         }
 
-        # TO DO: Establish more graceful strategy for memory tracking on Windows (with acceptable performance)
-        if( $track_memory && $processed_time_buckets++ % $check_memory_every == 0 && $^O ne 'MSWin32' ) {
-            $current_memory_usage = get_memory_usage();
-            if ($current_memory_usage > $max_memory_usage) {
-                $max_memory_usage = $current_memory_usage;
-            }
-        }
     }
-
-    if( $track_memory ) {
-        $current_memory_usage = get_memory_usage();								# track maximum memory usage
-        if ($current_memory_usage > $max_memory_usage) {
-            $max_memory_usage = $current_memory_usage;
-        }
-    }	
 
     print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
     unless ($disable_progress) {
@@ -3976,8 +3977,37 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "HEATMAP STATISTICS", format_time( $elapsed_heatmap_statistics, 's', 'medium', " " ) ) if $heatmap_enabled;
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "HISTOGRAM STATISTICS", format_time( $elapsed_histogram_statistics, 's', 'medium', " " ) ) if $histogram_enabled;
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) ); 
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) ) if $track_memory;
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) );
+
+    # Add structural breakdown if -mem flag used and we have high-water mark data
+    if ($show_memory && %memory_high_water_marks) {
+            # Skip structures with only empty hash/array overhead (< 1KB means effectively empty)
+            my $min_size_threshold = 1024;
+
+            # Calculate total of measured structures (only those above threshold)
+            my $total_measured = 0;
+            for my $size (values %memory_high_water_marks) {
+                $total_measured += $size if $size >= $min_size_threshold;
+            }
+
+            # Sort by size descending, skip empty structures
+            my @sorted = sort { $memory_high_water_marks{$b} <=> $memory_high_water_marks{$a} }
+                         grep { $memory_high_water_marks{$_} >= $min_size_threshold }
+                         keys %memory_high_water_marks;
+
+            for my $struct (@sorted) {
+                my $size = $memory_high_water_marks{$struct};
+                my $pct = $total_measured > 0 ? ($size / $total_measured) * 100 : 0;
+
+                # Format percentage: <1% for small values, otherwise rounded
+                my $pct_str = $pct < 1 ? "(<1%)" : sprintf("(%2.0f%%)", $pct);
+
+                # Right-align percentage within a fixed width, then append to indented label
+                my $indented_label = sprintf("  %-20s %5s", $struct, $pct_str);
+                push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", $indented_label, format_bytes( $size, 'B' ) );
+            }
+    }
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
 
     push @file_details, "\n";
@@ -4382,12 +4412,14 @@ $start_time = [gettimeofday];
 read_and_process_logs();
 $end_time = [gettimeofday];
 $elapsed_read_files = tv_interval($start_time, $end_time);
+measure_memory_structures();
 
 # INITIALIZE EMPTY TIME BUCKETS #
 $start_time = [gettimeofday];
 initialize_empty_time_windows();
 $end_time = [gettimeofday];
 $elapsed_initialize_empty_time_windows = tv_interval($start_time, $end_time);
+measure_memory_structures();
 
 # GROUP SIMILAR MESSAGES TOGETHER #
 unless( $group_similar_sensitivity eq "none" ) {
@@ -4403,6 +4435,7 @@ print "Calculate statistics..." unless $disable_progress;
 calculate_all_statistics();
 $end_time = [gettimeofday];
 $elapsed_calculate_statistics = tv_interval($start_time, $end_time);
+measure_memory_structures();
 
 # CALCULATE HEATMAP BUCKETS (if enabled) #
 if ($heatmap_enabled) {
@@ -4410,6 +4443,7 @@ if ($heatmap_enabled) {
     calculate_heatmap_buckets();
     $end_time = [gettimeofday];
     $elapsed_heatmap_statistics = tv_interval($start_time, $end_time);
+    measure_memory_structures();
 }
 
 # CALCULATE HISTOGRAM BUCKETS (if enabled) - Issue #25 #
@@ -4418,6 +4452,7 @@ if ($histogram_enabled) {
     calculate_histogram_buckets();
     $end_time = [gettimeofday];
     $elapsed_histogram_statistics = tv_interval($start_time, $end_time);
+    measure_memory_structures();
 }
 
 # NORMALIZE DATA FOR CONSOLE OUTPUT #
