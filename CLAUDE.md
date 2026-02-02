@@ -26,7 +26,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Track observations for process improvement. After releases, review what worked and what caused friction. Update CLAUDE.md with agreed changes.
 
-**Observations log:** <!-- Add dated entries here as patterns are noticed -->
+**Observations log:**
+- 2026-02-02: CRITICAL - Always use `--disable-progress` when running ltl from Claude Code. Progress output wastes massive tokens/cost. This was discovered after months of wasteful execution.
 
 ## Project Overview
 
@@ -76,6 +77,8 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 ```
 
 Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-if/-ef/-hf` (pattern files), `-du` (duration unit), `-hm` (heatmap), `-help` (full help)
+
+**Hidden option for Claude Code:** `--disable-progress` - ALWAYS use this flag when running ltl to suppress progress output that wastes tokens.
 
 ## Architecture
 
