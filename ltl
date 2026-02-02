@@ -57,6 +57,7 @@ use Term::ReadKey;
 use Getopt::Long qw(:config no_ignore_case);
 use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
+use Devel::Size qw(total_size);
 # Proc::ProcessTable is loaded conditionally in get_memory_usage() based on platform
 # On Windows, Win32::Process::Info is used instead
 use List::Util qw(min max);
