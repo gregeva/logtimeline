@@ -64,12 +64,27 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 
 ## Release Process
 
-1. Update version in `ltl` (line 75: `$version_number`) - verify with `grep version_number ltl | head -1`
-2. Create release notes at `releases/v{version}.md`
-3. Create release branch from `main`: `git checkout -b release/X.Y.Z` (no `v` prefix, every release gets its own branch)
-4. PR feature branch to release branch, merge
-5. Tag from release branch: `git tag vX.Y.Z && git push origin vX.Y.Z`
-6. Post-release: merge release branch to main, close GitHub issue, update observations log
+**CRITICAL: Follow these steps exactly. Do not skip steps or change the order.**
+
+### Pre-release (for each feature/bugfix branch)
+1. Commit all changes to feature branch
+2. Push feature branch: `git push origin {feature-branch}`
+3. Update GitHub issue with completion comment
+
+### Create Release
+4. Switch to main: `git checkout main && git pull origin main`
+5. Create release branch: `git checkout -b release/X.Y.Z` (no `v` prefix)
+6. Merge each feature/bugfix branch: `git merge {branch-name} --no-edit` (repeat for all branches going into this release)
+7. Update version in `ltl` (line 74: `$version_number`)
+8. Create release notes: `releases/v{version}.md` (include all features/fixes)
+9. Commit: `git commit -am "Release vX.Y.Z"`
+10. Push release branch: `git push -u origin release/X.Y.Z`
+11. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
+
+### Post-release
+12. Merge to main: `git checkout main && git merge release/X.Y.Z --no-edit && git push origin main`
+13. Close all issues included in release: `gh issue close {number} --reason completed`
+14. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each)
 
 ### Run Directly
 ```bash
