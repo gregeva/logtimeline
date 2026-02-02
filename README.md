@@ -4,9 +4,11 @@ Have you ever wished that you could quickly identify areas of interest or hotspo
 
 When dealing with logs which have a very large amount of lines/errors/whatever, it can be quite hard to get an overall view of the file while looking at a screen full of lines representing maybe less than a second.
 
-![ltl](images/slt-30minutewindows.png)
+Here is a very old screenshot showing the tools success in visualizing millions of log lines over a time range in a single screen.
 
-ltl, or log time line has come a long way since its initial release a few months ago.  The usage principle is basically to a) read log lines and try to establish the included time, b) also pull out message details and stats, c) filter in or out the lines based on provided command line options.  Use it to search for patterns, slowness, determine frequency and spacing of calls, and establish performance profile/baseline of your APIs or services.  See help for a list of all of the options and try them out yourself.
+![ltl - very old screenshot](images/slt-30minutewindows.png)
+
+`ltl`, or log timeline has come a long way since its initial release bacin early 2025.  The usage principle is basically to a) read log lines and try to establish the included time, b) also pull out message details and stats, c) filter in or out the lines based on provided command line options.  Use it to search for patterns, slowness, determine frequency and spacing of calls, and establish performance profile/baseline of your APIs or services.  See help for a list of all of the options and try them out yourself.
 
 Static binary packages are provided for Windows, Ubuntu, and Mac OS.  Download, rename to ltl, and place somewhere in your path.
 
@@ -56,6 +58,15 @@ The heatmap mode (`-hm` or `--heatmap`) replaces the latency statistics column w
 
 **Light background support (v0.8.1):**
 Terminal background color is auto-detected using OSC 11 query. On light/white backgrounds, the heatmap uses pale-to-bright color gradients instead of dark-gray-to-bright, improving visibility. Use `-lbg` or `--light-background` to explicitly force light background mode.
+
+# Screenshots
+
+## GC Analysis using Heatmap and Histogram
+
+Here is a Full GC loop explored through zooming in on the specific time range, activating heatmap with 100 character width, enabling duration and bytes histograms, and setting the time-window bucking to 1 minute.
+
+![Full GC loop explorered using heatmap and histogram views](images/gc-log-analysis_full-gc-loop_histogram-and-heatmap.png)
+
 
 # Known Issues
 
