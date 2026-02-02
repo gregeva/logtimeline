@@ -2,195 +2,112 @@
 
 **Issue:** #45
 **Branch:** `45-memory-tracking-improvements`
-**Status:** Planning
+**Status:** Complete
 
 ## Overview
 
 Improve memory tracking to provide accurate, low-overhead measurements with structural breakdown showing where memory is consumed.
 
-## Background
+## Implementation Summary
 
-The current implementation uses `Proc::ProcessTable` (Unix) and `Win32::Process::Info` (Windows) with frequent sampling during processing. Benchmark results show:
+### Default Behavior
+- RSS (Resident Set Size) high-water mark is always captured and displayed as MAXIMUM MEMORY USED in the summary table
+- Measurement occurs after each major processing phase using `measure_memory_structures()`
 
-| Method | Per Call (macOS) | Notes |
-|--------|------------------|-------|
-| `Proc::ProcessTable` | ~10ms | Returns incorrect values on macOS |
-| `ps` command | ~2ms | Correct values, 5x faster |
+### With `-mem` Flag
+- Additionally displays structural breakdown showing memory usage by data structure
+- Uses `Devel::Size` to measure individual structures
+- Shows percentage breakdown relative to total measured structures
 
-Both approaches are too slow for per-line or per-bucket tracking and provide only total RSS without structural insight.
+### Key Changes
+1. Replaced scattered `get_memory_usage()` calls with centralized `measure_memory_structures()` function
+2. High-water mark tracking ensures peak values are captured even when structures are later cleared
+3. Measurement points after: `read_and_process_logs()`, `initialize_empty_time_windows()`, `calculate_all_statistics()`, `calculate_heatmap_buckets()`, `calculate_histogram_buckets()`
 
-## Goals
+### Data Structures Tracked
+- `%log_occurrences` - Count tallies across time buckets
+- `%log_analysis` - Time bucket statistics (including durations array)
+- `%log_messages` - Message groupings
+- `%log_stats` - Statistical calculations
+- `%log_threadpools` - Threadpool data
+- `%threadpool_activity` - Threadpool activity
+- `%log_userdefinedmetrics` - User-defined metrics
+- `%heatmap_data` / `%heatmap_data_hl` - Heatmap bucket counts
+- `%heatmap_raw` / `%heatmap_raw_hl` - Raw heatmap values (when heatmap enabled)
+- `%histogram_values` - Histogram values
 
-1. Low runtime overhead (single measurement point)
-2. Structural breakdown showing memory usage by data structure
-3. Cross-platform consistency
-4. Actionable insight for optimization work
+## Output Format
 
-## Approach: Checkpoint + Structure Sizing
-
-Measure RSS once at peak memory usage (after all data structures are populated), then use `Devel::Size` to measure individual structures and calculate percentage breakdown.
-
-### Measurement Point
-
-After `read_and_process_logs()` completes - this is when:
-- `%log_occurrences` is fully populated
-- `%log_analysis` has all time buckets
-- `%log_messages` contains all message groupings
-- `%heatmap_data` / `%histogram_values` are populated (if enabled)
-
-### Key Data Structures to Measure
-
-From `ltl` globals (lines 82-233):
-
-| Structure | Purpose | Expected Impact |
-|-----------|---------|-----------------|
-| `%log_occurrences` | Count tallies across time buckets | High - grows with unique messages x buckets |
-| `%log_analysis` | Time bucket statistics | Medium - one entry per bucket |
-| `%log_messages` | Message groupings | High - stores message text |
-| `%log_stats` | Statistical calculations | Low - derived data |
-| `%heatmap_data` | Histogram bucket counts | Medium - when heatmap enabled |
-| `%histogram_values` | Raw values for histogram | High - when histogram enabled |
-| `@heatmap_boundaries` | Bucket boundaries | Low - small array |
-
-### Special Case: group-similar
-
-The `group-similar` feature consolidates messages, which can shift memory from `%log_messages` to grouping structures. This should be noted in output when active.
-
-## Implementation Plan
-
-### Phase 1: Add Devel::Size dependency
-
-- Add to `build/generate-cpanfile.sh`
-- Update build documentation
-
-### Phase 2: Create measurement function
-
-```perl
-sub measure_memory_structures {
-    return {} unless $track_memory;
-
-    require Devel::Size;
-
-    return {
-        log_occurrences => Devel::Size::total_size(\%log_occurrences),
-        log_analysis    => Devel::Size::total_size(\%log_analysis),
-        log_messages    => Devel::Size::total_size(\%log_messages),
-        log_stats       => Devel::Size::total_size(\%log_stats),
-        heatmap_data    => Devel::Size::total_size(\%heatmap_data),
-        histogram_values => Devel::Size::total_size(\%histogram_values),
-        # ... other structures
-    };
-}
-```
-
-### Phase 3: Replace current tracking
-
-- Remove frequent `get_memory_usage()` calls throughout code
-- Add single measurement call after `read_and_process_logs()`
-- Optionally keep one RSS measurement for total process memory
-
-### Phase 4: Update output
-
-Enhance summary table output when `-mem` flag is used. Structure breakdown appears as indented sub-items under MEMORY USED, with percentages right-aligned:
-
+### Default (no flags)
 ```
   TOTAL TIME                        2.1 sec
-  MEMORY USED                       69.0 MB
-    log_messages          (59%)     40.5 MB
-    log_occurrences       (31%)     21.4 MB
-    log_stats             ( 5%)      3.7 MB
-    histogram_values      ( 4%)      3.1 MB
-    heatmap_data          (<1%)    214.4 KB
-    log_analysis          (<1%)     45.6 KB
+  MAXIMUM MEMORY USED               83.0 MB
   ─────────────────────────────────────────
 ```
 
-**Requirements:**
-- Only display structures that are populated (non-empty). Skip structures with zero size to keep output clean and relevant to the actual run configuration.
-- Use `<1%` for percentages below 1%.
-- If the summary table width needs to increase to accommodate memory breakdown, all existing content (categories, values) must be widened proportionally so that column justification works as expected.
+### With `-mem` flag
+```
+  TOTAL TIME                        2.1 sec
+  MAXIMUM MEMORY USED               83.0 MB
+    log_messages         (59%)      12.2 MB
+    log_analysis         (41%)       8.5 MB
+    log_stats            (<1%)       5.4 kB
+    log_occurrences      (<1%)       2.4 kB
+  ─────────────────────────────────────────
+```
 
-### Phase 5: Optimize RSS measurement
+**Notes:**
+- Only structures with >= 1KB are displayed (empty structures are hidden)
+- Percentages are relative to total measured structures, not RSS
+- Each structure's high-water mark may be captured at different measurement points
+- RSS includes Perl interpreter overhead and loaded modules not reflected in structure totals
 
-- Linux: Use direct `/proc/$$/statm` access (sub-millisecond)
-- macOS: Use `ps -o rss=` command (~2ms)
-- Windows: Single measurement only (avoid repeated slow calls)
+## Performance Results
 
-## Performance Benchmarking
-
-### Before/After Comparison
-
-Capture and store performance measurements to validate the improvement:
-
-**Baseline (current implementation):**
-- Run `prototype/memory-benchmark.pl` to establish per-call overhead
-- Measure total runtime with `-mem` on test files
-- Record in this document
-
-**After implementation:**
-- Re-run benchmark to measure new per-call overhead
-- Measure total runtime with `-mem` on same test files
-- Calculate improvement percentage
-
-### Benchmark Results
-
-#### Baseline (before changes)
-
-**Per-call overhead (from `prototype/memory-benchmark.pl`):**
-
-| Platform | Method | Per Call |
-|----------|--------|----------|
-| macOS | `Proc::ProcessTable` | 9.84 ms |
-| macOS | `ps` command | 2.03 ms |
-| Linux | TBD | TBD |
-| Windows | TBD | TBD |
-
-**Test file: `ScriptLog-DPMExtended-clean.log` (122,808 lines)**
+### Before Implementation
+**Test file: `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` (277MB, 1,430,678 lines)**
 
 | Mode | Total Time | CALCULATE STATISTICS | SCALE DATA TO TERMINAL |
 |------|------------|---------------------|------------------------|
-| Without `-mem` | 2.0 sec | 28.9 msec | 486 usec |
-| With `-mem` | 2.1 sec | 101.2 msec | 30.1 msec |
+| Without `-mem` | 16.5 sec | 465 msec | 655 usec |
+| With `-mem` | 17.1 sec | 712 msec | 140 msec |
 
-**Overhead from `-mem` flag:**
-- CALCULATE STATISTICS: 3.5x slower (72.3ms added)
-- SCALE DATA TO TERMINAL: 62x slower (29.6ms added)
-- Total added overhead: ~102ms
+Overhead: ~600ms (3.6% of total runtime)
 
-#### After Implementation
+### After Implementation
 
-| Platform | Method | Per Call | Test File Runtime | Improvement |
-|----------|--------|----------|-------------------|-------------|
-| macOS | TBD | TBD | TBD | TBD |
-| Linux | TBD | TBD | TBD | TBD |
-| Windows | TBD | TBD | TBD | TBD |
+| Mode | Total Time | CALCULATE STATISTICS | SCALE DATA TO TERMINAL |
+|------|------------|---------------------|------------------------|
+| Without `-mem` | 16.3 sec | 455 msec | 619 usec |
+| With `-mem` | 16.3 sec | 457 msec | 587 usec |
 
-## Testing
+Overhead: **~0ms** (within measurement noise)
 
-Use test files from `docs/test-logs.md`:
-- Heatmap tests: `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log`
-- Large file: `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt`
+**Improvement:** ~600ms overhead eliminated
 
-Validation:
-- Runtime with `-mem` flag enabled (before vs after)
-- Accuracy of reported values vs system tools (`ps`, Activity Monitor)
-
-## Files to Modify
+## Files Modified
 
 - `ltl` - Main implementation
-- `build/generate-cpanfile.sh` - Add Devel::Size dependency
-- `CLAUDE.md` - Update architecture notes if needed
+  - Added `%memory_high_water_marks` global hash
+  - Added `measure_memory_structures()` function
+  - Updated `print_summary_table()` for structural breakdown output
+  - Renamed `$track_memory` to `$show_memory`
+- `build/generate-cpanfile.sh` - Devel::Size dependency auto-detected
 
 ## Progress
 
-- [x] Benchmark current implementation (`prototype/memory-benchmark.pl`)
-- [ ] Prototype Devel::Size approach
-- [ ] Implementation
-- [ ] Testing
-- [ ] Documentation
+- [x] Benchmark current implementation
+- [x] Prototype Devel::Size approach
+- [x] Implementation
+  - [x] Add `%memory_high_water_marks` global hash
+  - [x] Add `measure_memory_structures()` function with high-water mark tracking
+  - [x] Add measurement calls after key subroutines in MAIN
+  - [x] Remove scattered `get_memory_usage()` calls from loops
+  - [x] Add structural breakdown to summary table output
+  - [x] Always display RSS, structural breakdown only with `-mem`
+- [x] Testing
+- [x] Documentation
 
 ## References
 
 - [Devel::Size on CPAN](https://metacpan.org/pod/Devel::Size)
-- [Perl Memory Use - Tim Bunce](https://www.slideshare.net/Tim.Bunce/perl-memory-use-lpw2013)
-- [perlmaven - How much memory does my Perl application use?](https://perlmaven.com/how-much-memory-does-the-perl-application-use)
