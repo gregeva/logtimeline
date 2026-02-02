@@ -92,7 +92,7 @@ my $column_count_pre_graph = 2;		            # timestamp + legend is the default
 my @graph_columns = qw( duration bytes count );
 my ( @printed_column_widths, @printed_column_spacing, @printed_column_names );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
-my ( $print_durations, $track_memory ) = ( 0, 0 );
+my ( $print_durations, $track_memory, $disable_progress ) = ( 0, 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
 my ( $filter_count_min, $filter_count_max );
@@ -964,6 +964,7 @@ sub adapt_to_command_line_options {
         'count-min|cmin=i' => \$filter_count_min,
         'count-max|cmax=i' => \$filter_count_max,
 	    'memory-usage|mem' => \$track_memory,
+        'disable-progress' => \$disable_progress,
         'output-csv|o' => \$write_messages_to_csv,
         'sort-on|so=s' => \$sort_type,
         'sort-ascending|sa' => \$sort_ascending,
@@ -1262,7 +1263,7 @@ sub read_and_process_logs {
             my ( $timestamp, $threadname );
             $total_lines_read++;
 
-            if ($total_lines_read % 4999 == 0) {             # print progress based on total lines read (not per-file) to handle many small files
+            if ($total_lines_read % 4999 == 0 && !$disable_progress) {   # print progress based on total lines read (not per-file) to handle many small files
                 my $now = Time::HiRes::time();
                 push @progress_history, [ $now, $total_lines_read ];
                 shift @progress_history if @progress_history > 50;          # keep last 50 samples for rolling average
@@ -1748,11 +1749,13 @@ sub read_and_process_logs {
 
         close $fh;
 
-        print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
+        print "\r" . " " x ($terminal_width - 1) . "\r" unless $disable_progress;		# clear the line of progress messages when moving on to the next file
     }
-    print "\r$colors{'bright-green'}Processing completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Processing completed." ) );
-    print "\n";
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Processing completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Processing completed." ) );
+        print "\n";
+    }
 
     return;
 }
@@ -1833,8 +1836,10 @@ sub calculate_heatmap_buckets {
         delete $heatmap_raw_hl{$bucket};
     }
 
-    print "\r$colors{'bright-green'}Calculating heatmap buckets completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Calculating heatmap buckets completed." ) );
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Calculating heatmap buckets completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Calculating heatmap buckets completed." ) );
+    }
 
     return;
 }
@@ -1953,8 +1958,10 @@ sub calculate_histogram_buckets {
         @{$histogram_values{$metric}} = ();
     }
 
-    print "\r$colors{'bright-green'}Calculating histogram statistics completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Calculating histogram statistics completed." ) );
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Calculating histogram statistics completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Calculating histogram statistics completed." ) );
+    }
 
     # Verbose output for bucket calculation (Issue #25)
     if ($verbose && @metrics_with_data) {
@@ -2093,7 +2100,7 @@ sub calculate_histogram_layout {
 
 sub calculate_all_statistics {
 
-    print "\rCalculating statistics...";
+    print "\rCalculating statistics..." unless $disable_progress;
 
     foreach my $bucket (sort { $a <=> $b } keys %log_analysis) {
         my $aggregated_data = {
@@ -2334,8 +2341,10 @@ sub calculate_all_statistics {
     }
 
     print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
-    print "\r$colors{'bright-green'}Calculating statistics completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Calculating statistics completed." ) );
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Calculating statistics completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Calculating statistics completed." ) );
+    }
     print "\n";
 
     return;
@@ -2394,16 +2403,18 @@ sub initialize_empty_time_windows {
     unless( $omit_empty ) {
         my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;
 
-        print "\rInitializing empty time windows...";
+        print "\rInitializing empty time windows..." unless $disable_progress;
 
         for (my $bucket = $start_bucket; $bucket <= $output_timestamp_max; $bucket += $bucket_size_seconds) {
             $log_occurrences{$bucket}{'empty'}{'occurrences'} = 0;
         }
 
-        print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
-        print "\r$colors{'bright-green'}Initializing empty time windows completed.$colors{'NC'}";
-        print " " x ( $terminal_width - length( "Initializing empty time windows completed." ) );
-        print "\n";
+        unless ($disable_progress) {
+            print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
+            print "\r$colors{'bright-green'}Initializing empty time windows completed.$colors{'NC'}";
+            print " " x ( $terminal_width - length( "Initializing empty time windows completed." ) );
+            print "\n";
+        }
     }
 
     return;
@@ -2448,7 +2459,7 @@ sub normalize_data_for_output {
 
 # TO DO : user defined value will need to have a max total determined for scaling and printing
 
-    print "\rScaling and normalizing data...";
+    print "\rScaling and normalizing data..." unless $disable_progress;
 
     push @output_columns, "timestamp";
 
@@ -2767,8 +2778,10 @@ sub normalize_data_for_output {
     }	
 
     print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
-    print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Scaling and normalizing data completed." ) );
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Scaling and normalizing data completed." ) );
+    }
 
     return;
 }
@@ -4386,7 +4399,7 @@ unless( $group_similar_sensitivity eq "none" ) {
 
 # CALCULATE STATISTICS #
 $start_time = [gettimeofday];
-print "Calculate statistics...";
+print "Calculate statistics..." unless $disable_progress;
 calculate_all_statistics();
 $end_time = [gettimeofday];
 $elapsed_calculate_statistics = tv_interval($start_time, $end_time);
