@@ -61,3 +61,9 @@ What I observed was:
 - two histograms showing the distribution of GC event timing, as well as sizes of the reclaimed space
 - a heatmap showing the distribution of the number of GC events, their timing, as well as their evolution over time (increasing as the days passed)
 - a list at the end detailing the most common GC event types, their total occurrences, statistics like minimum, mean, P99.9, and the total time
+
+Here is a representative command which interestingly shows GC activity and Full GC cycles:
+
+```bash
+ltl -st "2025-05-14 09:07" -et "2025-05-14 09:28" -oe -hg -hm ./logs/GC/logs-gc/gc-twx01-twx-thingworx-1.out.4 ./logs/GC/logs-gc/gc-twx01-twx-thingworx-1.out.4 ./logs/GC/logs-gc/gc-twx01-twx-thingworx-1.out.5 -bs 1 -osum -hmw 100
+```
