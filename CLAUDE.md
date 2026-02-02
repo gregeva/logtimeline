@@ -8,62 +8,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Core Principles
 
-1. **The way is found on the path.** We discover the right approach through iteration: ideas → decisions → research → prototypes → learning → new decisions → adapting. Don't try to solve everything upfront. Take small steps, learn from each one, and let understanding emerge.
-
-2. **Challenge and contribute.** Bring ideas to the table. Question assumptions. Offer alternatives. Push back when something seems wrong. A good collaborator doesn't just execute - they help think through problems.
-
-3. **Ask, don't assume.** When uncertain about approach, scope, or priority - ask. A short question is better than a long wrong answer.
-
-4. **Small steps with confirmation.** Present one idea or change at a time. Wait for confirmation before proceeding. Do not chain multiple decisions together.
-
-5. **No unsolicited implementation.** Do not write production code until explicitly asked. Research and planning are not permission to implement.
-
-6. **Dialog over monologue.** Keep responses concise and conversational. Avoid lengthy summaries or walls of text. If you find yourself writing more than a few paragraphs, stop and ask a clarifying question instead.
+1. **The way is found on the path.** We discover the right approach through iteration. Don't try to solve everything upfront. Take small steps, learn from each one.
+2. **Challenge and contribute.** Bring ideas to the table. Question assumptions. Push back when something seems wrong.
+3. **Ask, don't assume.** When uncertain about approach, scope, or priority - ask.
+4. **Small steps with confirmation.** Present one idea or change at a time. Wait for confirmation before proceeding.
+5. **No unsolicited implementation.** Do not write production code until explicitly asked.
+6. **Dialog over monologue.** Keep responses concise. If writing more than a few paragraphs, stop and ask a clarifying question instead.
 
 ### Anti-patterns to Avoid
 
 - Writing code "to show what it would look like" without being asked
-- Presenting completed work for review instead of collaborating on it
 - Making architectural decisions independently then defending them
 - Lengthy explanations when a question would suffice
-- Assuming silence means approval
 - Trying to solve everything in one pass instead of iterating
 
 ### Continuous Improvement
 
-**Context usage and efficiency matter.** Session limits and user time are finite resources. Always consider:
-- Can this be done in fewer steps?
-- Can multiple independent actions be parallelized?
-- Is this output necessary, or am I over-explaining?
-- Am I doing work now that should be part of the normal workflow (and wasn't)?
-- **Stop and ask for direction** rather than autonomously exploring multiple paths. A quick yes/no question costs far less than going down the wrong rabbit hole.
+Track observations for process improvement. After releases, review what worked and what caused friction. Update CLAUDE.md with agreed changes.
 
-**Track observations for process improvement.** Note patterns during collaboration:
-- What workflows are working well?
-- What's causing friction, rework, or wasted effort?
-- What steps keep getting missed or forgotten?
-- What could be automated or templated?
-
-**Review after releases.** After minor version releases, initiate a brief retrospective discussion:
-- Share observations noted during the release cycle
-- Propose specific workflow improvements
-- Update CLAUDE.md with agreed changes
-
-**Current observations log:**
-<!-- Add dated entries here as patterns are noticed -->
-- 2026-02-01: GitHub issue updates were missed during v0.9.1 development, requiring 11% session usage for retroactive updates. Root cause: documentation step existed but wasn't prominent/mandatory enough. Fix: Added explicit "GitHub Issue Updates (MANDATORY)" section with specific triggers and commands.
-- 2026-02-01: Made code changes for issue #13 while on branch `25-histogram-charts`. Root cause: didn't verify branch before starting work. Fix: Added "Branch Verification (MANDATORY - FIRST STEP)" section requiring branch check before any code changes.
-- 2026-02-01: Version number in `ltl` (line 73) was not updated for v0.9.1 release. Root cause: Release Checklist exists but version update step not enforced. Fix: Added verification step to release process.
-- 2026-02-01: Insisted that Unicode full block characters (█) would render seamlessly between rows without researching terminal/font rendering issues. When user challenged this, defended position rather than investigating. Root cause: overconfidence in assumptions about rendering without researching how terminals and fonts actually handle block characters. Fix: When dealing with visual/rendering concerns, research how different terminals and fonts behave, and look for established developer solutions (in this case: applying same ANSI color to both foreground AND background eliminates whitespace gaps).
-- 2026-02-01: Researched and proposed linear bin sizing algorithms (Sturges, Rice, Scott, Freedman-Diaconis) for logarithmic histogram bucketing. When user questioned applicability, doubled down trying to force-fit rather than stepping back. Root cause: failed to validate that research matched the actual problem domain (log-scale vs linear-scale). Fix: When an approach requires forcing or workarounds, treat this as a red flag that the fundamental approach may be wrong. Step back, re-evaluate assumptions, and research domain-specific solutions (in this case, HdrHistogram's buckets-per-decade model).
-- 2026-02-01: Marked documentation as "Done" in feature progress tracking before actually completing it (help text, release notes). Root cause: premature status update without verifying all documentation tasks. Fix: Don't mark documentation complete until help/usage text updated, release notes created, and feature doc finalized.
-- 2026-02-01: Created release branch with wrong naming convention (`release/v0.10.0` instead of `release/0.10.0`). Root cause: no documented release branch naming convention in CLAUDE.md. Fix: Document release branch naming convention.
-- 2026-02-01: Attempted to create PR directly to main instead of to release branch first. Root cause: release workflow not clearly documented. Fix: Document the release branch workflow (create release branch → PR feature into release → tag from release branch).
-- 2026-02-01: Dynamic height scaling for histograms was initially too aggressive (scaling up at small terminal heights). Root cause: misunderstood user intent - histograms should be compact by default, only grow for large displays. Fix: Always clarify scaling direction (up vs down) and thresholds with user before implementing.
-- 2026-02-01: Forgot to do post-mortem and continuous improvement activities after release. Root cause: no explicit step in release workflow requiring observations log update. Fix: Add "Update CLAUDE.md observations log" as mandatory post-release step.
-- 2026-02-02: Skipped continuous improvement step again after v0.10.1 patch release despite having added it as mandatory in previous session. Root cause: the fix from previous observation (adding to release checklist) was never actually implemented - only noted as a fix. Fix: Actually add "Update CLAUDE.md observations log" to the Release Checklist section below.
-- 2026-02-02: Release branch `release/0.10.0` was never merged back to `main` after v0.10.0 release. Discovered when bug fix branch based on `main` didn't have the histogram feature code. Root cause: release workflow doesn't include step to merge release branch back to main after tagging. Fix: Add "Merge release branch to main" as post-release step in Release Checklist.
-- 2026-02-02: Patch release v0.10.1 was done on existing `release/0.10.0` branch instead of creating a new `release/0.10.1` branch. Root cause: assumed patch releases could reuse existing release branch. Fix: Every release (major, minor, or patch) must have its own release branch named `release/X.Y.Z`.
+**Observations log:** <!-- Add dated entries here as patterns are noticed -->
 
 ## Project Overview
 
@@ -76,159 +39,36 @@ The repository contains three tools:
 
 ## Build Commands
 
-### Install Dependencies (macOS)
+### Install Dependencies
 ```bash
-brew install cpanminus
-cpanm PAR::Packer
+# macOS
+brew install cpanminus && cpanm PAR::Packer
 cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
-```
 
-### Install Dependencies (Ubuntu/Linux)
-```bash
+# Ubuntu/Linux
 sudo apt-get install build-essential perl perl-base perl-modules libperl-dev cpanminus
 cpanm PAR::Packer
 cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
 ```
 
-### Build Static Binaries (Local)
+### Build Static Binaries
 ```bash
-# macOS (specify architecture)
-./build/macos-package.sh arm64    # Output: ltl_static-binary_macos-arm64
-./build/macos-package.sh x86_64   # Output: ltl_static-binary_macos-x86_64
-
-# Ubuntu/Linux (requires Docker)
-./build/ubuntu-package.sh amd64   # Output: ltl_static-binary_ubuntu-amd64
-./build/ubuntu-package.sh arm64   # Output: ltl_static-binary_ubuntu-arm64
-
-# Windows (requires Docker + Wine)
-./build/windows-package.sh        # Output: ltl_static-binary_windows-amd64.exe
+./build/macos-package.sh arm64|x86_64    # macOS
+./build/ubuntu-package.sh amd64|arm64    # Linux (requires Docker)
+./build/windows-package.sh               # Windows (requires Docker + Wine)
 ```
 
-### CI/CD Automated Builds
-
-The project uses GitHub Actions for automated cross-platform builds. See `.github/workflows/release-build.yml`.
-
-**Triggers:**
-- Version tags (`v*`) - creates GitHub Release with all binaries attached
-- `workflow_dispatch` - manual trigger for testing (no release created)
-
-**Output Binaries (4 total):**
-| Platform | Binary Name |
-|----------|-------------|
-| macOS ARM64 | `ltl_static-binary_macos-arm64` |
-| Ubuntu amd64 | `ltl_static-binary_ubuntu-amd64` |
-| Ubuntu arm64 | `ltl_static-binary_ubuntu-arm64` |
-| Windows amd64 | `ltl_static-binary_windows-amd64.exe` |
-
-**Manual Testing:**
-```bash
-# Trigger workflow manually
-gh workflow run release-build.yml
-
-# Watch progress
-gh run watch
-
-# Download artifacts from latest run
-gh run download
-```
+### CI/CD
+GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflows/release-build.yml`.
 
 ## Release Process
 
-### Overview
-Every release requires a release notes file in the `releases/` folder. The workflow will fail if release notes are not found.
-
-### Steps
-
-1. **Update version number** in `ltl` (line 75: `$version_number`)
-
-2. **Create release notes** at `releases/v{version}.md` (e.g., `releases/v0.8.2.md`):
-   ```markdown
-   ## What's New
-   - Feature 1 description
-   - Feature 2 description
-
-   ## Bug Fixes
-   - Fix 1 description
-
-   ## Breaking Changes
-   - Any breaking changes (or "None")
-
-   ## Upgrade Notes
-   - Migration instructions if needed (or "No special steps required")
-   ```
-
-3. **Commit changes** to feature branch
-
-4. **Create release branch** from `main` (naming convention: `release/X.Y.Z` without `v` prefix).
-   **Every release must have its own branch** - including patch releases (e.g., `release/0.10.1` not reusing `release/0.10.0`):
-   ```bash
-   git checkout main && git pull
-   git checkout -b release/0.10.0
-   git push origin release/0.10.0
-   ```
-
-5. **Create PR from feature branch to release branch** and merge
-
-6. **Create and push version tag** from release branch:
-   ```bash
-   git checkout release/0.10.0 && git pull
-   git tag v0.10.0
-   git push origin v0.10.0
-   ```
-
-7. **Workflow automatically**:
-   - Builds all 4 binaries
-   - Creates GitHub Release with your release notes
-   - Attaches binaries to release
-
-8. **Post-release**: Update CLAUDE.md observations log with lessons learned
-
-### Pre-Release Versions
-Tags containing `-` are marked as pre-releases (e.g., `v0.8.2-beta`, `v0.8.2-rc1`).
-Release notes are still required: `releases/v0.8.2-rc1.md`
-
-```bash
-git tag v0.8.2-rc1
-git push origin v0.8.2-rc1
-```
-
-### Release Checklist
-- [ ] Version number updated in `ltl` (line 73: `$version_number`) - **VERIFY with `grep version_number ltl | head -1`**
-- [ ] Release notes created at `releases/v{version}.md`
-- [ ] All tests pass locally
-- [ ] Feature documentation updated in `features/`
-- [ ] Help/usage text updated in `ltl` if new options added
-- [ ] CLAUDE.md updated if architecture changed
-- [ ] Release branch created (`release/X.Y.Z` - no `v` prefix)
-- [ ] PR created from feature branch to release branch and merged
-- [ ] Tag created and pushed from release branch (`v` prefix on tag)
-- [ ] After tagging, verify version matches: `./ltl -version` should show the tagged version
-- [ ] Merge release branch to `main`: `git checkout main && git merge release/X.Y.Z && git push origin main`
-- [ ] GitHub issue closed with completion comment
-- [ ] CLAUDE.md observations log updated with lessons learned
-
-### Verifying a Release
-After the workflow completes:
-```bash
-# View the release
-gh release view v0.8.2
-
-# Download and test binaries
-gh release download v0.8.2
-./ltl_static-binary_macos-arm64 -version
-```
-
-### Troubleshooting
-If the release workflow fails with "Release notes file not found":
-1. Ensure `releases/v{version}.md` exists (e.g., `releases/v0.8.2.md`)
-2. Commit and push the release notes file
-3. Delete the tag and re-create it:
-   ```bash
-   git tag -d v0.8.2
-   git push origin :refs/tags/v0.8.2
-   git tag v0.8.2
-   git push origin v0.8.2
-   ```
+1. Update version in `ltl` (line 75: `$version_number`) - verify with `grep version_number ltl | head -1`
+2. Create release notes at `releases/v{version}.md`
+3. Create release branch from `main`: `git checkout -b release/X.Y.Z` (no `v` prefix, every release gets its own branch)
+4. PR feature branch to release branch, merge
+5. Tag from release branch: `git tag vX.Y.Z && git push origin vX.Y.Z`
+6. Post-release: merge release branch to main, close GitHub issue, update observations log
 
 ### Run Directly
 ```bash
@@ -240,7 +80,6 @@ Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV ou
 ## Architecture
 
 ### Code Structure (ltl)
-The main script is organized into three sections:
 - **GLOBALS** (lines 74-232): Version, configuration, data structures, command-line options
 - **SUBS** (lines 235-2498): Processing and output subroutines
 - **MAIN** (lines 2499+): Execution flow
@@ -250,564 +89,68 @@ The main script is organized into three sections:
 - `%log_analysis` - Time bucket statistics
 - `%log_messages` - Message groupings
 - `%log_stats` - Statistical calculations (min/max/avg/stddev/percentiles)
-- `%log_threadpools` / `%threadpool_activity` - Thread pool tracking
-- `%log_userdefinedmetrics` - Custom metrics framework
-- `%heatmap_data` - Histogram bucket counts per time bucket for heatmap visualization
-- `@heatmap_boundaries` - Pre-calculated logarithmic/linear bucket boundaries (array has bucket_count+1 elements; boundaries[0]=min, boundaries[bucket_count]=max)
+- `%heatmap_data` - Histogram bucket counts per time bucket
+- `@heatmap_boundaries` - Logarithmic bucket boundaries (N+1 elements for N columns)
 
-### Output Column Layout System
-
-The bar graph output uses a sophisticated column layout system with spacing and padding. Understanding this is critical for alignment.
-
-**Key Width Variables:**
-- `$terminal_width` - Total terminal width (e.g., 120)
-- `$timestamp_length` - Width allocated for timestamp column
-- `$legend_length` - Width allocated for legend column (log level counts)
-- `$max_graph_width` - Space for all bar graph columns (calculated as `$terminal_width - $legend_length - $timestamp_length - $durations_graph_width`)
-- `$durations_graph_width` - Width for heatmap/statistics column (= `$graph_column_padding_latency + $heatmap_width + $graph_column_padding_all`)
-- `%graph_width` - Hash mapping column numbers to their allocated widths
-
-**Padding Constants (line ~90):**
-- `$graph_column_padding_all = 1` - Trailing padding after all columns
-- `$graph_column_padding_timestamp = 1` - Padding for timestamp column
-- `$graph_column_padding_legend = 0` - Padding for legend column
-- `$graph_column_padding_count = 2` - Padding for count column (includes `│` separator)
-- `$graph_column_padding_other = 1` - Padding for other metric columns
-- `$graph_column_padding_latency = 3` - Padding before heatmap/latency column
-
-**Column Separator Behavior:**
-- The `│` character is used as a column separator
-- For the heatmap column: `│` (1 char) + space (1 char padding) + content (`$heatmap_width` chars) + trailing space (1 char)
-- The `$printed_chars` variable tracks how many characters have been printed on the current line
-- Missing padding is calculated as: `$terminal_width - $printed_chars - $durations_graph_width`
-
-**Heatmap Column Structure:**
-When heatmap is enabled, the heatmap column replaces the latency statistics column:
-- Separator: `│` (1 char)
-- Padding: ` ` (1 space)
-- Content: heatmap data or scale values (`$heatmap_width` chars, default 52)
-- Trailing: ` ` (1 space)
-
-**Footer Alignment:**
-The footer scale must align with the heatmap data rows:
-- Footer uses `┴` at the same position as the data row's `│`
-- Scale content starts after one padding character (like the space after `│`)
-- Scale labels at 0% position should left-align with first heatmap column
-- Scale labels at 100% position should right-align with last heatmap column
-
-**Boundary Array Indexing:**
-For a heatmap with N display columns (default 52):
-- `@heatmap_boundaries` has N+1 elements (indices 0 through N)
-- `boundaries[0]` = minimum value
-- `boundaries[N]` = maximum value
-- Display column i covers range `[boundaries[i], boundaries[i+1])`
-- To get the value at 100% position, use `boundaries[N]`, NOT `boundaries[N-1]`
+### Output Column Layout
+The bar graph uses a column layout system with multiple width variables and padding constants. For detailed technical documentation, see `features/column-layout-refactor.md` (issue #33).
 
 ### Core Processing Flow
 1. `adapt_to_command_line_options()` - Parse command line
 2. `read_and_process_logs()` - Stream log files, extract timestamps/messages
-3. `calculate_all_statistics()` / `calculate_statistics()` - Compute statistics per bucket
+3. `calculate_all_statistics()` - Compute statistics per bucket
 4. `normalize_data_for_output()` - Prepare display data
 5. `print_bar_graph()` - Render time-bucket visualization
-6. `print_summary_table()` / `print_message_summary()` - Output statistics
+6. `print_summary_table()` - Output statistics
 
 ### Platform-Specific Code
 - Unix: Uses `Proc::ProcessTable` for memory tracking
 - Windows: Uses `Win32::Process::Info` instead
 - Platform detection via `$^O eq 'MSWin32'`
-- Separate cpanfiles: `build/cpanfile` (Unix) and `build/cpanfile.windows`
-
-## Development Notes
-
-### Dependency Management
-Run `./build/generate-cpanfile.sh` to regenerate cpanfile from script imports. It scans `use`/`require` statements and filters platform-specific modules.
-
-### Feature Documentation
-Feature requirements and test plans are in `features/` directory. Recent features include quantile optimization and custom metrics framework.
-
-### Known Limitations
-- Millisecond precision not yet supported (second-level only)
-- Long filenames with many filters can exceed filesystem limits
-- CSV output may skip metrics when using `-ov` flag
-
-### TO-DO Items
-Active development items are documented in comments at the top of the `ltl` script (lines 3-50), including data model refactoring, heatmap visualization, and additional log format support.
 
 ## Development Workflow
 
-When working on issues and new features, follow this workflow to keep the project documentation current. **This workflow is mandatory** - always check and update feature documentation as you progress through each phase.
+Each issue gets its own branch: `{issue-number}-{short-description}`. **CRITICAL: Verify branch before making code changes.** Do not write production code until implementation plan is approved.
 
-Each issue being worked on should have its own branch with the GitHub Issue ID number as the start of the branch name, followed by an appropriate short name for the given issue (which fits git branch naming rules).  Work progress should be tracked against this branch with commits containing details included and changes made.
-
-**CRITICAL: Do not write production code until the implementation plan has been reviewed and approved by the user.** Implementing before planning is complete wastes effort and creates cleanup work when the approach is rejected.
-
-### Branch Verification (MANDATORY - FIRST STEP)
-
-**BEFORE making any code changes for an issue, verify you are on the correct branch.**
-
-When the user says "let's work on issue #N" or similar:
-1. Run `git branch --show-current` to check current branch
-2. Verify the branch name starts with the issue number (e.g., `13-windows-character-rendering` for issue #13)
-3. If on the wrong branch:
-   - Check if the correct branch exists: `git branch -a | grep "^..13-"` (for issue #13)
-   - If it exists, switch to it: `git checkout 13-branch-name`
-   - If it doesn't exist, create it from main: `git checkout main && git pull && git checkout -b 13-descriptive-name`
-4. Only proceed with code changes after confirming you're on the correct branch
-
-**Never make changes on an unrelated issue's branch.** This causes merge conflicts and requires manual cleanup to move changes to the correct branch.
-
-### GitHub Issue Updates (MANDATORY)
-
-**GitHub Issues are the source of truth for project tracking.** Update issues throughout the development process, not just at the end.
-
-**When to update GitHub issues:**
-- **Starting work**: Add a comment noting work has begun and the approach being taken
-- **During investigation**: Document findings, root cause analysis, and any blockers discovered
-- **Design decisions**: Record architectural choices and trade-offs considered
-- **Implementation complete**: Add detailed resolution comment with:
-  - Commit hash(es) and brief description of changes
-  - What was implemented/fixed
-  - Testing performed
-  - Any performance implications
-- **Issue blocked**: Document what's blocking and link to blocking issue
-- **Work paused**: Note current status and next steps before ending session
-
-**Closing issues:**
-- Add resolution comment BEFORE closing
-- Use `gh issue close <number> --reason completed` for fixed issues
-- Use `gh issue close <number> --reason "not planned"` for won't-fix
-
-**For issues NOT fully resolved in a session:**
-- Add progress comment documenting what was investigated/attempted
-- Document findings and conclusions reached
-- Note recommended next steps
-- Update issue labels if status changed (e.g., add "blocked" label)
-
-**Commands reference:**
+### Branch Verification (MANDATORY FIRST STEP)
 ```bash
-# Add comment to issue
-gh issue comment <number> --body "Comment text"
-
-# Close issue with reason
-gh issue close <number> --reason completed --comment "Fixed in vX.Y.Z"
-
-# View issue with comments
-gh issue view <number> --comments
+git branch --show-current  # Must match issue number
 ```
 
-### 1. Planning & Research Phase
-- Create a feature document in `features/<feature-name>.md` describing requirements, design decisions, and test plan
-- Review existing TO-DO comments in `ltl` (lines 3-50) for related work
-- Check `features/` directory for similar or dependent features
-- Create implementation plan in `features/<feature-name>-implementation-plan.md` with:
-  - Data structures and their locations
-  - Integration points in the codebase
-  - Step-by-step implementation order
-  - Test cases and acceptance criteria
+### GitHub Issue Updates (MANDATORY)
+Update issues throughout development: when starting, during investigation, on design decisions, and when complete. Close with `gh issue close <number> --reason completed`.
 
-### 2. Prototyping Phase (for non-trivial features)
-
-**Before integrating into the main application**, validate the approach with a standalone prototype:
-
-- Create prototypes in `prototype/` directory as isolated scripts
-- Prototype should prove the core algorithm/approach works correctly
-- Document design decisions and questions in `prototype/<FEATURE>-DECISIONS.md`
-- Test the prototype independently to verify correctness
-- **Get user approval of prototype behavior before proceeding**
-
-Only after the prototype validates the approach should you determine how to integrate it into the existing application. This prevents wasted effort from implementing an approach that doesn't work or isn't approved.
-
-### 3. Scheduling Phase
-
-**GATE: Do not proceed past this phase without explicit user approval of the implementation plan.**
-
-- Review implementation plan with user
-- Confirm implementation order and dependencies
-- Discuss integration approach based on prototype learnings
-- Update feature document progress tracking section
-- **Obtain explicit approval to begin implementation**
-
-### 4. Implementation Phase
-- If adding new Perl modules, run `./build/generate-cpanfile.sh` to update dependency files
-- For platform-specific code, ensure both Unix and Windows paths are handled
-- **Update feature document progress tracking** as each task is completed
-
-### 5. Testing Phase
-- Test with sample log files in `logs/` directory
-- Verify CSV output if `-o` flag behavior is affected
-- Test on multiple platforms if changes involve platform-specific code
-- **Update feature document** with test results and any issues found
-
-### 6. Validation Phase
-- Verify all acceptance criteria are met
-- Verify visual output matches prototypes (if applicable)
-- Verify compatibility with existing command-line flags
-- **Update feature document** validation status
-
-### 7. Documentation Updates
-- Update `features/<feature-name>.md` with feature details to be included in the release notes
-- Update `features/<feature-name>.md` with implementation status and any deviations from the original plan
-- **Update GitHub Issue** (see "GitHub Issue Updates" section above):
-  - Add resolution comment with commit hash, implementation details, and testing performed
-  - Close the issue with `gh issue close <number> --reason completed`
-  - For issues not fully resolved: document findings, status, and next steps
-- Update `ltl` *usage* and *help* outputs if command line options are changed
-- Update this CLAUDE.md file if:
-  - New data structures are added to the architecture
-  - Build process changes
-  - New command-line options are added
-  - Known limitations change
-
-### 8. Keeping Documentation Current
-**IMPORTANT**: Always ensure decisions and current status are reflected in the feature documentation:
-- `features/<feature-name>.md` - Main feature document with requirements, decisions, and progress tracking
-- `features/<feature-name>-implementation-plan.md` - Detailed implementation plan (if created)
-- `prototype/<FEATURE>-DECISIONS.md` - Design decisions from prototyping phase (if applicable)
-
-When resuming work on a feature:
-1. Read the feature document to understand current state
-2. Check the progress tracking section for what's completed and what's next
-3. Update progress tracking as you work
-4. Ensure any new decisions or changes are documented before ending the session
+### Development Phases
+1. **Planning**: Create feature doc in `features/`, review existing TO-DOs, create implementation plan
+2. **Prototyping** (non-trivial features): Validate approach in `prototype/` directory first
+3. **Scheduling**: Get explicit user approval before implementation
+4. **Implementation**: Update feature doc progress as you work
+5. **Testing**: Use sample files in `logs/` directory (see `docs/test-logs.md`)
+6. **Documentation**: Update help text, CLAUDE.md if architecture changed, close GitHub issue
 
 ## Pattern Files
 
-The `patterns/` directory contains reusable filter pattern files for use with `-if`, `-ef`, and `-hf` options.
-
-| File | Purpose |
-|------|---------|
-| `metrics` | ThingWorx metrics endpoints |
-| `navigate-app-calls` | Windchill Navigate application API calls |
-| `probes` | Health check and probe endpoints |
-| `thingworx` | ThingWorx-specific patterns |
-
-Example usage:
-```bash
-./ltl -ef patterns/probes -hf patterns/navigate-app-calls logs/AccessLogs/*.log
-```
+The `patterns/` directory contains filter patterns for `-if`, `-ef`, and `-hf` options:
+- `metrics` - ThingWorx metrics endpoints
+- `navigate-app-calls` - Windchill Navigate API calls
+- `probes` - Health check endpoints
+- `thingworx` - ThingWorx-specific patterns
 
 ## Test Log Files
 
-The `logs/` directory contains sample log files for testing. **Always use these known files for testing - do not search for log files.**
+See `docs/test-logs.md` for detailed documentation of available test files.
 
-### Directory Structure
-```
-logs/
-├── AccessLogs/              # HTTP access logs (duration, bytes, status)
-├── Codebeamber/             # Codebeamer access logs
-└── ThingworxLogs/           # ThingWorx application logs
-    └── CustomThingworxLogs/ # Custom ScriptLogs with durationMS
-```
+**Quick reference:**
+- **Quick tests**: `logs/AccessLogs/localhost_access_log.2025-03-21.txt` (2.6MB)
+- **Heatmap tests**: `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log`
+- **Large file tests**: `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` (277MB)
 
----
+## Heatmap Feature
 
-### AccessLogs/ - HTTP Request Logs (duration, bytes, status)
+Heatmap mode (`-hm duration|bytes|count`) replaces latency statistics with color-intensity histogram visualization.
 
-| File | Server | Latency Unit | Metrics | Size | Use Case |
-|------|--------|--------------|---------|------|----------|
-| `ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` | Apache HTTP Server 2.x | microseconds (%D) | duration, bytes, count | 658KB | Apache HTTP2 with microsecond latency |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 277MB | Primary Tomcat 9 access log test |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 220MB | Secondary Tomcat 9 access log test |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 148MB | Smaller Tomcat 9 access log test |
-| `localhost_access_log.2025-03-21.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 2.6MB | Small access log for quick tests |
-| *(placeholder for Tomcat 11 logs)* | Tomcat 11 | milliseconds (%D) | duration, bytes, count | - | - |
+**Options**: `-hm [metric]`, `-hmw <width>` (default 52), `-lbg` (light background)
 
-**Format**: Apache combined log with duration at end (units vary by server)
-```
-# Apache HTTP Server 2.x - microseconds
-127.0.0.1 - - [22/Jan/2026:08:49:51 +0000] "GET /path HTTP/1.1" 200 209 173542
+**Color gradients**: yellow (duration), green (bytes), cyan (count). Uses logarithmic bucket boundaries for better resolution at low values.
 
-# Tomcat 9 - milliseconds
-10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /path HTTP/1.1" 200 261 1
-```
-Fields: IP, -, -, [timestamp], "method path protocol", status_code, bytes, duration
-
-**Note**: Apache HTTP Server uses `%D` for microseconds, while Tomcat uses `%D` for milliseconds. The ltl tool auto-detects the unit based on value ranges.
-
----
-
-### Codebeamber/ - Codebeamer Access Logs
-
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `codebeamer_access_log.2025-10-29.txt` | duration, bytes, count | 83KB | Codebeamer format testing |
-
-**Format**: Apache-style with duration in brackets
-```
-127.0.0.1 - - [29/Oct/2025:08:03:31 +0000] "GET /hc/ping.spr HTTP/1.1" 200 112 [293ms] [0.293s]
-```
-
----
-
-### ThingworxLogs/ - ThingWorx Application Logs
-
-All ThingWorx logs use this standard format:
-```
-2025-05-05 00:00:00.006+0000 [L: ERROR] [O: c.p.a.u.JobPurgeScheduler] [I: ] [U: SuperUser] [S: ] [P: ] [T: ThreadName] Message
-```
-Fields: timestamp [L: level] [O: origin] [I: instance] [U: user] [S: session] [P: process] [T: thread] message
-
-#### ApplicationLog (General platform activity)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ApplicationLog.2025-05-05.0.log` | occurrences only | 85MB | Large Linux ApplicationLog |
-| `ApplicationLog.2025-05-06.0.log` | occurrences only | 6.5MB | Medium ApplicationLog |
-| `ApplicationLog.2025-12-12.282-Windows.log` | occurrences only | 10MB | Windows ApplicationLog |
-| `ApplicationLog.log` | occurrences only | 5.8MB | Current ApplicationLog |
-| `ApplicationLog-improperlyRead.log` | occurrences only | 468B | Edge case - malformed reads |
-
-#### ScriptLog (Script execution logs)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ScriptLog.2025-05-05.0.log` | occurrences only | 13MB | Standard ScriptLog |
-| `ScriptLog.2025-05-06.0.log` | occurrences only | 15MB | Standard ScriptLog |
-| `ScriptLog.2025-12-17.0.Rolex.log` | occurrences only | 1.6MB | Basic ScriptLog test |
-| `ScriptLog.log` | occurrences only | 4.4MB | Current ScriptLog |
-
-#### ErrorLog (Error-level messages)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ErrorLog.2025-05-05.1.log` | occurrences only | 61MB | Large error log (auth failures, etc.) |
-| `ErrorLog.2025-05-06.0.log` | occurrences only | 3.3MB | Medium error log |
-| `ErrorLog.log` | occurrences only | 3.7MB | Current error log |
-
-#### SecurityLog (Security events)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `SecurityLog.2025-05-05.1.log` | occurrences only | 70MB | Large security log (nonce rejections) |
-| `SecurityLog.2025-05-06.0.log` | occurrences only | 3.0MB | Medium security log |
-| `SecurityLog.log` | occurrences only | 3.6MB | Current security log |
-
-#### ScriptErrorLog (Script-specific errors)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ScriptErrorLog.2025-05-05.0.log` | occurrences only | 14MB | Script error analysis |
-| `ScriptErrorLog.2025-05-06.0.log` | occurrences only | 14MB | Script error analysis |
-| `ScriptErrorLog.log` | occurrences only | 2.5MB | Current script errors |
-
-#### DatabaseLog (Database operations)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `DatabaseLog.2025-05-05.0.log` | occurrences only | 700KB | Database error tracking |
-| `DatabaseLog.2025-05-06.0.log` | occurrences only | 693KB | Database error tracking |
-| `DatabaseLog.log` | occurrences only | 29KB | Current database log |
-
-#### AuthLog (Authentication events)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `AuthLog.2025-05-05.0.log` | occurrences only | 324KB | SAML/SSO authentication events |
-| `AuthLog.2025-05-06.0.log` | occurrences only | 257KB | Authentication events |
-| `AuthLog.log` | occurrences only | 167KB | Current auth log |
-
-#### ConfigurationLog (Configuration changes)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ConfigurationLog.2025-05-05.0.log` | occurrences only | 30KB | Configuration tracking |
-| `ConfigurationLog.2025-05-06.0.log` | occurrences only | 31KB | Configuration tracking |
-| `ConfigurationLog.log` | occurrences only | 31KB | Current configuration log |
-
-#### Other ThingWorx Logs
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `CommunicationLog.2025-05-06.0.log` | occurrences only | 190B | Communication events (minimal) |
-| `AkkaCommunicationLog.log` | occurrences only | 2.2KB | Akka communication events |
-
----
-
-### ThingworxLogs/CustomThingworxLogs/ - ScriptLogs with Full Metrics
-
-These logs contain `durationMS=`, `result bytes=`, and `result count=` fields enabling all metric types for analysis and heatmaps.
-
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ScriptLog-DPMExtended-clean.log` | duration, bytes, count | 29MB | Cleaned DPM ScriptLog - ideal for all heatmap types |
-| `ScriptLog.2025-04-09.1.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
-| `ScriptLog.2025-04-09.2.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
-| `ScriptLog.2025-04-09.3.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
-| `ScriptLog.2025-04-09.4.log` | duration, bytes, count | 72MB | Large ScriptLog with full metrics |
-| `ScriptLog.2025-04-10.0.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
-| `ScriptLog.GetComplexPlotByIndex.log` | duration, bytes, count | 739KB | Specific service analysis |
-| `ScriptLog.log` | duration, bytes, count | 54MB | ScriptLog with full metrics |
-
-**Format**: ThingWorx ScriptLog with embedded metrics
-```
-2025-04-10 04:46:35.844+0000 [L: WARN] ... durationMS=167 events to be processed count=0
-2025-04-10 05:00:03.529+0000 [L: INFO] ... durationMS=1041 result count=12 result bytes=6059
-```
-
----
-
-### Quick Test Commands
-
-```bash
-# Duration heatmap (access logs - best for latency analysis)
-./ltl -hm duration logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt
-
-# Bytes heatmap (access logs - response size distribution)
-./ltl -hm bytes logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt
-
-# Count heatmap (any log - message frequency distribution)
-./ltl -hm count logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log
-
-# Duration heatmap from ThingWorx ScriptLogs with durationMS
-./ltl -hm duration logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log
-
-# Standard bar graph (any log)
-./ltl -n 5 logs/ThingworxLogs/ApplicationLog.2025-12-12.282-Windows.log
-
-# Quick test with small access log
-./ltl -n 10 logs/AccessLogs/localhost_access_log.2025-03-21.txt
-
-# Error analysis
-./ltl -n 20 logs/ThingworxLogs/ErrorLog.2025-05-05.1.log
-
-# Security event analysis
-./ltl -n 10 logs/ThingworxLogs/SecurityLog.2025-05-05.1.log
-
-# Codebeamer access log
-./ltl -hm duration logs/Codebeamber/codebeamer_access_log.2025-10-29.txt
-```
-
-### Logs by Use Case
-
-| Use Case | Recommended Log Files |
-|----------|----------------------|
-| **Duration/latency heatmap** | `AccessLogs/*.txt`, `ThingworxLogs/CustomThingworxLogs/*` |
-| **Bytes/response size analysis** | `AccessLogs/*.txt`, `ThingworxLogs/CustomThingworxLogs/*` |
-| **Count/frequency analysis** | Any log file |
-| **All three metrics (duration, bytes, count)** | `AccessLogs/*.txt`, `ThingworxLogs/CustomThingworxLogs/*` |
-| **Error analysis** | `ThingworxLogs/ErrorLog.*`, `ThingworxLogs/ScriptErrorLog.*` |
-| **Security events** | `ThingworxLogs/SecurityLog.*`, `ThingworxLogs/AuthLog.*` |
-| **Database issues** | `ThingworxLogs/DatabaseLog.*` |
-| **Quick tests (small files)** | `AccessLogs/localhost_access_log.2025-03-21.txt`, `Codebeamber/*`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log` |
-| **Large file stress tests** | `AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.*.log` |
-
-## Heatmap Visualization
-
-### Background: SRE Best Practices
-
-The heatmap feature is inspired by SRE best practices for analyzing load profiles and latency distributions. While percentile statistics (P50, P95, P99, P99.9) provide valuable insights, they reduce complex multi-modal distributions to a handful of numbers. Heatmaps address this by showing the entire distribution visually.
-
-**Industry Research Sources:**
-- **Brendan Gregg's Latency Heatmaps**: Heatmaps transform temporal latency data into visual representations where X-axis is time, Y-axis is latency ranges, and color intensity represents frequency/density. Bi-modal distributions become immediately visible, suggesting "fast path" and "slow path" behaviors.
-- **Datadog Heatmap Engineering**: Distributing histogram boundaries approximately exponentially is effective for visualizing request distributions. Logarithmic scale is important for latency data spanning orders of magnitude.
-- **Google SRE Monitoring**: The Four Golden Signals (latency, traffic, errors, saturation) are foundational. Latency distributions reveal more than averages.
-- **ACM Queue**: Response time is crucial to understand in detail, but common presentations hide important patterns that heatmaps reveal.
-
-**Key Implementation Insights:**
-1. **Logarithmic bucket boundaries** work better for latency data than linear (values span orders of magnitude)
-2. **Color intensity** represents request count/density (bright = many, dark = few)
-3. **Fixed range** uses global min/max across all time buckets for consistent scale
-4. **Position** tells you "at what latency", color tells you "how many requests"
-
-### Heatmap Axes and Color Model
-
-- **X-axis (horizontal position)**: Metric value range
-  - Left edge = minimum value (fast requests / small responses / low count)
-  - Right edge = maximum value (slow requests / large responses / high count)
-- **Y-axis (rows)**: Time buckets (same as existing bar graph rows)
-- **Color intensity**: Request COUNT/density at that value
-  - Bright/intense color = MANY requests fell into this bucket
-  - Dark/dim color = FEW requests fell into this bucket
-  - Empty/space = NO requests at this level
-
-### Color Gradients (256-color ANSI)
-
-Each metric uses an 8-step gradient from dim (index 0) to bright (index 7). The dark background gradients no longer use near-black grays (233, 234) which were invisible on many terminals.
-
-**Dark Background (default)** - visible colors only, dim to bright:
-
-| Color    | Codes                                    | Use Case |
-|----------|------------------------------------------|----------|
-| yellow   | 58, 94, 136, 142, 178, 184, 220, 226     | Duration |
-| green    | 22, 28, 34, 40, 46, 82, 118, 154         | Bytes    |
-| cyan     | 23, 30, 37, 44, 51, 80, 86, 123          | Count    |
-| blue     | 17, 18, 19, 20, 21, 27, 33, 39           | Future   |
-| magenta  | 53, 89, 125, 161, 162, 163, 199, 200     | Future   |
-| red      | 52, 88, 124, 160, 196, 197, 203, 209     | Future   |
-| white    | 238, 240, 242, 244, 246, 248, 252, 255   | Future   |
-
-**Light Background (`-lbg` flag)** - pale to saturated:
-
-| Color    | Codes                                    | Use Case |
-|----------|------------------------------------------|----------|
-| yellow   | 230, 229, 228, 227, 220, 214, 208, 202   | Duration |
-| green    | 194, 157, 120, 84, 48, 42, 36, 35        | Bytes    |
-| cyan     | 195, 159, 123, 87, 51, 44, 37, 30        | Count    |
-| blue     | 189, 153, 117, 81, 45, 39, 33, 27        | Future   |
-| magenta  | 225, 219, 213, 207, 201, 165, 129, 93    | Future   |
-| red      | 224, 218, 212, 206, 200, 196, 160, 124   | Future   |
-| white    | 255, 254, 253, 250, 247, 244, 241, 238   | Future   |
-
-Gradient prototype for visual comparison: `prototype/gradient-comparison.pl`
-
-Terminal background is auto-detected using OSC 11 query when heatmap is enabled. Use `-lbg` or `--light-background` to explicitly force light background mode (overrides auto-detection).
-
-### Logarithmic Bucket Boundaries
-
-Formula: `boundary[i] = min * (max/min)^(i/num_buckets)`
-
-For a 52-column heatmap with latency range 1ms to 100,000ms:
-- Bucket 0: ~1ms
-- Bucket 26: ~316ms (geometric midpoint)
-- Bucket 52: ~100,000ms
-
-Log scale provides better resolution at low values where most latency data clusters.
-
-### Terminal Rendering
-
-**256-Color ANSI Codes:**
-- Foreground: `ESC[38;5;⟨n⟩m`
-- Background: `ESC[48;5;⟨n⟩m`
-- Color cube (216 colors): indices 16-231, formula: `16 + 36×r + 6×g + b` (0 ≤ r,g,b ≤ 5)
-- Grayscale: indices 232-255 (24 shades)
-
-**Unicode Block Characters:**
-- U+2588 `█` - Full block (used for all density levels with color-only approach)
-- U+2591 `░` - Light shade (~25%)
-- U+2592 `▒` - Medium shade (~50%)
-- U+2593 `▓` - Dark shade (~75%)
-
-**Rendering Approach:** Color-only with full blocks (`█`) - provides clean appearance and universal terminal compatibility.
-
-### Highlight Support
-
-When `-highlight` is used with `-hm`, highlighted requests use background colors matching bar graph column `plain_bg` values:
-- Duration: 184 (yellow background)
-- Bytes: 34 (green background)
-- Count: 30 (cyan background)
-
-Foreground color (density) remains the same, allowing users to see both: which requests matched the filter AND their density.
-
-## Active Feature Branches
-
-### feature/heatmap
-**Status**: Implementation complete (v0.8.0)
-
-Adds heatmap visualization mode (`-hm`/`--heatmap`) replacing duration statistics with color-intensity histogram.
-
-**Command Line Options**:
-- `-hm` or `--heatmap [duration|bytes|count]` - Enable heatmap mode (default: duration)
-- `-hmw` or `--heatmap-width <N>` - Set heatmap width (default: 52)
-- `-lbg` or `--light-background` - Use light background color gradients (for white/light terminals)
-
-**Key Features**:
-- Logarithmic scale for better latency distribution visualization
-- Percentile markers (P50, P95, P99, P99.9) shown as `|` in gray
-- Header scale with min/max values (25%/75% markers when width > 75)
-- Footer scale with value labels at 0%, 25%, 50%, 75%, 100% positions
-- Color gradients: yellow (duration), green (bytes), cyan (count)
-- Auto-detection of terminal background color (light/dark) using OSC 11
-- Light background mode (`-lbg`) for terminals with white/light backgrounds
-- Highlight support with background colors
-
-**Key Files**:
-- `features/heatmap.md` - Feature requirements and acceptance criteria
-- `features/heatmap-implementation-plan.md` - Implementation plan
-- `prototype/HEATMAP-DECISIONS.md` - Design decisions
-
-**Known Issues Fixed (v0.8.0)**:
-- **Footer 100% boundary value**: Must use `$heatmap_boundaries[$heatmap_content_width]` not `[$heatmap_content_width - 1]` - the boundaries array has bucket_count+1 elements
-- **format_bytes() float handling**: Use `int($bytes)` for unit length comparison, not the raw float value (floats like `801.000765678898` have string length 16, exceeding TB threshold)
-- **Heatmap width affecting layout**: When heatmap is enabled, `$durations_graph_width` must use `$heatmap_width`, not hardcoded 52
-- **Highlight background colors**: Use same colors as bar graph column `plain_bg` values (184 yellow, 34 green, 30 cyan) for visual consistency
+For implementation details, see `features/heatmap.md`.
