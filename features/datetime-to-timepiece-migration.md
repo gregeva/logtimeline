@@ -1,7 +1,7 @@
 # Feature: DateTime to Time::Piece Migration
 
 **Issue:** #43
-**Status:** Investigation
+**Status:** Complete
 **Branch:** `43-datetime-to-timepiece`
 
 ## Summary
@@ -211,7 +211,7 @@ Reference: [Perl5 GitHub issue #18261](https://github.com/Perl/perl5/issues/1826
    - Calculate midnight using `int($epoch / 86400) * 86400` instead of object methods
 5. **Handle sub-second format variations** - `.` and `,` separators, 1-6 digit precision
 6. **Rename `$bucket_size_minutes`** to `$time_bucket_size`
-7. **Remove DateTime dependency** - delete `use DateTime;` and update cpanfile
+7. **Remove DateTime dependency** - delete `use DateTime;` (cpanfile is auto-generated)
 
 ### Out of Scope
 
@@ -222,16 +222,71 @@ Reference: [Perl5 GitHub issue #18261](https://github.com/Perl/perl5/issues/1826
 
 ## Implementation Plan
 
-*TODO: Define phases for architect review*
+**Key decisions:**
+- Bundle variable rename with main changes (single commit for core migration)
+- Keep `substr()` for ISO format field extraction (faster than strptime)
+- Use `Time::Local::timegm()` to convert extracted fields to epoch
+
+### Phase 1: Core Migration
+
+- [x] **1a. Variable Rename** - Rename `$bucket_size_minutes` → `$time_bucket_size` throughout `ltl`
+- [x] **1b. Extract Milliseconds** - Modify line 1514 to capture instead of discard; handle `.` and `,` separators; handle 1-6 digit precision
+- [x] **1c. Replace DateTime Parsing** - ISO format: keep `substr()`, use `Time::Local::timegm()`; Apache format: keep regex, use `timegm()`; cache stores fractional epoch
+- [x] **1d. Update calculate_start_end_filter_timestamps()** - Calculate midnight as `int($epoch / 86400) * 86400`
+
+**Verification:**
+```bash
+./ltl --disable-progress -bs 60 logs/AccessLogs/localhost_access_log.2025-03-21.txt
+./ltl --disable-progress -ms -bs 100 logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log
+```
+
+### Phase 2: Add Millisecond Support to -st/-et Options
+
+- [x] Update regex patterns in `calculate_start_end_filter_timestamps()` to capture optional fractional seconds
+- [x] Extract and add fractional part to epoch value
+
+**Verification:**
+```bash
+./ltl --disable-progress -ms -bs 100 -st "HH:MM:SS.500" -et "HH:MM:SS.999" <log>
+```
+
+### Phase 3: Remove DateTime Dependency
+
+- [x] Remove `use DateTime;` (line 54)
+- [x] Add `use Time::Local qw(timegm);`
+
+**Verification:**
+```bash
+perl -c ltl
+```
+
+### Phase 4: Documentation Updates
+
+- [x] Update CLAUDE.md: note millisecond precision support
+- [x] Remove README.md known issue about sub-second precision (if exists)
+- [x] Add README.md examples for `-ms` flag usage with `-st`/`-et`
+- [x] Update `print_usage()` in `ltl` to show millisecond support for `-st`/`-et`
 
 ---
 
-## Documentation Updates
+## Test Plan
 
-Per issue #43 requirements:
-- [ ] Update CLAUDE.md: timestamps support millisecond precision
-- [ ] Remove README.md known issue about sub-second precision
-- [ ] Add README.md examples for millisecond features (`-ms` flag, `-bs` with `-ms`, `-st`/`-et` with milliseconds)
+| Test | Command | Expected |
+|------|---------|----------|
+| Basic functionality | `./ltl --disable-progress -bs 60 logs/AccessLogs/localhost_access_log.2025-03-21.txt` | Output matches pre-migration |
+| Millisecond display | `./ltl --disable-progress -ms -bs 100 <thingworx-log>` | Non-zero milliseconds shown |
+| Time filtering | `-st "08:00:00.500" -et "08:00:01.000" -ms` | Filters at ms precision |
+| Apache format | Test access log (match_type 3) | Parses correctly |
+| Performance | Benchmark 277MB file | Measurable improvement |
+
+---
+
+## Files Modified
+
+- `ltl` - main changes
+- `build/cpanfile` - remove DateTime dependency (if listed)
+- `CLAUDE.md` - documentation
+- `README.md` - documentation
 
 ## Related Issues
 
@@ -247,3 +302,5 @@ Per issue #43 requirements:
 - 2026-02-03: Verified Time::Piece API compatibility and strptime limitations
 - 2026-02-03: Corrected option names (-st/-et not -ts/-te), documented bucket size behavior
 - 2026-02-03: Defined migration scope
+- 2026-02-03: Completed implementation plan with phases and status tracking
+- 2026-02-03: **Implementation complete** - all phases implemented and verified
