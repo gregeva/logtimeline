@@ -91,7 +91,7 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 ./ltl [options] <logfile(s)>
 ```
 
-Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-if/-ef/-hf` (pattern files), `-du` (duration unit), `-hm` (heatmap), `-help` (full help)
+Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-if/-ef/-hf` (pattern files), `-du` (duration unit), `-hm` (heatmap), `-ms` (millisecond precision), `-st/-et` (time range filters, supports milliseconds), `-help` (full help)
 
 **Hidden option for Claude Code:** `--disable-progress` - ALWAYS use this flag when running ltl to suppress progress output that wastes tokens.
 
