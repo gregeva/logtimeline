@@ -1,4 +1,3 @@
-requires 'DateTime';
 requires 'Devel::Size';
 requires 'File::Spec';
 requires 'Getopt::Long';
