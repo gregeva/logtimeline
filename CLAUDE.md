@@ -28,6 +28,10 @@ Track observations for process improvement. After releases, review what worked a
 
 **Observations log:**
 - 2026-02-02: CRITICAL - Always use `--disable-progress` when running ltl from Claude Code. Progress output wastes massive tokens/cost. This was discovered after months of wasteful execution.
+- 2026-02-03: Release workflow - Feature branches need PRs before merging to release branch. Create PR from release branch to main. Never use `--delete-branch` when merging release PRs - release branches must be preserved.
+- 2026-02-03: After tagging a release, always create the GitHub release with `gh release create <tag> --notes-file releases/<version>.md` to attach release notes.
+- 2026-02-03: When stuck on technical issues (e.g., floating-point precision), ask the user rather than iterating through failed attempts. The user often has quick answers.
+- 2026-02-03: For sub-second time buckets in Perl, use integer milliseconds for hash keys to avoid floating-point precision issues (e.g., `.099` instead of `.100`).
 
 ## Project Overview
 
