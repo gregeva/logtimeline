@@ -68,8 +68,22 @@ Here is a Full GC loop explored through zooming in on the specific time range, a
 ![Full GC loop explorered using heatmap and histogram views](images/gc-log-analysis_full-gc-loop_histogram-and-heatmap.png)
 
 
-# Known Issues
+## Millisecond Precision (v0.10.3)
 
-- **Millisecond Precision Not Supported:**
-  Although the application allows for selection of millisecond precision, reading and comparing timestamps with millisecond precision does not work at present. All timestamp parsing and comparison is currently performed at the second level, so any features or filters relying on millisecond accuracy will not function as expected.
+The `-ms` or `--milliseconds` flag enables sub-second timestamp parsing and display. When enabled:
+- Timestamps are parsed with millisecond precision from logs (supports 1-6 fractional digits)
+- Time buckets can be as small as 100ms
+- Time filters (`-st`/`-et`) accept millisecond precision: `-st "12:34:56.500" -et "12:35:00.999"`
+
+**Usage:**
+```bash
+# View log timeline with 100ms time buckets
+./ltl -ms -bs 100 logs/application.log
+
+# Filter to a specific sub-second time range
+./ltl -ms -bs 100 -st "08:15:30.500" -et "08:15:31.250" logs/application.log
+
+# Full date with milliseconds
+./ltl -ms -st "2025-04-10 12:34:56.789" logs/application.log
+```
 

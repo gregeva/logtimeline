@@ -50,9 +50,8 @@
 use strict;
 use warnings;
 use POSIX qw(strftime floor);
-use Math::Round;
 use Time::Piece;
-use DateTime;
+use Time::Local qw(timegm);
 use Term::ReadKey;
 use Getopt::Long qw(:config no_ignore_case);
 use Term::ANSIColor;
@@ -71,13 +70,13 @@ if ($^O eq 'MSWin32') {                                                         
 }
 
 ## GLOBALS ##
-my $version_number = "0.10.2";
+my $version_number = "0.10.3";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my $impact_time_exponent = 7;		            # it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
+my ( $time_bucket_size, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages, $elapsed_heatmap_statistics, $elapsed_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
@@ -411,7 +410,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--histogram|-hg [duration|bytes|count]] [--histogram-width|-hgw <N>] [--histogram-height|-hgh <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--memory-usage|-mem] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS.mmm>] [--end|-et <HH:MM:SS.mmm>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--histogram|-hg [duration|bytes|count]] [--histogram-width|-hgw <N>] [--histogram-height|-hgh <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--memory-usage|-mem] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -907,13 +906,6 @@ sub format_time {
     return defined $value ? "$formatted_value$unit_name" : undef;
 }
 
-# Utility function to visualize control characters as caret notation to show non-printable characters present in log messages
-sub visualize_carets {
-    my ($s) = @_;
-    $s =~ s/([\x00-\x1F])/'^' . chr(ord($1) + 64)/eg;  # ^@ .. ^_
-    $s =~ s/\x7F/^?/g;                                 # DEL
-    return $s;
-}
 
 # utility function for formating numbers to normal format
 sub normalize { $_[0] =~ s/\.0+$//r }
@@ -971,7 +963,7 @@ sub adapt_to_command_line_options {
     @ORIGINAL_ARGV = @ARGV;
 
     GetOptions(
-        'bucket-size|bs=i' => \$bucket_size_minutes,
+        'bucket-size|bs=i' => \$time_bucket_size,
         'pause|p' => \$pause_output,
         'start|st=s' => \$filter_range_start,
         'end|et=s' => \$filter_range_end,
@@ -1167,13 +1159,13 @@ sub adapt_to_command_line_options {
     }
 
     $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
-    #$bucket_size_seconds = $print_seconds ? $bucket_size_minutes : $bucket_size_minutes * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
+    #$bucket_size_seconds = $print_seconds ? $time_bucket_size : $time_bucket_size * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
     if( $print_seconds ) {
-        $bucket_size_seconds = $bucket_size_minutes;
+        $bucket_size_seconds = $time_bucket_size;
     } elsif( $print_milliseconds ) {
-        $bucket_size_seconds = $bucket_size_minutes / 1000;
+        $bucket_size_seconds = $time_bucket_size / 1000;
     } else {
-        $bucket_size_seconds = $bucket_size_minutes * 60;
+        $bucket_size_seconds = $time_bucket_size * 60;
     }
 
     my %argv_hash = map { $_ => 1 } @ARGV;
@@ -1203,13 +1195,21 @@ sub adapt_to_command_line_options {
 
 # Parse various possible formats for input of start and end times and set associated filter variables
 sub calculate_start_end_filter_timestamps {
-    my ( $log_time ) = @_;
-    my $log_date = $log_time->epoch() - ( $log_time->hour * ( 60 * 60 ) + $log_time->minute * 60 + $log_time->second );
+    my ( $log_epoch ) = @_;
+    # Calculate midnight of log date: truncate to day boundary
+    my $log_date = int($log_epoch / 86400) * 86400;
 
     foreach my $key (keys %filter_range) {
         my $value = $filter_range{$key};                                                        # Get the value (either $filter_range_start or $filter_range_end)
         next unless length( $filter_range{$key} ) > 0;
         my $epoch_value;  # Variable to store the epoch time
+        my $fractional_ms = 0;
+
+        # Extract optional fractional seconds (supports . or , separator, 1-6 digits)
+        if ($value =~ s/(\d{2}:\d{2}:\d{2})[.,](\d{1,6})/$1/) {
+            my $frac_digits = $2;
+            $fractional_ms = $frac_digits * (10 ** (3 - length($frac_digits)));
+        }
 
         # Convert timestamp to epoch seconds using Time::Piece -- WARNING -- use of strptime can cause timezone problems, it appears to work here as I've manually set TZ to UTC on input
         if ( $value =~ /^\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{2}:\d{2}/ ) {
@@ -1226,7 +1226,8 @@ sub calculate_start_end_filter_timestamps {
             print "Warning: unhandled date/time format - option not taken into account\n";
         }
 
-        $filter_range_epoch{$key} = $epoch_value if defined( $epoch_value );
+        # Add fractional milliseconds for precision filtering
+        $filter_range_epoch{$key} = $epoch_value + ($fractional_ms / 1000) if defined( $epoch_value );
     }
     return 1;
 }
@@ -1237,17 +1238,17 @@ sub adapt_to_terminal_settings {
 
     # Auto-adjust the bucket size based on the terminal height (larger terminal can handle more rows)
     if( $terminal_height <= 30 ) {
-        $bucket_size_minutes = 120;
+        $time_bucket_size = 120;
     } elsif( $terminal_height <= 45 ) {
-        $bucket_size_minutes = 90;
+        $time_bucket_size = 90;
     } elsif( $terminal_height <= 65 ) {
-        $bucket_size_minutes = 60;
+        $time_bucket_size = 60;
     } elsif( $terminal_height <= 85 ) {
-        $bucket_size_minutes = 30;
+        $time_bucket_size = 30;
     } elsif( $terminal_height > 85 ) {
-        $bucket_size_minutes = 10;
+        $time_bucket_size = 10;
     } else {
-        $bucket_size_minutes = 60;
+        $time_bucket_size = 60;
     }
 
     $max_log_message_length = $terminal_width;		# this is the max that we can print without wrapping, depends on the summary table width, and terminal width 
@@ -1337,8 +1338,10 @@ sub read_and_process_logs {
                 # this section is optional, for cases where log line has included additional context which should be interpretted (row count, execution duration, result size)
                 ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)/;								# 2025-04-22 remove the trailing whitespace as same as below
                 ( $duration ) = $message =~ / durationM[sS]\s*=\s*(\d+)/;						# 2025-04-17 remove the trailing white space as it was not picking up the variable if it was at the end of the line
-                $is_access_log = 1 if defined $bytes || defined $duration;
-                $message =~ s/ ((bytes|durationM[sS])\s*=\s*)(\d+)/ $1?/g;		# mask out bytes and duration values for grouping purposes (but leave others for later processing)
+                if (defined $bytes || defined $duration) {
+                    $is_access_log = 1;
+                    $message =~ s/ ((bytes|durationM[sS])\s*=\s*)(\d+)/ $1?/g;		# mask out bytes and duration values for grouping purposes (but leave others for later processing)
+                }
 
 
 # [elapsed 39ms]
@@ -1346,21 +1349,6 @@ sub read_and_process_logs {
 # ApplicationLog.2025-04-29.135.log:2025-04-29 09:07:04.340+0000 [L: INFO] [O: c.t.c.ImportProcessor] [I: ] [U: Administrator] [S: ] [P: ] [T: https-jsse-nio-8443-exec-1] ***  [elapsed 20m 47s 399ms] Import completed successfully
 #( $duration ) = $message =~ /\[elapsed (\d+)ms\]/;
 #$message =~ s/\[elapsed (\d+)ms\]/\[duration ??ms\]/g;
-
-
-# START TEMPORARY the following are temporary
-                $message =~ s/(session id: )\d+/$1\?\?/g;
-                $message =~ s/(\w+_)+\d{14}-/ModelFamily_CustomerPC_DateString-/g;
-                
-                $message =~ s/Successfully added for import \/.+$/Successfully added for import \/ThingworxStorage\/repository\/SystemRepository\/\.\.\./g;
-                $message =~ s/Setting visibility permissions for (.+)$/Setting visibility permissions for \.\.\./g;
-                $message =~ s/Ancestors for Entity(.+)$/Ancestors for Entity \.\.\./g;
-                $message =~ s/input document: (.+)$/input document: \.\.\./g;
-                $message =~ s/Transaction was successfully ended for request (.+)$/Transaction was successfully ended for request \.\.\./g;
-                $message =~ s/Ending transaction for request (.+)$/Ending transaction for request \.\.\./g;
-                $message =~ s/(TimerEventHandler|TimerThing)\@(\S+)/$1\@/g;
-                $message =~ s/correspond to sent message (\S+) \]/correspond to sent message ###################### \]/g;
-# END TEMPORARY
 
             ## ThingWorx Connection Server Standard Log Format ##
             } elsif ( ($timestamp_str, $thread, $category_bucket, $object, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)/) {
@@ -1532,7 +1520,13 @@ sub read_and_process_logs {
                     $duration = convert_duration_to_ms($duration, $duration_unit_override);
                 }
 
-                $timestamp_str =~ s/(:\d{2}:\d{2})\.\d{3}/$1/;                      # remove the milliseconds if present, as the code does not presently support them
+                # Extract milliseconds if present (supports . or , separator, 1-6 digits)
+                my $fractional_ms = 0;
+                if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {
+                    my $frac_digits = $2;
+                    # Normalize to milliseconds (e.g., .1 = 100ms, .12 = 120ms, .123 = 123ms, .123456 = 123.456ms)
+                    $fractional_ms = $frac_digits * (10 ** (3 - length($frac_digits)));
+                }
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
@@ -1540,14 +1534,14 @@ sub read_and_process_logs {
                     if (exists $timestamp_cache{$timestamp_str}) {
                         $timestamp = $timestamp_cache{$timestamp_str};
                     } else {
-                        $timestamp = DateTime->new(
-                            year      => substr($timestamp_str, 0, 4),
-                            month     => substr($timestamp_str, 5, 2),
-                            day       => substr($timestamp_str, 8, 2),
-                            hour      => substr($timestamp_str, 11, 2),
-                            minute    => substr($timestamp_str, 14, 2),
-                            second    => substr($timestamp_str, 17, 2),
-                            time_zone => 'UTC',
+                        # ISO format: use substr() for field extraction, timegm() for epoch
+                        $timestamp = timegm(
+                            substr($timestamp_str, 17, 2),  # second
+                            substr($timestamp_str, 14, 2),  # minute
+                            substr($timestamp_str, 11, 2),  # hour
+                            substr($timestamp_str, 8, 2),   # day
+                            substr($timestamp_str, 5, 2) - 1,  # month (0-11)
+                            substr($timestamp_str, 0, 4),   # year
                         );
                         $timestamp_cache{$timestamp_str} = $timestamp;
                     }
@@ -1557,23 +1551,26 @@ sub read_and_process_logs {
                     } else {
                         my ($day, $month_str, $year, $hour, $minute, $second) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/;
                         my $month = $month_map{$month_str};
-                        $timestamp = DateTime->new(
-                            year      => $year,
-                            month     => $month,
-                            day       => $day,
-                            hour      => $hour,
-                            minute    => $minute,
-                            second    => $second,
-                            time_zone => 'UTC',
+                        # Apache format: use timegm() for epoch
+                        $timestamp = timegm(
+                            $second,
+                            $minute,
+                            $hour,
+                            $day,
+                            $month - 1,  # month (0-11)
+                            $year,
                         );
                         $timestamp_cache{$timestamp_str} = $timestamp;
                     }
                 }
 
-                $filter_range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp ) unless $filter_range_filter_initialized;
+                # Add fractional milliseconds to epoch for precision filtering
+                my $timestamp_epoch = $timestamp + ($fractional_ms / 1000);
+
+                $filter_range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp_epoch ) unless $filter_range_filter_initialized;
 
                 ## FILTERING CONDITIONS ##
-                next if( $timestamp->epoch() < $filter_range_epoch{'start'} || $timestamp->epoch() >= $filter_range_epoch{'end'} );
+                next if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} );
                 next if( defined( $exclude_regex )          && /$exclude_regex/ );
                 next if( defined( $include_regex )          && !/$include_regex/ );
                 next if( defined( $filter_duration_min )    && ( !defined( $duration )  || $duration <= $filter_duration_min ));		# skip if duration value is below specified minimum filter
@@ -1594,12 +1591,20 @@ sub read_and_process_logs {
                 } else {
                     $category = 'plain';
                 }
-                
-                # sets earliest and latest timestamp values being displayed (after the range filtering selection)
-                $output_timestamp_min = $timestamp->epoch() if $output_timestamp_min == 0 || $output_timestamp_min > $timestamp->epoch();
-                $output_timestamp_max = $timestamp->epoch() if $output_timestamp_max == 0 || $output_timestamp_max < $timestamp->epoch();
 
-                my $bucket = int($timestamp->epoch() / $bucket_size_seconds) * $bucket_size_seconds;
+                # sets earliest and latest timestamp values being displayed (after the range filtering selection)
+                $output_timestamp_min = $timestamp_epoch if $output_timestamp_min == 0 || $output_timestamp_min > $timestamp_epoch;
+                $output_timestamp_max = $timestamp_epoch if $output_timestamp_max == 0 || $output_timestamp_max < $timestamp_epoch;
+
+                my $bucket;
+                if ($print_milliseconds) {
+                    # Use integer milliseconds for bucket keys to avoid floating-point precision issues
+                    my $epoch_ms = int($timestamp_epoch * 1000 + 0.5);
+                    my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);
+                    $bucket = int($epoch_ms / $bucket_size_ms) * $bucket_size_ms;
+                } else {
+                    $bucket = int($timestamp_epoch / $bucket_size_seconds) * $bucket_size_seconds;
+                }
 
                 $log_occurrences{$bucket}{$category_bucket}{occurrences}++;
                 $total_lines_included++;
@@ -1612,7 +1617,6 @@ sub read_and_process_logs {
 
                     # Substitute UUID with HASH if command line option to do so is present (temporary feature to be eclipsed by group similar feature)
                     $message =~ s/\S{8}-\S{4}-\S{4}-\S{4}-\S{12}+/########-####-####-####-############/g if defined $mask_uuid && $mask_uuid;
-                    $message = visualize_carets( $message );                            # render non-printable characters visually
 
                     if( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
                         my $truncated_thread = substr( $threadname, 0, 20 );
@@ -1667,7 +1671,7 @@ sub read_and_process_logs {
                             # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
                             if( $duration > 0 ) {
                                 my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{occurrences}; 
-                                $log_messages{$category}{$log_key}{impact} = round( log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{occurrences} ) * 100 ) / 100;
+                                $log_messages{$category}{$log_key}{impact} = sprintf("%.2f", log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{occurrences} ));
                             }
                         }
                     } else {
@@ -2185,7 +2189,7 @@ sub calculate_all_statistics {
                 count_occurrences => $log_analysis{$bucket}{count_occurrences},
                 count_min     => $log_analysis{$bucket}{count_min},
                 count_max     => $log_analysis{$bucket}{count_max},
-                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? round( $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences} ) : undef,
+                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? sprintf("%.0f", $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
                 count_sum     => $log_analysis{$bucket}{count_sum},
                 min           => $min,
                 mean          => $mean,
@@ -2238,7 +2242,7 @@ sub calculate_all_statistics {
                 count_occurrences => $log_analysis{$bucket}{count_occurrences},
                 count_min     => $log_analysis{$bucket}{count_min},
                 count_max     => $log_analysis{$bucket}{count_max},
-                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? round( $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences} ) : undef,
+                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? sprintf("%.0f", $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
                 count_sum     => $log_analysis{$bucket}{count_sum}
             }
         }
@@ -2304,7 +2308,7 @@ sub calculate_all_statistics {
 
                 $log_messages{$category}{$log_key}{count_occurrences} = $log_messages{$category}{$log_key}{count_occurrences} if defined $log_messages{$category}{$log_key}{count_occurrences};
                 $log_messages{$category}{$log_key}{count_min} = $log_messages{$category}{$log_key}{count_min} if defined $log_messages{$category}{$log_key}{count_min};
-                $log_messages{$category}{$log_key}{count_mean} = ( defined $log_messages{$category}{$log_key}{count_sum} && defined $log_messages{$category}{$log_key}{count_occurrences} && $log_messages{$category}{$log_key}{count_occurrences} > 0 ) ? round( $log_messages{$category}{$log_key}{count_sum} / $log_messages{$category}{$log_key}{count_occurrences} ) : undef if defined $log_messages{$category}{$log_key}{count_occurrences};
+                $log_messages{$category}{$log_key}{count_mean} = ( defined $log_messages{$category}{$log_key}{count_sum} && defined $log_messages{$category}{$log_key}{count_occurrences} && $log_messages{$category}{$log_key}{count_occurrences} > 0 ) ? sprintf("%.0f", $log_messages{$category}{$log_key}{count_sum} / $log_messages{$category}{$log_key}{count_occurrences}) : undef if defined $log_messages{$category}{$log_key}{count_occurrences};
                 $log_messages{$category}{$log_key}{count_max} = $log_messages{$category}{$log_key}{count_max} if defined $log_messages{$category}{$log_key}{count_max};
                 $log_messages{$category}{$log_key}{count_sum} = $log_messages{$category}{$log_key}{count_sum} if defined $log_messages{$category}{$log_key}{count_sum};
                 
@@ -2399,7 +2403,7 @@ sub calculate_statistics {
     my $mean = int($bucket_data->{total_duration} / $duration_count);
     my $max = max(@sorted);
     my $variance = ($bucket_data->{sum_of_squares} / $duration_count) - ($mean ** 2);
-    my $std_dev = round( sqrt($variance) * 1000 ) / 1000;
+    my $std_dev = sprintf("%.3f", sqrt($variance));
     my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean ) : undef;
 
     # Percentile calculations must use duration_count, not occurrences
@@ -2419,12 +2423,21 @@ sub initialize_empty_time_windows {
 
     # Go through all of the buckets between the earliest and latest times and ensure that they have empty data to print time buckets with no data
     unless( $omit_empty ) {
-        my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;
-
         print "\rInitializing empty time windows..." unless $disable_progress;
 
-        for (my $bucket = $start_bucket; $bucket <= $output_timestamp_max; $bucket += $bucket_size_seconds) {
-            $log_occurrences{$bucket}{'empty'}{'occurrences'} = 0;
+        if ($print_milliseconds) {
+            # Use integer milliseconds for bucket keys to avoid floating-point precision issues
+            my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);
+            my $start_bucket = int(int($output_timestamp_min * 1000 + 0.5) / $bucket_size_ms) * $bucket_size_ms;
+            my $end_bucket = int($output_timestamp_max * 1000 + 0.5);
+            for (my $bucket = $start_bucket; $bucket <= $end_bucket; $bucket += $bucket_size_ms) {
+                $log_occurrences{$bucket}{'empty'}{'occurrences'} = 0;
+            }
+        } else {
+            my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;
+            for (my $bucket = $start_bucket; $bucket <= $output_timestamp_max; $bucket += $bucket_size_seconds) {
+                $log_occurrences{$bucket}{'empty'}{'occurrences'} = 0;
+            }
         }
 
         unless ($disable_progress) {
@@ -2760,7 +2773,7 @@ sub normalize_data_for_output {
             next if $category_bucket =~ /^(err|msg)-rate|empty$/;
             my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
             next if !defined $occurrences;										                # skip scaling where varible was left or is undefined (ie; no error or message rate)
-            my $scaled_occurrences = $max_total{occurrences} != 0 ? round(($occurrences / $max_total{occurrences}) * $printed_column_widths[$column_count_pre_graph] ) : 0;	# Adapting count scaling to multi-graph functionality
+            my $scaled_occurrences = $max_total{occurrences} != 0 ? int(($occurrences / $max_total{occurrences}) * $printed_column_widths[$column_count_pre_graph] + 0.5) : 0;	# Adapting count scaling to multi-graph functionality
             if( $scaled_occurrences > $scaled_max_value ) {                                     # track the maximum scaled count for this time bucket to correct for rounding errors
                 $scaled_max_value = $scaled_occurrences;
                 $scaled_max_key = $category_bucket;
@@ -3100,7 +3113,7 @@ sub print_bar_graph {
             my $name   = $printed_column_names[$column];
             my $width  = $printed_column_widths[$column];    
             my $padding = $width - length($name);
-            my $left_pad  = round( $padding / 2 );
+            my $left_pad  = int( $padding / 2 + 0.5 );
             my $right_pad = $padding - $left_pad;
  
             if ( $printed_column_spacing[$column] > 0 ) {
@@ -3130,13 +3143,19 @@ sub print_bar_graph {
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
         $lines_printed++;
 
-        foreach my $bucket (sort keys %log_occurrences) {
-            my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
+        foreach my $bucket (sort { $a <=> $b } keys %log_occurrences) {
+            my $bucket_time_str;
+            if ($print_milliseconds) {
+                # Bucket is integer milliseconds - convert to seconds for gmtime, extract ms part
+                $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket / 1000));
+                $bucket_time_str .= sprintf ".%03d", $bucket % 1000;
+            } else {
+                $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
+            }
             my $printed_chars = 0;
             my $total_occurrences = 0;
 
             ## PRINT TIMESTAMP IN CHART ROW
-            $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
             my $timestamp_legend_length = $timestamp_length;                                # already includes the padding in the value $graph_column_padding_all;
             print " " x $graph_column_padding_timestamp . $bucket_time_str . " " x $graph_column_padding_all;
             $printed_chars += $printed_column_widths[0] + $printed_column_spacing[0];       # timestamp column width and spacing
@@ -4231,7 +4250,7 @@ sub print_message_summary {
                     my $total_bytes_num = $log_messages{$grouping}{$key}{total_bytes};
                     my $total_bytes = format_bytes( $total_bytes_num,'B' );
                     # BUG/ WRONG!!! below assumes all lines have bytes, but not really
-                    my $mean_bytes = round( $total_bytes_num / $occurrences ) if defined $total_bytes_num; 
+                    my $mean_bytes = int( $total_bytes_num / $occurrences + 0.5 ) if defined $total_bytes_num; 
                     my $min = $log_messages{$grouping}{$key}{min};
                     my $mean = $log_messages{$grouping}{$key}{mean};
                     my $max = $log_messages{$grouping}{$key}{max};
