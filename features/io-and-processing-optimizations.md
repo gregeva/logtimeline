@@ -1,8 +1,8 @@
 # Feature: I/O and Processing Optimizations
 
-**Issue:** #47
-**Status:** Investigation Complete
-**Branch:** `47-io-optimizations`
+**Issue:** #47, #48
+**Status:** Partial Implementation Complete
+**Branch:** `48-processing-optimizations`
 
 ## Summary
 
@@ -182,13 +182,69 @@ The original issue hypothesized I/O optimizations. Profiling shows these would h
 
 **Total Estimated Savings:** 9-11 seconds (~55-65% faster)
 
+## Implementation Results (Issue #48)
+
+### Optimizations Implemented
+
+The following optimizations were implemented in commit `1e18a05`:
+
+1. **Removed `visualize_carets()` function** - deleted function and call site
+2. **Removed TEMPORARY substitutions block** - deleted customer-specific patterns
+3. **Replaced Math::Round with built-in operations** - using `sprintf()` and `int()`
+4. **Conditionalized metric extraction substitution** - only runs when metrics found
+
+### Benchmark Results
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Average time | 16.6s | 16.1s | -3% |
+| Savings | - | ~0.5s | - |
+
+**Result:** The implemented optimizations had less real-world impact than profiler estimates suggested. The ~3% improvement falls short of the >20% target.
+
+### Post-Implementation Profiling Analysis
+
+Re-profiling after implementation revealed where the actual time is spent in `read_and_process_logs`:
+
+| Time | Calls | Operation |
+|------|-------|-----------|
+| **6.46s** | 1.43M | ThingWorx format regex match (fails every line on access log files) |
+| **2.54s** | 1.43M | `s/(\d)\d{2}/$1xx/` HTTP status bucketing |
+| **1.58s** | 1.43M | Code inside `if( $is_line_match )` block |
+| **1.43s** | 1.43M | `grep { $_ eq $category_bucket } @log_levels` |
+| **1.36s** | 1.43M | `s/[\r\n]+$//` line ending removal |
+| **1.07s** | 1.43M | `s/ HTTP\/\d\.\d$//` HTTP version removal |
+| **1.01s** | 1.43M | `s/ \+\d{4}$//` timezone removal |
+| **0.98s** | 1.43M | `s/\?.+$//` query string removal |
+| **0.82s** | 1.43M | `/ count\s*=\s*(\d+)/` extraction |
+| **0.72s** | 1.43M | `s/-HL$//` highlight suffix removal |
+| **0.69s** | 1.43M | `s/(:\d{2}:\d{2})\.\d{3}/$1/` milliseconds removal |
+| **0.68s** | 1.43M | DateTime epoch() filter check |
+
+### Key Finding: Failed Regex Matches Are Expensive
+
+The test file is an **access log** matching the pattern at line 1382, but the profiler shows the **ThingWorx pattern at line 1325 consuming 6.46s** because it attempts (and fails) that complex regex match on every single line before falling through to the correct pattern.
+
+**This represents ~40% of the hot loop time on access log files** and is the core problem that Issue #23 (Log Format Registry) is designed to solve through format detection once per file.
+
+### Opportunities for Further Optimization
+
+1. **Log Format Registry (Issue #23)** - Detect format once per file, eliminating 6.46s of failed regex attempts
+2. **Hash lookup for log levels** - Replace `grep { $_ eq $category_bucket } @log_levels` with hash lookup (1.43s)
+3. **Regex consolidation** - Combine multiple small substitutions into compiled patterns
+4. **Format-specific substitutions** - Many substitutions only apply to certain formats but run unconditionally
+5. **DateTime migration (Issue #43)** - Replace DateTime.pm with Time::Piece (~5-6s)
+
+---
+
 ## Success Criteria
 
 - [x] Baseline benchmark documented (16.6s for 277MB file)
 - [x] Profiling analysis complete
-- [ ] Each optimization tested independently
-- [ ] No regression in output accuracy
-- [ ] Final benchmark shows >40% improvement
+- [x] Optimizations implemented (#48)
+- [x] Post-implementation profiling complete
+- [ ] No regression in output accuracy (needs verification)
+- [ ] Final benchmark shows >40% improvement (not achieved - requires #23 and #43)
 
 ## Test Plan
 
@@ -206,4 +262,4 @@ The original issue hypothesized I/O optimizations. Profiling shows these would h
 
 - #43 - DateTime to Time::Piece migration (captures the largest single optimization)
 - #1 - Multi-threaded file processing (these optimizations benefit each worker thread)
-- #23 - Log format registry (processing layer is separate from parsing logic)
+- #23 - Log format registry (would eliminate ~6.5s of failed regex matching per file)
