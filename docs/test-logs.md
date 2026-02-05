@@ -17,11 +17,12 @@ logs/
 
 | File | Server | Latency Unit | Metrics | Size | Use Case |
 |------|--------|--------------|---------|------|----------|
-| `ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` | Apache HTTP Server 2.x | microseconds (%D) | duration, bytes, count | 658KB | Apache HTTP2 with microsecond latency |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 277MB | Primary Tomcat 9 access log test |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 220MB | Secondary Tomcat 9 access log test |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 148MB | Smaller Tomcat 9 access log test |
-| `localhost_access_log.2025-03-21.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes, count | 2.6MB | Small access log for quick tests |
+| `ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` | Apache HTTP Server 2.x | microseconds (%D) | duration, bytes | 658KB | Apache HTTP2 with microsecond latency |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 277MB | Primary Tomcat 9 access log test |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 220MB | Secondary Tomcat 9 access log test |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 148MB | Smaller Tomcat 9 access log test |
+| `localhost_access_log.2025-03-21.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 2.6MB | Small access log for quick tests |
+| `really-big/*` | Tomcat 10 | milliseconds (%D) | duration, bytes | 8.5GB | Really big access logs from 4 servers over 28 days |
 
 **Format**: Apache combined log with duration at end (units vary by server)
 ```
