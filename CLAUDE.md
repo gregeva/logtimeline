@@ -82,7 +82,7 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 5. Create release branch: `git checkout -b release/X.Y.Z` (no `v` prefix)
 6. Merge each feature/bugfix branch: `git merge {branch-name} --no-edit` (repeat for all branches going into this release)
 7. Update version in `ltl` (line 74: `$version_number`)
-8. Create release notes: `releases/v{version}.md` (include all features/fixes)
+8. Create release notes: `releases/v{version}.md` — **keep it concise**: one bullet per feature/fix with issue reference. No usage examples, no file lists, no "Breaking Changes: None", no "Known Issues", no root cause analysis. See `releases/TEMPLATE.md`.
 9. Commit: `git commit -am "Release vX.Y.Z"`
 10. Push release branch: `git push -u origin release/X.Y.Z`
 11. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
