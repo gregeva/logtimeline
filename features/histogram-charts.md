@@ -292,7 +292,6 @@ Match bar graph column colors for consistency:
 
 ## Non-Requirements (Out of Scope)
 
-- Highlight filter support (future enhancement)
 - User-defined bucket boundaries (future enhancement)
 - CSV output of histogram data (future enhancement)
 - Linear scale option (removed - logarithmic only)
@@ -318,6 +317,8 @@ Match bar graph column colors for consistency:
 17. [x] Histogram section display height is configurable from a command line option
 18. [x] Dynamic height scaling based on terminal height (4-15 rows)
 19. [x] Progress messages and timing displayed for histogram statistics
+20. [x] Highlight filter support - stacked bars with highlighted portion in bright color at bottom (Issue #42)
+21. [x] Two legend lines when highlight data exists - population percentiles (base color) and highlighted percentiles (highlight color)
 
 ## Test Plan
 
@@ -459,11 +460,11 @@ Complete set for axes, tick marks, and corners:
 
 ## Future Enhancements
 
-1. **Highlight support**: Show filtered subset distribution overlaid on full distribution
+1. ~~**Highlight support**~~: **DELIVERED** in Issue #42 - stacked bars show highlighted portion at bottom in bright colors
 2. **Custom bucket boundaries**: Allow users to specify bucket ranges via command line
 3. **Cumulative distribution**: Show CDF alongside histogram
 4. **CSV export**: Include histogram bucket data in CSV output
-5. **Percentile markers on chart**: Visual indicators (e.g., vertical lines or markers) showing P50/P90/P99/P99.9 positions directly on the histogram bars
+5. ~~**Percentile markers on chart**~~: Delivered via legend line below each histogram; percentiles selected from priority list (P50, P99, P99.9, P95, P90, P75, P99.99, P25, P10, P1) based on available width, then displayed in ascending order
 
 ## Progress Tracking
 
@@ -518,3 +519,7 @@ Complete set for axes, tick marks, and corners:
 | X-axis label alignment with log buckets | Labels calculated using same logarithmic formula as bucket boundaries; verified alignment across all display widths | 2026-02-01 |
 | Display bucket expansion/compression | When display > buckets: each bucket spans multiple columns; when display < buckets: multiple buckets aggregate per column | 2026-02-01 |
 | ANSI color reset before Y-axis | Prevents color bleeding on wide displays; `ansi_reset()` called before right Y-axis rendering | 2026-02-01 |
+| Highlight support memory approach | Follow existing heatmap pattern - store ALL values in main array, highlighted values duplicated in separate _hl arrays; simple given current architecture | 2026-02-05 |
+| Highlight colors match bar graph highlight_bg | Duration: 226 (bright yellow), Bytes: 46 (bright green), Count: 51 (bright cyan) | 2026-02-05 |
+| Stacked bars for highlight | Highlighted portion renders at bottom of bar in highlight color; non-highlighted portion on top in base color; uses half-block characters for smooth transitions | 2026-02-05 |
+| Two legend lines when highlight exists | First line: population percentiles (base text color); Second line: highlighted percentiles (highlight text color) | 2026-02-05 |
