@@ -233,6 +233,25 @@ my %histogram_stats = (
     count    => {},
 );
 
+# Histogram highlight data structures (Issue #42) - parallel to main structures
+my %histogram_values_hl = (
+    duration => [],
+    bytes    => [],
+    count    => [],
+);
+
+my %histogram_buckets_hl = (
+    duration => [],
+    bytes    => [],
+    count    => [],
+);
+
+my %histogram_stats_hl = (
+    duration => {},
+    bytes    => {},
+    count    => {},
+);
+
 # Box drawing character sets for histogram axes (Issue #25)
 my $histogram_box_weight = 'heavy';  # 'heavy' or 'light'
 
@@ -273,6 +292,13 @@ my %histogram_base_colors = (
     duration => 184,  # Yellow - matches bar graph column 2 plain_bg
     bytes    => 34,   # Green - matches bar graph column 3 plain_bg
     count    => 30,   # Cyan - matches bar graph column 4 plain_bg
+);
+
+# Histogram highlight colors (Issue #42) - match bar graph highlight_bg colors
+my %histogram_highlight_colors = (
+    duration => 226,  # Bright yellow - matches bar graph column 2 highlight
+    bytes    => 46,   # Bright green - matches bar graph column 3 highlight
+    count    => 51,   # Bright cyan - matches bar graph column 4 highlight
 );
 
 # Histogram color gradients (256-color ANSI) for optional intensity variation
@@ -952,7 +978,7 @@ sub handle_histogram_option {
                 # 'time' is an alias for 'duration' for consistency
                 $histogram_metrics{'duration'} = 1;
             } else {
-                warn "Unknown histogram metric: $metric (valid: duration, bytes, count)\n";
+                warn "Unknown histogram metric: $metric (valid: duration, time, bytes, count)\n";
             }
         }
     }
@@ -1754,17 +1780,22 @@ sub read_and_process_logs {
                     ## HISTOGRAM RAW VALUE CAPTURE (Issue #25) ##
                     # Histogram collects values across entire population (not per time-bucket like heatmap)
                     if ($histogram_enabled) {
+                        my $is_highlighted = ($category_bucket =~ /-HL$/);
+
                         # Collect duration values if requested (or if no specific metrics requested)
                         if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration >= 0 && !$omit_durations) {
                             push @{$histogram_values{duration}}, $duration;
+                            push @{$histogram_values_hl{duration}}, $duration if $is_highlighted;
                         }
                         # Collect bytes values if requested
                         if ((!%histogram_metrics || $histogram_metrics{bytes}) && defined $bytes && $bytes > 0 && !$omit_bytes) {
                             push @{$histogram_values{bytes}}, $bytes;
+                            push @{$histogram_values_hl{bytes}}, $bytes if $is_highlighted;
                         }
                         # Collect count values if requested
                         if ((!%histogram_metrics || $histogram_metrics{count}) && defined $count && $count >= 0 && !$omit_count) {
                             push @{$histogram_values{count}}, $count;
+                            push @{$histogram_values_hl{count}}, $count if $is_highlighted;
                         }
                     }
                 }
@@ -1994,6 +2025,43 @@ sub calculate_histogram_buckets {
 
         # Free memory - raw values no longer needed
         @{$histogram_values{$metric}} = ();
+
+        # Issue #42: Calculate highlight buckets and stats (using same boundaries)
+        my $hl_values_ref = $histogram_values_hl{$metric};
+        if (defined $highlight_regex && defined $hl_values_ref && @$hl_values_ref > 0) {
+            # Initialize highlight bucket counts
+            @{$histogram_buckets_hl{$metric}} = (0) x $bucket_count;
+
+            # Sort highlighted values for percentile calculation
+            my @sorted_hl = sort { $a <=> $b } @$hl_values_ref;
+            my $n_hl = scalar @sorted_hl;
+
+            # Calculate highlight percentiles
+            $histogram_stats_hl{$metric} = {
+                min    => $sorted_hl[0],
+                max    => $sorted_hl[-1],
+                count  => $n_hl,
+                p1     => $sorted_hl[int($n_hl * 0.01)],
+                p10    => $sorted_hl[int($n_hl * 0.10)],
+                p25    => $sorted_hl[int($n_hl * 0.25)],
+                p50    => $sorted_hl[int($n_hl * 0.50)],
+                p75    => $sorted_hl[int($n_hl * 0.75)],
+                p90    => $sorted_hl[int($n_hl * 0.90)],
+                p95    => $sorted_hl[int($n_hl * 0.95)],
+                p99    => $sorted_hl[int($n_hl * 0.99)],
+                p999   => $sorted_hl[int($n_hl * 0.999)] // $sorted_hl[-1],
+                p9999  => $sorted_hl[int($n_hl * 0.9999)] // $sorted_hl[-1],
+            };
+
+            # Assign highlighted values to buckets using same boundaries
+            for my $value (@sorted_hl) {
+                my $bucket_idx = find_histogram_bucket_index($value, $histogram_boundaries{$metric});
+                $histogram_buckets_hl{$metric}[$bucket_idx]++;
+            }
+        }
+
+        # Free highlight memory - raw values no longer needed
+        @{$histogram_values_hl{$metric}} = ();
     }
 
     unless ($disable_progress) {
@@ -3454,6 +3522,14 @@ sub print_histograms {
         # Calculate display scaling
         my @display_buckets = calculate_histogram_display_buckets(\@buckets, $bar_width);
 
+        # Issue #42: Calculate highlight display buckets if highlight data exists
+        my @display_buckets_hl = ();
+        my $stats_hl = undef;
+        if (defined $highlight_regex && @{$histogram_buckets_hl{$metric}}) {
+            @display_buckets_hl = calculate_histogram_display_buckets($histogram_buckets_hl{$metric}, $bar_width);
+            $stats_hl = $histogram_stats_hl{$metric};
+        }
+
         # Find max for scaling
         my $max_bucket = 0;
         for my $b (@display_buckets) {
@@ -3468,12 +3544,14 @@ sub print_histograms {
         my $x_labels = calculate_histogram_x_labels($boundaries, $bar_width, $metric);
 
         $metric_data{$metric} = {
-            display_buckets => \@display_buckets,
-            max_bucket      => $max_bucket,
-            y_ticks         => $y_ticks,
-            x_labels        => $x_labels,
-            boundaries      => $boundaries,
-            stats           => $stats,
+            display_buckets    => \@display_buckets,
+            display_buckets_hl => \@display_buckets_hl,
+            max_bucket         => $max_bucket,
+            y_ticks            => $y_ticks,
+            x_labels           => $x_labels,
+            boundaries         => $boundaries,
+            stats              => $stats,
+            stats_hl           => $stats_hl,
         };
     }
 
@@ -3516,8 +3594,8 @@ sub print_histograms {
             my $data = $metric_data{$metric};
             my $row_str = render_histogram_row(
                 $metric, $row, $height, $bar_width,
-                $data->{display_buckets}, $data->{max_bucket},
-                $data->{y_ticks}, \%box
+                $data->{display_buckets}, $data->{display_buckets_hl},
+                $data->{max_bucket}, $data->{y_ticks}, \%box
             );
             $row_line .= $row_str;
             $row_line .= " " x $gap if $i < $#metrics;
@@ -3548,14 +3626,24 @@ sub print_histograms {
     }
     push @all_lines, $xlabel_line;
 
-    # Legend (percentiles)
+    # Legend (percentiles) - may have 1 or 2 lines depending on highlight data
     my $legend_line = " " x $centering_offset;
+    my $legend_line_hl = " " x $centering_offset;
+    my $has_any_highlight = 0;
+
     for my $i (0 .. $#metrics) {
         my $metric = $metrics[$i];
         my $data = $metric_data{$metric};
-        my $legend_str = render_histogram_legend($metric, $data->{stats}, $bar_width, $single_width);
+        my ($legend_str, $legend_str_hl) = render_histogram_legend($metric, $data->{stats}, $data->{stats_hl}, $bar_width, $single_width);
         $legend_line .= $legend_str;
         $legend_line .= " " x $gap if $i < $#metrics;
+        if (defined $legend_str_hl) {
+            $legend_line_hl .= $legend_str_hl;
+            $has_any_highlight = 1;
+        } else {
+            $legend_line_hl .= " " x $single_width;
+        }
+        $legend_line_hl .= " " x $gap if $i < $#metrics;
     }
 
     # Add spacing before legend
@@ -3563,6 +3651,7 @@ sub print_histograms {
         push @all_lines, "";
     }
     push @all_lines, $legend_line;
+    push @all_lines, $legend_line_hl if $has_any_highlight;
 
     # Print all lines
     for my $line (@all_lines) {
@@ -3721,9 +3810,9 @@ sub calculate_histogram_x_labels {
     return \@filtered;
 }
 
-# Render a single histogram row
+# Render a single histogram row (Issue #42: supports stacked highlight bars)
 sub render_histogram_row {
-    my ($metric, $row, $height, $bar_width, $display_buckets, $max_bucket, $y_ticks, $box) = @_;
+    my ($metric, $row, $height, $bar_width, $display_buckets, $display_buckets_hl, $max_bucket, $y_ticks, $box) = @_;
 
     my $row_threshold = ($row + 1) / $height;
     my $row_bottom = $row / $height;
@@ -3747,42 +3836,102 @@ sub render_histogram_row {
 
     my $result = $y_label . $left_tick;
 
-    # Get color for this metric
+    # Get colors for this metric
     my $base_color = $histogram_base_colors{$metric};
+    my $highlight_color = $histogram_highlight_colors{$metric};
     my $gradient = $histogram_color_gradients{$metric};
+    my $has_highlight = defined $display_buckets_hl && @$display_buckets_hl;
 
     # Render bar characters
     for my $col (0 .. $bar_width - 1) {
         last if $col >= scalar(@$display_buckets);
 
-        my $bucket_fill = $display_buckets->[$col] / $max_bucket;
-        my $char;
+        my $total_count = $display_buckets->[$col];
+        my $hl_count = ($has_highlight && $col < scalar(@$display_buckets_hl)) ? $display_buckets_hl->[$col] : 0;
 
-        if ($bucket_fill >= $row_threshold) {
-            $char = $histogram_block_chars[8];  # Full block
-        } elsif ($bucket_fill > $row_bottom) {
-            my $partial = ($bucket_fill - $row_bottom) / (1 / $height);
-            my $index = int($partial * 8 + 0.5);
-            $index = 8 if $index > 8;
-            $index = 0 if $index < 0;
-            $char = $histogram_block_chars[$index];
-        } else {
-            # Empty - check for gridline
+        my $total_fill = $total_count / $max_bucket;
+        my $hl_fill = $hl_count / $max_bucket;
+
+        # Determine what portion of this row is filled and with what color
+        # Highlighted portion fills from bottom (row 0), non-highlighted on top
+        my $char;
+        my $color;
+
+        if ($total_fill <= $row_bottom) {
+            # Row is entirely empty - check for gridline
             if ($histogram_gridlines_enabled && $has_tick) {
                 $result .= "\e[38;5;${histogram_gridline_color}m─\e[0m";
                 next;
             }
             $char = ' ';
+            $result .= $char;
+            next;
         }
 
-        # Apply color
-        my $color;
-        if ($histogram_color_gradient_enabled) {
-            my $intensity = int(($display_buckets->[$col] / $max_bucket) * 7);
+        # Determine which color region this row falls into
+        # - Rows below hl_fill: highlighted color
+        # - Rows above hl_fill but below total_fill: base color
+        # - Rows spanning boundaries: partial blocks with appropriate colors
+
+        if ($hl_fill >= $row_threshold) {
+            # Row is entirely within highlighted region
+            $color = $has_highlight ? $highlight_color : $base_color;
+            $char = $histogram_block_chars[8];  # Full block
+        } elsif ($hl_fill > $row_bottom && $hl_fill < $row_threshold) {
+            # Row spans the highlight/non-highlight boundary
+            # We need to render a partial block for highlight, then partial for non-highlight
+            # Since we can only output one character, we use the lower half block technique
+
+            # Calculate highlight partial fill within this row
+            my $hl_partial = ($hl_fill - $row_bottom) / (1 / $height);
+            my $hl_index = int($hl_partial * 8 + 0.5);
+            $hl_index = 8 if $hl_index > 8;
+            $hl_index = 0 if $hl_index < 0;
+
+            if ($total_fill >= $row_threshold) {
+                # Total fills the row completely, highlight fills partially
+                # Use lower half block for highlight, upper half shows non-highlight
+                if ($hl_index >= 4 && $has_highlight) {
+                    # More than half is highlight - use lower half block with highlight fg, base bg
+                    $result .= "\e[38;5;${highlight_color};48;5;${base_color}m▄\e[0m";
+                } elsif ($hl_index > 0 && $has_highlight) {
+                    # Less than half is highlight - use upper half block with base fg, highlight bg
+                    $result .= "\e[38;5;${base_color};48;5;${highlight_color}m▀\e[0m";
+                } else {
+                    # No highlight in this row, full base color
+                    $result .= "\e[38;5;${base_color};48;5;${base_color}m█\e[0m";
+                }
+                next;
+            } else {
+                # Total doesn't fill the row completely
+                # Render highlight partial block
+                $char = $histogram_block_chars[$hl_index];
+                $color = $has_highlight ? $highlight_color : $base_color;
+            }
+        } elsif ($total_fill >= $row_threshold) {
+            # Row is entirely above highlight region but within total
+            $color = $base_color;
+            $char = $histogram_block_chars[8];  # Full block
+        } elsif ($total_fill > $row_bottom) {
+            # Row is partially filled with non-highlighted (above highlight region)
+            my $partial = ($total_fill - $row_bottom) / (1 / $height);
+            my $index = int($partial * 8 + 0.5);
+            $index = 8 if $index > 8;
+            $index = 0 if $index < 0;
+            $char = $histogram_block_chars[$index];
+            $color = $base_color;
+        } else {
+            # Should not reach here (handled above)
+            $char = ' ';
+            $result .= $char;
+            next;
+        }
+
+        # Apply gradient if enabled (only for non-highlight)
+        if ($histogram_color_gradient_enabled && $color == $base_color) {
+            my $intensity = int($total_fill * 7);
             $intensity = 7 if $intensity > 7;
             $color = $gradient->[$intensity];
-        } else {
-            $color = $base_color;
         }
 
         if ($char eq $histogram_block_chars[8]) {
@@ -3855,9 +4004,10 @@ sub render_histogram_x_labels {
     return join('', @label_line);
 }
 
-# Render legend with percentiles
+# Render legend with percentiles (Issue #42: supports highlight stats)
+# Returns ($legend_line, $legend_line_hl) where $legend_line_hl is undef if no highlight data
 sub render_histogram_legend {
-    my ($metric, $stats, $bar_width, $single_width) = @_;
+    my ($metric, $stats, $stats_hl, $bar_width, $single_width) = @_;
 
     # Priority order for percentile selection (SRE best practices)
     my @percentile_priority = (
@@ -3876,7 +4026,7 @@ sub render_histogram_legend {
     my $separator = "   ";
     my $available_width = $bar_width;
 
-    # Build all entry strings
+    # Build all entry strings for main stats
     my @all_entries;
     for my $pct (@percentile_priority) {
         my $value_str = format_heatmap_value($stats->{$pct->{key}}, $metric);
@@ -3902,7 +4052,7 @@ sub render_histogram_legend {
         }
     }
 
-    return " " x $single_width unless $max_entries > 0;
+    return (" " x $single_width, undef) unless $max_entries > 0;
 
     # Take first N items by priority, sort for display
     my @selected = @all_entries[0 .. $max_entries - 1];
@@ -3910,16 +4060,55 @@ sub render_histogram_legend {
 
     my $legend_line = join($separator, map { $_->{str} } @selected);
 
-    # Center within single_width
+    # Center within single_width, apply base metric color
     my $left_margin = 8;
     my $legend_padding = $left_margin + int(($bar_width - length($legend_line)) / 2);
     $legend_padding = 0 if $legend_padding < 0;
 
-    my $result = " " x $legend_padding . $legend_line;
-    # Pad to single_width
-    $result .= " " x ($single_width - length($result)) if length($result) < $single_width;
+    my $base_color = $histogram_base_colors{$metric};
+    my $result = " " x $legend_padding . "\e[38;5;${base_color}m" . $legend_line . "\e[0m";
+    # Pad to single_width (account for ANSI codes not taking visual width)
+    my $visual_len = $legend_padding + length($legend_line);
+    $result .= " " x ($single_width - $visual_len) if $visual_len < $single_width;
 
-    return $result;
+    # Issue #42: Build highlight legend line if highlight stats exist
+    my $result_hl = undef;
+    if (defined $stats_hl && defined $stats_hl->{count} && $stats_hl->{count} > 0) {
+        my $highlight_color = $histogram_highlight_colors{$metric};
+
+        # Build highlight entry strings using same percentiles
+        my @all_entries_hl;
+        for my $pct (@percentile_priority) {
+            my $value_str = format_heatmap_value($stats_hl->{$pct->{key}}, $metric);
+            my $entry_str = $pct->{label} . ": " . $value_str;
+            push @all_entries_hl, {
+                sort_order => $pct->{sort_order},
+                str        => $entry_str,
+                len        => length($entry_str),
+            };
+        }
+
+        # Use same number of entries as main legend for alignment
+        my @selected_hl = @all_entries_hl[0 .. $max_entries - 1];
+        @selected_hl = sort { $a->{sort_order} <=> $b->{sort_order} } @selected_hl;
+
+        my $legend_line_hl = join($separator, map { $_->{str} } @selected_hl);
+
+        # Center with highlight background color and black/white foreground (like bar charts)
+        my $hl_padding = $left_margin + int(($bar_width - length($legend_line_hl)) / 2);
+        $hl_padding = 0 if $hl_padding < 0;
+
+        # Use black foreground on dark terminals, white on light terminals
+        # Add space padding before and after text for highlighter effect
+        my $fg_color = $heatmap_light_bg ? 15 : 0;  # 15 = white, 0 = black
+        my $hl_text_with_padding = " " . $legend_line_hl . " ";  # space before and after for highlighter effect
+        $result_hl = " " x ($hl_padding - 1) . "\e[48;5;${highlight_color}m\e[38;5;${fg_color}m" . $hl_text_with_padding . "\e[0m";
+        # Pad to single_width (account for reduced left padding and added highlighter padding)
+        my $visual_len = ($hl_padding - 1) + length($hl_text_with_padding);
+        $result_hl .= " " x ($single_width - $visual_len) if $visual_len < $single_width;
+    }
+
+    return ($result, $result_hl);
 }
 
 sub print_summary_table {
