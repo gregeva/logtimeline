@@ -622,31 +622,38 @@ sub detect_light_terminal_background {
 sub get_memory_usage {
     my $memory_usage;
 
-    if ($^O eq 'darwin' || $^O eq 'linux') {                    # For Mac OS and Debian (Linux)
-        eval {
-            require Proc::ProcessTable;
-            my $t = Proc::ProcessTable->new();
-            ($memory_usage) = map { $_->rss } grep { $_->pid == $$ } @{$t->table};
-        };
-        if ($@) {
-            die "Failed to load Proc::ProcessTable: $@";
+    if ($^O eq 'darwin') {                                      # macOS
+        # Use ps command - reliable and avoids Proc::ProcessTable SIGTRAP crashes
+        my $rss = `ps -o rss= -p $$`;
+        chomp $rss;
+        $memory_usage = $rss * 1024 if $rss;                    # ps returns KB, convert to bytes
+    } elsif ($^O eq 'linux') {                                  # Linux
+        # Read /proc/self/statm directly - always available, no dependencies
+        if (open my $fh, '<', '/proc/self/statm') {
+            my $line = <$fh>;
+            close $fh;
+            my @fields = split /\s+/, $line;
+            if (defined $fields[1]) {
+                # Field 1 is RSS in pages, multiply by system page size
+                require POSIX;
+                my $page_size = POSIX::sysconf(&POSIX::_SC_PAGESIZE);
+                $memory_usage = $fields[1] * $page_size;
+            }
         }
-    } elsif ($^O eq 'MSWin32') {                                # For Windows
+    } elsif ($^O eq 'MSWin32') {                                # Windows
         eval {
             require Win32::Process::Info;
-            Win32::Process::Info->import();  # Explicitly call import
+            Win32::Process::Info->import();
             my $pi = Win32::Process::Info->new();
             my $info = $pi->GetProcInfo();
             ($memory_usage) = map { $_->{WorkingSetSize} } grep { $_->{ProcessId} == $$ } @$info;
         };
         if ($@) {
-            die "Failed to load Win32::Process::Info: $@";
+            warn "Failed to get memory usage on Windows: $@";
         }
-    } else {
-        die "Unsupported operating system: $^O";
     }
 
-    return $memory_usage;
+    return $memory_usage // 0;
 }
 
 # Issue #45: Measure all data structures and update high-water marks
@@ -3997,7 +4004,7 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "HISTOGRAM STATISTICS", format_time( $elapsed_histogram_statistics, 's', 'medium', " " ) ) if $histogram_enabled;
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $max_memory_usage, 'B' ) );
 
     # Add structural breakdown if -mem flag used and we have high-water mark data
     if ($show_memory && %memory_high_water_marks) {
