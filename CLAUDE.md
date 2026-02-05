@@ -32,6 +32,7 @@ Track observations for process improvement. After releases, review what worked a
 - 2026-02-03: After tagging a release, always create the GitHub release with `gh release create <tag> --notes-file releases/<version>.md` to attach release notes.
 - 2026-02-03: When stuck on technical issues (e.g., floating-point precision), ask the user rather than iterating through failed attempts. The user often has quick answers.
 - 2026-02-03: For sub-second time buckets in Perl, use integer milliseconds for hash keys to avoid floating-point precision issues (e.g., `.099` instead of `.100`).
+- 2026-02-05: When updating issues with fix completion, always include the commit hash and branch name.
 
 ## Project Overview
 
