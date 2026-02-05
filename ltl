@@ -198,7 +198,8 @@ my %heatmap_metric_map = (
 # Histogram data structures and settings (Issue #25)
 my $histogram_enabled = 0;                    # Flag: histogram mode active
 my %histogram_metrics = ();                   # Metrics to display: {duration => 1, bytes => 1, count => 1}
-my $histogram_width_percent = 95;             # Width as percentage of terminal
+my $histogram_width_percent = 95;             # Width as percentage of terminal (default, auto-adapted by histogram count)
+my $histogram_width_explicit = 0;             # Flag: true if user explicitly set -hgw
 my $histogram_height = 8;                     # Height in rows (default 8, auto-scaled based on terminal)
 my $histogram_height_explicit = 0;            # Flag: true if user explicitly set -hgh
 my $histogram_gap = 6;                        # Horizontal padding between histograms
@@ -1036,7 +1037,7 @@ sub adapt_to_command_line_options {
         'heatmap-width|hmw=i' => \$heatmap_width,
         'light-background|lbg' => sub { $heatmap_light_bg = 1; $heatmap_light_bg_auto = 0; },
         'histogram|hg:s' => \&handle_histogram_option,
-        'histogram-width|hgw=i' => \$histogram_width_percent,
+        'histogram-width|hgw=i' => sub { $histogram_width_percent = $_[1]; $histogram_width_explicit = 1; },
         'histogram-height|hgh=i' => sub { $histogram_height = $_[1]; $histogram_height_explicit = 1; },
         'hgbpd=i' => \$histogram_buckets_per_decade,
         'hgb=i' => \$histogram_bucket_override
@@ -2095,10 +2096,7 @@ sub calculate_histogram_buckets {
 # Calculate histogram layout dimensions - Issue #25
 # Returns a hash with layout information for rendering histograms side by side
 sub calculate_histogram_layout {
-    # Step 1: Get terminal width and calculate display width
-    my $display_width = int($terminal_width * $histogram_width_percent / 100);
-
-    # Step 2: Determine which metrics have data (in display order: duration, bytes, count)
+    # Step 1: Determine which metrics have data (in display order: duration, bytes, count)
     my @active_metrics = ();
     for my $metric (qw(duration bytes count)) {
         # Check if metric was requested (or all metrics if none specified)
@@ -2114,14 +2112,28 @@ sub calculate_histogram_layout {
 
     my $n = scalar @active_metrics;
 
-    # Step 3: Calculate spacing
+    # Step 2: Adapt width percentage based on number of histograms
+    # Fewer histograms = narrower display to avoid overly wide single charts
+    # If user explicitly set -hgw, respect that instead
+    my $effective_width_percent;
+    if ($histogram_width_explicit) {
+        $effective_width_percent = $histogram_width_percent;
+    } else {
+        my %width_by_count = (1 => 80, 2 => 90, 3 => 99);
+        $effective_width_percent = $width_by_count{$n} // $histogram_width_percent;
+    }
+
+    # Step 3: Get terminal width and calculate display width
+    my $display_width = int($terminal_width * $effective_width_percent / 100);
+
+    # Step 4: Calculate spacing
     my $total_gap = ($n - 1) * $histogram_gap;
 
-    # Step 4: Calculate available width for histograms
+    # Step 5: Calculate available width for histograms
     my $available_width = $display_width - $total_gap;
     my $single_histogram_width = int($available_width / $n);
 
-    # Step 5: Calculate internal layout for each histogram
+    # Step 6: Calculate internal layout for each histogram
     # Left Y-axis: count label (6 chars + space) + tick (1 char) = 8
     # Right Y-axis: tick (1 char) + percentage label (5 chars) = 6
     # Total overhead per histogram: 14 chars
