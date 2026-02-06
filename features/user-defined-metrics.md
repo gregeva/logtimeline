@@ -122,6 +122,13 @@ This implementation serves as a proving ground for Issue #23's derived metrics a
 
 - **Non-access-log formats silently discarded UDM values**: The UDM storage blocks were inside `if ($is_access_log)` gates. Log formats that don't set `$is_access_log` (e.g., match_type 11 — ThingWorx Edge C SDK trace logs) would capture UDM values but never store them. Fixed by setting `$is_access_log = 1` when `%udm_values` is populated, and making `$print_durations` conditional on actual duration/bytes/count data to avoid empty latency columns.
 
+## Next Steps
+
+### Aggregation functions: min, max, avg
+Currently functions only support `delta` and `idelta` (inter-line stateful transforms). Add `min`, `max`, and `avg` as new function types. These would change what value is displayed in the bar graph column — instead of showing the sum per time bucket (default), show the min, max, or average. The per-bucket min/max/mean values are already computed and stored; this just needs to select which one drives the bar graph and trend value display.
+
+Syntax: `-udm "metric_name::min"`, `-udm "metric_name:B:max"`, `-udm "metric_name::avg"`
+
 ## Future Enhancements (Out of Scope)
 
 - Heatmap support for UDM metrics (`-hm udm_metricname`)
