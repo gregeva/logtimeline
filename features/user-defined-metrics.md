@@ -141,6 +141,8 @@ $log_analysis{$bucket}{"udm_${name}_min"}
 $log_analysis{$bucket}{"udm_${name}_max"}
 $log_analysis{$bucket}{"udm_${name}_sum-HL"}
 $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}
+$log_analysis{$bucket}{"udm_${name}_min-HL"}
+$log_analysis{$bucket}{"udm_${name}_max-HL"}
 ```
 
 ### Per-Message Storage (`%log_messages`)
@@ -153,14 +155,25 @@ $log_messages{$cat}{$key}{"udm_${name}_max"}
 
 ### Statistics (`%log_stats`)
 ```
-$log_stats{$bucket}{"udm_$name"}           # sum (used for bar graph scaling)
-$log_stats{$bucket}{"udm_$name-HL"}        # highlighted sum
+$log_stats{$bucket}{"udm_$name"}           # display value (selected by aggregation: sum/min/max/avg)
+$log_stats{$bucket}{"udm_$name-HL"}        # highlighted display value (aggregation-aware)
 $log_stats{$bucket}{"udm_${name}_occurrences"}
 $log_stats{$bucket}{"udm_${name}_min"}
 $log_stats{$bucket}{"udm_${name}_max"}
 $log_stats{$bucket}{"udm_${name}_mean"}
 $log_stats{$bucket}{"udm_${name}_sum"}
 ```
+
+### Highlight Behavior by Aggregation
+
+The `-HL` (highlight) value controls what portion of the bar renders in highlight color:
+
+| Aggregation | Highlight behavior |
+|-------------|-------------------|
+| `sum` | `-HL` = sum of highlighted values. Bar shows highlighted portion proportionally. |
+| `min` | `-HL` = display value if the highlighted min equals the overall min (entire bar highlights). Otherwise `undef` (no highlight). |
+| `max` | `-HL` = display value if the highlighted max equals the overall max (entire bar highlights). Otherwise `undef` (no highlight). |
+| `avg` | `-HL` = `undef`. No meaningful highlight for averages. |
 
 ## Relationship to Issue #23
 
@@ -172,35 +185,29 @@ This implementation serves as a proving ground for Issue #23's derived metrics a
 
 ## Next Steps
 
-### Aggregation functions: min, max, avg — IN PROGRESS
-Add `min`, `max`, `avg`, and explicit `sum` as aggregation functions, with support for combining with transforms using function-call syntax: `max(delta)`, `avg(idelta)`, etc. See Functions section above for full syntax specification.
+### Aggregation functions: min, max, avg — DONE
+Added `min`, `max`, `avg`, and explicit `sum` as aggregation functions, with support for combining with transforms using function-call syntax: `max(delta)`, `avg(idelta)`, etc. See Functions section above for full syntax specification.
 
-Implementation tasks:
-- [ ] Parse new function syntax in `parse_udm_configs()`: standalone aggregations, combined `agg(transform)` form
-- [ ] Store aggregation type per UDM config
-- [ ] Select correct stored value (min/max/mean/sum) for bar graph display based on aggregation
-- [ ] Select correct stored value for trend/numeric display
-- [ ] Update `-help` text with aggregation examples
+Implementation:
+- [x] Parse new function syntax in `parse_udm_configs()`: standalone aggregations, combined `agg(transform)` form
+- [x] Store `transform` and `aggregation` per UDM config
+- [x] Select correct stored value (min/max/mean/sum) for bar graph display based on aggregation
+- [x] Aggregation-aware highlight logic (min-HL, max-HL tracking)
 
-### Unit coverage audit and IEC unit support
-Need to verify all unit specifiers work correctly and add missing IEC binary units (`KiB`, `MiB`, `GiB`, `TiB`).
+### Unit coverage audit and IEC unit support — DONE
+Added IEC binary units and case-insensitive unit matching.
 
-**Time units**: `ns`, `us`, `ms`, `s` — converted via `convert_duration_to_ms()`
-
-**Byte units**: `B`, `b`, `kB`, `KB`, `KiB`, `k`, `K`, `MB`, `MiB`, `M`, `GB`, `GiB`, `G`, `TB`, `TiB`, `T` — converted via `convert_bytes()`
-
-TO DO:
-- [ ] Add `KiB`, `MiB`, `GiB`, `TiB` to `parse_udm_configs()` unit recognition
-- [ ] Verify case handling (e.g., `kb` treated same as `KB`)
+- [x] Add `KiB`, `MiB`, `GiB`, `TiB` to `parse_udm_configs()` unit recognition and `convert_bytes()`
+- [x] Case normalization: `kb` → `KB`, `kib` → `KiB`, `ms` → `ms`, etc.
 - [ ] Test each time unit: `-udm "metric:ns"`, `-udm "metric:us"`, `-udm "metric:ms"`, `-udm "metric:s"`
-- [ ] Test each byte unit with different magnitudes: `-udm "metric:B"`, `-udm "metric:KB"`, `-udm "metric:KiB"`, `-udm "metric:MB"`, `-udm "metric:MiB"`, `-udm "metric:GB"`, `-udm "metric:GiB"`, `-udm "metric:TB"`, `-udm "metric:TiB"`
+- [ ] Test each byte unit with different magnitudes
 - [ ] Test shorthand byte units: `-udm "metric:k"`, `-udm "metric:K"`, `-udm "metric:M"`, `-udm "metric:G"`, `-udm "metric:T"`
-- [ ] Verify display formatting matches unit type (format_time for time, format_bytes for bytes)
-- [ ] Verify conversion correctness (e.g., `-udm "metric:KB"` with value 1024 should store as 1048576 bytes and display as 1 MB)
+- [ ] Verify conversion correctness
 - [ ] Consider whether additional units are needed (e.g., `min` for minutes, `h` for hours, percentage/rate units)
 
 ## Future Enhancements (Out of Scope)
 
+- CSV column naming convention for UDM stats — align with count field naming pattern (`bytes_sent_min`, `bytes_sent_max`, `bytes_sent_avg`, `bytes_sent_sum`) so CSV output reflects the selected aggregation consistently. More complex than a simple rename due to interactions between bar graph display columns, CSV stat columns, and the aggregation selection.
 - Heatmap support for UDM metrics (`-hm udm_metricname`)
 - Histogram support for UDM metrics
 - Percentile statistics (requires storing individual values per bucket)
