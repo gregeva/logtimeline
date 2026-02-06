@@ -92,6 +92,7 @@ Having a single source of truth for format definitions:
 9. **Derived metrics**: Support user-defined metrics computed from raw fields (intra-line arithmetic) and from stateful functions across time (inter-line deltas, rates)
 10. **Metric visibility control**: Allow each metric (raw or derived) to declare where and how it is used — graph columns, CSV output, internal-only, time-bucket rows, message-level stats
 11. **Sliding window memory model**: Hold raw data only for active buckets, freeing memory as buckets are finalized, with visibility into per-pattern memory usage
+12. **Unit system**: Every metric carries a declared unit type with normalization and display formatting, building on existing conversion functions
 
 ## Requirements
 
@@ -249,6 +250,48 @@ Requirements:
 - Per-pattern state memory usage must be included in ltl's memory tracking and reporting
 - Users must be able to see which patterns and metrics are consuming memory, so they can adjust their configuration if needed
 - State should be documented clearly so users understand the memory implications of their derived metric configurations
+
+#### 11. Unit System
+
+Every metric — raw or derived — carries a unit type. The system must know how to accept user-specified units, normalize values to a canonical internal form, and format values for display.
+
+##### Unit Types
+
+Three fundamental unit categories, plus raw:
+
+| Category | Internal baseline | Existing functions |
+|----------|------------------|--------------------|
+| Time/Duration | milliseconds | `convert_duration_to_ms()`, `format_time()` |
+| Bytes | bytes | `convert_bytes()`, `format_bytes()` |
+| Count | raw number | `format_number()` |
+| Percent | raw (0-100) | none |
+| Raw (unitless) | as-is | none |
+
+##### Requirements
+
+- **Unit declaration**: Users must specify the unit when defining a custom metric. No auto-detection.
+- **Unit normalization**: Values are converted to the internal baseline unit on extraction. All downstream processing (statistics, derived metrics, display) works with normalized values.
+- **Unit-aware display formatting**: Output functions select appropriate display units based on magnitude (e.g., 1,073,741,824 bytes → "1.0 GB", 0.045 ms → "45 us").
+- **Unit propagation in derived metrics**: When a derived metric is computed from fields with units, the result's unit must be explicitly declared. The system does not infer units from arithmetic (subtracting two durations could be a duration, but dividing bytes by duration is a rate — the user must state the result unit).
+- **Format registry integration**: Format definitions declare units for their fields (e.g., "field 8 is duration in microseconds"). This replaces the current `-du` command-line approach with declarative, per-format knowledge.
+
+##### Existing Code Foundation
+
+The following functions already exist in `ltl` and provide a solid base:
+- `convert_duration_to_ms()` (line ~559) — handles s, ms, us, ns
+- `convert_bytes()` (line ~726) — handles B, kB, KB, MB, GB, TB; accepts "100 MB" string format
+- `format_time()` (line ~894) — display formatting with short/medium/long styles, handles us through days
+- `format_bytes()` (line ~757) — display formatting with automatic unit promotion
+- `format_number()` (line ~864) — SI-style abbreviations (k, Mil, Bil, Tril)
+- `format_heatmap_value()` (line ~2902) — routes to appropriate formatter by metric type
+
+##### TODOs for Issue #22
+
+- [ ] Audit existing conversion functions for gaps and edge cases
+- [ ] Known issue: `format_bytes()` uses string length comparison instead of numeric thresholds for unit promotion (line ~779)
+- [ ] Determine if percent formatting function is needed
+- [ ] Ensure conversion functions handle edge cases (negative values, zero, very large values)
+- [ ] Verify that all conversion functions can be called uniformly (consistent interface for any unit type)
 
 ### Non-Functional Requirements
 
@@ -425,9 +468,12 @@ Discussion established that derived metrics require a fundamental change to the 
 5. **Metric visibility flags apply to all metrics** (raw and derived), not just derived. This decouples collection from display.
 6. **Fuzzy matching engine needed**: Inter-line metrics must operate on lines grouped by message identity within buckets, not globally. This engine should be shared with the "group-similar" feature.
 7. **Reusable metric definitions**: Derived metrics can be defined once and assigned to multiple match patterns.
+8. **Unit system is a cross-cutting requirement**: Every metric (raw or derived) must carry a declared unit type. No auto-detection — users specify units explicitly. Existing conversion/formatting functions (`convert_duration_to_ms`, `convert_bytes`, `format_time`, `format_bytes`, `format_number`) provide a solid foundation but need auditing for gaps.
+9. **Issue #22 (user-defined metrics) sequences before #23**: It provides a lighter-weight proving ground for custom metric extraction, unit handling, and data model integration using the existing architecture, while following patterns compatible with the future registry design. Issue #22 also includes a simple `delta()`/`idelta()` implementation (last-value-only, no per-message-identity tracking, no temporal interpolation) that serves as a precursor to Phase 4's full inter-line engine. The known limitations of #22's delta (interleaved messages produce incorrect deltas, no look-back window) are explicitly what Phase 4 solves.
 
 ## Related
 
 - Issue #17: Duration unit autodetection (blocked by this refactor)
+- Issue #22: User-defined metrics with custom regex and unit conversion (lighter-weight proving ground for custom metric extraction and unit handling)
 - Issue #48: Performance profiling (provided evidence for processing model changes)
 - features/duration-unit-autodetection.md
