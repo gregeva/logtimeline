@@ -129,6 +129,21 @@ Currently functions only support `delta` and `idelta` (inter-line stateful trans
 
 Syntax: `-udm "metric_name::min"`, `-udm "metric_name:B:max"`, `-udm "metric_name::avg"`
 
+### Unit coverage audit
+Need to verify all unit specifiers work correctly with `-udm`. Current units accepted in `parse_udm_configs()`:
+
+**Time units**: `ns`, `us`, `ms`, `s` — converted via `convert_duration_to_ms()`
+
+**Byte units**: `B`, `b`, `kB`, `KB`, `k`, `K`, `MB`, `M`, `GB`, `G`, `TB`, `T` — converted via `convert_bytes()`
+
+TO DO:
+- [ ] Test each time unit: `-udm "metric:ns"`, `-udm "metric:us"`, `-udm "metric:ms"`, `-udm "metric:s"`
+- [ ] Test each byte unit with different magnitudes: `-udm "metric:B"`, `-udm "metric:KB"`, `-udm "metric:MB"`, `-udm "metric:GB"`, `-udm "metric:TB"`
+- [ ] Test shorthand byte units: `-udm "metric:k"`, `-udm "metric:K"`, `-udm "metric:M"`, `-udm "metric:G"`, `-udm "metric:T"`
+- [ ] Verify display formatting matches unit type (format_time for time, format_bytes for bytes)
+- [ ] Verify conversion correctness (e.g., `-udm "metric:KB"` with value 1024 should store as 1048576 bytes and display as 1 MB)
+- [ ] Consider whether additional units are needed (e.g., `min` for minutes, `h` for hours, percentage/rate units)
+
 ## Future Enhancements (Out of Scope)
 
 - Heatmap support for UDM metrics (`-hm udm_metricname`)
