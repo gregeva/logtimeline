@@ -25,23 +25,61 @@ Multiple metrics can be specified with repeated `-udm` flags:
 | Field | Required | Description | Examples |
 |-------|----------|-------------|----------|
 | `name` | Yes | Metric identifier (used in column headers) | `rows`, `latency`, `tcp_errors` |
-| `unit` | No | Measurement unit for conversion/display | `ms`, `s`, `us`, `ns`, `B`, `KB`, `MB`, `GB`, `TB` |
-| `function` | No | Aggregation function | `delta`, `idelta` |
+| `unit` | No | Measurement unit for conversion/display | `ms`, `s`, `us`, `ns`, `B`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB` |
+| `function` | No | Transform and/or aggregation function | `delta`, `max`, `avg(delta)` |
 | `/pattern/` | No | Custom regex with capture group for value extraction | `/in (\d+\.\d+)/` |
 
 ### Unit Types
 
 - **Time units**: `ns`, `us`, `ms`, `s` — converted to milliseconds internally, displayed via `format_time()`
-- **Byte units**: `B`, `kB`, `KB`, `MB`, `GB`, `TB` — converted to bytes internally, displayed via `format_bytes()`
+- **Byte units**: `B`, `kB`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB` — converted to bytes internally, displayed via `format_bytes()`. Case-insensitive matching (e.g., `kb` = `KB`). Binary units (`KiB`, `MiB`, etc.) use base-1024; `kB` (lowercase k) uses base-1000; all others use base-1024.
 - **No unit**: displayed as raw numbers via `format_number()`
 
 ### Functions
 
+Functions control how extracted values are transformed and aggregated per time bucket.
+
+#### Transforms (applied per-line to raw values)
+
 - **`delta`**: Computes difference between consecutive values. Useful for monotonic counters.
 - **`idelta`**: Like delta but discards negative values (counter resets). "Increase delta."
-- **No function**: Uses the raw extracted value.
 
 Delta state is reset between files to avoid spurious deltas at file boundaries.
+
+#### Aggregations (applied per time bucket)
+
+- **`sum`**: Total of all values in the bucket (default)
+- **`min`**: Minimum value in the bucket
+- **`max`**: Maximum value in the bucket
+- **`avg`**: Average (mean) of all values in the bucket
+
+#### Combining transforms and aggregations
+
+Transforms and aggregations can be combined using function-call syntax: `aggregation(transform)`. The transform is applied first to each line, then the aggregation is applied to the resulting values within each time bucket.
+
+- When only a transform is specified (e.g., `delta`), aggregation defaults to `sum` — i.e., `delta` is shorthand for `sum(delta)`.
+- When only an aggregation is specified (e.g., `max`), no transform is applied — the raw extracted values are aggregated directly.
+- When neither is specified, the default is `sum` of raw values.
+
+Valid combinations:
+
+| Function value | Transform | Aggregation | Description |
+|---------------|-----------|-------------|-------------|
+| *(empty)* | none | sum | Sum of raw values (default) |
+| `sum` | none | sum | Explicit sum of raw values |
+| `min` | none | min | Minimum raw value in bucket |
+| `max` | none | max | Maximum raw value in bucket |
+| `avg` | none | avg | Average raw value in bucket |
+| `delta` | delta | sum | Sum of deltas (shorthand for `sum(delta)`) |
+| `idelta` | idelta | sum | Sum of positive deltas (shorthand for `sum(idelta)`) |
+| `sum(delta)` | delta | sum | Explicit sum of deltas |
+| `min(delta)` | delta | min | Minimum delta in bucket |
+| `max(delta)` | delta | max | Maximum delta in bucket (largest spike) |
+| `avg(delta)` | delta | avg | Average delta in bucket |
+| `sum(idelta)` | idelta | sum | Sum of positive deltas |
+| `min(idelta)` | idelta | min | Minimum positive delta in bucket |
+| `max(idelta)` | idelta | max | Maximum positive delta in bucket |
+| `avg(idelta)` | idelta | avg | Average positive delta in bucket |
 
 ### Default Pattern
 
@@ -52,13 +90,13 @@ When no custom `/pattern/` is provided, the metric name is used to build two def
 ### Examples
 
 ```bash
-# Extract "rows" values using default pattern matching
+# Extract "rows" values using default pattern matching (sum per bucket)
 -udm "rows"
 
 # Extract latency values, interpret as milliseconds
 -udm "latency:ms"
 
-# Extract counter, compute per-line delta
+# Extract counter, compute per-line delta (sum of deltas per bucket)
 -udm "tcp_errors::delta"
 
 # Extract counter, discard negative deltas (counter resets)
@@ -67,8 +105,18 @@ When no custom `/pattern/` is provided, the metric name is used to build two def
 # Custom regex extraction with time unit
 -udm "proc_time:s::/processed in ([\d.]+) seconds/"
 
+# Aggregation functions — change what the bar graph displays
+-udm "latency:ms:max"                  # max latency per bucket
+-udm "rows::avg"                       # average rows per bucket
+-udm "response_size:KB:min"            # min response size per bucket
+
+# Combined transform + aggregation
+-udm "tcp_errors::max(delta)"          # largest single error spike per bucket
+-udm "tcp_errors::avg(idelta)"         # average positive delta per bucket
+-udm "counter::sum(delta)"             # explicit form of just "delta"
+
 # Multiple metrics
--udm "rows" -udm "latency:ms" -udm "cache_hits::delta"
+-udm "rows" -udm "latency:ms:max" -udm "cache_hits::avg(delta)"
 ```
 
 ## Design Decisions
@@ -124,21 +172,28 @@ This implementation serves as a proving ground for Issue #23's derived metrics a
 
 ## Next Steps
 
-### Aggregation functions: min, max, avg
-Currently functions only support `delta` and `idelta` (inter-line stateful transforms). Add `min`, `max`, and `avg` as new function types. These would change what value is displayed in the bar graph column — instead of showing the sum per time bucket (default), show the min, max, or average. The per-bucket min/max/mean values are already computed and stored; this just needs to select which one drives the bar graph and trend value display.
+### Aggregation functions: min, max, avg — IN PROGRESS
+Add `min`, `max`, `avg`, and explicit `sum` as aggregation functions, with support for combining with transforms using function-call syntax: `max(delta)`, `avg(idelta)`, etc. See Functions section above for full syntax specification.
 
-Syntax: `-udm "metric_name::min"`, `-udm "metric_name:B:max"`, `-udm "metric_name::avg"`
+Implementation tasks:
+- [ ] Parse new function syntax in `parse_udm_configs()`: standalone aggregations, combined `agg(transform)` form
+- [ ] Store aggregation type per UDM config
+- [ ] Select correct stored value (min/max/mean/sum) for bar graph display based on aggregation
+- [ ] Select correct stored value for trend/numeric display
+- [ ] Update `-help` text with aggregation examples
 
-### Unit coverage audit
-Need to verify all unit specifiers work correctly with `-udm`. Current units accepted in `parse_udm_configs()`:
+### Unit coverage audit and IEC unit support
+Need to verify all unit specifiers work correctly and add missing IEC binary units (`KiB`, `MiB`, `GiB`, `TiB`).
 
 **Time units**: `ns`, `us`, `ms`, `s` — converted via `convert_duration_to_ms()`
 
-**Byte units**: `B`, `b`, `kB`, `KB`, `k`, `K`, `MB`, `M`, `GB`, `G`, `TB`, `T` — converted via `convert_bytes()`
+**Byte units**: `B`, `b`, `kB`, `KB`, `KiB`, `k`, `K`, `MB`, `MiB`, `M`, `GB`, `GiB`, `G`, `TB`, `TiB`, `T` — converted via `convert_bytes()`
 
 TO DO:
+- [ ] Add `KiB`, `MiB`, `GiB`, `TiB` to `parse_udm_configs()` unit recognition
+- [ ] Verify case handling (e.g., `kb` treated same as `KB`)
 - [ ] Test each time unit: `-udm "metric:ns"`, `-udm "metric:us"`, `-udm "metric:ms"`, `-udm "metric:s"`
-- [ ] Test each byte unit with different magnitudes: `-udm "metric:B"`, `-udm "metric:KB"`, `-udm "metric:MB"`, `-udm "metric:GB"`, `-udm "metric:TB"`
+- [ ] Test each byte unit with different magnitudes: `-udm "metric:B"`, `-udm "metric:KB"`, `-udm "metric:KiB"`, `-udm "metric:MB"`, `-udm "metric:MiB"`, `-udm "metric:GB"`, `-udm "metric:GiB"`, `-udm "metric:TB"`, `-udm "metric:TiB"`
 - [ ] Test shorthand byte units: `-udm "metric:k"`, `-udm "metric:K"`, `-udm "metric:M"`, `-udm "metric:G"`, `-udm "metric:T"`
 - [ ] Verify display formatting matches unit type (format_time for time, format_bytes for bytes)
 - [ ] Verify conversion correctness (e.g., `-udm "metric:KB"` with value 1024 should store as 1048576 bytes and display as 1 MB)
@@ -149,3 +204,4 @@ TO DO:
 - Heatmap support for UDM metrics (`-hm udm_metricname`)
 - Histogram support for UDM metrics
 - Percentile statistics (requires storing individual values per bucket)
+- Columnar UDM from CSV input — allow defining user-defined metrics by column position or header name in CSV files, rather than regex extraction from unstructured log lines
