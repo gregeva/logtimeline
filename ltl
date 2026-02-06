@@ -560,7 +560,11 @@ sub get_pattern_file_indicator {
 sub parse_udm_configs {
     my $number = qr/-?\d+(?:\.\d+)?/;
     my %time_units = map { $_ => 1 } qw( ns us ms s );
-    my %byte_units = map { $_ => 1 } qw( B b kB KB k K MB M GB G TB T );
+    my %byte_units = map { $_ => 1 } qw( B b kB KB k K MB M GB G TB T KiB MiB GiB TiB );
+
+    # Case normalization: map lowercase variants to canonical forms
+    my %byte_unit_canonical = map { lc($_) => $_ } keys %byte_units;
+    my %time_unit_canonical = map { lc($_) => $_ } keys %time_units;
 
     foreach my $raw_arg (@udm_raw_args) {
         my $arg = $raw_arg;
@@ -590,10 +594,32 @@ sub parse_udm_configs {
             next;
         }
 
-        # Validate function
-        if (defined $function && $function !~ /^(delta|idelta)$/) {
-            print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: delta, idelta)\n";
-            next;
+        # Parse function field into transform and aggregation
+        my ($transform, $aggregation);
+        if (defined $function) {
+            if ($function =~ /^(sum|min|max|avg)\((delta|idelta)\)$/) {
+                $aggregation = $1;
+                $transform = $2;
+            } elsif ($function =~ /^(delta|idelta)$/) {
+                $transform = $1;
+                $aggregation = 'sum';
+            } elsif ($function =~ /^(sum|min|max|avg)$/) {
+                $aggregation = $1;
+            } else {
+                print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: sum, min, max, avg, delta, idelta, or combined e.g. max(delta))\n";
+                next;
+            }
+        }
+        $aggregation //= 'sum';
+
+        # Normalize unit case: look up canonical form by lowercase key
+        if (defined $unit) {
+            my $lc = lc($unit);
+            if (exists $time_unit_canonical{$lc}) {
+                $unit = $time_unit_canonical{$lc};
+            } elsif (exists $byte_unit_canonical{$lc}) {
+                $unit = $byte_unit_canonical{$lc};
+            }
         }
 
         # Determine unit type, converter, and formatter
@@ -625,13 +651,15 @@ sub parse_udm_configs {
         }
 
         push @udm_configs, {
-            name      => $name,
-            unit      => $unit,
-            function  => $function,
-            patterns  => \@patterns,
-            unit_type => $unit_type,
-            converter => $converter,
-            formatter => $formatter,
+            name        => $name,
+            unit        => $unit,
+            function    => $function,
+            transform   => $transform,
+            aggregation => $aggregation,
+            patterns    => \@patterns,
+            unit_type   => $unit_type,
+            converter   => $converter,
+            formatter   => $formatter,
         };
 
         push @graph_user_defined_metrics, $name;
@@ -833,6 +861,10 @@ sub convert_bytes {
         'G' => 1024**3,
         'TB' => 1024**4,
         'T' => 1024**4,
+        'KiB' => 1024,
+        'MiB' => 1024**2,
+        'GiB' => 1024**3,
+        'TiB' => 1024**4,
     );
 
     my $bytes = $value * $units{$unit};
@@ -1617,12 +1649,12 @@ sub read_and_process_logs {
 
                     my $raw_value = $matched_value + 0;  # Ensure numeric
 
-                    # Apply delta/idelta function on raw value before conversion
-                    if (defined $config->{function}) {
+                    # Apply delta/idelta transform on raw value before conversion
+                    if (defined $config->{transform}) {
                         if (defined $udm_last_value{$name}) {
                             my $delta = $raw_value - $udm_last_value{$name};
                             $udm_last_value{$name} = $raw_value;
-                            if ($config->{function} eq 'idelta' && $delta < 0) {
+                            if ($config->{transform} eq 'idelta' && $delta < 0) {
                                 next;  # Discard counter reset
                             }
                             $raw_value = $delta;
@@ -1875,8 +1907,14 @@ sub read_and_process_logs {
                         my $value = $udm_values{$name};
                         $log_analysis{$bucket}{"udm_${name}_sum"} += $value;
                         $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
-                        $log_analysis{$bucket}{"udm_${name}_sum-HL"} += $value if $category_bucket =~ /-HL$/;
-                        $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++ if $category_bucket =~ /-HL$/;
+                        if ($category_bucket =~ /-HL$/) {
+                            $log_analysis{$bucket}{"udm_${name}_sum-HL"} += $value;
+                            $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
+                            $log_analysis{$bucket}{"udm_${name}_min-HL"} = $value
+                                if !defined $log_analysis{$bucket}{"udm_${name}_min-HL"} || $value < $log_analysis{$bucket}{"udm_${name}_min-HL"};
+                            $log_analysis{$bucket}{"udm_${name}_max-HL"} = $value
+                                if !defined $log_analysis{$bucket}{"udm_${name}_max-HL"} || $value > $log_analysis{$bucket}{"udm_${name}_max-HL"};
+                        }
                         $log_analysis{$bucket}{"udm_${name}_min"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_min"} || $value < $log_analysis{$bucket}{"udm_${name}_min"};
                         $log_analysis{$bucket}{"udm_${name}_max"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_max"} || $value > $log_analysis{$bucket}{"udm_${name}_max"};
                     }
@@ -2457,14 +2495,40 @@ sub calculate_all_statistics {
         # Populate UDM stats for this bucket (Issue #22)
         foreach my $config (@udm_configs) {
             my $name = $config->{name};
-            my $occ = $log_analysis{$bucket}{"udm_${name}_occurrences"};
-            $log_stats{$bucket}{"udm_$name"}    = $log_analysis{$bucket}{"udm_${name}_sum"};
-            $log_stats{$bucket}{"udm_$name-HL"} = $log_analysis{$bucket}{"udm_${name}_sum-HL"};
+            my $agg  = $config->{aggregation};
+            my $occ  = $log_analysis{$bucket}{"udm_${name}_occurrences"};
+
+            # Always populate all raw stats for CSV/summary
             $log_stats{$bucket}{"udm_${name}_occurrences"} = $occ;
             $log_stats{$bucket}{"udm_${name}_min"}  = $log_analysis{$bucket}{"udm_${name}_min"};
             $log_stats{$bucket}{"udm_${name}_max"}  = $log_analysis{$bucket}{"udm_${name}_max"};
             $log_stats{$bucket}{"udm_${name}_mean"} = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef;
             $log_stats{$bucket}{"udm_${name}_sum"}  = $log_analysis{$bucket}{"udm_${name}_sum"};
+
+            # Select display value based on aggregation function
+            my $display_value;
+            if    ($agg eq 'sum') { $display_value = $log_analysis{$bucket}{"udm_${name}_sum"}; }
+            elsif ($agg eq 'min') { $display_value = $log_analysis{$bucket}{"udm_${name}_min"}; }
+            elsif ($agg eq 'max') { $display_value = $log_analysis{$bucket}{"udm_${name}_max"}; }
+            elsif ($agg eq 'avg') { $display_value = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef; }
+            $log_stats{$bucket}{"udm_$name"} = $display_value;
+
+            # Aggregation-aware highlight value
+            my $hl_value;
+            if ($agg eq 'sum') {
+                $hl_value = $log_analysis{$bucket}{"udm_${name}_sum-HL"};
+            } elsif ($agg eq 'min') {
+                # Highlight entire bar if the highlighted min equals the overall min
+                my $hl_min = $log_analysis{$bucket}{"udm_${name}_min-HL"};
+                $hl_value = (defined $hl_min && defined $display_value && $hl_min == $display_value) ? $display_value : undef;
+            } elsif ($agg eq 'max') {
+                # Highlight entire bar if the highlighted max equals the overall max
+                my $hl_max = $log_analysis{$bucket}{"udm_${name}_max-HL"};
+                $hl_value = (defined $hl_max && defined $display_value && $hl_max == $display_value) ? $display_value : undef;
+            } elsif ($agg eq 'avg') {
+                $hl_value = undef;  # No meaningful highlight for averages
+            }
+            $log_stats{$bucket}{"udm_$name-HL"} = $hl_value;
         }
     }
 
