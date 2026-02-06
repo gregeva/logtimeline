@@ -32,7 +32,7 @@ Multiple metrics can be specified with repeated `-udm` flags:
 ### Unit Types
 
 - **Time units**: `ns`, `us`, `ms`, `s` — converted to milliseconds internally, displayed via `format_time()`
-- **Byte units**: `B`, `kB`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB` — converted to bytes internally, displayed via `format_bytes()`. Case-insensitive matching (e.g., `kb` = `KB`). Binary units (`KiB`, `MiB`, etc.) use base-1024; `kB` (lowercase k) uses base-1000; all others use base-1024.
+- **Byte units**: `B`, `kB`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB` — converted to bytes internally, displayed via `format_bytes()`. Case-insensitive matching (e.g., `kb` = `KB`). All byte units currently use base-1024 (see #63 — `kB` should use base-1000 per SI convention).
 - **No unit**: displayed as raw numbers via `format_number()`
 
 ### Functions
@@ -130,6 +130,9 @@ When no custom `/pattern/` is provided, the metric name is used to build two def
 | Unit auto-detection | Not implemented | Users declare units explicitly |
 | Non-access-log support | Set `$is_access_log = 1` when UDM values captured | Follows count metric precedent (line 1593); enables storage in time-bucket and per-message blocks |
 | Latency stats suppression | `$print_durations` only set when duration/bytes/count present | Prevents empty P50/P95/P99/P999 columns when only UDM metrics are active |
+| Default aggregation | `sum` | Consistent with pre-aggregation behavior; `delta` without explicit aggregation means `sum(delta)` |
+| Case normalization | Normalize in `parse_udm_configs()` before lookup | Avoids changing `convert_bytes()` / `convert_duration_to_ms()` which are used elsewhere |
+| Aggregation affects display only | Bar graph column driven by aggregation; CSV always outputs all five stats | CSV preserves full data regardless of display selection |
 
 ## Data Model
 
@@ -179,7 +182,11 @@ The `-HL` (highlight) value controls what portion of the bar renders in highligh
 
 This implementation serves as a proving ground for Issue #23's derived metrics architecture. It tests custom metric extraction, unit handling, delta functions, and data model integration in a lightweight form before the full core redesign.
 
-## Known Issues (Resolved)
+## Known Issues
+
+- **Same metric name with different functions is not supported**: Using the same metric name in multiple `-udm` flags with different aggregations or transforms (e.g., `-udm "x::sum" -udm "x::max"`) does not produce two separate columns. Both configs share the same `%udm_values` key and `%udm_last_value` delta state, so the second config's extracted value overwrites the first during per-line processing. Use distinct names instead (e.g., `-udm "x_sum::sum" -udm "x_max::max"` with custom regex patterns).
+
+### Resolved
 
 - **Non-access-log formats silently discarded UDM values**: The UDM storage blocks were inside `if ($is_access_log)` gates. Log formats that don't set `$is_access_log` (e.g., match_type 11 — ThingWorx Edge C SDK trace logs) would capture UDM values but never store them. Fixed by setting `$is_access_log = 1` when `%udm_values` is populated, and making `$print_durations` conditional on actual duration/bytes/count data to avoid empty latency columns.
 
