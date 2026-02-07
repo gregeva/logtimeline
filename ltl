@@ -157,6 +157,7 @@ my %timestamp_cache;
 my $heatmap_enabled = 0;                    # Flag: heatmap mode active
 my $heatmap_metric;                         # Metric: duration|bytes|count|<udm_name> (undef until set by CLI)
 my $heatmap_udm_config;                     # Reference to @udm_configs entry for heatmap UDM metric
+my @histogram_udm_configs;                  # References to @udm_configs entries for histogram UDM metrics
 my $heatmap_width = 52;                     # Number of histogram buckets (default matches latency stats width)
 my $heatmap_light_bg = 0;                   # Flag: use light background color gradients (set by -lbg or auto-detect)
 my $heatmap_light_bg_auto = 1;              # Flag: auto-detect terminal background (disabled if -lbg explicitly set)
@@ -1173,8 +1174,8 @@ sub handle_histogram_option {
             }
         }
 
-        if (!$has_valid_metric) {
-            # Value doesn't contain any valid metrics - it's likely a filename
+        if (!$has_valid_metric && !@udm_raw_args) {
+            # Value doesn't contain any valid metrics and no UDM args - it's likely a filename
             # Push it back to @ARGV so it can be processed as a file
             unshift @ARGV, $opt_value;
             return;
@@ -1188,6 +1189,9 @@ sub handle_histogram_option {
             } elsif ($metric =~ /^time$/) {
                 # 'time' is an alias for 'duration' for consistency
                 $histogram_metrics{'duration'} = 1;
+            } elsif (@udm_raw_args) {
+                # Could be a UDM metric name — store it, validate after parse_udm_configs()
+                $histogram_metrics{$metric} = 1;
             } else {
                 warn "Unknown histogram metric: $metric (valid: duration, time, bytes, count)\n";
             }
@@ -1392,6 +1396,35 @@ sub adapt_to_command_line_options {
         } else {
             my @available = (qw(duration bytes count), map { $_->{name} } @udm_configs);
             die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', @available) . "\n";
+        }
+    }
+
+    # Validate UDM histogram metric names (must run after parse_udm_configs)
+    if ($histogram_enabled && %histogram_metrics) {
+        for my $metric (keys %histogram_metrics) {
+            next if $metric =~ /^(duration|bytes|count)$/;
+            my ($match) = grep { $_->{name} eq $metric } @udm_configs;
+            if ($match) {
+                push @histogram_udm_configs, $match;
+                # Defaults — resolved to actual column-position colors in normalize_data_for_output()
+                $histogram_base_colors{$metric} = $histogram_base_colors{count};
+                $histogram_highlight_colors{$metric} = $histogram_highlight_colors{count};
+                $histogram_color_gradients{$metric} = [@{$histogram_color_gradients{count}}];
+            } else {
+                my @available = (qw(duration bytes count), map { $_->{name} } @udm_configs);
+                die "Error: Unknown histogram metric '$metric'. Available: " . join(', ', @available) . "\n";
+            }
+        }
+    }
+
+    # Bare -hg: include all UDM metrics
+    if ($histogram_enabled && !%histogram_metrics && @udm_configs) {
+        @histogram_udm_configs = @udm_configs;
+        for my $cfg (@udm_configs) {
+            # Defaults — resolved to actual column-position colors in normalize_data_for_output()
+            $histogram_base_colors{$cfg->{name}} = $histogram_base_colors{count};
+            $histogram_highlight_colors{$cfg->{name}} = $histogram_highlight_colors{count};
+            $histogram_color_gradients{$cfg->{name}} = [@{$histogram_color_gradients{count}}];
         }
     }
 
@@ -2095,7 +2128,7 @@ sub read_and_process_logs {
                         my $is_highlighted = ($category_bucket =~ /-HL$/);
 
                         # Collect duration values if requested (or if no specific metrics requested)
-                        if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration >= 0 && !$omit_durations) {
+                        if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$omit_durations) {
                             push @{$histogram_values{duration}}, $duration;
                             push @{$histogram_values_hl{duration}}, $duration if $is_highlighted;
                         }
@@ -2105,9 +2138,18 @@ sub read_and_process_logs {
                             push @{$histogram_values_hl{bytes}}, $bytes if $is_highlighted;
                         }
                         # Collect count values if requested
-                        if ((!%histogram_metrics || $histogram_metrics{count}) && defined $count && $count >= 0 && !$omit_count) {
+                        if ((!%histogram_metrics || $histogram_metrics{count}) && defined $count && $count > 0 && !$omit_count) {
                             push @{$histogram_values{count}}, $count;
                             push @{$histogram_values_hl{count}}, $count if $is_highlighted;
+                        }
+                        # Collect UDM values if requested (or if all metrics requested via bare -hg)
+                        for my $udm_cfg (@histogram_udm_configs) {
+                            my $name = $udm_cfg->{name};
+                            if ((!%histogram_metrics || $histogram_metrics{$name}) &&
+                                defined $udm_values{$name} && $udm_values{$name} > 0) {
+                                push @{$histogram_values{$name}}, $udm_values{$name};
+                                push @{$histogram_values_hl{$name}}, $udm_values{$name} if $is_highlighted;
+                            }
                         }
                     }
                 }
@@ -2273,7 +2315,7 @@ sub calculate_histogram_buckets {
 
     my @metrics_with_data = ();
 
-    for my $metric (qw(duration bytes count)) {
+    for my $metric (qw(duration bytes count), map { $_->{name} } @histogram_udm_configs) {
         my $values_ref = $histogram_values{$metric};
         next unless defined $values_ref && @$values_ref > 0;
 
@@ -2407,10 +2449,19 @@ sub calculate_histogram_buckets {
 # Calculate histogram layout dimensions - Issue #25
 # Returns a hash with layout information for rendering histograms side by side
 sub calculate_histogram_layout {
-    # Step 1: Determine which metrics have data (in display order: duration, bytes, count)
+    # Step 1: Determine which metrics have data (in display order: duration, bytes, count, then UDMs)
     my @active_metrics = ();
     for my $metric (qw(duration bytes count)) {
         # Check if metric was requested (or all metrics if none specified)
+        if ((!%histogram_metrics || $histogram_metrics{$metric}) &&
+            exists $histogram_stats{$metric} &&
+            defined $histogram_stats{$metric}{count} &&
+            $histogram_stats{$metric}{count} > 0) {
+            push @active_metrics, $metric;
+        }
+    }
+    for my $udm_cfg (@histogram_udm_configs) {
+        my $metric = $udm_cfg->{name};
         if ((!%histogram_metrics || $histogram_metrics{$metric}) &&
             exists $histogram_stats{$metric} &&
             defined $histogram_stats{$metric}{count} &&
@@ -3237,17 +3288,46 @@ sub normalize_data_for_output {
 
     }
 
+    # Shared column-position color arrays for UDM heatmap and histogram resolution
+    # These map bar graph column positions to their color schemes
+    # (see issue #64 for consolidation with other hardcoded color references)
+    my @column_color_names   = qw( yellow green cyan blue magenta );
+    my @column_plain_bg      = ( 184, 34, 30, 20, 127 );
+    my @column_highlight_bg  = ( 226, 46, 51, 27, 207 );
+    my @column_gradients = (
+        [58, 94, 136, 142, 178, 184, 220, 226],   # Yellow
+        [22, 28, 34, 40, 46, 82, 118, 154],        # Green
+        [23, 30, 37, 44, 51, 80, 86, 123],         # Cyan
+        [17, 18, 19, 20, 21, 27, 33, 39],          # Blue
+        [53, 89, 125, 127, 163, 165, 201, 207],    # Magenta
+    );
+
     # Resolve UDM heatmap color from its bar graph column position
     if (defined $heatmap_udm_config) {
-        my @column_colors = qw( yellow green cyan blue magenta );
-        my @column_highlight_bg = ( 184, 34, 30, 20, 127 );
         my $col = 0;
         for my $key (@populated_graph_columns) {
             next if $key eq 'occurrences';
             if ($key eq "udm_$heatmap_udm_config->{name}") {
-                my $idx = $col < scalar(@column_colors) ? $col : $#column_colors;
-                $heatmap_metric_map{$heatmap_metric}{color} = $column_colors[$idx];
-                $heatmap_metric_map{$heatmap_metric}{highlight_bg} = $column_highlight_bg[$idx];
+                my $idx = $col < scalar(@column_color_names) ? $col : $#column_color_names;
+                $heatmap_metric_map{$heatmap_metric}{color} = $column_color_names[$idx];
+                $heatmap_metric_map{$heatmap_metric}{highlight_bg} = $column_plain_bg[$idx];
+                last;
+            }
+            $col++;
+        }
+    }
+
+    # Resolve UDM histogram colors from bar graph column positions
+    for my $udm_cfg (@histogram_udm_configs) {
+        my $metric = $udm_cfg->{name};
+        my $col = 0;
+        for my $key (@populated_graph_columns) {
+            next if $key eq 'occurrences';
+            if ($key eq "udm_$metric") {
+                my $idx = $col < scalar(@column_plain_bg) ? $col : $#column_plain_bg;
+                $histogram_base_colors{$metric} = $column_plain_bg[$idx];
+                $histogram_highlight_colors{$metric} = $column_highlight_bg[$idx];
+                $histogram_color_gradients{$metric} = $column_gradients[$idx];
                 last;
             }
             $col++;
@@ -3289,6 +3369,11 @@ sub format_heatmap_value {
         return format_number($value);
     } elsif (defined $heatmap_udm_config && $metric eq $heatmap_udm_config->{name}) {
         my $ut = $heatmap_udm_config->{unit_type};
+        return $ut eq 'time'  ? format_time($value, 'ms') :
+               $ut eq 'bytes' ? format_bytes($value, 'B') :
+                                format_number($value);
+    } elsif (my ($hcfg) = grep { $_->{name} eq $metric } @histogram_udm_configs) {
+        my $ut = $hcfg->{unit_type};
         return $ut eq 'time'  ? format_time($value, 'ms') :
                $ut eq 'bytes' ? format_bytes($value, 'B') :
                                 format_number($value);
@@ -3983,7 +4068,9 @@ sub print_histograms {
     my $title_line = " " x $centering_offset;
     for my $i (0 .. $#metrics) {
         my $metric = $metrics[$i];
-        my $title = ucfirst($metric) . " Distribution";
+        my $title = (grep { $_->{name} eq $metric } @histogram_udm_configs)
+            ? "$metric Distribution"
+            : ucfirst($metric) . " Distribution";
         my $title_padding_left = int(($single_width - length($title)) / 2);
         $title_padding_left = 0 if $title_padding_left < 0;
         my $title_padding_right = $single_width - $title_padding_left - length($title);
