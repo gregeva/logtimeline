@@ -128,6 +128,7 @@ When no custom `/pattern/` is provided, the metric name is used to build two def
 | Delta state | Reset between files | Avoids spurious deltas at file boundaries |
 | Delta on raw vs converted | Delta on raw, then convert | Preserves counter semantics |
 | Column key prefix | `udm_` prefix internally | Avoids collision with existing keys; stripped for display headers |
+| CSV column naming | `name[_unit]_stat` lowercase | Consistent pattern across count and UDM metrics in both STATS and MESSAGES CSVs. Unit included when defined (e.g., `latency_ms_min`), omitted when unitless (e.g., `rows_min`). Count columns use `count_stat` (not PascalCase). |
 | Unit auto-detection | Not implemented | Users declare units explicitly |
 | Non-access-log support | Set `$is_access_log = 1` when UDM values captured | Follows count metric precedent (line 1593); enables storage in time-bucket and per-message blocks |
 | Latency stats suppression | `$print_durations` only set when duration/bytes/count present | Prevents empty P50/P95/P99/P999 columns when only UDM metrics are active |
@@ -237,7 +238,7 @@ When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from t
 
 ## Future Enhancements (Out of Scope)
 
-- CSV column naming convention for UDM stats — align with count field naming pattern (`bytes_sent_min`, `bytes_sent_max`, `bytes_sent_avg`, `bytes_sent_sum`) so CSV output reflects the selected aggregation consistently. More complex than a simple rename due to interactions between bar graph display columns, CSV stat columns, and the aggregation selection.
+- ~~CSV column naming convention for UDM stats~~ — Done: consistent `name[_unit]_stat` lowercase pattern across both STATS and MESSAGES CSVs. Unit included between name and stat when defined (e.g., `latency_ms_occurrences`), omitted when unitless (e.g., `rows_occurrences`). Count columns normalized from PascalCase to `count_stat`.
 - ~~Heatmap support for UDM metrics~~ — Done: `-hm <udm_name>` uses color gradient matching the metric's bar graph column
 - ~~Histogram support for UDM metrics~~ — Done: `-hg <udm_name>` renders histogram with color matching the metric's bar graph column position. Multiple UDM histograms supported side-by-side.
 - Percentile statistics (requires storing individual values per bucket)
