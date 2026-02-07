@@ -215,10 +215,29 @@ Added IEC binary units and case-insensitive unit matching.
 - [ ] Verify unknown unit warning: `-udm "metric:xyz"`
 - [ ] GC log regression: verify `convert_bytes("512M")` still works (non-UDM path)
 
+### CSV Columnar Input — DONE
+
+When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from the first line (header row), maps UDM metric names to column headers, and extracts values directly by column index instead of regex matching.
+
+**Options:**
+- `-ucm "col1 col2"` — specify CSV columns to use as the message grouping key (space-separated names, repeatable flag)
+- `-ucs ","` — override auto-detected separator (auto-detects `,`, `;`, `\t`)
+
+**Behavior:**
+- CSV detection only triggers when `-udm` is present and the first line looks like a header (has separators)
+- Column matching is case-insensitive
+- Per-file state: different CSV files in the same invocation can have different schemas
+- All transforms (`delta`, `idelta`) and aggregations (`min`, `max`, `avg`) work with CSV input
+- CSV lines use fixed category `DATA` (no log levels in CSV)
+- Without `-ucm`, all CSV rows group under a single "CSV data" message
+
+**Limitations:**
+- No support for quoted fields with embedded separators (uses simple `split()`)
+- Timestamp column must be named `timestamp` (case-insensitive) or defaults to column 0
+
 ## Future Enhancements (Out of Scope)
 
 - CSV column naming convention for UDM stats — align with count field naming pattern (`bytes_sent_min`, `bytes_sent_max`, `bytes_sent_avg`, `bytes_sent_sum`) so CSV output reflects the selected aggregation consistently. More complex than a simple rename due to interactions between bar graph display columns, CSV stat columns, and the aggregation selection.
 - Heatmap support for UDM metrics (`-hm udm_metricname`)
 - Histogram support for UDM metrics
 - Percentile statistics (requires storing individual values per bucket)
-- Columnar UDM from CSV input — allow defining user-defined metrics by column position or header name in CSV files, rather than regex extraction from unstructured log lines
