@@ -65,7 +65,7 @@ use Text::CSV;
 use Text::CSV_PP;
 
 
-if ($^O eq 'MSWin32') {                                                             # Change code page to UTF-8 on Windows to support UTF-8 characters in terminal
+if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to support UTF-8 characters in terminal
 	system("chcp 65001 > nul");
 }
 
@@ -92,7 +92,7 @@ my $column_count_pre_graph = 2;		            # timestamp + legend is the default
 my @graph_columns = qw( duration bytes count );
 my ( @printed_column_widths, @printed_column_spacing, @printed_column_names );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
-my ( $print_durations, $show_memory, $disable_progress ) = ( 0, 0, 0 );
+my ( $print_durations, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
 my ( $filter_count_min, $filter_count_max );
@@ -100,7 +100,7 @@ my $top_n_messages = 10;
 my ( $write_messages_to_csv, $csv, $csv_fh, $csv_file_args ) = ( 0, undef, undef, "" );
 my $total_lines_read = 0;
 my $total_lines_included = 0;
-my @progress_history = ();                                                      # rolling history for lines/sec calculation: [ [timestamp, lines_read], ... ]
+my @progress_history = ();     # rolling history for lines/sec calculation: [ [timestamp, lines_read], ... ]
 my $total_lines_highlighted = 0;
 my $legend_length = 0;
 my $timestamp_length = 0;
@@ -444,9 +444,143 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS.mmm>] [--end|-et <HH:MM:SS.mmm>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--histogram|-hg [duration|bytes|count]] [--histogram-width|-hgw <N>] [--histogram-height|-hgh <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--user-defined-metrics|-udm <name[:unit[:function]][:/regex/]>] [--udm-csv-message|-ucm <col1 col2 ...>] [--udm-csv-separator|-ucs <separator>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--memory-usage|-mem] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
-
+    print "Usage: ltl [-bs <N>] [-n <N>] [-i <regex>] [-e <regex>] [-h <regex>] [-st <time>] [-et <time>]\n";
+    print "           [-ov] [-or] [-osum] [-so <field>] [-hm [metric]] [-hg [metric]] <logfile> ...\n";
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
+    print "Try 'ltl --help' for more information.\n\n";
+    return;
+}
+
+sub print_help {
+    my $help = <<'END';
+Identify hotspots in large log files through statistical analysis and time-bucket visualization.
+
+USAGE
+
+  ltl [options] <logfile> [logfile2 ...]
+
+OPTIONS
+
+  Time & Buckets
+    -bs,  --bucket-size <N>                    Set the width of each time bucket on the timeline
+                                               (default unit: minutes; see -s, -ms)
+    -s,   --seconds                            Interpret bucket size as seconds instead of minutes
+    -ms,  --milliseconds                       Enable sub-second timestamp parsing and allow bucket
+                                               sizes down to 100ms
+    -st,  --start <timestamp>                  Only process log lines at or after this time
+                                               (YYYY-MM-DD HH:MM:SS[.mmm])
+    -et,  --end <timestamp>                    Only process log lines before this time
+                                               (HH:MM:SS[.mmm])
+    -du,  --duration-unit <unit>               Specify the duration unit used in the log file when
+                                               auto-detection is not possible (ns, us, ms, s)
+
+  Filtering
+    -i,   --include <regex>                    Only process lines matching this pattern, discard
+                                               everything else
+    -e,   --exclude <regex>                    Discard lines matching this pattern before analysis
+    -h,   --highlight <regex>                  Show matching lines as a separate colored bar alongside
+                                               the main bar for visual comparison
+    -if,  --include-file <file>                Load include patterns from a file (one regex per line)
+    -ef,  --exclude-file <file>                Load exclude patterns from a file (one regex per line)
+    -hf,  --highlight-file <file>              Load highlight patterns from a file (one regex per line)
+    -dmin, --duration-min <N>                  Hide log entries with duration below this threshold
+    -dmax, --duration-max <N>                  Hide log entries with duration above this threshold
+    -bmin, --bytes-min <N>                     Hide log entries with response size below this threshold
+    -bmax, --bytes-max <N>                     Hide log entries with response size above this threshold
+    -cmin, --count-min <N>                     Hide log entries with count below this threshold
+    -cmax, --count-max <N>                     Hide log entries with count above this threshold
+    -uuid, --mask-uuid                         Replace UUIDs/GUIDs with a placeholder so that requests
+                                               differing only by ID are grouped together
+
+    Note: filters affect all computed statistics. For example, -dmin 1000 will show a
+    minimum duration of ~1s because faster entries were excluded. The statistics reflect
+    the filtered subset, not the full population of data in the file.
+
+  Recording & Processing
+    -ov,  --omit-values                        Hide the per-bucket numeric values on the bar graph
+    -os,  --omit-stats                         Hide the statistics columns (min/avg/max/stddev/etc.)
+    -oe,  --omit-empty                         Skip time buckets that contain zero log entries
+    -osum, --omit-summary                      Hide the summary table printed after the bar graph
+    -or,  --omit-rate                          Hide the lines/sec processing rate from output
+    -od,  --omit-durations                     Suppress duration extraction and related columns
+    -ob,  --omit-bytes                         Suppress byte-size extraction and related columns
+    -oc,  --omit-count                         Suppress count extraction and related columns
+    -ic,  --include-count                      Add a count column to the output (off by default)
+    -iqs, --include-query-string               Keep the query string when grouping URLs, so /api?a=1
+                                               and /api?b=2 are tracked separately
+    -is,  --include-session                    Keep session/user IDs when grouping messages, so each
+                                               session is tracked separately
+
+  Output
+    -n,   --top-messages <N>                   Number of unique messages to show in the summary table
+                                               (default: 10)
+    -o,   --output-csv                         Write all extracted data to a CSV file for external
+                                               analysis
+    -so,  --sort-on <field>                    Choose which metric to rank messages by in the summary
+                                               (occurrences, duration, min, mean, max, stddev,
+                                               bytes, count, impact, cv)
+    -sa,  --sort-ascending                     Reverse the sort order to show lowest values first
+
+  Heatmap
+    -hm,  --heatmap [metric]                   Replace statistics with a color-intensity histogram
+                                               showing value distribution per time bucket
+                                               (duration, bytes, or count)
+    -hmw, --heatmap-width <N>                  Number of columns for the heatmap display (default: 52)
+
+  Histogram
+    -hg,  --histogram [metric]                 Show an overall distribution histogram after the bar
+                                               graph (duration, bytes, or count)
+    -hgw, --histogram-width <N>                Histogram width as percentage of terminal (default: 65)
+    -hgh, --histogram-height <N>               Histogram height in rows (default: 20)
+
+  User-Defined Metrics
+    -udm, --user-defined-metrics <spec>        Extract a custom numeric metric from each log line
+                                               using a regex capture group
+                                               (name[:unit[:fn]]:/regex/)
+    -ucm, --udm-csv-message <cols>             Treat the message field as CSV and name the columns
+                                               for use with -udm
+    -ucs, --udm-csv-separator <sep>            Set the CSV field delimiter when using -ucm
+                                               (default: comma)
+
+  Thread Pool Activity
+    -tpa, --threadpool-activity <regex>        Track activity over time for threads whose name matches
+                                               the given pattern
+    -tpas, --threadpool-activity-summary       Show a summary of activity across all detected thread
+                                               pools based on thread names in the log
+
+  Display
+    -lbg, --light-background                   Use pale-to-bright color gradients suited for
+                                               light/white terminal backgrounds
+    -p,   --pause                              Wait for a keypress between pages of output
+    -V,   --verbose                            Print detailed processing information including regex
+                                               matches and parsing decisions
+
+  Info
+    -v,   --version                            Print the version number and exit
+          --help                               Show this help screen and exit
+    -mem, --memory-usage                       Display memory consumption statistics after processing
+                                               completes
+
+EXAMPLES
+
+  Basic analysis of an access log:
+    ltl access.log
+
+  Analyze with millisecond precision over a one-minute window:
+    ltl -ms -bs 100 -st "08:15:00.000" -et "08:16:00.000" my-app.log
+
+  Filter to POST requests and highlight a specific API:
+    ltl -i "POST" -h "/api/v2/orders" access.log
+
+  Duration heatmap with 5-minute buckets:
+    ltl -hm duration -bs 5 access.log
+
+  Track a custom metric from application logs:
+    ltl -udm "rows:/(\d+) rows processed/" my-app.log
+
+END
+
+    print $help;
     return;
 }
 
@@ -990,7 +1124,7 @@ sub format_bytes {
     }
 
     $formatted_value = sprintf("%.1f", $formatted_value);
-    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;                                                        # remove trailing .0 if present
+    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;       # remove trailing .0 if present
 
     return "$formatted_value $formatted_unit";
 }
@@ -1080,7 +1214,7 @@ sub format_number {
     my $formatted_unit = '';
     $decimals = 1 if !defined $decimals;
 
-    foreach my $u (@unit_order) {                                                                   # Determine the most relevant unit
+    foreach my $u (@unit_order) {                  # Determine the most relevant unit
         if ($value >= $units{$u}) {
             $formatted_value = $value / $units{$u};
             $formatted_unit = $u;
@@ -1090,7 +1224,7 @@ sub format_number {
     }
 
     $formatted_value = sprintf("%.${decimals}f%s%s", $formatted_value, defined($space) ? " " : "", $formatted_unit eq "1" ? "" : $formatted_unit );
-    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;                                                        # remove trailing .0 if present
+    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;       # remove trailing .0 if present
 
     return $formatted_value;
 }
@@ -1124,7 +1258,7 @@ sub format_time {
     my $formatted_value = $microseconds;
     my $formatted_unit = 'us';
 
-    foreach my $u (@unit_order) {                                                           # Determine the most relevant unit
+    foreach my $u (@unit_order) {          # Determine the most relevant unit
         if ($microseconds >= $units{$u}) {
             $formatted_value = $microseconds / $units{$u};
             $formatted_unit = $u;
@@ -1203,6 +1337,8 @@ sub handle_histogram_option {
 sub adapt_to_command_line_options {
     @ORIGINAL_ARGV = @ARGV;
 
+    @ARGV = map { ($_ eq '-?' || $_ eq '/help' || $_ eq '/?') ? '--help' : $_ } @ARGV;
+
     GetOptions(
         'bucket-size|bs=i' => \$time_bucket_size,
         'pause|p' => \$pause_output,
@@ -1256,7 +1392,8 @@ sub adapt_to_command_line_options {
         'histogram-width|hgw=i' => sub { $histogram_width_percent = $_[1]; $histogram_width_explicit = 1; },
         'histogram-height|hgh=i' => sub { $histogram_height = $_[1]; $histogram_height_explicit = 1; },
         'hgbpd=i' => \$histogram_buckets_per_decade,
-        'hgb=i' => \$histogram_bucket_override
+        'hgb=i' => \$histogram_bucket_override,
+        'help' => \$show_help
     ) or die print_usage( "required options not provided" );
 
     $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
@@ -1343,6 +1480,11 @@ sub adapt_to_command_line_options {
 
     if( $print_version ) {
         print_version();
+        exit;
+    }
+
+    if ( $show_help ) {
+        print_help();
         exit;
     }
 
@@ -1470,7 +1612,7 @@ sub calculate_start_end_filter_timestamps {
     my $log_date = int($log_epoch / 86400) * 86400;
 
     foreach my $key (keys %filter_range) {
-        my $value = $filter_range{$key};                                                        # Get the value (either $filter_range_start or $filter_range_end)
+        my $value = $filter_range{$key};       # Get the value (either $filter_range_start or $filter_range_end)
         next unless length( $filter_range{$key} ) > 0;
         my $epoch_value;  # Variable to store the epoch time
         my $fractional_ms = 0;
@@ -3679,7 +3821,7 @@ sub print_bar_graph {
 
             if ( ($printed_column_spacing[$column] // 0) > 0 ) {
                 my $num_padding_chars = ($printed_column_spacing[$column]-$graph_column_padding_all);
-                print ' ' x 1 if $num_padding_chars > 1;                                                    # set this to pipe to have the column line propagate up (does not work with line in durations)
+                print ' ' x 1 if $num_padding_chars > 1;   # set this to pipe to have the column line propagate up (does not work with line in durations)
                 print ' ' x ($num_padding_chars > 1 ? $num_padding_chars - 1 : $num_padding_chars);
             }
             
@@ -5195,7 +5337,7 @@ $elapsed_normalize_data = tv_interval($start_time, $end_time);
 
 $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_heatmap_statistics + $elapsed_histogram_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
 
-if( $write_messages_to_csv ) {                                                                      # If write to CSV enabled, open filehandles
+if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
     $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
     my $csv_file_name = build_csv_filename('STATS');
     open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
@@ -5208,7 +5350,7 @@ close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && de
 
 print_summary_table();
 
-if( $write_messages_to_csv ) {                                                                      # If write to CSV enabled, open filehandles
+if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
     $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
     my $csv_file_name = build_csv_filename('MESSAGES');
     open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names

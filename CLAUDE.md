@@ -34,6 +34,7 @@ Track observations for process improvement. After releases, review what worked a
 - 2026-02-03: When stuck on technical issues (e.g., floating-point precision), ask the user rather than iterating through failed attempts. The user often has quick answers.
 - 2026-02-03: For sub-second time buckets in Perl, use integer milliseconds for hash keys to avoid floating-point precision issues (e.g., `.099` instead of `.100`).
 - 2026-02-05: When updating issues with fix completion, always include the commit hash and branch name.
+- 2026-02-07: When adding or modifying CLI options, update `print_help()` in ltl and the options reference in README.md.
 
 ## Project Overview
 
@@ -97,7 +98,7 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 ./ltl [options] <logfile(s)>
 ```
 
-Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-if/-ef/-hf` (pattern files), `-du` (duration unit), `-hm` (heatmap), `-ms` (millisecond precision), `-st/-et` (time range filters, supports milliseconds), `-help` (full help)
+Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-if/-ef/-hf` (pattern files), `-du` (duration unit), `-hm` (heatmap), `-ms` (millisecond precision), `-st/-et` (time range filters, supports milliseconds), `--help` (full help)
 
 **Hidden option for Claude Code:** `--disable-progress` - ALWAYS use this flag when running ltl to suppress progress output that wastes tokens.
 
