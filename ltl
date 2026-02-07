@@ -116,6 +116,9 @@ my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
 my ( @udm_configs, @udm_raw_args, %udm_last_value );
+my ( $csv_separator_override, @udm_csv_message_col_names );
+my ( $csv_detected, $csv_separator, $csv_timestamp_col, %csv_col_index );
+my ( @csv_udm_col_indices, @csv_message_col_indices );
 
 # Pattern file filter options (Issue #19)
 my (@include_files, @exclude_files, @highlight_files);   # File paths from command line (arrays for multiple files)
@@ -321,7 +324,7 @@ my @log_levels = (
     'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx', 
     '4xx-HL', '4xx', '3xx-HL', '3xx', '2xx-HL', '2xx', '1xx-HL', 
     '1xx', 'Pause Young-HL', 'Pause Young', 'Pause Full-HL', 'Pause Full',
-    'err-rate', 'msg-rate', 'empty'
+    'DATA-HL', 'DATA', 'err-rate', 'msg-rate', 'empty'
 );
 
 # Characters selected and usable for drawing the bar charts
@@ -350,6 +353,7 @@ my %colors = (
     'INFO'  => "\033[0;32m",
     'DEBUG' => "\033[0;34m",
     'TRACE' => "\033[0;35m",
+    'DATA'  => "\033[0;34m",
     '1xx'  => "\033[0;34m",
     '2xx'  => "\033[0;32m",
     '3xx'  => "\033[0;35m",
@@ -438,7 +442,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS.mmm>] [--end|-et <HH:MM:SS.mmm>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--histogram|-hg [duration|bytes|count]] [--histogram-width|-hgw <N>] [--histogram-height|-hgh <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--user-defined-metrics|-udm <name[:unit[:function]][:/regex/]>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--memory-usage|-mem] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS.mmm>] [--end|-et <HH:MM:SS.mmm>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--histogram|-hg [duration|bytes|count]] [--histogram-width|-hgw <N>] [--histogram-height|-hgh <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--user-defined-metrics|-udm <name[:unit[:function]][:/regex/]>] [--udm-csv-message|-ucm <col1 col2 ...>] [--udm-csv-separator|-ucs <separator>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--memory-usage|-mem] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -679,6 +683,72 @@ sub parse_udm_configs {
 
     # Add UDM metric names to graph columns
     push @graph_columns, map { "udm_$_->{name}" } @udm_configs;
+}
+
+# CSV header detection and column mapping for UDM (Issue #22)
+sub detect_and_parse_csv_header {
+    my ($header_line) = @_;
+
+    # Auto-detect separator: count candidate separators
+    my $comma_count = () = $header_line =~ /,/g;
+    my $semi_count  = () = $header_line =~ /;/g;
+    my $tab_count   = () = $header_line =~ /\t/g;
+
+    my %sep_counts = ( ',' => $comma_count, ';' => $semi_count, "\t" => $tab_count );
+    my ($best_sep) = sort { $sep_counts{$b} <=> $sep_counts{$a} } keys %sep_counts;
+
+    # Override with user-specified separator
+    if (defined $csv_separator_override) {
+        $best_sep = $csv_separator_override eq '\t' ? "\t" : $csv_separator_override;
+    } elsif ($sep_counts{$best_sep} < 1) {
+        return 0;  # Not a CSV file
+    }
+
+    $csv_separator = $best_sep;
+
+    # Split header into column names
+    my @headers = split(/\Q$csv_separator\E/, $header_line, -1);
+    %csv_col_index = ();
+    for my $i (0 .. $#headers) {
+        my $col = $headers[$i];
+        $col =~ s/^\s+|\s+$//g;
+        $csv_col_index{lc($col)} = $i;
+    }
+
+    # Find timestamp column
+    if (exists $csv_col_index{'timestamp'}) {
+        $csv_timestamp_col = $csv_col_index{'timestamp'};
+    } else {
+        $csv_timestamp_col = 0;  # Fall back to first column
+    }
+
+    # Map UDM configs to column indices
+    @csv_udm_col_indices = ();
+    for my $i (0 .. $#udm_configs) {
+        my $col_name = lc($udm_configs[$i]->{name});
+        if (exists $csv_col_index{$col_name}) {
+            $csv_udm_col_indices[$i] = $csv_col_index{$col_name};
+        } else {
+            $csv_udm_col_indices[$i] = -1;
+            print STDERR "Warning: UDM metric '$udm_configs[$i]->{name}' not found in CSV headers\n";
+        }
+    }
+
+    # Map message columns from -ucm
+    @csv_message_col_indices = ();
+    for my $name (@udm_csv_message_col_names) {
+        # Support space-separated column names in a single -ucm argument
+        for my $col_name (split(/\s+/, $name)) {
+            if (exists $csv_col_index{lc($col_name)}) {
+                push @csv_message_col_indices, $csv_col_index{lc($col_name)};
+            } else {
+                print STDERR "Warning: CSV message column '$col_name' not found in headers\n";
+            }
+        }
+    }
+
+    $csv_detected = 1;
+    return 1;
 }
 
 # Duration unit autodetection functions (Issue #17)
@@ -1170,6 +1240,8 @@ sub adapt_to_command_line_options {
         'threadpool-activity-summary|tpas' => \$include_threadpool_summary,
         'threadpool-activity|tpa=s' => \$threadpool_activity_regex,
         'user-defined-metrics|udm=s' => \@udm_raw_args,
+        'udm-csv-message|ucm=s'    => \@udm_csv_message_col_names,
+        'udm-csv-separator|ucs=s'  => \$csv_separator_override,
         'mask-uuid|uuid' => \$mask_uuid,
         'group-similar|g=s' => \$group_similar_sensitivity,
         'heatmap|hm:s' => \$heatmap_metric,
@@ -1442,6 +1514,10 @@ sub read_and_process_logs {
         my %month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
         %udm_last_value = () if @udm_configs;  # Reset delta state between files (Issue #22)
+        $csv_detected = 0;
+        %csv_col_index = ();
+        @csv_udm_col_indices = ();
+        @csv_message_col_indices = ();
 
         while (<$fh>) {
             s/[\r\n]+$//;                                   # Remove Windows line endings (CRLF) or Unix line endings (LF) if present
@@ -1450,6 +1526,7 @@ sub read_and_process_logs {
             my ( $is_line_match, $is_access_log, $match_type, $status_code, $heap_from, $heap_to, $heap_size ) = ( 0, 0, 0, 0, 0, 0, 0 );
             my ( $bytes, $duration, $occurrences, $count ) = ( undef, undef, undef, undef );
             my ( $timestamp, $threadname );
+            my @csv_fields;
             $total_lines_read++;
 
             if ($total_lines_read % 4999 == 0 && !$disable_progress) {   # print progress based on total lines read (not per-file) to handle many small files
@@ -1477,8 +1554,30 @@ sub read_and_process_logs {
                 $| = 1;                                     # Flush output to stdout
             }
 
+            ## CSV header detection (first line only, requires -udm) ##
+            if (!$csv_detected && $line_number == 1 && @udm_configs && detect_and_parse_csv_header($_)) {
+                next;  # Header consumed, skip to data lines
+
+            ## CSV data line ##
+            } elsif ($csv_detected) {
+                @csv_fields = split(/\Q$csv_separator\E/, $_, -1);
+                $timestamp_str = $csv_fields[$csv_timestamp_col];
+                $timestamp_str =~ s/^\s+|\s+$//g if defined $timestamp_str;
+
+                # Build message from -ucm columns or default label
+                if (@csv_message_col_indices) {
+                    $message = join(' ', map { ($_ < @csv_fields ? $csv_fields[$_] : '') =~ s/^\s+|\s+$//gr } @csv_message_col_indices);
+                } else {
+                    $message = "CSV data";
+                }
+
+                $category_bucket = "DATA";
+                $is_line_match = 1;
+                $is_access_log = 1;
+                $match_type = 13;
+
             ## ThingWorx Standard Log Format (ApplicationLog, ErrorLog, ScriptLog, ...) ##
-            if ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
+            } elsif ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
                 $is_line_match = 1;
                 $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
 
@@ -1649,14 +1748,26 @@ sub read_and_process_logs {
             ## USER DEFINED METRICS CAPTURE (Issue #22) ##
             my %udm_values;
             if (@udm_configs && defined $message) {
-                foreach my $config (@udm_configs) {
+                foreach my $config_idx (0 .. $#udm_configs) {
+                    my $config = $udm_configs[$config_idx];
                     my $name = $config->{name};
                     my $matched_value;
 
-                    foreach my $pattern (@{$config->{patterns}}) {
-                        if (/$pattern/) {
-                            $matched_value = $1;
-                            last;
+                    if ($match_type == 13) {
+                        # CSV: extract by column index
+                        my $col_idx = $csv_udm_col_indices[$config_idx];
+                        if (defined $col_idx && $col_idx >= 0 && $col_idx < scalar @csv_fields) {
+                            my $val = $csv_fields[$col_idx];
+                            $val =~ s/^\s+|\s+$//g;
+                            $matched_value = $val if $val ne '';
+                        }
+                    } else {
+                        # Regex: existing pattern matching
+                        foreach my $pattern (@{$config->{patterns}}) {
+                            if (/$pattern/) {
+                                $matched_value = $1;
+                                last;
+                            }
                         }
                     }
                     next unless defined $matched_value;
@@ -1682,8 +1793,8 @@ sub read_and_process_logs {
                     my $converted_value = defined $config->{converter} ? $config->{converter}->($raw_value) : $raw_value;
                     $udm_values{$name} = $converted_value if defined $converted_value;
 
-                    # Mask extracted values in message for grouping
-                    $message =~ s/\Q$matched_value\E/?/;
+                    # Mask extracted values in message for grouping (skip for CSV)
+                    $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13;
                 }
             }
             $is_access_log = 1 if %udm_values;
@@ -1706,7 +1817,7 @@ sub read_and_process_logs {
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
-                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 || $match_type == 7 || $match_type == 8 || $match_type == 10 || $match_type == 11 ) {
+                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 || $match_type == 7 || $match_type == 8 || $match_type == 10 || $match_type == 11 || $match_type == 13 ) {
                     if (exists $timestamp_cache{$timestamp_str}) {
                         $timestamp = $timestamp_cache{$timestamp_str};
                     } else {
