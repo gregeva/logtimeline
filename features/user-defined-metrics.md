@@ -25,14 +25,15 @@ Multiple metrics can be specified with repeated `-udm` flags:
 | Field | Required | Description | Examples |
 |-------|----------|-------------|----------|
 | `name` | Yes | Metric identifier (used in column headers) | `rows`, `latency`, `tcp_errors` |
-| `unit` | No | Measurement unit for conversion/display | `ms`, `s`, `us`, `ns`, `B`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB` |
+| `unit` | No | Measurement unit for conversion/display | `ms`, `s`, `m`, `min`, `h`, `us`, `ns`, `B`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB`, `k`, `K`, `M`, `G`, `T` |
 | `function` | No | Transform and/or aggregation function | `delta`, `max`, `avg(delta)` |
 | `/pattern/` | No | Custom regex with capture group for value extraction | `/in (\d+\.\d+)/` |
 
 ### Unit Types
 
-- **Time units**: `ns`, `us`, `ms`, `s` — converted to milliseconds internally, displayed via `format_time()`
+- **Time units**: `ns`, `us`, `ms`, `s`, `m` (or `min`), `h` — converted to milliseconds internally, displayed via `format_time()`
 - **Byte units**: `B`, `kB`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB` — converted to bytes internally, displayed via `format_bytes()`. Case-insensitive matching (e.g., `kb` = `KB`). All byte units currently use base-1024 (see #63 — `kB` should use base-1000 per SI convention).
+- **SI number units**: `k`, `K`, `M`, `G`, `T` — unitless SI multipliers (base-1000), displayed via `format_number()`. Case-sensitive (`m` = minutes, `M` = mega).
 - **No unit**: displayed as raw numbers via `format_number()`
 
 ### Functions
@@ -206,11 +207,13 @@ Added IEC binary units and case-insensitive unit matching.
 
 - [x] Add `KiB`, `MiB`, `GiB`, `TiB` to `parse_udm_configs()` unit recognition and `convert_bytes()`
 - [x] Case normalization: `kb` → `KB`, `kib` → `KiB`, `ms` → `ms`, etc.
-- [ ] Test each time unit: `-udm "metric:ns"`, `-udm "metric:us"`, `-udm "metric:ms"`, `-udm "metric:s"`
-- [ ] Test each byte unit with different magnitudes
-- [ ] Test shorthand byte units: `-udm "metric:k"`, `-udm "metric:K"`, `-udm "metric:M"`, `-udm "metric:G"`, `-udm "metric:T"`
-- [ ] Verify conversion correctness
-- [ ] Consider whether additional units are needed (e.g., `min` for minutes, `h` for hours, percentage/rate units)
+- [ ] Test each time unit: `-udm "metric:ns"`, `us`, `ms`, `s`, `m`, `min`, `h`
+- [ ] Test each byte unit: `-udm "metric:B"`, `kB`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB`
+- [ ] Test SI number units: `-udm "metric:k"`, `K`, `M`, `G`, `T` — verify base-1000 conversion
+- [ ] Case edge: `-udm "metric:m"` = minutes, `-udm "metric:M"` = mega
+- [ ] Alias: `-udm "metric:min"` = same as `m`
+- [ ] Verify unknown unit warning: `-udm "metric:xyz"`
+- [ ] GC log regression: verify `convert_bytes("512M")` still works (non-UDM path)
 
 ## Future Enhancements (Out of Scope)
 
