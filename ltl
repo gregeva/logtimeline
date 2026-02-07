@@ -81,7 +81,7 @@ my ( $include_query_string, $include_session, $include_threadpool_summary, $incl
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages, $elapsed_heatmap_statistics, $elapsed_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 # this is where the counts of log entries are tallied across the time buckets
-my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_userdefinedmetrics );
+my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity );
 my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
 my $mask_uuid;									# temporary command line option to mask UUIDs with HASH characters for grouping purposes (to be replaced by more generic group similar feature)
 my $durations_graph_width = 0;
@@ -114,7 +114,11 @@ my %filter_range;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
-my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex, $user_defined_metrics, $user_defined_metrics_regex, $user_defined_metrics_pre_regex, $user_defined_metrics_post_regex );
+my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
+my ( @udm_configs, @udm_raw_args, %udm_last_value );
+my ( $csv_separator_override, @udm_csv_message_col_names );
+my ( $csv_detected, $csv_separator, $csv_timestamp_col, %csv_col_index );
+my ( @csv_udm_col_indices, @csv_message_col_indices );
 
 # Pattern file filter options (Issue #19)
 my (@include_files, @exclude_files, @highlight_files);   # File paths from command line (arrays for multiple files)
@@ -151,7 +155,9 @@ my %timestamp_cache;
 
 # Heatmap data structures
 my $heatmap_enabled = 0;                    # Flag: heatmap mode active
-my $heatmap_metric;                         # Metric: duration|bytes|count (undef until set by CLI)
+my $heatmap_metric;                         # Metric: duration|bytes|count|<udm_name> (undef until set by CLI)
+my $heatmap_udm_config;                     # Reference to @udm_configs entry for heatmap UDM metric
+my @histogram_udm_configs;                  # References to @udm_configs entries for histogram UDM metrics
 my $heatmap_width = 52;                     # Number of histogram buckets (default matches latency stats width)
 my $heatmap_light_bg = 0;                   # Flag: use light background color gradients (set by -lbg or auto-detect)
 my $heatmap_light_bg_auto = 1;              # Flag: auto-detect terminal background (disabled if -lbg explicitly set)
@@ -320,7 +326,7 @@ my @log_levels = (
     'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx', 
     '4xx-HL', '4xx', '3xx-HL', '3xx', '2xx-HL', '2xx', '1xx-HL', 
     '1xx', 'Pause Young-HL', 'Pause Young', 'Pause Full-HL', 'Pause Full',
-    'err-rate', 'msg-rate', 'empty'
+    'DATA-HL', 'DATA', 'err-rate', 'msg-rate', 'empty'
 );
 
 # Characters selected and usable for drawing the bar charts
@@ -349,6 +355,7 @@ my %colors = (
     'INFO'  => "\033[0;32m",
     'DEBUG' => "\033[0;34m",
     'TRACE' => "\033[0;35m",
+    'DATA'  => "\033[0;34m",
     '1xx'  => "\033[0;34m",
     '2xx'  => "\033[0;32m",
     '3xx'  => "\033[0;35m",
@@ -437,7 +444,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS.mmm>] [--end|-et <HH:MM:SS.mmm>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--histogram|-hg [duration|bytes|count]] [--histogram-width|-hgw <N>] [--histogram-height|-hgh <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--memory-usage|-mem] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS.mmm>] [--end|-et <HH:MM:SS.mmm>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--histogram|-hg [duration|bytes|count]] [--histogram-width|-hgw <N>] [--histogram-height|-hgh <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--user-defined-metrics|-udm <name[:unit[:function]][:/regex/]>] [--udm-csv-message|-ucm <col1 col2 ...>] [--udm-csv-separator|-ucs <separator>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--memory-usage|-mem] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -555,6 +562,197 @@ sub get_pattern_file_indicator {
     return '';
 }
 
+# User-defined metrics parsing (Issue #22)
+sub parse_udm_configs {
+    my $number = qr/-?\d+(?:\.\d+)?/;
+    my %time_units = map { $_ => 1 } qw( ns us ms s m h );
+    my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );
+    my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );
+
+    # Case normalization: map lowercase variants to canonical forms
+    my %byte_unit_canonical = map { lc($_) => $_ } keys %byte_units;
+    my %time_unit_canonical = map { lc($_) => $_ } keys %time_units;
+    $time_unit_canonical{'min'} = 'm';
+
+    foreach my $raw_arg (@udm_raw_args) {
+        my $arg = $raw_arg;
+        my ($custom_pattern, $name, $unit, $function);
+        my @patterns;
+
+        # Extract trailing /pattern/ if present (right-to-left parsing)
+        if ($arg =~ s{:(/.*/)$}{}) {
+            my $pat_str = $1;
+            $pat_str =~ s{^/|/$}{}g;  # Strip delimiters
+            eval { $custom_pattern = qr/$pat_str/ };
+            if ($@) {
+                print STDERR "Warning: Invalid regex in -udm '$raw_arg': $@\n";
+                next;
+            }
+            @patterns = ($custom_pattern);
+        }
+
+        # Split remaining on : to get name, unit, function
+        my @fields = split(/:/, $arg, 3);
+        $name = $fields[0];
+        $unit = (defined $fields[1] && $fields[1] ne '') ? $fields[1] : undef;
+        $function = (defined $fields[2] && $fields[2] ne '') ? $fields[2] : undef;
+
+        unless (defined $name && $name ne '') {
+            print STDERR "Warning: -udm requires a metric name: '$raw_arg'\n";
+            next;
+        }
+
+        # Parse function field into transform and aggregation
+        my ($transform, $aggregation);
+        if (defined $function) {
+            if ($function =~ /^(sum|min|max|avg)\((delta|idelta)\)$/) {
+                $aggregation = $1;
+                $transform = $2;
+            } elsif ($function =~ /^(delta|idelta)$/) {
+                $transform = $1;
+                $aggregation = 'sum';
+            } elsif ($function =~ /^(sum|min|max|avg)$/) {
+                $aggregation = $1;
+            } else {
+                print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: sum, min, max, avg, delta, idelta, or combined e.g. max(delta))\n";
+                next;
+            }
+        }
+        $aggregation //= 'sum';
+
+        # Normalize unit case: SI units checked case-sensitively first
+        # (m = minutes, M = mega), then lowercase lookups for time/byte
+        if (defined $unit) {
+            if (exists $si_units{$unit}) {
+                # Case-sensitive match — $unit stays as-is
+            } else {
+                my $lc = lc($unit);
+                if (exists $time_unit_canonical{$lc}) {
+                    $unit = $time_unit_canonical{$lc};
+                } elsif (exists $byte_unit_canonical{$lc}) {
+                    $unit = $byte_unit_canonical{$lc};
+                }
+            }
+        }
+
+        # Determine unit type, converter, and formatter
+        my ($unit_type, $converter, $formatter);
+        if (defined $unit && exists $time_units{$unit}) {
+            $unit_type = 'time';
+            $converter = sub { convert_duration_to_ms($_[0], $unit) };
+            $formatter = \&format_time;
+        } elsif (defined $unit && exists $si_units{$unit}) {
+            $unit_type = 'number';
+            my $multiplier = $si_units{$unit};
+            $converter = sub { $_[0] * $multiplier };
+            $formatter = \&format_number;
+        } elsif (defined $unit && exists $byte_units{$unit}) {
+            $unit_type = 'bytes';
+            $converter = sub { convert_bytes($_[0], $unit) };
+            $formatter = \&format_bytes;
+        } elsif (defined $unit) {
+            print STDERR "Warning: Unknown unit '$unit' in -udm '$raw_arg', treating as raw number\n";
+            $unit_type = 'raw';
+            $converter = undef;
+            $formatter = \&format_number;
+        } else {
+            $unit_type = 'raw';
+            $converter = undef;
+            $formatter = \&format_number;
+        }
+
+        # Build default patterns if no custom pattern provided
+        if (!@patterns) {
+            my $escaped_name = quotemeta($name);
+            push @patterns, qr/\b${escaped_name}\s*[=:]\s*(${number})/;
+            push @patterns, qr/(${number})\s*[=:]?\s*${escaped_name}\b/;
+        }
+
+        push @udm_configs, {
+            name        => $name,
+            unit        => $unit,
+            function    => $function,
+            transform   => $transform,
+            aggregation => $aggregation,
+            patterns    => \@patterns,
+            unit_type   => $unit_type,
+            converter   => $converter,
+            formatter   => $formatter,
+        };
+
+        push @graph_user_defined_metrics, $name;
+    }
+
+    # Add UDM metric names to graph columns
+    push @graph_columns, map { "udm_$_->{name}" } @udm_configs;
+}
+
+# CSV header detection and column mapping for UDM (Issue #22)
+sub detect_and_parse_csv_header {
+    my ($header_line) = @_;
+
+    # Auto-detect separator: count candidate separators
+    my $comma_count = () = $header_line =~ /,/g;
+    my $semi_count  = () = $header_line =~ /;/g;
+    my $tab_count   = () = $header_line =~ /\t/g;
+
+    my %sep_counts = ( ',' => $comma_count, ';' => $semi_count, "\t" => $tab_count );
+    my ($best_sep) = sort { $sep_counts{$b} <=> $sep_counts{$a} } keys %sep_counts;
+
+    # Override with user-specified separator
+    if (defined $csv_separator_override) {
+        $best_sep = $csv_separator_override eq '\t' ? "\t" : $csv_separator_override;
+    } elsif ($sep_counts{$best_sep} < 1) {
+        return 0;  # Not a CSV file
+    }
+
+    $csv_separator = $best_sep;
+
+    # Split header into column names
+    my @headers = split(/\Q$csv_separator\E/, $header_line, -1);
+    %csv_col_index = ();
+    for my $i (0 .. $#headers) {
+        my $col = $headers[$i];
+        $col =~ s/^\s+|\s+$//g;
+        $csv_col_index{lc($col)} = $i;
+    }
+
+    # Find timestamp column
+    if (exists $csv_col_index{'timestamp'}) {
+        $csv_timestamp_col = $csv_col_index{'timestamp'};
+    } else {
+        $csv_timestamp_col = 0;  # Fall back to first column
+    }
+
+    # Map UDM configs to column indices
+    @csv_udm_col_indices = ();
+    for my $i (0 .. $#udm_configs) {
+        my $col_name = lc($udm_configs[$i]->{name});
+        if (exists $csv_col_index{$col_name}) {
+            $csv_udm_col_indices[$i] = $csv_col_index{$col_name};
+        } else {
+            $csv_udm_col_indices[$i] = -1;
+            print STDERR "Warning: UDM metric '$udm_configs[$i]->{name}' not found in CSV headers\n";
+        }
+    }
+
+    # Map message columns from -ucm
+    @csv_message_col_indices = ();
+    for my $name (@udm_csv_message_col_names) {
+        # Support space-separated column names in a single -ucm argument
+        for my $col_name (split(/\s+/, $name)) {
+            if (exists $csv_col_index{lc($col_name)}) {
+                push @csv_message_col_indices, $csv_col_index{lc($col_name)};
+            } else {
+                print STDERR "Warning: CSV message column '$col_name' not found in headers\n";
+            }
+        }
+    }
+
+    $csv_detected = 1;
+    return 1;
+}
+
 # Duration unit autodetection functions (Issue #17)
 sub convert_duration_to_ms {
     my ($value, $unit) = @_;
@@ -563,6 +761,8 @@ sub convert_duration_to_ms {
     return $value                if $unit eq 'ms';
     return $value / 1000         if $unit eq 'us';
     return $value / 1000000      if $unit eq 'ns';
+    return $value * 60000        if $unit eq 'm';
+    return $value * 3600000      if $unit eq 'h';
     return $value;  # default: assume milliseconds
 }
 
@@ -705,7 +905,7 @@ sub measure_memory_structures {
         log_stats              => Devel::Size::total_size(\%log_stats),
         log_threadpools        => Devel::Size::total_size(\%log_threadpools),
         threadpool_activity    => Devel::Size::total_size(\%threadpool_activity),
-        log_userdefinedmetrics => Devel::Size::total_size(\%log_userdefinedmetrics),
+        udm_last_value         => Devel::Size::total_size(\%udm_last_value),
         heatmap_data           => Devel::Size::total_size(\%heatmap_data),
         heatmap_data_hl        => Devel::Size::total_size(\%heatmap_data_hl),
         heatmap_raw            => Devel::Size::total_size(\%heatmap_raw),
@@ -747,6 +947,10 @@ sub convert_bytes {
         'G' => 1024**3,
         'TB' => 1024**4,
         'T' => 1024**4,
+        'KiB' => 1024,
+        'MiB' => 1024**2,
+        'GiB' => 1024**3,
+        'TiB' => 1024**4,
     );
 
     my $bytes = $value * $units{$unit};
@@ -970,8 +1174,8 @@ sub handle_histogram_option {
             }
         }
 
-        if (!$has_valid_metric) {
-            # Value doesn't contain any valid metrics - it's likely a filename
+        if (!$has_valid_metric && !@udm_raw_args) {
+            # Value doesn't contain any valid metrics and no UDM args - it's likely a filename
             # Push it back to @ARGV so it can be processed as a file
             unshift @ARGV, $opt_value;
             return;
@@ -985,6 +1189,9 @@ sub handle_histogram_option {
             } elsif ($metric =~ /^time$/) {
                 # 'time' is an alias for 'duration' for consistency
                 $histogram_metrics{'duration'} = 1;
+            } elsif (@udm_raw_args) {
+                # Could be a UDM metric name — store it, validate after parse_udm_configs()
+                $histogram_metrics{$metric} = 1;
             } else {
                 warn "Unknown histogram metric: $metric (valid: duration, time, bytes, count)\n";
             }
@@ -1037,7 +1244,9 @@ sub adapt_to_command_line_options {
         'sort-ascending|sa' => \$sort_ascending,
         'threadpool-activity-summary|tpas' => \$include_threadpool_summary,
         'threadpool-activity|tpa=s' => \$threadpool_activity_regex,
-        'user-defined-metrics|udm=s' => \$user_defined_metrics,
+        'user-defined-metrics|udm=s' => \@udm_raw_args,
+        'udm-csv-message|ucm=s'    => \@udm_csv_message_col_names,
+        'udm-csv-separator|ucs=s'  => \$csv_separator_override,
         'mask-uuid|uuid' => \$mask_uuid,
         'group-similar|g=s' => \$group_similar_sensitivity,
         'heatmap|hm:s' => \$heatmap_metric,
@@ -1058,12 +1267,18 @@ sub adapt_to_command_line_options {
         $heatmap_enabled = 1;
         # Handle case where -hm is followed by a filename (GetOptions captures it as optional value)
         if ($heatmap_metric eq '' || !grep { $_ eq $heatmap_metric } qw(duration time bytes count)) {
-            # If the value doesn't match a valid metric, it's likely a filename
-            # Push it back to @ARGV and use default metric
+            # If the value doesn't match a known built-in metric, it could be a UDM name or a filename
             if ($heatmap_metric ne '' && $heatmap_metric !~ /^(duration|time|bytes|count)$/) {
-                unshift @ARGV, $heatmap_metric;
+                if (@udm_raw_args) {
+                    # UDM args exist — keep the value, validate after parse_udm_configs()
+                } else {
+                    # No UDM args — it's likely a filename, push it back
+                    unshift @ARGV, $heatmap_metric;
+                    $heatmap_metric = 'duration';  # Default metric
+                }
+            } else {
+                $heatmap_metric = 'duration';  # Default metric (empty string case)
             }
-            $heatmap_metric = 'duration';  # Default metric
         } elsif( $heatmap_metric =~ /^time$/i ) {
             $heatmap_metric = 'duration';  # time is allowed for consistency, but what is really meant is duration
         }
@@ -1170,26 +1385,47 @@ sub adapt_to_command_line_options {
         $sort_key = "count_max";
     }
 
-    if( defined $user_defined_metrics ) {
-        my $separator = qr/\s*[=:]?\s*/;
-        #my $number = qr/-?\d{1,3}(?:[ ,]?\d{3})*(?:\.\d+)?/;								# Number pattern with optional negative, thousands separators, and decimals
-        my $number = qr/-?\d+(?:\.\d+)?/;								# Number pattern with optional negative, thousands separators, and decimals
-        $user_defined_metrics_regex = join( '|', split( ',', $user_defined_metrics ) );
+    parse_udm_configs() if @udm_raw_args;
 
-        foreach my $user_metric ( split( ',', $user_defined_metrics ) ) {
-            my $metric = quotemeta($user_metric);  # Escape special characters
-
-            $user_defined_metrics_pre_regex .= qr/\s+$metric$separator(?<$metric>$number)/x;
-            $user_defined_metrics_post_regex .= qr/(?<$metric>$number)$separator$metric\s+/x;
-            #$user_defined_metrics_post_regex .= qr/(?<${metric}>-?\d+(?:\.\d+)?)\s*[=:]?\s*${metric}\s+/;
-            #$user_defined_metrics_post_regex = qr/(?<rows>-?\d+(?:\.\d+)?)\s*[=:]?\s*rows/;
-
-
-#            $user_defined_metrics_regex .= "${metric}[ =:](<${metric}>?[0-9.])";
+    # Validate UDM heatmap metric name (must run after parse_udm_configs)
+    if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
+        my ($match) = grep { $_->{name} eq $heatmap_metric } @udm_configs;
+        if ($match) {
+            $heatmap_udm_config = $match;
+            $heatmap_metric_map{$heatmap_metric} = { column => undef, color => 'blue' };
+        } else {
+            my @available = (qw(duration bytes count), map { $_->{name} } @udm_configs);
+            die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', @available) . "\n";
         }
+    }
 
-#print "udm: $user_defined_metrics\t\tudm regex: $user_defined_metrics_regex udm: metrics post regex: $user_defined_metrics_post_regex\n";
+    # Validate UDM histogram metric names (must run after parse_udm_configs)
+    if ($histogram_enabled && %histogram_metrics) {
+        for my $metric (keys %histogram_metrics) {
+            next if $metric =~ /^(duration|bytes|count)$/;
+            my ($match) = grep { $_->{name} eq $metric } @udm_configs;
+            if ($match) {
+                push @histogram_udm_configs, $match;
+                # Defaults — resolved to actual column-position colors in normalize_data_for_output()
+                $histogram_base_colors{$metric} = $histogram_base_colors{count};
+                $histogram_highlight_colors{$metric} = $histogram_highlight_colors{count};
+                $histogram_color_gradients{$metric} = [@{$histogram_color_gradients{count}}];
+            } else {
+                my @available = (qw(duration bytes count), map { $_->{name} } @udm_configs);
+                die "Error: Unknown histogram metric '$metric'. Available: " . join(', ', @available) . "\n";
+            }
+        }
+    }
 
+    # Bare -hg: include all UDM metrics
+    if ($histogram_enabled && !%histogram_metrics && @udm_configs) {
+        @histogram_udm_configs = @udm_configs;
+        for my $cfg (@udm_configs) {
+            # Defaults — resolved to actual column-position colors in normalize_data_for_output()
+            $histogram_base_colors{$cfg->{name}} = $histogram_base_colors{count};
+            $histogram_highlight_colors{$cfg->{name}} = $histogram_highlight_colors{count};
+            $histogram_color_gradients{$cfg->{name}} = [@{$histogram_color_gradients{count}}];
+        }
     }
 
     $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
@@ -1329,6 +1565,11 @@ sub read_and_process_logs {
         my $filter_range_filter_initialized = 0;
         my %month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
+        %udm_last_value = () if @udm_configs;  # Reset delta state between files (Issue #22)
+        $csv_detected = 0;
+        %csv_col_index = ();
+        @csv_udm_col_indices = ();
+        @csv_message_col_indices = ();
 
         while (<$fh>) {
             s/[\r\n]+$//;                                   # Remove Windows line endings (CRLF) or Unix line endings (LF) if present
@@ -1337,6 +1578,7 @@ sub read_and_process_logs {
             my ( $is_line_match, $is_access_log, $match_type, $status_code, $heap_from, $heap_to, $heap_size ) = ( 0, 0, 0, 0, 0, 0, 0 );
             my ( $bytes, $duration, $occurrences, $count ) = ( undef, undef, undef, undef );
             my ( $timestamp, $threadname );
+            my @csv_fields;
             $total_lines_read++;
 
             if ($total_lines_read % 4999 == 0 && !$disable_progress) {   # print progress based on total lines read (not per-file) to handle many small files
@@ -1364,8 +1606,30 @@ sub read_and_process_logs {
                 $| = 1;                                     # Flush output to stdout
             }
 
+            ## CSV header detection (first line only, requires -udm) ##
+            if (!$csv_detected && $line_number == 1 && @udm_configs && detect_and_parse_csv_header($_)) {
+                next;  # Header consumed, skip to data lines
+
+            ## CSV data line ##
+            } elsif ($csv_detected) {
+                @csv_fields = split(/\Q$csv_separator\E/, $_, -1);
+                $timestamp_str = $csv_fields[$csv_timestamp_col];
+                $timestamp_str =~ s/^\s+|\s+$//g if defined $timestamp_str;
+
+                # Build message from -ucm columns or default label
+                if (@csv_message_col_indices) {
+                    $message = join(' ', map { ($_ < @csv_fields ? $csv_fields[$_] : '') =~ s/^\s+|\s+$//gr } @csv_message_col_indices);
+                } else {
+                    $message = "CSV data";
+                }
+
+                $category_bucket = "DATA";
+                $is_line_match = 1;
+                $is_access_log = 1;
+                $match_type = 13;
+
             ## ThingWorx Standard Log Format (ApplicationLog, ErrorLog, ScriptLog, ...) ##
-            if ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
+            } elsif ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
                 $is_line_match = 1;
                 $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
 
@@ -1533,18 +1797,59 @@ sub read_and_process_logs {
                 $threadname = defined $threadpool ? $threadpool : $thread;
             }
 
-            ## USER DEFINED METRICS CAPTURE ##
-            if( defined $user_defined_metrics && /$user_defined_metrics_regex/ ) {
-                if( /$user_defined_metrics_post_regex/g ) {
-                    foreach my $user_metric ( split( ',', $user_defined_metrics ) ) {
-                        my $metric = quotemeta( $user_metric );
-                        my $regex = qr/(?<$metric>-?\d+(?:\.\d+)?)\s*[=:]?\s*$metric\s+/x;
-                    #foreach my $metric ( keys %+ ) {
-                        my $value = defined $+{$metric} ? normalize( $+{$metric} ) : "N/A"; 
-                        print "$metric=$value ";
+            ## USER DEFINED METRICS CAPTURE (Issue #22) ##
+            my %udm_values;
+            if (@udm_configs && defined $message) {
+                foreach my $config_idx (0 .. $#udm_configs) {
+                    my $config = $udm_configs[$config_idx];
+                    my $name = $config->{name};
+                    my $matched_value;
+
+                    if ($match_type == 13) {
+                        # CSV: extract by column index
+                        my $col_idx = $csv_udm_col_indices[$config_idx];
+                        if (defined $col_idx && $col_idx >= 0 && $col_idx < scalar @csv_fields) {
+                            my $val = $csv_fields[$col_idx];
+                            $val =~ s/^\s+|\s+$//g;
+                            $matched_value = $val if $val ne '';
+                        }
+                    } else {
+                        # Regex: existing pattern matching
+                        foreach my $pattern (@{$config->{patterns}}) {
+                            if (/$pattern/) {
+                                $matched_value = $1;
+                                last;
+                            }
+                        }
                     }
+                    next unless defined $matched_value;
+
+                    my $raw_value = $matched_value + 0;  # Ensure numeric
+
+                    # Apply delta/idelta transform on raw value before conversion
+                    if (defined $config->{transform}) {
+                        if (defined $udm_last_value{$name}) {
+                            my $delta = $raw_value - $udm_last_value{$name};
+                            $udm_last_value{$name} = $raw_value;
+                            if ($config->{transform} eq 'idelta' && $delta < 0) {
+                                next;  # Discard counter reset
+                            }
+                            $raw_value = $delta;
+                        } else {
+                            $udm_last_value{$name} = $raw_value;
+                            next;  # No previous value, skip first occurrence
+                        }
+                    }
+
+                    # Apply unit conversion
+                    my $converted_value = defined $config->{converter} ? $config->{converter}->($raw_value) : $raw_value;
+                    $udm_values{$name} = $converted_value if defined $converted_value;
+
+                    # Mask extracted values in message for grouping (skip for CSV)
+                    $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13;
                 }
             }
+            $is_access_log = 1 if %udm_values;
 
             if( $is_line_match ) {
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
@@ -1564,7 +1869,7 @@ sub read_and_process_logs {
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
-                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 || $match_type == 7 || $match_type == 8 || $match_type == 10 || $match_type == 11 ) {
+                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 || $match_type == 7 || $match_type == 8 || $match_type == 10 || $match_type == 11 || $match_type == 13 ) {
                     if (exists $timestamp_cache{$timestamp_str}) {
                         $timestamp = $timestamp_cache{$timestamp_str};
                     } else {
@@ -1694,6 +1999,17 @@ sub read_and_process_logs {
                             $log_messages{$category}{$log_key}{count_max} = $count if !defined $log_messages{$category}{$log_key}{count_max} || $count > $log_messages{$category}{$log_key}{count_max};
                         }
 
+                        # UDM per-message storage (Issue #22)
+                        foreach my $config (@udm_configs) {
+                            my $name = $config->{name};
+                            next unless defined $udm_values{$name};
+                            my $value = $udm_values{$name};
+                            $log_messages{$category}{$log_key}{"udm_${name}_sum"} += $value;
+                            $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
+                            $log_messages{$category}{$log_key}{"udm_${name}_min"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_min"} || $value < $log_messages{$category}{$log_key}{"udm_${name}_min"};
+                            $log_messages{$category}{$log_key}{"udm_${name}_max"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_max"} || $value > $log_messages{$category}{$log_key}{"udm_${name}_max"};
+                        }
+
                         if( defined $duration && !$omit_durations ) {
                             $log_messages{$category}{$log_key}{total_duration} += $duration;
                             $log_messages{$category}{$log_key}{total_duration_num} += $duration;
@@ -1715,7 +2031,7 @@ sub read_and_process_logs {
 
                 ## CAPTURE TIME-WINDOWS BASED STATISTICS DATA ##
                 if( $is_access_log  ) {
-                    $print_durations = 1 if $print_durations != 1;
+                    $print_durations = 1 if $print_durations != 1 && (defined $duration || defined $bytes || defined $count);
 
                     ## STATISTICAL DATA CAPTURE ##
                     $duration = 0 if !defined( $duration );
@@ -1761,6 +2077,25 @@ sub read_and_process_logs {
                         $log_analysis{$bucket}{count_max} = $count if !defined $log_analysis{$bucket}{count_max} || $count > $log_analysis{$bucket}{count_max};
                     }
 
+                    # UDM time-bucket storage (Issue #22)
+                    foreach my $config (@udm_configs) {
+                        my $name = $config->{name};
+                        next unless defined $udm_values{$name};
+                        my $value = $udm_values{$name};
+                        $log_analysis{$bucket}{"udm_${name}_sum"} += $value;
+                        $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
+                        if ($category_bucket =~ /-HL$/) {
+                            $log_analysis{$bucket}{"udm_${name}_sum-HL"} += $value;
+                            $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
+                            $log_analysis{$bucket}{"udm_${name}_min-HL"} = $value
+                                if !defined $log_analysis{$bucket}{"udm_${name}_min-HL"} || $value < $log_analysis{$bucket}{"udm_${name}_min-HL"};
+                            $log_analysis{$bucket}{"udm_${name}_max-HL"} = $value
+                                if !defined $log_analysis{$bucket}{"udm_${name}_max-HL"} || $value > $log_analysis{$bucket}{"udm_${name}_max-HL"};
+                        }
+                        $log_analysis{$bucket}{"udm_${name}_min"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_min"} || $value < $log_analysis{$bucket}{"udm_${name}_min"};
+                        $log_analysis{$bucket}{"udm_${name}_max"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_max"} || $value > $log_analysis{$bucket}{"udm_${name}_max"};
+                    }
+
                     ## HEATMAP RAW VALUE CAPTURE ##
                     if ($heatmap_enabled) {
                         my $heatmap_value;
@@ -1771,6 +2106,8 @@ sub read_and_process_logs {
                             $heatmap_value = $bytes;
                         } elsif ($heatmap_metric eq 'count' && defined $count && $count >= 0) {
                             $heatmap_value = $count;
+                        } elsif (defined $heatmap_udm_config && defined $udm_values{$heatmap_udm_config->{name}}) {
+                            $heatmap_value = $udm_values{$heatmap_udm_config->{name}};
                         }
 
                         if (defined $heatmap_value && $heatmap_value > 0) {
@@ -1791,7 +2128,7 @@ sub read_and_process_logs {
                         my $is_highlighted = ($category_bucket =~ /-HL$/);
 
                         # Collect duration values if requested (or if no specific metrics requested)
-                        if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration >= 0 && !$omit_durations) {
+                        if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$omit_durations) {
                             push @{$histogram_values{duration}}, $duration;
                             push @{$histogram_values_hl{duration}}, $duration if $is_highlighted;
                         }
@@ -1801,9 +2138,18 @@ sub read_and_process_logs {
                             push @{$histogram_values_hl{bytes}}, $bytes if $is_highlighted;
                         }
                         # Collect count values if requested
-                        if ((!%histogram_metrics || $histogram_metrics{count}) && defined $count && $count >= 0 && !$omit_count) {
+                        if ((!%histogram_metrics || $histogram_metrics{count}) && defined $count && $count > 0 && !$omit_count) {
                             push @{$histogram_values{count}}, $count;
                             push @{$histogram_values_hl{count}}, $count if $is_highlighted;
+                        }
+                        # Collect UDM values if requested (or if all metrics requested via bare -hg)
+                        for my $udm_cfg (@histogram_udm_configs) {
+                            my $name = $udm_cfg->{name};
+                            if ((!%histogram_metrics || $histogram_metrics{$name}) &&
+                                defined $udm_values{$name} && $udm_values{$name} > 0) {
+                                push @{$histogram_values{$name}}, $udm_values{$name};
+                                push @{$histogram_values_hl{$name}}, $udm_values{$name} if $is_highlighted;
+                            }
                         }
                     }
                 }
@@ -1969,7 +2315,7 @@ sub calculate_histogram_buckets {
 
     my @metrics_with_data = ();
 
-    for my $metric (qw(duration bytes count)) {
+    for my $metric (qw(duration bytes count), map { $_->{name} } @histogram_udm_configs) {
         my $values_ref = $histogram_values{$metric};
         next unless defined $values_ref && @$values_ref > 0;
 
@@ -2103,10 +2449,19 @@ sub calculate_histogram_buckets {
 # Calculate histogram layout dimensions - Issue #25
 # Returns a hash with layout information for rendering histograms side by side
 sub calculate_histogram_layout {
-    # Step 1: Determine which metrics have data (in display order: duration, bytes, count)
+    # Step 1: Determine which metrics have data (in display order: duration, bytes, count, then UDMs)
     my @active_metrics = ();
     for my $metric (qw(duration bytes count)) {
         # Check if metric was requested (or all metrics if none specified)
+        if ((!%histogram_metrics || $histogram_metrics{$metric}) &&
+            exists $histogram_stats{$metric} &&
+            defined $histogram_stats{$metric}{count} &&
+            $histogram_stats{$metric}{count} > 0) {
+            push @active_metrics, $metric;
+        }
+    }
+    for my $udm_cfg (@histogram_udm_configs) {
+        my $metric = $udm_cfg->{name};
         if ((!%histogram_metrics || $histogram_metrics{$metric}) &&
             exists $histogram_stats{$metric} &&
             defined $histogram_stats{$metric}{count} &&
@@ -2333,6 +2688,45 @@ sub calculate_all_statistics {
                 count_sum     => $log_analysis{$bucket}{count_sum}
             }
         }
+
+        # Populate UDM stats for this bucket (Issue #22)
+        foreach my $config (@udm_configs) {
+            my $name = $config->{name};
+            my $agg  = $config->{aggregation};
+            my $occ  = $log_analysis{$bucket}{"udm_${name}_occurrences"};
+
+            # Always populate all raw stats for CSV/summary
+            $log_stats{$bucket}{"udm_${name}_occurrences"} = $occ;
+            $log_stats{$bucket}{"udm_${name}_min"}  = $log_analysis{$bucket}{"udm_${name}_min"};
+            $log_stats{$bucket}{"udm_${name}_max"}  = $log_analysis{$bucket}{"udm_${name}_max"};
+            $log_stats{$bucket}{"udm_${name}_mean"} = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef;
+            $log_stats{$bucket}{"udm_${name}_sum"}  = $log_analysis{$bucket}{"udm_${name}_sum"};
+
+            # Select display value based on aggregation function
+            my $display_value;
+            if    ($agg eq 'sum') { $display_value = $log_analysis{$bucket}{"udm_${name}_sum"}; }
+            elsif ($agg eq 'min') { $display_value = $log_analysis{$bucket}{"udm_${name}_min"}; }
+            elsif ($agg eq 'max') { $display_value = $log_analysis{$bucket}{"udm_${name}_max"}; }
+            elsif ($agg eq 'avg') { $display_value = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef; }
+            $log_stats{$bucket}{"udm_$name"} = $display_value;
+
+            # Aggregation-aware highlight value
+            my $hl_value;
+            if ($agg eq 'sum') {
+                $hl_value = $log_analysis{$bucket}{"udm_${name}_sum-HL"};
+            } elsif ($agg eq 'min') {
+                # Highlight entire bar if the highlighted min equals the overall min
+                my $hl_min = $log_analysis{$bucket}{"udm_${name}_min-HL"};
+                $hl_value = (defined $hl_min && defined $display_value && $hl_min == $display_value) ? $display_value : undef;
+            } elsif ($agg eq 'max') {
+                # Highlight entire bar if the highlighted max equals the overall max
+                my $hl_max = $log_analysis{$bucket}{"udm_${name}_max-HL"};
+                $hl_value = (defined $hl_max && defined $display_value && $hl_max == $display_value) ? $display_value : undef;
+            } elsif ($agg eq 'avg') {
+                $hl_value = undef;  # No meaningful highlight for averages
+            }
+            $log_stats{$bucket}{"udm_$name-HL"} = $hl_value;
+        }
     }
 
     ## STATS FOR TOP LOG MESSAGES ##
@@ -2398,7 +2792,14 @@ sub calculate_all_statistics {
                 $log_messages{$category}{$log_key}{count_mean} = ( defined $log_messages{$category}{$log_key}{count_sum} && defined $log_messages{$category}{$log_key}{count_occurrences} && $log_messages{$category}{$log_key}{count_occurrences} > 0 ) ? sprintf("%.0f", $log_messages{$category}{$log_key}{count_sum} / $log_messages{$category}{$log_key}{count_occurrences}) : undef if defined $log_messages{$category}{$log_key}{count_occurrences};
                 $log_messages{$category}{$log_key}{count_max} = $log_messages{$category}{$log_key}{count_max} if defined $log_messages{$category}{$log_key}{count_max};
                 $log_messages{$category}{$log_key}{count_sum} = $log_messages{$category}{$log_key}{count_sum} if defined $log_messages{$category}{$log_key}{count_sum};
-                
+
+                # Calculate UDM per-message mean (Issue #22)
+                foreach my $config (@udm_configs) {
+                    my $name = $config->{name};
+                    my $occ = $log_messages{$category}{$log_key}{"udm_${name}_occurrences"};
+                    $log_messages{$category}{$log_key}{"udm_${name}_mean"} = (defined $occ && $occ > 0) ? $log_messages{$category}{$log_key}{"udm_${name}_sum"} / $occ : undef;
+                }
+
                 # 2026-01-04 TO DO: free up the memory from the data structure as it is no longer needed (don't think that below logic was actually working as intended)
                 # undef $log_messages{$category}{$log_key}{durations};
                 # delete $log_messages{$category}{$log_key}{durations};
@@ -2573,9 +2974,8 @@ sub normalize_data_for_output {
         duration => 0,
         count => 0,
     );
+    $max_total{"udm_$_->{name}"} = 0 for @udm_configs;  # Initialize UDM max totals (Issue #22)
     my %output_columns;
-
-# TO DO : user defined value will need to have a max total determined for scaling and printing
 
     print "\rScaling and normalizing data..." unless $disable_progress;
 
@@ -2604,6 +3004,12 @@ sub normalize_data_for_output {
         $max_total{bytes} = $total_bytes if ( defined $total_bytes && !$omit_bytes && $total_bytes > $max_total{bytes} );
         $max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration} && $log_stats{$bucket}{duration} > $max_total{duration} );
         $max_total{count} = $log_stats{$bucket}{count} if ( defined $log_stats{$bucket}{count} && !$omit_count && $log_stats{$bucket}{count} > $max_total{count} );
+
+        # Track UDM max values (Issue #22)
+        foreach my $config (@udm_configs) {
+            my $key = "udm_$config->{name}";
+            $max_total{$key} = $log_stats{$bucket}{$key} if defined $log_stats{$bucket}{$key} && $log_stats{$bucket}{$key} > $max_total{$key};
+        }
     }
 
     if( scalar @graph_threadpools_activity > 0 ) {
@@ -2703,6 +3109,11 @@ sub normalize_data_for_output {
             push @output_columns, "${key}Nice" if $key =~ /^(duration|bytes)$/; # presently these won't be output to CSV as processing loop to screen will stop at max columns
             if( $key =~ /^count$/ ) {
                 push @output_columns, "${key}_occurrences", "${key}_min", "${key}_mean", "${key}_max", "${key}_sum" if !$omit_count;
+            } elsif ( $key =~ /^udm_/ ) {
+                (my $csv_key = $key) =~ s/^udm_//;
+                my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
+                my $csv_prefix = ($cfg && $cfg->{unit}) ? "${csv_key}_$cfg->{unit}" : $csv_key;
+                push @output_columns, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
             } else {
                 push @output_columns, $key;
             }
@@ -2806,8 +3217,10 @@ sub normalize_data_for_output {
 
     foreach my $column ( 0 .. $#printed_column_names ) {
         my $title = $printed_column_names[$column];
-        my $max_length = $printed_column_widths[$column];
-        $printed_column_names[$column] = substr( $title, 0, $max_length ) if length( $title ) > $max_length;
+        $title =~ s/^udm_//;                   # Strip internal prefix for display
+        my $max_length = $printed_column_widths[$column] // 0;
+        $title = substr( $title, 0, $max_length ) if $max_length > 0 && length( $title ) > $max_length;
+        $printed_column_names[$column] = $title;
     }
 
     my @rounded_column_widths = cumulative_round_widths( \@printed_column_widths, $terminal_width - eval(join '+', @printed_column_spacing ));
@@ -2878,6 +3291,52 @@ sub normalize_data_for_output {
 
     }
 
+    # Shared column-position color arrays for UDM heatmap and histogram resolution
+    # These map bar graph column positions to their color schemes
+    # (see issue #64 for consolidation with other hardcoded color references)
+    my @column_color_names   = qw( yellow green cyan blue magenta );
+    my @column_plain_bg      = ( 184, 34, 30, 20, 127 );
+    my @column_highlight_bg  = ( 226, 46, 51, 27, 207 );
+    my @column_gradients = (
+        [58, 94, 136, 142, 178, 184, 220, 226],   # Yellow
+        [22, 28, 34, 40, 46, 82, 118, 154],        # Green
+        [23, 30, 37, 44, 51, 80, 86, 123],         # Cyan
+        [17, 18, 19, 20, 21, 27, 33, 39],          # Blue
+        [53, 89, 125, 127, 163, 165, 201, 207],    # Magenta
+    );
+
+    # Resolve UDM heatmap color from its bar graph column position
+    if (defined $heatmap_udm_config) {
+        my $col = 0;
+        for my $key (@populated_graph_columns) {
+            next if $key eq 'occurrences';
+            if ($key eq "udm_$heatmap_udm_config->{name}") {
+                my $idx = $col < scalar(@column_color_names) ? $col : $#column_color_names;
+                $heatmap_metric_map{$heatmap_metric}{color} = $column_color_names[$idx];
+                $heatmap_metric_map{$heatmap_metric}{highlight_bg} = $column_plain_bg[$idx];
+                last;
+            }
+            $col++;
+        }
+    }
+
+    # Resolve UDM histogram colors from bar graph column positions
+    for my $udm_cfg (@histogram_udm_configs) {
+        my $metric = $udm_cfg->{name};
+        my $col = 0;
+        for my $key (@populated_graph_columns) {
+            next if $key eq 'occurrences';
+            if ($key eq "udm_$metric") {
+                my $idx = $col < scalar(@column_plain_bg) ? $col : $#column_plain_bg;
+                $histogram_base_colors{$metric} = $column_plain_bg[$idx];
+                $histogram_highlight_colors{$metric} = $column_highlight_bg[$idx];
+                $histogram_color_gradients{$metric} = $column_gradients[$idx];
+                last;
+            }
+            $col++;
+        }
+    }
+
     print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
@@ -2896,7 +3355,11 @@ sub get_heatmap_highlight_bg_color {
         'bytes'    => 34,   # Green - matches bar graph column 3 plain_bg
         'count'    => 30,   # Cyan - matches bar graph column 4 plain_bg
     );
-    return $highlight_colors{$metric} // 184;
+    if (exists $highlight_colors{$metric}) {
+        return $highlight_colors{$metric};
+    }
+    # UDM metrics: use highlight_bg resolved from bar graph column position
+    return $heatmap_metric_map{$metric}{highlight_bg} // 184;
 }
 
 sub format_heatmap_value {
@@ -2907,6 +3370,16 @@ sub format_heatmap_value {
         return format_bytes($value, 'B');
     } elsif ($metric eq 'count') {
         return format_number($value);
+    } elsif (defined $heatmap_udm_config && $metric eq $heatmap_udm_config->{name}) {
+        my $ut = $heatmap_udm_config->{unit_type};
+        return $ut eq 'time'  ? format_time($value, 'ms') :
+               $ut eq 'bytes' ? format_bytes($value, 'B') :
+                                format_number($value);
+    } elsif (my ($hcfg) = grep { $_->{name} eq $metric } @histogram_udm_configs) {
+        my $ut = $hcfg->{unit_type};
+        return $ut eq 'time'  ? format_time($value, 'ms') :
+               $ut eq 'bytes' ? format_bytes($value, 'B') :
+                                format_number($value);
     } else {
         return $value;
     }
@@ -3198,12 +3671,13 @@ sub print_bar_graph {
 
         foreach my $column (0 .. $#printed_column_names) {
             my $name   = $printed_column_names[$column];
-            my $width  = $printed_column_widths[$column];    
+            my $width  = $printed_column_widths[$column] // length($name);
             my $padding = $width - length($name);
+            $padding = 0 if $padding < 0;
             my $left_pad  = int( $padding / 2 + 0.5 );
             my $right_pad = $padding - $left_pad;
- 
-            if ( $printed_column_spacing[$column] > 0 ) {
+
+            if ( ($printed_column_spacing[$column] // 0) > 0 ) {
                 my $num_padding_chars = ($printed_column_spacing[$column]-$graph_column_padding_all);
                 print ' ' x 1 if $num_padding_chars > 1;                                                    # set this to pipe to have the column line propagate up (does not work with line in durations)
                 print ' ' x ($num_padding_chars > 1 ? $num_padding_chars - 1 : $num_padding_chars);
@@ -3222,7 +3696,7 @@ sub print_bar_graph {
                 # $printed_chars += $right_pad;
             };
 
-            if( $printed_column_spacing[$column] > 0 ) {
+            if( ($printed_column_spacing[$column] // 0) > 0 ) {
                 print ' ' x $graph_column_padding_all;
             }
         }
@@ -3382,6 +3856,25 @@ sub print_bar_graph {
                             foreach my $metric ( qw( occurrences min mean max sum ) ) {
                                 my $key_metric = "${key}_${metric}";
                                 push @csv_data, $log_stats{$bucket}{$key_metric};
+                            }
+                        } elsif( $key =~ /^udm_(.+)$/ ) {
+                            my $metric_name = $1;
+                            my ($config) = grep { $_->{name} eq $metric_name } @udm_configs;
+                            if ($config) {
+                                my $unit_type = $config->{unit_type};
+                                if ($unit_type eq 'time') {
+                                    my $col_width = $printed_column_widths[$printed_column_index];
+                                    my $fmt = $col_width >= 15 ? 'long' : ($col_width >= 10 ? 'medium' : 'short');
+                                    my $spc = $fmt eq 'short' ? undef : ' ';
+                                    $trend_value = " " . format_time($log_stats{$bucket}{$key}, 'ms', $fmt, $spc);
+                                } elsif ($unit_type eq 'bytes') {
+                                    $trend_value = " " . format_bytes($log_stats{$bucket}{$key}, 'B');
+                                } else {
+                                    $trend_value = " " . format_number($log_stats{$bucket}{$key}, ' ', 2);
+                                }
+                            }
+                            foreach my $metric ( qw( occurrences min mean max sum ) ) {
+                                push @csv_data, $log_stats{$bucket}{"${key}_${metric}"};
                             }
                         } else {
                             $trend_value = defined $log_stats{$bucket}{$key} ? " $log_stats{$bucket}{$key}" : "";
@@ -3578,7 +4071,9 @@ sub print_histograms {
     my $title_line = " " x $centering_offset;
     for my $i (0 .. $#metrics) {
         my $metric = $metrics[$i];
-        my $title = ucfirst($metric) . " Distribution";
+        my $title = (grep { $_->{name} eq $metric } @histogram_udm_configs)
+            ? "$metric Distribution"
+            : ucfirst($metric) . " Distribution";
         my $title_padding_left = int(($single_width - length($title)) / 2);
         $title_padding_left = 0 if $title_padding_left < 0;
         my $title_padding_right = $single_width - $title_padding_left - length($title);
@@ -4490,7 +4985,17 @@ sub print_message_summary {
 
                     # Separated conditions for CSV output from printed column data
                     if( $write_messages_to_csv && defined $csv_fh ) {
-                        $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact ]);
+                        my @udm_csv_values;
+                        foreach my $config (@udm_configs) {
+                            my $name = $config->{name};
+                            push @udm_csv_values,
+                                $log_messages{$grouping}{$key}{"udm_${name}_occurrences"},
+                                $log_messages{$grouping}{$key}{"udm_${name}_min"},
+                                $log_messages{$grouping}{$key}{"udm_${name}_mean"},
+                                $log_messages{$grouping}{$key}{"udm_${name}_max"},
+                                $log_messages{$grouping}{$key}{"udm_${name}_sum"};
+                        }
+                        $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact, @udm_csv_values ]);
                     }
 
                     print "$row\n";
@@ -4707,7 +5212,13 @@ if( $write_messages_to_csv ) {                                                  
     $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
     my $csv_file_name = build_csv_filename('MESSAGES');
     open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
-    $csv->print($csv_fh, [qw(Category Message Occurrences MeanBytes TotalBytes TotalBytesNice CountOccurrences CountMin CountMean CountMax CountSum MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact)]);
+    my @udm_csv_headers;
+    foreach my $config (@udm_configs) {
+        my $name = $config->{name};
+        my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
+        push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
+    }
+    $csv->print($csv_fh, [qw(Category Message Occurrences MeanBytes TotalBytes TotalBytesNice count_occurrences count_min count_mean count_max count_sum MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact), @udm_csv_headers]);
 }
 
 print_message_summary();														                    # Print and write message summaries
