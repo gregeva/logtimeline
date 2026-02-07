@@ -50,13 +50,13 @@
 use strict;
 use warnings;
 use POSIX qw(strftime floor);
-use Math::Round;
 use Time::Piece;
-use DateTime;
+use Time::Local qw(timegm);
 use Term::ReadKey;
 use Getopt::Long qw(:config no_ignore_case);
 use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
+use Devel::Size qw(total_size);
 # Proc::ProcessTable is loaded conditionally in get_memory_usage() based on platform
 # On Windows, Win32::Process::Info is used instead
 use List::Util qw(min max);
@@ -70,15 +70,16 @@ if ($^O eq 'MSWin32') {                                                         
 }
 
 ## GLOBALS ##
-my $version_number = "0.10.0";
+my $version_number = "0.10.4";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
 my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
 my $impact_time_exponent = 7;		            # it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
-my ( $bucket_size_minutes, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
+my ( $time_bucket_size, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages, $elapsed_heatmap_statistics, $elapsed_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
+my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_userdefinedmetrics );
 my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
@@ -91,7 +92,7 @@ my $column_count_pre_graph = 2;		            # timestamp + legend is the default
 my @graph_columns = qw( duration bytes count );
 my ( @printed_column_widths, @printed_column_spacing, @printed_column_names );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
-my ( $print_durations, $track_memory ) = ( 0, 0 );
+my ( $print_durations, $show_memory, $disable_progress ) = ( 0, 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
 my ( $filter_count_min, $filter_count_max );
@@ -197,7 +198,8 @@ my %heatmap_metric_map = (
 # Histogram data structures and settings (Issue #25)
 my $histogram_enabled = 0;                    # Flag: histogram mode active
 my %histogram_metrics = ();                   # Metrics to display: {duration => 1, bytes => 1, count => 1}
-my $histogram_width_percent = 95;             # Width as percentage of terminal
+my $histogram_width_percent = 95;             # Width as percentage of terminal (default, auto-adapted by histogram count)
+my $histogram_width_explicit = 0;             # Flag: true if user explicitly set -hgw
 my $histogram_height = 8;                     # Height in rows (default 8, auto-scaled based on terminal)
 my $histogram_height_explicit = 0;            # Flag: true if user explicitly set -hgh
 my $histogram_gap = 6;                        # Horizontal padding between histograms
@@ -228,6 +230,25 @@ my %histogram_boundaries = (
 
 my %histogram_stats = (
     duration => {},  # Will contain: min, max, p1, p10, p25, p50, p75, p90, p95, p99, p999, p9999, count, bucket_count
+    bytes    => {},
+    count    => {},
+);
+
+# Histogram highlight data structures (Issue #42) - parallel to main structures
+my %histogram_values_hl = (
+    duration => [],
+    bytes    => [],
+    count    => [],
+);
+
+my %histogram_buckets_hl = (
+    duration => [],
+    bytes    => [],
+    count    => [],
+);
+
+my %histogram_stats_hl = (
+    duration => {},
     bytes    => {},
     count    => {},
 );
@@ -272,6 +293,13 @@ my %histogram_base_colors = (
     duration => 184,  # Yellow - matches bar graph column 2 plain_bg
     bytes    => 34,   # Green - matches bar graph column 3 plain_bg
     count    => 30,   # Cyan - matches bar graph column 4 plain_bg
+);
+
+# Histogram highlight colors (Issue #42) - match bar graph highlight_bg colors
+my %histogram_highlight_colors = (
+    duration => 226,  # Bright yellow - matches bar graph column 2 highlight
+    bytes    => 46,   # Bright green - matches bar graph column 3 highlight
+    count    => 51,   # Bright cyan - matches bar graph column 4 highlight
 );
 
 # Histogram color gradients (256-color ANSI) for optional intensity variation
@@ -409,7 +437,7 @@ END
 
 sub print_usage {
     my ( $error_reason ) = @_;
-    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS>] [--end|-et <HH:MM>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--histogram|-hg [duration|bytes|count]] [--histogram-width|-hgw <N>] [--histogram-height|-hgh <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
+    print "Usage: $0 [--bucket-size|-bs <time block>] [--pause|-p] [--start|-st <YYYY-MM-DD HH:MM:SS.mmm>] [--end|-et <HH:MM:SS.mmm>] [--exclude|-e <RegEx>] [--include|-i <RegEx>] [--highlight|-h <RegEx>] [--exclude-file|-ef <file>] [--include-file|-if <file>] [--highlight-file|-hf <file>] [--verbose|-V] [--heatmap|-hm [duration|bytes|count]] [--heatmap-width|-hmw <N>] [--histogram|-hg [duration|bytes|count]] [--histogram-width|-hgw <N>] [--histogram-height|-hgh <N>] [--light-background|-lbg] [--seconds|-s] [--milliseconds|-ms] [--output-csv|-o] [--omit-values|-ov] [--omit-stats|-os] [--omit-empty|-oe] [--omit-summary|-osum] [--omit-rate|-or] [--omit-durations|-od] [--omit-bytes|-ob] [--omit-count|-oc] [--include-count|-ic] [--include-query-string|-iqs] [--include-session|-is] [--duration-min|-dmin <value>] [--duration-max|-dmax <value>] [--duration-unit|-du <ns|us|ms|s>] [--bytes-min|-bmin <value>] [--bytes-max|-bmax <value>] [--count-min|-cmin <value>] [--count-max|-cmax <value>] [--sort-on|-so occurrences/total,duration/time,min,mean/avg,max,stddev,bytes,count,count_min,count_mean/count_avg,count_max,count_occurrences/count_total,impact,cv] [--sort-ascending|-sa] [--threadpool-activity-summary|-tpas] [--threadpool-activity|-tpa <RegEx>] [--memory-usage|-mem] [--mask-uuid|-uuid] [--version|-v] <file1> <file2> ...\n";
 
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     return;
@@ -621,31 +649,78 @@ sub detect_light_terminal_background {
 sub get_memory_usage {
     my $memory_usage;
 
-    if ($^O eq 'darwin' || $^O eq 'linux') {                    # For Mac OS and Debian (Linux)
-        eval {
-            require Proc::ProcessTable;
-            my $t = Proc::ProcessTable->new();
-            ($memory_usage) = map { $_->rss } grep { $_->pid == $$ } @{$t->table};
-        };
-        if ($@) {
-            die "Failed to load Proc::ProcessTable: $@";
+    if ($^O eq 'darwin') {                                      # macOS
+        # Use ps command - reliable and avoids Proc::ProcessTable SIGTRAP crashes
+        my $rss = `ps -o rss= -p $$`;
+        chomp $rss;
+        $memory_usage = $rss * 1024 if $rss;                    # ps returns KB, convert to bytes
+    } elsif ($^O eq 'linux') {                                  # Linux
+        # Read /proc/self/statm directly - always available, no dependencies
+        if (open my $fh, '<', '/proc/self/statm') {
+            my $line = <$fh>;
+            close $fh;
+            my @fields = split /\s+/, $line;
+            if (defined $fields[1]) {
+                # Field 1 is RSS in pages, multiply by system page size
+                require POSIX;
+                my $page_size = POSIX::sysconf(&POSIX::_SC_PAGESIZE);
+                $memory_usage = $fields[1] * $page_size;
+            }
         }
-    } elsif ($^O eq 'MSWin32') {                                # For Windows
+    } elsif ($^O eq 'MSWin32') {                                # Windows
         eval {
             require Win32::Process::Info;
-            Win32::Process::Info->import();  # Explicitly call import
+            Win32::Process::Info->import();
             my $pi = Win32::Process::Info->new();
             my $info = $pi->GetProcInfo();
             ($memory_usage) = map { $_->{WorkingSetSize} } grep { $_->{ProcessId} == $$ } @$info;
         };
         if ($@) {
-            die "Failed to load Win32::Process::Info: $@";
+            warn "Failed to get memory usage on Windows: $@";
         }
-    } else {
-        die "Unsupported operating system: $^O";
     }
 
-    return $memory_usage;
+    return $memory_usage // 0;
+}
+
+# Issue #45: Measure all data structures and update high-water marks
+# Called after each major subroutine to capture peak memory usage
+sub measure_memory_structures {
+    # Always capture RSS high-water mark
+    $current_memory_usage = get_memory_usage();
+    if ($current_memory_usage > $max_memory_usage) {
+        $max_memory_usage = $current_memory_usage;
+    }
+
+    # Only measure individual structures when -mem flag is used
+    return unless $show_memory;
+
+    require Devel::Size;
+
+    # Measure all key data structures
+    my %current_sizes = (
+        log_occurrences        => Devel::Size::total_size(\%log_occurrences),
+        log_analysis           => Devel::Size::total_size(\%log_analysis),
+        log_messages           => Devel::Size::total_size(\%log_messages),
+        log_stats              => Devel::Size::total_size(\%log_stats),
+        log_threadpools        => Devel::Size::total_size(\%log_threadpools),
+        threadpool_activity    => Devel::Size::total_size(\%threadpool_activity),
+        log_userdefinedmetrics => Devel::Size::total_size(\%log_userdefinedmetrics),
+        heatmap_data           => Devel::Size::total_size(\%heatmap_data),
+        heatmap_data_hl        => Devel::Size::total_size(\%heatmap_data_hl),
+        heatmap_raw            => Devel::Size::total_size(\%heatmap_raw),
+        heatmap_raw_hl         => Devel::Size::total_size(\%heatmap_raw_hl),
+        histogram_values       => Devel::Size::total_size(\%histogram_values),
+    );
+
+    # Update high-water marks (only if current value is larger)
+    for my $struct (keys %current_sizes) {
+        my $current = $current_sizes{$struct};
+        my $hwm = $memory_high_water_marks{$struct} // 0;
+        if ($current > $hwm) {
+            $memory_high_water_marks{$struct} = $current;
+        }
+    }
 }
 
 sub convert_bytes {
@@ -865,13 +940,6 @@ sub format_time {
     return defined $value ? "$formatted_value$unit_name" : undef;
 }
 
-# Utility function to visualize control characters as caret notation to show non-printable characters present in log messages
-sub visualize_carets {
-    my ($s) = @_;
-    $s =~ s/([\x00-\x1F])/'^' . chr(ord($1) + 64)/eg;  # ^@ .. ^_
-    $s =~ s/\x7F/^?/g;                                 # DEL
-    return $s;
-}
 
 # utility function for formating numbers to normal format
 sub normalize { $_[0] =~ s/\.0+$//r }
@@ -918,7 +986,7 @@ sub handle_histogram_option {
                 # 'time' is an alias for 'duration' for consistency
                 $histogram_metrics{'duration'} = 1;
             } else {
-                warn "Unknown histogram metric: $metric (valid: duration, bytes, count)\n";
+                warn "Unknown histogram metric: $metric (valid: duration, time, bytes, count)\n";
             }
         }
     }
@@ -929,7 +997,7 @@ sub adapt_to_command_line_options {
     @ORIGINAL_ARGV = @ARGV;
 
     GetOptions(
-        'bucket-size|bs=i' => \$bucket_size_minutes,
+        'bucket-size|bs=i' => \$time_bucket_size,
         'pause|p' => \$pause_output,
         'start|st=s' => \$filter_range_start,
         'end|et=s' => \$filter_range_end,
@@ -962,7 +1030,8 @@ sub adapt_to_command_line_options {
         'bytes-max|bmax=i' => \$filter_bytes_max,
         'count-min|cmin=i' => \$filter_count_min,
         'count-max|cmax=i' => \$filter_count_max,
-	    'memory-usage|mem' => \$track_memory,
+	    'memory-usage|mem' => \$show_memory,
+        'disable-progress' => \$disable_progress,
         'output-csv|o' => \$write_messages_to_csv,
         'sort-on|so=s' => \$sort_type,
         'sort-ascending|sa' => \$sort_ascending,
@@ -975,7 +1044,7 @@ sub adapt_to_command_line_options {
         'heatmap-width|hmw=i' => \$heatmap_width,
         'light-background|lbg' => sub { $heatmap_light_bg = 1; $heatmap_light_bg_auto = 0; },
         'histogram|hg:s' => \&handle_histogram_option,
-        'histogram-width|hgw=i' => \$histogram_width_percent,
+        'histogram-width|hgw=i' => sub { $histogram_width_percent = $_[1]; $histogram_width_explicit = 1; },
         'histogram-height|hgh=i' => sub { $histogram_height = $_[1]; $histogram_height_explicit = 1; },
         'hgbpd=i' => \$histogram_buckets_per_decade,
         'hgb=i' => \$histogram_bucket_override
@@ -1124,13 +1193,13 @@ sub adapt_to_command_line_options {
     }
 
     $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
-    #$bucket_size_seconds = $print_seconds ? $bucket_size_minutes : $bucket_size_minutes * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
+    #$bucket_size_seconds = $print_seconds ? $time_bucket_size : $time_bucket_size * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
     if( $print_seconds ) {
-        $bucket_size_seconds = $bucket_size_minutes;
+        $bucket_size_seconds = $time_bucket_size;
     } elsif( $print_milliseconds ) {
-        $bucket_size_seconds = $bucket_size_minutes / 1000;
+        $bucket_size_seconds = $time_bucket_size / 1000;
     } else {
-        $bucket_size_seconds = $bucket_size_minutes * 60;
+        $bucket_size_seconds = $time_bucket_size * 60;
     }
 
     my %argv_hash = map { $_ => 1 } @ARGV;
@@ -1160,13 +1229,21 @@ sub adapt_to_command_line_options {
 
 # Parse various possible formats for input of start and end times and set associated filter variables
 sub calculate_start_end_filter_timestamps {
-    my ( $log_time ) = @_;
-    my $log_date = $log_time->epoch() - ( $log_time->hour * ( 60 * 60 ) + $log_time->minute * 60 + $log_time->second );
+    my ( $log_epoch ) = @_;
+    # Calculate midnight of log date: truncate to day boundary
+    my $log_date = int($log_epoch / 86400) * 86400;
 
     foreach my $key (keys %filter_range) {
         my $value = $filter_range{$key};                                                        # Get the value (either $filter_range_start or $filter_range_end)
         next unless length( $filter_range{$key} ) > 0;
         my $epoch_value;  # Variable to store the epoch time
+        my $fractional_ms = 0;
+
+        # Extract optional fractional seconds (supports . or , separator, 1-6 digits)
+        if ($value =~ s/(\d{2}:\d{2}:\d{2})[.,](\d{1,6})/$1/) {
+            my $frac_digits = $2;
+            $fractional_ms = $frac_digits * (10 ** (3 - length($frac_digits)));
+        }
 
         # Convert timestamp to epoch seconds using Time::Piece -- WARNING -- use of strptime can cause timezone problems, it appears to work here as I've manually set TZ to UTC on input
         if ( $value =~ /^\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{2}:\d{2}/ ) {
@@ -1183,7 +1260,8 @@ sub calculate_start_end_filter_timestamps {
             print "Warning: unhandled date/time format - option not taken into account\n";
         }
 
-        $filter_range_epoch{$key} = $epoch_value if defined( $epoch_value );
+        # Add fractional milliseconds for precision filtering
+        $filter_range_epoch{$key} = $epoch_value + ($fractional_ms / 1000) if defined( $epoch_value );
     }
     return 1;
 }
@@ -1194,17 +1272,17 @@ sub adapt_to_terminal_settings {
 
     # Auto-adjust the bucket size based on the terminal height (larger terminal can handle more rows)
     if( $terminal_height <= 30 ) {
-        $bucket_size_minutes = 120;
+        $time_bucket_size = 120;
     } elsif( $terminal_height <= 45 ) {
-        $bucket_size_minutes = 90;
+        $time_bucket_size = 90;
     } elsif( $terminal_height <= 65 ) {
-        $bucket_size_minutes = 60;
+        $time_bucket_size = 60;
     } elsif( $terminal_height <= 85 ) {
-        $bucket_size_minutes = 30;
+        $time_bucket_size = 30;
     } elsif( $terminal_height > 85 ) {
-        $bucket_size_minutes = 10;
+        $time_bucket_size = 10;
     } else {
-        $bucket_size_minutes = 60;
+        $time_bucket_size = 60;
     }
 
     $max_log_message_length = $terminal_width;		# this is the max that we can print without wrapping, depends on the summary table width, and terminal width 
@@ -1261,7 +1339,7 @@ sub read_and_process_logs {
             my ( $timestamp, $threadname );
             $total_lines_read++;
 
-            if ($total_lines_read % 4999 == 0) {             # print progress based on total lines read (not per-file) to handle many small files
+            if ($total_lines_read % 4999 == 0 && !$disable_progress) {   # print progress based on total lines read (not per-file) to handle many small files
                 my $now = Time::HiRes::time();
                 push @progress_history, [ $now, $total_lines_read ];
                 shift @progress_history if @progress_history > 50;          # keep last 50 samples for rolling average
@@ -1286,13 +1364,6 @@ sub read_and_process_logs {
                 $| = 1;                                     # Flush output to stdout
             }
 
-            if ($track_memory && $line_number % 100000 == 0) {						    # only collect memory in use around every 100000 lines processed
-                $current_memory_usage = get_memory_usage();								# track maximum memory usage
-                if ($current_memory_usage > $max_memory_usage) {
-                    $max_memory_usage = $current_memory_usage;
-                }
-            }
-
             ## ThingWorx Standard Log Format (ApplicationLog, ErrorLog, ScriptLog, ...) ##
             if ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
                 $is_line_match = 1;
@@ -1301,8 +1372,10 @@ sub read_and_process_logs {
                 # this section is optional, for cases where log line has included additional context which should be interpretted (row count, execution duration, result size)
                 ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)/;								# 2025-04-22 remove the trailing whitespace as same as below
                 ( $duration ) = $message =~ / durationM[sS]\s*=\s*(\d+)/;						# 2025-04-17 remove the trailing white space as it was not picking up the variable if it was at the end of the line
-                $is_access_log = 1 if defined $bytes || defined $duration;
-                $message =~ s/ ((bytes|durationM[sS])\s*=\s*)(\d+)/ $1?/g;		# mask out bytes and duration values for grouping purposes (but leave others for later processing)
+                if (defined $bytes || defined $duration) {
+                    $is_access_log = 1;
+                    $message =~ s/ ((bytes|durationM[sS])\s*=\s*)(\d+)/ $1?/g;		# mask out bytes and duration values for grouping purposes (but leave others for later processing)
+                }
 
 
 # [elapsed 39ms]
@@ -1310,21 +1383,6 @@ sub read_and_process_logs {
 # ApplicationLog.2025-04-29.135.log:2025-04-29 09:07:04.340+0000 [L: INFO] [O: c.t.c.ImportProcessor] [I: ] [U: Administrator] [S: ] [P: ] [T: https-jsse-nio-8443-exec-1] ***  [elapsed 20m 47s 399ms] Import completed successfully
 #( $duration ) = $message =~ /\[elapsed (\d+)ms\]/;
 #$message =~ s/\[elapsed (\d+)ms\]/\[duration ??ms\]/g;
-
-
-# START TEMPORARY the following are temporary
-                $message =~ s/(session id: )\d+/$1\?\?/g;
-                $message =~ s/(\w+_)+\d{14}-/ModelFamily_CustomerPC_DateString-/g;
-                
-                $message =~ s/Successfully added for import \/.+$/Successfully added for import \/ThingworxStorage\/repository\/SystemRepository\/\.\.\./g;
-                $message =~ s/Setting visibility permissions for (.+)$/Setting visibility permissions for \.\.\./g;
-                $message =~ s/Ancestors for Entity(.+)$/Ancestors for Entity \.\.\./g;
-                $message =~ s/input document: (.+)$/input document: \.\.\./g;
-                $message =~ s/Transaction was successfully ended for request (.+)$/Transaction was successfully ended for request \.\.\./g;
-                $message =~ s/Ending transaction for request (.+)$/Ending transaction for request \.\.\./g;
-                $message =~ s/(TimerEventHandler|TimerThing)\@(\S+)/$1\@/g;
-                $message =~ s/correspond to sent message (\S+) \]/correspond to sent message ###################### \]/g;
-# END TEMPORARY
 
             ## ThingWorx Connection Server Standard Log Format ##
             } elsif ( ($timestamp_str, $thread, $category_bucket, $object, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)/) {
@@ -1496,7 +1554,13 @@ sub read_and_process_logs {
                     $duration = convert_duration_to_ms($duration, $duration_unit_override);
                 }
 
-                $timestamp_str =~ s/(:\d{2}:\d{2})\.\d{3}/$1/;                      # remove the milliseconds if present, as the code does not presently support them
+                # Extract milliseconds if present (supports . or , separator, 1-6 digits)
+                my $fractional_ms = 0;
+                if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {
+                    my $frac_digits = $2;
+                    # Normalize to milliseconds (e.g., .1 = 100ms, .12 = 120ms, .123 = 123ms, .123456 = 123.456ms)
+                    $fractional_ms = $frac_digits * (10 ** (3 - length($frac_digits)));
+                }
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
@@ -1504,14 +1568,14 @@ sub read_and_process_logs {
                     if (exists $timestamp_cache{$timestamp_str}) {
                         $timestamp = $timestamp_cache{$timestamp_str};
                     } else {
-                        $timestamp = DateTime->new(
-                            year      => substr($timestamp_str, 0, 4),
-                            month     => substr($timestamp_str, 5, 2),
-                            day       => substr($timestamp_str, 8, 2),
-                            hour      => substr($timestamp_str, 11, 2),
-                            minute    => substr($timestamp_str, 14, 2),
-                            second    => substr($timestamp_str, 17, 2),
-                            time_zone => 'UTC',
+                        # ISO format: use substr() for field extraction, timegm() for epoch
+                        $timestamp = timegm(
+                            substr($timestamp_str, 17, 2),  # second
+                            substr($timestamp_str, 14, 2),  # minute
+                            substr($timestamp_str, 11, 2),  # hour
+                            substr($timestamp_str, 8, 2),   # day
+                            substr($timestamp_str, 5, 2) - 1,  # month (0-11)
+                            substr($timestamp_str, 0, 4),   # year
                         );
                         $timestamp_cache{$timestamp_str} = $timestamp;
                     }
@@ -1521,23 +1585,26 @@ sub read_and_process_logs {
                     } else {
                         my ($day, $month_str, $year, $hour, $minute, $second) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/;
                         my $month = $month_map{$month_str};
-                        $timestamp = DateTime->new(
-                            year      => $year,
-                            month     => $month,
-                            day       => $day,
-                            hour      => $hour,
-                            minute    => $minute,
-                            second    => $second,
-                            time_zone => 'UTC',
+                        # Apache format: use timegm() for epoch
+                        $timestamp = timegm(
+                            $second,
+                            $minute,
+                            $hour,
+                            $day,
+                            $month - 1,  # month (0-11)
+                            $year,
                         );
                         $timestamp_cache{$timestamp_str} = $timestamp;
                     }
                 }
 
-                $filter_range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp ) unless $filter_range_filter_initialized;
+                # Add fractional milliseconds to epoch for precision filtering
+                my $timestamp_epoch = $timestamp + ($fractional_ms / 1000);
+
+                $filter_range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp_epoch ) unless $filter_range_filter_initialized;
 
                 ## FILTERING CONDITIONS ##
-                next if( $timestamp->epoch() < $filter_range_epoch{'start'} || $timestamp->epoch() >= $filter_range_epoch{'end'} );
+                next if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} );
                 next if( defined( $exclude_regex )          && /$exclude_regex/ );
                 next if( defined( $include_regex )          && !/$include_regex/ );
                 next if( defined( $filter_duration_min )    && ( !defined( $duration )  || $duration <= $filter_duration_min ));		# skip if duration value is below specified minimum filter
@@ -1558,12 +1625,20 @@ sub read_and_process_logs {
                 } else {
                     $category = 'plain';
                 }
-                
-                # sets earliest and latest timestamp values being displayed (after the range filtering selection)
-                $output_timestamp_min = $timestamp->epoch() if $output_timestamp_min == 0 || $output_timestamp_min > $timestamp->epoch();
-                $output_timestamp_max = $timestamp->epoch() if $output_timestamp_max == 0 || $output_timestamp_max < $timestamp->epoch();
 
-                my $bucket = int($timestamp->epoch() / $bucket_size_seconds) * $bucket_size_seconds;
+                # sets earliest and latest timestamp values being displayed (after the range filtering selection)
+                $output_timestamp_min = $timestamp_epoch if $output_timestamp_min == 0 || $output_timestamp_min > $timestamp_epoch;
+                $output_timestamp_max = $timestamp_epoch if $output_timestamp_max == 0 || $output_timestamp_max < $timestamp_epoch;
+
+                my $bucket;
+                if ($print_milliseconds) {
+                    # Use integer milliseconds for bucket keys to avoid floating-point precision issues
+                    my $epoch_ms = int($timestamp_epoch * 1000 + 0.5);
+                    my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);
+                    $bucket = int($epoch_ms / $bucket_size_ms) * $bucket_size_ms;
+                } else {
+                    $bucket = int($timestamp_epoch / $bucket_size_seconds) * $bucket_size_seconds;
+                }
 
                 $log_occurrences{$bucket}{$category_bucket}{occurrences}++;
                 $total_lines_included++;
@@ -1576,7 +1651,6 @@ sub read_and_process_logs {
 
                     # Substitute UUID with HASH if command line option to do so is present (temporary feature to be eclipsed by group similar feature)
                     $message =~ s/\S{8}-\S{4}-\S{4}-\S{4}-\S{12}+/########-####-####-####-############/g if defined $mask_uuid && $mask_uuid;
-                    $message = visualize_carets( $message );                            # render non-printable characters visually
 
                     if( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
                         my $truncated_thread = substr( $threadname, 0, 20 );
@@ -1631,7 +1705,7 @@ sub read_and_process_logs {
                             # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
                             if( $duration > 0 ) {
                                 my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{occurrences}; 
-                                $log_messages{$category}{$log_key}{impact} = round( log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{occurrences} ) * 100 ) / 100;
+                                $log_messages{$category}{$log_key}{impact} = sprintf("%.2f", log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{occurrences} ));
                             }
                         }
                     } else {
@@ -1714,17 +1788,22 @@ sub read_and_process_logs {
                     ## HISTOGRAM RAW VALUE CAPTURE (Issue #25) ##
                     # Histogram collects values across entire population (not per time-bucket like heatmap)
                     if ($histogram_enabled) {
+                        my $is_highlighted = ($category_bucket =~ /-HL$/);
+
                         # Collect duration values if requested (or if no specific metrics requested)
                         if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration >= 0 && !$omit_durations) {
                             push @{$histogram_values{duration}}, $duration;
+                            push @{$histogram_values_hl{duration}}, $duration if $is_highlighted;
                         }
                         # Collect bytes values if requested
                         if ((!%histogram_metrics || $histogram_metrics{bytes}) && defined $bytes && $bytes > 0 && !$omit_bytes) {
                             push @{$histogram_values{bytes}}, $bytes;
+                            push @{$histogram_values_hl{bytes}}, $bytes if $is_highlighted;
                         }
                         # Collect count values if requested
                         if ((!%histogram_metrics || $histogram_metrics{count}) && defined $count && $count >= 0 && !$omit_count) {
                             push @{$histogram_values{count}}, $count;
+                            push @{$histogram_values_hl{count}}, $count if $is_highlighted;
                         }
                     }
                 }
@@ -1747,11 +1826,13 @@ sub read_and_process_logs {
 
         close $fh;
 
-        print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
+        print "\r" . " " x ($terminal_width - 1) . "\r" unless $disable_progress;		# clear the line of progress messages when moving on to the next file
     }
-    print "\r$colors{'bright-green'}Processing completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Processing completed." ) );
-    print "\n";
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Processing completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Processing completed." ) );
+        print "\n";
+    }
 
     return;
 }
@@ -1832,8 +1913,10 @@ sub calculate_heatmap_buckets {
         delete $heatmap_raw_hl{$bucket};
     }
 
-    print "\r$colors{'bright-green'}Calculating heatmap buckets completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Calculating heatmap buckets completed." ) );
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Calculating heatmap buckets completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Calculating heatmap buckets completed." ) );
+    }
 
     return;
 }
@@ -1950,10 +2033,49 @@ sub calculate_histogram_buckets {
 
         # Free memory - raw values no longer needed
         @{$histogram_values{$metric}} = ();
+
+        # Issue #42: Calculate highlight buckets and stats (using same boundaries)
+        my $hl_values_ref = $histogram_values_hl{$metric};
+        if (defined $highlight_regex && defined $hl_values_ref && @$hl_values_ref > 0) {
+            # Initialize highlight bucket counts
+            @{$histogram_buckets_hl{$metric}} = (0) x $bucket_count;
+
+            # Sort highlighted values for percentile calculation
+            my @sorted_hl = sort { $a <=> $b } @$hl_values_ref;
+            my $n_hl = scalar @sorted_hl;
+
+            # Calculate highlight percentiles
+            $histogram_stats_hl{$metric} = {
+                min    => $sorted_hl[0],
+                max    => $sorted_hl[-1],
+                count  => $n_hl,
+                p1     => $sorted_hl[int($n_hl * 0.01)],
+                p10    => $sorted_hl[int($n_hl * 0.10)],
+                p25    => $sorted_hl[int($n_hl * 0.25)],
+                p50    => $sorted_hl[int($n_hl * 0.50)],
+                p75    => $sorted_hl[int($n_hl * 0.75)],
+                p90    => $sorted_hl[int($n_hl * 0.90)],
+                p95    => $sorted_hl[int($n_hl * 0.95)],
+                p99    => $sorted_hl[int($n_hl * 0.99)],
+                p999   => $sorted_hl[int($n_hl * 0.999)] // $sorted_hl[-1],
+                p9999  => $sorted_hl[int($n_hl * 0.9999)] // $sorted_hl[-1],
+            };
+
+            # Assign highlighted values to buckets using same boundaries
+            for my $value (@sorted_hl) {
+                my $bucket_idx = find_histogram_bucket_index($value, $histogram_boundaries{$metric});
+                $histogram_buckets_hl{$metric}[$bucket_idx]++;
+            }
+        }
+
+        # Free highlight memory - raw values no longer needed
+        @{$histogram_values_hl{$metric}} = ();
     }
 
-    print "\r$colors{'bright-green'}Calculating histogram statistics completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Calculating histogram statistics completed." ) );
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Calculating histogram statistics completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Calculating histogram statistics completed." ) );
+    }
 
     # Verbose output for bucket calculation (Issue #25)
     if ($verbose && @metrics_with_data) {
@@ -1981,10 +2103,7 @@ sub calculate_histogram_buckets {
 # Calculate histogram layout dimensions - Issue #25
 # Returns a hash with layout information for rendering histograms side by side
 sub calculate_histogram_layout {
-    # Step 1: Get terminal width and calculate display width
-    my $display_width = int($terminal_width * $histogram_width_percent / 100);
-
-    # Step 2: Determine which metrics have data (in display order: duration, bytes, count)
+    # Step 1: Determine which metrics have data (in display order: duration, bytes, count)
     my @active_metrics = ();
     for my $metric (qw(duration bytes count)) {
         # Check if metric was requested (or all metrics if none specified)
@@ -2000,14 +2119,28 @@ sub calculate_histogram_layout {
 
     my $n = scalar @active_metrics;
 
-    # Step 3: Calculate spacing
+    # Step 2: Adapt width percentage based on number of histograms
+    # Fewer histograms = narrower display to avoid overly wide single charts
+    # If user explicitly set -hgw, respect that instead
+    my $effective_width_percent;
+    if ($histogram_width_explicit) {
+        $effective_width_percent = $histogram_width_percent;
+    } else {
+        my %width_by_count = (1 => 80, 2 => 90, 3 => 99);
+        $effective_width_percent = $width_by_count{$n} // $histogram_width_percent;
+    }
+
+    # Step 3: Get terminal width and calculate display width
+    my $display_width = int($terminal_width * $effective_width_percent / 100);
+
+    # Step 4: Calculate spacing
     my $total_gap = ($n - 1) * $histogram_gap;
 
-    # Step 4: Calculate available width for histograms
+    # Step 5: Calculate available width for histograms
     my $available_width = $display_width - $total_gap;
     my $single_histogram_width = int($available_width / $n);
 
-    # Step 5: Calculate internal layout for each histogram
+    # Step 6: Calculate internal layout for each histogram
     # Left Y-axis: count label (6 chars + space) + tick (1 char) = 8
     # Right Y-axis: tick (1 char) + percentage label (5 chars) = 6
     # Total overhead per histogram: 14 chars
@@ -2092,7 +2225,7 @@ sub calculate_histogram_layout {
 
 sub calculate_all_statistics {
 
-    print "\rCalculating statistics...";
+    print "\rCalculating statistics..." unless $disable_progress;
 
     foreach my $bucket (sort { $a <=> $b } keys %log_analysis) {
         my $aggregated_data = {
@@ -2111,14 +2244,6 @@ sub calculate_all_statistics {
             durations           => [],
         };
 
-# TO DO: shouldn't check memory on each pass; use approach like reading lines
-        if( $track_memory ) {
-            $current_memory_usage = get_memory_usage();								# track maximum memory usage
-            if ($current_memory_usage > $max_memory_usage) {
-                $max_memory_usage = $current_memory_usage;
-            }
-        }
-   
         next if !defined( $log_analysis{$bucket}{occurrences} );
 
 # TO DO: I think that I can get rid of aggregate_data now that I've simplified the data model
@@ -2151,7 +2276,7 @@ sub calculate_all_statistics {
                 count_occurrences => $log_analysis{$bucket}{count_occurrences},
                 count_min     => $log_analysis{$bucket}{count_min},
                 count_max     => $log_analysis{$bucket}{count_max},
-                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? round( $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences} ) : undef,
+                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? sprintf("%.0f", $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
                 count_sum     => $log_analysis{$bucket}{count_sum},
                 min           => $min,
                 mean          => $mean,
@@ -2168,26 +2293,28 @@ sub calculate_all_statistics {
                 z_score       => undef
             };
     
-            # Calculate rolling mean and std_dev
-            my $rolling_mean = 0;
-            my $rolling_sum_of_squares = 0;
-            my $rolling_count = 0;
-            foreach my $prev_bucket (@rolling_window) {
-                $rolling_mean += $prev_bucket->{mean};
-                $rolling_sum_of_squares += $prev_bucket->{sum_of_squares};
-                $rolling_count++;
-            }
-            if ($rolling_count > 0) {
-                $rolling_mean /= $rolling_count;
-                my $rolling_variance = ($rolling_sum_of_squares / $rolling_count) - ($rolling_mean ** 2);
-                my $rolling_std_dev = sqrt($rolling_variance);
-                my $z_score = calculate_z_score($mean, $rolling_mean, $rolling_std_dev);
-               $log_stats{$bucket}{z_score} = $z_score;
-            }
+            # Calculate rolling mean and std_dev (only if we have valid statistics)
+            if (defined $mean) {
+                my $rolling_mean = 0;
+                my $rolling_sum_of_squares = 0;
+                my $rolling_count = 0;
+                foreach my $prev_bucket (@rolling_window) {
+                    $rolling_mean += $prev_bucket->{mean};
+                    $rolling_sum_of_squares += $prev_bucket->{sum_of_squares};
+                    $rolling_count++;
+                }
+                if ($rolling_count > 0) {
+                    $rolling_mean /= $rolling_count;
+                    my $rolling_variance = ($rolling_sum_of_squares / $rolling_count) - ($rolling_mean ** 2);
+                    my $rolling_std_dev = sqrt($rolling_variance);
+                    my $z_score = calculate_z_score($mean, $rolling_mean, $rolling_std_dev);
+                   $log_stats{$bucket}{z_score} = $z_score;
+                }
 
-            # Update rolling window logic
-            push @rolling_window, { mean => $mean, sum_of_squares => $aggregated_data->{sum_of_squares} };
-            shift @rolling_window if @rolling_window > $rolling_window_size;
+                # Update rolling window logic
+                push @rolling_window, { mean => $mean, sum_of_squares => $aggregated_data->{sum_of_squares} };
+                shift @rolling_window if @rolling_window > $rolling_window_size;
+            }
 
         } else {
             # This will catch the situation where there are no durations, printing them has been disabled, or they were not captured.
@@ -2202,7 +2329,7 @@ sub calculate_all_statistics {
                 count_occurrences => $log_analysis{$bucket}{count_occurrences},
                 count_min     => $log_analysis{$bucket}{count_min},
                 count_max     => $log_analysis{$bucket}{count_max},
-                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? round( $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences} ) : undef,
+                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? sprintf("%.0f", $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
                 count_sum     => $log_analysis{$bucket}{count_sum}
             }
         }
@@ -2233,14 +2360,6 @@ sub calculate_all_statistics {
 
             foreach my $log_key (@top_keys) {
                 my $aggregated_data = {};
-
-                # TO DO: Shouldn't check memory usage on each pass, only every few
-                if( $track_memory ) {
-                    $current_memory_usage = get_memory_usage();								# track maximum memory usage
-                    if ($current_memory_usage > $max_memory_usage) {
-                        $max_memory_usage = $current_memory_usage;
-                    }
-                } 
 
                 next if !defined( $log_messages{$category}{$log_key}{occurrences} );
 
@@ -2276,7 +2395,7 @@ sub calculate_all_statistics {
 
                 $log_messages{$category}{$log_key}{count_occurrences} = $log_messages{$category}{$log_key}{count_occurrences} if defined $log_messages{$category}{$log_key}{count_occurrences};
                 $log_messages{$category}{$log_key}{count_min} = $log_messages{$category}{$log_key}{count_min} if defined $log_messages{$category}{$log_key}{count_min};
-                $log_messages{$category}{$log_key}{count_mean} = ( defined $log_messages{$category}{$log_key}{count_sum} && defined $log_messages{$category}{$log_key}{count_occurrences} && $log_messages{$category}{$log_key}{count_occurrences} > 0 ) ? round( $log_messages{$category}{$log_key}{count_sum} / $log_messages{$category}{$log_key}{count_occurrences} ) : undef if defined $log_messages{$category}{$log_key}{count_occurrences};
+                $log_messages{$category}{$log_key}{count_mean} = ( defined $log_messages{$category}{$log_key}{count_sum} && defined $log_messages{$category}{$log_key}{count_occurrences} && $log_messages{$category}{$log_key}{count_occurrences} > 0 ) ? sprintf("%.0f", $log_messages{$category}{$log_key}{count_sum} / $log_messages{$category}{$log_key}{count_occurrences}) : undef if defined $log_messages{$category}{$log_key}{count_occurrences};
                 $log_messages{$category}{$log_key}{count_max} = $log_messages{$category}{$log_key}{count_max} if defined $log_messages{$category}{$log_key}{count_max};
                 $log_messages{$category}{$log_key}{count_sum} = $log_messages{$category}{$log_key}{count_sum} if defined $log_messages{$category}{$log_key}{count_sum};
                 
@@ -2331,8 +2450,10 @@ sub calculate_all_statistics {
     }
 
     print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
-    print "\r$colors{'bright-green'}Calculating statistics completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Calculating statistics completed." ) );
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Calculating statistics completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Calculating statistics completed." ) );
+    }
     print "\n";
 
     return;
@@ -2369,7 +2490,7 @@ sub calculate_statistics {
     my $mean = int($bucket_data->{total_duration} / $duration_count);
     my $max = max(@sorted);
     my $variance = ($bucket_data->{sum_of_squares} / $duration_count) - ($mean ** 2);
-    my $std_dev = round( sqrt($variance) * 1000 ) / 1000;
+    my $std_dev = sprintf("%.3f", sqrt($variance));
     my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean ) : undef;
 
     # Percentile calculations must use duration_count, not occurrences
@@ -2389,18 +2510,29 @@ sub initialize_empty_time_windows {
 
     # Go through all of the buckets between the earliest and latest times and ensure that they have empty data to print time buckets with no data
     unless( $omit_empty ) {
-        my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;
+        print "\rInitializing empty time windows..." unless $disable_progress;
 
-        print "\rInitializing empty time windows...";
-
-        for (my $bucket = $start_bucket; $bucket <= $output_timestamp_max; $bucket += $bucket_size_seconds) {
-            $log_occurrences{$bucket}{'empty'}{'occurrences'} = 0;
+        if ($print_milliseconds) {
+            # Use integer milliseconds for bucket keys to avoid floating-point precision issues
+            my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);
+            my $start_bucket = int(int($output_timestamp_min * 1000 + 0.5) / $bucket_size_ms) * $bucket_size_ms;
+            my $end_bucket = int($output_timestamp_max * 1000 + 0.5);
+            for (my $bucket = $start_bucket; $bucket <= $end_bucket; $bucket += $bucket_size_ms) {
+                $log_occurrences{$bucket}{'empty'}{'occurrences'} = 0;
+            }
+        } else {
+            my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;
+            for (my $bucket = $start_bucket; $bucket <= $output_timestamp_max; $bucket += $bucket_size_seconds) {
+                $log_occurrences{$bucket}{'empty'}{'occurrences'} = 0;
+            }
         }
 
-        print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
-        print "\r$colors{'bright-green'}Initializing empty time windows completed.$colors{'NC'}";
-        print " " x ( $terminal_width - length( "Initializing empty time windows completed." ) );
-        print "\n";
+        unless ($disable_progress) {
+            print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
+            print "\r$colors{'bright-green'}Initializing empty time windows completed.$colors{'NC'}";
+            print " " x ( $terminal_width - length( "Initializing empty time windows completed." ) );
+            print "\n";
+        }
     }
 
     return;
@@ -2445,7 +2577,7 @@ sub normalize_data_for_output {
 
 # TO DO : user defined value will need to have a max total determined for scaling and printing
 
-    print "\rScaling and normalizing data...";
+    print "\rScaling and normalizing data..." unless $disable_progress;
 
     push @output_columns, "timestamp";
 
@@ -2697,9 +2829,6 @@ sub normalize_data_for_output {
     @printed_column_widths = @rounded_column_widths;
 
     foreach my $bucket (keys %log_occurrences) {
-        my $processed_time_buckets //= 0;
-	    my $check_memory_every = $^O ne 'MSWin32' ? 50 : 500;
-		
         # scale the transferred bytes for printing the statistics table
         my $bytes = $log_stats{$bucket}{bytes};
         my $scaled_bytes = ( defined $bytes && defined $max_total{bytes} && $max_total{bytes} != 0 ) ? int(($bytes / $max_total{bytes}) * $durations_graph_width) : 0;
@@ -2731,7 +2860,7 @@ sub normalize_data_for_output {
             next if $category_bucket =~ /^(err|msg)-rate|empty$/;
             my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
             next if !defined $occurrences;										                # skip scaling where varible was left or is undefined (ie; no error or message rate)
-            my $scaled_occurrences = $max_total{occurrences} != 0 ? round(($occurrences / $max_total{occurrences}) * $printed_column_widths[$column_count_pre_graph] ) : 0;	# Adapting count scaling to multi-graph functionality
+            my $scaled_occurrences = $max_total{occurrences} != 0 ? int(($occurrences / $max_total{occurrences}) * $printed_column_widths[$column_count_pre_graph] + 0.5) : 0;	# Adapting count scaling to multi-graph functionality
             if( $scaled_occurrences > $scaled_max_value ) {                                     # track the maximum scaled count for this time bucket to correct for rounding errors
                 $scaled_max_value = $scaled_occurrences;
                 $scaled_max_key = $category_bucket;
@@ -2747,25 +2876,13 @@ sub normalize_data_for_output {
             $log_occurrences{$bucket}{$scaled_max_key}{scaled_occurrences}--;
         }
 
-        # TO DO: Establish more graceful strategy for memory tracking on Windows (with acceptable performance)
-        if( $track_memory && $processed_time_buckets++ % $check_memory_every == 0 && $^O ne 'MSWin32' ) {
-            $current_memory_usage = get_memory_usage();
-            if ($current_memory_usage > $max_memory_usage) {
-                $max_memory_usage = $current_memory_usage;
-            }
-        }
     }
 
-    if( $track_memory ) {
-        $current_memory_usage = get_memory_usage();								# track maximum memory usage
-        if ($current_memory_usage > $max_memory_usage) {
-            $max_memory_usage = $current_memory_usage;
-        }
-    }	
-
     print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
-    print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
-    print " " x ( $terminal_width - length( "Scaling and normalizing data completed." ) );
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Scaling and normalizing data completed." ) );
+    }
 
     return;
 }
@@ -3083,7 +3200,7 @@ sub print_bar_graph {
             my $name   = $printed_column_names[$column];
             my $width  = $printed_column_widths[$column];    
             my $padding = $width - length($name);
-            my $left_pad  = round( $padding / 2 );
+            my $left_pad  = int( $padding / 2 + 0.5 );
             my $right_pad = $padding - $left_pad;
  
             if ( $printed_column_spacing[$column] > 0 ) {
@@ -3113,13 +3230,19 @@ sub print_bar_graph {
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
         $lines_printed++;
 
-        foreach my $bucket (sort keys %log_occurrences) {
-            my $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
+        foreach my $bucket (sort { $a <=> $b } keys %log_occurrences) {
+            my $bucket_time_str;
+            if ($print_milliseconds) {
+                # Bucket is integer milliseconds - convert to seconds for gmtime, extract ms part
+                $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket / 1000));
+                $bucket_time_str .= sprintf ".%03d", $bucket % 1000;
+            } else {
+                $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
+            }
             my $printed_chars = 0;
             my $total_occurrences = 0;
 
             ## PRINT TIMESTAMP IN CHART ROW
-            $bucket_time_str .= sprintf ".%03d", ($bucket-int($bucket))*1000 if $print_milliseconds;
             my $timestamp_legend_length = $timestamp_length;                                # already includes the padding in the value $graph_column_padding_all;
             print " " x $graph_column_padding_timestamp . $bucket_time_str . " " x $graph_column_padding_all;
             $printed_chars += $printed_column_widths[0] + $printed_column_spacing[0];       # timestamp column width and spacing
@@ -3418,6 +3541,14 @@ sub print_histograms {
         # Calculate display scaling
         my @display_buckets = calculate_histogram_display_buckets(\@buckets, $bar_width);
 
+        # Issue #42: Calculate highlight display buckets if highlight data exists
+        my @display_buckets_hl = ();
+        my $stats_hl = undef;
+        if (defined $highlight_regex && @{$histogram_buckets_hl{$metric}}) {
+            @display_buckets_hl = calculate_histogram_display_buckets($histogram_buckets_hl{$metric}, $bar_width);
+            $stats_hl = $histogram_stats_hl{$metric};
+        }
+
         # Find max for scaling
         my $max_bucket = 0;
         for my $b (@display_buckets) {
@@ -3432,12 +3563,14 @@ sub print_histograms {
         my $x_labels = calculate_histogram_x_labels($boundaries, $bar_width, $metric);
 
         $metric_data{$metric} = {
-            display_buckets => \@display_buckets,
-            max_bucket      => $max_bucket,
-            y_ticks         => $y_ticks,
-            x_labels        => $x_labels,
-            boundaries      => $boundaries,
-            stats           => $stats,
+            display_buckets    => \@display_buckets,
+            display_buckets_hl => \@display_buckets_hl,
+            max_bucket         => $max_bucket,
+            y_ticks            => $y_ticks,
+            x_labels           => $x_labels,
+            boundaries         => $boundaries,
+            stats              => $stats,
+            stats_hl           => $stats_hl,
         };
     }
 
@@ -3480,8 +3613,8 @@ sub print_histograms {
             my $data = $metric_data{$metric};
             my $row_str = render_histogram_row(
                 $metric, $row, $height, $bar_width,
-                $data->{display_buckets}, $data->{max_bucket},
-                $data->{y_ticks}, \%box
+                $data->{display_buckets}, $data->{display_buckets_hl},
+                $data->{max_bucket}, $data->{y_ticks}, \%box
             );
             $row_line .= $row_str;
             $row_line .= " " x $gap if $i < $#metrics;
@@ -3512,14 +3645,24 @@ sub print_histograms {
     }
     push @all_lines, $xlabel_line;
 
-    # Legend (percentiles)
+    # Legend (percentiles) - may have 1 or 2 lines depending on highlight data
     my $legend_line = " " x $centering_offset;
+    my $legend_line_hl = " " x $centering_offset;
+    my $has_any_highlight = 0;
+
     for my $i (0 .. $#metrics) {
         my $metric = $metrics[$i];
         my $data = $metric_data{$metric};
-        my $legend_str = render_histogram_legend($metric, $data->{stats}, $bar_width, $single_width);
+        my ($legend_str, $legend_str_hl) = render_histogram_legend($metric, $data->{stats}, $data->{stats_hl}, $bar_width, $single_width);
         $legend_line .= $legend_str;
         $legend_line .= " " x $gap if $i < $#metrics;
+        if (defined $legend_str_hl) {
+            $legend_line_hl .= $legend_str_hl;
+            $has_any_highlight = 1;
+        } else {
+            $legend_line_hl .= " " x $single_width;
+        }
+        $legend_line_hl .= " " x $gap if $i < $#metrics;
     }
 
     # Add spacing before legend
@@ -3527,6 +3670,7 @@ sub print_histograms {
         push @all_lines, "";
     }
     push @all_lines, $legend_line;
+    push @all_lines, $legend_line_hl if $has_any_highlight;
 
     # Print all lines
     for my $line (@all_lines) {
@@ -3685,9 +3829,9 @@ sub calculate_histogram_x_labels {
     return \@filtered;
 }
 
-# Render a single histogram row
+# Render a single histogram row (Issue #42: supports stacked highlight bars)
 sub render_histogram_row {
-    my ($metric, $row, $height, $bar_width, $display_buckets, $max_bucket, $y_ticks, $box) = @_;
+    my ($metric, $row, $height, $bar_width, $display_buckets, $display_buckets_hl, $max_bucket, $y_ticks, $box) = @_;
 
     my $row_threshold = ($row + 1) / $height;
     my $row_bottom = $row / $height;
@@ -3711,42 +3855,102 @@ sub render_histogram_row {
 
     my $result = $y_label . $left_tick;
 
-    # Get color for this metric
+    # Get colors for this metric
     my $base_color = $histogram_base_colors{$metric};
+    my $highlight_color = $histogram_highlight_colors{$metric};
     my $gradient = $histogram_color_gradients{$metric};
+    my $has_highlight = defined $display_buckets_hl && @$display_buckets_hl;
 
     # Render bar characters
     for my $col (0 .. $bar_width - 1) {
         last if $col >= scalar(@$display_buckets);
 
-        my $bucket_fill = $display_buckets->[$col] / $max_bucket;
-        my $char;
+        my $total_count = $display_buckets->[$col];
+        my $hl_count = ($has_highlight && $col < scalar(@$display_buckets_hl)) ? $display_buckets_hl->[$col] : 0;
 
-        if ($bucket_fill >= $row_threshold) {
-            $char = $histogram_block_chars[8];  # Full block
-        } elsif ($bucket_fill > $row_bottom) {
-            my $partial = ($bucket_fill - $row_bottom) / (1 / $height);
-            my $index = int($partial * 8 + 0.5);
-            $index = 8 if $index > 8;
-            $index = 0 if $index < 0;
-            $char = $histogram_block_chars[$index];
-        } else {
-            # Empty - check for gridline
+        my $total_fill = $total_count / $max_bucket;
+        my $hl_fill = $hl_count / $max_bucket;
+
+        # Determine what portion of this row is filled and with what color
+        # Highlighted portion fills from bottom (row 0), non-highlighted on top
+        my $char;
+        my $color;
+
+        if ($total_fill <= $row_bottom) {
+            # Row is entirely empty - check for gridline
             if ($histogram_gridlines_enabled && $has_tick) {
                 $result .= "\e[38;5;${histogram_gridline_color}m─\e[0m";
                 next;
             }
             $char = ' ';
+            $result .= $char;
+            next;
         }
 
-        # Apply color
-        my $color;
-        if ($histogram_color_gradient_enabled) {
-            my $intensity = int(($display_buckets->[$col] / $max_bucket) * 7);
+        # Determine which color region this row falls into
+        # - Rows below hl_fill: highlighted color
+        # - Rows above hl_fill but below total_fill: base color
+        # - Rows spanning boundaries: partial blocks with appropriate colors
+
+        if ($hl_fill >= $row_threshold) {
+            # Row is entirely within highlighted region
+            $color = $has_highlight ? $highlight_color : $base_color;
+            $char = $histogram_block_chars[8];  # Full block
+        } elsif ($hl_fill > $row_bottom && $hl_fill < $row_threshold) {
+            # Row spans the highlight/non-highlight boundary
+            # We need to render a partial block for highlight, then partial for non-highlight
+            # Since we can only output one character, we use the lower half block technique
+
+            # Calculate highlight partial fill within this row
+            my $hl_partial = ($hl_fill - $row_bottom) / (1 / $height);
+            my $hl_index = int($hl_partial * 8 + 0.5);
+            $hl_index = 8 if $hl_index > 8;
+            $hl_index = 0 if $hl_index < 0;
+
+            if ($total_fill >= $row_threshold) {
+                # Total fills the row completely, highlight fills partially
+                # Use lower half block for highlight, upper half shows non-highlight
+                if ($hl_index >= 4 && $has_highlight) {
+                    # More than half is highlight - use lower half block with highlight fg, base bg
+                    $result .= "\e[38;5;${highlight_color};48;5;${base_color}m▄\e[0m";
+                } elsif ($hl_index > 0 && $has_highlight) {
+                    # Less than half is highlight - use upper half block with base fg, highlight bg
+                    $result .= "\e[38;5;${base_color};48;5;${highlight_color}m▀\e[0m";
+                } else {
+                    # No highlight in this row, full base color
+                    $result .= "\e[38;5;${base_color};48;5;${base_color}m█\e[0m";
+                }
+                next;
+            } else {
+                # Total doesn't fill the row completely
+                # Render highlight partial block
+                $char = $histogram_block_chars[$hl_index];
+                $color = $has_highlight ? $highlight_color : $base_color;
+            }
+        } elsif ($total_fill >= $row_threshold) {
+            # Row is entirely above highlight region but within total
+            $color = $base_color;
+            $char = $histogram_block_chars[8];  # Full block
+        } elsif ($total_fill > $row_bottom) {
+            # Row is partially filled with non-highlighted (above highlight region)
+            my $partial = ($total_fill - $row_bottom) / (1 / $height);
+            my $index = int($partial * 8 + 0.5);
+            $index = 8 if $index > 8;
+            $index = 0 if $index < 0;
+            $char = $histogram_block_chars[$index];
+            $color = $base_color;
+        } else {
+            # Should not reach here (handled above)
+            $char = ' ';
+            $result .= $char;
+            next;
+        }
+
+        # Apply gradient if enabled (only for non-highlight)
+        if ($histogram_color_gradient_enabled && $color == $base_color) {
+            my $intensity = int($total_fill * 7);
             $intensity = 7 if $intensity > 7;
             $color = $gradient->[$intensity];
-        } else {
-            $color = $base_color;
         }
 
         if ($char eq $histogram_block_chars[8]) {
@@ -3819,9 +4023,10 @@ sub render_histogram_x_labels {
     return join('', @label_line);
 }
 
-# Render legend with percentiles
+# Render legend with percentiles (Issue #42: supports highlight stats)
+# Returns ($legend_line, $legend_line_hl) where $legend_line_hl is undef if no highlight data
 sub render_histogram_legend {
-    my ($metric, $stats, $bar_width, $single_width) = @_;
+    my ($metric, $stats, $stats_hl, $bar_width, $single_width) = @_;
 
     # Priority order for percentile selection (SRE best practices)
     my @percentile_priority = (
@@ -3840,7 +4045,7 @@ sub render_histogram_legend {
     my $separator = "   ";
     my $available_width = $bar_width;
 
-    # Build all entry strings
+    # Build all entry strings for main stats
     my @all_entries;
     for my $pct (@percentile_priority) {
         my $value_str = format_heatmap_value($stats->{$pct->{key}}, $metric);
@@ -3866,7 +4071,7 @@ sub render_histogram_legend {
         }
     }
 
-    return " " x $single_width unless $max_entries > 0;
+    return (" " x $single_width, undef) unless $max_entries > 0;
 
     # Take first N items by priority, sort for display
     my @selected = @all_entries[0 .. $max_entries - 1];
@@ -3874,16 +4079,55 @@ sub render_histogram_legend {
 
     my $legend_line = join($separator, map { $_->{str} } @selected);
 
-    # Center within single_width
+    # Center within single_width, apply base metric color
     my $left_margin = 8;
     my $legend_padding = $left_margin + int(($bar_width - length($legend_line)) / 2);
     $legend_padding = 0 if $legend_padding < 0;
 
-    my $result = " " x $legend_padding . $legend_line;
-    # Pad to single_width
-    $result .= " " x ($single_width - length($result)) if length($result) < $single_width;
+    my $base_color = $histogram_base_colors{$metric};
+    my $result = " " x $legend_padding . "\e[38;5;${base_color}m" . $legend_line . "\e[0m";
+    # Pad to single_width (account for ANSI codes not taking visual width)
+    my $visual_len = $legend_padding + length($legend_line);
+    $result .= " " x ($single_width - $visual_len) if $visual_len < $single_width;
 
-    return $result;
+    # Issue #42: Build highlight legend line if highlight stats exist
+    my $result_hl = undef;
+    if (defined $stats_hl && defined $stats_hl->{count} && $stats_hl->{count} > 0) {
+        my $highlight_color = $histogram_highlight_colors{$metric};
+
+        # Build highlight entry strings using same percentiles
+        my @all_entries_hl;
+        for my $pct (@percentile_priority) {
+            my $value_str = format_heatmap_value($stats_hl->{$pct->{key}}, $metric);
+            my $entry_str = $pct->{label} . ": " . $value_str;
+            push @all_entries_hl, {
+                sort_order => $pct->{sort_order},
+                str        => $entry_str,
+                len        => length($entry_str),
+            };
+        }
+
+        # Use same number of entries as main legend for alignment
+        my @selected_hl = @all_entries_hl[0 .. $max_entries - 1];
+        @selected_hl = sort { $a->{sort_order} <=> $b->{sort_order} } @selected_hl;
+
+        my $legend_line_hl = join($separator, map { $_->{str} } @selected_hl);
+
+        # Center with highlight background color and black/white foreground (like bar charts)
+        my $hl_padding = $left_margin + int(($bar_width - length($legend_line_hl)) / 2);
+        $hl_padding = 0 if $hl_padding < 0;
+
+        # Use black foreground on dark terminals, white on light terminals
+        # Add space padding before and after text for highlighter effect
+        my $fg_color = $heatmap_light_bg ? 15 : 0;  # 15 = white, 0 = black
+        my $hl_text_with_padding = " " . $legend_line_hl . " ";  # space before and after for highlighter effect
+        $result_hl = " " x ($hl_padding - 1) . "\e[48;5;${highlight_color}m\e[38;5;${fg_color}m" . $hl_text_with_padding . "\e[0m";
+        # Pad to single_width (account for reduced left padding and added highlighter padding)
+        my $visual_len = ($hl_padding - 1) + length($hl_text_with_padding);
+        $result_hl .= " " x ($single_width - $visual_len) if $visual_len < $single_width;
+    }
+
+    return ($result, $result_hl);
 }
 
 sub print_summary_table {
@@ -3960,8 +4204,37 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "HEATMAP STATISTICS", format_time( $elapsed_heatmap_statistics, 's', 'medium', " " ) ) if $heatmap_enabled;
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "HISTOGRAM STATISTICS", format_time( $elapsed_histogram_statistics, 's', 'medium', " " ) ) if $histogram_enabled;
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) ); 
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MEMORY USED", format_bytes( $max_memory_usage, 'kB' ) ) if $track_memory;
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $max_memory_usage, 'B' ) );
+
+    # Add structural breakdown if -mem flag used and we have high-water mark data
+    if ($show_memory && %memory_high_water_marks) {
+            # Skip structures with only empty hash/array overhead (< 1KB means effectively empty)
+            my $min_size_threshold = 1024;
+
+            # Calculate total of measured structures (only those above threshold)
+            my $total_measured = 0;
+            for my $size (values %memory_high_water_marks) {
+                $total_measured += $size if $size >= $min_size_threshold;
+            }
+
+            # Sort by size descending, skip empty structures
+            my @sorted = sort { $memory_high_water_marks{$b} <=> $memory_high_water_marks{$a} }
+                         grep { $memory_high_water_marks{$_} >= $min_size_threshold }
+                         keys %memory_high_water_marks;
+
+            for my $struct (@sorted) {
+                my $size = $memory_high_water_marks{$struct};
+                my $pct = $total_measured > 0 ? ($size / $total_measured) * 100 : 0;
+
+                # Format percentage: <1% for small values, otherwise rounded
+                my $pct_str = $pct < 1 ? "(<1%)" : sprintf("(%2.0f%%)", $pct);
+
+                # Right-align percentage within a fixed width, then append to indented label
+                my $indented_label = sprintf("  %-20s %5s", $struct, $pct_str);
+                push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", $indented_label, format_bytes( $size, 'B' ) );
+            }
+    }
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
 
     push @file_details, "\n";
@@ -4185,7 +4458,7 @@ sub print_message_summary {
                     my $total_bytes_num = $log_messages{$grouping}{$key}{total_bytes};
                     my $total_bytes = format_bytes( $total_bytes_num,'B' );
                     # BUG/ WRONG!!! below assumes all lines have bytes, but not really
-                    my $mean_bytes = round( $total_bytes_num / $occurrences ) if defined $total_bytes_num; 
+                    my $mean_bytes = int( $total_bytes_num / $occurrences + 0.5 ) if defined $total_bytes_num; 
                     my $min = $log_messages{$grouping}{$key}{min};
                     my $mean = $log_messages{$grouping}{$key}{mean};
                     my $max = $log_messages{$grouping}{$key}{max};
@@ -4366,12 +4639,14 @@ $start_time = [gettimeofday];
 read_and_process_logs();
 $end_time = [gettimeofday];
 $elapsed_read_files = tv_interval($start_time, $end_time);
+measure_memory_structures();
 
 # INITIALIZE EMPTY TIME BUCKETS #
 $start_time = [gettimeofday];
 initialize_empty_time_windows();
 $end_time = [gettimeofday];
 $elapsed_initialize_empty_time_windows = tv_interval($start_time, $end_time);
+measure_memory_structures();
 
 # GROUP SIMILAR MESSAGES TOGETHER #
 unless( $group_similar_sensitivity eq "none" ) {
@@ -4383,10 +4658,11 @@ unless( $group_similar_sensitivity eq "none" ) {
 
 # CALCULATE STATISTICS #
 $start_time = [gettimeofday];
-print "Calculate statistics...";
+print "Calculate statistics..." unless $disable_progress;
 calculate_all_statistics();
 $end_time = [gettimeofday];
 $elapsed_calculate_statistics = tv_interval($start_time, $end_time);
+measure_memory_structures();
 
 # CALCULATE HEATMAP BUCKETS (if enabled) #
 if ($heatmap_enabled) {
@@ -4394,6 +4670,7 @@ if ($heatmap_enabled) {
     calculate_heatmap_buckets();
     $end_time = [gettimeofday];
     $elapsed_heatmap_statistics = tv_interval($start_time, $end_time);
+    measure_memory_structures();
 }
 
 # CALCULATE HISTOGRAM BUCKETS (if enabled) - Issue #25 #
@@ -4402,6 +4679,7 @@ if ($histogram_enabled) {
     calculate_histogram_buckets();
     $end_time = [gettimeofday];
     $elapsed_histogram_statistics = tv_interval($start_time, $end_time);
+    measure_memory_structures();
 }
 
 # NORMALIZE DATA FOR CONSOLE OUTPUT #

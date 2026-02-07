@@ -112,19 +112,7 @@ docker run --rm --platform=linux/$architecture \
     wine "$STRAWBERRY/perl/bin/perl.exe" /tmp/cpanm.pl --notest --cpanfile cpanfile.windows --installdeps . 2>&1 | tail -10
 
     echo "[7/7] Building Windows executable..."
-    # Use -M to explicitly include modules that are loaded dynamically at runtime
-    # (PAR::Packer static analysis cannot detect modules loaded via Module::Runtime)
-    wine "$STRAWBERRY/perl/bin/perl.exe" -S pp \
-      -M Specio::PP \
-      -M DateTime::Locale::FromData \
-      -M DateTime::Locale::Base \
-      -M DateTime::Locale::Data \
-      -M DateTime::Locale::Util \
-      -M DateTime::TimeZone::Local \
-      -M DateTime::TimeZone::Local::Win32 \
-      -M DateTime::TimeZone::UTC \
-      -M DateTime::TimeZone::Floating \
-      -o ../${PACKAGE_NAME}.exe ../${SCRIPT_NAME}
+    wine "$STRAWBERRY/perl/bin/perl.exe" -S pp -o ../${PACKAGE_NAME}.exe ../${SCRIPT_NAME}
 
     # Verify the build
     echo ""
