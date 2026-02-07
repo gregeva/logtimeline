@@ -141,6 +141,17 @@ These logs contain `durationMS=`, `result bytes=`, and `result count=` fields en
 | `ScriptLog.GetComplexPlotByIndex.log` | duration, bytes, count | 739KB | Specific service analysis |
 | `ScriptLog.log` | duration, bytes, count | 54MB | ScriptLog with full metrics |
 
+
+---
+
+## / - Other Test Logs (system_cpu_total, bytes_sent, bytes_received)
+
+| File | Application | Metrics | Size | Use Case |
+|------|-------------|---------|------|----------|
+| `rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log` | ThingWorx Edge C SDK | TSV formatted metrics Recv-Q=0 Send-Q=0 bytes_sent=6185 bytes_retrans=347 bytes_acked=5839 bytes_received=8373 | Use include filer for text "CONN_MON statistics" to target the relevant lines | 2.1 MB | For UDM/user defined metrics testing in pattern mode |
+| `connection-server-custom-metrics.csv` | Custom Monitoring Script | Various CSV formatted system metrics: system_cpu_total, tcp_inuse, tcp_established, tcp_timewait, ctx_switches, ctx_nonvoluntary, tcp_delayed_acks | 29 KB | For UDM/user defined metrics testing in CSV mode |
+
+
 **Format**: ThingWorx ScriptLog with embedded metrics
 ```
 2025-04-10 04:46:35.844+0000 [L: WARN] ... durationMS=167 events to be processed count=0
