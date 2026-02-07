@@ -238,6 +238,6 @@ When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from t
 ## Future Enhancements (Out of Scope)
 
 - CSV column naming convention for UDM stats — align with count field naming pattern (`bytes_sent_min`, `bytes_sent_max`, `bytes_sent_avg`, `bytes_sent_sum`) so CSV output reflects the selected aggregation consistently. More complex than a simple rename due to interactions between bar graph display columns, CSV stat columns, and the aggregation selection.
-- Heatmap support for UDM metrics (`-hm udm_metricname`)
+- ~~Heatmap support for UDM metrics~~ — Done: `-hm <udm_name>` uses color gradient matching the metric's bar graph column
 - Histogram support for UDM metrics
 - Percentile statistics (requires storing individual values per bucket)

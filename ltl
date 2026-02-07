@@ -155,7 +155,8 @@ my %timestamp_cache;
 
 # Heatmap data structures
 my $heatmap_enabled = 0;                    # Flag: heatmap mode active
-my $heatmap_metric;                         # Metric: duration|bytes|count (undef until set by CLI)
+my $heatmap_metric;                         # Metric: duration|bytes|count|<udm_name> (undef until set by CLI)
+my $heatmap_udm_config;                     # Reference to @udm_configs entry for heatmap UDM metric
 my $heatmap_width = 52;                     # Number of histogram buckets (default matches latency stats width)
 my $heatmap_light_bg = 0;                   # Flag: use light background color gradients (set by -lbg or auto-detect)
 my $heatmap_light_bg_auto = 1;              # Flag: auto-detect terminal background (disabled if -lbg explicitly set)
@@ -1262,12 +1263,18 @@ sub adapt_to_command_line_options {
         $heatmap_enabled = 1;
         # Handle case where -hm is followed by a filename (GetOptions captures it as optional value)
         if ($heatmap_metric eq '' || !grep { $_ eq $heatmap_metric } qw(duration time bytes count)) {
-            # If the value doesn't match a valid metric, it's likely a filename
-            # Push it back to @ARGV and use default metric
+            # If the value doesn't match a known built-in metric, it could be a UDM name or a filename
             if ($heatmap_metric ne '' && $heatmap_metric !~ /^(duration|time|bytes|count)$/) {
-                unshift @ARGV, $heatmap_metric;
+                if (@udm_raw_args) {
+                    # UDM args exist — keep the value, validate after parse_udm_configs()
+                } else {
+                    # No UDM args — it's likely a filename, push it back
+                    unshift @ARGV, $heatmap_metric;
+                    $heatmap_metric = 'duration';  # Default metric
+                }
+            } else {
+                $heatmap_metric = 'duration';  # Default metric (empty string case)
             }
-            $heatmap_metric = 'duration';  # Default metric
         } elsif( $heatmap_metric =~ /^time$/i ) {
             $heatmap_metric = 'duration';  # time is allowed for consistency, but what is really meant is duration
         }
@@ -1375,6 +1382,18 @@ sub adapt_to_command_line_options {
     }
 
     parse_udm_configs() if @udm_raw_args;
+
+    # Validate UDM heatmap metric name (must run after parse_udm_configs)
+    if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
+        my ($match) = grep { $_->{name} eq $heatmap_metric } @udm_configs;
+        if ($match) {
+            $heatmap_udm_config = $match;
+            $heatmap_metric_map{$heatmap_metric} = { column => undef, color => 'blue' };
+        } else {
+            my @available = (qw(duration bytes count), map { $_->{name} } @udm_configs);
+            die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', @available) . "\n";
+        }
+    }
 
     $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
     #$bucket_size_seconds = $print_seconds ? $time_bucket_size : $time_bucket_size * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
@@ -2054,6 +2073,8 @@ sub read_and_process_logs {
                             $heatmap_value = $bytes;
                         } elsif ($heatmap_metric eq 'count' && defined $count && $count >= 0) {
                             $heatmap_value = $count;
+                        } elsif (defined $heatmap_udm_config && defined $udm_values{$heatmap_udm_config->{name}}) {
+                            $heatmap_value = $udm_values{$heatmap_udm_config->{name}};
                         }
 
                         if (defined $heatmap_value && $heatmap_value > 0) {
@@ -3216,6 +3237,23 @@ sub normalize_data_for_output {
 
     }
 
+    # Resolve UDM heatmap color from its bar graph column position
+    if (defined $heatmap_udm_config) {
+        my @column_colors = qw( yellow green cyan blue magenta );
+        my @column_highlight_bg = ( 184, 34, 30, 20, 127 );
+        my $col = 0;
+        for my $key (@populated_graph_columns) {
+            next if $key eq 'occurrences';
+            if ($key eq "udm_$heatmap_udm_config->{name}") {
+                my $idx = $col < scalar(@column_colors) ? $col : $#column_colors;
+                $heatmap_metric_map{$heatmap_metric}{color} = $column_colors[$idx];
+                $heatmap_metric_map{$heatmap_metric}{highlight_bg} = $column_highlight_bg[$idx];
+                last;
+            }
+            $col++;
+        }
+    }
+
     print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
@@ -3234,7 +3272,11 @@ sub get_heatmap_highlight_bg_color {
         'bytes'    => 34,   # Green - matches bar graph column 3 plain_bg
         'count'    => 30,   # Cyan - matches bar graph column 4 plain_bg
     );
-    return $highlight_colors{$metric} // 184;
+    if (exists $highlight_colors{$metric}) {
+        return $highlight_colors{$metric};
+    }
+    # UDM metrics: use highlight_bg resolved from bar graph column position
+    return $heatmap_metric_map{$metric}{highlight_bg} // 184;
 }
 
 sub format_heatmap_value {
@@ -3245,6 +3287,11 @@ sub format_heatmap_value {
         return format_bytes($value, 'B');
     } elsif ($metric eq 'count') {
         return format_number($value);
+    } elsif (defined $heatmap_udm_config && $metric eq $heatmap_udm_config->{name}) {
+        my $ut = $heatmap_udm_config->{unit_type};
+        return $ut eq 'time'  ? format_time($value, 'ms') :
+               $ut eq 'bytes' ? format_bytes($value, 'B') :
+                                format_number($value);
     } else {
         return $value;
     }
