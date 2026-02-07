@@ -51,3 +51,19 @@ A scenario that presented recently which the tool doesn't really have a way to s
 To accomplish this, you need to leverage time instead of file, where you'd pick a different days file from each node, so that they'd come one after the other in the output.  The overall minimums and maximums would give you the comparative range, and using the heatmap would show visually their load and performance compared to each other.  Using --omit-empty would ensure empty time windows are not printed to get things close together on the screen, and this would also allow chosing days far from each other.
 
 The idea of chosing days from from each other also introduces a technique to compare load and performance from one period to another on a specific system.  Simply providing multiple files from the early time, and the later time, enabling omit-empty, activating heatmap should then do this for you.  If you want statistics calculated for external analysis or simply saving the results you'll have to turn off heatmap.
+
+# Long-term Analysis of Garbage Collection
+
+In somewhat of an accident, I just tried an analysis on a whole folder of GC logs leveraging the histogram and heatmap.  What entailed was quite interesting, causing me to re-run it with a more suitable time window size of one day.  It turns out that I had GC logs for 2+ months from a clustered application across nodes and restarts (where new GC files are created after JVM restart).
+
+What I observed was:
+
+- two histograms showing the distribution of GC event timing, as well as sizes of the reclaimed space
+- a heatmap showing the distribution of the number of GC events, their timing, as well as their evolution over time (increasing as the days passed)
+- a list at the end detailing the most common GC event types, their total occurrences, statistics like minimum, mean, P99.9, and the total time
+
+Here is a representative command which interestingly shows GC activity and Full GC cycles:
+
+```bash
+ltl -st "2025-05-14 09:07" -et "2025-05-14 09:28" -oe -hg -hm ./logs/GC/logs-gc/gc-twx01-twx-thingworx-1.out.4 ./logs/GC/logs-gc/gc-twx01-twx-thingworx-1.out.4 ./logs/GC/logs-gc/gc-twx01-twx-thingworx-1.out.5 -bs 1 -osum -hmw 100
+```

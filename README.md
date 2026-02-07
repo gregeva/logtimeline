@@ -1,23 +1,14 @@
-# Current Version & Release Notes
-
-Access and download releases from the [*Releases*](https://github.com/gregeva/logtimeline/releases) page.
-
-2026-01-21 : v0.8.1 - fixes heatmap axis alignment, adds light background terminal support with auto-detection
-
-2026-01-20 : v0.8.0 - adds heatmap visualization mode for SRE-grade latency distribution analysis
-
-2025-12-09 : v0.6.0 - introduces many column support architecture with dynamic layout and column padding
-
-
-# llt : Log Time Line
+# ltl : Log Time Line
 
 Have you ever wished that you could quickly identify areas of interest or hotspots in very large log files so that you could navigate there directly?  That's what this timeline view is for!!
 
 When dealing with logs which have a very large amount of lines/errors/whatever, it can be quite hard to get an overall view of the file while looking at a screen full of lines representing maybe less than a second.
 
-![ltl](images/slt-30minutewindows.png)
+Here is a very old screenshot showing the tools success in visualizing millions of log lines over a time range in a single screen.
 
-ltl, or log time line has come a long way since its initial release a few months ago.  The usage principle is basically to a) read log lines and try to establish the included time, b) also pull out message details and stats, c) filter in or out the lines based on provided command line options.  Use it to search for patterns, slowness, determine frequency and spacing of calls, and establish performance profile/baseline of your APIs or services.  See help for a list of all of the options and try them out yourself.
+![ltl - very old screenshot](images/slt-30minutewindows.png)
+
+`ltl`, or log timeline has come a long way since its initial release bacin early 2025.  The usage principle is basically to a) read log lines and try to establish the included time, b) also pull out message details and stats, c) filter in or out the lines based on provided command line options.  Use it to search for patterns, slowness, determine frequency and spacing of calls, and establish performance profile/baseline of your APIs or services.  See help for a list of all of the options and try them out yourself.
 
 Static binary packages are provided for Windows, Ubuntu, and Mac OS.  Download, rename to ltl, and place somewhere in your path.
 
@@ -68,8 +59,31 @@ The heatmap mode (`-hm` or `--heatmap`) replaces the latency statistics column w
 **Light background support (v0.8.1):**
 Terminal background color is auto-detected using OSC 11 query. On light/white backgrounds, the heatmap uses pale-to-bright color gradients instead of dark-gray-to-bright, improving visibility. Use `-lbg` or `--light-background` to explicitly force light background mode.
 
-# Known Issues
+# Screenshots
 
-- **Millisecond Precision Not Supported:**
-  Although the application allows for selection of millisecond precision, reading and comparing timestamps with millisecond precision does not work at present. All timestamp parsing and comparison is currently performed at the second level, so any features or filters relying on millisecond accuracy will not function as expected.
+## GC Analysis using Heatmap and Histogram
+
+Here is a Full GC loop explored through zooming in on the specific time range, activating heatmap with 100 character width, enabling duration and bytes histograms, and setting the time-window bucking to 1 minute.
+
+![Full GC loop explorered using heatmap and histogram views](images/gc-log-analysis_full-gc-loop_histogram-and-heatmap.png)
+
+
+## Millisecond Precision (v0.10.3)
+
+The `-ms` or `--milliseconds` flag enables sub-second timestamp parsing and display. When enabled:
+- Timestamps are parsed with millisecond precision from logs (supports 1-6 fractional digits)
+- Time buckets can be as small as 100ms
+- Time filters (`-st`/`-et`) accept millisecond precision: `-st "12:34:56.500" -et "12:35:00.999"`
+
+**Usage:**
+```bash
+# View log timeline with 100ms time buckets
+./ltl -ms -bs 100 logs/application.log
+
+# Filter to a specific sub-second time range
+./ltl -ms -bs 100 -st "08:15:30.500" -et "08:15:31.250" logs/application.log
+
+# Full date with milliseconds
+./ltl -ms -st "2025-04-10 12:34:56.789" logs/application.log
+```
 

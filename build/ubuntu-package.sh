@@ -62,18 +62,7 @@ docker run --rm --platform=linux/$architecture \
     fi
 
     echo "[4/4] Building static binary..."
-    # Use -M to explicitly include modules that are loaded dynamically at runtime
-    # (PAR::Packer static analysis cannot detect modules loaded via Module::Runtime)
-    pp \
-      -M Specio::PP \
-      -M DateTime::Locale::FromData \
-      -M DateTime::Locale::Base \
-      -M DateTime::Locale::Data \
-      -M DateTime::Locale::Util \
-      -M DateTime::TimeZone::Local \
-      -M DateTime::TimeZone::UTC \
-      -M DateTime::TimeZone::Floating \
-      -o ${PACKAGE_NAME} ${SCRIPT_NAME}
+    pp -o ${PACKAGE_NAME} ${SCRIPT_NAME}
 
     # Verify the build
     echo ""
