@@ -3110,7 +3110,10 @@ sub normalize_data_for_output {
             if( $key =~ /^count$/ ) {
                 push @output_columns, "${key}_occurrences", "${key}_min", "${key}_mean", "${key}_max", "${key}_sum" if !$omit_count;
             } elsif ( $key =~ /^udm_/ ) {
-                push @output_columns, "${key}_occurrences", "${key}_min", "${key}_mean", "${key}_max", "${key}_sum";
+                (my $csv_key = $key) =~ s/^udm_//;
+                my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
+                my $csv_prefix = ($cfg && $cfg->{unit}) ? "${csv_key}_$cfg->{unit}" : $csv_key;
+                push @output_columns, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
             } else {
                 push @output_columns, $key;
             }
@@ -5212,9 +5215,10 @@ if( $write_messages_to_csv ) {                                                  
     my @udm_csv_headers;
     foreach my $config (@udm_configs) {
         my $name = $config->{name};
-        push @udm_csv_headers, "udm_${name}_occurrences", "udm_${name}_min", "udm_${name}_mean", "udm_${name}_max", "udm_${name}_sum";
+        my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
+        push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
     }
-    $csv->print($csv_fh, [qw(Category Message Occurrences MeanBytes TotalBytes TotalBytesNice CountOccurrences CountMin CountMean CountMax CountSum MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact), @udm_csv_headers]);
+    $csv->print($csv_fh, [qw(Category Message Occurrences MeanBytes TotalBytes TotalBytesNice count_occurrences count_min count_mean count_max count_sum MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact), @udm_csv_headers]);
 }
 
 print_message_summary();														                    # Print and write message summaries
