@@ -2049,12 +2049,12 @@ sub calculate_histogram_layout {
     # Dynamic height scaling based on terminal height
     # Histograms should be compact - only grow for users with large displays
     # Terminal height -> histogram rows:
-    #   < 50 rows:  4 rows (minimum, compact)
-    #   50-64:      5 rows
-    #   65-79:      8 rows (default for medium terminals)
-    #   80-99:     10 rows
-    #  100-119:    12 rows
-    #  120+:       15 rows (maximum for very large displays)
+    #   < 50 rows:  5 rows (minimum, compact)
+    #   50-64:      7 rows
+    #   65-79:      9 rows (default for medium terminals)
+    #   80-99:     11 rows
+    #  100-119:    14 rows
+    #  120+:       16 rows (maximum for very large displays)
 
     my $effective_height;
 
@@ -2065,17 +2065,17 @@ sub calculate_histogram_layout {
         # Piped/redirected output - use configured default
         $effective_height = $histogram_height;
     } elsif ($terminal_height < 50) {
-        $effective_height = 4;
-    } elsif ($terminal_height < 65) {
         $effective_height = 5;
+    } elsif ($terminal_height < 65) {
+        $effective_height = 7;
     } elsif ($terminal_height < 80) {
-        $effective_height = 8;
+        $effective_height = 9;
     } elsif ($terminal_height < 100) {
-        $effective_height = 10;
+        $effective_height = 11;
     } elsif ($terminal_height < 120) {
-        $effective_height = 12;
+        $effective_height = 14;
     } else {
-        $effective_height = 15;
+        $effective_height = 16;
     }
 
     return {
