@@ -559,12 +559,14 @@ sub get_pattern_file_indicator {
 # User-defined metrics parsing (Issue #22)
 sub parse_udm_configs {
     my $number = qr/-?\d+(?:\.\d+)?/;
-    my %time_units = map { $_ => 1 } qw( ns us ms s );
-    my %byte_units = map { $_ => 1 } qw( B b kB KB k K MB M GB G TB T KiB MiB GiB TiB );
+    my %time_units = map { $_ => 1 } qw( ns us ms s m h );
+    my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );
+    my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );
 
     # Case normalization: map lowercase variants to canonical forms
     my %byte_unit_canonical = map { lc($_) => $_ } keys %byte_units;
     my %time_unit_canonical = map { lc($_) => $_ } keys %time_units;
+    $time_unit_canonical{'min'} = 'm';
 
     foreach my $raw_arg (@udm_raw_args) {
         my $arg = $raw_arg;
@@ -612,13 +614,18 @@ sub parse_udm_configs {
         }
         $aggregation //= 'sum';
 
-        # Normalize unit case: look up canonical form by lowercase key
+        # Normalize unit case: SI units checked case-sensitively first
+        # (m = minutes, M = mega), then lowercase lookups for time/byte
         if (defined $unit) {
-            my $lc = lc($unit);
-            if (exists $time_unit_canonical{$lc}) {
-                $unit = $time_unit_canonical{$lc};
-            } elsif (exists $byte_unit_canonical{$lc}) {
-                $unit = $byte_unit_canonical{$lc};
+            if (exists $si_units{$unit}) {
+                # Case-sensitive match — $unit stays as-is
+            } else {
+                my $lc = lc($unit);
+                if (exists $time_unit_canonical{$lc}) {
+                    $unit = $time_unit_canonical{$lc};
+                } elsif (exists $byte_unit_canonical{$lc}) {
+                    $unit = $byte_unit_canonical{$lc};
+                }
             }
         }
 
@@ -628,6 +635,11 @@ sub parse_udm_configs {
             $unit_type = 'time';
             $converter = sub { convert_duration_to_ms($_[0], $unit) };
             $formatter = \&format_time;
+        } elsif (defined $unit && exists $si_units{$unit}) {
+            $unit_type = 'number';
+            my $multiplier = $si_units{$unit};
+            $converter = sub { $_[0] * $multiplier };
+            $formatter = \&format_number;
         } elsif (defined $unit && exists $byte_units{$unit}) {
             $unit_type = 'bytes';
             $converter = sub { convert_bytes($_[0], $unit) };
@@ -677,6 +689,8 @@ sub convert_duration_to_ms {
     return $value                if $unit eq 'ms';
     return $value / 1000         if $unit eq 'us';
     return $value / 1000000      if $unit eq 'ns';
+    return $value * 60000        if $unit eq 'm';
+    return $value * 3600000      if $unit eq 'h';
     return $value;  # default: assume milliseconds
 }
 
