@@ -28,7 +28,8 @@ Track observations for process improvement. After releases, review what worked a
 
 **Observations log:**
 - 2026-02-02: CRITICAL - Always use `--disable-progress` when running ltl from Claude Code. Progress output wastes massive tokens/cost. This was discovered after months of wasteful execution.
-- 2026-02-03: CRITICAL - Release workflow - Feature branches need PRs before merging to release branch. Create PR from release branch to main. Never use `--delete-branch` when merging release PRs - release branches must be preserved.
+- 2026-02-03: CRITICAL - Release workflow - Feature branches need PRs before merging to release branch. Release branch needs PR before merging to main. Never use `--delete-branch` when merging release PRs - release branches must be preserved.
+- 2026-02-07: CRITICAL - REPEATED VIOLATION - Direct merge of release/0.11.0 to main instead of PR. Root cause: step 12 in release process itself said `git merge`. Fixed step 12 to use `gh pr create`. NEVER run `git merge` or `git checkout main && git merge` during a release.
 - 2026-02-06: CRITICAL - DO NOT directly merge feature branches to release branch with `git merge`. ALWAYS create a PR first using `gh pr create --base release/X.Y.Z --head feature-branch`. This was forgotten again during v0.10.4 release.
 - 2026-02-03: After tagging a release, always create the GitHub release with `gh release create <tag> --notes-file releases/<version>.md` to attach release notes.
 - 2026-02-03: When stuck on technical issues (e.g., floating-point precision), ask the user rather than iterating through failed attempts. The user often has quick answers.
@@ -89,9 +90,9 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 11. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
 
 ### Post-release
-12. Merge to main: `git checkout main && git merge release/X.Y.Z --no-edit && git push origin main`
+12. **Merge to main via PR (NEVER direct merge):** `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` (do NOT use `--delete-branch` — release branches must be preserved)
 13. Close all issues included in release: `gh issue close {number} --reason completed`
-14. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each)
+14. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each, NOT the release branch)
 
 ### Run Directly
 ```bash
