@@ -193,7 +193,7 @@ The rendered output must be **pixel-identical** to the current output for all ex
 
 ## Data Structure Integration
 
-The layout engine does not exist in isolation — it must integrate with ltl's existing data structures and access patterns. The rendering code is tightly coupled to how data is stored and keyed. This refactor must work within those realities, not against them.
+The layout engine does not exist in isolation — it must integrate with ltl's existing data structures and access patterns. The rendering code is tightly coupled to how data is stored and keyed. This refactor must work within those realities, not against them.  
 
 ### Current Data Flow
 
@@ -201,6 +201,12 @@ Columns get their data from two primary structures:
 
 - **`%log_occurrences{$bucket}{$category}{occurrences}`** — Used by the legend column (category counts/rates) and the occurrences bar graph (scaled_occurrences per category). Three-level nesting.
 - **`%log_stats{$bucket}{$key}`** — Used by all other graph columns (duration, bytes, count, UDMs, threadpools) and latency statistics. Two-level nesting with `scaled_*` and `*-HL` key variants.
+
+### Calculate Table Before Scaling Data
+
+The table layout MUST be calculated prior to the data scaling, as the data will be scaled proportionately into the available space.  To support this, the scaling logic must have access to the metrics column size to define its allowed chart width.
+
+Table column spacing layout calculations must be done after data has been read in `read_and_process_log`and before it is scaled in `normalize_data_for_output` which will calculated the scaled values to fit into the applicable columns.
 
 ### Integration Constraint
 
@@ -275,12 +281,12 @@ This exists because columns don't self-report their rendered width — there's n
 All column combinations must produce identical output before and after refactor:
 - Basic: timestamp + legend + occurrences + latency
 - With duration, bytes, count (individually and combined)
-- With threadpool activity (`-tpa`)
+- With threadpool activity summary (`-tpas`)
 - With user-defined metrics
 - With heatmap (`-hm duration`, `-hm bytes`, `-hm count`)
 - With omit flags (`-ov`, `-or`, `-os`) individually and combined
 - With millisecond precision (`-ms`)
-- At multiple terminal widths (80, 120, 160, 200+)
+- At multiple terminal widths (60, 100, 160, 200, 350+)
 
 ### Regression Capture
 Before refactoring, capture reference output for each test case. After refactoring, diff against reference. Any difference fails the test.
