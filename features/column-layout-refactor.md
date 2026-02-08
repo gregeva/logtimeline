@@ -311,3 +311,87 @@ Add a debug/assertion mode that verifies:
 - **#26 (Session metric column)**: Blocked by this refactor. Adding a new column type should be a matter of defining it in the layout system, not threading it through 5 data structures.
 - **#27 (Array mismatch bug with `-tpa`)**: Root cause is the fragmented column management this refactor eliminates.
 - **#64 (Color consolidation)**: The column-carries-its-color approach enables future cleanup of hardcoded color references, but #64 is a separate effort.
+
+## Prototype Decisions & Learnings
+
+*Captured from `prototype/column-layout-prototype.pl` — 2026-02-08*
+
+### Algorithm Selection: Linear Decay
+
+The linear decay algorithm was selected over exponential decay for proportional distribution:
+
+```
+focus_share = max(focus_min, focus_base - (N-2) * focus_step)
+```
+
+With parameters `focus_base=70, focus_step=10, focus_min=25`:
+
+| N | Current | Algorithm | Max Delta |
+|---|---------|-----------|-----------|
+| 2 | 65/35 | 70/30 | 5pp |
+| 3 | 62/21/17 | 60/20/20 | 3pp |
+| 4 | 50/18/16/16 | 50/16.7/16.7/16.7 | 1.3pp |
+| 5 | 40/15/15/15/15 | 40/15/15/15/15 | 0pp (exact) |
+| 6 | 30/14/14/14/14/14 | 30/14/14/14/14/14 | 0pp (exact) |
+
+The maximum deviation is 5 percentage points (at N=2), which is within acceptable visual tolerance. The algorithm is exact for N=4-6 and smoothly extends to N=7+ without requiring new hardcoded tables.
+
+The formula uses `(N-2)` not `(N-1)` because the step applies starting from the 3rd column (N=2 is the anchor point where `focus_base` applies directly).
+
+The exponential decay algorithm (`focus = max * decay^(N-2)`) was prototyped but rejected — it diverges more at N=3-5 where the current tables are well-established.
+
+### Separator Modeling Validated
+
+Modeling separators as distinct 1-character columns with `spacing=0` produces identical character budgets to the current approach where separators are embedded in padding:
+
+- **Current**: `pad_count=2` includes the `│` as its first character. `pad_latency=3` includes `│` + 2 spaces via gap-fill.
+- **New**: `sep_legend_graph` is a 1-char column; `occurrences.spacing` drops from 2 to 1. `sep_graph_stats` is a 1-char column; `latency.spacing` drops from 3 to 2. Net character budget: identical.
+
+This was validated by the separator budget validation test (Section F) across all terminal widths.
+
+### Width Allocation Pipeline
+
+The 8-step allocation pipeline works correctly:
+
+1. Resolve separator visibility (adjacency rule)
+2. Allocate fixed columns (timestamp, latency)
+3. Allocate separators (1 char each)
+4. Allocate content-driven columns (legend)
+5. Sum all spacing
+6. Calculate remaining width
+7. Distribute proportional via linear decay algorithm
+8. Apply cumulative rounding (verbatim from ltl)
+
+The cumulative rounding function integrates cleanly — it operates only on the proportional column widths array, not the full column set. Separators and fixed columns are excluded from rounding.
+
+### Narrow Terminal Handling
+
+At narrow widths (80-100 chars), the fixed columns (timestamp + legend + latency) can consume all available space, leaving nothing for proportional columns. This is a real constraint that ltl already handles by:
+- Not showing latency stats when no duration data exists
+- Dropping count columns when space is insufficient (ltl:3238)
+
+The layout engine correctly calculates negative remaining space in these cases. The implementation must either hide latency/legend at narrow widths or allow minimum-width proportional columns with graceful degradation.
+
+### Visibility Toggle Redistribution
+
+The prototype validates that hiding columns correctly redistributes space:
+- Hiding legend: its 30-char width flows to proportional columns
+- Hiding latency + separator: 57 chars flow to proportional columns
+- Separator adjacency rule: separators auto-hide when an adjacent column is hidden
+
+This confirms the first-class visibility model works as designed.
+
+### Dynamic Column Insertion
+
+The `add_dynamic_column()` pattern (insert before `sep_graph_stats`) works cleanly for threadpool and UDM columns. New columns inherit the standard secondary spacing and get colors from the palette by index. No changes to the layout engine are needed — the engine is column-count agnostic.
+
+### Key Decision: Spacing Model
+
+Spacing is a property of each column (chars *before* this column), not between columns. This means:
+- `timestamp.spacing = 2` (pad_all + pad_timestamp)
+- `legend.spacing = 0`
+- `occurrences.spacing = 1` (pad_count minus the separator)
+- `duration/bytes/count.spacing = 2` (pad_all + pad_other)
+- `latency.spacing = 2` (pad_latency minus the separator)
+
+This matches the current rendering where spacing is printed before each column's content.
