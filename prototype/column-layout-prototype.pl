@@ -483,6 +483,16 @@ sub cumulative_round_widths {
 # SECTION 6: RENDERING / MOCKUP OUTPUT
 # ============================================================================
 
+# ANSI green background + ○ for padding/spacing visualization
+my $PAD_ON  = "\033[42m";   # green background
+my $PAD_OFF = "\033[0m";    # reset
+
+sub pad_chars {
+    my ($n) = @_;
+    return '' if $n <= 0;
+    return $PAD_ON . '○' x $n . $PAD_OFF;
+}
+
 # Synthetic data for simulated data rows
 my @sim_rows = (
     {
@@ -585,8 +595,8 @@ sub render_data_rows {
                 next;
             }
 
-            # Spacing before column content
-            $line .= ' ' x $sp;
+            # Spacing before column content (green ○)
+            $line .= pad_chars($sp);
 
             if ($id eq 'timestamp') {
                 $line .= render_cell($row->{timestamp}, $w);
@@ -631,12 +641,15 @@ sub render_layout_mockup {
 
     # Build three rows: horizontal rule, header names, type labels
     # Only internal separators (│) are rendered — no outer box borders
+    # Spacing characters are rendered as ○ with green background to distinguish
+    # from content whitespace
     my $rule = '';
     my $mid  = '';
     my $bot  = '';
 
     for my $col (@visible) {
-        my $total_w = $col->{width} + $col->{spacing};
+        my $w  = $col->{width};
+        my $sp = $col->{spacing};
 
         if ($col->{type} eq 'separator') {
             $rule .= '┼';
@@ -644,6 +657,11 @@ sub render_layout_mockup {
             $bot  .= '│';
             next;
         }
+
+        # Spacing before column content (green ○)
+        $rule .= pad_chars($sp);
+        $mid  .= pad_chars($sp);
+        $bot  .= pad_chars($sp);
 
         # Build column content
         my $header = $col->{name};
@@ -659,17 +677,17 @@ sub render_layout_mockup {
             $type_label = sprintf "%d", $col->{width};
         }
 
-        # Header name (centered in total_w)
-        my $h_text = length($header) > $total_w ? substr($header, 0, $total_w) : $header;
-        my $h_pad_l = int(($total_w - length($h_text)) / 2);
-        my $h_pad_r = $total_w - length($h_text) - $h_pad_l;
+        # Header name (centered in column width)
+        my $h_text = length($header) > $w ? substr($header, 0, $w) : $header;
+        my $h_pad_l = int(($w - length($h_text)) / 2);
+        my $h_pad_r = $w - length($h_text) - $h_pad_l;
 
-        # Type label (centered in total_w)
-        my $t_text = length($type_label) > $total_w ? substr($type_label, 0, $total_w) : $type_label;
-        my $t_pad_l = int(($total_w - length($t_text)) / 2);
-        my $t_pad_r = $total_w - length($t_text) - $t_pad_l;
+        # Type label (centered in column width)
+        my $t_text = length($type_label) > $w ? substr($type_label, 0, $w) : $type_label;
+        my $t_pad_l = int(($w - length($t_text)) / 2);
+        my $t_pad_r = $w - length($t_text) - $t_pad_l;
 
-        $rule .= '─' x $total_w;
+        $rule .= '─' x $w;
         $mid  .= ' ' x $h_pad_l . $h_text . ' ' x $h_pad_r;
         $bot  .= ' ' x $t_pad_l . $t_text . ' ' x $t_pad_r;
     }
