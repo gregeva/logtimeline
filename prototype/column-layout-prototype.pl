@@ -483,14 +483,12 @@ sub cumulative_round_widths {
 # SECTION 6: RENDERING / MOCKUP OUTPUT
 # ============================================================================
 
-# ANSI green background + ○ for padding/spacing visualization
-my $PAD_ON  = "\033[42m";   # green background
-my $PAD_OFF = "\033[0m";    # reset
-
+# Middle dot (·) for padding/spacing visualization — no ANSI, just a visible
+# character distinct from space and content
 sub pad_chars {
     my ($n) = @_;
     return '' if $n <= 0;
-    return $PAD_ON . '○' x $n . $PAD_OFF;
+    return '·' x $n;
 }
 
 # Synthetic data for simulated data rows
