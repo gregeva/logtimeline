@@ -95,6 +95,13 @@ my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_
 my @column_layout;
 my ($focus_base, $focus_step, $focus_min) = (70, 10, 25);
 my $debug_layout = 0;
+my @column_colors = (
+    { name => 'yellow',  highlighted_bg => "\033[48;5;226m\033[38;5;0m", plain_bg => "\033[48;5;184m\033[38;5;0m", fg => "\033[0m\033[93m" },
+    { name => 'green',   highlighted_bg => "\033[48;5;46m\033[38;5;0m",  plain_bg => "\033[48;5;34m\033[38;5;0m",  fg => "\033[0m\033[32m" },
+    { name => 'cyan',    highlighted_bg => "\033[48;5;36m\033[38;5;0m",  plain_bg => "\033[48;5;30m\033[38;5;0m",  fg => "\033[0m\033[36m" },
+    { name => 'blue',    highlighted_bg => "\033[48;5;21m\033[38;5;0m",  plain_bg => "\033[48;5;20m\033[38;5;0m",  fg => "\033[0m\033[34m" },
+    { name => 'magenta', highlighted_bg => "\033[48;5;201m\033[38;5;0m", plain_bg => "\033[48;5;127m\033[38;5;0m", fg => "\033[0m\033[35m" },
+);
 my ( $print_durations, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -3142,7 +3149,7 @@ sub build_column_layout {
         name            => "\x{2502}",
         width           => undef,
         base_width      => 1,
-        spacing_before  => 1,
+        spacing_before  => 0,
         spacing_after   => 1,
         visible         => $show_legend,
         color           => undef,
@@ -3173,7 +3180,7 @@ sub build_column_layout {
         spacing_before  => 1,
         spacing_after   => 1,
         visible         => 0,
-        color           => undef,
+        color           => $column_colors[0],
         priority        => 'secondary',
     };
 
@@ -3187,7 +3194,7 @@ sub build_column_layout {
         spacing_before  => 1,
         spacing_after   => 1,
         visible         => 0,
-        color           => undef,
+        color           => $column_colors[1],
         priority        => 'secondary',
     };
 
@@ -3201,7 +3208,7 @@ sub build_column_layout {
         spacing_before  => 1,
         spacing_after   => 1,
         visible         => 0,
-        color           => undef,
+        color           => $column_colors[2],
         priority        => 'secondary',
     };
 
@@ -3221,15 +3228,31 @@ sub build_column_layout {
         };
     }
 
-    # Latency statistics or heatmap — fixed width
-    if ($show_latency || $show_heatmap) {
+    # Latency statistics — fixed width
+    if ($show_latency) {
         push @cols, {
-            id              => $show_heatmap ? 'heatmap' : 'latency',
+            id              => 'latency',
             type            => 'fixed',
-            name            => $show_heatmap ? get_heatmap_column_header() : 'latency statistics',
+            name            => 'latency statistics',
             width           => undef,
             base_width      => $latency_w,
             spacing_before  => 2,
+            spacing_after   => 0,
+            visible         => 1,
+            color           => undef,
+            priority        => undef,
+        };
+    }
+
+    # Heatmap — fixed width
+    if ($show_heatmap) {
+        push @cols, {
+            id              => 'heatmap',
+            type            => 'fixed',
+            name            => get_heatmap_column_header(),
+            width           => undef,
+            base_width      => $latency_w,
+            spacing_before  => 1,
             spacing_after   => 0,
             visible         => 1,
             color           => undef,
@@ -3262,7 +3285,7 @@ sub add_dynamic_column {
         spacing_before  => 1,
         spacing_after   => 1,
         visible         => 1,
-        color           => undef,
+        color           => $column_colors[$color_index % scalar(@column_colors)],
         priority        => 'secondary',
     };
 
@@ -3783,8 +3806,11 @@ sub get_heatmap_column_header {
     my $metric = $heatmap_metric;
     my $heatmap_content_width = $heatmap_width;
 
+    # Header content is 1 char narrower than data area to account for the leading space prefix
+    my $header_content_width = $heatmap_content_width - 1;
+
     # Build character array for exact positioning (same approach as footer)
-    my @header_chars = (" ") x $heatmap_content_width;
+    my @header_chars = (" ") x $header_content_width;
 
     # Define markers: for header we show 0%, [25%], 50% (label), [75%], 100%
     # 25% and 75% only shown if width > 75
@@ -3798,9 +3824,9 @@ sub get_heatmap_column_header {
     # Calculate positions and values for each marker
     my @markers;  # Each element: { pct, display_pos, value_str, is_label }
     for my $pct (@marker_pcts) {
-        # Calculate display position (0 to width-1)
-        my $display_pos = int($pct * ($heatmap_content_width - 1));
-        $display_pos = $heatmap_content_width - 1 if $display_pos >= $heatmap_content_width;
+        # Calculate display position (0 to header_content_width-1)
+        my $display_pos = int($pct * ($header_content_width - 1));
+        $display_pos = $header_content_width - 1 if $display_pos >= $header_content_width;
 
         # Calculate boundary index for the value at this display position
         # Display column i shows data from bucket i, which covers [boundaries[i], boundaries[i+1])
@@ -3854,7 +3880,7 @@ sub get_heatmap_column_header {
         if ($i == 0) {
             $start = 0;  # Left-align first label (0%)
         } elsif ($i == $#markers) {
-            $start = $heatmap_content_width - $label_len;  # Right-align last label (100%)
+            $start = $header_content_width - $label_len;  # Right-align last label (100%)
         } else {
             $start = $pos - int($label_len / 2);  # Center others at their position
         }
@@ -3864,7 +3890,7 @@ sub get_heatmap_column_header {
         $start = $last_end + 1 if $start <= $last_end;  # Avoid overlap
 
         # Place the label if it fits
-        if ($start + $label_len <= $heatmap_content_width) {
+        if ($start + $label_len <= $header_content_width) {
             for my $j (0 .. $label_len - 1) {
                 $header_chars[$start + $j] = substr($label, $j, 1);
             }
@@ -3872,24 +3898,16 @@ sub get_heatmap_column_header {
         }
     }
 
-    # Build final string: prefix (2) + content (heatmap_width) + suffix (2)
-    # This gives durations_graph_width total when heatmap_width + 4 = durations_graph_width
-    my $prefix = "  ";   # 2 spaces to align with "│ " in data rows
-    my $content = join("", @header_chars);
-    my $suffix = "  ";   # 2 trailing spaces
-
-    return $prefix . $content . $suffix;
+    # Build final string: prefix space aligns content with data rows (matches spacing_before on heatmap column)
+    # No suffix — trailing space handled by column spacing_after
+    return " " . join("", @header_chars);
 }
 
 sub print_heatmap_row {
-    my ($bucket, $printed_chars) = @_;
+    my ($bucket) = @_;
 
     # Use $heatmap_width for content width
     my $heatmap_content_width = $heatmap_width;
-
-    my $missing_chars = $terminal_width - $printed_chars - $durations_graph_width;
-    print " " x $missing_chars if $missing_chars > 0;
-    print "$colors{'bright-black'}│$colors{'NC'} ";
 
     my $color_key = $heatmap_metric_map{$heatmap_metric}{color};
     my $color_hash = $heatmap_light_bg ? \%heatmap_colors_light : \%heatmap_colors;
@@ -3939,7 +3957,6 @@ sub print_heatmap_row {
             }
         }
     }
-    print " ";
 }
 
 sub print_heatmap_footer_scale {
@@ -3989,13 +4006,17 @@ sub print_heatmap_footer_scale {
     }
 
     # Print the leading horizontal line (before heatmap column)
+    # Get heatmap spacing_before from layout to align footer with data rows
+    my $hm_col = (grep { $_->{id} eq 'heatmap' && $_->{visible} } @column_layout)[0];
+    my $hm_spacing_before = $hm_col ? $hm_col->{spacing_before} : 1;
+
     print "$colors{'bright-black'}";
     print "─" x $pre_heatmap_width;
     print "┴";  # Connection to the column separator (aligns with │ in data rows)
-    print "─";  # Padding character (aligns with space after │ in data rows)
+    print "─" x ($hm_spacing_before);  # Padding characters (align with spacing before heatmap content)
 
     # Build the heatmap scale section with embedded labels
-    # This is exactly heatmap_content_width characters to align with the 52 data columns
+    # This is exactly heatmap_content_width characters to align with the data columns
     my @scale_chars = ("─") x $heatmap_content_width;
 
     # Place labels at marker positions, avoiding overlap
@@ -4032,7 +4053,6 @@ sub print_heatmap_footer_scale {
     }
 
     print join("", @scale_chars);
-    print "─";  # Trailing character (aligns with trailing space in data rows)
     print "$colors{'NC'}\n";
 }
 
@@ -4091,14 +4111,7 @@ sub print_bar_graph {
             } else {
                 $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
             }
-            my $printed_chars = 0;
             my $total_occurrences = 0;
-
-            ## PRINT TIMESTAMP IN CHART ROW
-            my $timestamp_legend_length = $timestamp_length;                                # already includes the padding in the value $graph_column_padding_all;
-            print " " x $graph_column_padding_timestamp . $bucket_time_str . " " x $graph_column_padding_all;
-            $printed_chars += $printed_column_widths[0] + $printed_column_spacing[0];       # timestamp column width and spacing
-            $timestamp_legend_length += $printed_column_widths[1] + $printed_column_spacing[1] if( !( $omit_values && $omit_rate ) );
 
             my $log_details = "";
             my $rate_metrics = "";
@@ -4106,7 +4119,7 @@ sub print_bar_graph {
             my %output_columns;
             my $scaled_occurrences_total = 0;
 
-            ## LOOP THROUGH LOG CATEGORY BUCKETS AND PRINT PER ROW LEGEND COUNTS
+            ## LOOP THROUGH LOG CATEGORY BUCKETS AND BUILD PER ROW LEGEND COUNTS
             foreach my $category_bucket (@log_levels) {
                 if (exists $log_occurrences{$bucket}{$category_bucket}) {
                     my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
@@ -4152,7 +4165,7 @@ sub print_bar_graph {
                next if $category_bucket =~ /^timestamp$/;								# skip the first column and get to the counts
                last if $category_bucket =~ /^totalOccurrences$/;								# only fill in empty values up to the totalOccurrences
 
-               if( exists $output_columns{$category_bucket} ) {								# if there was a count for this log level, add it to the list 
+               if( exists $output_columns{$category_bucket} ) {								# if there was a count for this log level, add it to the list
                    push @csv_data, $output_columns{$category_bucket};
 
 # 2026-01-04 TO DO: this may not be required, test after fixing the count and byte metric collection with no duration stats
@@ -4163,73 +4176,61 @@ sub print_bar_graph {
 
             push @csv_data, $total_occurrences;										# add the total message count to the output CSV data
 
-            print $log_details unless $omit_values;
-            my $padding = $legend_length - $legend_length_bucket;
-            $printed_chars += $legend_length_bucket ;
+            ## RENDER ROW BY ITERATING @column_layout
+            for my $col (grep { $_->{visible} } @column_layout) {
+                my $col_id   = $col->{id};
+                my $col_type = $col->{type};
+                my $col_w    = $col->{width} // 0;
 
-            print " " x ($padding > 0 ? $padding : 0);
-            $printed_chars += ($padding > 0 ? $padding : 0);
-            print $rate_metrics unless $omit_rate;
+                # Print spacing before this column
+                print " " x ($col->{spacing_before} // 0);
 
-        # 2025-12-07 - this legend width plus spacing given the possible variations is quite hard to refactor, so leaving it like this
-        if( $graph_column_padding_count >= 1 ) {						# if there is a padding character, make the first one the separator
-            print "$colors{'bright-black'}│$colors{'NC'}";
-            $printed_chars++;
-	    }
+                if ($col_id eq 'timestamp') {
+                    print $bucket_time_str;
 
-	    if( $graph_column_padding_count - 1 >= 1 ) {					# and these are the remaining padding characters
-            my $padding = $graph_column_padding_count - 1;
-		    print " " x $padding;
-            $printed_chars += $padding;
-        }
+                } elsif ($col_id eq 'legend') {
+                    print $log_details unless $omit_values;
+                    my $padding = $legend_length - $legend_length_bucket;
+                    print " " x ($padding > 0 ? $padding : 0);
+                    print $rate_metrics unless $omit_rate;
 
-            ## PRINT STANDARD 'COUNT' BAR GRAPH ##
-            foreach my $category_bucket (@log_levels) {
-                next unless $category_bucket !~ /^empty|err-rate|msg-rate$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
-                if (exists $log_occurrences{$bucket}{$category_bucket}) {
-                    my $scaled_occurrences = $log_occurrences{$bucket}{$category_bucket}{scaled_occurrences};
-                    $scaled_occurrences = 0 if $scaled_occurrences < 0;  # Guard against negative values
-                    my $color = $colors{$category_bucket} // $colors{'NC'};
-                    print "$color" . $blocks{$default_chart_block} x $scaled_occurrences . "$colors{'NC'}";
-                    $printed_chars += $scaled_occurrences;
-                    $scaled_occurrences_total += $scaled_occurrences;
-                }
-            }
+                } elsif ($col_type eq 'separator') {
+                    print "$colors{'bright-black'}│$colors{'NC'}";
 
-            print " " x $graph_column_padding_all;
-            $printed_chars += $graph_column_padding_all;
+                } elsif ($col_id eq 'occurrences') {
+                    # Print category-colored blocks
+                    foreach my $category_bucket (@log_levels) {
+                        next unless $category_bucket !~ /^empty|err-rate|msg-rate$/;
+                        if (exists $log_occurrences{$bucket}{$category_bucket}) {
+                            my $scaled_occurrences = $log_occurrences{$bucket}{$category_bucket}{scaled_occurrences};
+                            $scaled_occurrences = 0 if $scaled_occurrences < 0;
+                            my $color = $colors{$category_bucket} // $colors{'NC'};
+                            print "$color" . $blocks{$default_chart_block} x $scaled_occurrences . "$colors{'NC'}";
+                            $scaled_occurrences_total += $scaled_occurrences;
+                        }
+                    }
+                    # Fill remaining width with spaces
+                    my $remaining = $col_w - $scaled_occurrences_total;
+                    print " " x $remaining if $remaining > 0;
 
-            ## PRINT ADDITIONAL TRENDED VALUES ##
-            if( $graph_count > 1 ) {
-                my $column_number = 2;		                            # start after the timestamp and possibly legend columns
-                my $missing_chars = ( $printed_column_widths[$column_count_pre_graph] + $printed_column_spacing[$column_count_pre_graph] ) - ( $scaled_occurrences_total + $printed_column_spacing[$column_count_pre_graph] );
-                $missing_chars = 0 if $missing_chars < 0;  # Guard against negative values
-                # Fill in empty characters to the start of the second graph space
-                print " " x $missing_chars;
-                $printed_chars += $missing_chars;
-
-                foreach my $key ( @populated_graph_columns ) {		    # loop through available data columns to print
-                    next if $key =~ /^occurrences$/;					# the counts have already been printed, so should skip this entry even if it is legitimate
+                } elsif ($col_type eq 'proportional' && $col_id ne 'occurrences') {
+                    # Secondary metric bar (duration, bytes, count, UDMs, threadpools)
+                    my $key = $col_id;
                     my $scaled_trend_key = "scaled_${key}";
                     my $scaled_trend_key_highlight = "${scaled_trend_key}-HL";
                     my $scaled_trend_value = $log_stats{$bucket}{$scaled_trend_key};
                     my $trend_value = $log_stats{$bucket}{$key};
-                    my $printed_column_index = $column_count_pre_graph-1+$column_number;
 
                     if( defined $log_stats{$bucket}{$key} ) {
                         if( $key =~ /^(time|duration)$/i ) {
-                            # Select duration unit format based on column width: long (>=15), medium (>=10), short (<10)
-                            # Short format omits space between value and unit to save space
-                            my $column_width = $printed_column_widths[$printed_column_index];
-                            my $time_format = $column_width >= 15 ? 'long' : ($column_width >= 10 ? 'medium' : 'short');
+                            my $time_format = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
                             my $time_space = $time_format eq 'short' ? undef : ' ';
                             $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', $time_format, $time_space );
-                            push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};				# push trend value to CSV data list
+                            push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};
                         } elsif( $key =~ /^bytes$/i ) {
                             $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
-                            push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};				# push trend value to CSV data list
+                            push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};
                         } elsif( $key =~ /^count$/i ) {
-                            # $trend_value = defined $log_stats{$bucket}{$key} ? " $log_stats{$bucket}{$key}" : "";
                             $trend_value = " " . format_number( $log_stats{$bucket}{$key}, ' ', 2);
                             foreach my $metric ( qw( occurrences min mean max sum ) ) {
                                 my $key_metric = "${key}_${metric}";
@@ -4241,8 +4242,7 @@ sub print_bar_graph {
                             if ($config) {
                                 my $unit_type = $config->{unit_type};
                                 if ($unit_type eq 'time') {
-                                    my $col_width = $printed_column_widths[$printed_column_index];
-                                    my $fmt = $col_width >= 15 ? 'long' : ($col_width >= 10 ? 'medium' : 'short');
+                                    my $fmt = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
                                     my $spc = $fmt eq 'short' ? undef : ' ';
                                     $trend_value = " " . format_time($log_stats{$bucket}{$key}, 'ms', $fmt, $spc);
                                 } elsif ($unit_type eq 'bytes') {
@@ -4256,100 +4256,56 @@ sub print_bar_graph {
                             }
                         } else {
                             $trend_value = defined $log_stats{$bucket}{$key} ? " $log_stats{$bucket}{$key}" : "";
-                            push @csv_data, ltrim( $trend_value );								            # push trend value to CSV data list
+                            push @csv_data, ltrim( $trend_value );
                         }
 
-                        # SECONDARY TREND Print the secondary trend and associated value
-                        # Yellow background 103m, Yellow Foreground 93m       184 medium yellow (nice!)  190 pale yellow  226 bright yellow   (184 + 190 are the winners)
-                        # Cyan background 103m, Cyan Foreground 36m, bright Cyan 96m   46 Cyan BG   30 Deep Cyan  44 Bright Cyan 36 Darker Cyan 37 Vibrant Cyan 45 Cyan 106 Bright Cyan BG  51 bright cyan    123 medium cyan   159 light cyan  195 pale cyan
-                        # Green                          32 Green FG    42 Green BG     92 Bright Green FG   102  Bright Green BG     34 Medium Green  46 Ultramarine Green  120  Light Green  121  Pale Green
-                        # Blue                           34 Blue FG     44 Blug BG     94 Bright Blue FG   20 Ultramarine Blue   104 Bright Blue BG    20 Medium Blue   117 Light Blue   159  Pale Blue
-                        # Magenta                        35 FG Magenta     45 BG Magenta      105 Bright Magenta    127 Medium magenta   201 Ultramarine Magenta   225 Light Magenta     219 Pale Magenta
+                        # Render the metric bar using color from column layout
+                        my $col_color = $col->{color};
+                        print $col_color->{highlighted_bg};
 
-                        # Start the background color with the brighter highlight value if there is anything to highlight
-                        my ( $highlighted_bg_black_fg, $plain_bg_black_fg, $black_bg_plain_fg );
-
-                        if( $column_number == 2 ) {	                        # Yellow				
-                            $highlighted_bg_black_fg = "\033[48;5;226m\033[38;5;0m";
-                            $plain_bg_black_fg = "\033[48;5;184m\033[38;5;0m";
-                            $black_bg_plain_fg = "\033[0m\033[93m";
-                        } elsif( $column_number == 3 ) {					# Green
-                            $highlighted_bg_black_fg = "\033[48;5;46m\033[38;5;0m";
-                            $plain_bg_black_fg = "\033[48;5;34m\033[38;5;0m";
-                            $black_bg_plain_fg = "\033[0m\033[32m";
-                        } elsif( $column_number == 4 ) {					# Cyan
-                            $highlighted_bg_black_fg = "\033[48;5;36m\033[38;5;0m";
-                            $plain_bg_black_fg = "\033[48;5;30m\033[38;5;0m";
-                            $black_bg_plain_fg = "\033[0m\033[36m";
-                        } elsif( $column_number == 5 ) {					# Blue
-                            $highlighted_bg_black_fg = "\033[48;5;21m\033[38;5;0m";
-                            $plain_bg_black_fg = "\033[48;5;20m\033[38;5;0m";
-                            $black_bg_plain_fg = "\033[0m\033[34m";
-                        } elsif( $column_number == 6 ) {					# Magenta
-                            $highlighted_bg_black_fg = "\033[48;5;201m\033[38;5;0m";
-                            $plain_bg_black_fg = "\033[48;5;127m\033[38;5;0m";
-                            $black_bg_plain_fg = "\033[0m\033[35m";
-                        } else {
-                            last;
-                        }
-
-                        print " " x $graph_column_padding_other;				# if stated, this is the BEFORE column padding specific to these columns
-                        $printed_chars += $graph_column_padding_other;
-                        print $highlighted_bg_black_fg;
-
-                        for my $i ( 0 .. $printed_column_widths[$printed_column_index] - 1) {
+                        for my $i ( 0 .. $col_w - 1) {
                             my $value_char = (split //, $trend_value )[$i];
 
-                            # Switch over to the standard foreground/background colors once we have printed the required number of highlighted bars
                             if( defined $log_stats{$bucket}{$scaled_trend_key_highlight} && $log_stats{$bucket}{$scaled_trend_key_highlight} == $i ) {
-                                print $plain_bg_black_fg;
+                                print $col_color->{plain_bg};
                             }
 
-                            # Switch over the graphs standard foreground color with black background once all bars are printed
                             if( $i == $scaled_trend_value ) {
-                                print "$black_bg_plain_fg";
+                                print $col_color->{fg};
                             }
 
                             print length( $value_char ) ? $value_char : " ";
-                            $printed_chars++;
                         }
 
-                        print "$colors{'NC'}\033[0m";						# clear the foreground color
+                        print "$colors{'NC'}\033[0m";
 
                     } else {
-                        # This is the special condition where a column has no values/data for a particular interval, in which case we just need to print the column width in spaces
-                        print " " x $printed_column_widths[$printed_column_index];
-                        $printed_chars += $printed_column_widths[$printed_column_index];
+                        # No data for this column in this bucket — print empty space
+                        print " " x $col_w;
                     }
 
-                    print " " x $graph_column_padding_all;				    # if stated, this is the AFTER column padding for ALL columns
-                    $printed_chars += $graph_column_padding_all;
-                    $column_number++;
-                }
-            }
+                } elsif ($col_id eq 'latency') {
+                    # Duration statistics
+                    if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{p99} || defined $log_stats{$bucket}{p999} || defined $log_stats{$bucket}{cv} ) {
+                        my $cv_color = defined $log_stats{$bucket}{cv} && $log_stats{$bucket}{cv} >= 20 ? 'WARN-HL' : 'white-underline';
 
-            # HEATMAP OR DURATION STATISTICS - print heatmap if enabled, otherwise duration statistics table
-            if ($heatmap_enabled) {
-                print_heatmap_row($bucket, $printed_chars);
-            } elsif( $print_durations && !$omit_durations && !$omit_stats ) {
-                my $missing_chars;
-                $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width;
-                print " " x $missing_chars if $missing_chars > 0;
-                print "$colors{'bright-black'}│$colors{'NC'}  ";
-                if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{p99} || defined $log_stats{$bucket}{p999} || defined $log_stats{$bucket}{cv} ) {
+                        defined $log_stats{$bucket}{p50} ? printf( "$colors{'cyan'}P50:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p50} ) >= 4 ? format_time( $log_stats{$bucket}{p50}, 'ms' ) : $log_stats{$bucket}{p50} ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p99} ) >= 4 ? format_time( $log_stats{$bucket}{p99}, 'ms' ) : $log_stats{$bucket}{p99} ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-5s$colors{'NC'} ", ( length( $log_stats{$bucket}{p999} ) >= 4 ? format_time( $log_stats{$bucket}{p999}, 'ms' ) : $log_stats{$bucket}{p999} ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", $log_stats{$bucket}{cv} ) : printf ( " " x 7 );
 
-                    my $cv_color = defined $log_stats{$bucket}{cv} && $log_stats{$bucket}{cv} >= 20 ? 'WARN-HL' : 'white-underline';
-
-                    defined $log_stats{$bucket}{p50} ? printf( "$colors{'cyan'}P50:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p50} ) >= 4 ? format_time( $log_stats{$bucket}{p50}, 'ms' ) : $log_stats{$bucket}{p50} ) ) : printf( " " x 11 );
-                    defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 11 );
-                    defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p99} ) >= 4 ? format_time( $log_stats{$bucket}{p99}, 'ms' ) : $log_stats{$bucket}{p99} ) ) : printf( " " x 11 );
-                    defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-5s$colors{'NC'} ", ( length( $log_stats{$bucket}{p999} ) >= 4 ? format_time( $log_stats{$bucket}{p999}, 'ms' ) : $log_stats{$bucket}{p999} ) ) : printf( " " x 11 );
-                    defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", $log_stats{$bucket}{cv} ) : printf ( " " x 7 );
-
-                    foreach my $stat ( qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) ) {				# push statistics data to the CSV data list
-                        push @csv_data, $log_stats{$bucket}{$stat};
+                        foreach my $stat ( qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) ) {
+                            push @csv_data, $log_stats{$bucket}{$stat};
+                        }
                     }
+
+                } elsif ($col_id eq 'heatmap') {
+                    print_heatmap_row($bucket);
                 }
+
+                # Print spacing after this column
+                print " " x ($col->{spacing_after} // 0);
             }
 
             # Print statistics for time-bucket statistics to the CSV file if activated
