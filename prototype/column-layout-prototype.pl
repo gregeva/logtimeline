@@ -7,16 +7,6 @@
 #
 # This prototype uses synthetic column definitions to test the layout engine
 # independently of the main ltl log parsing infrastructure.
-#
-# NEXT STEP: The legend column is currently modeled as a single content-driven
-# column. It needs to be implemented as a compound column with three sub-columns:
-#   1. Counts sub-column (category labels + occurrence counts)
-#   2. Spacing sub-column (2 chars, conditionally visible)
-#   3. Rates sub-column (error rate + message rate)
-# Each sub-column width should be calculated independently from data, and the
-# layout engine should allocate legend width as the sum of its sub-columns.
-# The current data row rendering concatenates counts and rates as a single
-# string, which does not validate the compound column or spacing model.
 
 use strict;
 use warnings;
@@ -77,9 +67,9 @@ my $alt_focus_max   = 70;
 my $alt_decay_rate  = 0.75;  # Each additional column multiplies remaining by this
 
 # Simulated fixed widths for prototype
-my $sim_timestamp_width = 17;    # Typical: "2025-03-21 14:30" + padding
+my $sim_timestamp_width = 16;    # "2026-02-09 14:30" = 16 chars
 my $sim_legend_width    = 30;    # Typical legend content width
-my $sim_latency_width   = 56;    # 3 + 52 + 1 padding (pad_latency + 52 + pad_all)
+my $sim_latency_width   = 52;    # Fixed: P50(11) + P95(11) + P99(11) + P999(11) + CV(7) = 52
 
 # Color definitions for column types (data only, no ANSI rendering)
 my @column_colors = (
@@ -108,138 +98,161 @@ sub build_default_columns {
     my @cols;
 
     # Timestamp — fixed width
+    # 0 before, 1 after
     push @cols, {
-        id         => 'timestamp',
-        type       => 'fixed',
-        name       => 'timestamp',
-        width      => undef,    # calculated
-        base_width => $timestamp_w,
-        spacing    => $padding{all} + $padding{timestamp},  # 2
-        visible    => 1,
-        color      => undef,
-        priority   => undef,
-        data_source => 'format',
+        id              => 'timestamp',
+        type            => 'fixed',
+        name            => 'timestamp',
+        width           => undef,
+        base_width      => $timestamp_w,
+        spacing_before  => 0,
+        spacing_after   => 1,
+        visible         => 1,
+        color           => undef,
+        priority        => undef,
+        data_source     => 'format',
     };
 
-    # Legend — compound column (content-driven)
+    # Legend — content-driven width (single column, floating internal boundary
+    # between counts and rates per row)
+    # 0 before, 1 after
     if ($show_legend) {
         push @cols, {
-            id         => 'legend',
-            type       => 'content',
-            name       => 'legend',
-            width      => undef,
-            base_width => $legend_w,
-            spacing    => $padding{legend},  # 0
-            visible    => 1,
-            color      => undef,
-            priority   => undef,
-            data_source => 'log_occurrences',
+            id              => 'legend',
+            type            => 'content',
+            name            => 'legend',
+            width           => undef,
+            base_width      => $legend_w,
+            spacing_before  => 0,
+            spacing_after   => 1,
+            visible         => 1,
+            color           => undef,
+            priority        => undef,
+            data_source     => 'log_occurrences',
         };
     }
 
     # Separator: legend | graph columns
     push @cols, {
-        id         => 'sep_legend_graph',
-        type       => 'separator',
-        name       => '│',
-        width      => undef,
-        base_width => 1,
-        spacing    => 0,
-        visible    => $show_legend,
-        color      => undef,
-        priority   => undef,
-        data_source => undef,
+        id              => 'sep_legend_graph',
+        type            => 'separator',
+        name            => '│',
+        width           => undef,
+        base_width      => 1,
+        spacing_before  => 0,
+        spacing_after   => 0,
+        visible         => $show_legend,
+        color           => undef,
+        priority        => undef,
+        data_source     => undef,
     };
 
     # Occurrences — proportional, focus column
+    # 1 before, 1 after
     push @cols, {
-        id         => 'occurrences',
-        type       => 'proportional',
-        name       => 'occurrences',
-        width      => undef,
-        base_width => undef,
-        spacing    => $padding{count} - 1,  # 1 (separator accounts for 1 char of original pad_count=2)
-        visible    => 1,
-        color      => undef,  # occurrences uses category colors, not a single color
-        priority   => 'focus',
-        data_source => 'log_occurrences',
+        id              => 'occurrences',
+        type            => 'proportional',
+        name            => 'occurrences',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 1,
+        color           => undef,
+        priority        => 'focus',
+        data_source     => 'log_occurrences',
     };
 
     # Duration — proportional, secondary
+    # 1 before, 1 after
     push @cols, {
-        id         => 'duration',
-        type       => 'proportional',
-        name       => 'duration',
-        width      => undef,
-        base_width => undef,
-        spacing    => $padding{all} + $padding{other},  # 2
-        visible    => 0,   # only visible when data exists
-        color      => $column_colors[0],  # yellow
-        priority   => 'secondary',
-        data_source => 'log_stats',
+        id              => 'duration',
+        type            => 'proportional',
+        name            => 'duration',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 0,
+        color           => $column_colors[0],  # yellow
+        priority        => 'secondary',
+        data_source     => 'log_stats',
     };
 
     # Bytes — proportional, secondary
+    # 1 before, 1 after
     push @cols, {
-        id         => 'bytes',
-        type       => 'proportional',
-        name       => 'bytes',
-        width      => undef,
-        base_width => undef,
-        spacing    => $padding{all} + $padding{other},  # 2
-        visible    => 0,
-        color      => $column_colors[1],  # green
-        priority   => 'secondary',
-        data_source => 'log_stats',
+        id              => 'bytes',
+        type            => 'proportional',
+        name            => 'bytes',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 0,
+        color           => $column_colors[1],  # green
+        priority        => 'secondary',
+        data_source     => 'log_stats',
     };
 
     # Count — proportional, secondary
+    # 1 before, 1 after
     push @cols, {
-        id         => 'count',
-        type       => 'proportional',
-        name       => 'count',
-        width      => undef,
-        base_width => undef,
-        spacing    => $padding{all} + $padding{other},  # 2
-        visible    => 0,
-        color      => $column_colors[2],  # cyan
-        priority   => 'secondary',
-        data_source => 'log_stats',
+        id              => 'count',
+        type            => 'proportional',
+        name            => 'count',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 0,
+        color           => $column_colors[2],  # cyan
+        priority        => 'secondary',
+        data_source     => 'log_stats',
     };
 
     # Separator: graph columns | latency
     if ($show_latency) {
         push @cols, {
-            id         => 'sep_graph_stats',
-            type       => 'separator',
-            name       => '│',
-            width      => undef,
-            base_width => 1,
-            spacing    => 0,
-            visible    => 1,
-            color      => undef,
-            priority   => undef,
-            data_source => undef,
+            id              => 'sep_graph_stats',
+            type            => 'separator',
+            name            => '│',
+            width           => undef,
+            base_width      => 1,
+            spacing_before  => 0,
+            spacing_after   => 0,
+            visible         => 1,
+            color           => undef,
+            priority        => undef,
+            data_source     => undef,
         };
     }
 
     # Latency statistics — fixed width
+    # 2 before, 0 after
     if ($show_latency) {
         push @cols, {
-            id         => 'latency',
-            type       => 'fixed',
-            name       => 'latency statistics',
-            width      => undef,
-            base_width => $latency_w,
-            spacing    => $padding{latency} - 1,  # 2 (separator accounts for 1 char; original was pad_latency=3 embedded in the gap-fill + │ + 2 spaces)
-            visible    => 1,
-            color      => undef,
-            priority   => undef,
-            data_source => 'log_stats',
+            id              => 'latency',
+            type            => 'fixed',
+            name            => 'latency statistics',
+            width           => undef,
+            base_width      => $latency_w,
+            spacing_before  => 2,
+            spacing_after   => 0,
+            visible         => 1,
+            color           => undef,
+            priority        => undef,
+            data_source     => 'log_stats',
         };
     }
 
     return @cols;
+}
+
+# Total spacing consumed by a column (before + after)
+sub col_spacing {
+    my ($col) = @_;
+    return ($col->{spacing_before} // 0) + ($col->{spacing_after} // 0);
 }
 
 # Add a dynamic column (threadpool or UDM) before the graph-stats separator
@@ -258,16 +271,17 @@ sub add_dynamic_column {
     }
 
     my $new_col = {
-        id         => $id,
-        type       => 'proportional',
-        name       => $name,
-        width      => undef,
-        base_width => undef,
-        spacing    => $padding{all} + $padding{other},  # 2
-        visible    => 1,
-        color      => $color,
-        priority   => 'secondary',
-        data_source => 'log_stats',
+        id              => $id,
+        type            => 'proportional',
+        name            => $name,
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 1,
+        color           => $color,
+        priority        => 'secondary',
+        data_source     => 'log_stats',
     };
 
     splice @$columns_ref, $insert_idx, 0, $new_col;
@@ -361,7 +375,7 @@ sub calculate_layout {
     # Step 5: Deduct all spacing
     my $spacing_total = 0;
     for my $col (@visible) {
-        $spacing_total += $col->{spacing};
+        $spacing_total += col_spacing($col);
     }
 
     # Step 6: Calculate remaining width for proportional columns
@@ -412,7 +426,7 @@ sub calculate_layout {
 
     # Calculate total used
     for my $col (@visible) {
-        $summary{total_used} += ($col->{width} // 0) + $col->{spacing};
+        $summary{total_used} += ($col->{width} // 0) + col_spacing($col);
     }
 
     return %summary;
@@ -483,18 +497,24 @@ sub cumulative_round_widths {
 # SECTION 6: RENDERING / MOCKUP OUTPUT
 # ============================================================================
 
-# Middle dot (·) for padding/spacing visualization — no ANSI, just a visible
-# character distinct from space and content
-sub pad_chars {
+# Distinct characters for before/after spacing visualization
+# ‹ for spacing_before, › for spacing_after
+sub pad_before {
     my ($n) = @_;
     return '' if $n <= 0;
-    return '·' x $n;
+    return '‹' x $n;
+}
+
+sub pad_after {
+    my ($n) = @_;
+    return '' if $n <= 0;
+    return '›' x $n;
 }
 
 # Synthetic data for simulated data rows
 my @sim_rows = (
     {
-        timestamp  => '14:30:00',
+        timestamp  => '2026-02-09 14:30',
         legend     => 'INFO: 245 WARN: 42 ERROR: 3 ',
         rates      => '12:892/m ',
         occ_fill   => 0.85,   # fraction of column width to fill with blocks
@@ -504,7 +524,7 @@ my @sim_rows = (
         latency    => 'P50:120ms  P95:890ms  P99:2.1s   P999:4.5s  CV:  42',
     },
     {
-        timestamp  => '14:35:00',
+        timestamp  => '2026-02-09 14:35',
         legend     => 'INFO: 180 WARN: 8 ',
         rates      => '3:564/m ',
         occ_fill   => 0.55,
@@ -514,7 +534,7 @@ my @sim_rows = (
         latency    => 'P50:85ms   P95:340ms  P99:1.2s   P999:2.8s  CV:  28',
     },
     {
-        timestamp  => '14:40:00',
+        timestamp  => '2026-02-09 14:40',
         legend     => 'INFO: 310 WARN: 95 ERROR: 18 ',
         rates      => '45:1.2k/m ',
         occ_fill   => 1.00,
@@ -585,25 +605,26 @@ sub render_data_rows {
         my $line = '';
         for my $col (@$visible_ref) {
             my $w   = $col->{width};
-            my $sp  = $col->{spacing};
             my $id  = $col->{id};
+            my $sp_before = $col->{spacing_before} // 0;
+            my $sp_after  = $col->{spacing_after}  // 0;
 
             if ($col->{type} eq 'separator') {
                 $line .= '│';
                 next;
             }
 
-            # Spacing before column content (green ○)
-            $line .= pad_chars($sp);
+            # Spacing before column content
+            $line .= pad_before($sp_before);
 
             if ($id eq 'timestamp') {
                 $line .= render_cell($row->{timestamp}, $w);
             } elsif ($id eq 'legend') {
-                # Combine counts and rates, right-pad to legend width
+                # Combine counts and rates with 2-space internal gap, right-pad to legend width
                 my $counts = $row->{legend} // '';
                 my $rates  = $row->{rates}  // '';
                 my $legend_content = $counts;
-                # Pad counts to fill legend width minus rates length
+                # Pad counts to fill legend width minus rates length, with 2-space gap
                 my $counts_space = $w - length($rates);
                 if ($counts_space > length($counts)) {
                     $legend_content = $counts . ' ' x ($counts_space - length($counts)) . $rates;
@@ -622,6 +643,9 @@ sub render_data_rows {
                 # Unknown or no data — empty fill
                 $line .= ' ' x $w;
             }
+
+            # Spacing after column content
+            $line .= pad_after($sp_after);
         }
         print "$line\n";
     }
@@ -646,8 +670,9 @@ sub render_layout_mockup {
     my $bot  = '';
 
     for my $col (@visible) {
-        my $w  = $col->{width};
-        my $sp = $col->{spacing};
+        my $w         = $col->{width};
+        my $sp_before = $col->{spacing_before} // 0;
+        my $sp_after  = $col->{spacing_after}  // 0;
 
         if ($col->{type} eq 'separator') {
             $rule .= '┼';
@@ -656,10 +681,10 @@ sub render_layout_mockup {
             next;
         }
 
-        # Spacing before column content (green ○)
-        $rule .= pad_chars($sp);
-        $mid  .= pad_chars($sp);
-        $bot  .= pad_chars($sp);
+        # Spacing before column content
+        $rule .= pad_before($sp_before);
+        $mid  .= pad_before($sp_before);
+        $bot  .= pad_before($sp_before);
 
         # Build column content
         my $header = $col->{name};
@@ -688,6 +713,11 @@ sub render_layout_mockup {
         $rule .= '─' x $w;
         $mid  .= ' ' x $h_pad_l . $h_text . ' ' x $h_pad_r;
         $bot  .= ' ' x $t_pad_l . $t_text . ' ' x $t_pad_r;
+
+        # Spacing after column content
+        $rule .= pad_after($sp_after);
+        $mid  .= pad_after($sp_after);
+        $bot  .= pad_after($sp_after);
     }
 
     print "$rule\n";
@@ -701,16 +731,17 @@ sub render_layout_mockup {
     print "$rule\n";
 
     # Print column detail table
-    printf "  %-20s %-14s %6s %7s %6s\n", "Column", "Type", "Width", "Spacing", "Total";
-    printf "  %-20s %-14s %6s %7s %6s\n", '-' x 20, '-' x 14, '-' x 6, '-' x 7, '-' x 6;
+    printf "  %-20s %-14s %6s %4s %5s %6s\n", "Column", "Type", "Width", "Bef", "Aft", "Total";
+    printf "  %-20s %-14s %6s %4s %5s %6s\n", '-' x 20, '-' x 14, '-' x 6, '-' x 4, '-' x 5, '-' x 6;
     my $running_total = 0;
     for my $col (@visible) {
-        my $total = ($col->{width} // 0) + $col->{spacing};
+        my $total = ($col->{width} // 0) + col_spacing($col);
         $running_total += $total;
-        printf "  %-20s %-14s %6d %7d %6d\n",
-            $col->{id}, $col->{type}, $col->{width} // 0, $col->{spacing}, $total;
+        printf "  %-20s %-14s %6d %4d %5d %6d\n",
+            $col->{id}, $col->{type}, $col->{width} // 0,
+            $col->{spacing_before} // 0, $col->{spacing_after} // 0, $total;
     }
-    printf "  %-20s %-14s %6s %7s %6d\n", '', '', '', 'TOTAL:', $running_total;
+    printf "  %-20s %-14s %6s %4s %5s %6d\n", '', '', '', '', 'TOTAL:', $running_total;
     print "\n";
 }
 
@@ -739,7 +770,7 @@ sub validate_layout {
     # Check 1: Total width equals terminal width
     my $total = 0;
     for my $col (@visible) {
-        $total += ($col->{width} // 0) + $col->{spacing};
+        $total += ($col->{width} // 0) + col_spacing($col);
     }
     assert_ok(
         "${test_prefix}Total width == terminal width",
@@ -879,8 +910,27 @@ sub output_width_sweep {
         }
 
         my %summary = calculate_layout(\@cols, $w);
-        render_layout_mockup(\@cols, $w, "--- Width Sweep: $w chars ---");
+        render_layout_mockup(\@cols, $w, "--- Width Sweep: $w chars (with latency) ---");
         validate_layout(\@cols, $w, "Width=$w: ");
+    }
+
+    # Second pass: duration + bytes visible, NO latency
+    # This gives much more space to proportional columns
+    print "\n  -- No latency stats: duration + bytes share all remaining space --\n";
+
+    for my $w (@widths) {
+        my $show_duration = ($w >= 100) ? 1 : 0;
+        my $show_bytes = ($w >= 120) ? 1 : 0;
+
+        my @cols = build_default_columns(show_latency => 0);
+        for my $col (@cols) {
+            $col->{visible} = 1 if $col->{id} eq 'duration' && $show_duration;
+            $col->{visible} = 1 if $col->{id} eq 'bytes' && $show_bytes;
+        }
+
+        my %summary = calculate_layout(\@cols, $w);
+        render_layout_mockup(\@cols, $w, "--- Width Sweep: $w chars (no latency) ---");
+        validate_layout(\@cols, $w, "Width=${w}-nolat: ");
     }
 }
 
@@ -1003,6 +1053,17 @@ sub output_visibility_demo {
         render_layout_mockup(\@cols, $w, "--- Full metrics, no legend ---");
         validate_layout(\@cols, $w, "Vis-full-no-legend: ");
     }
+
+    # Scenario 6: Duration + bytes visible, no latency
+    {
+        my @cols = build_default_columns(show_latency => 0);
+        for my $col (@cols) {
+            $col->{visible} = 1 if $col->{id} =~ /^(duration|bytes)$/;
+        }
+        my %summary = calculate_layout(\@cols, $w);
+        render_layout_mockup(\@cols, $w, "--- Duration + bytes, no latency (proportionals get all remaining space) ---");
+        validate_layout(\@cols, $w, "Vis-dur-bytes-nolat: ");
+    }
 }
 
 # ============================================================================
@@ -1028,10 +1089,11 @@ sub output_sequencing_demo {
     my %summary = calculate_layout(\@cols, $w);
 
     # Show the calculated widths
-    printf "  %-20s %6s %6s\n", "Column", "Width", "Spacing";
-    printf "  %-20s %6s %6s\n", '-' x 20, '-' x 6, '-' x 6;
+    printf "  %-20s %6s %4s %5s\n", "Column", "Width", "Bef", "Aft";
+    printf "  %-20s %6s %4s %5s\n", '-' x 20, '-' x 6, '-' x 4, '-' x 5;
     for my $col (grep { $_->{visible} } @cols) {
-        printf "  %-20s %6d %6d\n", $col->{id}, $col->{width} // 0, $col->{spacing};
+        printf "  %-20s %6d %4d %5d\n", $col->{id}, $col->{width} // 0,
+            $col->{spacing_before} // 0, $col->{spacing_after} // 0;
     }
 
     # Step 2: Simulate scaling using calculated widths
@@ -1063,27 +1125,10 @@ sub output_separator_validation {
 
     my $w = 160;
 
-    # Current approach budget (from ltl)
-    # timestamp: width + pad_timestamp + pad_all = 17 + 1 + 1 = 19
-    # legend: width + pad_legend = 30 + 0 = 30
-    # occurrences: width + pad_count + pad_all = W + 2 + 1 = W+3
-    #   (pad_count includes the │ char)
-    # duration: width + pad_other + pad_all = W + 1 + 1 = W+2
-    # latency: width + pad_latency + pad_all = 52 + 3 + 1 = 56
-    #   (gap-fill + │ + 2 spaces is how pad_latency works)
-
-    # Our approach budget:
-    # timestamp: width + spacing(2) = 17 + 2 = 19
-    # legend: width + spacing(0) = 30 + 0 = 30
-    # sep_legend_graph: width(1) + spacing(0) = 1
-    # occurrences: width + spacing(1) = W + 1  (sep accounts for 1 of pad_count)
-    # duration: width + spacing(2) = W + 2
-    # sep_graph_stats: width(1) + spacing(0) = 1
-    # latency: width + spacing(2) = 52 + 2 = 54  (sep accounts for 1 of pad_latency)
-
-    # Total separators (ours): 1 + 1 = 2 chars
-    # Total separators (current): embedded in pad_count(1st char) + pad_latency(│ char)
-    # Net: identical
+    # Our model: each column has explicit width + spacing_before + spacing_after
+    # Separators are distinct 1-char columns with 0 spacing
+    # This should produce the same total character budget as the current ltl code
+    # where separators are embedded in adjacent column padding
 
     my @cols = build_default_columns();
     for my $col (@cols) {
@@ -1091,41 +1136,18 @@ sub output_separator_validation {
     }
     my %summary = calculate_layout(\@cols, $w);
 
-    printf "  %-25s %-20s %-20s\n", "Component", "Our Model", "Current Model";
-    printf "  %-25s %-20s %-20s\n", '-' x 25, '-' x 20, '-' x 20;
+    printf "  %-20s %6s %4s %5s %6s\n", "Column", "Width", "Bef", "Aft", "Total";
+    printf "  %-20s %6s %4s %5s %6s\n", '-' x 20, '-' x 6, '-' x 4, '-' x 5, '-' x 6;
 
-    # Get widths from our model
-    my %our_widths;
+    my $running = 0;
     for my $col (grep { $_->{visible} } @cols) {
-        $our_widths{$col->{id}} = { width => $col->{width}, spacing => $col->{spacing} };
+        my $total = ($col->{width} // 0) + col_spacing($col);
+        $running += $total;
+        printf "  %-20s %6d %4d %5d %6d\n",
+            $col->{id}, $col->{width} // 0,
+            $col->{spacing_before} // 0, $col->{spacing_after} // 0, $total;
     }
-
-    my $occ_w = $our_widths{occurrences}{width};
-
-    printf "  %-25s %-20s %-20s\n", "timestamp",
-        sprintf("%d + %d = %d", $our_widths{timestamp}{width}, $our_widths{timestamp}{spacing}, $our_widths{timestamp}{width} + $our_widths{timestamp}{spacing}),
-        sprintf("%d + %d = %d", $sim_timestamp_width, $padding{timestamp} + $padding{all}, $sim_timestamp_width + $padding{timestamp} + $padding{all});
-    printf "  %-25s %-20s %-20s\n", "legend",
-        sprintf("%d + %d = %d", $our_widths{legend}{width}, $our_widths{legend}{spacing}, $our_widths{legend}{width} + $our_widths{legend}{spacing}),
-        sprintf("%d + %d = %d", $sim_legend_width, $padding{legend}, $sim_legend_width + $padding{legend});
-    printf "  %-25s %-20s %-20s\n", "sep_legend_graph",
-        sprintf("%d + %d = %d", $our_widths{sep_legend_graph}{width}, $our_widths{sep_legend_graph}{spacing}, 1),
-        "(embedded in pad_count)";
-    printf "  %-25s %-20s %-20s\n", "occurrences",
-        sprintf("%d + %d = %d", $occ_w, $our_widths{occurrences}{spacing}, $occ_w + $our_widths{occurrences}{spacing}),
-        sprintf("W + %d = W+%d", $padding{count} + $padding{all}, $padding{count} + $padding{all});
-    if ($our_widths{duration}) {
-        my $dur_w = $our_widths{duration}{width};
-        printf "  %-25s %-20s %-20s\n", "duration",
-            sprintf("%d + %d = %d", $dur_w, $our_widths{duration}{spacing}, $dur_w + $our_widths{duration}{spacing}),
-            sprintf("W + %d = W+%d", $padding{other} + $padding{all}, $padding{other} + $padding{all});
-    }
-    printf "  %-25s %-20s %-20s\n", "sep_graph_stats",
-        sprintf("%d + %d = %d", $our_widths{sep_graph_stats}{width}, $our_widths{sep_graph_stats}{spacing}, 1),
-        "(embedded in gap-fill)";
-    printf "  %-25s %-20s %-20s\n", "latency",
-        sprintf("%d + %d = %d", $our_widths{latency}{width}, $our_widths{latency}{spacing}, $our_widths{latency}{width} + $our_widths{latency}{spacing}),
-        sprintf("%d + %d = %d", $sim_latency_width, $padding{latency} + $padding{all}, $sim_latency_width + $padding{latency} + $padding{all});
+    printf "  %-20s %6s %4s %5s %6d\n", '', '', '', 'TOTAL:', $running;
 
     printf "\n  Total (our model):     %d\n", $summary{total_used};
     printf "  Terminal width:        %d\n", $w;

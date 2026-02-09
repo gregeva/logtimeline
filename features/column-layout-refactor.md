@@ -80,10 +80,10 @@ Width is a share of the remaining terminal space after fixed and content-driven 
 ### Separator
 A fixed-width (1 character) vertical line (`│`) that visually divides column groups. Modeled as a distinct layout element, not as padding on adjacent columns.
 
-### Compound Column
-A logical grouping of sub-columns that share a single spanning header. The sub-columns are individually sized but the header covers the full group width.
+### ~~Compound Column~~ (Removed)
+~~A logical grouping of sub-columns that share a single spanning header.~~
 
-- **Legend** is a compound column containing: counts sub-column + conditional spacing sub-column + rates sub-column, with "legend" as the spanning header.
+**Decision (2026-02-09):** The compound sub-column model for legend was dropped during prototyping. The legend column works well precisely because the boundary between category counts and message rates floats per row. A rigid sub-column model would force fixed widths for counts and rates independently, making legend wider than necessary — the worst-case counts width plus worst-case rates width rarely occur on the same row. Legend remains a single content-driven column with a floating internal boundary.
 
 ## Layout Engine Requirements
 
@@ -159,23 +159,21 @@ Colors are assigned by position in parallel arrays (line 3439–3448):
 
 ## Legend Column Requirements
 
-The legend column is the most complex column because it contains heterogeneous sub-content:
-
-### Sub-Column Decomposition
-Model the legend as three sub-columns within a compound column:
-
-1. **Counts sub-column**: Category labels and occurrence counts (e.g., `WARN: 42 ERROR: 15`). Width = maximum counts text width across all buckets.
-2. **Spacing sub-column**: A single space separating counts from rates. Only visible when both counts and rates are visible.
-3. **Rates sub-column**: Error rate and message rate (e.g., `23: 145/m`). Width = maximum rates text width across all buckets.
+The legend column contains heterogeneous sub-content (category counts and message rates) but is modeled as a **single content-driven column** with a floating internal boundary.
 
 ### Width Calculation
-- Calculate max counts width and max rates width **independently** by scanning bucket data.
-- Total legend width = counts width + spacing (if applicable) + rates width.
-- This replaces the current single-pass `$legend_length` calculation that intermixes both.
+- Legend width = maximum total legend text width across all time buckets (counts + internal spacing + rates combined).
+- This preserves the current `$legend_length` calculation where the boundary between counts and rates floats per row, keeping overall legend width as compact as possible.
+
+### Internal Layout (per row)
+- Category counts are rendered left-aligned within the legend width.
+- Message rates are rendered right-aligned within the legend width.
+- A 2-character gap separates them, but this gap floats — it is not a fixed sub-column boundary.
+- One row may have long counts and short rates; another may have short counts and long rates. Both fit within the same total width.
 
 ### Visibility
 - Counts and rates each respect their own omit flags (`-ov`, `-or`).
-- The spacing sub-column is automatically hidden when either counts or rates is hidden.
+- When one is hidden, the other expands to fill the legend width.
 
 ## Rendering Requirements
 
@@ -385,13 +383,22 @@ This confirms the first-class visibility model works as designed.
 
 The `add_dynamic_column()` pattern (insert before `sep_graph_stats`) works cleanly for threadpool and UDM columns. New columns inherit the standard secondary spacing and get colors from the palette by index. No changes to the layout engine are needed — the engine is column-count agnostic.
 
-### Key Decision: Spacing Model
+### Key Decision: Spacing Model (Before/After)
 
-Spacing is a property of each column (chars *before* this column), not between columns. This means:
-- `timestamp.spacing = 2` (pad_all + pad_timestamp)
-- `legend.spacing = 0`
-- `occurrences.spacing = 1` (pad_count minus the separator)
-- `duration/bytes/count.spacing = 2` (pad_all + pad_other)
-- `latency.spacing = 2` (pad_latency minus the separator)
+Each column carries explicit `spacing_before` and `spacing_after` values rather than a single combined spacing. This makes spacing ownership unambiguous — each column fully owns the padding on both sides:
 
-This matches the current rendering where spacing is printed before each column's content.
+| Column | Before | After |
+|--------|--------|-------|
+| timestamp | 0 | 1 |
+| legend | 0 | 1 |
+| sep_legend_graph | 0 | 0 |
+| occurrences | 1 | 1 |
+| duration/bytes/count | 1 | 1 |
+| sep_graph_stats | 0 | 0 |
+| latency | 2 | 0 |
+
+The prototype uses `‹` for before-spacing and `›` for after-spacing to make ownership visually unambiguous in mockup output.
+
+### Key Decision: Legend as Single Content-Driven Column
+
+The compound sub-column model for legend (counts + spacing + rates as separate sub-columns) was dropped. The legend works well because the boundary between counts and rates floats per row — one row may have long counts with short rates, the next the reverse. A rigid sub-column split would force worst-case widths for both, making the legend wider than necessary. Legend remains `type => 'content'` with a single width calculated from max total legend length.
