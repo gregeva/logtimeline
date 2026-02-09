@@ -218,6 +218,38 @@ Two data structure inconsistencies create friction but are outside the scope of 
 
 2. **Occurrences scaling anomaly** — Most metrics have their scaling calculated and stored as `scaled_*` keys in `%log_stats` during `normalize_data_for_output()`. Occurrences scaling happens separately, stored in `%log_occurrences{$bucket}{$category}{scaled_occurrences}`. There is no centralized scaling phase.
 
+## Architectural Principle: Data Model vs UI Rendering Separation
+
+### Current Design
+
+ltl is designed to minimize resource usage by only capturing and storing what is needed to render the requested output. Command-line options like `-o` (CSV output) expand what gets captured — if the user asks for CSV statistics, more data is calculated during processing. This keeps the tool fast and memory-efficient for large log files.
+
+The consequence is that data capture and UI rendering are tightly coupled today. If a column won't be rendered, the data behind it isn't captured. The decision about what to compute is made at the start based on command-line options, and the rendering code assumes that everything in the data model should be displayed.
+
+### The Problem This Creates
+
+When the terminal is narrow, proportional columns can be squished to the point where they're unreadable — a 3-character-wide duration bar shows no useful detail. Today the user must manually choose which metrics to request. The layout engine has no ability to say "this column exists in the data but shouldn't be rendered because there isn't enough space to show it meaningfully."
+
+### Required Separation
+
+The column layout refactor should introduce a clear separation between two concerns:
+
+1. **Data availability** — What metrics exist in the data model, driven by the log content and command-line options that control data capture (`-du`, `-bu`, etc.). This determines which columns *could* be shown.
+
+2. **UI rendering** — What columns are actually rendered, driven by terminal width, column visibility toggles, and minimum useful width thresholds. This determines which columns *are* shown.
+
+The column definition's `visible` flag is the mechanism for this separation. A column can exist in the layout definition (because its data was captured) but have `visible = 0` (because the UI decided not to render it). The layout engine redistributes the space from hidden columns to visible ones.
+
+### Automatic Visibility
+
+With this separation in place, the layout engine can automatically hide low-priority columns when rendering them would produce unreadable output. For example:
+
+- If a proportional secondary column would receive fewer than N characters, hide it and redistribute its space to the remaining columns.
+- The focus column (occurrences) should be the last proportional column to be hidden.
+- Fixed columns like latency could also be auto-hidden if the remaining space for proportional columns falls below a threshold.
+
+This is the same mechanism as the user toggling visibility, but driven by the layout engine based on space constraints. The data remains in the model — CSV output, summary tables, and other non-visual outputs are unaffected.
+
 ## Identified Problem Areas
 
 The following data structure and rendering problems were identified during investigation. They are related to the column layout refactor and should be considered during design and prototyping. Each represents a friction point that the layout engine will need to accommodate or that may warrant its own refactoring effort as part of the broader output coherence work.
@@ -382,6 +414,17 @@ This confirms the first-class visibility model works as designed.
 ### Dynamic Column Insertion
 
 The `add_dynamic_column()` pattern (insert before `sep_graph_stats`) works cleanly for threadpool and UDM columns. New columns inherit the standard secondary spacing and get colors from the palette by index. No changes to the layout engine are needed — the engine is column-count agnostic.
+
+### Separator Adjacency Rule
+
+A separator column is only visible when it has a visible non-separator column on **both** sides. The adjacency check scans outward in each direction, skipping other separators, until it finds a visible non-separator column or reaches the edge.
+
+Examples:
+- **Legend hidden, latency visible**: `sep_legend_graph` still has timestamp (left) and occurrences (right), so it stays visible. `sep_graph_stats` has the last proportional column (left) and latency (right), so it stays visible.
+- **Latency hidden**: `sep_graph_stats` has no visible column to its right, so it auto-hides. The last proportional column's `spacing_after` becomes the end of the line.
+- **Both legend and timestamp hidden** (hypothetical): `sep_legend_graph` has no visible column to its left, so it auto-hides.
+
+This rule ensures separators never appear at the edges of the output or adjacent to empty space where a column group has been entirely hidden.
 
 ### Key Decision: Spacing Model (Before/After)
 
