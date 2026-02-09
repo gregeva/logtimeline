@@ -90,6 +90,7 @@ my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_
 my @column_layout;
 my ($focus_base, $focus_step, $focus_min) = (70, 10, 25);
 my $debug_layout = 0;
+my $validate_layout = 0;
 my @column_colors = (
     { name => 'yellow',  highlighted_bg => "\033[48;5;226m\033[38;5;0m", plain_bg => "\033[48;5;184m\033[38;5;0m", fg => "\033[0m\033[93m" },
     { name => 'green',   highlighted_bg => "\033[48;5;46m\033[38;5;0m",  plain_bg => "\033[48;5;34m\033[38;5;0m",  fg => "\033[0m\033[32m" },
@@ -1400,6 +1401,7 @@ sub adapt_to_command_line_options {
         'hgb=i' => \$histogram_bucket_override,
         'terminal-width|tw=i' => \$terminal_width,
         'debug-layout' => \$debug_layout,
+        'validate-layout' => \$validate_layout,
         'help' => \$show_help
     ) or die print_usage( "required options not provided" );
 
@@ -3559,6 +3561,21 @@ sub normalize_data_for_output {
             printf STDERR "  %-20s %-14s %6s %4s %5s %3s  = %d (terminal: %d)\n",
                 '', '', '', '', 'TOTAL', '', $total, $terminal_width;
             print STDERR "---\n";
+        }
+
+        if ($validate_layout) {
+            my $total = 0;
+            my @errors;
+            for my $col (grep { $_->{visible} } @column_layout) {
+                my $w = $col->{width} // 0;
+                $total += $w + ($col->{spacing_before}//0) + ($col->{spacing_after}//0);
+                push @errors, "zero-width visible column: $col->{id}" if $w == 0 && $col->{type} ne 'separator';
+            }
+            push @errors, "total width $total != terminal width $terminal_width" if $total != $terminal_width;
+            if (@errors) {
+                print STDERR "LAYOUT VALIDATION FAILED:\n";
+                print STDERR "  - $_\n" for @errors;
+            }
         }
     }
 
