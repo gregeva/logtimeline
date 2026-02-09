@@ -385,17 +385,19 @@ The `add_dynamic_column()` pattern (insert before `sep_graph_stats`) works clean
 
 ### Key Decision: Spacing Model (Before/After)
 
-Each column carries explicit `spacing_before` and `spacing_after` values rather than a single combined spacing. This makes spacing ownership unambiguous — each column fully owns the padding on both sides:
+Each column carries explicit `spacing_before` and `spacing_after` values rather than a single combined spacing. Spacing is anchored on separators and non-optional elements to avoid double-spacing when optional columns are hidden.
 
-| Column | Before | After |
-|--------|--------|-------|
-| timestamp | 0 | 1 |
-| legend | 0 | 1 |
-| sep_legend_graph | 0 | 0 |
-| occurrences | 1 | 1 |
-| duration/bytes/count | 1 | 1 |
-| sep_graph_stats | 0 | 0 |
-| latency | 2 | 0 |
+| Column | Before | After | Rationale |
+|--------|--------|-------|-----------|
+| timestamp | 0 | 0 | First column, no padding needed |
+| legend | 1 | 0 | Space from timestamp; separator handles the other side |
+| sep_legend_graph | 1 | 1 | Anchors spacing — always-present element between groups |
+| occurrences | 0 | 1 | Separator's after handles the left side |
+| duration/bytes/count | 1 | 1 | Standard inter-column spacing |
+| sep_graph_stats | 0 | 0 | Latency's before handles both spaces |
+| latency | 2 | 0 | Last column, no trailing padding |
+
+**Key insight:** When legend is hidden, `timestamp(0/0)` + `sep(1/1)` + `occurrences(0/1)` gives exactly 1 space on each side of the separator. When legend is visible, `timestamp(0/0)` + `legend(1/0)` + `sep(1/1)` + `occurrences(0/1)` gives 1 space between timestamp and legend, then 1 space between legend and separator, then 1 space between separator and occurrences. No double-spacing in either case.
 
 The prototype uses `‹` for before-spacing and `›` for after-spacing to make ownership visually unambiguous in mockup output.
 
