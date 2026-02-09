@@ -402,3 +402,31 @@ The prototype uses `‹` for before-spacing and `›` for after-spacing to make 
 ### Key Decision: Legend as Single Content-Driven Column
 
 The compound sub-column model for legend (counts + spacing + rates as separate sub-columns) was dropped. The legend works well because the boundary between counts and rates floats per row — one row may have long counts with short rates, the next the reverse. A rigid sub-column split would force worst-case widths for both, making the legend wider than necessary. Legend remains `type => 'content'` with a single width calculated from max total legend length.
+
+### Integration Lesson: Content Trailing Spaces vs Layout Spacing
+
+In the current ltl code, content strings for legend counts and rates include trailing spaces — e.g., `"WARN: 42 "` and `"12:892/m "`. These trailing spaces currently serve as inter-column padding because the old layout system doesn't have explicit column spacing.
+
+In the new layout engine, spacing between columns is handled by `spacing_before` and `spacing_after` on each column definition. **Content strings must have trailing padding truncated before rendering into their column.** If not truncated, the trailing content spaces and the layout engine's spacing would double-count, pushing subsequent columns out of alignment.
+
+The inter-category spaces within counts (e.g., the space between `"WARN: 42"` and `"ERROR: 3"`) are content separators and must be preserved — only the final trailing space needs stripping. During integration, the code that builds legend content strings will need to either: (a) stop appending trailing spaces, or (b) `rstrip` the final string before passing it to the layout engine.
+
+### Integration Constraint: Legend Width Must Be Calculated Before Table Layout
+
+The layout engine needs the legend column width to calculate the table, and the table must be calculated before `normalize_data_for_output` scales data to fit proportional columns. However, the legend width determination currently lives *inside* `normalize_data_for_output` (ltl:3133-3192), interleaved with the same loop that builds `$legend_length` as a running max across all time buckets.
+
+**Current ordering in ltl:**
+1. `read_and_process_logs()` — captures raw data
+2. `calculate_all_statistics()` — computes stats
+3. `normalize_data_for_output()` — determines `$legend_length` AND scales data to column widths
+
+**Required ordering for the new layout engine:**
+1. `read_and_process_logs()` — captures raw data
+2. `calculate_all_statistics()` — computes stats
+3. **Determine legend width** — scan all buckets for max `(counts + 2 + rates)` length
+4. **Calculate table layout** — needs legend width, produces proportional column widths
+5. **Scale data** — uses proportional column widths from step 4
+
+The legend width calculation (step 3) must be extracted from `normalize_data_for_output` and run before the table layout. This is a code restructuring requirement — the current function does both steps 3 and 5 in a single pass.
+
+**Performance consideration:** Rather than adding a separate pass over all buckets, the legend width could be calculated incrementally during `read_and_process_logs` as data is captured. Each time a bucket's categories or rates change, update a running max. This would avoid the extra iteration at the cost of maintaining the running max during data capture. The prototype demonstrates this by calculating legend width from sample data before passing it to `build_default_columns`.
