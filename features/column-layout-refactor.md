@@ -1,7 +1,7 @@
 # Column Layout Refactor — Requirements
 
 **GitHub Issue:** #33
-**Status:** Design Complete — Ready for Implementation Planning
+**Status:** Implementation Complete (2026-02-09)
 **Blocks:** #26 (session metric column)
 **Fixes:** #27 (array mismatch bug)
 
@@ -553,3 +553,37 @@ The following findings emerged from hands-on prototyping and testing. Each is no
 9. **Content trailing spaces conflict with layout spacing** — Must be stripped during integration. See [Content Trailing Space Handling](#content-trailing-space-handling).
 10. **Legend width calculation must precede table layout** — Requires extracting from `normalize_data_for_output`. See [Integration Plan](#integration-plan).
 11. **Separator rendering must include spacing** — The prototype initially skipped `pad_before`/`pad_after` around separator characters, causing missing spaces. Fixed in both mockup header and data row rendering paths.
+
+## Implementation Summary
+
+Completed 2026-02-09 across 8 commits on branch `33-column-layout-refactor`.
+
+### What Changed
+
+**New code:**
+- `@column_layout` global — single source of truth array-of-hashes
+- `@column_colors` global — ANSI color definitions (yellow/green/cyan/blue/magenta)
+- `build_column_layout()` — builds column definitions from current state
+- `add_dynamic_column()` — inserts proportional columns before `sep_graph_stats`
+- `resolve_separator_visibility()` — adjacency rule
+- `distribute_proportional()` — linear decay algorithm
+- `calculate_table_layout()` — 8-step width allocation pipeline
+- `--terminal-width`, `--debug-layout`, `--validate-layout` hidden CLI options
+
+**Removed:**
+- `%graph_width`, `$graph_count`, `$graph_count_max`, `$max_graph_width`
+- `$column_count_pre_graph`
+- `$graph_column_padding_all`, `$graph_column_padding_timestamp`, `$graph_column_padding_legend`, `$graph_column_padding_count`, `$graph_column_padding_other`, `$graph_column_padding_latency`
+- `@printed_column_widths`, `@printed_column_spacing`, `@printed_column_names` (bridge arrays)
+- `$printed_chars` tracking (~15 increments per row)
+- Hardcoded color if/elsif dispatch on `$column_number`
+
+**Spacing adjustments from design:**
+- `sep_legend_graph`: `spacing_before` changed from 1 to 0 (old rendering had no space before `│`)
+- Latency and heatmap split into separate column definitions (`spacing_before=2` vs `spacing_before=1`)
+- `print_heatmap_row()` no longer prints its own `│` or trailing space — handled by column layout
+
+### Remaining Follow-On Work
+- Auto-hide columns at narrow widths (detected by `--validate-layout`)
+- Consolidate duplicate color arrays at line ~3698 with `@column_colors` (see #64)
+- Heatmap header name slightly truncated at max axis label — header rendering could be improved to account for column spacing in name sizing
