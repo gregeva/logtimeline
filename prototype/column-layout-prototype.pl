@@ -68,7 +68,7 @@ my $alt_decay_rate  = 0.75;  # Each additional column multiplies remaining by th
 
 # Simulated fixed widths for prototype
 my $sim_timestamp_width = 16;    # "2026-02-09 14:30" = 16 chars
-my $sim_legend_width    = 30;    # Typical legend content width
+my $sim_legend_width;           # Calculated from sample data (see below)
 my $sim_latency_width   = 52;    # Fixed: P50(11) + P95(11) + P99(11) + P999(11) + CV(7) = 52
 
 # Color definitions for column types (data only, no ANSI rendering)
@@ -515,8 +515,8 @@ sub pad_after {
 my @sim_rows = (
     {
         timestamp  => '2026-02-09 14:30',
-        legend     => 'INFO: 245 WARN: 42 ERROR: 3 ',
-        rates      => '12:892/m ',
+        legend     => 'INFO: 245 WARN: 42 ERROR: 3',
+        rates      => '12:892/m',
         occ_fill   => 0.85,   # fraction of column width to fill with blocks
         duration   => { fill => 0.60, label => ' 4.2 sec' },
         bytes      => { fill => 0.35, label => ' 1.2 MB' },
@@ -525,8 +525,8 @@ my @sim_rows = (
     },
     {
         timestamp  => '2026-02-09 14:35',
-        legend     => 'INFO: 180 WARN: 8 ',
-        rates      => '3:564/m ',
+        legend     => 'INFO: 180 WARN: 8',
+        rates      => '3:564/m',
         occ_fill   => 0.55,
         duration   => { fill => 0.30, label => ' 1.8 sec' },
         bytes      => { fill => 0.70, label => ' 3.8 MB' },
@@ -535,8 +535,8 @@ my @sim_rows = (
     },
     {
         timestamp  => '2026-02-09 14:40',
-        legend     => 'INFO: 310 WARN: 95 ERROR: 18 ',
-        rates      => '45:1.2k/m ',
+        legend     => 'INFO: 310 WARN: 95 ERROR: 18',
+        rates      => '45:1.2k/m',
         occ_fill   => 1.00,
         duration   => { fill => 0.90, label => ' 12.4 sec' },
         bytes      => { fill => 0.15, label => ' 420 KB' },
@@ -544,6 +544,18 @@ my @sim_rows = (
         latency    => 'P50:450ms  P95:3.2s   P99:8.7s   P999:12s   CV: 118',
     },
 );
+
+# Calculate legend width from sample data — mirrors how ltl determines $legend_length
+# In ltl, this is currently done inside normalize_data_for_output (line 3192):
+#   $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
+# The layout engine needs this BEFORE scaling, creating an ordering constraint (see feature doc).
+$sim_legend_width = 0;
+for my $row (@sim_rows) {
+    my $counts = $row->{legend} // '';
+    my $rates  = $row->{rates}  // '';
+    my $row_legend_len = length($counts) + 2 + length($rates);  # counts + 2-space gap + rates
+    $sim_legend_width = $row_legend_len if $row_legend_len > $sim_legend_width;
+}
 
 # Render a cell's content padded/truncated to exact width
 sub render_cell {
