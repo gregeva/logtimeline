@@ -85,12 +85,7 @@ my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stat
 my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
 my $mask_uuid;									# temporary command line option to mask UUIDs with HASH characters for grouping purposes (to be replaced by more generic group similar feature)
 my $durations_graph_width = 0;
-my ( $graph_count, $graph_count_max, $max_graph_width ) = ( 1, 6, 0 );
-my ( $graph_column_padding_all, $graph_column_padding_timestamp, $graph_column_padding_legend, $graph_column_padding_count, $graph_column_padding_other, $graph_column_padding_latency ) = ( 1, 1, 0, 2, 1, 3 );	# used to add padding (removed from width) in normalize data function
-my %graph_width;
-my $column_count_pre_graph = 2;		            # timestamp + legend is the default
 my @graph_columns = qw( duration bytes count );
-my ( @printed_column_widths, @printed_column_spacing, @printed_column_names );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
 my @column_layout;
 my ($focus_base, $focus_step, $focus_min) = (70, 10, 25);
@@ -3587,59 +3582,23 @@ sub normalize_data_for_output {
         }
     }
 
-    # Set legacy variables from layout engine
-    $column_count_pre_graph = ($omit_values && $omit_rate) ? 1 : 2;
-    $graph_count = scalar(grep { $_->{type} eq 'proportional' && $_->{visible} } @column_layout);
-
-    # Calculate $durations_graph_width from layout (needed by scaling and rendering code)
+    # Calculate $durations_graph_width from layout (needed by heatmap footer scale)
     my $latency_col = (grep { $_->{id} =~ /^(latency|heatmap)$/ && $_->{visible} } @column_layout)[0];
     if ($latency_col) {
         $durations_graph_width = $latency_col->{width} + $latency_col->{spacing_before} + $latency_col->{spacing_after};
-        # Include the separator width+spacing that precedes latency
         my $sep_col = (grep { $_->{id} eq 'sep_graph_stats' && $_->{visible} } @column_layout)[0];
         $durations_graph_width += $sep_col->{width} + ($sep_col->{spacing_before}//0) + ($sep_col->{spacing_after}//0) if $sep_col;
     } else {
         $durations_graph_width = 0;
     }
 
-    # Calculate $timestamp_length from layout (needed by rendering code)
-    # $timestamp_length in the old code = padding_timestamp(1) + content_width + padding_all(1) = width + spacing
+    # Calculate $timestamp_length from layout
     my $ts_col = (grep { $_->{id} eq 'timestamp' } @column_layout)[0];
     $timestamp_length = $ts_col->{width} + $ts_col->{spacing_before} + $ts_col->{spacing_after};
 
     # Add CSV output columns for latency stats
     if ($print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled) {
         push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score );
-    }
-
-    # Bridge: populate @printed_column_widths, @printed_column_spacing, @printed_column_names from @column_layout
-    # Separators are NOT separate entries in the old arrays — their width+spacing is absorbed
-    # into the spacing of the next non-separator column.
-    @printed_column_widths = ();
-    @printed_column_spacing = ();
-    @printed_column_names = ();
-
-    my $pending_sep_chars = 0;  # accumulate separator width+spacing to add to next column's spacing
-    for my $col (grep { $_->{visible} } @column_layout) {
-        if ($col->{type} eq 'separator') {
-            $pending_sep_chars += ($col->{spacing_before}//0) + ($col->{width}//0) + ($col->{spacing_after}//0);
-            next;
-        }
-        my $col_spacing = ($col->{spacing_before}//0) + ($col->{spacing_after}//0) + $pending_sep_chars;
-        $pending_sep_chars = 0;
-        push @printed_column_widths, $col->{width};
-        push @printed_column_spacing, $col_spacing;
-        my $name = $col->{name};
-        $name =~ s/^udm_//;
-        push @printed_column_names, $name;
-    }
-
-    # Truncate column names to fit their width
-    foreach my $column (0 .. $#printed_column_names) {
-        my $title = $printed_column_names[$column];
-        my $max_length = $printed_column_widths[$column] // 0;
-        $title = substr($title, 0, $max_length) if $max_length > 0 && length($title) > $max_length;
-        $printed_column_names[$column] = $title;
     }
 
     foreach my $bucket (keys %log_occurrences) {
@@ -3649,9 +3608,8 @@ sub normalize_data_for_output {
         $log_stats{$bucket}{scaled_bytes} = $scaled_bytes;
 
         # Scale the total values to the printable size
-        if( $graph_count > 1 ) {
-            my $column_number = $column_count_pre_graph + 1;		# start after the timestamp and possibly legend columns
-
+        my @proportional_cols = grep { $_->{type} eq 'proportional' && $_->{visible} } @column_layout;
+        if( scalar(@proportional_cols) > 1 ) {
             foreach my $key ( @populated_graph_columns ) {			# go through the list of possible columns and populate the scaled value for that metric for the current time bucket
                 # 2025-12-07 - counts are handled separately below with additional logic which should be incorporated here in the future for coherence and performance improvements
                 next if $key =~ /^occurrences$/;					# the occurrences have already been printed, so should skip this entry even if it is legitimate
@@ -3659,22 +3617,25 @@ sub normalize_data_for_output {
                 my $scaled_key = "scaled_${key}";
                 my $scaled_key_highlight = "${scaled_key}-HL";
 
-                $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * $printed_column_widths[$column_number] ) : 0;
-                $log_stats{$bucket}{$scaled_key_highlight} = ( defined $log_stats{$bucket}{$key_highlight} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key_highlight} / $max_total{$key} ) * $printed_column_widths[$column_number] ) : 0;
-                $column_number++;
+                my ($col) = grep { $_->{id} eq $key } @column_layout;
+                my $col_width = $col ? $col->{width} : 0;
+                $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * $col_width ) : 0;
+                $log_stats{$bucket}{$scaled_key_highlight} = ( defined $log_stats{$bucket}{$key_highlight} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key_highlight} / $max_total{$key} ) * $col_width ) : 0;
             }
         }
 
         my $scaled_occurrences_total = 0;
         my $scaled_max_key = "";
         my $scaled_max_value = 0;
+        my $occ_col = (grep { $_->{id} eq 'occurrences' } @column_layout)[0];
+        my $occ_width = $occ_col ? $occ_col->{width} : 0;
 
         # Scale the log message counts for printing the graph
         foreach my $category_bucket (keys %{$log_occurrences{$bucket}}) {
             next if $category_bucket =~ /^(err|msg)-rate|empty$/;
             my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
             next if !defined $occurrences;										                # skip scaling where varible was left or is undefined (ie; no error or message rate)
-            my $scaled_occurrences = $max_total{occurrences} != 0 ? int(($occurrences / $max_total{occurrences}) * $printed_column_widths[$column_count_pre_graph] + 0.5) : 0;	# Adapting count scaling to multi-graph functionality
+            my $scaled_occurrences = $max_total{occurrences} != 0 ? int(($occurrences / $max_total{occurrences}) * $occ_width + 0.5) : 0;
             if( $scaled_occurrences > $scaled_max_value ) {                                     # track the maximum scaled count for this time bucket to correct for rounding errors
                 $scaled_max_value = $scaled_occurrences;
                 $scaled_max_key = $category_bucket;
@@ -3686,7 +3647,7 @@ sub normalize_data_for_output {
             $total_lines_highlighted += $occurrences if $category_bucket =~ /-HL$/;
         }
 
-        if ( $scaled_occurrences_total > $printed_column_widths[$column_count_pre_graph] ) {	# correct for rounding errors by reducing the largest scaled count by 1 if we went over the allowed width
+        if ( $scaled_occurrences_total > $occ_width ) {	# correct for rounding errors by reducing the largest scaled count by 1 if we went over the allowed width
             $log_occurrences{$bucket}{$scaled_max_key}{scaled_occurrences}--;
         }
 
@@ -3806,11 +3767,8 @@ sub get_heatmap_column_header {
     my $metric = $heatmap_metric;
     my $heatmap_content_width = $heatmap_width;
 
-    # Header content is 1 char narrower than data area to account for the leading space prefix
-    my $header_content_width = $heatmap_content_width - 1;
-
     # Build character array for exact positioning (same approach as footer)
-    my @header_chars = (" ") x $header_content_width;
+    my @header_chars = (" ") x $heatmap_content_width;
 
     # Define markers: for header we show 0%, [25%], 50% (label), [75%], 100%
     # 25% and 75% only shown if width > 75
@@ -3824,9 +3782,9 @@ sub get_heatmap_column_header {
     # Calculate positions and values for each marker
     my @markers;  # Each element: { pct, display_pos, value_str, is_label }
     for my $pct (@marker_pcts) {
-        # Calculate display position (0 to header_content_width-1)
-        my $display_pos = int($pct * ($header_content_width - 1));
-        $display_pos = $header_content_width - 1 if $display_pos >= $header_content_width;
+        # Calculate display position (0 to width-1)
+        my $display_pos = int($pct * ($heatmap_content_width - 1));
+        $display_pos = $heatmap_content_width - 1 if $display_pos >= $heatmap_content_width;
 
         # Calculate boundary index for the value at this display position
         # Display column i shows data from bucket i, which covers [boundaries[i], boundaries[i+1])
@@ -3880,7 +3838,7 @@ sub get_heatmap_column_header {
         if ($i == 0) {
             $start = 0;  # Left-align first label (0%)
         } elsif ($i == $#markers) {
-            $start = $header_content_width - $label_len;  # Right-align last label (100%)
+            $start = $heatmap_content_width - $label_len;  # Right-align last label (100%)
         } else {
             $start = $pos - int($label_len / 2);  # Center others at their position
         }
@@ -3890,7 +3848,7 @@ sub get_heatmap_column_header {
         $start = $last_end + 1 if $start <= $last_end;  # Avoid overlap
 
         # Place the label if it fits
-        if ($start + $label_len <= $header_content_width) {
+        if ($start + $label_len <= $heatmap_content_width) {
             for my $j (0 .. $label_len - 1) {
                 $header_chars[$start + $j] = substr($label, $j, 1);
             }
@@ -3898,9 +3856,8 @@ sub get_heatmap_column_header {
         }
     }
 
-    # Build final string: prefix space aligns content with data rows (matches spacing_before on heatmap column)
-    # No suffix — trailing space handled by column spacing_after
-    return " " . join("", @header_chars);
+    # Return content only — spacing_before on heatmap column handles alignment
+    return join("", @header_chars);
 }
 
 sub print_heatmap_row {
@@ -4064,39 +4021,36 @@ sub print_bar_graph {
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
 
         print $colors{'bright-black'};
-        my $printed_chars = 0;
-        my $expected_chars = 0;
 
-        foreach my $column (0 .. $#printed_column_names) {
-            my $name   = $printed_column_names[$column];
-            my $width  = $printed_column_widths[$column] // length($name);
-            my $padding = $width - length($name);
+        for my $col (grep { $_->{visible} } @column_layout) {
+            my $col_w = $col->{width} // 0;
+
+            if ($col->{type} eq 'separator') {
+                # Separators render as whitespace in headers
+                print ' ' x (($col->{spacing_before}//0) + $col_w + ($col->{spacing_after}//0));
+                next;
+            }
+
+            # Print spacing before column
+            print ' ' x ($col->{spacing_before} // 0);
+
+            # Get column name, truncate to width
+            my $name = $col->{name} // '';
+            $name =~ s/^udm_//;
+            $name = substr($name, 0, $col_w) if $col_w > 0 && length($name) > $col_w;
+
+            # Center the name within column width
+            my $padding = $col_w - length($name);
             $padding = 0 if $padding < 0;
             my $left_pad  = int( $padding / 2 + 0.5 );
             my $right_pad = $padding - $left_pad;
 
-            if ( ($printed_column_spacing[$column] // 0) > 0 ) {
-                my $num_padding_chars = ($printed_column_spacing[$column]-$graph_column_padding_all);
-                print ' ' x 1 if $num_padding_chars > 1;   # set this to pipe to have the column line propagate up (does not work with line in durations)
-                print ' ' x ($num_padding_chars > 1 ? $num_padding_chars - 1 : $num_padding_chars);
-            }
-            
-            if( $left_pad > 0 ) {
-                # print "$colors{'green'}:$colors{'NC'}" x $left_pad;
-                print ' ' x $left_pad;
-                # $printed_chars += $left_pad;
-            };
+            print ' ' x $left_pad if $left_pad > 0;
             print $name;
-            $printed_chars += length($name);
-            if( $right_pad > 0 ) {
-                # print "$colors{'red'}:$colors{'NC'}" x $right_pad;
-                print ' ' x $right_pad;
-                # $printed_chars += $right_pad;
-            };
+            print ' ' x $right_pad if $right_pad > 0;
 
-            if( ($printed_column_spacing[$column] // 0) > 0 ) {
-                print ' ' x $graph_column_padding_all;
-            }
+            # Print spacing after column
+            print ' ' x ($col->{spacing_after} // 0);
         }
 
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
