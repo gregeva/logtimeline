@@ -1393,6 +1393,7 @@ sub adapt_to_command_line_options {
         'histogram-height|hgh=i' => sub { $histogram_height = $_[1]; $histogram_height_explicit = 1; },
         'hgbpd=i' => \$histogram_buckets_per_decade,
         'hgb=i' => \$histogram_bucket_override,
+        'terminal-width|tw=i' => \$terminal_width,
         'help' => \$show_help
     ) or die print_usage( "required options not provided" );
 
