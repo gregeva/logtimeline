@@ -67,3 +67,19 @@ Here is a representative command which interestingly shows GC activity and Full 
 ```bash
 ltl -st "2025-05-14 09:07" -et "2025-05-14 09:28" -oe -hg -hm ./logs/GC/logs-gc/gc-twx01-twx-thingworx-1.out.4 ./logs/GC/logs-gc/gc-twx01-twx-thingworx-1.out.4 ./logs/GC/logs-gc/gc-twx01-twx-thingworx-1.out.5 -bs 1 -osum -hmw 100
 ```
+
+# Finding a User with Slow Performance, and Representing them in the Whole Population
+
+The scenario where one user complains about slowness while others say nothing is quite common and raises some questions that data should be able to answer.
+
+- Is the user experiencing something specific to their usage of the application, or is this a general issue and they are the first or only one to speak up about it?
+- Is their experience related to how they are using the application?
+- How is their usage of the application perhaps affecting other users (noisy neighbor)?
+
+Analysis thoughts and approaches:
+
+- Addition of the Session ID into access logs allow us to identify and focus in on specific user sessions and their application use
+- Finding slow APIs based on session can be done by including the session in the message, and then sorting by max time or total duration
+- Specific user usage pattern can then be visualized by highlighting that session activity
+- Filtering that session in or out can give a better idea of the users load/usage versus the rest of the population
+- Once a slow API is identified, it can be filtered in, to check other sessions experience using it
