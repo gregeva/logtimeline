@@ -1,7 +1,7 @@
 # Column Layout Refactor — Requirements
 
 **GitHub Issue:** #33
-**Status:** Planning
+**Status:** Design Complete — Ready for Implementation Planning
 **Blocks:** #26 (session metric column)
 **Fixes:** #27 (array mismatch bug)
 
@@ -37,13 +37,12 @@ This accumulated debt blocks issue #26 (adding a session metric column), which w
 ## Goals
 
 1. **Single source of truth** — One data structure defines each column's name, type, width, spacing, visibility, color, and rendering behavior.
-2. **Algorithmic width distribution** — Replace hardcoded percentage tables with an algorithm that distributes proportional space based on column count and priority.
+2. **Algorithmic width distribution** — Replace hardcoded percentage tables with a linear decay algorithm that distributes proportional space based on column count and priority (see [DD-01](#dd-01-linear-decay-algorithm-for-proportional-distribution)).
 3. **First-class visibility** — Each column carries a visible/hidden flag. Hiding a column triggers automatic space redistribution. No ad-hoc conditionals.
 4. **Fill-to-width rendering** — Each column's renderer fills its exact allocated width (padding included). Eliminates `$printed_chars` tracking entirely.
-5. **Compound column support** — Legend (and potentially others) can be modeled as a group of sub-columns with a spanning header.
-6. **Separators as layout elements** — Vertical separators (`│`) are distinct elements in the layout, not embedded in column padding.
-7. **Stable color identity** — Color is a property of the column definition, not derived from position at render time.
-8. **Unblock #26** — The refactored system must make adding a new column type (session metric) straightforward.
+5. **Separators as layout elements** — Vertical separators (`│`) are distinct elements in the layout, not embedded in column padding (see [DD-02](#dd-02-separators-as-distinct-layout-elements)).
+6. **Stable color identity** — Color is a property of the column definition, not derived from position at render time.
+7. **Unblock #26** — The refactored system must make adding a new column type (session metric) straightforward.
 
 ## Non-Goals
 
@@ -77,69 +76,119 @@ Width is a share of the remaining terminal space after fixed and content-driven 
 - **Threadpool activity columns**: Secondary.
 - **User-defined metric columns**: Secondary.
 
+Dynamic columns (threadpool, UDM) are inserted before `sep_graph_stats` using an `add_dynamic_column()` pattern. New columns inherit the standard secondary spacing and receive colors from the palette by index. The layout engine is column-count agnostic — no changes to the engine are needed when adding dynamic columns.
+
 ### Separator
 A fixed-width (1 character) vertical line (`│`) that visually divides column groups. Modeled as a distinct layout element, not as padding on adjacent columns.
 
 ### ~~Compound Column~~ (Removed)
-~~A logical grouping of sub-columns that share a single spanning header.~~
 
-**Decision (2026-02-09):** The compound sub-column model for legend was dropped during prototyping. The legend column works well precisely because the boundary between category counts and message rates floats per row. A rigid sub-column model would force fixed widths for counts and rates independently, making legend wider than necessary — the worst-case counts width plus worst-case rates width rarely occur on the same row. Legend remains a single content-driven column with a floating internal boundary.
+Removed — see [DD-04](#dd-04-legend-as-single-content-driven-column). Legend is modeled as a single content-driven column with a floating internal boundary, not as a compound of sub-columns.
 
 ## Layout Engine Requirements
 
-### Width Allocation Algorithm
+### Width Allocation Pipeline
 
-The layout engine must allocate terminal width in this order:
+The layout engine allocates terminal width through an 8-step pipeline:
 
-1. **Separators**: Each consumes 1 character.
-2. **Fixed columns**: Timestamp, latency/heatmap — consume their predetermined widths.
-3. **Content-driven columns**: Legend — consumes its data-determined width.
-4. **Spacing**: Inter-column padding for all allocated columns.
-5. **Proportional columns**: Remaining width is distributed among visible graph columns.
+1. **Resolve separator visibility** — Apply the adjacency rule (see [Separator Adjacency Rule](#separator-adjacency-rule)) to determine which separators are visible.
+2. **Allocate fixed columns** — Timestamp, latency/heatmap consume their predetermined widths.
+3. **Allocate separators** — Each visible separator consumes 1 character.
+4. **Allocate content-driven columns** — Legend consumes its data-determined width.
+5. **Sum all spacing** — Total `spacing_before` + `spacing_after` for all visible columns.
+6. **Calculate remaining width** — Terminal width minus all allocations from steps 2–5.
+7. **Distribute proportional** — Remaining width distributed via linear decay algorithm (see [DD-01](#dd-01-linear-decay-algorithm-for-proportional-distribution)).
+8. **Apply cumulative rounding** — The existing `cumulative_round_widths()` function operates on proportional column widths only (separators and fixed columns are excluded) to ensure the total sums exactly to terminal width.
 
 ### Proportional Distribution
 
-Replace the hardcoded percentage tables with an algorithmic approach:
+The hardcoded percentage tables are replaced by a linear decay algorithm (see [DD-01](#dd-01-linear-decay-algorithm-for-proportional-distribution)):
+
+```
+focus_share = max(focus_min, focus_base - (N-2) * focus_step)
+secondary_share = (100 - focus_share) / (N-1)
+```
+
+Parameters: `focus_base=70, focus_step=10, focus_min=25`
 
 - One column is designated as the **focus** (primary) column. Default: occurrences.
-- The focus column receives a larger share of proportional space.
+- The focus column receives a larger share of proportional space, decaying linearly as more columns are added.
 - Remaining proportional columns split the rest equally.
-- The algorithm must work for any number of proportional columns (1–6+), not just the current 2–6 range.
-- **Min/max constraints**: The focus column should not dominate on very wide terminals or starve on narrow ones. Beyond a threshold, extra width flows to secondary columns.
+- The algorithm works for any number of proportional columns (1–6+), not just the current 2–6 range.
+- The formula uses `(N-2)` because the step applies starting from the 3rd column — N=2 is the anchor point where `focus_base` applies directly.
+- **Min/max constraints**: `focus_min=25` ensures the focus column never drops below 25% regardless of column count.
 
 ### Visibility Toggling
 
 - Each column has a `visible` flag.
-- When a column is hidden, its width (and any adjacent separator) is returned to the proportional pool.
+- When a column is hidden, its width (and any adjacent separator via the adjacency rule) is returned to the proportional pool.
 - Hiding/showing a column triggers redistribution — no manual recalculation required.
 - This enables toggling occurrences visibility, which is not cleanly possible today.
+- Visibility is resolved from multiple sources into a single flag: no data for the metric, terminal too narrow, user CLI flag (`-ov`, `-or`, `-os`), or automatic minimum-width threshold (see [Architectural Principle: Data Model vs UI Rendering Separation](#architectural-principle-data-model-vs-ui-rendering-separation)).
+
+### Narrow Terminal Handling
+
+At narrow widths (80–100 chars), fixed columns (timestamp + legend + latency) can consume all available space, leaving nothing for proportional columns. The layout engine handles this by:
+
+- Calculating remaining width after fixed/content/separator/spacing allocation — this value can be zero or negative.
+- Applying minimum useful width thresholds: if a proportional secondary column would receive fewer than N characters, it is auto-hidden and its space redistributed.
+- The focus column (occurrences) is the last proportional column to be auto-hidden.
+- This is consistent with ltl's existing behavior of dropping count columns when space is insufficient (ltl:3238).
 
 ### Rounding
 
-The existing `cumulative_round_widths()` function handles sub-pixel rounding to ensure column widths sum exactly to terminal width. This behavior must be preserved.
+The existing `cumulative_round_widths()` function handles sub-pixel rounding to ensure column widths sum exactly to terminal width. This function operates only on proportional column widths — separators and fixed columns are excluded from rounding (see pipeline step 8).
 
 ## Header System Requirements
 
 ### Individual Headers
-Each visible column gets a header label centered within its allocated width. This is the current behavior for graph columns (occurrences, duration, bytes, etc.).
-
-### Spanning Headers
-A compound column's header spans the combined width of all its visible sub-columns. The header text is centered across the full span.
-
-- **Legend**: The header "legend" spans the counts sub-column, the conditional spacing sub-column, and the rates sub-column.
+Each visible column gets a header label centered within its allocated width. This is the current behavior for graph columns (occurrences, duration, bytes, etc.). Legend gets a single header spanning its full content-driven width.
 
 ### Separator Headers
-Separators display a `│` character in the header row, consistent with data rows.
+Separators display a `│` character in the header row, consistent with data rows. Separator spacing (`spacing_before` and `spacing_after`) is rendered around the separator character in both header and data rows.
 
 ### Header/Footer Alignment
 The header underline (`─`) and any footer elements (e.g., heatmap scale with `┴`) must align precisely with column boundaries. This is currently correct and must be preserved.
 
 ## Separator Requirements
 
-- Separators are **distinct layout elements** in the column array, not padding embedded in adjacent columns.
-- Current separator positions: (1) between legend and occurrences, (2) between the last graph column and latency/heatmap.
-- **Adjacency rule**: A separator is only visible if both adjacent columns (or column groups) are visible.
+- Separators are **distinct layout elements** in the column array, not padding embedded in adjacent columns (see [DD-02](#dd-02-separators-as-distinct-layout-elements)).
+- Current separator positions: (1) `sep_legend_graph` between legend and occurrences, (2) `sep_graph_stats` between the last graph column and latency/heatmap.
 - Separator width is always 1 character.
+
+### Separator Adjacency Rule
+
+A separator is only visible when it has a visible non-separator column on **both** sides. The adjacency check scans outward in each direction, skipping other separators, until it finds a visible non-separator column or reaches the edge.
+
+Examples:
+- **Legend hidden, latency visible**: `sep_legend_graph` still has timestamp (left) and occurrences (right) → stays visible. `sep_graph_stats` has the last proportional column (left) and latency (right) → stays visible.
+- **Latency hidden**: `sep_graph_stats` has no visible column to its right → auto-hides.
+- **Both legend and timestamp hidden** (hypothetical): `sep_legend_graph` has no visible column to its left → auto-hides.
+
+This rule ensures separators never appear at the edges of the output or adjacent to empty space where a column group has been entirely hidden.
+
+### Spacing Model (Before/After)
+
+Each column carries explicit `spacing_before` and `spacing_after` values rather than a single combined spacing value. Spacing is anchored on separators and non-optional elements to prevent double-spacing when optional columns are hidden (see [DD-03](#dd-03-beforeafter-spacing-model)).
+
+| Column | Before | After | Rationale |
+|--------|--------|-------|-----------|
+| timestamp | 0 | 0 | First column, no padding needed |
+| legend | 1 | 0 | Space from timestamp; separator handles the other side |
+| sep_legend_graph | 1 | 1 | Anchors spacing — always-present element between groups |
+| occurrences | 0 | 1 | Separator's after handles the left side |
+| duration/bytes/count | 1 | 1 | Standard inter-column spacing |
+| sep_graph_stats | 0 | 0 | Latency's before handles both spaces |
+| latency | 2 | 0 | Last column, no trailing padding |
+
+**Key insight:** When legend is hidden, `timestamp(0/0)` + `sep(1/1)` + `occurrences(0/1)` gives exactly 1 space on each side of the separator. When legend is visible, `timestamp(0/0)` + `legend(1/0)` + `sep(1/1)` + `occurrences(0/1)` gives 1 space between timestamp and legend, then 1 space between legend and separator, then 1 space between separator and occurrences. No double-spacing in either case.
+
+### Character Budget Equivalence
+
+Modeling separators as distinct columns produces identical character budgets to the current embedded approach:
+
+- **Current**: `pad_count=2` includes the `│` as its first character. `pad_latency=3` includes `│` + 2 spaces via gap-fill.
+- **New**: `sep_legend_graph` is a 1-char column; `occurrences.spacing` drops from 2 to 1. `sep_graph_stats` is a 1-char column; `latency.spacing` drops from 3 to 2. Net character budget: identical.
 
 ## Color Scheme Requirements
 
@@ -159,7 +208,7 @@ Colors are assigned by position in parallel arrays (line 3439–3448):
 
 ## Legend Column Requirements
 
-The legend column contains heterogeneous sub-content (category counts and message rates) but is modeled as a **single content-driven column** with a floating internal boundary.
+The legend column contains heterogeneous sub-content (category counts and message rates) but is modeled as a **single content-driven column** with a floating internal boundary (see [DD-04](#dd-04-legend-as-single-content-driven-column)).
 
 ### Width Calculation
 - Legend width = maximum total legend text width across all time buckets (counts + internal spacing + rates combined).
@@ -174,6 +223,14 @@ The legend column contains heterogeneous sub-content (category counts and messag
 ### Visibility
 - Counts and rates each respect their own omit flags (`-ov`, `-or`).
 - When one is hidden, the other expands to fill the legend width.
+
+### Content Trailing Space Handling
+
+In the current ltl code, content strings for legend counts and rates include trailing spaces (e.g., `"WARN: 42 "`, `"12:892/m "`). These trailing spaces currently serve as inter-column padding because the old layout system lacks explicit column spacing.
+
+In the new layout engine, spacing is handled by `spacing_before` and `spacing_after`. **Content strings must have trailing padding truncated before rendering into their column.** If not truncated, the trailing content spaces and the layout engine's spacing would double-count, pushing subsequent columns out of alignment.
+
+The inter-category spaces within counts (e.g., the space between `"WARN: 42"` and `"ERROR: 3"`) are content separators and must be preserved — only the final trailing space needs stripping.
 
 ## Rendering Requirements
 
@@ -331,9 +388,9 @@ Add a debug/assertion mode that verifies:
 
 1. **Output regression** — The biggest risk. Mitigated by capture-and-diff testing across all option combinations.
 2. **Scope creep** — The refactor touches core rendering. Discipline required to change structure without changing behavior.
-3. **Legend complexity** — The legend sub-column decomposition is the most intricate part. May need prototyping to validate.
-4. **Proportional algorithm tuning** — The hardcoded percentages produce specific visual results users are accustomed to. The algorithm must approximate these proportions, not just be mathematically clean.
-5. **Cumulative rounding** — The existing `cumulative_round_widths()` function must integrate with the new layout engine. Edge cases around rounding with separators need attention.
+3. ~~**Legend complexity**~~ — Resolved by [DD-04](#dd-04-legend-as-single-content-driven-column). Legend is a single content-driven column, not a compound sub-column decomposition.
+4. ~~**Proportional algorithm tuning**~~ — Resolved by [DD-01](#dd-01-linear-decay-algorithm-for-proportional-distribution). Linear decay matches current tables within 5pp max deviation and is exact for N=4-6.
+5. **Cumulative rounding** — The existing `cumulative_round_widths()` function integrates cleanly with the new layout engine — it operates only on proportional column widths, excluding separators and fixed columns. Validated during prototyping.
 6. **Large refactor surface** — The column setup, header printing, and row rendering code are all intertwined. Phased migration (coexisting old and new paths) may be necessary to keep the codebase working throughout.
 
 ## Relationship to Other Issues
@@ -342,19 +399,27 @@ Add a debug/assertion mode that verifies:
 - **#27 (Array mismatch bug with `-tpa`)**: Root cause is the fragmented column management this refactor eliminates.
 - **#64 (Color consolidation)**: The column-carries-its-color approach enables future cleanup of hardcoded color references, but #64 is a separate effort.
 
-## Prototype Decisions & Learnings
+## Design Decisions
 
-*Captured from `prototype/column-layout-prototype.pl` — 2026-02-08*
+Design decisions are numbered for traceability. Each records the context, decision, rationale, and alternatives considered.
 
-### Algorithm Selection: Linear Decay
+### DD-01: Linear Decay Algorithm for Proportional Distribution
 
-The linear decay algorithm was selected over exponential decay for proportional distribution:
+**Date:** 2026-02-08
+**Status:** Accepted
+
+**Context:** The hardcoded percentage tables (65/35 for 2 columns, 62/21/17 for 3, etc.) must be manually authored for each column count and don't extend beyond N=6. An algorithmic approach is needed that works for any column count.
+
+**Decision:** Use a linear decay formula:
 
 ```
 focus_share = max(focus_min, focus_base - (N-2) * focus_step)
+secondary_share = (100 - focus_share) / (N-1)
 ```
 
-With parameters `focus_base=70, focus_step=10, focus_min=25`:
+Parameters: `focus_base=70, focus_step=10, focus_min=25`
+
+**Rationale:** Linear decay closely matches the existing hardcoded tables and extends naturally to N=7+:
 
 | N | Current | Algorithm | Max Delta |
 |---|---------|-----------|-----------|
@@ -364,114 +429,127 @@ With parameters `focus_base=70, focus_step=10, focus_min=25`:
 | 5 | 40/15/15/15/15 | 40/15/15/15/15 | 0pp (exact) |
 | 6 | 30/14/14/14/14/14 | 30/14/14/14/14/14 | 0pp (exact) |
 
-The maximum deviation is 5 percentage points (at N=2), which is within acceptable visual tolerance. The algorithm is exact for N=4-6 and smoothly extends to N=7+ without requiring new hardcoded tables.
+Maximum deviation is 5pp at N=2, within acceptable visual tolerance. Exact for N=4-6.
 
-The formula uses `(N-2)` not `(N-1)` because the step applies starting from the 3rd column (N=2 is the anchor point where `focus_base` applies directly).
+The formula uses `(N-2)` not `(N-1)` because the step applies starting from the 3rd column — N=2 is the anchor point where `focus_base` applies directly.
 
-The exponential decay algorithm (`focus = max * decay^(N-2)`) was prototyped but rejected — it diverges more at N=3-5 where the current tables are well-established.
+**Alternatives considered:**
+- **Exponential decay** (`focus = max * decay^(N-2)`): Prototyped but rejected — diverges more at N=3-5 where the current tables are well-established.
+- **Keep hardcoded tables + add N=7**: Would work short-term but doesn't address the underlying scalability problem.
 
-### Separator Modeling Validated
+---
 
-Modeling separators as distinct 1-character columns with `spacing=0` produces identical character budgets to the current approach where separators are embedded in padding:
+### DD-02: Separators as Distinct Layout Elements
 
-- **Current**: `pad_count=2` includes the `│` as its first character. `pad_latency=3` includes `│` + 2 spaces via gap-fill.
-- **New**: `sep_legend_graph` is a 1-char column; `occurrences.spacing` drops from 2 to 1. `sep_graph_stats` is a 1-char column; `latency.spacing` drops from 3 to 2. Net character budget: identical.
+**Date:** 2026-02-08
+**Status:** Accepted
 
-This was validated by the separator budget validation test (Section F) across all terminal widths.
+**Context:** In the current code, vertical separators (`│`) are embedded in inter-column padding — `pad_count=2` includes the separator as its first character, `pad_latency=3` includes separator + 2 spaces. This makes separator behavior implicit and complicates visibility toggling.
 
-### Width Allocation Pipeline
+**Decision:** Model separators as distinct 1-character columns in the layout array. They have their own `spacing_before` and `spacing_after` values and obey the adjacency visibility rule.
 
-The 8-step allocation pipeline works correctly:
+**Rationale:** Produces identical character budgets to the current approach while making separator behavior explicit and composable with the visibility system:
 
-1. Resolve separator visibility (adjacency rule)
-2. Allocate fixed columns (timestamp, latency)
-3. Allocate separators (1 char each)
-4. Allocate content-driven columns (legend)
-5. Sum all spacing
-6. Calculate remaining width
-7. Distribute proportional via linear decay algorithm
-8. Apply cumulative rounding (verbatim from ltl)
+- `sep_legend_graph` is a 1-char column; `occurrences.spacing` drops from 2 to 1.
+- `sep_graph_stats` is a 1-char column; `latency.spacing` drops from 3 to 2.
+- Net character budget: identical. Validated by separator budget test across all terminal widths.
 
-The cumulative rounding function integrates cleanly — it operates only on the proportional column widths array, not the full column set. Separators and fixed columns are excluded from rounding.
+**Alternatives considered:**
+- **Keep separators embedded in padding**: Would work but complicates visibility toggling — hiding a column that "owns" the separator character requires special-case logic to move the separator to an adjacent column's padding.
 
-### Narrow Terminal Handling
+---
 
-At narrow widths (80-100 chars), the fixed columns (timestamp + legend + latency) can consume all available space, leaving nothing for proportional columns. This is a real constraint that ltl already handles by:
-- Not showing latency stats when no duration data exists
-- Dropping count columns when space is insufficient (ltl:3238)
+### DD-03: Before/After Spacing Model
 
-The layout engine correctly calculates negative remaining space in these cases. The implementation must either hide latency/legend at narrow widths or allow minimum-width proportional columns with graceful degradation.
+**Date:** 2026-02-09
+**Status:** Accepted
 
-### Visibility Toggle Redistribution
+**Context:** A single `spacing` value per column creates double-spacing problems when optional columns are hidden. If legend has `spacing=1` (left side) and occurrences has `spacing=2` (includes separator), hiding legend leaves both the separator's spacing and occurrences's spacing producing extra whitespace.
 
-The prototype validates that hiding columns correctly redistributes space:
-- Hiding legend: its 30-char width flows to proportional columns
-- Hiding latency + separator: 57 chars flow to proportional columns
-- Separator adjacency rule: separators auto-hide when an adjacent column is hidden
+**Decision:** Each column carries explicit `spacing_before` and `spacing_after` values. Spacing is anchored on separators and non-optional elements.
 
-This confirms the first-class visibility model works as designed.
+**Rationale:** Eliminates double-spacing in all visibility combinations by making spacing ownership explicit. The spacing table (see [Spacing Model](#spacing-model-beforeafter)) was validated against legend-visible and legend-hidden scenarios with no double-spacing in either case.
 
-### Dynamic Column Insertion
+**Alternatives considered:**
+- **Single combined spacing**: Simpler model but produces incorrect spacing when columns are hidden — the spacing "owned" by the hidden column either disappears (gap) or doubles (adjacent column also has spacing).
+- **Contextual spacing recalculation**: Could recalculate spacing on each visibility change, but adds complexity and makes the layout harder to reason about.
 
-The `add_dynamic_column()` pattern (insert before `sep_graph_stats`) works cleanly for threadpool and UDM columns. New columns inherit the standard secondary spacing and get colors from the palette by index. No changes to the layout engine are needed — the engine is column-count agnostic.
+---
 
-### Separator Adjacency Rule
+### DD-04: Legend as Single Content-Driven Column
 
-A separator column is only visible when it has a visible non-separator column on **both** sides. The adjacency check scans outward in each direction, skipping other separators, until it finds a visible non-separator column or reaches the edge.
+**Date:** 2026-02-09
+**Status:** Accepted
 
-Examples:
-- **Legend hidden, latency visible**: `sep_legend_graph` still has timestamp (left) and occurrences (right), so it stays visible. `sep_graph_stats` has the last proportional column (left) and latency (right), so it stays visible.
-- **Latency hidden**: `sep_graph_stats` has no visible column to its right, so it auto-hides. The last proportional column's `spacing_after` becomes the end of the line.
-- **Both legend and timestamp hidden** (hypothetical): `sep_legend_graph` has no visible column to its left, so it auto-hides.
+**Context:** The original design (Goal #5) proposed modeling legend as a compound column with sub-columns for category counts, conditional spacing, and message rates.
 
-This rule ensures separators never appear at the edges of the output or adjacent to empty space where a column group has been entirely hidden.
+**Decision:** Drop the compound sub-column model. Legend is a single `type => 'content'` column with a floating internal boundary. Width is calculated from the maximum total legend text length across all time buckets.
 
-### Key Decision: Spacing Model (Before/After)
+**Rationale:** The legend works well precisely because the boundary between counts and rates floats per row. One row may have long counts with short rates; the next may have short counts and long rates. A rigid sub-column model would force fixed widths for both — worst-case counts width plus worst-case rates width rarely occur on the same row, making legend wider than necessary.
 
-Each column carries explicit `spacing_before` and `spacing_after` values rather than a single combined spacing. Spacing is anchored on separators and non-optional elements to avoid double-spacing when optional columns are hidden.
+**Alternatives considered:**
+- **Compound sub-columns**: Would enable independent header labels for counts and rates, but forces wider legend and breaks the compact floating-boundary behavior.
 
-| Column | Before | After | Rationale |
-|--------|--------|-------|-----------|
-| timestamp | 0 | 0 | First column, no padding needed |
-| legend | 1 | 0 | Space from timestamp; separator handles the other side |
-| sep_legend_graph | 1 | 1 | Anchors spacing — always-present element between groups |
-| occurrences | 0 | 1 | Separator's after handles the left side |
-| duration/bytes/count | 1 | 1 | Standard inter-column spacing |
-| sep_graph_stats | 0 | 0 | Latency's before handles both spaces |
-| latency | 2 | 0 | Last column, no trailing padding |
+---
 
-**Key insight:** When legend is hidden, `timestamp(0/0)` + `sep(1/1)` + `occurrences(0/1)` gives exactly 1 space on each side of the separator. When legend is visible, `timestamp(0/0)` + `legend(1/0)` + `sep(1/1)` + `occurrences(0/1)` gives 1 space between timestamp and legend, then 1 space between legend and separator, then 1 space between separator and occurrences. No double-spacing in either case.
+### DD-05: 8-Step Width Allocation Pipeline
 
-The prototype uses `‹` for before-spacing and `›` for after-spacing to make ownership visually unambiguous in mockup output.
+**Date:** 2026-02-08
+**Status:** Accepted
 
-### Key Decision: Legend as Single Content-Driven Column
+**Context:** The current width allocation is scattered across `normalize_data_for_output()` with no clear sequencing.
 
-The compound sub-column model for legend (counts + spacing + rates as separate sub-columns) was dropped. The legend works well because the boundary between counts and rates floats per row — one row may have long counts with short rates, the next the reverse. A rigid sub-column split would force worst-case widths for both, making the legend wider than necessary. Legend remains `type => 'content'` with a single width calculated from max total legend length.
+**Decision:** Allocate width in a defined 8-step pipeline (see [Width Allocation Pipeline](#width-allocation-pipeline)): resolve separators → fixed columns → separators → content-driven → spacing → remaining → proportional → rounding.
 
-### Integration Lesson: Content Trailing Spaces vs Layout Spacing
+**Rationale:** Each step has a clear input and output. The pipeline is deterministic and testable at each stage. The cumulative rounding function integrates cleanly — it operates only on proportional column widths, excluding separators and fixed columns.
 
-In the current ltl code, content strings for legend counts and rates include trailing spaces — e.g., `"WARN: 42 "` and `"12:892/m "`. These trailing spaces currently serve as inter-column padding because the old layout system doesn't have explicit column spacing.
+**Alternatives considered:**
+- **Constraint-based solver**: More flexible but unnecessary complexity for a fixed column ordering system.
 
-In the new layout engine, spacing between columns is handled by `spacing_before` and `spacing_after` on each column definition. **Content strings must have trailing padding truncated before rendering into their column.** If not truncated, the trailing content spaces and the layout engine's spacing would double-count, pushing subsequent columns out of alignment.
+## Integration Plan
 
-The inter-category spaces within counts (e.g., the space between `"WARN: 42"` and `"ERROR: 3"`) are content separators and must be preserved — only the final trailing space needs stripping. During integration, the code that builds legend content strings will need to either: (a) stop appending trailing spaces, or (b) `rstrip` the final string before passing it to the layout engine.
+### Execution Order Constraint
 
-### Integration Constraint: Legend Width Must Be Calculated Before Table Layout
-
-The layout engine needs the legend column width to calculate the table, and the table must be calculated before `normalize_data_for_output` scales data to fit proportional columns. However, the legend width determination currently lives *inside* `normalize_data_for_output` (ltl:3133-3192), interleaved with the same loop that builds `$legend_length` as a running max across all time buckets.
+The table layout must be calculated **after** data capture but **before** data scaling:
 
 **Current ordering in ltl:**
 1. `read_and_process_logs()` — captures raw data
 2. `calculate_all_statistics()` — computes stats
 3. `normalize_data_for_output()` — determines `$legend_length` AND scales data to column widths
 
-**Required ordering for the new layout engine:**
+**Required ordering:**
 1. `read_and_process_logs()` — captures raw data
 2. `calculate_all_statistics()` — computes stats
 3. **Determine legend width** — scan all buckets for max `(counts + 2 + rates)` length
 4. **Calculate table layout** — needs legend width, produces proportional column widths
 5. **Scale data** — uses proportional column widths from step 4
 
-The legend width calculation (step 3) must be extracted from `normalize_data_for_output` and run before the table layout. This is a code restructuring requirement — the current function does both steps 3 and 5 in a single pass.
+### Required Code Restructuring
 
-**Performance consideration:** Rather than adding a separate pass over all buckets, the legend width could be calculated incrementally during `read_and_process_logs` as data is captured. Each time a bucket's categories or rates change, update a running max. This would avoid the extra iteration at the cost of maintaining the running max during data capture. The prototype demonstrates this by calculating legend width from sample data before passing it to `build_default_columns`.
+1. **Extract legend width calculation** — The legend width determination currently lives inside `normalize_data_for_output` (ltl:3133-3192), interleaved with the loop that builds `$legend_length` as a running max. This must be extracted and run before the table layout.
+
+2. **Strip content trailing spaces** — Legend content strings include trailing spaces that currently serve as inter-column padding. In the new layout engine, these must be stripped before rendering to avoid double-counting with the layout engine's `spacing_before`/`spacing_after` (see [Content Trailing Space Handling](#content-trailing-space-handling)).
+
+3. **Replace `$printed_chars` tracking** — The fill-to-width rendering model eliminates the need for cumulative character tracking (~15 updates per row in `print_bar_graph`).
+
+### Performance Consideration
+
+Rather than adding a separate pass over all buckets for legend width, the width could be calculated incrementally during `read_and_process_logs` as data is captured. Each time a bucket's categories or rates change, update a running max. This avoids extra iteration at the cost of maintaining the running max during data capture.
+
+## Prototype Lessons Learned
+
+*Source: `prototype/column-layout-prototype.pl` — 2026-02-08/09*
+
+The following findings emerged from hands-on prototyping and testing. Each is now documented in the relevant requirements or design decisions section.
+
+1. **Linear decay matches existing tables** — The algorithm produces exact matches at N=4-6 and stays within 5pp for N=2-3. See [DD-01](#dd-01-linear-decay-algorithm-for-proportional-distribution).
+2. **Separator budget equivalence** — Distinct separator columns produce identical character budgets to embedded separators. Validated across all terminal widths. See [DD-02](#dd-02-separators-as-distinct-layout-elements) and [Character Budget Equivalence](#character-budget-equivalence).
+3. **8-step pipeline validated** — Each step produces correct intermediate results. Cumulative rounding integrates cleanly on proportional widths only. See [DD-05](#dd-05-8-step-width-allocation-pipeline).
+4. **Narrow terminals produce negative remaining space** — Fixed columns can consume all available width. Auto-hiding via minimum width thresholds handles this. See [Narrow Terminal Handling](#narrow-terminal-handling).
+5. **Visibility redistribution works** — Hiding legend/latency correctly redistributes space; separator adjacency auto-hides separators. See [Visibility Toggling](#visibility-toggling).
+6. **Dynamic column insertion is engine-agnostic** — `add_dynamic_column()` before `sep_graph_stats` requires no engine changes. See [Proportional Width](#proportional-width).
+7. **Before/after spacing eliminates double-spacing** — Single combined spacing failed when optional columns were hidden. See [DD-03](#dd-03-beforeafter-spacing-model).
+8. **Compound legend model rejected** — Rigid sub-columns force wider legend than floating boundary. See [DD-04](#dd-04-legend-as-single-content-driven-column).
+9. **Content trailing spaces conflict with layout spacing** — Must be stripped during integration. See [Content Trailing Space Handling](#content-trailing-space-handling).
+10. **Legend width calculation must precede table layout** — Requires extracting from `normalize_data_for_output`. See [Integration Plan](#integration-plan).
+11. **Separator rendering must include spacing** — The prototype initially skipped `pad_before`/`pad_after` around separator characters, causing missing spaces. Fixed in both mockup header and data row rendering paths.
