@@ -3104,20 +3104,22 @@ sub build_column_layout {
     my @cols;
 
     # Timestamp — fixed width
+    # spacing_before=1 is the leading indent, spacing_after=1 is the trailing space
     push @cols, {
         id              => 'timestamp',
         type            => 'fixed',
         name            => 'timestamp',
         width           => undef,
         base_width      => $timestamp_w,
-        spacing_before  => 0,
-        spacing_after   => 0,
+        spacing_before  => 1,
+        spacing_after   => 1,
         visible         => 1,
         color           => undef,
         priority        => undef,
     };
 
     # Legend — content-driven width
+    # spacing_before=0: the gap between timestamp and legend is handled by timestamp's spacing_after
     if ($show_legend) {
         push @cols, {
             id              => 'legend',
@@ -3125,7 +3127,7 @@ sub build_column_layout {
             name            => 'legend',
             width           => undef,
             base_width      => $legend_length,
-            spacing_before  => 1,
+            spacing_before  => 0,
             spacing_after   => 0,
             visible         => 1,
             color           => undef,
@@ -3542,59 +3544,16 @@ sub normalize_data_for_output {
         }
     }
 
-# Latency statistics column width: │ + 2 spaces + P50(11) + P95(11) + P99(11) + P999(11) + CV(7) = 54 chars
-    # When heatmap is enabled, use $heatmap_width (which may be customized via -hmw) instead of hardcoded 52
-    if ($heatmap_enabled) {
-        $durations_graph_width = $graph_column_padding_latency + $heatmap_width + $graph_column_padding_all;
-    } elsif ($print_durations && !$omit_durations && !$omit_stats) {
-        $durations_graph_width = $graph_column_padding_latency + 52 + $graph_column_padding_all;
-    } else {
-        $durations_graph_width = 0;
-    }
+    # --- Phase 3: Build old arrays from @column_layout ---
 
-    # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
-    # $timestamp_length = length( strftime($output_timestamp_format, gmtime(0) ) ) + 1 + ( $print_milliseconds ? 4 : 0 ) ;     # +1 for built in space after timestamp
-    $timestamp_length = $graph_column_padding_timestamp + length( strftime($output_timestamp_format, gmtime(0) ) ) + ( $print_milliseconds ? 4 : 0 ) + $graph_column_padding_all;     # remove spacing from length calculation as it is seperate
-
-    $max_graph_width = $terminal_width - $legend_length - $timestamp_length - $durations_graph_width;
-# print "\nmax_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . $timestamp_length . " durations_graph_width: $durations_graph_width\n";
-
-    push @printed_column_widths, $timestamp_length - ( $graph_column_padding_all + $graph_column_padding_timestamp );
-    push @printed_column_names, "timestamp"; 
-    push @printed_column_spacing, ( $graph_column_padding_all + $graph_column_padding_timestamp );
-
-    if( !( $omit_values && $omit_rate ) ) {
-        push @printed_column_widths, $legend_length;
-        push @printed_column_spacing, 0;                                        # legend column does not need trailing spacing as it is last before graph columns
-        push @printed_column_names, "legend";
-        $column_count_pre_graph = 2;                                            # if legend column is printed, then statically sized columns will be timestamp and legend
-    } else {
-	    $column_count_pre_graph = 1;                                            # if legend column is omitted, then statically sized columns will only be timestamp
-    }
-
-    push @printed_column_names, "occurrences"; 									# this count column is required, not sure how to make the logic more coherent
-
-    %graph_width = ( 1 => $max_graph_width );
-
-    # Split the graph spacing into parts if more than one graph is to be drawn
-    foreach my $graph_type ( @graph_columns ) {									# Count how many of the to be displayed data columns actually have values to be printed
-        if( $graph_type eq 'count' && !$include_count && ( $max_graph_width / $graph_count < 25 ) ) {       # remove count column if not enough space to print it, unless explicitly included
-            @graph_columns = grep { $_ !~ /count/ } @graph_columns;
-            next;
-        };
-        $graph_count += ( $max_total{$graph_type} > 0 );
-    }
-
-    my %graph_relative_size;
-    my $graph_column_count = 1;             # will always have count/occurrences column
-    # Determine and store which of the possible columns to print have data
-    foreach my $key ( @graph_columns ) {
-        if( defined $max_total{$key} && $max_total{$key} != 0 ) {
+    # Build @populated_graph_columns and @output_columns (still needed for scaling and CSV)
+    foreach my $key (@graph_columns) {
+        if (defined $max_total{$key} && $max_total{$key} != 0) {
             push @populated_graph_columns, $key;
-            push @output_columns, "${key}Nice" if $key =~ /^(duration|bytes)$/; # presently these won't be output to CSV as processing loop to screen will stop at max columns
-            if( $key =~ /^count$/ ) {
+            push @output_columns, "${key}Nice" if $key =~ /^(duration|bytes)$/;
+            if ($key =~ /^count$/) {
                 push @output_columns, "${key}_occurrences", "${key}_min", "${key}_mean", "${key}_max", "${key}_sum" if !$omit_count;
-            } elsif ( $key =~ /^udm_/ ) {
+            } elsif ($key =~ /^udm_/) {
                 (my $csv_key = $key) =~ s/^udm_//;
                 my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
                 my $csv_prefix = ($cfg && $cfg->{unit}) ? "${csv_key}_$cfg->{unit}" : $csv_key;
@@ -3602,129 +3561,63 @@ sub normalize_data_for_output {
             } else {
                 push @output_columns, $key;
             }
-
-            next if ++$graph_column_count > $graph_count_max;					# limit the number of graph columns to 6 max
-            push @printed_column_names, $key;
         }
     }
 
-    $graph_count = $graph_count_max if $graph_count > $graph_count_max;									# limit the number of graph columns to 6 max
+    # Set legacy variables from layout engine
+    $column_count_pre_graph = ($omit_values && $omit_rate) ? 1 : 2;
+    $graph_count = scalar(grep { $_->{type} eq 'proportional' && $_->{visible} } @column_layout);
 
-    if( $graph_count == 2 ) {
-        %graph_relative_size = (
-            1 => 65,
-            2 => 35,
-        );
-        %graph_width = (
-            1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
-            2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
-        );
-    } elsif( $graph_count == 3 ) {
-        %graph_relative_size = (
-            1 => 62,
-            2 => 21,
-            3 => 17,
-        );
-        %graph_width = (
-            1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
-            2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
-            3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
-        );
-    } elsif( $graph_count == 4 ) {
-        %graph_relative_size = (
-            1 => 50,
-            2 => 18,
-            3 => 16,
-            4 => 16,
-        );
-        %graph_width = (
-            1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
-            2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
-            3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
-            4 => ( $graph_relative_size{4} / 100 * $max_graph_width ),
-        );
-    } elsif( $graph_count == 5 ) {
-        %graph_relative_size = (
-            1 => 40,
-            2 => 15,
-            3 => 15,
-            4 => 15,
-            5 => 15,
-        );
-        %graph_width = (
-            1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
-            2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
-            3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
-            4 => ( $graph_relative_size{4} / 100 * $max_graph_width ),
-            5 => ( $graph_relative_size{5} / 100 * $max_graph_width ),
-        );
-    } elsif( $graph_count == 6 ) {
-        %graph_relative_size = (
-            1 => 30,
-            2 => 14,
-            3 => 14,
-            4 => 14,
-            5 => 14,
-            6 => 14,
-        );
-        %graph_width = (
-            1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
-            2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
-            3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
-            4 => ( $graph_relative_size{4} / 100 * $max_graph_width ),
-            5 => ( $graph_relative_size{5} / 100 * $max_graph_width ),
-            6 => ( $graph_relative_size{6} / 100 * $max_graph_width ),
-        );
+    # Calculate $durations_graph_width from layout (needed by scaling and rendering code)
+    my $latency_col = (grep { $_->{id} =~ /^(latency|heatmap)$/ && $_->{visible} } @column_layout)[0];
+    if ($latency_col) {
+        $durations_graph_width = $latency_col->{width} + $latency_col->{spacing_before} + $latency_col->{spacing_after};
+        # Include the separator width+spacing that precedes latency
+        my $sep_col = (grep { $_->{id} eq 'sep_graph_stats' && $_->{visible} } @column_layout)[0];
+        $durations_graph_width += $sep_col->{width} + ($sep_col->{spacing_before}//0) + ($sep_col->{spacing_after}//0) if $sep_col;
+    } else {
+        $durations_graph_width = 0;
     }
 
-    foreach my $column ( 1 .. $graph_count ) {							# capture and build up list containing width and spacing between columns
-        my $column_spacing = $graph_column_padding_all;
-        $column_spacing += $graph_column_padding_count if $column == 1;
-        $column_spacing += $graph_column_padding_other if $column > 1;
-        push @printed_column_widths, $graph_width{$column} - $column_spacing;
-        push @printed_column_spacing, $column_spacing;
-    }
+    # Calculate $timestamp_length from layout (needed by rendering code)
+    # $timestamp_length in the old code = padding_timestamp(1) + content_width + padding_all(1) = width + spacing
+    my $ts_col = (grep { $_->{id} eq 'timestamp' } @column_layout)[0];
+    $timestamp_length = $ts_col->{width} + $ts_col->{spacing_before} + $ts_col->{spacing_after};
 
-    # BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
-    if ($heatmap_enabled) {
-        # Heatmap column header replaces latency statistics - don't add percentile columns to CSV
-        # (individual duration values are not collected when heatmap is enabled)
-        push @printed_column_widths, $durations_graph_width;
-        push @printed_column_spacing, 0;
-        push @printed_column_names, get_heatmap_column_header();
-    } elsif( $print_durations && !$omit_durations && !$omit_stats ) {
-        my $column_spacing = ( $graph_column_padding_all + $graph_column_padding_latency );
+    # Add CSV output columns for latency stats
+    if ($print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled) {
         push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score );
-        push @printed_column_widths, $durations_graph_width;
-        push @printed_column_spacing, 0;
-        push @printed_column_names, "latency statistics";
     }
 
-    foreach my $column ( 0 .. $#printed_column_names ) {
+    # Bridge: populate @printed_column_widths, @printed_column_spacing, @printed_column_names from @column_layout
+    # Separators are NOT separate entries in the old arrays — their width+spacing is absorbed
+    # into the spacing of the next non-separator column.
+    @printed_column_widths = ();
+    @printed_column_spacing = ();
+    @printed_column_names = ();
+
+    my $pending_sep_chars = 0;  # accumulate separator width+spacing to add to next column's spacing
+    for my $col (grep { $_->{visible} } @column_layout) {
+        if ($col->{type} eq 'separator') {
+            $pending_sep_chars += ($col->{spacing_before}//0) + ($col->{width}//0) + ($col->{spacing_after}//0);
+            next;
+        }
+        my $col_spacing = ($col->{spacing_before}//0) + ($col->{spacing_after}//0) + $pending_sep_chars;
+        $pending_sep_chars = 0;
+        push @printed_column_widths, $col->{width};
+        push @printed_column_spacing, $col_spacing;
+        my $name = $col->{name};
+        $name =~ s/^udm_//;
+        push @printed_column_names, $name;
+    }
+
+    # Truncate column names to fit their width
+    foreach my $column (0 .. $#printed_column_names) {
         my $title = $printed_column_names[$column];
-        $title =~ s/^udm_//;                   # Strip internal prefix for display
         my $max_length = $printed_column_widths[$column] // 0;
-        $title = substr( $title, 0, $max_length ) if $max_length > 0 && length( $title ) > $max_length;
+        $title = substr($title, 0, $max_length) if $max_length > 0 && length($title) > $max_length;
         $printed_column_names[$column] = $title;
     }
-
-    my @rounded_column_widths = cumulative_round_widths( \@printed_column_widths, $terminal_width - eval(join '+', @printed_column_spacing ));
-
-    # $, = ", ";
-    # print "\nPopulated graph columns:       ", @populated_graph_columns;
-    # print "\nDetected and sized columns:    ", sort keys %graph_width;
-    # print "\nCalculated column widths:      ", map { "$_ => $graph_width{$_}" } sort keys %graph_width;  
-    # print "\nPrinted column length:          ", @printed_column_widths;
-    # print " -- total=" . eval(join '+', @printed_column_widths );
-    # print "\nRounded column lengths:          ", @rounded_column_widths;
-    # print " -- total=" . eval(join '+', @rounded_column_widths );
-    # print "\nPrinted column spacing:         ", @printed_column_spacing;
-    # print " -- total=" . eval(join '+', @printed_column_spacing );
-    # print "\nPrinted column names:           ", @printed_column_names;
-    # print "\n";
-    # $, = "";
-
-    @printed_column_widths = @rounded_column_widths;
 
     foreach my $bucket (keys %log_occurrences) {
         # scale the transferred bytes for printing the statistics table
