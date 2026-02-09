@@ -98,7 +98,7 @@ sub build_default_columns {
     my @cols;
 
     # Timestamp — fixed width
-    # 0 before, 1 after
+    # 0 before, 0 after
     push @cols, {
         id              => 'timestamp',
         type            => 'fixed',
@@ -106,7 +106,7 @@ sub build_default_columns {
         width           => undef,
         base_width      => $timestamp_w,
         spacing_before  => 0,
-        spacing_after   => 1,
+        spacing_after   => 0,
         visible         => 1,
         color           => undef,
         priority        => undef,
@@ -115,7 +115,7 @@ sub build_default_columns {
 
     # Legend — content-driven width (single column, floating internal boundary
     # between counts and rates per row)
-    # 0 before, 1 after
+    # 1 before, 0 after
     if ($show_legend) {
         push @cols, {
             id              => 'legend',
@@ -123,8 +123,8 @@ sub build_default_columns {
             name            => 'legend',
             width           => undef,
             base_width      => $legend_w,
-            spacing_before  => 0,
-            spacing_after   => 1,
+            spacing_before  => 1,
+            spacing_after   => 0,
             visible         => 1,
             color           => undef,
             priority        => undef,
@@ -133,14 +133,16 @@ sub build_default_columns {
     }
 
     # Separator: legend | graph columns
+    # 1 before, 1 after — separator anchors the spacing so hiding legend
+    # doesn't create double spacing (timestamp 0/0 + sep 1/1 = 1 space each side)
     push @cols, {
         id              => 'sep_legend_graph',
         type            => 'separator',
         name            => '│',
         width           => undef,
         base_width      => 1,
-        spacing_before  => 0,
-        spacing_after   => 0,
+        spacing_before  => 1,
+        spacing_after   => 1,
         visible         => $show_legend,
         color           => undef,
         priority        => undef,
@@ -148,14 +150,14 @@ sub build_default_columns {
     };
 
     # Occurrences — proportional, focus column
-    # 1 before, 1 after
+    # 0 before (separator's after handles it), 1 after
     push @cols, {
         id              => 'occurrences',
         type            => 'proportional',
         name            => 'occurrences',
         width           => undef,
         base_width      => undef,
-        spacing_before  => 1,
+        spacing_before  => 0,
         spacing_after   => 1,
         visible         => 1,
         color           => undef,
@@ -621,13 +623,14 @@ sub render_data_rows {
             my $sp_before = $col->{spacing_before} // 0;
             my $sp_after  = $col->{spacing_after}  // 0;
 
+            # Spacing before column content (including separators)
+            $line .= pad_before($sp_before);
+
             if ($col->{type} eq 'separator') {
                 $line .= '│';
+                $line .= pad_after($sp_after);
                 next;
             }
-
-            # Spacing before column content
-            $line .= pad_before($sp_before);
 
             if ($id eq 'timestamp') {
                 $line .= render_cell($row->{timestamp}, $w);
@@ -686,17 +689,20 @@ sub render_layout_mockup {
         my $sp_before = $col->{spacing_before} // 0;
         my $sp_after  = $col->{spacing_after}  // 0;
 
+        # Spacing before column content (including separators)
+        $rule .= pad_before($sp_before);
+        $mid  .= pad_before($sp_before);
+        $bot  .= pad_before($sp_before);
+
         if ($col->{type} eq 'separator') {
             $rule .= '┼';
             $mid  .= '│';
             $bot  .= '│';
+            $rule .= pad_after($sp_after);
+            $mid  .= pad_after($sp_after);
+            $bot  .= pad_after($sp_after);
             next;
         }
-
-        # Spacing before column content
-        $rule .= pad_before($sp_before);
-        $mid  .= pad_before($sp_before);
-        $bot  .= pad_before($sp_before);
 
         # Build column content
         my $header = $col->{name};
