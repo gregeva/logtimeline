@@ -92,6 +92,9 @@ my $column_count_pre_graph = 2;		            # timestamp + legend is the default
 my @graph_columns = qw( duration bytes count );
 my ( @printed_column_widths, @printed_column_spacing, @printed_column_names );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
+my @column_layout;
+my ($focus_base, $focus_step, $focus_min) = (70, 10, 25);
+my $debug_layout = 0;
 my ( $print_durations, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -1394,6 +1397,7 @@ sub adapt_to_command_line_options {
         'hgbpd=i' => \$histogram_buckets_per_decade,
         'hgb=i' => \$histogram_bucket_override,
         'terminal-width|tw=i' => \$terminal_width,
+        'debug-layout' => \$debug_layout,
         'help' => \$show_help
     ) or die print_usage( "required options not provided" );
 
@@ -3082,6 +3086,301 @@ sub initialize_empty_time_windows {
     return;
 }
 
+# ============================================================================
+# LAYOUT ENGINE — Column layout single source of truth (Issue #33)
+# These subroutines build and calculate column layouts but are NOT YET used
+# for rendering. The old code path remains authoritative during Phase 1-2.
+# ============================================================================
+
+# Build the default column layout array from current state.
+# Returns an ordered array of column definition hashes.
+sub build_column_layout {
+    my $show_legend  = !($omit_values && $omit_rate);
+    my $show_latency = $print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled;
+    my $show_heatmap = $heatmap_enabled;
+    my $timestamp_w  = length(strftime($output_timestamp_format, gmtime(0))) + ($print_milliseconds ? 4 : 0);
+    my $latency_w    = $show_heatmap ? $heatmap_width : 52;
+
+    my @cols;
+
+    # Timestamp — fixed width
+    push @cols, {
+        id              => 'timestamp',
+        type            => 'fixed',
+        name            => 'timestamp',
+        width           => undef,
+        base_width      => $timestamp_w,
+        spacing_before  => 0,
+        spacing_after   => 0,
+        visible         => 1,
+        color           => undef,
+        priority        => undef,
+    };
+
+    # Legend — content-driven width
+    if ($show_legend) {
+        push @cols, {
+            id              => 'legend',
+            type            => 'content',
+            name            => 'legend',
+            width           => undef,
+            base_width      => $legend_length,
+            spacing_before  => 1,
+            spacing_after   => 0,
+            visible         => 1,
+            color           => undef,
+            priority        => undef,
+        };
+    }
+
+    # Separator: legend | graph columns
+    push @cols, {
+        id              => 'sep_legend_graph',
+        type            => 'separator',
+        name            => "\x{2502}",
+        width           => undef,
+        base_width      => 1,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => $show_legend,
+        color           => undef,
+        priority        => undef,
+    };
+
+    # Occurrences — proportional, focus column
+    push @cols, {
+        id              => 'occurrences',
+        type            => 'proportional',
+        name            => 'occurrences',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 0,
+        spacing_after   => 1,
+        visible         => 1,
+        color           => undef,
+        priority        => 'focus',
+    };
+
+    # Duration — proportional, secondary
+    push @cols, {
+        id              => 'duration',
+        type            => 'proportional',
+        name            => 'duration',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 0,
+        color           => undef,
+        priority        => 'secondary',
+    };
+
+    # Bytes — proportional, secondary
+    push @cols, {
+        id              => 'bytes',
+        type            => 'proportional',
+        name            => 'bytes',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 0,
+        color           => undef,
+        priority        => 'secondary',
+    };
+
+    # Count — proportional, secondary
+    push @cols, {
+        id              => 'count',
+        type            => 'proportional',
+        name            => 'count',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 0,
+        color           => undef,
+        priority        => 'secondary',
+    };
+
+    # Separator: graph columns | latency/heatmap
+    if ($show_latency || $show_heatmap) {
+        push @cols, {
+            id              => 'sep_graph_stats',
+            type            => 'separator',
+            name            => "\x{2502}",
+            width           => undef,
+            base_width      => 1,
+            spacing_before  => 0,
+            spacing_after   => 0,
+            visible         => 1,
+            color           => undef,
+            priority        => undef,
+        };
+    }
+
+    # Latency statistics or heatmap — fixed width
+    if ($show_latency || $show_heatmap) {
+        push @cols, {
+            id              => $show_heatmap ? 'heatmap' : 'latency',
+            type            => 'fixed',
+            name            => $show_heatmap ? get_heatmap_column_header() : 'latency statistics',
+            width           => undef,
+            base_width      => $latency_w,
+            spacing_before  => 2,
+            spacing_after   => 0,
+            visible         => 1,
+            color           => undef,
+            priority        => undef,
+        };
+    }
+
+    return @cols;
+}
+
+# Add a dynamic column (threadpool or UDM) before the graph-stats separator
+sub add_dynamic_column {
+    my ($columns_ref, $id, $name, $color_index) = @_;
+
+    # Find insertion point: before sep_graph_stats (or end of proportionals)
+    my $insert_idx = scalar @$columns_ref;
+    for my $i (0 .. $#$columns_ref) {
+        if ($columns_ref->[$i]{id} eq 'sep_graph_stats') {
+            $insert_idx = $i;
+            last;
+        }
+    }
+
+    my $new_col = {
+        id              => $id,
+        type            => 'proportional',
+        name            => $name,
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 1,
+        color           => undef,
+        priority        => 'secondary',
+    };
+
+    splice @$columns_ref, $insert_idx, 0, $new_col;
+    return $columns_ref;
+}
+
+# Resolve separator visibility based on adjacency.
+# A separator is visible only if both adjacent non-separator columns are visible.
+sub resolve_separator_visibility {
+    my ($columns_ref) = @_;
+
+    for my $i (0 .. $#$columns_ref) {
+        my $col = $columns_ref->[$i];
+        next unless $col->{type} eq 'separator';
+
+        my $prev_visible = 0;
+        for my $j (reverse 0 .. $i-1) {
+            next if $columns_ref->[$j]{type} eq 'separator';
+            next unless $columns_ref->[$j]{visible};
+            $prev_visible = 1;
+            last;
+        }
+
+        my $next_visible = 0;
+        for my $j ($i+1 .. $#$columns_ref) {
+            next if $columns_ref->[$j]{type} eq 'separator';
+            next unless $columns_ref->[$j]{visible};
+            $next_visible = 1;
+            last;
+        }
+
+        $col->{visible} = ($prev_visible && $next_visible) ? 1 : 0;
+    }
+}
+
+# Distribute proportional width using linear decay algorithm.
+# focus_share = max(focus_min, focus_base - (N-2) * focus_step)
+# secondary_share = (100 - focus_share) / (N-1)
+sub distribute_proportional {
+    my ($n) = @_;
+    return (100) if $n == 1;
+
+    my $focus_pct = max($focus_min, $focus_base - ($n - 2) * $focus_step);
+    my $secondary_pct = (100 - $focus_pct) / ($n - 1);
+
+    my @shares = ($focus_pct);
+    push @shares, $secondary_pct for 2 .. $n;
+    return @shares;
+}
+
+# 8-step width allocation pipeline.
+# Input: array ref of column definitions, terminal width.
+# Output: modifies column width fields in place.
+sub calculate_table_layout {
+    my ($columns_ref, $term_width) = @_;
+
+    # Step 1: Resolve separator visibility
+    resolve_separator_visibility($columns_ref);
+
+    my @visible = grep { $_->{visible} } @$columns_ref;
+
+    # Step 2: Allocate fixed columns
+    for my $col (@visible) {
+        if ($col->{type} eq 'fixed') {
+            $col->{width} = $col->{base_width};
+        }
+    }
+
+    # Step 3: Allocate separator columns
+    for my $col (@visible) {
+        if ($col->{type} eq 'separator') {
+            $col->{width} = $col->{base_width};  # always 1
+        }
+    }
+
+    # Step 4: Allocate content-driven columns
+    for my $col (@visible) {
+        if ($col->{type} eq 'content') {
+            $col->{width} = $col->{base_width};
+        }
+    }
+
+    # Step 5: Sum all spacing
+    my $spacing_total = 0;
+    for my $col (@visible) {
+        $spacing_total += ($col->{spacing_before} // 0) + ($col->{spacing_after} // 0);
+    }
+
+    # Step 6: Calculate remaining width for proportional columns
+    my $fixed_total = 0;
+    for my $col (@visible) {
+        $fixed_total += $col->{width} // 0 if $col->{type} ne 'proportional';
+    }
+    my $remaining = $term_width - $fixed_total - $spacing_total;
+
+    # Step 7: Distribute remaining to proportional columns
+    my @prop_cols = grep { $_->{type} eq 'proportional' && $_->{visible} } @$columns_ref;
+    my $n_prop = scalar @prop_cols;
+
+    if ($n_prop > 0 && $remaining > 0) {
+        my @shares = distribute_proportional($n_prop);
+        my @raw_widths;
+        for my $i (0 .. $#prop_cols) {
+            push @raw_widths, $shares[$i] / 100 * $remaining;
+        }
+
+        # Step 8: Apply cumulative rounding
+        my @rounded = cumulative_round_widths(\@raw_widths, $remaining);
+
+        for my $i (0 .. $#prop_cols) {
+            $prop_cols[$i]->{width} = $rounded[$i];
+        }
+    } elsif ($n_prop > 0) {
+        for my $col (@prop_cols) {
+            $col->{width} = max(1, int($remaining / $n_prop));
+        }
+    }
+}
+
 sub cumulative_round_widths {
     my ($w_ref, $M) = @_;
     my @w = @$w_ref;
@@ -3199,6 +3498,49 @@ sub normalize_data_for_output {
         }
     }
     push @output_columns, "totalOccurrences"; # if $category_bucket =~ /^err-rate$/;
+
+    # --- Layout engine (Phase 1): build and calculate but do NOT use for rendering ---
+    {
+        @column_layout = build_column_layout();
+
+        # Set visibility on proportional columns based on data presence
+        for my $col (@column_layout) {
+            next unless $col->{type} eq 'proportional' && $col->{id} ne 'occurrences';
+            $col->{visible} = 1 if defined $max_total{$col->{id}} && $max_total{$col->{id}} > 0;
+        }
+
+        # Add dynamic columns (threadpools, UDMs)
+        for my $tp (@graph_threadpools_activity) {
+            add_dynamic_column(\@column_layout, $tp, $tp, 3);
+        }
+        my $udm_color_idx = 3 + scalar(@graph_threadpools_activity);
+        for my $config (@udm_configs) {
+            my $key = "udm_$config->{name}";
+            if (defined $max_total{$key} && $max_total{$key} > 0) {
+                add_dynamic_column(\@column_layout, $key, $config->{name}, $udm_color_idx++);
+            }
+        }
+
+        calculate_table_layout(\@column_layout, $terminal_width);
+
+        if ($debug_layout) {
+            print STDERR "\n--- Layout Engine Debug (Phase 1) ---\n";
+            printf STDERR "  %-20s %-14s %6s %4s %5s %3s\n", "Column", "Type", "Width", "Bef", "Aft", "Vis";
+            my $total = 0;
+            for my $col (@column_layout) {
+                next unless $col->{visible};
+                my $w = $col->{width} // 0;
+                my $t = $w + ($col->{spacing_before}//0) + ($col->{spacing_after}//0);
+                $total += $t;
+                printf STDERR "  %-20s %-14s %6d %4d %5d %3d\n",
+                    $col->{id}, $col->{type}, $w,
+                    $col->{spacing_before}//0, $col->{spacing_after}//0, $col->{visible};
+            }
+            printf STDERR "  %-20s %-14s %6s %4s %5s %3s  = %d (terminal: %d)\n",
+                '', '', '', '', 'TOTAL', '', $total, $terminal_width;
+            print STDERR "---\n";
+        }
+    }
 
 # Latency statistics column width: │ + 2 spaces + P50(11) + P95(11) + P99(11) + P999(11) + CV(7) = 54 chars
     # When heatmap is enabled, use $heatmap_width (which may be customized via -hmw) instead of hardcoded 52
