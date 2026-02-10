@@ -94,17 +94,48 @@ my $no_auto_hide = 0;
 my $debug_layout = 0;
 my $validate_layout = 0;
 my @column_colors = (
-    { name => 'yellow',  highlighted_bg => "\033[48;5;226m\033[38;5;0m", plain_bg => "\033[48;5;184m\033[38;5;0m", fg => "\033[0m\033[93m" },
-    { name => 'green',   highlighted_bg => "\033[48;5;46m\033[38;5;0m",  plain_bg => "\033[48;5;34m\033[38;5;0m",  fg => "\033[0m\033[32m" },
-    { name => 'cyan',    highlighted_bg => "\033[48;5;36m\033[38;5;0m",  plain_bg => "\033[48;5;30m\033[38;5;0m",  fg => "\033[0m\033[36m" },
-    { name => 'blue',    highlighted_bg => "\033[48;5;21m\033[38;5;0m",  plain_bg => "\033[48;5;20m\033[38;5;0m",  fg => "\033[0m\033[34m" },
-    { name => 'magenta', highlighted_bg => "\033[48;5;201m\033[38;5;0m", plain_bg => "\033[48;5;127m\033[38;5;0m", fg => "\033[0m\033[35m" },
-    { name => 'red',     highlighted_bg => "\033[48;5;196m\033[38;5;0m", plain_bg => "\033[48;5;124m\033[38;5;0m", fg => "\033[0m\033[31m" },
-    { name => 'orange',  highlighted_bg => "\033[48;5;208m\033[38;5;0m", plain_bg => "\033[48;5;166m\033[38;5;0m", fg => "\033[0m\033[38;5;208m" },
-    { name => 'pink',    highlighted_bg => "\033[48;5;213m\033[38;5;0m", plain_bg => "\033[48;5;169m\033[38;5;0m", fg => "\033[0m\033[38;5;213m" },
-    { name => 'teal',    highlighted_bg => "\033[48;5;43m\033[38;5;0m",  plain_bg => "\033[48;5;29m\033[38;5;0m",  fg => "\033[0m\033[38;5;43m" },
-    { name => 'purple',  highlighted_bg => "\033[48;5;93m\033[38;5;0m",  plain_bg => "\033[48;5;55m\033[38;5;0m",  fg => "\033[0m\033[38;5;93m" },
+    { name => 'yellow',  highlighted_bg => "\033[48;5;226m\033[38;5;0m", plain_bg => "\033[48;5;184m\033[38;5;0m", fg => "\033[0m\033[93m",
+      plain_bg_num => 184, highlighted_bg_num => 226,
+      gradient       => [58, 94, 136, 142, 178, 184, 220, 226],
+      gradient_light => [230, 229, 228, 227, 220, 214, 208, 202] },
+    { name => 'green',   highlighted_bg => "\033[48;5;46m\033[38;5;0m",  plain_bg => "\033[48;5;34m\033[38;5;0m",  fg => "\033[0m\033[32m",
+      plain_bg_num => 34, highlighted_bg_num => 46,
+      gradient       => [22, 28, 34, 40, 46, 82, 118, 154],
+      gradient_light => [194, 157, 120, 84, 48, 42, 36, 35] },
+    { name => 'cyan',    highlighted_bg => "\033[48;5;36m\033[38;5;0m",  plain_bg => "\033[48;5;30m\033[38;5;0m",  fg => "\033[0m\033[36m",
+      plain_bg_num => 30, highlighted_bg_num => 51,
+      gradient       => [23, 30, 37, 44, 51, 80, 86, 123],
+      gradient_light => [195, 159, 123, 87, 51, 44, 37, 30] },
+    { name => 'blue',    highlighted_bg => "\033[48;5;21m\033[38;5;0m",  plain_bg => "\033[48;5;20m\033[38;5;0m",  fg => "\033[0m\033[34m",
+      plain_bg_num => 20, highlighted_bg_num => 27,
+      gradient       => [17, 18, 19, 20, 21, 27, 33, 39],
+      gradient_light => [189, 153, 117, 81, 45, 39, 33, 27] },
+    { name => 'magenta', highlighted_bg => "\033[48;5;201m\033[38;5;0m", plain_bg => "\033[48;5;127m\033[38;5;0m", fg => "\033[0m\033[35m",
+      plain_bg_num => 127, highlighted_bg_num => 207,
+      gradient       => [53, 89, 125, 127, 163, 165, 201, 207],
+      gradient_light => [225, 219, 213, 207, 201, 165, 129, 93] },
+    { name => 'red',     highlighted_bg => "\033[48;5;196m\033[38;5;0m", plain_bg => "\033[48;5;124m\033[38;5;0m", fg => "\033[0m\033[31m",
+      plain_bg_num => 124, highlighted_bg_num => 196,
+      gradient       => [52, 88, 124, 160, 196, 197, 203, 209],
+      gradient_light => [224, 218, 212, 206, 200, 196, 160, 124] },
+    { name => 'orange',  highlighted_bg => "\033[48;5;208m\033[38;5;0m", plain_bg => "\033[48;5;166m\033[38;5;0m", fg => "\033[0m\033[38;5;208m",
+      plain_bg_num => 166, highlighted_bg_num => 208,
+      gradient       => [94, 130, 166, 172, 208, 209, 214, 215],
+      gradient_light => [223, 217, 216, 215, 214, 208, 172, 166] },
+    { name => 'pink',    highlighted_bg => "\033[48;5;213m\033[38;5;0m", plain_bg => "\033[48;5;169m\033[38;5;0m", fg => "\033[0m\033[38;5;213m",
+      plain_bg_num => 169, highlighted_bg_num => 213,
+      gradient       => [132, 133, 169, 170, 206, 207, 213, 219],
+      gradient_light => [225, 219, 218, 217, 213, 212, 206, 169] },
+    { name => 'teal',    highlighted_bg => "\033[48;5;43m\033[38;5;0m",  plain_bg => "\033[48;5;29m\033[38;5;0m",  fg => "\033[0m\033[38;5;43m",
+      plain_bg_num => 29, highlighted_bg_num => 43,
+      gradient       => [23, 29, 30, 36, 37, 43, 44, 50],
+      gradient_light => [158, 122, 86, 50, 44, 43, 37, 29] },
+    { name => 'purple',  highlighted_bg => "\033[48;5;93m\033[38;5;0m",  plain_bg => "\033[48;5;55m\033[38;5;0m",  fg => "\033[0m\033[38;5;93m",
+      plain_bg_num => 55, highlighted_bg_num => 93,
+      gradient       => [54, 55, 56, 92, 93, 129, 134, 171],
+      gradient_light => [189, 183, 177, 171, 135, 134, 93, 55] },
 );
+my %column_color_lookup = map { $_->{name} => $_ } @column_colors;
 my ( $print_durations, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -183,36 +214,10 @@ my ($heatmap_min, $heatmap_max) = (undef, undef);   # Global min/max for normali
 my $heatmap_max_density = 0;                # Maximum density across all cells
 my %heatmap_percentiles;                    # {$bucket} = { p50 => index, p95 => index, p99 => index, p999 => index } - percentile marker positions
 
-# Heatmap color gradients (8 steps from dim to bright)
-# Index 0 = lowest density (dim), Index 7 = highest density (bright)
-# Dark background gradients: visible colors only (no near-black grays)
-my %heatmap_colors = (
-    'yellow'  => [58, 94, 136, 142, 178, 184, 220, 226],     # Duration (column 2)
-    'green'   => [22, 28, 34, 40, 46, 82, 118, 154],         # Bytes (column 3)
-    'cyan'    => [23, 30, 37, 44, 51, 80, 86, 123],          # Count (column 4)
-    'blue'    => [17, 18, 19, 20, 21, 27, 33, 39],           # Future metrics
-    'magenta' => [53, 89, 125, 161, 162, 163, 199, 200],     # Future metrics
-    'red'     => [52, 88, 124, 160, 196, 197, 203, 209],     # Future metrics
-    'orange'  => [94, 130, 166, 172, 208, 209, 214, 215],    # Future metrics
-    'pink'    => [132, 133, 169, 170, 206, 207, 213, 219],   # Future metrics
-    'teal'    => [23, 29, 30, 36, 37, 43, 44, 50],           # Future metrics
-    'purple'  => [54, 55, 56, 92, 93, 129, 134, 171],        # Future metrics
-    'white'   => [238, 240, 242, 244, 246, 248, 252, 255],   # Future metrics
-);
-
-# Light background gradients: fade from light/pale shades to bright saturated color
-my %heatmap_colors_light = (
-    'yellow'  => [230, 229, 228, 227, 220, 214, 208, 202],   # Duration: pale yellow to saturated
-    'green'   => [194, 157, 120, 84, 48, 42, 36, 35],        # Bytes: pale green to saturated
-    'cyan'    => [195, 159, 123, 87, 51, 44, 37, 30],        # Count: pale cyan to saturated
-    'blue'    => [189, 153, 117, 81, 45, 39, 33, 27],        # Future: pale blue to saturated
-    'magenta' => [225, 219, 213, 207, 201, 165, 129, 93],    # Future: pale magenta to saturated
-    'red'     => [224, 218, 212, 206, 200, 196, 160, 124],   # Future: pale red to saturated
-    'orange'  => [223, 217, 216, 215, 214, 208, 172, 166],   # Future: pale orange to saturated
-    'pink'    => [225, 219, 218, 217, 213, 212, 206, 169],   # Future: pale pink to saturated
-    'teal'    => [158, 122, 86, 50, 44, 43, 37, 29],         # Future: pale teal to saturated
-    'purple'  => [189, 183, 177, 171, 135, 134, 93, 55],     # Future: pale purple to saturated
-    'white'   => [255, 254, 253, 250, 247, 244, 241, 238],   # Future: white to gray
+# Special heatmap gradients for colors not in @column_colors
+my %heatmap_special_gradients = (
+    white => { gradient       => [238, 240, 242, 244, 246, 248, 252, 255],
+               gradient_light => [255, 254, 253, 250, 247, 244, 241, 238] },
 );
 
 # Map metric names to column numbers and colors
@@ -315,26 +320,10 @@ my %histogram_box_sets = (
 # 8-level block characters for sub-character resolution in histograms
 my @histogram_block_chars = (' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█');
 
-# Histogram base colors - match bar graph column plain_bg colors
-my %histogram_base_colors = (
-    duration => 184,  # Yellow - matches bar graph column 2 plain_bg
-    bytes    => 34,   # Green - matches bar graph column 3 plain_bg
-    count    => 30,   # Cyan - matches bar graph column 4 plain_bg
-);
-
-# Histogram highlight colors (Issue #42) - match bar graph highlight_bg colors
-my %histogram_highlight_colors = (
-    duration => 226,  # Bright yellow - matches bar graph column 2 highlight
-    bytes    => 46,   # Bright green - matches bar graph column 3 highlight
-    count    => 51,   # Bright cyan - matches bar graph column 4 highlight
-);
-
-# Histogram color gradients (256-color ANSI) for optional intensity variation
-my %histogram_color_gradients = (
-    duration => [58, 94, 136, 142, 178, 184, 220, 226],   # Yellow gradient
-    bytes    => [22, 28, 34, 40, 46, 82, 118, 154],       # Green gradient
-    count    => [23, 30, 37, 44, 51, 80, 86, 123],        # Cyan gradient
-);
+# Histogram colors — derived from @column_colors (duration=yellow[0], bytes=green[1], count=cyan[2])
+my %histogram_base_colors      = ( duration => $column_colors[0]{plain_bg_num},       bytes => $column_colors[1]{plain_bg_num},       count => $column_colors[2]{plain_bg_num} );
+my %histogram_highlight_colors = ( duration => $column_colors[0]{highlighted_bg_num}, bytes => $column_colors[1]{highlighted_bg_num}, count => $column_colors[2]{highlighted_bg_num} );
+my %histogram_color_gradients  = ( duration => $column_colors[0]{gradient},           bytes => $column_colors[1]{gradient},           count => $column_colors[2]{gradient} );
 
 my $histogram_color_gradient_enabled = 0;     # Toggle: 1 = intensity gradients, 0 = flat base color
 my $histogram_gridlines_enabled = 1;          # Toggle: horizontal gridlines at Y-axis tick positions
@@ -3781,24 +3770,11 @@ sub normalize_data_for_output {
 
     }
 
-    # Shared column-position color arrays for UDM heatmap and histogram resolution
-    # These map bar graph column positions to their color schemes
-    # (see issue #64 for consolidation with other hardcoded color references)
-    my @column_color_names   = qw( yellow green cyan blue magenta red orange pink teal purple );
-    my @column_plain_bg      = ( 184, 34, 30, 20, 127, 124, 166, 169, 29, 55 );
-    my @column_highlight_bg  = ( 226, 46, 51, 27, 207, 196, 208, 213, 43, 93 );
-    my @column_gradients = (
-        [58, 94, 136, 142, 178, 184, 220, 226],   # Yellow
-        [22, 28, 34, 40, 46, 82, 118, 154],        # Green
-        [23, 30, 37, 44, 51, 80, 86, 123],         # Cyan
-        [17, 18, 19, 20, 21, 27, 33, 39],          # Blue
-        [53, 89, 125, 127, 163, 165, 201, 207],    # Magenta
-        [52, 88, 124, 160, 196, 197, 203, 209],    # Red
-        [94, 130, 166, 172, 208, 209, 214, 215],   # Orange
-        [132, 133, 169, 170, 206, 207, 213, 219],  # Pink
-        [23, 29, 30, 36, 37, 43, 44, 50],          # Teal
-        [54, 55, 56, 92, 93, 129, 134, 171],       # Purple
-    );
+    # Derive local arrays from @column_colors for UDM heatmap and histogram resolution
+    my @column_color_names  = map { $_->{name} } @column_colors;
+    my @column_plain_bg     = map { $_->{plain_bg_num} } @column_colors;
+    my @column_highlight_bg = map { $_->{highlighted_bg_num} } @column_colors;
+    my @column_gradients    = map { $_->{gradient} } @column_colors;
 
     # Resolve UDM heatmap color from its bar graph column position
     if (defined $heatmap_udm_config) {
@@ -3839,22 +3815,6 @@ sub normalize_data_for_output {
     }
 
     return;
-}
-
-sub get_heatmap_highlight_bg_color {
-    my ($metric) = @_;
-    # Return highlight background color for heatmap
-    # Uses same colors as plain_bg in bar graph columns for consistency
-    my %highlight_colors = (
-        'duration' => 184,  # Yellow - matches bar graph column 2 plain_bg
-        'bytes'    => 34,   # Green - matches bar graph column 3 plain_bg
-        'count'    => 30,   # Cyan - matches bar graph column 4 plain_bg
-    );
-    if (exists $highlight_colors{$metric}) {
-        return $highlight_colors{$metric};
-    }
-    # UDM metrics: use highlight_bg resolved from bar graph column position
-    return $heatmap_metric_map{$metric}{highlight_bg} // 184;
 }
 
 sub format_heatmap_value {
@@ -4000,9 +3960,9 @@ sub print_heatmap_row {
     my $heatmap_content_width = $heatmap_width;
 
     my $color_key = $heatmap_metric_map{$heatmap_metric}{color};
-    my $color_hash = $heatmap_light_bg ? \%heatmap_colors_light : \%heatmap_colors;
-    my @gradient = @{$color_hash->{$color_key}};
-    my $highlight_bg = get_heatmap_highlight_bg_color($heatmap_metric);
+    my $entry = $column_color_lookup{$color_key} // $heatmap_special_gradients{$color_key};
+    my @gradient = @{$heatmap_light_bg ? $entry->{gradient_light} : $entry->{gradient}};
+    my $highlight_bg = $entry->{plain_bg_num} // $heatmap_metric_map{$heatmap_metric}{highlight_bg} // 184;
 
     # Get percentile positions for this bucket
     my $percentiles = $heatmap_percentiles{$bucket} // {};
