@@ -99,6 +99,11 @@ my @column_colors = (
     { name => 'cyan',    highlighted_bg => "\033[48;5;36m\033[38;5;0m",  plain_bg => "\033[48;5;30m\033[38;5;0m",  fg => "\033[0m\033[36m" },
     { name => 'blue',    highlighted_bg => "\033[48;5;21m\033[38;5;0m",  plain_bg => "\033[48;5;20m\033[38;5;0m",  fg => "\033[0m\033[34m" },
     { name => 'magenta', highlighted_bg => "\033[48;5;201m\033[38;5;0m", plain_bg => "\033[48;5;127m\033[38;5;0m", fg => "\033[0m\033[35m" },
+    { name => 'red',     highlighted_bg => "\033[48;5;196m\033[38;5;0m", plain_bg => "\033[48;5;124m\033[38;5;0m", fg => "\033[0m\033[31m" },
+    { name => 'orange',  highlighted_bg => "\033[48;5;208m\033[38;5;0m", plain_bg => "\033[48;5;166m\033[38;5;0m", fg => "\033[0m\033[38;5;208m" },
+    { name => 'pink',    highlighted_bg => "\033[48;5;213m\033[38;5;0m", plain_bg => "\033[48;5;169m\033[38;5;0m", fg => "\033[0m\033[38;5;213m" },
+    { name => 'teal',    highlighted_bg => "\033[48;5;43m\033[38;5;0m",  plain_bg => "\033[48;5;29m\033[38;5;0m",  fg => "\033[0m\033[38;5;43m" },
+    { name => 'purple',  highlighted_bg => "\033[48;5;93m\033[38;5;0m",  plain_bg => "\033[48;5;55m\033[38;5;0m",  fg => "\033[0m\033[38;5;93m" },
 );
 my ( $print_durations, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
@@ -188,6 +193,10 @@ my %heatmap_colors = (
     'blue'    => [17, 18, 19, 20, 21, 27, 33, 39],           # Future metrics
     'magenta' => [53, 89, 125, 161, 162, 163, 199, 200],     # Future metrics
     'red'     => [52, 88, 124, 160, 196, 197, 203, 209],     # Future metrics
+    'orange'  => [94, 130, 166, 172, 208, 209, 214, 215],    # Future metrics
+    'pink'    => [132, 133, 169, 170, 206, 207, 213, 219],   # Future metrics
+    'teal'    => [23, 29, 30, 36, 37, 43, 44, 50],           # Future metrics
+    'purple'  => [54, 55, 56, 92, 93, 129, 134, 171],        # Future metrics
     'white'   => [238, 240, 242, 244, 246, 248, 252, 255],   # Future metrics
 );
 
@@ -199,6 +208,10 @@ my %heatmap_colors_light = (
     'blue'    => [189, 153, 117, 81, 45, 39, 33, 27],        # Future: pale blue to saturated
     'magenta' => [225, 219, 213, 207, 201, 165, 129, 93],    # Future: pale magenta to saturated
     'red'     => [224, 218, 212, 206, 200, 196, 160, 124],   # Future: pale red to saturated
+    'orange'  => [223, 217, 216, 215, 214, 208, 172, 166],   # Future: pale orange to saturated
+    'pink'    => [225, 219, 218, 217, 213, 212, 206, 169],   # Future: pale pink to saturated
+    'teal'    => [158, 122, 86, 50, 44, 43, 37, 29],         # Future: pale teal to saturated
+    'purple'  => [189, 183, 177, 171, 135, 134, 93, 55],     # Future: pale purple to saturated
     'white'   => [255, 254, 253, 250, 247, 244, 241, 238],   # Future: white to gray
 );
 
@@ -2992,8 +3005,6 @@ sub calculate_all_statistics {
     ## STATS FOR THREAD POOL ACTIVITY ##
     my %threadpools;
     my ( @ordered_threadpools );
-    my $threadpools_included = 0;
-
     foreach my $category ( qw( highlight plain ) ) {
         foreach my $threadpool ( keys %{$threadpool_activity{$category}} ) {
             $threadpools{$threadpool}{threads} += scalar keys %{$threadpool_activity{$category}{$threadpool}};
@@ -3005,10 +3016,7 @@ sub calculate_all_statistics {
 
     @ordered_threadpools = sort { $threadpools{$b}{occurrences} <=> $threadpools{$a}{occurrences} } keys %threadpools;
 
-# TO DO - If I built up the max_totals while going through the files, by the time we calculate the statistics I could removed empty graph fields like duration and bytes,
-#         then we'd be OK to add more custom columns in order to still fit within the 6 column limit.
     foreach my $threadpool ( @ordered_threadpools ) {
-        last if $threadpools_included++ > 3;
         push( @graph_threadpools_activity, $threadpool ) if( $include_threadpool_summary || $threadpool =~ /${threadpool_activity_regex}/i );
     }
 
@@ -3776,15 +3784,20 @@ sub normalize_data_for_output {
     # Shared column-position color arrays for UDM heatmap and histogram resolution
     # These map bar graph column positions to their color schemes
     # (see issue #64 for consolidation with other hardcoded color references)
-    my @column_color_names   = qw( yellow green cyan blue magenta );
-    my @column_plain_bg      = ( 184, 34, 30, 20, 127 );
-    my @column_highlight_bg  = ( 226, 46, 51, 27, 207 );
+    my @column_color_names   = qw( yellow green cyan blue magenta red orange pink teal purple );
+    my @column_plain_bg      = ( 184, 34, 30, 20, 127, 124, 166, 169, 29, 55 );
+    my @column_highlight_bg  = ( 226, 46, 51, 27, 207, 196, 208, 213, 43, 93 );
     my @column_gradients = (
         [58, 94, 136, 142, 178, 184, 220, 226],   # Yellow
         [22, 28, 34, 40, 46, 82, 118, 154],        # Green
         [23, 30, 37, 44, 51, 80, 86, 123],         # Cyan
         [17, 18, 19, 20, 21, 27, 33, 39],          # Blue
         [53, 89, 125, 127, 163, 165, 201, 207],    # Magenta
+        [52, 88, 124, 160, 196, 197, 203, 209],    # Red
+        [94, 130, 166, 172, 208, 209, 214, 215],   # Orange
+        [132, 133, 169, 170, 206, 207, 213, 219],  # Pink
+        [23, 29, 30, 36, 37, 43, 44, 50],          # Teal
+        [54, 55, 56, 92, 93, 129, 134, 171],       # Purple
     );
 
     # Resolve UDM heatmap color from its bar graph column position
@@ -3793,7 +3806,7 @@ sub normalize_data_for_output {
         for my $key (@populated_graph_columns) {
             next if $key eq 'occurrences';
             if ($key eq "udm_$heatmap_udm_config->{name}") {
-                my $idx = $col < scalar(@column_color_names) ? $col : $#column_color_names;
+                my $idx = $col % scalar(@column_color_names);
                 $heatmap_metric_map{$heatmap_metric}{color} = $column_color_names[$idx];
                 $heatmap_metric_map{$heatmap_metric}{highlight_bg} = $column_plain_bg[$idx];
                 last;
@@ -3809,7 +3822,7 @@ sub normalize_data_for_output {
         for my $key (@populated_graph_columns) {
             next if $key eq 'occurrences';
             if ($key eq "udm_$metric") {
-                my $idx = $col < scalar(@column_plain_bg) ? $col : $#column_plain_bg;
+                my $idx = $col % scalar(@column_plain_bg);
                 $histogram_base_colors{$metric} = $column_plain_bg[$idx];
                 $histogram_highlight_colors{$metric} = $column_highlight_bg[$idx];
                 $histogram_color_gradients{$metric} = $column_gradients[$idx];
