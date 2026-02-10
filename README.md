@@ -124,6 +124,7 @@ ltl [options] <logfile> [logfile2 ...]
 | Option | Description |
 |--------|-------------|
 | `-lbg, --light-background` | Use pale-to-bright color gradients suited for light/white terminal backgrounds |
+| `-nah, --no-auto-hide` | Disable automatic column hiding at narrow terminal widths (squeeze all columns instead) |
 | `-p, --pause` | Wait for a keypress between pages of output |
 | `-V, --verbose` | Print detailed processing information including regex matches and parsing decisions |
 
