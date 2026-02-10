@@ -89,6 +89,8 @@ my @graph_columns = qw( duration bytes count );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
 my @column_layout;
 my ($focus_base, $focus_step, $focus_min) = (70, 10, 25);
+my $auto_hide_min_width = 6;
+my $no_auto_hide = 0;
 my $debug_layout = 0;
 my $validate_layout = 0;
 my @column_colors = (
@@ -566,6 +568,8 @@ OPTIONS
   Display
     -lbg, --light-background                   Use pale-to-bright color gradients suited for
                                                light/white terminal backgrounds
+    -nah, --no-auto-hide                       Disable automatic column hiding at narrow terminal
+                                               widths (squeeze all columns instead)
     -p,   --pause                              Wait for a keypress between pages of output
     -V,   --verbose                            Print detailed processing information including regex
                                                matches and parsing decisions
@@ -1417,6 +1421,7 @@ sub adapt_to_command_line_options {
         'hgbpd=i' => \$histogram_buckets_per_decade,
         'hgb=i' => \$histogram_bucket_override,
         'terminal-width|tw=i' => \$terminal_width,
+        'no-auto-hide|nah' => \$no_auto_hide,
         'debug-layout' => \$debug_layout,
         'validate-layout' => \$validate_layout,
         'help' => \$show_help
@@ -3163,7 +3168,7 @@ sub build_column_layout {
         spacing_after   => 1,
         visible         => 1,
         color           => undef,
-        priority        => undef,
+        hide_order      => 0,
     };
 
     # Legend — content-driven width
@@ -3179,7 +3184,7 @@ sub build_column_layout {
             spacing_after   => 0,
             visible         => $hide_legend ? 0 : 1,
             color           => undef,
-            priority        => undef,
+            hide_order      => 0,
         };
     }
 
@@ -3194,7 +3199,7 @@ sub build_column_layout {
         spacing_after   => 1,
         visible         => $show_legend,
         color           => undef,
-        priority        => undef,
+        hide_order      => 0,
     };
 
     # Occurrences — proportional, focus column
@@ -3208,7 +3213,7 @@ sub build_column_layout {
         spacing_after   => 1,
         visible         => $hide_occurrences ? 0 : 1,
         color           => undef,
-        priority        => 'focus',
+        hide_order      => 10,
     };
 
     # Duration — proportional, secondary
@@ -3222,7 +3227,7 @@ sub build_column_layout {
         spacing_after   => 1,
         visible         => 0,
         color           => $column_colors[0],
-        priority        => 'secondary',
+        hide_order      => 30,
     };
 
     # Bytes — proportional, secondary
@@ -3236,7 +3241,7 @@ sub build_column_layout {
         spacing_after   => 1,
         visible         => 0,
         color           => $column_colors[1],
-        priority        => 'secondary',
+        hide_order      => 40,
     };
 
     # Count — proportional, secondary
@@ -3250,7 +3255,7 @@ sub build_column_layout {
         spacing_after   => 1,
         visible         => 0,
         color           => $column_colors[2],
-        priority        => 'secondary',
+        hide_order      => 50,
     };
 
     # Separator: graph columns | latency/heatmap
@@ -3265,7 +3270,7 @@ sub build_column_layout {
             spacing_after   => 0,
             visible         => 1,
             color           => undef,
-            priority        => undef,
+            hide_order      => 0,
         };
     }
 
@@ -3281,7 +3286,7 @@ sub build_column_layout {
             spacing_after   => 0,
             visible         => $hide_stats ? 0 : 1,
             color           => undef,
-            priority        => undef,
+            hide_order      => 70,
         };
     }
 
@@ -3297,7 +3302,7 @@ sub build_column_layout {
             spacing_after   => 0,
             visible         => $hide_stats ? 0 : 1,
             color           => undef,
-            priority        => undef,
+            hide_order      => 20,
         };
     }
 
@@ -3305,7 +3310,7 @@ sub build_column_layout {
 }
 
 # Add a dynamic column (threadpool, session, or UDM) before the graph-stats separator
-# Optional %opts: priority => 'tertiary', visible => 0
+# Optional %opts: visible => 0, hide_order => N
 sub add_dynamic_column {
     my ($columns_ref, $id, $name, $color_index, %opts) = @_;
 
@@ -3328,7 +3333,7 @@ sub add_dynamic_column {
         spacing_after   => 1,
         visible         => exists $opts{visible} ? $opts{visible} : 1,
         color           => $column_colors[$color_index % scalar(@column_colors)],
-        priority        => $opts{priority} // 'secondary',
+        hide_order      => $opts{hide_order} // 55,
     };
 
     splice @$columns_ref, $insert_idx, 0, $new_col;
@@ -3445,6 +3450,49 @@ sub calculate_table_layout {
         for my $col (@prop_cols) {
             $col->{width} = max(1, int($remaining / $n_prop));
         }
+    }
+}
+
+# Auto-hide low-priority columns when terminal is too narrow.
+# Wraps calculate_table_layout() in a loop, hiding the highest hide_order
+# column each iteration until all visible proportional columns meet the
+# minimum width threshold (or only one proportional column remains).
+sub auto_hide_narrow_columns {
+    my ($columns_ref, $term_width) = @_;
+
+    calculate_table_layout($columns_ref, $term_width);
+    return if $no_auto_hide;
+
+    while (1) {
+        # Check if any visible proportional column is below minimum width
+        my @prop_visible = grep { $_->{type} eq 'proportional' && $_->{visible} } @$columns_ref;
+
+        my $needs_hiding = 0;
+        for my $col (@prop_visible) {
+            if (($col->{width} // 0) < $auto_hide_min_width) {
+                $needs_hiding = 1;
+                last;
+            }
+        }
+        last unless $needs_hiding;
+
+        # Find the visible column with the highest hide_order (candidate to hide)
+        # Only consider columns with hide_order > 0 (never auto-hide structural columns)
+        # Guard: don't hide the last remaining proportional column
+        my $candidate;
+        for my $col (@$columns_ref) {
+            next unless $col->{visible};
+            next unless ($col->{hide_order} // 0) > 0;
+            next if $col->{type} eq 'proportional' && @prop_visible <= 1;
+            if (!$candidate || ($col->{hide_order} // 0) > ($candidate->{hide_order} // 0)) {
+                $candidate = $col;
+            }
+        }
+        last unless $candidate;  # Nothing left to hide
+
+        $candidate->{visible} = 0;
+        $candidate->{auto_hidden} = 1;
+        calculate_table_layout($columns_ref, $term_width);
     }
 }
 
@@ -3591,11 +3639,11 @@ sub normalize_data_for_output {
         my $session_color_offset = 0;
         if ($session_data_found && defined $max_total{sessions} && $max_total{sessions} > 0) {
             add_dynamic_column(\@column_layout, 'sessions', 'sessions', 3,
-                priority => 'tertiary', visible => $hide_session ? 0 : 1);
+                visible => $hide_session ? 0 : 1, hide_order => 60);
             $session_color_offset = 1;
         }
         for my $tp (@graph_threadpools_activity) {
-            add_dynamic_column(\@column_layout, $tp, $tp, 3 + $session_color_offset);
+            add_dynamic_column(\@column_layout, $tp, $tp, 3 + $session_color_offset, hide_order => 20);
         }
         my $udm_color_idx = 3 + $session_color_offset + scalar(@graph_threadpools_activity);
         for my $config (@udm_configs) {
@@ -3605,23 +3653,27 @@ sub normalize_data_for_output {
             }
         }
 
-        calculate_table_layout(\@column_layout, $terminal_width);
+        auto_hide_narrow_columns(\@column_layout, $terminal_width);
 
         if ($debug_layout) {
             print STDERR "\n--- Layout Engine Debug (Phase 1) ---\n";
-            printf STDERR "  %-20s %-14s %6s %4s %5s %3s\n", "Column", "Type", "Width", "Bef", "Aft", "Vis";
+            printf STDERR "  %-20s %-14s %6s %4s %5s %3s %6s\n", "Column", "Type", "Width", "Bef", "Aft", "Vis", "HideO";
             my $total = 0;
             for my $col (@column_layout) {
-                next unless $col->{visible};
-                my $w = $col->{width} // 0;
-                my $t = $w + ($col->{spacing_before}//0) + ($col->{spacing_after}//0);
+                my $w = $col->{visible} ? ($col->{width} // 0) : 0;
+                my $t = $col->{visible} ? $w + ($col->{spacing_before}//0) + ($col->{spacing_after}//0) : 0;
                 $total += $t;
-                printf STDERR "  %-20s %-14s %6d %4d %5d %3d\n",
-                    $col->{id}, $col->{type}, $w,
-                    $col->{spacing_before}//0, $col->{spacing_after}//0, $col->{visible};
+                my $marker = $col->{auto_hidden} ? " (auto-hidden)" : "";
+                printf STDERR "  %-20s %-14s %6s %4d %5d %3d %6d%s\n",
+                    $col->{id}, $col->{type},
+                    $col->{visible} ? $w : "-",
+                    $col->{spacing_before}//0, $col->{spacing_after}//0,
+                    $col->{visible} ? 1 : 0,
+                    $col->{hide_order} // 0,
+                    $marker;
             }
-            printf STDERR "  %-20s %-14s %6s %4s %5s %3s  = %d (terminal: %d)\n",
-                '', '', '', '', 'TOTAL', '', $total, $terminal_width;
+            printf STDERR "  %-20s %-14s %6s %4s %5s %3s %6s  = %d (terminal: %d)\n",
+                '', '', '', '', 'TOTAL', '', '', $total, $terminal_width;
             print STDERR "---\n";
         }
 
@@ -3632,6 +3684,9 @@ sub normalize_data_for_output {
                 my $w = $col->{width} // 0;
                 $total += $w + ($col->{spacing_before}//0) + ($col->{spacing_after}//0);
                 push @errors, "zero-width visible column: $col->{id}" if $w == 0 && $col->{type} ne 'separator';
+                if (!$no_auto_hide && $col->{type} eq 'proportional' && $w < $auto_hide_min_width) {
+                    push @errors, "proportional column below min width ($auto_hide_min_width): $col->{id} = $w";
+                }
             }
             push @errors, "total width $total != terminal width $terminal_width" if $total != $terminal_width;
             if (@errors) {
