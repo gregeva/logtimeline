@@ -72,7 +72,13 @@ ltl [options] <logfile> [logfile2 ...]
 | `-ic, --include-count` | Add a count column to the output (off by default) |
 | `-iqs, --include-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
 | `-is, --include-session` | Keep session/user IDs when grouping messages, so each session is tracked separately |
+| `-hl, --hide-legend` | Hide the legend column (category breakdowns and rates) |
+| `-ho, --hide-occurrences` | Hide the occurrences bar graph column, freeing space for other metric columns |
+| `-hd, --hide-duration` | Hide the duration bar graph column |
+| `-hb, --hide-bytes` | Hide the bytes bar graph column |
+| `-hc, --hide-count` | Hide the count bar graph column |
 | `-hs, --hide-session` | Hide the Sessions column that automatically appears when session IDs are found in the log data |
+| `-hst, --hide-stats` | Hide the latency statistics or heatmap column |
 
 ### Output
 
