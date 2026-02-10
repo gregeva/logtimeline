@@ -4277,7 +4277,7 @@ sub print_bar_graph {
                         } else {
                             my $decimals = $col_w > 10 ? 2 : ($col_w > 8 ? 1 : 0);
                             $trend_value = defined $log_stats{$bucket}{$key} ? " " . format_number( $log_stats{$bucket}{$key}, ' ', $decimals) : "";
-                            push @csv_data, ltrim( $trend_value );
+                            push @csv_data, $log_stats{$bucket}{$key};
                         }
 
                         # Render the metric bar using color from column layout
