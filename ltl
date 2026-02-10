@@ -70,7 +70,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.11.0";
+my $version_number = "0.12.0";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
@@ -78,20 +78,64 @@ my $rolling_window_size = 5;					# Adjust this value as needed - more time bucke
 my $impact_time_exponent = 7;		            # it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $time_bucket_size, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
+my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages, $elapsed_heatmap_statistics, $elapsed_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 # this is where the counts of log entries are tallied across the time buckets
-my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity );
+my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_sessions );
 my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
 my $mask_uuid;									# temporary command line option to mask UUIDs with HASH characters for grouping purposes (to be replaced by more generic group similar feature)
-my $durations_graph_width = 0;
-my ( $graph_count, $graph_count_max, $max_graph_width ) = ( 1, 6, 0 );
-my ( $graph_column_padding_all, $graph_column_padding_timestamp, $graph_column_padding_legend, $graph_column_padding_count, $graph_column_padding_other, $graph_column_padding_latency ) = ( 1, 1, 0, 2, 1, 3 );	# used to add padding (removed from width) in normalize data function
-my %graph_width;
-my $column_count_pre_graph = 2;		            # timestamp + legend is the default
 my @graph_columns = qw( duration bytes count );
-my ( @printed_column_widths, @printed_column_spacing, @printed_column_names );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
+my @column_layout;
+my ($focus_base, $focus_step, $focus_min) = (70, 10, 25);
+my $auto_hide_min_width = 6;
+my $no_auto_hide = 0;
+my $debug_layout = 0;
+my $validate_layout = 0;
+my @column_colors = (
+    { name => 'yellow',  highlighted_bg => "\033[48;5;226m\033[38;5;0m", plain_bg => "\033[48;5;184m\033[38;5;0m", fg => "\033[0m\033[93m",
+      plain_bg_num => 184, highlighted_bg_num => 226,
+      gradient       => [58, 94, 136, 142, 178, 184, 220, 226],
+      gradient_light => [230, 229, 228, 227, 220, 214, 208, 202] },
+    { name => 'green',   highlighted_bg => "\033[48;5;46m\033[38;5;0m",  plain_bg => "\033[48;5;34m\033[38;5;0m",  fg => "\033[0m\033[32m",
+      plain_bg_num => 34, highlighted_bg_num => 46,
+      gradient       => [22, 28, 34, 40, 46, 82, 118, 154],
+      gradient_light => [194, 157, 120, 84, 48, 42, 36, 35] },
+    { name => 'cyan',    highlighted_bg => "\033[48;5;36m\033[38;5;0m",  plain_bg => "\033[48;5;30m\033[38;5;0m",  fg => "\033[0m\033[36m",
+      plain_bg_num => 30, highlighted_bg_num => 51,
+      gradient       => [23, 30, 37, 44, 51, 80, 86, 123],
+      gradient_light => [195, 159, 123, 87, 51, 44, 37, 30] },
+    { name => 'blue',    highlighted_bg => "\033[48;5;21m\033[38;5;0m",  plain_bg => "\033[48;5;20m\033[38;5;0m",  fg => "\033[0m\033[34m",
+      plain_bg_num => 20, highlighted_bg_num => 27,
+      gradient       => [17, 18, 19, 20, 21, 27, 33, 39],
+      gradient_light => [189, 153, 117, 81, 45, 39, 33, 27] },
+    { name => 'magenta', highlighted_bg => "\033[48;5;201m\033[38;5;0m", plain_bg => "\033[48;5;127m\033[38;5;0m", fg => "\033[0m\033[35m",
+      plain_bg_num => 127, highlighted_bg_num => 207,
+      gradient       => [53, 89, 125, 127, 163, 165, 201, 207],
+      gradient_light => [225, 219, 213, 207, 201, 165, 129, 93] },
+    { name => 'red',     highlighted_bg => "\033[48;5;196m\033[38;5;0m", plain_bg => "\033[48;5;124m\033[38;5;0m", fg => "\033[0m\033[31m",
+      plain_bg_num => 124, highlighted_bg_num => 196,
+      gradient       => [52, 88, 124, 160, 196, 197, 203, 209],
+      gradient_light => [224, 218, 212, 206, 200, 196, 160, 124] },
+    { name => 'orange',  highlighted_bg => "\033[48;5;208m\033[38;5;0m", plain_bg => "\033[48;5;166m\033[38;5;0m", fg => "\033[0m\033[38;5;208m",
+      plain_bg_num => 166, highlighted_bg_num => 208,
+      gradient       => [94, 130, 166, 172, 208, 209, 214, 215],
+      gradient_light => [223, 217, 216, 215, 214, 208, 172, 166] },
+    { name => 'pink',    highlighted_bg => "\033[48;5;213m\033[38;5;0m", plain_bg => "\033[48;5;169m\033[38;5;0m", fg => "\033[0m\033[38;5;213m",
+      plain_bg_num => 169, highlighted_bg_num => 213,
+      gradient       => [132, 133, 169, 170, 206, 207, 213, 219],
+      gradient_light => [225, 219, 218, 217, 213, 212, 206, 169] },
+    { name => 'teal',    highlighted_bg => "\033[48;5;43m\033[38;5;0m",  plain_bg => "\033[48;5;29m\033[38;5;0m",  fg => "\033[0m\033[38;5;43m",
+      plain_bg_num => 29, highlighted_bg_num => 43,
+      gradient       => [23, 29, 30, 36, 37, 43, 44, 50],
+      gradient_light => [158, 122, 86, 50, 44, 43, 37, 29] },
+    { name => 'purple',  highlighted_bg => "\033[48;5;93m\033[38;5;0m",  plain_bg => "\033[48;5;55m\033[38;5;0m",  fg => "\033[0m\033[38;5;93m",
+      plain_bg_num => 55, highlighted_bg_num => 93,
+      gradient       => [54, 55, 56, 92, 93, 129, 134, 171],
+      gradient_light => [189, 183, 177, 171, 135, 134, 93, 55] },
+);
+my %column_color_lookup = map { $_->{name} => $_ } @column_colors;
 my ( $print_durations, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, 0 );
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -170,28 +214,10 @@ my ($heatmap_min, $heatmap_max) = (undef, undef);   # Global min/max for normali
 my $heatmap_max_density = 0;                # Maximum density across all cells
 my %heatmap_percentiles;                    # {$bucket} = { p50 => index, p95 => index, p99 => index, p999 => index } - percentile marker positions
 
-# Heatmap color gradients (8 steps from dim to bright)
-# Index 0 = lowest density (dim), Index 7 = highest density (bright)
-# Dark background gradients: visible colors only (no near-black grays)
-my %heatmap_colors = (
-    'yellow'  => [58, 94, 136, 142, 178, 184, 220, 226],     # Duration (column 2)
-    'green'   => [22, 28, 34, 40, 46, 82, 118, 154],         # Bytes (column 3)
-    'cyan'    => [23, 30, 37, 44, 51, 80, 86, 123],          # Count (column 4)
-    'blue'    => [17, 18, 19, 20, 21, 27, 33, 39],           # Future metrics
-    'magenta' => [53, 89, 125, 161, 162, 163, 199, 200],     # Future metrics
-    'red'     => [52, 88, 124, 160, 196, 197, 203, 209],     # Future metrics
-    'white'   => [238, 240, 242, 244, 246, 248, 252, 255],   # Future metrics
-);
-
-# Light background gradients: fade from light/pale shades to bright saturated color
-my %heatmap_colors_light = (
-    'yellow'  => [230, 229, 228, 227, 220, 214, 208, 202],   # Duration: pale yellow to saturated
-    'green'   => [194, 157, 120, 84, 48, 42, 36, 35],        # Bytes: pale green to saturated
-    'cyan'    => [195, 159, 123, 87, 51, 44, 37, 30],        # Count: pale cyan to saturated
-    'blue'    => [189, 153, 117, 81, 45, 39, 33, 27],        # Future: pale blue to saturated
-    'magenta' => [225, 219, 213, 207, 201, 165, 129, 93],    # Future: pale magenta to saturated
-    'red'     => [224, 218, 212, 206, 200, 196, 160, 124],   # Future: pale red to saturated
-    'white'   => [255, 254, 253, 250, 247, 244, 241, 238],   # Future: white to gray
+# Special heatmap gradients for colors not in @column_colors
+my %heatmap_special_gradients = (
+    white => { gradient       => [238, 240, 242, 244, 246, 248, 252, 255],
+               gradient_light => [255, 254, 253, 250, 247, 244, 241, 238] },
 );
 
 # Map metric names to column numbers and colors
@@ -294,26 +320,10 @@ my %histogram_box_sets = (
 # 8-level block characters for sub-character resolution in histograms
 my @histogram_block_chars = (' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█');
 
-# Histogram base colors - match bar graph column plain_bg colors
-my %histogram_base_colors = (
-    duration => 184,  # Yellow - matches bar graph column 2 plain_bg
-    bytes    => 34,   # Green - matches bar graph column 3 plain_bg
-    count    => 30,   # Cyan - matches bar graph column 4 plain_bg
-);
-
-# Histogram highlight colors (Issue #42) - match bar graph highlight_bg colors
-my %histogram_highlight_colors = (
-    duration => 226,  # Bright yellow - matches bar graph column 2 highlight
-    bytes    => 46,   # Bright green - matches bar graph column 3 highlight
-    count    => 51,   # Bright cyan - matches bar graph column 4 highlight
-);
-
-# Histogram color gradients (256-color ANSI) for optional intensity variation
-my %histogram_color_gradients = (
-    duration => [58, 94, 136, 142, 178, 184, 220, 226],   # Yellow gradient
-    bytes    => [22, 28, 34, 40, 46, 82, 118, 154],       # Green gradient
-    count    => [23, 30, 37, 44, 51, 80, 86, 123],        # Cyan gradient
-);
+# Histogram colors — derived from @column_colors (duration=yellow[0], bytes=green[1], count=cyan[2])
+my %histogram_base_colors      = ( duration => $column_colors[0]{plain_bg_num},       bytes => $column_colors[1]{plain_bg_num},       count => $column_colors[2]{plain_bg_num} );
+my %histogram_highlight_colors = ( duration => $column_colors[0]{highlighted_bg_num}, bytes => $column_colors[1]{highlighted_bg_num}, count => $column_colors[2]{highlighted_bg_num} );
+my %histogram_color_gradients  = ( duration => $column_colors[0]{gradient},           bytes => $column_colors[1]{gradient},           count => $column_colors[2]{gradient} );
 
 my $histogram_color_gradient_enabled = 0;     # Toggle: 1 = intensity gradients, 0 = flat base color
 my $histogram_gridlines_enabled = 1;          # Toggle: horizontal gridlines at Y-axis tick positions
@@ -510,6 +520,15 @@ OPTIONS
                                                and /api?b=2 are tracked separately
     -is,  --include-session                    Keep session/user IDs when grouping messages, so each
                                                session is tracked separately
+    -hl,  --hide-legend                        Hide the legend column (category breakdowns and rates)
+    -ho,  --hide-occurrences                   Hide the occurrences bar graph column, freeing space
+                                               for other metric columns
+    -hd,  --hide-duration                      Hide the duration bar graph column
+    -hb,  --hide-bytes                         Hide the bytes bar graph column
+    -hc,  --hide-count                         Hide the count bar graph column
+    -hs,  --hide-session                       Hide the Sessions column that automatically appears
+                                               when session IDs are found in the log data
+    -hst, --hide-stats                         Hide the latency statistics or heatmap column
 
   Output
     -n,   --top-messages <N>                   Number of unique messages to show in the summary table
@@ -551,6 +570,8 @@ OPTIONS
   Display
     -lbg, --light-background                   Use pale-to-bright color gradients suited for
                                                light/white terminal backgrounds
+    -nah, --no-auto-hide                       Disable automatic column hiding at narrow terminal
+                                               widths (squeeze all columns instead)
     -p,   --pause                              Wait for a keypress between pages of output
     -V,   --verbose                            Print detailed processing information including regex
                                                matches and parsing decisions
@@ -1038,6 +1059,7 @@ sub measure_memory_structures {
         log_messages           => Devel::Size::total_size(\%log_messages),
         log_stats              => Devel::Size::total_size(\%log_stats),
         log_threadpools        => Devel::Size::total_size(\%log_threadpools),
+        log_sessions           => Devel::Size::total_size(\%log_sessions),
         threadpool_activity    => Devel::Size::total_size(\%threadpool_activity),
         udm_last_value         => Devel::Size::total_size(\%udm_last_value),
         heatmap_data           => Devel::Size::total_size(\%heatmap_data),
@@ -1071,16 +1093,16 @@ sub convert_bytes {
     my %units = (
         'B'  => 1,
         'b'  => 1,
-        'kB' => 1024,
-        'KB' => 1024,
-        'k' => 1024,
-        'K' => 1024,
-        'MB' => 1024**2,
-        'M' => 1024**2,
-        'GB' => 1024**3,
-        'G' => 1024**3,
-        'TB' => 1024**4,
-        'T' => 1024**4,
+        'kB' => 1000,
+        'k'  => 1000,
+        'MB' => 1000**2,
+        'M'  => 1000**2,
+        'GB' => 1000**3,
+        'G'  => 1000**3,
+        'TB' => 1000**4,
+        'T'  => 1000**4,
+        'KB'  => 1024,
+        'K'   => 1024,
         'KiB' => 1024,
         'MiB' => 1024**2,
         'GiB' => 1024**3,
@@ -1097,10 +1119,10 @@ sub format_bytes {
     my %units = (
         'b'  => 1,
         'B'  => 1,
-        'kB' => 1024,
-        'MB' => 1024**2,
-        'GB' => 1024**3,
-        'TB' => 1024**4,
+        'KiB' => 1024,
+        'MiB' => 1024**2,
+        'GiB' => 1024**3,
+        'TiB' => 1024**4,
     );
 
     return undef unless defined $value;
@@ -1108,7 +1130,7 @@ sub format_bytes {
     my $bytes = $value * $units{$unit};
     my $bytes_int = int($bytes);  # Use integer for unit comparison to avoid float string length issues
 
-    my @unit_order = ('B', 'kB', 'MB', 'GB', 'TB');
+    my @unit_order = ('B', 'KiB', 'MiB', 'GiB', 'TiB');
     my $formatted_value = $bytes;
     my $formatted_unit = 'B';
 
@@ -1363,6 +1385,13 @@ sub adapt_to_command_line_options {
         'include-count|ic' => \$include_count,
         'include-query-string|iqs' => \$include_query_string,
         'include-session|is' => \$include_session,
+        'hide-session|hs' => \$hide_session,
+        'hide-occurrences|ho' => \$hide_occurrences,
+        'hide-legend|hl' => \$hide_legend,
+        'hide-duration|hd' => \$hide_duration,
+        'hide-bytes|hb' => \$hide_bytes,
+        'hide-count|hc' => \$hide_count,
+        'hide-stats|hst' => \$hide_stats,
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds,
         'version|v' => \$print_version,
@@ -1393,6 +1422,10 @@ sub adapt_to_command_line_options {
         'histogram-height|hgh=i' => sub { $histogram_height = $_[1]; $histogram_height_explicit = 1; },
         'hgbpd=i' => \$histogram_buckets_per_decade,
         'hgb=i' => \$histogram_bucket_override,
+        'terminal-width|tw=i' => \$terminal_width,
+        'no-auto-hide|nah' => \$no_auto_hide,
+        'debug-layout' => \$debug_layout,
+        'validate-layout' => \$validate_layout,
         'help' => \$show_help
     ) or die print_usage( "required options not provided" );
 
@@ -1771,7 +1804,7 @@ sub read_and_process_logs {
                 $match_type = 13;
 
             ## ThingWorx Standard Log Format (ApplicationLog, ErrorLog, ScriptLog, ...) ##
-            } elsif ( ($timestamp_str, $category_bucket, $object, $instance, $user, undef, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
+            } elsif ( ($timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ([^\]]*)] (.*)/) {
                 $is_line_match = 1;
                 $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
 
@@ -2307,6 +2340,15 @@ sub read_and_process_logs {
 
                     if( $category_bucket =~ /-HL$/ ) {                  # capture total duration and bytes for highlighted rows
                         $log_threadpools{$bucket}{$threadpool}{highlight}{$thread} += 1;
+                    }
+                }
+
+                ## CAPTURE SESSION BASED STATISTICS DATA (Issue #26) ##
+                if( defined $session && $session ne "" && $session ne "-" ) {
+                    $session_data_found = 1;
+                    $log_sessions{$bucket}{plain}{$session} += 1;
+                    if( $category_bucket =~ /-HL$/ ) {
+                        $log_sessions{$bucket}{highlight}{$session} += 1;
                     }
                 }
             }
@@ -2952,8 +2994,6 @@ sub calculate_all_statistics {
     ## STATS FOR THREAD POOL ACTIVITY ##
     my %threadpools;
     my ( @ordered_threadpools );
-    my $threadpools_included = 0;
-
     foreach my $category ( qw( highlight plain ) ) {
         foreach my $threadpool ( keys %{$threadpool_activity{$category}} ) {
             $threadpools{$threadpool}{threads} += scalar keys %{$threadpool_activity{$category}{$threadpool}};
@@ -2965,10 +3005,7 @@ sub calculate_all_statistics {
 
     @ordered_threadpools = sort { $threadpools{$b}{occurrences} <=> $threadpools{$a}{occurrences} } keys %threadpools;
 
-# TO DO - If I built up the max_totals while going through the files, by the time we calculate the statistics I could removed empty graph fields like duration and bytes,
-#         then we'd be OK to add more custom columns in order to still fit within the 6 column limit.
     foreach my $threadpool ( @ordered_threadpools ) {
-        last if $threadpools_included++ > 3;
         push( @graph_threadpools_activity, $threadpool ) if( $include_threadpool_summary || $threadpool =~ /${threadpool_activity_regex}/i );
     }
 
@@ -2989,6 +3026,24 @@ sub calculate_all_statistics {
             # 2026-01-04 TO DO: Free up no longer needed memory (likely not working as intended)
             undef $log_threadpools{$bucket}{$threadpool};
             delete $log_threadpools{$bucket}{$threadpool};
+        }
+    }
+
+    ## STATS FOR SESSION ACTIVITY (Issue #26) ##
+    if ($session_data_found) {
+        push @graph_columns, 'sessions';
+
+        foreach my $bucket (keys %log_sessions) {
+            if (exists $log_sessions{$bucket}{plain}) {
+                $log_stats{$bucket}{sessions} = scalar keys %{$log_sessions{$bucket}{plain}};
+                $log_stats{$bucket}{'sessions-HL'} = exists $log_sessions{$bucket}{highlight}
+                    ? scalar keys %{$log_sessions{$bucket}{highlight}}
+                    : 0;
+            } else {
+                $log_stats{$bucket}{sessions} = 0;
+            }
+            undef $log_sessions{$bucket};
+            delete $log_sessions{$bucket};
         }
     }
 
@@ -3081,6 +3136,363 @@ sub initialize_empty_time_windows {
     return;
 }
 
+# ============================================================================
+# LAYOUT ENGINE — Column layout single source of truth (Issue #33)
+# These subroutines build and calculate column layouts but are NOT YET used
+# for rendering. The old code path remains authoritative during Phase 1-2.
+# ============================================================================
+
+# Build the default column layout array from current state.
+# Returns an ordered array of column definition hashes.
+sub build_column_layout {
+    my $show_legend  = !($omit_values && $omit_rate);
+    my $show_latency = $print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled;
+    my $show_heatmap = $heatmap_enabled;
+    my $timestamp_w  = length(strftime($output_timestamp_format, gmtime(0))) + ($print_milliseconds ? 4 : 0);
+    my $latency_w    = $show_heatmap ? $heatmap_width : 52;
+
+    my @cols;
+
+    # Timestamp — fixed width
+    # spacing_before=1 is the leading indent, spacing_after=1 is the trailing space
+    push @cols, {
+        id              => 'timestamp',
+        type            => 'fixed',
+        name            => 'timestamp',
+        width           => undef,
+        base_width      => $timestamp_w,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 1,
+        color           => undef,
+        hide_order      => 0,
+    };
+
+    # Legend — content-driven width
+    # spacing_before=0: the gap between timestamp and legend is handled by timestamp's spacing_after
+    if ($show_legend) {
+        push @cols, {
+            id              => 'legend',
+            type            => 'content',
+            name            => 'legend',
+            width           => undef,
+            base_width      => $legend_length,
+            spacing_before  => 0,
+            spacing_after   => 0,
+            visible         => $hide_legend ? 0 : 1,
+            color           => undef,
+            hide_order      => 0,
+        };
+    }
+
+    # Separator: legend | graph columns
+    push @cols, {
+        id              => 'sep_legend_graph',
+        type            => 'separator',
+        name            => "\x{2502}",
+        width           => undef,
+        base_width      => 1,
+        spacing_before  => 0,
+        spacing_after   => 1,
+        visible         => $show_legend,
+        color           => undef,
+        hide_order      => 0,
+    };
+
+    # Occurrences — proportional, focus column
+    push @cols, {
+        id              => 'occurrences',
+        type            => 'proportional',
+        name            => 'occurrences',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 0,
+        spacing_after   => 1,
+        visible         => $hide_occurrences ? 0 : 1,
+        color           => undef,
+        hide_order      => 10,
+    };
+
+    # Duration — proportional, secondary
+    push @cols, {
+        id              => 'duration',
+        type            => 'proportional',
+        name            => 'duration',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 0,
+        color           => $column_colors[0],
+        hide_order      => 30,
+    };
+
+    # Bytes — proportional, secondary
+    push @cols, {
+        id              => 'bytes',
+        type            => 'proportional',
+        name            => 'bytes',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 0,
+        color           => $column_colors[1],
+        hide_order      => 40,
+    };
+
+    # Count — proportional, secondary
+    push @cols, {
+        id              => 'count',
+        type            => 'proportional',
+        name            => 'count',
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => 0,
+        color           => $column_colors[2],
+        hide_order      => 50,
+    };
+
+    # Separator: graph columns | latency/heatmap
+    if ($show_latency || $show_heatmap) {
+        push @cols, {
+            id              => 'sep_graph_stats',
+            type            => 'separator',
+            name            => "\x{2502}",
+            width           => undef,
+            base_width      => 1,
+            spacing_before  => 0,
+            spacing_after   => 0,
+            visible         => 1,
+            color           => undef,
+            hide_order      => 0,
+        };
+    }
+
+    # Latency statistics — fixed width
+    if ($show_latency) {
+        push @cols, {
+            id              => 'latency',
+            type            => 'fixed',
+            name            => 'latency statistics',
+            width           => undef,
+            base_width      => $latency_w,
+            spacing_before  => 2,
+            spacing_after   => 0,
+            visible         => $hide_stats ? 0 : 1,
+            color           => undef,
+            hide_order      => 70,
+        };
+    }
+
+    # Heatmap — fixed width
+    if ($show_heatmap) {
+        push @cols, {
+            id              => 'heatmap',
+            type            => 'fixed',
+            name            => get_heatmap_column_header(),
+            width           => undef,
+            base_width      => $latency_w,
+            spacing_before  => 1,
+            spacing_after   => 0,
+            visible         => $hide_stats ? 0 : 1,
+            color           => undef,
+            hide_order      => 20,
+        };
+    }
+
+    return @cols;
+}
+
+# Add a dynamic column (threadpool, session, or UDM) before the graph-stats separator
+# Optional %opts: visible => 0, hide_order => N
+sub add_dynamic_column {
+    my ($columns_ref, $id, $name, $color_index, %opts) = @_;
+
+    # Find insertion point: before sep_graph_stats (or end of proportionals)
+    my $insert_idx = scalar @$columns_ref;
+    for my $i (0 .. $#$columns_ref) {
+        if ($columns_ref->[$i]{id} eq 'sep_graph_stats') {
+            $insert_idx = $i;
+            last;
+        }
+    }
+
+    my $new_col = {
+        id              => $id,
+        type            => 'proportional',
+        name            => $name,
+        width           => undef,
+        base_width      => undef,
+        spacing_before  => 1,
+        spacing_after   => 1,
+        visible         => exists $opts{visible} ? $opts{visible} : 1,
+        color           => $column_colors[$color_index % scalar(@column_colors)],
+        hide_order      => $opts{hide_order} // 55,
+    };
+
+    splice @$columns_ref, $insert_idx, 0, $new_col;
+    return $columns_ref;
+}
+
+# Resolve separator visibility based on adjacency.
+# A separator is visible only if both adjacent non-separator columns are visible.
+sub resolve_separator_visibility {
+    my ($columns_ref) = @_;
+
+    for my $i (0 .. $#$columns_ref) {
+        my $col = $columns_ref->[$i];
+        next unless $col->{type} eq 'separator';
+
+        my $prev_visible = 0;
+        for my $j (reverse 0 .. $i-1) {
+            next if $columns_ref->[$j]{type} eq 'separator';
+            next unless $columns_ref->[$j]{visible};
+            $prev_visible = 1;
+            last;
+        }
+
+        my $next_visible = 0;
+        for my $j ($i+1 .. $#$columns_ref) {
+            next if $columns_ref->[$j]{type} eq 'separator';
+            next unless $columns_ref->[$j]{visible};
+            $next_visible = 1;
+            last;
+        }
+
+        $col->{visible} = ($prev_visible && $next_visible) ? 1 : 0;
+    }
+}
+
+# Distribute proportional width using linear decay algorithm.
+# focus_share = max(focus_min, focus_base - (N-2) * focus_step)
+# secondary_share = (100 - focus_share) / (N-1)
+sub distribute_proportional {
+    my ($n) = @_;
+    return (100) if $n == 1;
+
+    my $focus_pct = max($focus_min, $focus_base - ($n - 2) * $focus_step);
+    my $secondary_pct = (100 - $focus_pct) / ($n - 1);
+
+    my @shares = ($focus_pct);
+    push @shares, $secondary_pct for 2 .. $n;
+    return @shares;
+}
+
+# 8-step width allocation pipeline.
+# Input: array ref of column definitions, terminal width.
+# Output: modifies column width fields in place.
+sub calculate_table_layout {
+    my ($columns_ref, $term_width) = @_;
+
+    # Step 1: Resolve separator visibility
+    resolve_separator_visibility($columns_ref);
+
+    my @visible = grep { $_->{visible} } @$columns_ref;
+
+    # Step 2: Allocate fixed columns
+    for my $col (@visible) {
+        if ($col->{type} eq 'fixed') {
+            $col->{width} = $col->{base_width};
+        }
+    }
+
+    # Step 3: Allocate separator columns
+    for my $col (@visible) {
+        if ($col->{type} eq 'separator') {
+            $col->{width} = $col->{base_width};  # always 1
+        }
+    }
+
+    # Step 4: Allocate content-driven columns
+    for my $col (@visible) {
+        if ($col->{type} eq 'content') {
+            $col->{width} = $col->{base_width};
+        }
+    }
+
+    # Step 5: Sum all spacing
+    my $spacing_total = 0;
+    for my $col (@visible) {
+        $spacing_total += ($col->{spacing_before} // 0) + ($col->{spacing_after} // 0);
+    }
+
+    # Step 6: Calculate remaining width for proportional columns
+    my $fixed_total = 0;
+    for my $col (@visible) {
+        $fixed_total += $col->{width} // 0 if $col->{type} ne 'proportional';
+    }
+    my $remaining = $term_width - $fixed_total - $spacing_total;
+
+    # Step 7: Distribute remaining to proportional columns
+    my @prop_cols = grep { $_->{type} eq 'proportional' && $_->{visible} } @$columns_ref;
+    my $n_prop = scalar @prop_cols;
+
+    if ($n_prop > 0 && $remaining > 0) {
+        my @shares = distribute_proportional($n_prop);
+        my @raw_widths;
+        for my $i (0 .. $#prop_cols) {
+            push @raw_widths, $shares[$i] / 100 * $remaining;
+        }
+
+        # Step 8: Apply cumulative rounding
+        my @rounded = cumulative_round_widths(\@raw_widths, $remaining);
+
+        for my $i (0 .. $#prop_cols) {
+            $prop_cols[$i]->{width} = $rounded[$i];
+        }
+    } elsif ($n_prop > 0) {
+        for my $col (@prop_cols) {
+            $col->{width} = max(1, int($remaining / $n_prop));
+        }
+    }
+}
+
+# Auto-hide low-priority columns when terminal is too narrow.
+# Wraps calculate_table_layout() in a loop, hiding the highest hide_order
+# column each iteration until all visible proportional columns meet the
+# minimum width threshold (or only one proportional column remains).
+sub auto_hide_narrow_columns {
+    my ($columns_ref, $term_width) = @_;
+
+    calculate_table_layout($columns_ref, $term_width);
+    return if $no_auto_hide;
+
+    while (1) {
+        # Check if any visible proportional column is below minimum width
+        my @prop_visible = grep { $_->{type} eq 'proportional' && $_->{visible} } @$columns_ref;
+
+        my $needs_hiding = 0;
+        for my $col (@prop_visible) {
+            if (($col->{width} // 0) < $auto_hide_min_width) {
+                $needs_hiding = 1;
+                last;
+            }
+        }
+        last unless $needs_hiding;
+
+        # Find the visible column with the highest hide_order (candidate to hide)
+        # Only consider columns with hide_order > 0 (never auto-hide structural columns)
+        # Guard: don't hide the last remaining proportional column
+        my $candidate;
+        for my $col (@$columns_ref) {
+            next unless $col->{visible};
+            next unless ($col->{hide_order} // 0) > 0;
+            next if $col->{type} eq 'proportional' && @prop_visible <= 1;
+            if (!$candidate || ($col->{hide_order} // 0) > ($candidate->{hide_order} // 0)) {
+                $candidate = $col;
+            }
+        }
+        last unless $candidate;  # Nothing left to hide
+
+        $candidate->{visible} = 0;
+        $candidate->{auto_hidden} = 1;
+        calculate_table_layout($columns_ref, $term_width);
+    }
+}
+
 sub cumulative_round_widths {
     my ($w_ref, $M) = @_;
     my @w = @$w_ref;
@@ -3163,6 +3575,14 @@ sub normalize_data_for_output {
         }
     }
 
+    if ($session_data_found) {
+        $max_total{sessions} = 0;
+        foreach my $bucket (keys %log_occurrences) {
+            $max_total{sessions} = $log_stats{$bucket}{sessions}
+                if defined $log_stats{$bucket}{sessions} && $log_stats{$bucket}{sessions} > $max_total{sessions};
+        }
+    }
+
     # Calculate the maximum character length of log level titles and counts
     foreach my $bucket (keys %log_occurrences) {
         my $bucket_legend_length = 0;
@@ -3199,59 +3619,90 @@ sub normalize_data_for_output {
     }
     push @output_columns, "totalOccurrences"; # if $category_bucket =~ /^err-rate$/;
 
-# Latency statistics column width: │ + 2 spaces + P50(11) + P95(11) + P99(11) + P999(11) + CV(7) = 54 chars
-    # When heatmap is enabled, use $heatmap_width (which may be customized via -hmw) instead of hardcoded 52
-    if ($heatmap_enabled) {
-        $durations_graph_width = $graph_column_padding_latency + $heatmap_width + $graph_column_padding_all;
-    } elsif ($print_durations && !$omit_durations && !$omit_stats) {
-        $durations_graph_width = $graph_column_padding_latency + 52 + $graph_column_padding_all;
-    } else {
-        $durations_graph_width = 0;
+    # --- Layout engine (Phase 1): build and calculate but do NOT use for rendering ---
+    {
+        @column_layout = build_column_layout();
+
+        # Set visibility on proportional columns based on data presence
+        my %hide_column = ( duration => $hide_duration, bytes => $hide_bytes, count => $hide_count );
+        for my $col (@column_layout) {
+            next unless $col->{type} eq 'proportional' && $col->{id} ne 'occurrences';
+            if (defined $max_total{$col->{id}} && $max_total{$col->{id}} > 0) {
+                $col->{visible} = $hide_column{$col->{id}} ? 0 : 1;
+            }
+        }
+
+        # Add dynamic columns (sessions, threadpools, UDMs)
+        my $session_color_offset = 0;
+        if ($session_data_found && defined $max_total{sessions} && $max_total{sessions} > 0) {
+            add_dynamic_column(\@column_layout, 'sessions', 'sessions', 3,
+                visible => $hide_session ? 0 : 1, hide_order => 60);
+            $session_color_offset = 1;
+        }
+        for my $tp (@graph_threadpools_activity) {
+            add_dynamic_column(\@column_layout, $tp, $tp, 3 + $session_color_offset, hide_order => 20);
+        }
+        my $udm_color_idx = 3 + $session_color_offset + scalar(@graph_threadpools_activity);
+        for my $config (@udm_configs) {
+            my $key = "udm_$config->{name}";
+            if (defined $max_total{$key} && $max_total{$key} > 0) {
+                add_dynamic_column(\@column_layout, $key, $config->{name}, $udm_color_idx++);
+            }
+        }
+
+        auto_hide_narrow_columns(\@column_layout, $terminal_width);
+
+        if ($debug_layout) {
+            print STDERR "\n--- Layout Engine Debug (Phase 1) ---\n";
+            printf STDERR "  %-20s %-14s %6s %4s %5s %3s %6s\n", "Column", "Type", "Width", "Bef", "Aft", "Vis", "HideO";
+            my $total = 0;
+            for my $col (@column_layout) {
+                my $w = $col->{visible} ? ($col->{width} // 0) : 0;
+                my $t = $col->{visible} ? $w + ($col->{spacing_before}//0) + ($col->{spacing_after}//0) : 0;
+                $total += $t;
+                my $marker = $col->{auto_hidden} ? " (auto-hidden)" : "";
+                printf STDERR "  %-20s %-14s %6s %4d %5d %3d %6d%s\n",
+                    $col->{id}, $col->{type},
+                    $col->{visible} ? $w : "-",
+                    $col->{spacing_before}//0, $col->{spacing_after}//0,
+                    $col->{visible} ? 1 : 0,
+                    $col->{hide_order} // 0,
+                    $marker;
+            }
+            printf STDERR "  %-20s %-14s %6s %4s %5s %3s %6s  = %d (terminal: %d)\n",
+                '', '', '', '', 'TOTAL', '', '', $total, $terminal_width;
+            print STDERR "---\n";
+        }
+
+        if ($validate_layout) {
+            my $total = 0;
+            my @errors;
+            for my $col (grep { $_->{visible} } @column_layout) {
+                my $w = $col->{width} // 0;
+                $total += $w + ($col->{spacing_before}//0) + ($col->{spacing_after}//0);
+                push @errors, "zero-width visible column: $col->{id}" if $w == 0 && $col->{type} ne 'separator';
+                if (!$no_auto_hide && $col->{type} eq 'proportional' && $w < $auto_hide_min_width) {
+                    push @errors, "proportional column below min width ($auto_hide_min_width): $col->{id} = $w";
+                }
+            }
+            push @errors, "total width $total != terminal width $terminal_width" if $total != $terminal_width;
+            if (@errors) {
+                print STDERR "LAYOUT VALIDATION FAILED:\n";
+                print STDERR "  - $_\n" for @errors;
+            }
+        }
     }
 
-    # Normalize counts to fit terminal width - static values based on timestamp length, some white space, maybe a vertical line spacer
-    # $timestamp_length = length( strftime($output_timestamp_format, gmtime(0) ) ) + 1 + ( $print_milliseconds ? 4 : 0 ) ;     # +1 for built in space after timestamp
-    $timestamp_length = $graph_column_padding_timestamp + length( strftime($output_timestamp_format, gmtime(0) ) ) + ( $print_milliseconds ? 4 : 0 ) + $graph_column_padding_all;     # remove spacing from length calculation as it is seperate
+    # --- Phase 3: Build old arrays from @column_layout ---
 
-    $max_graph_width = $terminal_width - $legend_length - $timestamp_length - $durations_graph_width;
-# print "\nmax_graph_width: $max_graph_width terminal_width: $terminal_width legend_length: $legend_length timestamp length: " . $timestamp_length . " durations_graph_width: $durations_graph_width\n";
-
-    push @printed_column_widths, $timestamp_length - ( $graph_column_padding_all + $graph_column_padding_timestamp );
-    push @printed_column_names, "timestamp"; 
-    push @printed_column_spacing, ( $graph_column_padding_all + $graph_column_padding_timestamp );
-
-    if( !( $omit_values && $omit_rate ) ) {
-        push @printed_column_widths, $legend_length;
-        push @printed_column_spacing, 0;                                        # legend column does not need trailing spacing as it is last before graph columns
-        push @printed_column_names, "legend";
-        $column_count_pre_graph = 2;                                            # if legend column is printed, then statically sized columns will be timestamp and legend
-    } else {
-	    $column_count_pre_graph = 1;                                            # if legend column is omitted, then statically sized columns will only be timestamp
-    }
-
-    push @printed_column_names, "occurrences"; 									# this count column is required, not sure how to make the logic more coherent
-
-    %graph_width = ( 1 => $max_graph_width );
-
-    # Split the graph spacing into parts if more than one graph is to be drawn
-    foreach my $graph_type ( @graph_columns ) {									# Count how many of the to be displayed data columns actually have values to be printed
-        if( $graph_type eq 'count' && !$include_count && ( $max_graph_width / $graph_count < 25 ) ) {       # remove count column if not enough space to print it, unless explicitly included
-            @graph_columns = grep { $_ !~ /count/ } @graph_columns;
-            next;
-        };
-        $graph_count += ( $max_total{$graph_type} > 0 );
-    }
-
-    my %graph_relative_size;
-    my $graph_column_count = 1;             # will always have count/occurrences column
-    # Determine and store which of the possible columns to print have data
-    foreach my $key ( @graph_columns ) {
-        if( defined $max_total{$key} && $max_total{$key} != 0 ) {
+    # Build @populated_graph_columns and @output_columns (still needed for scaling and CSV)
+    foreach my $key (@graph_columns) {
+        if (defined $max_total{$key} && $max_total{$key} != 0) {
             push @populated_graph_columns, $key;
-            push @output_columns, "${key}Nice" if $key =~ /^(duration|bytes)$/; # presently these won't be output to CSV as processing loop to screen will stop at max columns
-            if( $key =~ /^count$/ ) {
+            push @output_columns, "${key}Nice" if $key =~ /^(duration|bytes)$/;
+            if ($key =~ /^count$/) {
                 push @output_columns, "${key}_occurrences", "${key}_min", "${key}_mean", "${key}_max", "${key}_sum" if !$omit_count;
-            } elsif ( $key =~ /^udm_/ ) {
+            } elsif ($key =~ /^udm_/) {
                 (my $csv_key = $key) =~ s/^udm_//;
                 my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
                 my $csv_prefix = ($cfg && $cfg->{unit}) ? "${csv_key}_$cfg->{unit}" : $csv_key;
@@ -3259,140 +3710,23 @@ sub normalize_data_for_output {
             } else {
                 push @output_columns, $key;
             }
-
-            next if ++$graph_column_count > $graph_count_max;					# limit the number of graph columns to 6 max
-            push @printed_column_names, $key;
         }
     }
 
-    $graph_count = $graph_count_max if $graph_count > $graph_count_max;									# limit the number of graph columns to 6 max
 
-    if( $graph_count == 2 ) {
-        %graph_relative_size = (
-            1 => 65,
-            2 => 35,
-        );
-        %graph_width = (
-            1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
-            2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
-        );
-    } elsif( $graph_count == 3 ) {
-        %graph_relative_size = (
-            1 => 62,
-            2 => 21,
-            3 => 17,
-        );
-        %graph_width = (
-            1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
-            2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
-            3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
-        );
-    } elsif( $graph_count == 4 ) {
-        %graph_relative_size = (
-            1 => 50,
-            2 => 18,
-            3 => 16,
-            4 => 16,
-        );
-        %graph_width = (
-            1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
-            2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
-            3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
-            4 => ( $graph_relative_size{4} / 100 * $max_graph_width ),
-        );
-    } elsif( $graph_count == 5 ) {
-        %graph_relative_size = (
-            1 => 40,
-            2 => 15,
-            3 => 15,
-            4 => 15,
-            5 => 15,
-        );
-        %graph_width = (
-            1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
-            2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
-            3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
-            4 => ( $graph_relative_size{4} / 100 * $max_graph_width ),
-            5 => ( $graph_relative_size{5} / 100 * $max_graph_width ),
-        );
-    } elsif( $graph_count == 6 ) {
-        %graph_relative_size = (
-            1 => 30,
-            2 => 14,
-            3 => 14,
-            4 => 14,
-            5 => 14,
-            6 => 14,
-        );
-        %graph_width = (
-            1 => ( $graph_relative_size{1} / 100 * $max_graph_width ),
-            2 => ( $graph_relative_size{2} / 100 * $max_graph_width ),
-            3 => ( $graph_relative_size{3} / 100 * $max_graph_width ),
-            4 => ( $graph_relative_size{4} / 100 * $max_graph_width ),
-            5 => ( $graph_relative_size{5} / 100 * $max_graph_width ),
-            6 => ( $graph_relative_size{6} / 100 * $max_graph_width ),
-        );
-    }
+    # Calculate $timestamp_length from layout
+    my $ts_col = (grep { $_->{id} eq 'timestamp' } @column_layout)[0];
+    $timestamp_length = $ts_col->{width} + $ts_col->{spacing_before} + $ts_col->{spacing_after};
 
-    foreach my $column ( 1 .. $graph_count ) {							# capture and build up list containing width and spacing between columns
-        my $column_spacing = $graph_column_padding_all;
-        $column_spacing += $graph_column_padding_count if $column == 1;
-        $column_spacing += $graph_column_padding_other if $column > 1;
-        push @printed_column_widths, $graph_width{$column} - $column_spacing;
-        push @printed_column_spacing, $column_spacing;
-    }
-
-    # BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
-    if ($heatmap_enabled) {
-        # Heatmap column header replaces latency statistics - don't add percentile columns to CSV
-        # (individual duration values are not collected when heatmap is enabled)
-        push @printed_column_widths, $durations_graph_width;
-        push @printed_column_spacing, 0;
-        push @printed_column_names, get_heatmap_column_header();
-    } elsif( $print_durations && !$omit_durations && !$omit_stats ) {
-        my $column_spacing = ( $graph_column_padding_all + $graph_column_padding_latency );
+    # Add CSV output columns for latency stats
+    if ($print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled) {
         push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score );
-        push @printed_column_widths, $durations_graph_width;
-        push @printed_column_spacing, 0;
-        push @printed_column_names, "latency statistics";
     }
-
-    foreach my $column ( 0 .. $#printed_column_names ) {
-        my $title = $printed_column_names[$column];
-        $title =~ s/^udm_//;                   # Strip internal prefix for display
-        my $max_length = $printed_column_widths[$column] // 0;
-        $title = substr( $title, 0, $max_length ) if $max_length > 0 && length( $title ) > $max_length;
-        $printed_column_names[$column] = $title;
-    }
-
-    my @rounded_column_widths = cumulative_round_widths( \@printed_column_widths, $terminal_width - eval(join '+', @printed_column_spacing ));
-
-    # $, = ", ";
-    # print "\nPopulated graph columns:       ", @populated_graph_columns;
-    # print "\nDetected and sized columns:    ", sort keys %graph_width;
-    # print "\nCalculated column widths:      ", map { "$_ => $graph_width{$_}" } sort keys %graph_width;  
-    # print "\nPrinted column length:          ", @printed_column_widths;
-    # print " -- total=" . eval(join '+', @printed_column_widths );
-    # print "\nRounded column lengths:          ", @rounded_column_widths;
-    # print " -- total=" . eval(join '+', @rounded_column_widths );
-    # print "\nPrinted column spacing:         ", @printed_column_spacing;
-    # print " -- total=" . eval(join '+', @printed_column_spacing );
-    # print "\nPrinted column names:           ", @printed_column_names;
-    # print "\n";
-    # $, = "";
-
-    @printed_column_widths = @rounded_column_widths;
 
     foreach my $bucket (keys %log_occurrences) {
-        # scale the transferred bytes for printing the statistics table
-        my $bytes = $log_stats{$bucket}{bytes};
-        my $scaled_bytes = ( defined $bytes && defined $max_total{bytes} && $max_total{bytes} != 0 ) ? int(($bytes / $max_total{bytes}) * $durations_graph_width) : 0;
-        $log_stats{$bucket}{scaled_bytes} = $scaled_bytes;
-
         # Scale the total values to the printable size
-        if( $graph_count > 1 ) {
-            my $column_number = $column_count_pre_graph + 1;		# start after the timestamp and possibly legend columns
-
+        my @proportional_cols = grep { $_->{type} eq 'proportional' && $_->{visible} } @column_layout;
+        if( scalar(@proportional_cols) > 1 ) {
             foreach my $key ( @populated_graph_columns ) {			# go through the list of possible columns and populate the scaled value for that metric for the current time bucket
                 # 2025-12-07 - counts are handled separately below with additional logic which should be incorporated here in the future for coherence and performance improvements
                 next if $key =~ /^occurrences$/;					# the occurrences have already been printed, so should skip this entry even if it is legitimate
@@ -3400,22 +3734,25 @@ sub normalize_data_for_output {
                 my $scaled_key = "scaled_${key}";
                 my $scaled_key_highlight = "${scaled_key}-HL";
 
-                $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * $printed_column_widths[$column_number] ) : 0;
-                $log_stats{$bucket}{$scaled_key_highlight} = ( defined $log_stats{$bucket}{$key_highlight} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key_highlight} / $max_total{$key} ) * $printed_column_widths[$column_number] ) : 0;
-                $column_number++;
+                my ($col) = grep { $_->{id} eq $key } @column_layout;
+                my $col_width = ($col && $col->{width}) ? $col->{width} : 0;
+                $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * $col_width ) : 0;
+                $log_stats{$bucket}{$scaled_key_highlight} = ( defined $log_stats{$bucket}{$key_highlight} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key_highlight} / $max_total{$key} ) * $col_width ) : 0;
             }
         }
 
         my $scaled_occurrences_total = 0;
         my $scaled_max_key = "";
         my $scaled_max_value = 0;
+        my $occ_col = (grep { $_->{id} eq 'occurrences' } @column_layout)[0];
+        my $occ_width = ($occ_col && $occ_col->{visible}) ? ($occ_col->{width} // 0) : 0;
 
         # Scale the log message counts for printing the graph
         foreach my $category_bucket (keys %{$log_occurrences{$bucket}}) {
             next if $category_bucket =~ /^(err|msg)-rate|empty$/;
             my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
             next if !defined $occurrences;										                # skip scaling where varible was left or is undefined (ie; no error or message rate)
-            my $scaled_occurrences = $max_total{occurrences} != 0 ? int(($occurrences / $max_total{occurrences}) * $printed_column_widths[$column_count_pre_graph] + 0.5) : 0;	# Adapting count scaling to multi-graph functionality
+            my $scaled_occurrences = $max_total{occurrences} != 0 ? int(($occurrences / $max_total{occurrences}) * $occ_width + 0.5) : 0;
             if( $scaled_occurrences > $scaled_max_value ) {                                     # track the maximum scaled count for this time bucket to correct for rounding errors
                 $scaled_max_value = $scaled_occurrences;
                 $scaled_max_key = $category_bucket;
@@ -3427,25 +3764,17 @@ sub normalize_data_for_output {
             $total_lines_highlighted += $occurrences if $category_bucket =~ /-HL$/;
         }
 
-        if ( $scaled_occurrences_total > $printed_column_widths[$column_count_pre_graph] ) {	# correct for rounding errors by reducing the largest scaled count by 1 if we went over the allowed width
+        if ( $scaled_occurrences_total > $occ_width ) {	# correct for rounding errors by reducing the largest scaled count by 1 if we went over the allowed width
             $log_occurrences{$bucket}{$scaled_max_key}{scaled_occurrences}--;
         }
 
     }
 
-    # Shared column-position color arrays for UDM heatmap and histogram resolution
-    # These map bar graph column positions to their color schemes
-    # (see issue #64 for consolidation with other hardcoded color references)
-    my @column_color_names   = qw( yellow green cyan blue magenta );
-    my @column_plain_bg      = ( 184, 34, 30, 20, 127 );
-    my @column_highlight_bg  = ( 226, 46, 51, 27, 207 );
-    my @column_gradients = (
-        [58, 94, 136, 142, 178, 184, 220, 226],   # Yellow
-        [22, 28, 34, 40, 46, 82, 118, 154],        # Green
-        [23, 30, 37, 44, 51, 80, 86, 123],         # Cyan
-        [17, 18, 19, 20, 21, 27, 33, 39],          # Blue
-        [53, 89, 125, 127, 163, 165, 201, 207],    # Magenta
-    );
+    # Derive local arrays from @column_colors for UDM heatmap and histogram resolution
+    my @column_color_names  = map { $_->{name} } @column_colors;
+    my @column_plain_bg     = map { $_->{plain_bg_num} } @column_colors;
+    my @column_highlight_bg = map { $_->{highlighted_bg_num} } @column_colors;
+    my @column_gradients    = map { $_->{gradient} } @column_colors;
 
     # Resolve UDM heatmap color from its bar graph column position
     if (defined $heatmap_udm_config) {
@@ -3453,7 +3782,7 @@ sub normalize_data_for_output {
         for my $key (@populated_graph_columns) {
             next if $key eq 'occurrences';
             if ($key eq "udm_$heatmap_udm_config->{name}") {
-                my $idx = $col < scalar(@column_color_names) ? $col : $#column_color_names;
+                my $idx = $col % scalar(@column_color_names);
                 $heatmap_metric_map{$heatmap_metric}{color} = $column_color_names[$idx];
                 $heatmap_metric_map{$heatmap_metric}{highlight_bg} = $column_plain_bg[$idx];
                 last;
@@ -3469,7 +3798,7 @@ sub normalize_data_for_output {
         for my $key (@populated_graph_columns) {
             next if $key eq 'occurrences';
             if ($key eq "udm_$metric") {
-                my $idx = $col < scalar(@column_plain_bg) ? $col : $#column_plain_bg;
+                my $idx = $col % scalar(@column_plain_bg);
                 $histogram_base_colors{$metric} = $column_plain_bg[$idx];
                 $histogram_highlight_colors{$metric} = $column_highlight_bg[$idx];
                 $histogram_color_gradients{$metric} = $column_gradients[$idx];
@@ -3486,22 +3815,6 @@ sub normalize_data_for_output {
     }
 
     return;
-}
-
-sub get_heatmap_highlight_bg_color {
-    my ($metric) = @_;
-    # Return highlight background color for heatmap
-    # Uses same colors as plain_bg in bar graph columns for consistency
-    my %highlight_colors = (
-        'duration' => 184,  # Yellow - matches bar graph column 2 plain_bg
-        'bytes'    => 34,   # Green - matches bar graph column 3 plain_bg
-        'count'    => 30,   # Cyan - matches bar graph column 4 plain_bg
-    );
-    if (exists $highlight_colors{$metric}) {
-        return $highlight_colors{$metric};
-    }
-    # UDM metrics: use highlight_bg resolved from bar graph column position
-    return $heatmap_metric_map{$metric}{highlight_bg} // 184;
 }
 
 sub format_heatmap_value {
@@ -3636,29 +3949,20 @@ sub get_heatmap_column_header {
         }
     }
 
-    # Build final string: prefix (2) + content (heatmap_width) + suffix (2)
-    # This gives durations_graph_width total when heatmap_width + 4 = durations_graph_width
-    my $prefix = "  ";   # 2 spaces to align with "│ " in data rows
-    my $content = join("", @header_chars);
-    my $suffix = "  ";   # 2 trailing spaces
-
-    return $prefix . $content . $suffix;
+    # Return content only — spacing_before on heatmap column handles alignment
+    return join("", @header_chars);
 }
 
 sub print_heatmap_row {
-    my ($bucket, $printed_chars) = @_;
+    my ($bucket) = @_;
 
     # Use $heatmap_width for content width
     my $heatmap_content_width = $heatmap_width;
 
-    my $missing_chars = $terminal_width - $printed_chars - $durations_graph_width;
-    print " " x $missing_chars if $missing_chars > 0;
-    print "$colors{'bright-black'}│$colors{'NC'} ";
-
     my $color_key = $heatmap_metric_map{$heatmap_metric}{color};
-    my $color_hash = $heatmap_light_bg ? \%heatmap_colors_light : \%heatmap_colors;
-    my @gradient = @{$color_hash->{$color_key}};
-    my $highlight_bg = get_heatmap_highlight_bg_color($heatmap_metric);
+    my $entry = $column_color_lookup{$color_key} // $heatmap_special_gradients{$color_key};
+    my @gradient = @{$heatmap_light_bg ? $entry->{gradient_light} : $entry->{gradient}};
+    my $highlight_bg = $entry->{plain_bg_num} // $heatmap_metric_map{$heatmap_metric}{highlight_bg} // 184;
 
     # Get percentile positions for this bucket
     my $percentiles = $heatmap_percentiles{$bucket} // {};
@@ -3703,7 +4007,6 @@ sub print_heatmap_row {
             }
         }
     }
-    print " ";
 }
 
 sub print_heatmap_footer_scale {
@@ -3714,12 +4017,13 @@ sub print_heatmap_footer_scale {
     my $metric = $heatmap_metric;
     my $heatmap_content_width = $heatmap_width;
 
-    # Calculate width before the heatmap column
-    # This must match the position where │ is printed in print_heatmap_row()
-    # Total width = timestamp + legend + bar_graph_columns + heatmap_column
-    # So pre_heatmap = terminal_width - durations_graph_width gives us the position
-    # But we need to account for all the content before the heatmap │
-    my $pre_heatmap_width = $terminal_width - $durations_graph_width;
+    # Calculate width before the heatmap column by summing all columns up to sep_graph_stats
+    my $pre_heatmap_width = 0;
+    for my $col (@column_layout) {
+        last if $col->{id} eq 'sep_graph_stats';
+        next unless $col->{visible};
+        $pre_heatmap_width += ($col->{spacing_before} // 0) + ($col->{width} // 0) + ($col->{spacing_after} // 0);
+    }
 
     # Build the scale with markers at positions 0%, 25%, 50%, 75%, 100%
     my @marker_positions = (0, 0.25, 0.50, 0.75, 1.0);
@@ -3753,13 +4057,17 @@ sub print_heatmap_footer_scale {
     }
 
     # Print the leading horizontal line (before heatmap column)
+    # Get heatmap spacing_before from layout to align footer with data rows
+    my $hm_col = (grep { $_->{id} eq 'heatmap' && $_->{visible} } @column_layout)[0];
+    my $hm_spacing_before = $hm_col ? $hm_col->{spacing_before} : 1;
+
     print "$colors{'bright-black'}";
     print "─" x $pre_heatmap_width;
     print "┴";  # Connection to the column separator (aligns with │ in data rows)
-    print "─";  # Padding character (aligns with space after │ in data rows)
+    print "─" x ($hm_spacing_before);  # Padding characters (align with spacing before heatmap content)
 
     # Build the heatmap scale section with embedded labels
-    # This is exactly heatmap_content_width characters to align with the 52 data columns
+    # This is exactly heatmap_content_width characters to align with the data columns
     my @scale_chars = ("─") x $heatmap_content_width;
 
     # Place labels at marker positions, avoiding overlap
@@ -3796,7 +4104,6 @@ sub print_heatmap_footer_scale {
     }
 
     print join("", @scale_chars);
-    print "─";  # Trailing character (aligns with trailing space in data rows)
     print "$colors{'NC'}\n";
 }
 
@@ -3808,39 +4115,36 @@ sub print_bar_graph {
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
 
         print $colors{'bright-black'};
-        my $printed_chars = 0;
-        my $expected_chars = 0;
 
-        foreach my $column (0 .. $#printed_column_names) {
-            my $name   = $printed_column_names[$column];
-            my $width  = $printed_column_widths[$column] // length($name);
-            my $padding = $width - length($name);
+        for my $col (grep { $_->{visible} } @column_layout) {
+            my $col_w = $col->{width} // 0;
+
+            if ($col->{type} eq 'separator') {
+                # Separators render as whitespace in headers
+                print ' ' x (($col->{spacing_before}//0) + $col_w + ($col->{spacing_after}//0));
+                next;
+            }
+
+            # Print spacing before column
+            print ' ' x ($col->{spacing_before} // 0);
+
+            # Get column name, truncate to width
+            my $name = $col->{name} // '';
+            $name =~ s/^udm_//;
+            $name = substr($name, 0, $col_w) if $col_w > 0 && length($name) > $col_w;
+
+            # Center the name within column width
+            my $padding = $col_w - length($name);
             $padding = 0 if $padding < 0;
             my $left_pad  = int( $padding / 2 + 0.5 );
             my $right_pad = $padding - $left_pad;
 
-            if ( ($printed_column_spacing[$column] // 0) > 0 ) {
-                my $num_padding_chars = ($printed_column_spacing[$column]-$graph_column_padding_all);
-                print ' ' x 1 if $num_padding_chars > 1;   # set this to pipe to have the column line propagate up (does not work with line in durations)
-                print ' ' x ($num_padding_chars > 1 ? $num_padding_chars - 1 : $num_padding_chars);
-            }
-            
-            if( $left_pad > 0 ) {
-                # print "$colors{'green'}:$colors{'NC'}" x $left_pad;
-                print ' ' x $left_pad;
-                # $printed_chars += $left_pad;
-            };
+            print ' ' x $left_pad if $left_pad > 0;
             print $name;
-            $printed_chars += length($name);
-            if( $right_pad > 0 ) {
-                # print "$colors{'red'}:$colors{'NC'}" x $right_pad;
-                print ' ' x $right_pad;
-                # $printed_chars += $right_pad;
-            };
+            print ' ' x $right_pad if $right_pad > 0;
 
-            if( ($printed_column_spacing[$column] // 0) > 0 ) {
-                print ' ' x $graph_column_padding_all;
-            }
+            # Print spacing after column
+            print ' ' x ($col->{spacing_after} // 0);
         }
 
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
@@ -3855,14 +4159,7 @@ sub print_bar_graph {
             } else {
                 $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
             }
-            my $printed_chars = 0;
             my $total_occurrences = 0;
-
-            ## PRINT TIMESTAMP IN CHART ROW
-            my $timestamp_legend_length = $timestamp_length;                                # already includes the padding in the value $graph_column_padding_all;
-            print " " x $graph_column_padding_timestamp . $bucket_time_str . " " x $graph_column_padding_all;
-            $printed_chars += $printed_column_widths[0] + $printed_column_spacing[0];       # timestamp column width and spacing
-            $timestamp_legend_length += $printed_column_widths[1] + $printed_column_spacing[1] if( !( $omit_values && $omit_rate ) );
 
             my $log_details = "";
             my $rate_metrics = "";
@@ -3870,7 +4167,7 @@ sub print_bar_graph {
             my %output_columns;
             my $scaled_occurrences_total = 0;
 
-            ## LOOP THROUGH LOG CATEGORY BUCKETS AND PRINT PER ROW LEGEND COUNTS
+            ## LOOP THROUGH LOG CATEGORY BUCKETS AND BUILD PER ROW LEGEND COUNTS
             foreach my $category_bucket (@log_levels) {
                 if (exists $log_occurrences{$bucket}{$category_bucket}) {
                     my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
@@ -3916,7 +4213,7 @@ sub print_bar_graph {
                next if $category_bucket =~ /^timestamp$/;								# skip the first column and get to the counts
                last if $category_bucket =~ /^totalOccurrences$/;								# only fill in empty values up to the totalOccurrences
 
-               if( exists $output_columns{$category_bucket} ) {								# if there was a count for this log level, add it to the list 
+               if( exists $output_columns{$category_bucket} ) {								# if there was a count for this log level, add it to the list
                    push @csv_data, $output_columns{$category_bucket};
 
 # 2026-01-04 TO DO: this may not be required, test after fixing the count and byte metric collection with no duration stats
@@ -3927,73 +4224,61 @@ sub print_bar_graph {
 
             push @csv_data, $total_occurrences;										# add the total message count to the output CSV data
 
-            print $log_details unless $omit_values;
-            my $padding = $legend_length - $legend_length_bucket;
-            $printed_chars += $legend_length_bucket ;
+            ## RENDER ROW BY ITERATING @column_layout
+            for my $col (grep { $_->{visible} } @column_layout) {
+                my $col_id   = $col->{id};
+                my $col_type = $col->{type};
+                my $col_w    = $col->{width} // 0;
 
-            print " " x ($padding > 0 ? $padding : 0);
-            $printed_chars += ($padding > 0 ? $padding : 0);
-            print $rate_metrics unless $omit_rate;
+                # Print spacing before this column
+                print " " x ($col->{spacing_before} // 0);
 
-        # 2025-12-07 - this legend width plus spacing given the possible variations is quite hard to refactor, so leaving it like this
-        if( $graph_column_padding_count >= 1 ) {						# if there is a padding character, make the first one the separator
-            print "$colors{'bright-black'}│$colors{'NC'}";
-            $printed_chars++;
-	    }
+                if ($col_id eq 'timestamp') {
+                    print $bucket_time_str;
 
-	    if( $graph_column_padding_count - 1 >= 1 ) {					# and these are the remaining padding characters
-            my $padding = $graph_column_padding_count - 1;
-		    print " " x $padding;
-            $printed_chars += $padding;
-        }
+                } elsif ($col_id eq 'legend') {
+                    print $log_details unless $omit_values;
+                    my $padding = $legend_length - $legend_length_bucket;
+                    print " " x ($padding > 0 ? $padding : 0);
+                    print $rate_metrics unless $omit_rate;
 
-            ## PRINT STANDARD 'COUNT' BAR GRAPH ##
-            foreach my $category_bucket (@log_levels) {
-                next unless $category_bucket !~ /^empty|err-rate|msg-rate$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
-                if (exists $log_occurrences{$bucket}{$category_bucket}) {
-                    my $scaled_occurrences = $log_occurrences{$bucket}{$category_bucket}{scaled_occurrences};
-                    $scaled_occurrences = 0 if $scaled_occurrences < 0;  # Guard against negative values
-                    my $color = $colors{$category_bucket} // $colors{'NC'};
-                    print "$color" . $blocks{$default_chart_block} x $scaled_occurrences . "$colors{'NC'}";
-                    $printed_chars += $scaled_occurrences;
-                    $scaled_occurrences_total += $scaled_occurrences;
-                }
-            }
+                } elsif ($col_type eq 'separator') {
+                    print "$colors{'bright-black'}│$colors{'NC'}";
 
-            print " " x $graph_column_padding_all;
-            $printed_chars += $graph_column_padding_all;
+                } elsif ($col_id eq 'occurrences') {
+                    # Print category-colored blocks
+                    foreach my $category_bucket (@log_levels) {
+                        next unless $category_bucket !~ /^empty|err-rate|msg-rate$/;
+                        if (exists $log_occurrences{$bucket}{$category_bucket}) {
+                            my $scaled_occurrences = $log_occurrences{$bucket}{$category_bucket}{scaled_occurrences};
+                            $scaled_occurrences = 0 if $scaled_occurrences < 0;
+                            my $color = $colors{$category_bucket} // $colors{'NC'};
+                            print "$color" . $blocks{$default_chart_block} x $scaled_occurrences . "$colors{'NC'}";
+                            $scaled_occurrences_total += $scaled_occurrences;
+                        }
+                    }
+                    # Fill remaining width with spaces
+                    my $remaining = $col_w - $scaled_occurrences_total;
+                    print " " x $remaining if $remaining > 0;
 
-            ## PRINT ADDITIONAL TRENDED VALUES ##
-            if( $graph_count > 1 ) {
-                my $column_number = 2;		                            # start after the timestamp and possibly legend columns
-                my $missing_chars = ( $printed_column_widths[$column_count_pre_graph] + $printed_column_spacing[$column_count_pre_graph] ) - ( $scaled_occurrences_total + $printed_column_spacing[$column_count_pre_graph] );
-                $missing_chars = 0 if $missing_chars < 0;  # Guard against negative values
-                # Fill in empty characters to the start of the second graph space
-                print " " x $missing_chars;
-                $printed_chars += $missing_chars;
-
-                foreach my $key ( @populated_graph_columns ) {		    # loop through available data columns to print
-                    next if $key =~ /^occurrences$/;					# the counts have already been printed, so should skip this entry even if it is legitimate
+                } elsif ($col_type eq 'proportional' && $col_id ne 'occurrences') {
+                    # Secondary metric bar (duration, bytes, count, UDMs, threadpools)
+                    my $key = $col_id;
                     my $scaled_trend_key = "scaled_${key}";
                     my $scaled_trend_key_highlight = "${scaled_trend_key}-HL";
                     my $scaled_trend_value = $log_stats{$bucket}{$scaled_trend_key};
                     my $trend_value = $log_stats{$bucket}{$key};
-                    my $printed_column_index = $column_count_pre_graph-1+$column_number;
 
                     if( defined $log_stats{$bucket}{$key} ) {
                         if( $key =~ /^(time|duration)$/i ) {
-                            # Select duration unit format based on column width: long (>=15), medium (>=10), short (<10)
-                            # Short format omits space between value and unit to save space
-                            my $column_width = $printed_column_widths[$printed_column_index];
-                            my $time_format = $column_width >= 15 ? 'long' : ($column_width >= 10 ? 'medium' : 'short');
+                            my $time_format = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
                             my $time_space = $time_format eq 'short' ? undef : ' ';
                             $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', $time_format, $time_space );
-                            push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};				# push trend value to CSV data list
+                            push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};
                         } elsif( $key =~ /^bytes$/i ) {
                             $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
-                            push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};				# push trend value to CSV data list
+                            push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};
                         } elsif( $key =~ /^count$/i ) {
-                            # $trend_value = defined $log_stats{$bucket}{$key} ? " $log_stats{$bucket}{$key}" : "";
                             $trend_value = " " . format_number( $log_stats{$bucket}{$key}, ' ', 2);
                             foreach my $metric ( qw( occurrences min mean max sum ) ) {
                                 my $key_metric = "${key}_${metric}";
@@ -4005,8 +4290,7 @@ sub print_bar_graph {
                             if ($config) {
                                 my $unit_type = $config->{unit_type};
                                 if ($unit_type eq 'time') {
-                                    my $col_width = $printed_column_widths[$printed_column_index];
-                                    my $fmt = $col_width >= 15 ? 'long' : ($col_width >= 10 ? 'medium' : 'short');
+                                    my $fmt = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
                                     my $spc = $fmt eq 'short' ? undef : ' ';
                                     $trend_value = " " . format_time($log_stats{$bucket}{$key}, 'ms', $fmt, $spc);
                                 } elsif ($unit_type eq 'bytes') {
@@ -4019,101 +4303,58 @@ sub print_bar_graph {
                                 push @csv_data, $log_stats{$bucket}{"${key}_${metric}"};
                             }
                         } else {
-                            $trend_value = defined $log_stats{$bucket}{$key} ? " $log_stats{$bucket}{$key}" : "";
-                            push @csv_data, ltrim( $trend_value );								            # push trend value to CSV data list
+                            my $decimals = $col_w > 10 ? 2 : ($col_w > 8 ? 1 : 0);
+                            $trend_value = defined $log_stats{$bucket}{$key} ? " " . format_number( $log_stats{$bucket}{$key}, ' ', $decimals) : "";
+                            push @csv_data, $log_stats{$bucket}{$key};
                         }
 
-                        # SECONDARY TREND Print the secondary trend and associated value
-                        # Yellow background 103m, Yellow Foreground 93m       184 medium yellow (nice!)  190 pale yellow  226 bright yellow   (184 + 190 are the winners)
-                        # Cyan background 103m, Cyan Foreground 36m, bright Cyan 96m   46 Cyan BG   30 Deep Cyan  44 Bright Cyan 36 Darker Cyan 37 Vibrant Cyan 45 Cyan 106 Bright Cyan BG  51 bright cyan    123 medium cyan   159 light cyan  195 pale cyan
-                        # Green                          32 Green FG    42 Green BG     92 Bright Green FG   102  Bright Green BG     34 Medium Green  46 Ultramarine Green  120  Light Green  121  Pale Green
-                        # Blue                           34 Blue FG     44 Blug BG     94 Bright Blue FG   20 Ultramarine Blue   104 Bright Blue BG    20 Medium Blue   117 Light Blue   159  Pale Blue
-                        # Magenta                        35 FG Magenta     45 BG Magenta      105 Bright Magenta    127 Medium magenta   201 Ultramarine Magenta   225 Light Magenta     219 Pale Magenta
+                        # Render the metric bar using color from column layout
+                        my $col_color = $col->{color};
+                        print $col_color->{highlighted_bg};
 
-                        # Start the background color with the brighter highlight value if there is anything to highlight
-                        my ( $highlighted_bg_black_fg, $plain_bg_black_fg, $black_bg_plain_fg );
-
-                        if( $column_number == 2 ) {	                        # Yellow				
-                            $highlighted_bg_black_fg = "\033[48;5;226m\033[38;5;0m";
-                            $plain_bg_black_fg = "\033[48;5;184m\033[38;5;0m";
-                            $black_bg_plain_fg = "\033[0m\033[93m";
-                        } elsif( $column_number == 3 ) {					# Green
-                            $highlighted_bg_black_fg = "\033[48;5;46m\033[38;5;0m";
-                            $plain_bg_black_fg = "\033[48;5;34m\033[38;5;0m";
-                            $black_bg_plain_fg = "\033[0m\033[32m";
-                        } elsif( $column_number == 4 ) {					# Cyan
-                            $highlighted_bg_black_fg = "\033[48;5;36m\033[38;5;0m";
-                            $plain_bg_black_fg = "\033[48;5;30m\033[38;5;0m";
-                            $black_bg_plain_fg = "\033[0m\033[36m";
-                        } elsif( $column_number == 5 ) {					# Blue
-                            $highlighted_bg_black_fg = "\033[48;5;21m\033[38;5;0m";
-                            $plain_bg_black_fg = "\033[48;5;20m\033[38;5;0m";
-                            $black_bg_plain_fg = "\033[0m\033[34m";
-                        } elsif( $column_number == 6 ) {					# Magenta
-                            $highlighted_bg_black_fg = "\033[48;5;201m\033[38;5;0m";
-                            $plain_bg_black_fg = "\033[48;5;127m\033[38;5;0m";
-                            $black_bg_plain_fg = "\033[0m\033[35m";
-                        } else {
-                            last;
-                        }
-
-                        print " " x $graph_column_padding_other;				# if stated, this is the BEFORE column padding specific to these columns
-                        $printed_chars += $graph_column_padding_other;
-                        print $highlighted_bg_black_fg;
-
-                        for my $i ( 0 .. $printed_column_widths[$printed_column_index] - 1) {
+                        for my $i ( 0 .. $col_w - 1) {
                             my $value_char = (split //, $trend_value )[$i];
 
-                            # Switch over to the standard foreground/background colors once we have printed the required number of highlighted bars
                             if( defined $log_stats{$bucket}{$scaled_trend_key_highlight} && $log_stats{$bucket}{$scaled_trend_key_highlight} == $i ) {
-                                print $plain_bg_black_fg;
+                                print $col_color->{plain_bg};
                             }
 
-                            # Switch over the graphs standard foreground color with black background once all bars are printed
                             if( $i == $scaled_trend_value ) {
-                                print "$black_bg_plain_fg";
+                                print $col_color->{fg};
                             }
 
                             print length( $value_char ) ? $value_char : " ";
-                            $printed_chars++;
                         }
 
-                        print "$colors{'NC'}\033[0m";						# clear the foreground color
+                        print "$colors{'NC'}\033[0m";
 
                     } else {
-                        # This is the special condition where a column has no values/data for a particular interval, in which case we just need to print the column width in spaces
-                        print " " x $printed_column_widths[$printed_column_index];
-                        $printed_chars += $printed_column_widths[$printed_column_index];
+                        # No data for this column in this bucket — print empty space
+                        print " " x $col_w;
                     }
 
-                    print " " x $graph_column_padding_all;				    # if stated, this is the AFTER column padding for ALL columns
-                    $printed_chars += $graph_column_padding_all;
-                    $column_number++;
-                }
-            }
+                } elsif ($col_id eq 'latency') {
+                    # Duration statistics
+                    if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{p99} || defined $log_stats{$bucket}{p999} || defined $log_stats{$bucket}{cv} ) {
+                        my $cv_color = defined $log_stats{$bucket}{cv} && $log_stats{$bucket}{cv} >= 20 ? 'WARN-HL' : 'white-underline';
 
-            # HEATMAP OR DURATION STATISTICS - print heatmap if enabled, otherwise duration statistics table
-            if ($heatmap_enabled) {
-                print_heatmap_row($bucket, $printed_chars);
-            } elsif( $print_durations && !$omit_durations && !$omit_stats ) {
-                my $missing_chars;
-                $missing_chars =  $terminal_width - $printed_chars - $durations_graph_width;
-                print " " x $missing_chars if $missing_chars > 0;
-                print "$colors{'bright-black'}│$colors{'NC'}  ";
-                if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{p99} || defined $log_stats{$bucket}{p999} || defined $log_stats{$bucket}{cv} ) {
+                        defined $log_stats{$bucket}{p50} ? printf( "$colors{'cyan'}P50:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p50} ) >= 4 ? format_time( $log_stats{$bucket}{p50}, 'ms' ) : $log_stats{$bucket}{p50} ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p99} ) >= 4 ? format_time( $log_stats{$bucket}{p99}, 'ms' ) : $log_stats{$bucket}{p99} ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-5s$colors{'NC'} ", ( length( $log_stats{$bucket}{p999} ) >= 4 ? format_time( $log_stats{$bucket}{p999}, 'ms' ) : $log_stats{$bucket}{p999} ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", $log_stats{$bucket}{cv} ) : printf ( " " x 7 );
 
-                    my $cv_color = defined $log_stats{$bucket}{cv} && $log_stats{$bucket}{cv} >= 20 ? 'WARN-HL' : 'white-underline';
-
-                    defined $log_stats{$bucket}{p50} ? printf( "$colors{'cyan'}P50:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p50} ) >= 4 ? format_time( $log_stats{$bucket}{p50}, 'ms' ) : $log_stats{$bucket}{p50} ) ) : printf( " " x 11 );
-                    defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 11 );
-                    defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p99} ) >= 4 ? format_time( $log_stats{$bucket}{p99}, 'ms' ) : $log_stats{$bucket}{p99} ) ) : printf( " " x 11 );
-                    defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-5s$colors{'NC'} ", ( length( $log_stats{$bucket}{p999} ) >= 4 ? format_time( $log_stats{$bucket}{p999}, 'ms' ) : $log_stats{$bucket}{p999} ) ) : printf( " " x 11 );
-                    defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", $log_stats{$bucket}{cv} ) : printf ( " " x 7 );
-
-                    foreach my $stat ( qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) ) {				# push statistics data to the CSV data list
-                        push @csv_data, $log_stats{$bucket}{$stat};
+                        foreach my $stat ( qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) ) {
+                            push @csv_data, $log_stats{$bucket}{$stat};
+                        }
                     }
+
+                } elsif ($col_id eq 'heatmap') {
+                    print_heatmap_row($bucket);
                 }
+
+                # Print spacing after this column
+                print " " x ($col->{spacing_after} // 0);
             }
 
             # Print statistics for time-bucket statistics to the CSV file if activated
