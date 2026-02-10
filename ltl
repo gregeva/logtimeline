@@ -78,7 +78,7 @@ my $rolling_window_size = 5;					# Adjust this value as needed - more time bucke
 my $impact_time_exponent = 7;		            # it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $time_bucket_size, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
-my ( $hide_session, $session_data_found ) = ( 0, 0 );
+my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages, $elapsed_heatmap_statistics, $elapsed_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 # this is where the counts of log entries are tallied across the time buckets
@@ -516,8 +516,15 @@ OPTIONS
                                                and /api?b=2 are tracked separately
     -is,  --include-session                    Keep session/user IDs when grouping messages, so each
                                                session is tracked separately
+    -hl,  --hide-legend                        Hide the legend column (category breakdowns and rates)
+    -ho,  --hide-occurrences                   Hide the occurrences bar graph column, freeing space
+                                               for other metric columns
+    -hd,  --hide-duration                      Hide the duration bar graph column
+    -hb,  --hide-bytes                         Hide the bytes bar graph column
+    -hc,  --hide-count                         Hide the count bar graph column
     -hs,  --hide-session                       Hide the Sessions column that automatically appears
                                                when session IDs are found in the log data
+    -hst, --hide-stats                         Hide the latency statistics or heatmap column
 
   Output
     -n,   --top-messages <N>                   Number of unique messages to show in the summary table
@@ -1373,6 +1380,12 @@ sub adapt_to_command_line_options {
         'include-query-string|iqs' => \$include_query_string,
         'include-session|is' => \$include_session,
         'hide-session|hs' => \$hide_session,
+        'hide-occurrences|ho' => \$hide_occurrences,
+        'hide-legend|hl' => \$hide_legend,
+        'hide-duration|hd' => \$hide_duration,
+        'hide-bytes|hb' => \$hide_bytes,
+        'hide-count|hc' => \$hide_count,
+        'hide-stats|hst' => \$hide_stats,
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds,
         'version|v' => \$print_version,
@@ -3164,7 +3177,7 @@ sub build_column_layout {
             base_width      => $legend_length,
             spacing_before  => 0,
             spacing_after   => 0,
-            visible         => 1,
+            visible         => $hide_legend ? 0 : 1,
             color           => undef,
             priority        => undef,
         };
@@ -3193,7 +3206,7 @@ sub build_column_layout {
         base_width      => undef,
         spacing_before  => 0,
         spacing_after   => 1,
-        visible         => 1,
+        visible         => $hide_occurrences ? 0 : 1,
         color           => undef,
         priority        => 'focus',
     };
@@ -3266,7 +3279,7 @@ sub build_column_layout {
             base_width      => $latency_w,
             spacing_before  => 2,
             spacing_after   => 0,
-            visible         => 1,
+            visible         => $hide_stats ? 0 : 1,
             color           => undef,
             priority        => undef,
         };
@@ -3282,7 +3295,7 @@ sub build_column_layout {
             base_width      => $latency_w,
             spacing_before  => 1,
             spacing_after   => 0,
-            visible         => 1,
+            visible         => $hide_stats ? 0 : 1,
             color           => undef,
             priority        => undef,
         };
@@ -3566,9 +3579,12 @@ sub normalize_data_for_output {
         @column_layout = build_column_layout();
 
         # Set visibility on proportional columns based on data presence
+        my %hide_column = ( duration => $hide_duration, bytes => $hide_bytes, count => $hide_count );
         for my $col (@column_layout) {
             next unless $col->{type} eq 'proportional' && $col->{id} ne 'occurrences';
-            $col->{visible} = 1 if defined $max_total{$col->{id}} && $max_total{$col->{id}} > 0;
+            if (defined $max_total{$col->{id}} && $max_total{$col->{id}} > 0) {
+                $col->{visible} = $hide_column{$col->{id}} ? 0 : 1;
+            }
         }
 
         # Add dynamic columns (sessions, threadpools, UDMs)
@@ -3677,7 +3693,7 @@ sub normalize_data_for_output {
         my $scaled_max_key = "";
         my $scaled_max_value = 0;
         my $occ_col = (grep { $_->{id} eq 'occurrences' } @column_layout)[0];
-        my $occ_width = $occ_col ? $occ_col->{width} : 0;
+        my $occ_width = ($occ_col && $occ_col->{visible}) ? ($occ_col->{width} // 0) : 0;
 
         # Scale the log message counts for printing the graph
         foreach my $category_bucket (keys %{$log_occurrences{$bucket}}) {
