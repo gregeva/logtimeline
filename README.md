@@ -72,6 +72,7 @@ ltl [options] <logfile> [logfile2 ...]
 | `-ic, --include-count` | Add a count column to the output (off by default) |
 | `-iqs, --include-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
 | `-is, --include-session` | Keep session/user IDs when grouping messages, so each session is tracked separately |
+| `-hs, --hide-session` | Hide the Sessions column that automatically appears when session IDs are found in the log data |
 
 ### Output
 
