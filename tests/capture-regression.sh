@@ -6,8 +6,8 @@
 # strips ANSI escape codes, and saves output to reference files.
 # Uses -osum -n 1 to suppress summary table and limit top messages (not under test).
 #
-# At narrow widths (80, 100), columns are omitted to avoid overflow since
-# auto-hide is not yet implemented. Wider widths test the full column set.
+# At narrow widths, auto-hide removes low-priority columns automatically.
+# The -os/-od/-ov tests verify manual column hiding still works alongside auto-hide.
 
 set -euo pipefail
 
@@ -84,6 +84,13 @@ run_test "omit-ov-w160" "$LTL" $COMMON --terminal-width 160 -ov "$ACCESS_LOG"
 run_test "omit-or-w160" "$LTL" $COMMON --terminal-width 160 -or "$ACCESS_LOG"
 run_test "omit-os-w160" "$LTL" $COMMON --terminal-width 160 -os "$ACCESS_LOG"
 run_test "omit-ov-or-w160" "$LTL" $COMMON --terminal-width 160 -ov -or "$ACCESS_LOG"
+
+# --- Auto-hide tests (Issue #73) ---
+echo "Auto-hide at narrow widths:"
+run_test "autohide-w80" "$LTL" $COMMON --terminal-width 80 "$ACCESS_LOG"
+run_test "autohide-w100" "$LTL" $COMMON --terminal-width 100 "$ACCESS_LOG"
+run_test "noautohide-w80" "$LTL" $COMMON --terminal-width 80 --no-auto-hide "$ACCESS_LOG"
+run_test "autohide-hm-w120" "$LTL" $COMMON --terminal-width 120 -hm duration "$SCRIPT_LOG"
 
 # --- Millisecond precision with constrained time range ---
 echo "Millisecond precision at width 160:"

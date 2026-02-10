@@ -91,6 +91,12 @@ run_test "omit-or-w160" "$LTL" $COMMON --terminal-width 160 -or "$ACCESS_LOG"
 run_test "omit-os-w160" "$LTL" $COMMON --terminal-width 160 -os "$ACCESS_LOG"
 run_test "omit-ov-or-w160" "$LTL" $COMMON --terminal-width 160 -ov -or "$ACCESS_LOG"
 
+# --- Auto-hide tests (Issue #73) ---
+run_test "autohide-w80" "$LTL" $COMMON --terminal-width 80 "$ACCESS_LOG"
+run_test "autohide-w100" "$LTL" $COMMON --terminal-width 100 "$ACCESS_LOG"
+run_test "noautohide-w80" "$LTL" $COMMON --terminal-width 80 --no-auto-hide "$ACCESS_LOG"
+run_test "autohide-hm-w120" "$LTL" $COMMON --terminal-width 120 -hm duration "$SCRIPT_LOG"
+
 # --- Millisecond precision ---
 run_test "ms-w160" "$LTL" $COMMON --terminal-width 160 -ms -bs 1000 -st 00:00 -et 00:05 "$ACCESS_LOG"
 
