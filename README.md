@@ -108,9 +108,18 @@ ltl [options] <logfile> [logfile2 ...]
 
 | Option | Description |
 |--------|-------------|
-| `-udm, --user-defined-metrics <spec>` | Extract a custom numeric metric from each log line using a regex capture group (`name[:unit[:fn]]:/regex/`) |
+| `-udm, --user-defined-metrics <spec>` | Extract a custom numeric metric from each log line (see format below) |
 | `-ucm, --udm-csv-message <cols>` | Treat the message field as CSV and name the columns for use with `-udm` |
 | `-ucs, --udm-csv-separator <sep>` | Set the CSV field delimiter when using `-ucm` (default: comma) |
+
+**UDM spec format:** `name[:unit[:function]][:/regex/]`
+
+| Part | Description |
+|------|-------------|
+| `name` | Metric name — also used as default pattern to match `name=value` or `name: value` |
+| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — omit for raw numbers |
+| `function` | **Aggregations:** `sum` (default), `min`, `max`, `avg` — **Transforms:** `delta` (clamped ≥0), `idelta` (unclamped) — **Combined:** `sum(delta)`, `avg(delta)`, `max(idelta)`, etc. |
+| `/regex/` | Custom extraction pattern with one capture group around the numeric value to extract (overrides default name matching). e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |
 
 ### Thread Pool Activity
 
