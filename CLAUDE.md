@@ -50,9 +50,8 @@ The repository contains three tools:
 
 ### Install Dependencies
 ```bash
-# macOS
-brew install cpanminus && cpanm PAR::Packer
-cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
+# macOS (uses Homebrew Perl — do NOT use macOS system Perl)
+./build/macos-setup.sh
 
 # Ubuntu/Linux
 sudo apt-get install build-essential perl perl-base perl-modules libperl-dev cpanminus
