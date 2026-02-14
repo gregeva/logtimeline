@@ -220,11 +220,11 @@ my %heatmap_special_gradients = (
                gradient_light => [255, 254, 253, 250, 247, 244, 241, 238] },
 );
 
-# Map metric names to column numbers and colors
+# Map metric names to column IDs — colors resolved from @column_layout in normalize_data_for_output()
 my %heatmap_metric_map = (
-    'duration' => { column => 2, color => 'yellow' },
-    'bytes'    => { column => 3, color => 'green' },
-    'count'    => { column => 4, color => 'cyan' },
+    'duration' => { column => 2 },
+    'bytes'    => { column => 3 },
+    'count'    => { column => 4 },
 );
 
 # Histogram data structures and settings (Issue #25)
@@ -320,10 +320,10 @@ my %histogram_box_sets = (
 # 8-level block characters for sub-character resolution in histograms
 my @histogram_block_chars = (' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█');
 
-# Histogram colors — derived from @column_colors (duration=yellow[0], bytes=green[1], count=cyan[2])
-my %histogram_base_colors      = ( duration => $column_colors[0]{plain_bg_num},       bytes => $column_colors[1]{plain_bg_num},       count => $column_colors[2]{plain_bg_num} );
-my %histogram_highlight_colors = ( duration => $column_colors[0]{highlighted_bg_num}, bytes => $column_colors[1]{highlighted_bg_num}, count => $column_colors[2]{highlighted_bg_num} );
-my %histogram_color_gradients  = ( duration => $column_colors[0]{gradient},           bytes => $column_colors[1]{gradient},           count => $column_colors[2]{gradient} );
+# Histogram colors — resolved from @column_layout in normalize_data_for_output()
+my %histogram_base_colors;
+my %histogram_highlight_colors;
+my %histogram_color_gradients;
 
 my $histogram_color_gradient_enabled = 0;     # Toggle: 1 = intensity gradients, 0 = flat base color
 my $histogram_gridlines_enabled = 1;          # Toggle: horizontal gridlines at Y-axis tick positions
@@ -1567,7 +1567,7 @@ sub adapt_to_command_line_options {
         my ($match) = grep { $_->{name} eq $heatmap_metric } @udm_configs;
         if ($match) {
             $heatmap_udm_config = $match;
-            $heatmap_metric_map{$heatmap_metric} = { column => undef, color => 'blue' };
+            $heatmap_metric_map{$heatmap_metric} = { column => undef };
         } else {
             my @available = (qw(duration bytes count), map { $_->{name} } @udm_configs);
             die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', @available) . "\n";
@@ -1581,10 +1581,7 @@ sub adapt_to_command_line_options {
             my ($match) = grep { $_->{name} eq $metric } @udm_configs;
             if ($match) {
                 push @histogram_udm_configs, $match;
-                # Defaults — resolved to actual column-position colors in normalize_data_for_output()
-                $histogram_base_colors{$metric} = $histogram_base_colors{count};
-                $histogram_highlight_colors{$metric} = $histogram_highlight_colors{count};
-                $histogram_color_gradients{$metric} = [@{$histogram_color_gradients{count}}];
+                # Colors resolved from @column_layout in normalize_data_for_output()
             } else {
                 my @available = (qw(duration bytes count), map { $_->{name} } @udm_configs);
                 die "Error: Unknown histogram metric '$metric'. Available: " . join(', ', @available) . "\n";
@@ -1596,10 +1593,7 @@ sub adapt_to_command_line_options {
     if ($histogram_enabled && !%histogram_metrics && @udm_configs) {
         @histogram_udm_configs = @udm_configs;
         for my $cfg (@udm_configs) {
-            # Defaults — resolved to actual column-position colors in normalize_data_for_output()
-            $histogram_base_colors{$cfg->{name}} = $histogram_base_colors{count};
-            $histogram_highlight_colors{$cfg->{name}} = $histogram_highlight_colors{count};
-            $histogram_color_gradients{$cfg->{name}} = [@{$histogram_color_gradients{count}}];
+            # Colors resolved from @column_layout in normalize_data_for_output()
         }
     }
 
@@ -3770,41 +3764,34 @@ sub normalize_data_for_output {
 
     }
 
-    # Derive local arrays from @column_colors for UDM heatmap and histogram resolution
-    my @column_color_names  = map { $_->{name} } @column_colors;
-    my @column_plain_bg     = map { $_->{plain_bg_num} } @column_colors;
-    my @column_highlight_bg = map { $_->{highlighted_bg_num} } @column_colors;
-    my @column_gradients    = map { $_->{gradient} } @column_colors;
-
-    # Resolve UDM heatmap color from its bar graph column position
+    # Resolve ALL metric colors from @column_layout (single source of truth)
+    # A. Built-in metrics: duration, bytes, count
+    for my $metric (qw(duration bytes count)) {
+        my ($col_entry) = grep { $_->{id} eq $metric } @column_layout;
+        next unless $col_entry && $col_entry->{color};
+        $heatmap_metric_map{$metric}{color} = $col_entry->{color}{name};
+        $heatmap_metric_map{$metric}{highlight_bg} = $col_entry->{color}{plain_bg_num};
+        $histogram_base_colors{$metric} = $col_entry->{color}{plain_bg_num};
+        $histogram_highlight_colors{$metric} = $col_entry->{color}{highlighted_bg_num};
+        $histogram_color_gradients{$metric} = $col_entry->{color}{gradient};
+    }
+    # B. UDM metrics
     if (defined $heatmap_udm_config) {
-        my $col = 0;
-        for my $key (@populated_graph_columns) {
-            next if $key eq 'occurrences';
-            if ($key eq "udm_$heatmap_udm_config->{name}") {
-                my $idx = $col % scalar(@column_color_names);
-                $heatmap_metric_map{$heatmap_metric}{color} = $column_color_names[$idx];
-                $heatmap_metric_map{$heatmap_metric}{highlight_bg} = $column_plain_bg[$idx];
-                last;
-            }
-            $col++;
+        my $udm_key = "udm_$heatmap_udm_config->{name}";
+        my ($col_entry) = grep { $_->{id} eq $udm_key } @column_layout;
+        if ($col_entry && $col_entry->{color}) {
+            $heatmap_metric_map{$heatmap_metric}{color} = $col_entry->{color}{name};
+            $heatmap_metric_map{$heatmap_metric}{highlight_bg} = $col_entry->{color}{plain_bg_num};
         }
     }
-
-    # Resolve UDM histogram colors from bar graph column positions
     for my $udm_cfg (@histogram_udm_configs) {
         my $metric = $udm_cfg->{name};
-        my $col = 0;
-        for my $key (@populated_graph_columns) {
-            next if $key eq 'occurrences';
-            if ($key eq "udm_$metric") {
-                my $idx = $col % scalar(@column_plain_bg);
-                $histogram_base_colors{$metric} = $column_plain_bg[$idx];
-                $histogram_highlight_colors{$metric} = $column_highlight_bg[$idx];
-                $histogram_color_gradients{$metric} = $column_gradients[$idx];
-                last;
-            }
-            $col++;
+        my $udm_key = "udm_$metric";
+        my ($col_entry) = grep { $_->{id} eq $udm_key } @column_layout;
+        if ($col_entry && $col_entry->{color}) {
+            $histogram_base_colors{$metric} = $col_entry->{color}{plain_bg_num};
+            $histogram_highlight_colors{$metric} = $col_entry->{color}{highlighted_bg_num};
+            $histogram_color_gradients{$metric} = $col_entry->{color}{gradient};
         }
     }
 
