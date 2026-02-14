@@ -4319,7 +4319,7 @@ sub print_bar_graph {
                                 print $col_color->{plain_bg};
                             }
 
-                            if( $i == $scaled_trend_value ) {
+                            if( defined $scaled_trend_value && $i == $scaled_trend_value ) {
                                 print $col_color->{fg};
                             }
 
