@@ -27,18 +27,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Perl
-        uses: shogo82148/actions-setup-perl@v1
-        with:
-          perl-version: '5.38'
-
-      - name: Install PAR::Packer
-        run: cpanm --notest PAR::Packer
-
-      - name: Generate and install dependencies
-        run: |
-          cd build && ./generate-cpanfile.sh
-          cpanm --notest --installdeps .
+      - name: Setup build environment
+        run: ./build/macos-setup.sh
 
       - name: Build static binary
         run: |
