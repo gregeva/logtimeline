@@ -57,7 +57,7 @@ if [[ "$current_arch" != "$architecture" && "$current_arch" != "aarch64" || "$ar
 fi
 
 echo "[1/2] Building static binary..."
-pp -o ${PACKAGE_NAME} ${SCRIPT_NAME}
+perl -S pp -o ${PACKAGE_NAME} ${SCRIPT_NAME}
 
 # Verify the build
 echo ""
