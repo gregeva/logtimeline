@@ -554,8 +554,34 @@ OPTIONS
 
   User-Defined Metrics
     -udm, --user-defined-metrics <spec>        Extract a custom numeric metric from each log line
-                                               using a regex capture group
-                                               (name[:unit[:fn]]:/regex/)
+
+      Format: name[:unit[:function]][:/ regex /]
+
+      name      Metric name — also used as the default pattern to match
+                "name=value" or "name: value" in log lines
+      unit      Unit for display formatting and conversion:
+                  Time:  ns, us, ms, s, m, h
+                  Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB
+                  SI:    k, K, M, G, T  (multipliers: k/K=1000, M=10^6, etc.)
+                  Omit for raw numbers
+      function  Aggregation and/or transform per time bucket:
+                  Aggregations: sum (default), min, max, avg
+                  Transforms:   delta  (difference between consecutive values,
+                                       negative deltas become 0)
+                                idelta (unclamped delta, keeps negatives)
+                  Combined:     sum(delta), avg(delta), max(idelta), etc.
+      /regex/   Custom extraction pattern with one capture group
+                  around the numeric value to extract. The rest of the
+                  pattern matches the surrounding context in the log line.
+                  Overrides the default name=value matching.
+                  e.g. for "[Duration 134ms]":  /\[Duration (\d+)(?:ms|Ms)\]/
+
+      Examples:
+        -udm "rows:/(\d+) rows processed/"     Pattern match, raw number
+        -udm "busy:ms:sum(delta)"              Time unit, delta aggregation
+        -udm "bytes_sent:B:sum(delta)"         Byte unit, delta aggregation
+        -udm Send-Q::max                       No unit, max aggregation
+
     -ucm, --udm-csv-message <cols>             Treat the message field as CSV and name the columns
                                                for use with -udm
     -ucs, --udm-csv-separator <sep>            Set the CSV field delimiter when using -ucm
