@@ -501,10 +501,51 @@ Matching 286K unique messages against 103 compiled regex patterns took 18.4s in 
 
 **Solution:** `match_against_patterns()` tracks match counts and bubbles matched entries up one position after each hit. The hottest patterns naturally migrate to the front of the list. Combined with bounded pattern counts (PF-05), this keeps per-line matching cost low.
 
+### PF-14: Performance Profile — NYTProf Analysis
+
+**Test:** 288K-line ThingWorx log (286K unique messages), `--threshold 80 --ceiling 3 --max-patterns 50 --final-pass`.
+
+**Before optimization (profile baseline):**
+
+| Function | Excl. Time | Calls | % of Total |
+|----------|------------|-------|------------|
+| `compute_mask` | 33.4s | 1,107 | 62.8% |
+| `find_candidates` | 11.1s | 314 | 21.0% |
+| `run_consolidation_pass` | 3.23s | 6 | 6.1% |
+| `build_ngram_index` | 713ms | 12 | 1.3% |
+| `CORE:match` (regex eval) | 601ms | 2M | 1.1% |
+| `get_trigrams` | 509ms | 11,290 | 1.0% |
+| `match_against_patterns` | 436ms | 286,870 | 0.8% |
+| `dice_coefficient` | 213ms | 7,995 | 0.4% |
+
+**Optimizations applied:**
+
+1. **`compute_mask` — prefix/suffix stripping:** Similar messages (e.g., ErrorCode with varying UUIDs) share ~200 chars of identical prefix and suffix. Stripping these before the LCS DP reduces the matrix from 350×350 (122K cells) to ~40×40 (1.6K cells) — a 76× reduction in DP work. The prefix and suffix are trivially marked as "keep" in the mask.
+
+2. **`compute_mask` — bit-packed direction table:** The DP backtrace direction table (3 values per cell) was stored as an array-of-arrays of Perl scalars. Replaced with a bit-string using `vec()` at 2 bits per cell, reducing memory allocation overhead and improving cache locality.
+
+3. **`find_candidates` — trigram set size pre-filter:** Before scoring a candidate with `dice_coefficient()`, check if its trigram set size is within the theoretical bounds for the threshold. Dice = 2|A∩B|/(|A|+|B|) ≥ T% requires |B| ∈ [|A|·T/(200−T), |A|·(200−T)/T]. Candidates outside this range are skipped without scoring.
+
+**After optimization:**
+
+| Function | Excl. Time | Calls | % of Total | Speedup |
+|----------|------------|-------|------------|---------|
+| `find_candidates` | 11.1s | 309 | 37.3% | — |
+| `compute_mask` | 10.8s | 831 | 36.3% | **3.1×** |
+| `run_consolidation_pass` | 2.55s | 6 | 8.6% | 1.3× |
+| `build_ngram_index` | 769ms | 12 | 2.6% | — |
+| `coalesce_mask` | 86ms | 831 | 0.3% | 1.4× |
+| `derive_canonical` | 84ms | 831 | 0.3% | 1.5× |
+| `derive_regex` | 82ms | 831 | 0.3% | 1.4× |
+
+**Overall: 30s → 21s (1.4× total speedup). Memory: ~500MB RSS (unchanged).**
+
+**Remaining hotspot:** `find_candidates` at 37.3% is now the top cost. Its time is spent iterating posting lists in `%ngram_index` to accumulate candidate hit counts. This is inherent to the inverted-index approach. Further optimization would require a fundamentally different algorithm (e.g., locality-sensitive hashing). For the ltl integration, this cost is amortized: consolidation runs infrequently (only when unmatched count exceeds the trigger), not per-line.
+
 ## Open Questions
 
 1. ~~**Character-level alignment algorithm**~~: Resolved — LCS with two-pass coalescing (PF-03)
 2. ~~**CLI option naming**~~: Resolved — `--ceiling`, `--max-patterns`, `--final-pass`, `--final-threshold`, `--final-ceiling`
-3. **Performance benchmarks**: Consolidation pass timing on the test files above — wall clock and memory profiling with and without `--group-similar`
+3. ~~**Performance benchmarks**~~: Resolved — NYTProf profiling complete (PF-14)
 4. **Minimum cluster count**: Below what number of unique messages per category is consolidation not triggered at all? Likely related to the trigger threshold but may need a separate floor.
 5. ~~**Hard cap value**~~: Resolved — default 50, accommodates shared pool across log levels
