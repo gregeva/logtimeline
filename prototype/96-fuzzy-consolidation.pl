@@ -174,7 +174,15 @@ sub find_candidates {
     my $source_size = scalar keys %$source_trigrams;
     return () if $source_size == 0;
 
+    # Dice = 2*|A∩B| / (|A|+|B|). For score >= threshold:
+    #   |A∩B| >= threshold * (|A|+|B|) / (2*100)
+    # Minimum hits in posting lists (lower bound on intersection):
     my $min_hits = int($threshold_pct * $source_size / 100);
+
+    # Length pre-filter: Dice >= T% requires |B| >= |A|*T/(200-T) and |B| <= |A|*(200-T)/T
+    # This lets us skip candidates whose trigram set size is too different.
+    my $min_cand_size = int($source_size * $threshold_pct / (200 - $threshold_pct));
+    my $max_cand_size = int($source_size * (200 - $threshold_pct) / $threshold_pct) + 1;
 
     my %candidate_hits;
     for my $trig (keys %$source_trigrams) {
@@ -196,6 +204,10 @@ sub find_candidates {
         my $cand_trigrams = $key_trigrams{$cand_key};
         next unless defined $cand_trigrams;
 
+        # Length pre-filter: skip if trigram set size ratio makes threshold impossible
+        my $cand_size = scalar keys %$cand_trigrams;
+        next if $cand_size < $min_cand_size || $cand_size > $max_cand_size;
+
         my $score = dice_coefficient($source_trigrams, $cand_trigrams);
         if ($score >= $threshold_pct) {
             push @results, { key => $cand_key, score => $score };
@@ -212,50 +224,95 @@ sub find_candidates {
 
 # LCS-based character-level alignment returning mask array
 # mask: 1 = keep (LCS member), 0 = variable
+#
+# Optimizations:
+#   1. Strip common prefix and suffix — these are trivially "keep" and reduce
+#      the DP matrix size dramatically for similar strings.
+#   2. Pack direction table as bit-string (2 bits per cell) instead of array-of-arrays.
 sub compute_mask {
     my ($str_a, $str_b) = @_;
-    my @a = split //, $str_a;
-    my @b = split //, $str_b;
+    my $len_a = length $str_a;
+    my $len_b = length $str_b;
+
+    # --- Optimization 1: Strip common prefix and suffix ---
+    my $prefix_len = 0;
+    my $min_len = $len_a < $len_b ? $len_a : $len_b;
+    while ($prefix_len < $min_len &&
+           substr($str_a, $prefix_len, 1) eq substr($str_b, $prefix_len, 1)) {
+        $prefix_len++;
+    }
+
+    my $suffix_len = 0;
+    while ($suffix_len < ($min_len - $prefix_len) &&
+           substr($str_a, $len_a - 1 - $suffix_len, 1) eq substr($str_b, $len_b - 1 - $suffix_len, 1)) {
+        $suffix_len++;
+    }
+
+    # Build mask: prefix = all keep, middle = LCS, suffix = all keep
+    my @mask = (0) x $len_a;
+
+    # Mark prefix as keep
+    for my $i (0 .. $prefix_len - 1) {
+        $mask[$i] = 1;
+    }
+    # Mark suffix as keep
+    for my $i (0 .. $suffix_len - 1) {
+        $mask[$len_a - 1 - $i] = 1;
+    }
+
+    # Extract the differing middle portions
+    my $mid_a_len = $len_a - $prefix_len - $suffix_len;
+    my $mid_b_len = $len_b - $prefix_len - $suffix_len;
+
+    # If middles are empty, we're done (strings are identical or only prefix/suffix differ)
+    return \@mask if $mid_a_len <= 0 || $mid_b_len <= 0;
+
+    my @a = split //, substr($str_a, $prefix_len, $mid_a_len);
+    my @b = split //, substr($str_b, $prefix_len, $mid_b_len);
     my $m = scalar @a;
     my $n = scalar @b;
 
-    # Build LCS length table (standard DP)
-    # Use 1D rolling array to save memory: only need current and previous row
-    my @prev = (0) x ($n + 1);
-    my @curr = (0) x ($n + 1);
-
-    # We also need to backtrace, so store the full table for directions
-    # Direction: 0 = diagonal (match), 1 = up, 2 = left
-    my @dir;
+    # --- Optimization 2: Bit-packed direction table ---
+    # 2 bits per cell: 0=diagonal, 1=up, 2=left
+    # Each row is a string of ($n+1) cells packed 4 per byte
+    my $row_bytes = int(($n + 1 + 3) / 4);  # ceiling division
+    my @dir_rows;
+    my $zero_row = "\0" x $row_bytes;
     for my $i (0 .. $m) {
-        $dir[$i] = [(0) x ($n + 1)];
+        $dir_rows[$i] = $zero_row;
     }
+
+    # Build LCS length table with rolling arrays
+    my @prev = (0) x ($n + 1);
+    my @curr;
 
     for my $i (1 .. $m) {
         @curr = (0) x ($n + 1);
         for my $j (1 .. $n) {
             if ($a[$i-1] eq $b[$j-1]) {
                 $curr[$j] = $prev[$j-1] + 1;
-                $dir[$i][$j] = 0;  # diagonal
+                # dir = 0 (diagonal) — already zero in bit-packed string
             } elsif ($prev[$j] >= $curr[$j-1]) {
                 $curr[$j] = $prev[$j];
-                $dir[$i][$j] = 1;  # up
+                # dir = 1 (up)
+                vec($dir_rows[$i], $j, 2) = 1;
             } else {
                 $curr[$j] = $curr[$j-1];
-                $dir[$i][$j] = 2;  # left
+                # dir = 2 (left)
+                vec($dir_rows[$i], $j, 2) = 2;
             }
         }
         @prev = @curr;
     }
 
-    # Backtrace to find which positions in A are LCS members
-    my @mask = (0) x $m;
+    # Backtrace on the middle portion
     my ($i, $j) = ($m, $n);
     while ($i > 0 && $j > 0) {
-        if ($dir[$i][$j] == 0) {
-            $mask[$i-1] = 1;  # this char in A is part of LCS
+        my $d = vec($dir_rows[$i], $j, 2);
+        if ($d == 0) {
+            $mask[$prefix_len + $i - 1] = 1;  # offset by prefix
             $i--; $j--;
-        } elsif ($dir[$i][$j] == 1) {
+        } elsif ($d == 1) {
             $i--;
         } else {
             $j--;
