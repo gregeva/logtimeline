@@ -546,10 +546,45 @@ Matching 286K unique messages against 103 compiled regex patterns took 18.4s in 
 
 **Remaining hotspot:** `find_candidates` at 37.3% is now the top cost. Its time is spent iterating posting lists in `%ngram_index` to accumulate candidate hit counts. This is inherent to the inverted-index approach. Further optimization would require a fundamentally different algorithm (e.g., locality-sensitive hashing). For the ltl integration, this cost is amortized: consolidation runs infrequently (only when unmatched count exceeds the trigger), not per-line.
 
+### PF-15: Alignment Algorithm — Inline::C Banded Edit Distance (100× speedup)
+
+**Problem:** `compute_mask` remained the dominant cost even after PF-14 optimizations (10.8s, 36.3% of total). The pure-Perl LCS DP is bottlenecked by Perl interpreter overhead (array creation via `split //`, per-element hash/array access, `vec()` calls), not algorithmic complexity. After prefix/suffix stripping, the differing middles average only ~38 chars — the 40×40 DP matrix is tiny, but Perl's per-operation cost makes it expensive.
+
+**Benchmark:** Six alignment approaches tested on 102 real similar-message pairs (5 repeats each):
+
+| # | Approach | Per-call | Speedup | Notes |
+|---|----------|----------|---------|-------|
+| 1 | Current LCS DP | 1.35 ms | baseline | Pure Perl, O(mn) |
+| 2 | Banded edit distance (Perl) | 1.65 ms | 0.8× (slower) | Pure Perl, O(nk) — Perl overhead dominates |
+| 3 | Algorithm::Diff sdiff | 0.27 ms | 5.0× | Pure Perl, Myers O(ND) |
+| 4 | Algorithm::Diff traverse | 0.23 ms | 5.9× | Pure Perl, Myers O(ND), less overhead |
+| 5 | Algorithm::Diff::XS traverse | 0.23 ms | 5.9× | XS C core — no gain over pure Perl (bottleneck is `split //` and callbacks) |
+| 6 | **Inline::C banded ED** | **0.013 ms** | **100×** | Full C: prefix/suffix strip + banded DP + backtrace |
+
+**Key findings:**
+- **Banded DP in pure Perl is slower** than unbanded — the band-clamping logic (`max/min` per iteration, out-of-band fill) adds more Perl overhead than the reduced cell count saves.
+- **Algorithm::Diff::XS provides no advantage** over pure-Perl Algorithm::Diff. The XS module accelerates the core LCS computation in C, but the bottleneck is Perl-side: creating character arrays via `split //` and per-match callback dispatch. Both incur identical overhead.
+- **Inline::C eliminates all Perl overhead.** The entire alignment — prefix/suffix stripping, banded DP, direction table, backtrace — runs in C operating on raw `char*` strings. No array creation, no callbacks, no Perl scalar operations in the inner loop.
+
+**Decision:** Replace `compute_mask` with `Inline::C` banded edit distance. The C function compiles on first use and the shared object is cached. For PAR-packaged distribution, the compiled `.so` is included in the package — identical to any other XS dependency.
+
+**Mask equivalence:** Edit distance alignment produces slightly different masks than LCS (edit distance prefers substitution over delete+insert for single-character changes). The differences are in ambiguous regions within variable spans and are normalized by `coalesce_mask`. End-to-end consolidation quality is equivalent.
+
+**End-to-end impact (full 288K-line test, `--final-pass --verbose`):**
+
+| Metric | Before (Perl LCS) | After (Inline::C) | Improvement |
+|--------|-------------------|-------------------|-------------|
+| Total time | 21s | 10.3s | 2.0× |
+| Phase 4 (consolidation) | 14.5s | 2.4s | 6.0× |
+| Phase 3 (pattern matching) | ~5.9s | 5.9s | — (not affected) |
+| RSS memory | 792 MB | 512 MB | 35% less |
+
+**Remaining costs:** Phase 3 pattern matching (5.9s) is now the dominant cost — linear scan of 286K messages against compiled regex patterns. This is a separate optimization target for ltl integration (e.g., skip pattern matching for categories with few patterns, or batch-apply patterns during consolidation only).
+
 ## Open Questions
 
 1. ~~**Character-level alignment algorithm**~~: Resolved — LCS with two-pass coalescing (PF-03)
 2. ~~**CLI option naming**~~: Resolved — `--ceiling`, `--max-patterns`, `--final-pass`, `--final-threshold`, `--final-ceiling`
-3. ~~**Performance benchmarks**~~: Resolved — NYTProf profiling complete (PF-14)
+3. ~~**Performance benchmarks**~~: Resolved — NYTProf profiling (PF-14), alignment algorithm benchmark (PF-15)
 4. **Minimum cluster count**: Below what number of unique messages per category is consolidation not triggered at all? Likely related to the trigger threshold but may need a separate floor.
 5. ~~**Hard cap value**~~: Resolved — default 50, accommodates shared pool across log levels
