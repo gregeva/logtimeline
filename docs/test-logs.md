@@ -67,6 +67,7 @@ Fields: timestamp [L: level] [O: origin] [I: instance] [U: user] [S: session] [P
 | `ApplicationLog.2025-12-12.282-Windows.log` | occurrences only | 10MB | Windows ApplicationLog |
 | `ApplicationLog.log` | occurrences only | 5.8MB | Current ApplicationLog |
 | `ApplicationLog-improperlyRead.log` | occurrences only | 468B | Edge case - malformed reads |
+| `HundredsOfThousandsOfUniqueErrors.log` | occurrences only | 101.7MB | Hundreds of thousands of unique error messages (group-similar) |
 
 ### ScriptLog (Script execution logs)
 | File | Metrics | Size | Use Case |
