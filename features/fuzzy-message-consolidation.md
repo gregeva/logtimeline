@@ -581,6 +581,81 @@ Matching 286K unique messages against 103 compiled regex patterns took 18.4s in 
 
 **Remaining costs:** Phase 3 pattern matching (5.9s) is now the dominant cost — linear scan of 286K messages against compiled regex patterns. This is a separate optimization target for ltl integration (e.g., skip pattern matching for categories with few patterns, or batch-apply patterns during consolidation only).
 
+### PF-16: Re-scan Optimization Research — Phase 4 Breakdown and Approach Selection
+
+**Problem:** After making Phase 3 verbose-only (saving 5.9s) and replacing `compute_mask` with Inline::C (PF-15), total time dropped to 4.95s. Phase 4 is now the dominant cost at 2.9s. Instrumented breakdown:
+
+| Component | Time | % of Phase 4 | Scaling concern |
+|-----------|------|--------------|-----------------|
+| build_ngram_index | 0.49s | 30% | Scales with trigger (fixed at 5000) |
+| **interleaved re-scan** | 0.47s | 29% | **O(unmatched × patterns)** |
+| **merge re-scan** | 0.36s | 22% | **O(unmatched × merges)** |
+| find_candidates | 0.27s | 17% | Scales with trigger × posting list size |
+| compute_mask (C) | 0.01s | 1% | Solved (PF-15) |
+
+The two re-scans are 51% of Phase 4: 848K regex evaluations across 46 patterns. Each pattern discovery triggers a linear scan of ALL remaining unmatched keys. With 1M unique keys this becomes ~3M regex evals.
+
+**Research: 10 approaches evaluated for reducing re-scan cost.**
+
+**Tier 1 — Selected for implementation (combined 20-40× reduction in regex evals):**
+
+1. **Key Partitioning by log level + class name** — Partition `@unmatched_keys` once into ~20 buckets. Each pattern scans only its matching bucket. Pure Perl, ~15 lines. Expected 20× reduction. One-time O(N) partitioning amortized across all patterns.
+
+2. **Batched Discovery** — Discover 5-10 patterns before re-scanning, then one combined scan tests all accumulated patterns. Trivial restructuring, 5-10× fewer scan passes. Composes with partitioning. Trade-off: loses some cascading reduction from interleaved absorption, but `%consumed` hash already short-circuits consumed keys.
+
+**Tier 2 — If Tier 1 is insufficient:**
+
+3. **Alternation regex pre-filter** — Build `qr/(?:$p1)|...|(?:$p46)/` as fast rejection filter. Perl's regex optimizer may build an internal trie for common literal prefixes. Zero architecture change.
+
+4. **Prefix index** — Extract literal prefix from each pattern (up to first `.+?`), hash lookup before regex eval. Alternative to partitioning for variable key formats.
+
+**Tier 3 — Heavy optimizations (only if re-scan remains dominant):**
+
+5. **Inline::C batch match with PCRE2** — Move the match loop to C, eliminating per-call Perl overhead (3-5× on remaining evals). Requires PCRE2 headers.
+
+6. **MCE parallelism** — Distribute partitioned buckets across CPU cores. Realistic 2× speedup.
+
+7. **Hyperscan/RE2::Set** — Single-pass multi-pattern DFA. Theoretical best for 1000+ patterns, but Hyperscan doesn't support ARM (blocks macOS arm64 builds) and RE2::Set requires custom C++ bindings.
+
+**Rejected approaches:**
+- Lazy/deferred re-scan — strictly worse for power-law distributions (first pattern absorbs 99% of keys; without re-scan, unnecessary discovery cycles are triggered)
+- Inverted pattern index — over-engineered for ~46 patterns; prefix indexing subsumes it
+- Bloom filter pre-filter — over-engineered at this scale
+- Sampling-based re-scan — introduces correctness trade-off (misses rare matches)
+
+**Scaling analysis:**
+
+| Approach | 286K keys | 1M keys | 5M keys |
+|----------|-----------|---------|---------|
+| Current (no opt) | 848K evals | ~3M evals | ~15M evals |
+| Partitioning (20 buckets) | ~42K evals | ~150K evals | ~750K evals |
+| + Batched discovery | Same, 5× fewer passes | Same | Same |
+| + Inline::C batch | Same count, 3-5× faster | Same | Same |
+
+Partitioning keeps the problem tractable up to ~5M keys. Beyond that, Hyperscan/RE2::Set becomes worth the build complexity.
+
+### PF-17: Key Partitioning Implementation — Batching Regression and Fix
+
+**Implemented:** Partitioned interleaved re-scan in `run_consolidation_pass()`.
+
+**First attempt — batched discovery (failed):** Implemented `$discovery_batch_size = 10` with deferred re-scan. Accumulated 10 patterns before flushing. Result: **Phase 4 regressed from 2.9s to 64.25s** (22× slower). Root cause: batching destroys cascading reduction. In power-law data, pattern 1 absorbs 99%+ of keys via interleaved re-scan. With batch_size=10, patterns 2-10 each discover against the full 286K unmatched set (pattern 1's absorption hasn't happened yet). This caused 500 pattern discoveries in pass 1 (was 2 before), with massive redundant work.
+
+**Key insight:** For power-law distributions, **interleaved re-scan is essential**. The cascading reduction (pattern 1 absorbs bulk, leaving tiny residual for subsequent patterns) is the core performance mechanism. Batching trades correctness of scan cost for fewer passes — but when one pattern absorbs 99%, the "fewer passes" savings is negligible while the expanded discovery cost is catastrophic.
+
+**Fix — partitioned interleaved re-scan:** Keep interleaved re-scan (scan immediately after each pattern discovery) but partition keys by `[LEVEL][class]` so each scan only touches the matching bucket instead of all unmatched keys.
+
+**Helper functions added:**
+- `extract_bucket_key($log_key)` — extracts `[LEVEL][class]` from log_key (skipping thread)
+- `partition_keys($keys_ref)` — partitions keys into bucket hash
+- `extract_pattern_bucket($canonical)` — extracts bucket key from pattern canonical
+
+**Results:**
+- Phase 4: 2.9s → 2.27s (21% faster)
+- Total: 4.95s → 4.21s (15% faster)
+- Absorption unchanged: 286,437/286,571 (same correctness)
+
+**Decision:** Batched discovery rejected for this data profile. Partitioned interleaved re-scan is the correct approach. The `batched_rescan()` function was removed as dead code.
+
 ## Open Questions
 
 1. ~~**Character-level alignment algorithm**~~: Resolved — LCS with two-pass coalescing (PF-03)

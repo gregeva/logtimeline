@@ -650,9 +650,14 @@ sub match_against_patterns {
 }
 
 # Phase 3 validation: discover patterns from sample pairs, then test matching
-# against ALL messages in each category
+# against ALL messages in each category.
+# This is a validation-only step — not needed in the actual ltl implementation.
+# Gated behind --verbose since it scans all keys and takes ~6s on the test file.
 
 my $t_phase3_start = time();
+my $t_phase3_done = $t_phase3_start;
+
+if ($verbose) {
 print "\n=== Phase 3: Pattern Compilation + Matching Validation ===\n";
 
 # Step 1: Discover patterns by finding similar pairs and creating canonical forms
@@ -755,11 +760,20 @@ for my $cat (sort keys %log_messages) {
     }
 }
 
-my $t_phase3_done = time();
+$t_phase3_done = time();
 my $grand_total = $total_matched + $total_unmatched;
 printf "\n  Total: %d/%d matched (%.1f%%), %d unmatched\n",
     $total_matched, $grand_total, ($grand_total > 0 ? $total_matched * 100.0 / $grand_total : 0), $total_unmatched;
 printf "  Phase 3 time: %.2f s\n", $t_phase3_done - $t_phase3_start;
+
+# Reset patterns and structures from Phase 3 validation
+%canonical_patterns = ();
+%ngram_index = ();
+%key_trigrams = ();
+
+} else {
+    print "\n(Phase 3 validation skipped — use --verbose to enable)\n";
+}
 
 # ========================================================================
 # Phase 4: Full Consolidation Loop
@@ -767,11 +781,6 @@ printf "  Phase 3 time: %.2f s\n", $t_phase3_done - $t_phase3_start;
 
 my $t_phase4_start = time();
 print "\n=== Phase 4: Full Consolidation Loop ===\n";
-
-# Reset patterns and structures from Phase 3 validation
-%canonical_patterns = ();
-%ngram_index = ();
-%key_trigrams = ();
 
 # Consolidated clusters: {category}{cluster_key} => { canonical, pattern, mask, occurrences, match_count }
 my %clusters;
@@ -835,11 +844,45 @@ sub try_merge_into_existing {
     return undef;
 }
 
-# run_consolidation_pass: discover patterns for one category with interleaved re-scan
-# Applies occurrence ceiling: keys with occurrences >= ceiling are excluded from discovery
-# Applies merge-first: before adding a new pattern, tries to merge into existing
-# Applies hard cap: stops creating new patterns once max_patterns is reached
+# extract_bucket_key: extract partitioning key from a log_key for re-scan bucketing.
+# Extracts [LEVEL] and [class] (skipping [thread] which varies).
+# Example: "[ERROR] [TWEventProcessor-5] [c.t.p.Reflection] msg" => "[ERROR][c.t.p.Reflection]"
+sub extract_bucket_key {
+    my ($log_key) = @_;
+    if ($log_key =~ /^(\[[^\]]+\]) \[[^\]]+\] (\[[^\]]+\])/) {
+        return "$1$2";
+    }
+    # Fallback: first 20 chars
+    return substr($log_key, 0, 20);
+}
+
+# partition_keys: partition an array of keys into buckets by bucket_key.
+# Returns hashref: { bucket_key => [@keys] }
+sub partition_keys {
+    my ($keys_ref) = @_;
+    my %buckets;
+    for my $key (@$keys_ref) {
+        my $bk = extract_bucket_key($key_message{$key} // $key);
+        push @{$buckets{$bk}}, $key;
+    }
+    return \%buckets;
+}
+
+# extract_pattern_bucket: extract bucket key from a pattern's canonical form.
+# The canonical starts with the same [LEVEL] [thread*] [class] prefix.
+sub extract_pattern_bucket {
+    my ($canonical) = @_;
+    return extract_bucket_key($canonical);
+}
+
+
+# run_consolidation_pass: discover patterns for one category with partitioned interleaved re-scan.
+# Uses key partitioning (PF-16) to reduce re-scan cost: each new pattern only scans
+# its matching bucket instead of all unmatched keys.
+# Keeps interleaved re-scan (after each pattern discovery) to preserve cascading reduction —
+# critical for power-law data where pattern 1 absorbs 99%+ of keys.
 # Returns: ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit)
+
 sub run_consolidation_pass {
     my ($cat, $unmatched_ref, $pass_num) = @_;
     my @unmatched_keys = @$unmatched_ref;
@@ -880,6 +923,15 @@ sub run_consolidation_pass {
 
     # Current pattern count for this category
     my $current_pattern_count = exists $canonical_patterns{$cat} ? scalar @{$canonical_patterns{$cat}} : 0;
+
+    # Build partitioned buckets for fast re-scan
+    # Key optimization: instead of scanning ALL unmatched keys per pattern,
+    # partition by [LEVEL][class] and only scan the matching bucket.
+    my %buckets;  # bucket_key => { keys => [@keys] }
+    for my $key (@unmatched_keys) {
+        my $bk = extract_bucket_key($key_message{$key} // $key);
+        push @{$buckets{$bk}}, $key;
+    }
 
     for my $key (@index_batch) {
         last if $keys_searched >= $max_search;
@@ -923,78 +975,68 @@ sub run_consolidation_pass {
                 }
             }
 
-            # Interleaved re-scan: immediately test ALL remaining unmatched keys
-            # (including ceiling keys — they can be absorbed by patterns)
-            for my $ukey (@unmatched_keys) {
-                next if $consumed{$ukey};
-                my $umsg = $key_message{$ukey};
-                next unless defined $umsg;
-                my $capped = substr($umsg, 0, $message_length_cap);
-                if ($capped =~ $regex) {
-                    $consumed{$ukey} = 1;
-                    if (exists $log_messages{$cat}{$ukey}) {
-                        merge_stats($new_cluster, $log_messages{$cat}{$ukey});
-                        $new_cluster->{match_count}++;
-                        $messages_absorbed++;
-                    }
-                }
-            }
-
             # Merge-first: try to merge into an existing similar pattern
+            my $scan_regex = $regex;
+            my $scan_cluster = $new_cluster;
+            my $scan_entry;
             my $merged_regex = try_merge_into_existing($cat, $canonical, $regex, $mask, $new_cluster);
             if ($merged_regex) {
                 $merges_into_existing++;
                 $patterns_discovered++;
+                $scan_regex = $merged_regex;
 
-                # Re-scan all remaining unmatched keys against the generalized pattern
-                # (it may now match keys the old narrower pattern didn't)
-                for my $ukey (@unmatched_keys) {
+                # Find the entry that was merged into
+                for my $entry (@{$canonical_patterns{$cat}}) {
+                    if ($entry->{pattern} eq $merged_regex) {
+                        $scan_entry = $entry;
+                        $scan_cluster = $clusters{$cat}{$entry->{canonical}};
+                        last;
+                    }
+                }
+            } else {
+                # Hard cap check: can we add a new pattern?
+                if ($current_pattern_count >= $max_patterns) {
+                    $cap_hit = 1;
+                    printf "    [WARN] Pattern cap (%d) reached — cannot add new pattern\n", $max_patterns if $verbose;
+                    $clusters{$cat}{$canonical} = $new_cluster;
+                    $patterns_discovered++;
+                    last;
+                }
+
+                # Add as new pattern
+                $clusters{$cat}{$canonical} = $new_cluster;
+                $scan_entry = {
+                    pattern     => $regex,
+                    cluster_key => $canonical,
+                    canonical   => $canonical,
+                    match_count => $new_cluster->{match_count},
+                };
+                push @{$canonical_patterns{$cat}}, $scan_entry;
+                $current_pattern_count++;
+                $patterns_discovered++;
+            }
+
+            # Interleaved re-scan with partitioning:
+            # Only scan the bucket matching this pattern's [LEVEL][class]
+            my $pattern_bk = extract_pattern_bucket($scan_entry ? $scan_entry->{canonical} : $canonical);
+            my $bucket_keys = $buckets{$pattern_bk};
+            if ($bucket_keys) {
+                for my $ukey (@$bucket_keys) {
                     next if $consumed{$ukey};
                     my $umsg = $key_message{$ukey};
                     next unless defined $umsg;
                     my $capped = substr($umsg, 0, $message_length_cap);
-                    if ($capped =~ $merged_regex) {
+                    if ($capped =~ $scan_regex) {
                         $consumed{$ukey} = 1;
-                        # Find the cluster this merged into and add stats
-                        for my $entry (@{$canonical_patterns{$cat}}) {
-                            if ($entry->{pattern} eq $merged_regex) {
-                                my $cluster = $clusters{$cat}{$entry->{canonical}};
-                                if ($cluster && exists $log_messages{$cat}{$ukey}) {
-                                    merge_stats($cluster, $log_messages{$cat}{$ukey});
-                                    $cluster->{match_count}++;
-                                    $entry->{match_count} = $cluster->{match_count};
-                                    $messages_absorbed++;
-                                }
-                                last;
-                            }
+                        if (exists $log_messages{$cat}{$ukey}) {
+                            merge_stats($scan_cluster, $log_messages{$cat}{$ukey});
+                            $scan_cluster->{match_count}++;
+                            $scan_entry->{match_count} = $scan_cluster->{match_count} if $scan_entry;
+                            $messages_absorbed++;
                         }
                     }
                 }
-
-                last;
             }
-
-            # Hard cap check: can we add a new pattern?
-            if ($current_pattern_count >= $max_patterns) {
-                $cap_hit = 1;
-                printf "    [WARN] Pattern cap (%d) reached — cannot add new pattern\n", $max_patterns if $verbose;
-                # Stats already absorbed via interleaved re-scan, but pattern not stored
-                # Create a one-off cluster without a reusable pattern
-                $clusters{$cat}{$canonical} = $new_cluster;
-                $patterns_discovered++;
-                last;
-            }
-
-            # Add as new pattern
-            $clusters{$cat}{$canonical} = $new_cluster;
-            push @{$canonical_patterns{$cat}}, {
-                pattern     => $regex,
-                cluster_key => $canonical,
-                canonical   => $canonical,
-                match_count => $new_cluster->{match_count},
-            };
-            $current_pattern_count++;
-            $patterns_discovered++;
 
             last;  # one pattern per source key, then move on
         }
