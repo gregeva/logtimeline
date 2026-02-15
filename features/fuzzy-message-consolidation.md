@@ -373,9 +373,138 @@ The following log files should be used throughout prototyping, development, and 
 | `logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log` | ThingWorx ApplicationLog | 101.7MB | **Primary test file.** Hundreds of thousands of unique error messages — ideal for exercising similarity detection, consolidation passes, memory reduction, and adaptive trigger behavior. |
 | `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat access log | 148MB | **Secondary test file.** Large access log with duration/bytes metrics — validates consolidation with full statistics merging on URI-based message patterns. |
 
+## Prototype Findings
+
+### PF-01: Default Threshold Lowered to 75% (was 85%)
+
+**Finding:** UUID-varying ErrorCode messages — the dominant pattern in the primary test file (286K of 288K lines) — score 80–82% Dice similarity. A single UUID (36 chars) in a ~180-char message generates ~34 unique trigrams per message, dragging the score well below 85%.
+
+**Decision:** Default threshold lowered to 75%. At 75%, the ErrorCode messages consistently pass the filter while still excluding genuinely dissimilar messages. The 85% default was based on the worked example in DD-01 which used short messages with small variable parts — real-world messages with UUIDs, session tokens, and entity names have proportionally larger variable regions.
+
+**Impact on DD-01:** The Dice coefficient rationale still holds — Dice provides better granularity than Jaccard in the 75–95% range where threshold tuning happens. The threshold value changed, not the algorithm choice.
+
+### PF-02: N-gram Index Performance Characteristics
+
+**Finding from Phase 1 prototyping:**
+- 288K lines parsed in ~1s, 5000 keys indexed in 0.36s
+- For highly similar messages (ErrorCode pattern), median posting list size is ~5000 (nearly every indexed key shares the common trigrams)
+- Building `%candidate_hits` by iterating all trigrams is O(trigrams × posting_list_size) — with 176 trigrams × 5000 entries = ~880K hash operations per candidate search
+- Candidate scoring (top 50) adds negligible overhead
+- Full candidate accumulation for one key against 5000 indexed keys takes ~0.1s
+
+**Implication for Phase 4:** The consolidation loop must avoid searching all N keys pairwise. The interleaved discovery approach (find one pair → create pattern → re-scan remaining) is essential — it lets one pattern absorb thousands of matches without pairwise comparison.
+
+### PF-03: LCS Alignment and Coalescing Behavior
+
+**Finding from Phase 2 prototyping:**
+
+LCS character-level alignment works well but has a known limitation: coincidental character matches inside variable regions (e.g., hex chars in UUIDs sharing `4403` by chance). A two-pass coalescing approach addresses most cases:
+
+- **Pass 1:** Remove short keep runs (<3 chars) between variable regions.
+- **Pass 2:** Detect variable-dominated spans (keep/total ratio < 40%) and collapse all keeps within them. A span boundary is defined by a long keep run (≥10 chars) or end of string.
+
+**Results across categories:**
+- **ERROR (UUID variation):** 3 of 5 pairs produce ideal `ErrorCode(*)`. 2 pairs have minor boundary leakage (1–4 chars of hex retained at UUID edges), causing regex to match A but not B. Cross-cluster merging in Phase 4 will generalize these further.
+- **INFO (elapsed time variation):** Perfect canonicals — `[elapsed *ms]` with entity names correctly preserved.
+- **WARN (provider name + numeric stat variation):** Excellent results — provider prefix wildcarded, static config values preserved literal, only varying counters wildcarded. 12 of 13 total pairs have regex matching both A and B.
+
+**Decision:** Coalescing parameters (min keep run = 3 chars, variable-dominated ratio threshold = 40%, long keep boundary = 10 chars) are good defaults. Boundary char leakage is acceptable at this stage — Phase 4 cross-cluster merging will handle it.
+
+### PF-04: Pattern Count Must Be Bounded — Matching Cost Is Linear Per Line
+
+**Finding from Phase 3 prototyping:**
+
+Matching 286K unique messages against 103 compiled regex patterns took 18.4s in batch mode (~0.06ms per message × pattern). In ltl integration, pattern matching runs per incoming line during ingestion. With 288K lines and 100 patterns, that's 28.8M regex evaluations.
+
+**Key observations:**
+- 50 ERROR patterns were discovered but most are redundant overlaps of the same ErrorCode message (e.g., `ErrorCode(*)`, `ErrorCode(c*)`, `ErrorCode(6*3)` all match subsets of the same population)
+- The ideal `ErrorCode(*)` pattern alone absorbed 268K of 286K ERROR messages (93.7%)
+- Overlapping patterns with boundary char leakage add cost without meaningful coverage improvement
+
+**Decision:** Pattern count must be bounded per category. Cross-cluster merging (Phase 4) must consolidate overlapping patterns — compare existing canonical forms for similarity and merge when they represent the same underlying message template. The most general pattern subsumes the more specific ones. Target: <20 patterns per category for production use.
+
+**Impact on DD-02:** The two-phase processing model is validated — discovery is expensive but rare, matching is cheap per-pattern. But the "cheap" matching cost is multiplied by pattern count × line count, so pattern count is a critical control lever.
+
+### PF-05: Pattern Management — Merge-First + Hard Cap
+
+**Decisions from Phase 4 review:**
+
+**Merge-first policy:** Before adding a new pattern, check existing patterns for similarity. If a similar pattern exists, merge the new pattern into it (generalizing the existing pattern further). This keeps count bounded while improving coverage. Patterns are never removed — only replaced by merging — because aggregated statistics are already accumulated against them.
+
+**Hard cap:** A hard limit on the number of compiled patterns. When the cap is reached, a new pattern can only be added if it replaces (by merging into) an existing one. Verbose output should report when the cap is hit so users know consolidation is limited. The cap applies to the entire `plain` category (all log levels mixed — see PF-07), so it must be set higher than per-level budgets would be. Default TBD during implementation.
+
+**Prevalence-first discovery:** High-volume patterns should naturally be discovered first due to their prevalence in the index — the most common message variations are the most likely to appear as candidate pairs. This means the most impactful patterns claim budget slots first.
+
+### PF-06: Occurrence Ceiling — Skip High-Occurrence Messages
+
+**Decision:** Messages already appearing N or more times are excluded from consolidation discovery passes. They are already naturally grouped by identical `$log_key` and are not the intended target for fuzzy consolidation. Default ceiling: 3 occurrences.
+
+**Rationale:** A message occurring 100 times with identical text is not a consolidation candidate — it's already well-grouped. The consolidation target is the long tail of single/low-occurrence entries that represent the same pattern with variable parameters (UUIDs, usernames, timestamps). Excluding high-occurrence messages from discovery reduces the search space and avoids creating unnecessary patterns.
+
+**Auto-adjustment:** The ceiling should be adjustable at runtime. When memory pressure is high and the system wants to consolidate further, the ceiling can be lowered (e.g., from 3 to 2) and consolidation re-run to capture previously-excluded entries. This ties consolidation aggressiveness to memory conditions — a self-tuning mechanism.
+
+**CLI:** Configurable as a hidden/debug option during prototyping. Default 3.
+
+### PF-07: Level Partitioning Deferred — Algorithm Works Without It
+
+**Finding:** In ltl, `%log_messages` is keyed by `$category` which is `'plain'` or `'highlight'` — NOT by log level (ERROR/WARN/INFO). The log level is baked into `$log_key` as the `[$log_level]` prefix.
+
+**Why it works without partitioning:** The `[ERROR]`/`[WARN]`/`[INFO]` prefix in `$log_key` means messages of different levels will never score above the Dice threshold against each other. Their trigram sets naturally separate them. So consolidation operating on the entire `plain` pool is functionally correct.
+
+**Trade-off of not partitioning:**
+- The n-gram index is larger than necessary (WARN trigrams point to ERROR keys, wasting memory and lookup time)
+- Pattern budget is shared across all levels (see PF-05 — cap must be set higher)
+- Candidate search does extra work scoring cross-level candidates that will never match
+
+**Decision:** Defer level partitioning to a future enhancement. The current `%log_messages` data model does not need to change. Consolidation operates on `%log_messages{'plain'}` as a single pool. The hard cap accommodates this by being set higher. Partitioning by extracting `[LEVEL]` from `$log_key` can be added later as an optimization.
+
+### PF-08: Default Threshold Raised to 80%
+
+**Finding:** After implementing merge-first pattern generalization and the `*`-aware canonical/regex derivation, threshold 75% was too aggressive — merging canonicals that shouldn't merge. Threshold 80% provides a good balance: strict enough to avoid false merges, loose enough to catch genuine patterns.
+
+**Decision:** Default threshold = 80%. The final pass uses 95% for high-occurrence cleanup.
+
+### PF-09: Similarity Must Operate on Full `$log_key`, Not Just `$message`
+
+**Finding:** When consolidation operated on `$message` only (the text after `[level] [thread] [object]`), the canonical forms lost their prefix metadata. The CheckHeartbeat messages appeared as bare `Error Executing Event Handler 'CheckHeartbeat'...` without the `[ERROR] [TWEventProcessor-*] [c.t.s.s.e.EventInstance]` prefix.
+
+**Decision:** Index and compare the full `$log_key`. The `[level]` prefix naturally prevents cross-level merges (see PF-07). The thread and object portions participate in similarity/alignment, producing correct wildcards like `[TWEventProcessor-*]`.
+
+### PF-10: Canonical and Regex Derivation Must Handle Pre-Existing `*` Characters
+
+**Finding:** When merge-first generalizes a pattern by aligning two canonical forms, both already contain `*` from previous canonicals. The LCS alignment treats `*` as a literal character, producing `**` in derived canonicals and `\*` (literal match) in derived regexes. This caused patterns to become overly narrow (e.g., `ErrorCode(9*)` matching only UUIDs starting with `9` instead of all UUIDs).
+
+**Fix:** Both `derive_canonical()` and `derive_regex()` now treat `*` in keep positions as variable — emitting `*`/`.+?` instead of the literal character. This ensures repeated generalization converges toward broader patterns rather than fragmenting.
+
+### PF-11: Merge-First Must Re-Scan Unmatched Keys After Pattern Generalization
+
+**Finding:** When merge-first generalizes an existing pattern, the new broader regex may now match keys that the old narrower pattern missed. Without re-scanning, these keys remain unconsolidated — e.g., `ErrorCode(4*34)` with 64 occurrences sitting separately from the main `ErrorCode(*)` cluster with 286K occurrences.
+
+**Fix:** After `try_merge_into_existing()` generalizes a pattern, immediately re-scan all remaining unmatched keys against the updated regex. This absorbed significant additional messages in practice.
+
+### PF-12: Final Pass — Optional High-Similarity Cleanup of Ceiling-Excluded Keys
+
+**Finding:** The occurrence ceiling (default 3) prevents high-occurrence messages from entering discovery. But some high-occurrence messages share patterns (e.g., `CheckHeartbeat` across 16 thread pools, each with 29-47 occurrences). These are obvious consolidation candidates that the ceiling blocks.
+
+**Solution:** Optional `--final-pass` flag runs a separate consolidation pass after the main loop, targeting only ceiling-excluded keys with a strict similarity threshold (default 95%) and elevated ceiling (default 100).
+
+**Results on test file:**
+- CheckHeartbeat: 16 entries (29-47 occ each) → 1 entry with 583 occurrences
+- CheckOverallStatuses: similar consolidation → 59 occurrences
+- ERROR remaining: 42 → 12, WARN remaining: 89 → 44
+- Final pass time: ~2s (fast — small candidate sets, high threshold)
+- WARN overall reduction: 62.7% → 76.7%
+
+### PF-13: Hot-Sort Pattern List for Faster Matching
+
+**Finding:** Linear scan of compiled patterns is the dominant cost. The most common patterns (ErrorCode with 286K matches) should be checked first.
+
+**Solution:** `match_against_patterns()` tracks match counts and bubbles matched entries up one position after each hit. The hottest patterns naturally migrate to the front of the list. Combined with bounded pattern counts (PF-05), this keeps per-line matching cost low.
+
 ## Open Questions
 
-1. **Character-level alignment algorithm**: Exact diff-style algorithm variant for producing the keep/variable mask — to be determined during prototyping
-2. **CLI option naming**: Exact flag names for occurrence threshold and length-preserving wildcards
+1. ~~**Character-level alignment algorithm**~~: Resolved — LCS with two-pass coalescing (PF-03)
+2. ~~**CLI option naming**~~: Resolved — `--ceiling`, `--max-patterns`, `--final-pass`, `--final-threshold`, `--final-ceiling`
 3. **Performance benchmarks**: Consolidation pass timing on the test files above — wall clock and memory profiling with and without `--group-similar`
 4. **Minimum cluster count**: Below what number of unique messages per category is consolidation not triggered at all? Likely related to the trigger threshold but may need a separate floor.
+5. ~~**Hard cap value**~~: Resolved — default 50, accommodates shared pool across log levels
