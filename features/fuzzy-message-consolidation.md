@@ -1,7 +1,7 @@
 # Fuzzy Message Consolidation — Requirements
 
 **GitHub Issue:** #96
-**Status:** Prototype Complete — Ready for ltl Integration
+**Status:** Prototype — Core algorithms validated, consolidation loop redesign required (see Performance Assessment)
 **Blocks:** #97 (hierarchical message roll-up grouping)
 
 ## Problem Statement
