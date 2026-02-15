@@ -364,9 +364,18 @@ Enhanced with consolidation statistics (see DD-10).
 ### Memory Summary (`-mem`)
 Enhanced with new data structure sizes (see DD-13).
 
+## Test Files
+
+The following log files should be used throughout prototyping, development, and testing:
+
+| File | Type | Size | Purpose |
+|------|------|------|---------|
+| `logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log` | ThingWorx ApplicationLog | 101.7MB | **Primary test file.** Hundreds of thousands of unique error messages — ideal for exercising similarity detection, consolidation passes, memory reduction, and adaptive trigger behavior. |
+| `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat access log | 148MB | **Secondary test file.** Large access log with duration/bytes metrics — validates consolidation with full statistics merging on URI-based message patterns. |
+
 ## Open Questions
 
 1. **Character-level alignment algorithm**: Exact diff-style algorithm variant for producing the keep/variable mask — to be determined during prototyping
 2. **CLI option naming**: Exact flag names for occurrence threshold and length-preserving wildcards
-3. **Performance benchmarks**: Consolidation pass timing on real log files with 5K, 10K, 50K unique messages — specific test files TBD
+3. **Performance benchmarks**: Consolidation pass timing on the test files above — wall clock and memory profiling with and without `--group-similar`
 4. **Minimum cluster count**: Below what number of unique messages per category is consolidation not triggered at all? Likely related to the trigger threshold but may need a separate floor.
