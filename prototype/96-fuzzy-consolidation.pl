@@ -161,6 +161,7 @@ die "Error: file '$file' not found\n" unless -f $file;
 # --- Data Structures ---
 my %log_messages;        # {category}{log_key} => { occurrences => N }
 my %ngram_index;         # {category}{trigram}{log_key} => 1
+my %posting_size;        # {category}{trigram} => count  (posting list size cache)
 my %key_trigrams;        # {log_key} => { trigram => 1, ... }  (cache)
 my %key_message;         # {log_key} => $message  (the message portion, for similarity)
 my %canonical_patterns;  # {category} => [ { pattern => qr//, cluster_key => $key, canonical => $str, match_count => N }, ... ]
@@ -200,7 +201,7 @@ while (my $line = <$fh>) {
         $log_messages{$category}{$log_key}{occurrences}++;
 
         unless (exists $key_message{$log_key}) {
-            $key_message{$log_key} = $log_key;
+            $key_message{$log_key} = substr($log_key, 0, $message_length_cap);
         }
     } else {
         $unmatched_lines++;
@@ -278,8 +279,16 @@ sub build_ngram_index {
         }
         $indexed++;
     }
+    # Cache posting list sizes for discriminative trigram selection
+    delete $posting_size{$category};
+    for my $trig (keys %{$ngram_index{$category}}) {
+        $posting_size{$category}{$trig} = scalar keys %{$ngram_index{$category}{$trig}};
+    }
     return $indexed;
 }
+
+my $discriminative_topk = 50;       # use top-50 most discriminative trigrams
+my $prefilter_ratio    = 0.30;      # require 30% of topk hits as loose pre-filter
 
 sub find_candidates {
     my ($category, $source_key, $threshold_pct, $max_candidates) = @_;
@@ -290,37 +299,40 @@ sub find_candidates {
     my $source_size = scalar keys %$source_trigrams;
     return () if $source_size == 0;
 
-    # Dice = 2*|A∩B| / (|A|+|B|). For score >= threshold:
-    #   |A∩B| >= threshold * (|A|+|B|) / (2*100)
-    # Minimum hits in posting lists (lower bound on intersection):
-    my $min_hits = int($threshold_pct * $source_size / 100);
-
     # Length pre-filter: Dice >= T% requires |B| >= |A|*T/(200-T) and |B| <= |A|*(200-T)/T
-    # This lets us skip candidates whose trigram set size is too different.
     my $min_cand_size = int($source_size * $threshold_pct / (200 - $threshold_pct));
     my $max_cand_size = int($source_size * (200 - $threshold_pct) / $threshold_pct) + 1;
 
+    # Phase 1: Use top-K most discriminative trigrams (smallest posting lists)
+    # to build a small candidate set cheaply. This avoids iterating huge posting
+    # lists for common trigrams like "[WA", "ARN", "] [" that appear in every key.
+    my $ps = $posting_size{$category};
+    my @disc_trigrams = sort { ($ps->{$a} // 0) <=> ($ps->{$b} // 0) }
+                        grep { exists $ngram_index{$category}{$_} }
+                        keys %$source_trigrams;
+    my $topk_actual = min($discriminative_topk, scalar @disc_trigrams);
+    splice(@disc_trigrams, $topk_actual) if @disc_trigrams > $topk_actual;
+
+    # Loose pre-filter threshold: require prefilter_ratio * topk hits
+    my $loose_min = max(1, int($prefilter_ratio * $topk_actual));
+
     my %candidate_hits;
-    for my $trig (keys %$source_trigrams) {
-        next unless exists $ngram_index{$category}{$trig};
+    for my $trig (@disc_trigrams) {
         for my $cand_key (keys %{$ngram_index{$category}{$trig}}) {
             next if $cand_key eq $source_key;
             $candidate_hits{$cand_key}++;
         }
     }
 
-    my @top_candidates = sort { $candidate_hits{$b} <=> $candidate_hits{$a} }
-                         grep { $candidate_hits{$_} >= $min_hits }
-                         keys %candidate_hits;
-
-    splice(@top_candidates, $max_candidates) if @top_candidates > $max_candidates;
-
+    # Phase 2: Full Dice verification on candidates passing the loose pre-filter.
+    # The pre-filter narrows ~5000 candidates to ~200, then Dice is cheap.
     my @results;
-    for my $cand_key (@top_candidates) {
+    for my $cand_key (keys %candidate_hits) {
+        next if $candidate_hits{$cand_key} < $loose_min;
+
         my $cand_trigrams = $key_trigrams{$cand_key};
         next unless defined $cand_trigrams;
 
-        # Length pre-filter: skip if trigram set size ratio makes threshold impossible
         my $cand_size = scalar keys %$cand_trigrams;
         next if $cand_size < $min_cand_size || $cand_size > $max_cand_size;
 
@@ -331,6 +343,7 @@ sub find_candidates {
     }
 
     @results = sort { $b->{score} <=> $a->{score} } @results;
+    splice(@results, $max_candidates) if @results > $max_candidates;
     return @results;
 }
 
@@ -729,9 +742,7 @@ for my $cat (sort keys %log_messages) {
     for my $log_key (keys %{$log_messages{$cat}}) {
         my $message = $key_message{$log_key};
         next unless defined $message;
-        my $capped_msg = substr($message, 0, $message_length_cap);
-
-        my $hit = match_against_patterns($cat, $capped_msg);
+        my $hit = match_against_patterns($cat, $message);
         if ($hit) {
             $cat_matched++;
         } else {
@@ -1021,12 +1032,12 @@ sub run_consolidation_pass {
             my $pattern_bk = extract_pattern_bucket($scan_entry ? $scan_entry->{canonical} : $canonical);
             my $bucket_keys = $buckets{$pattern_bk};
             if ($bucket_keys) {
+                my @surviving;  # keys that survive this scan (not consumed)
                 for my $ukey (@$bucket_keys) {
-                    next if $consumed{$ukey};
+                    if ($consumed{$ukey}) { next; }
                     my $umsg = $key_message{$ukey};
-                    next unless defined $umsg;
-                    my $capped = substr($umsg, 0, $message_length_cap);
-                    if ($capped =~ $scan_regex) {
+                    unless (defined $umsg) { push @surviving, $ukey; next; }
+                    if ($umsg =~ $scan_regex) {
                         $consumed{$ukey} = 1;
                         if (exists $log_messages{$cat}{$ukey}) {
                             merge_stats($scan_cluster, $log_messages{$cat}{$ukey});
@@ -1034,8 +1045,12 @@ sub run_consolidation_pass {
                             $scan_entry->{match_count} = $scan_cluster->{match_count} if $scan_entry;
                             $messages_absorbed++;
                         }
+                    } else {
+                        push @surviving, $ukey;
                     }
                 }
+                # Prune bucket: replace with only surviving keys
+                $buckets{$pattern_bk} = \@surviving;
             }
 
             last;  # one pattern per source key, then move on
@@ -1278,8 +1293,7 @@ if ($final_pass) {
                     next if $consumed{$ukey};
                     my $umsg = $key_message{$ukey};
                     next unless defined $umsg;
-                    my $capped = substr($umsg, 0, $message_length_cap);
-                    if ($capped =~ $regex) {
+                    if ($umsg =~ $regex) {
                         $consumed{$ukey} = 1;
                         if (exists $log_messages{$cat}{$ukey}) {
                             merge_stats($new_cluster, $log_messages{$cat}{$ukey});
@@ -1300,8 +1314,7 @@ if ($final_pass) {
                         next if $consumed{$ukey};
                         my $umsg = $key_message{$ukey};
                         next unless defined $umsg;
-                        my $capped = substr($umsg, 0, $message_length_cap);
-                        if ($capped =~ $merged_regex) {
+                        if ($umsg =~ $merged_regex) {
                             $consumed{$ukey} = 1;
                             for my $entry (@{$canonical_patterns{$cat}}) {
                                 if ($entry->{pattern} eq $merged_regex) {

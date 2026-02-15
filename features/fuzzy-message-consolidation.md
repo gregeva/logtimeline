@@ -656,6 +656,29 @@ Partitioning keeps the problem tractable up to ~5M keys. Beyond that, Hyperscan/
 
 **Decision:** Batched discovery rejected for this data profile. Partitioned interleaved re-scan is the correct approach. The `batched_rescan()` function was removed as dead code.
 
+### PF-18: Discriminative Trigram Pre-filter for find_candidates
+
+**Problem:** NYTProf profiling (PF-14) revealed `find_candidates` consumes 88.1% of runtime (29.9s out of 34s) on diverse log files. The inner loop iterates all posting lists for every source trigram — common trigrams like `[WA`, `ARN`, `] [` appear in nearly every WARN key, creating posting lists of 1000-5000 entries. Each call visits ~300K posting entries across 1152 calls.
+
+**Solution — two-phase pre-filter:**
+1. **Phase 1 (cheap):** Sort source trigrams by posting list size (ascending = most discriminative). Use only top-50 trigrams to build candidate set. Require only 30% of those 50 trigrams to match (loose threshold of 15 hits). This skips the massive posting lists entirely.
+2. **Phase 2 (accurate):** Apply size filter + full Dice coefficient verification on the pre-filtered candidate set.
+
+**Parameters:** `$discriminative_topk = 50`, `$prefilter_ratio = 0.30` (loose_min = max(1, int(0.30 * 50)) = 15).
+
+**Data structure:** `%posting_size{$category}{$trigram}` cache populated at end of `build_ngram_index()`.
+
+**Benchmark results** (200-key sample, diverse ApplicationLog):
+- Top-50/ratio-0.3: **4.8× speedup**, zero missed matches (0/200 test keys)
+- Top-30/ratio-0.3: 6.2× speedup but 2 missed matches
+- Top-20/ratio-0.3: 8.1× speedup but 5 missed matches
+
+**Integration results:**
+- Primary file (power-law): Phase 4 2.27s → 2.03s (11% faster) — minimal impact because interleaved re-scan absorbs bulk before many `find_candidates` calls
+- Diverse file (ApplicationLog): Phase 4 9.46s → 6.21s (34% faster) — significant improvement because `find_candidates` dominates
+
+**Also cleaned up:** Removed dead `batch_match_one_c()` from Inline::C block (unused after reverting batch match integration from PF-16).
+
 ## Open Questions
 
 1. ~~**Character-level alignment algorithm**~~: Resolved — LCS with two-pass coalescing (PF-03)
