@@ -22,20 +22,26 @@ A flat list forces users to mentally aggregate related entries, which is impract
 
 ### Relationship to #96
 
-Issue #96 (fuzzy message consolidation) builds the core similarity engine: n-gram indexing, similarity scoring, canonical form generation, and statistics merging. That feature **discards** original entries when consolidating — the goal is noise reduction and memory savings.
+Issue #96 (fuzzy message consolidation) builds the core engine: n-gram indexing, similarity scoring, character-level alignment, canonical form generation, and statistics merging. It operates in two phases:
 
-This feature uses the **same engine** but with a different outcome: original entries are **preserved** as children under a parent group. The goal is organization and insight, not reduction.
+- **Pattern discovery** (expensive, batch): pairwise comparison, alignment, canonical pattern creation
+- **Pattern matching** (cheap, continuous): incoming messages matched against known patterns at line processing time
+
+In #96, both phases result in **consolidation** — original entries are merged into the canonical form and discarded. The goal is noise reduction and memory savings.
+
+This feature (#97) uses the **same two-phase engine** but with a different outcome: original entries are **preserved** as children under a parent group. Incoming messages that match a known pattern during Phase 2 are routed into a child entry under the parent cluster rather than merged into the parent's aggregate. The goal is organization and insight, not reduction.
 
 Both features can compose:
-- **Consolidation within children**: truly redundant child entries (same pattern, different UUIDs) can be consolidated using #96, reducing noise within a group
-- **Hierarchy on top**: the reduced set is then organized into families with aggregate parent stats
+- **Consolidation within children**: truly redundant child entries (same pattern, different UUIDs) can be consolidated using #96's engine, reducing noise within a group
+- **Hierarchy on top**: the reduced set is organized into families with aggregate parent stats
+- Consolidation within children uses the same two-phase approach — discovery patterns within a group, then cheap matching for subsequent entries
 
 ## Goals
 
 1. **Hierarchical view** — group similar messages into parent-child relationships where the parent shows a generalized canonical form with aggregate statistics
 2. **Preserve detail** — child entries retain their individual statistics and are visible in the output
-3. **Reuse #96 engine** — same similarity detection, canonical form generation, and stats aggregation; no duplicate machinery
-4. **Optional feature** — enabled via CLI flag; flat view remains the default
+3. **Reuse #96 engine** — same two-phase processing (discovery + matching), canonical form generation, and stats aggregation; no duplicate machinery
+4. **Optional feature** — enabled via `--group-detail`; flat view remains the default
 5. **Composable with #96** — consolidation and hierarchy can operate together; consolidation reduces children, hierarchy organizes the result
 
 ## Non-Goals
@@ -46,15 +52,17 @@ Both features can compose:
 
 ## Design Decisions
 
-### DD-01: Same Engine, Different Outcome
+### DD-01: Same Engine, Different Routing
 
-**Decision:** Hierarchical grouping uses the same n-gram indexing, similarity scoring, and canonical form generation as #96. The only difference is what happens after similarity is detected:
+**Decision:** Hierarchical grouping uses the same n-gram indexing, similarity scoring, character-level alignment, and canonical form generation as #96. The difference is how matched messages are routed:
 
 | | #96 Consolidation | #97 Hierarchical |
 |---|---|---|
-| Original entries | Discarded (merged into canonical) | Preserved as children |
+| Pattern discovery | Batch: pairwise comparison + alignment | Same |
+| Pattern matching | Continuous: incoming messages matched at line processing time | Same |
+| Match routing | Merged into parent aggregate, original discarded | Stored as child entry under parent, original preserved |
 | Parent stats | Replace originals | Roll-up aggregates alongside children |
-| Memory impact | Reduces (frees merged entries) | Increases (adds parent layer) |
+| Memory impact | Reduces (frees merged entries) | Increases (adds parent layer, preserves children) |
 | Purpose | Noise reduction, memory relief | Organization, insight |
 
 ### DD-02: Single Level of Hierarchy
@@ -65,9 +73,26 @@ Both features can compose:
 
 ### DD-03: Data Structure Compatibility
 
-**Decision:** The cluster model from #96 naturally supports hierarchy through its `children` hash. When #96 consolidates, children may be empty or absent. When #97 is active, children are populated and preserved.
+**Decision:** The cluster model from #96 naturally supports hierarchy through its `children` hash. The data structure is already designed with #97 in mind:
 
-This means the data structure designed for #96 serves both features without modification.
+- `children` hash holds original entries with their individual statistics
+- `is_consolidated` flag distinguishes consolidated groups from unconsolidated entries
+- `canonical` field holds the generalized display form for the parent
+- `pattern` field (compiled regex) enables cheap incoming message matching
+
+When #96 operates alone: `children` is empty or absent (originals are discarded).
+When #97 is active: `children` is populated and preserved (originals are kept).
+When both compose: children within a group may themselves be consolidated (child-level `is_consolidated` flag), reducing noise while preserving the hierarchical structure.
+
+### DD-04: Observability Interaction with #96
+
+**Decision:** #96 defines a consolidated message indicator (visual prefix character in summary table, boolean in CSV). When #97 is active:
+
+- **Parent rows** are inherently consolidated — they always show the indicator
+- **Child rows** show the indicator only if they themselves have been consolidated (composing with #96 within the group)
+- **Unconsolidated child rows** do not show the indicator — they represent original, individual messages
+
+This maintains consistent semantics: the indicator always means "this row represents a merged group of similar messages."
 
 ## Display
 
@@ -99,4 +124,4 @@ Key display questions to resolve:
 2. **Interaction with `-n`**: Does top-N count parents, children, or both?
 3. **Sorting behavior**: Sort by parent aggregates? Allow sorting within groups?
 4. **CSV output**: How to represent hierarchy in CSV format — additional column for group ID? Separate parent/child rows?
-5. **Composition UX**: When both #96 and #97 are active, does the user need to understand the distinction, or should it "just work" with sensible defaults?
+5. **Composition UX**: When both `--group-similar` and `--group-detail` are specified explicitly, does `--group-detail` show children that have themselves been consolidated? (Likely yes — the indicators distinguish them.)
