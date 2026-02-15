@@ -486,7 +486,11 @@ Matching 286K unique messages against 103 compiled regex patterns took 18.4s in 
 
 **Finding:** The occurrence ceiling (default 3) prevents high-occurrence messages from entering discovery. But some high-occurrence messages share patterns (e.g., `CheckHeartbeat` across 16 thread pools, each with 29-47 occurrences). These are obvious consolidation candidates that the ceiling blocks.
 
-**Solution:** Optional `--final-pass` flag runs a separate consolidation pass after the main loop, targeting only ceiling-excluded keys with a strict similarity threshold (default 95%) and elevated ceiling (default 100).
+**Design decisions:**
+- The final pass is a **separate optional process flow** (`--final-pass`), not part of the normal consolidation. It is not always-on — users opt in when they want cleanup of high-occurrence stragglers.
+- The similarity threshold for the final pass is deliberately high (default 95%, configurable via `--final-threshold`). At 95%, only nearly-identical messages consolidate — the only variation allowed is small fields like thread numbers or short IDs. This prevents over-generalization of messages that happen to share common boilerplate.
+- The final pass ceiling (default 100, configurable via `--final-ceiling`) defines the upper bound — messages with more than this many occurrences are left alone even in the final pass.
+- **Relationship to PF-06:** The ceiling and final pass are complementary. The ceiling keeps the main discovery loop focused on the long tail of low-occurrence unique messages (the primary consolidation target). The final pass handles the case where the ceiling creates "stranded" high-occurrence entries that share obvious patterns but were excluded from discovery. Together they provide two-tier consolidation: aggressive discovery on the long tail, conservative cleanup on high-occurrence groups.
 
 **Results on test file:**
 - CheckHeartbeat: 16 entries (29-47 occ each) → 1 entry with 583 occurrences
