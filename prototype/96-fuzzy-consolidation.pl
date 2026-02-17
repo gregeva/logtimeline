@@ -4,6 +4,7 @@ use warnings;
 use Getopt::Long;
 use Time::HiRes qw(time);
 use List::Util qw(min max);
+$| = 1;  # autoflush STDOUT
 
 use Inline C => <<'END_C';
 
