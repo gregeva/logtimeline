@@ -1,7 +1,7 @@
 # Fuzzy Message Consolidation — Requirements
 
 **GitHub Issue:** #96
-**Status:** Prototype — Checkpoint-based architecture validated, core algorithms proven (see PF-19, PF-20)
+**Status:** Prototype complete — Checkpoint architecture, core algorithms, and memory profile validated (PF-01 through PF-21). Ready for ltl integration.
 **Blocks:** #97 (hierarchical message roll-up grouping)
 
 ## Problem Statement
@@ -939,9 +939,19 @@ The core algorithms are sound and proven:
 
 17. **Normalize known variable patterns before similarity scoring.** UUIDs are structurally random noise that drags Dice scores below threshold for messages that are structurally identical. Normalizing to `<UUID>` in the scoring pipeline (not in the alignment pipeline) lets similarity see through the noise while preserving original text for pattern derivation. (PF-19)
 
+**Memory:**
+
+18. **Measure before claiming victory.** DD-12 predicted 30% memory reduction from consolidation. Actual measurement showed the opposite — prototype uses MORE memory than ltl (238 vs 172 MB) because trigram data structures cost more than the savings from absorbing keys. Design assumptions about memory must be validated with instrumentation, not reasoned about. (PF-21)
+
+19. **RSS is not memory usage.** Perl's `free()` returns memory to the allocator's free pool, not the OS. RSS never decreases even when structures are freed. This means RSS high-water = RSS at end, but the freed memory IS reusable for subsequent Perl allocations. Measure structure sizes with `Devel::Size`, not just RSS. (PF-21)
+
+20. **The biggest savings are invisible.** S1 inline match prevents 98% of keys from ever entering `%log_messages` — this avoids ~105 MB of hash allocation on the power-law file. But this savings never shows up in memory measurements because those keys were never allocated. The cumulative deleted bytes (~6 MB) massively understate the true savings vs a no-consolidation baseline. (PF-21)
+
+21. **Trigram overhead dominates and is bounded by batch size.** `key_trigrams` + `ngram_index` + `key_trigrams_norm` peak at ~206 MB for a 5000-key batch. This is the price of similarity search — fixed per checkpoint, not cumulative. The `$trigger` parameter directly controls this: lower trigger = less peak memory but more frequent checkpoints. (PF-21)
+
 **Perl-specific:**
 
-18. **`my` declarations execute at runtime in textual order.** Variables declared below the parsing loop are `undef` when called during parsing via checkpoints. This is a Perl-specific gotcha when restructuring code flow — move all declarations above the earliest possible call site. (PF-20)
+22. **`my` declarations execute at runtime in textual order.** Variables declared below the parsing loop are `undef` when called during parsing via checkpoints. This is a Perl-specific gotcha when restructuring code flow — move all declarations above the earliest possible call site. (PF-20)
 
 ### Outstanding Decisions
 
