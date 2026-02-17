@@ -1,7 +1,7 @@
 # Fuzzy Message Consolidation — Requirements
 
 **GitHub Issue:** #96
-**Status:** Prototype — Core algorithms validated, consolidation loop redesign required (see Performance Assessment)
+**Status:** Prototype — Checkpoint-based architecture validated, core algorithms proven (see PF-19, PF-20)
 **Blocks:** #97 (hierarchical message roll-up grouping)
 
 ## Problem Statement
@@ -679,6 +679,91 @@ Partitioning keeps the problem tractable up to ~5M keys. Beyond that, Hyperscan/
 
 **Also cleaned up:** Removed dead `batch_match_one_c()` from Inline::C block (unused after reverting batch match integration from PF-16).
 
+### PF-19: UUID Normalization for Dice Scoring
+
+**Problem:** After rebuilding with checkpoint-based architecture (PF-20), NYTProf profiling on the diverse ApplicationLog revealed `dice_coefficient` consuming 49% of runtime (6.32s, 414K calls). Root cause: 1,709 DEBUG keys all share the same 80-char prefix (`Nonce key retrieved. Resulting key is <UUID>`) but differ only in the UUID tail. Full Dice scores 74-76% (below 80% threshold) because ~34 unique UUID trigrams per message drag the score down. This caused 500 fruitless `find_candidates` calls discovering zero patterns.
+
+**Investigation — prefix gate rejected:** A prefix Dice reject gate was explored first but would NOT help — all 1,709 DEBUG keys have 100% prefix Dice similarity. The problem is the opposite: keys that SHOULD match are being rejected by full Dice due to UUID noise.
+
+**Solution — UUID normalization in Dice scoring pipeline:**
+- `$uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i`
+- `%key_trigrams_norm{$key}` — UUID-normalized trigrams, built in `build_ngram_index` only for keys containing UUIDs
+- `find_candidates` uses normalized trigrams for Dice scoring, original trigrams for indexing/posting list construction
+- Normalization does NOT affect `derive_canonical`/`derive_regex` — those still use original text (UUIDs get wildcarded naturally by alignment)
+- Freed in `run_checkpoint` alongside `%key_trigrams`
+
+**UUID prevalence in test files:**
+- 100% of DEBUG keys (1,709/1,709) — all `Nonce key retrieved`
+- 100% of power-law ERROR keys (286,571/286,571) — all `ErrorCode(uuid)`
+- 64.5% of WARN keys (4,524/7,014) — `PersistentSession`, `IntrusionDetector`, etc.
+- Normalized Dice for same-structure messages: 97-100% (vs 74-76% unnormalized)
+
+**Results:**
+- ApplicationLog: 6.80s → 2.06s (3.3× faster)
+- DEBUG: 1,709 → 1 pattern with 1 fc_call (was 500 fruitless calls, 0 patterns)
+- `dice_coefficient`: 414K calls → ~7.5K (42× fewer)
+- Power-law file: 1.87s (essentially unchanged — UUID normalization has minimal overhead)
+
+**Key insight:** UUID normalization is not just an optimization — it fixes a correctness gap. Without it, UUID-varying messages that represent the same pattern cannot be consolidated because Dice scores are below threshold. The normalization lets the similarity engine see through random hex noise to the structural similarity underneath.
+
+### PF-20: Checkpoint-Based Architecture Rebuild
+
+**Problem:** The prototype loaded all log lines into memory, then ran consolidation over the entire key set at once. This made performance numbers meaningless — there were no batch boundaries where new keys arrive against existing patterns, so the S1 inline match and S3 checkpoint match stages never had any work to do.
+
+**Solution — move consolidation INTO the parsing loop as checkpoint-triggered processing:**
+
+```
+Parse line-by-line:
+  → new key? S1 inline match (try match_against_patterns)
+    → match? merge into cluster, key never enters %log_messages
+    → no match? add to %log_messages + %unmatched_keys{$cat}
+  → unmatched count for category hits trigger (5000)?
+    → fire checkpoint: S2 ceiling → S3 checkpoint match → S4 pairwise → re-scan
+    → delete absorbed keys from %log_messages
+→ after EOF: final checkpoint for remaining unmatched keys
+→ Phase 5 output
+```
+
+**5-stage pipeline with tracking invariant:**
+- **S1 Inline match** — new key matched against compiled patterns during parsing, routed to cluster, never enters `%log_messages`
+- **S2 Ceiling filter** — at checkpoint: occurrences >= ceiling, excluded from discovery
+- **S3 Checkpoint match** — at checkpoint: matched existing pattern discovered in same checkpoint's S4
+- **S4 Pairwise discovery** — Dice similarity + interleaved re-scan within checkpoint batch
+- **S5 Unmatched** — survived all stages across all checkpoints
+- Invariant: `S1 + S2 + S3 + S4 + S5 = cat_keys_seen` per category (built-in sanity check)
+
+**New data structures:**
+- `%clusters{cat}{canonical}` — consolidated cluster stats (occurrences, match_count)
+- `%unmatched_keys{cat}{key}` — keys awaiting consolidation
+- `%cat_stats{cat}` — per-category S1-S5 accumulators
+- `%cat_keys_seen{cat}`, `$total_keys_seen` — unique key counters
+
+**Memory lifecycle:**
+- Trigram data (`%ngram_index`, `%key_trigrams`, `%posting_size`, `%key_trigrams_norm`) built and freed per checkpoint
+- Only compiled patterns (`%canonical_patterns`) and clusters (`%clusters`) persist across checkpoints
+- Absorbed keys deleted from `%log_messages` and `%key_message` to free memory
+
+**Results — power-law file (288K lines, 286K unique ERROR):**
+- Total: 1.87s (was 3.6s in old architecture)
+- 4 checkpoints fired for ERROR (57 batches of 5000 → absorbed by S1 inline after checkpoint 1)
+- S1 Inline match: 282,081 (98.4% of all ERROR keys absorbed during parsing)
+- S4 Pairwise discovery: 4,416 (only checkpoint 1 does significant work)
+- S5 Unmatched: 24
+- 5 patterns discovered, `match_against_patterns` dominant cost at 0.68s
+
+**Results — diverse file (480K lines, 10K unique):**
+- Total: 2.06s (was 12.3s in old architecture, after UUID normalization)
+- WARN: 2 checkpoints, S1=4,543, S4=1,843, S5=18, 43 patterns
+- ERROR: 1 final checkpoint, S4=210, S5=31, 12 patterns
+- DEBUG: 1 final checkpoint, S4=1,708, S5=1, 1 pattern (UUID normalization enables this)
+- INFO: 1 final checkpoint, S4=4, S5=8
+
+**Validated the checkpoint design:**
+- S1 inline match is the primary performance mechanism — absorbs 98%+ of keys on power-law data
+- Trigram data freed per checkpoint keeps memory bounded
+- Per-checkpoint output provides full pipeline visibility (S2 → S3 → S4 flow)
+- Tracking invariant catches any accounting errors immediately
+
 ## Prototype Performance Assessment
 
 ### Test Files
@@ -695,88 +780,39 @@ Both files are small compared to real-world production logs which can reach 1–
 | Metric | Primary (power-law) | Diverse (realistic) |
 |--------|--------------------:|--------------------:|
 | **ltl baseline** | **2.6s** | **3.0s** |
-| Prototype total | 3.6s | 12.3s |
-| — Parse | 1.0s | 1.2s |
-| — Index build | 0.4s | 0.4s |
-| — Pair finding (Ph1-2) | 0.1s | 4.5s |
-| — Phase 4 consolidation | 2.0s | 6.2s |
-| **Overhead vs ltl** | **+35%** | **+310%** |
+| Old prototype (load-all) | 3.6s | 12.3s |
+| **Checkpoint prototype** | **1.87s** | **2.06s** |
+| **Overhead vs ltl** | **-28%** | **-31%** |
+
+The checkpoint architecture is actually **faster** than ltl baseline because S1 inline matching prevents most keys from ever entering `%log_messages`, reducing hash allocation overhead. The old prototype's 310% overhead on diverse data is eliminated.
 
 ### Memory Comparison
 
 | Metric | Primary (power-law) | Diverse (realistic) |
 |--------|--------------------:|--------------------:|
 | **ltl baseline** | **171 MB** | **28 MB** |
-| Prototype | 535 MB | 192 MB |
-| **Overhead vs ltl** | **+213%** | **+580%** |
+| Old prototype (load-all) | 535 MB | 192 MB |
+| **Checkpoint prototype** | **TBD** | **TBD** |
 
-The primary file already consumes 171 MB in ltl due to 286K unique hash keys in `%log_messages`. The prototype adds ~364 MB of trigram data structures on top. The diverse file shows the memory overhead more clearly: 28 MB → 192 MB, almost entirely trigram hashes.
+Memory has not been formally measured with `Devel::Size` on the checkpoint architecture. However, the design frees trigram data per checkpoint and deletes absorbed keys from `%log_messages`, so memory should be significantly lower than the old prototype. On power-law data, 98.4% of keys are absorbed during parsing and never create `%log_messages` entries.
 
 ### Key Findings
 
-1. **`find_candidates` is the dominant cost.** NYTProf profiling shows it consumes 88% of runtime on diverse data. Each call iterates posting lists for source trigrams — common trigrams (`[WA`, `ARN`, `] [`) create posting lists with thousands of entries, producing ~300K hash lookups per call across 1152 calls.
+1. **S1 inline match is the primary performance mechanism.** On power-law data, 98.4% of keys are absorbed during parsing by matching against compiled patterns. They never enter `%log_messages`, eliminating hash allocation and all downstream processing. This is why the checkpoint prototype is faster than ltl baseline.
 
-2. **Trigram index memory is expensive.** `%key_trigrams` stores ~298 trigram hash entries per key. `%ngram_index` stores the reverse mapping. For 7,000 indexed keys, this is ~400 MB of Perl hash overhead (each hash entry costs ~100 bytes in Perl).
+2. **UUID normalization fixes a correctness gap, not just a performance issue.** Without it, UUID-varying messages score 74-76% Dice (below 80% threshold) and cannot be consolidated. DEBUG messages went from 0% to 99.9% reduction after normalization (PF-19).
 
-3. **Power-law data is cheap; diverse data is expensive.** On power-law data, interleaved re-scan absorbs 99%+ of keys on the first pattern, so `find_candidates` is called very few times. On diverse data with many distinct message families, `find_candidates` runs for every unmatched key in every pass.
+3. **`match_against_patterns` is now the dominant cost.** On power-law data, S1 inline matching 287K keys against compiled patterns takes 0.68s (36% of total). This is the correct cost profile — cheap regex matching, not expensive pairwise similarity.
 
-4. **The discriminative trigram pre-filter (PF-18) helps but doesn't solve the problem.** It reduced diverse-file Phase 4 from 9.5s to 6.2s (34% improvement) but the overhead remains unacceptable at 310%.
+4. **Power-law data benefits most from checkpoints; diverse data benefits from UUID normalization.** On power-law data, checkpoint 1 discovers the dominant pattern, and S1 absorbs everything thereafter. On diverse data, UUID normalization reduces `dice_coefficient` calls from 414K to 7.5K.
 
-5. **Inline::C compute_mask provides 100× speedup** on character alignment but adds a build dependency. It accounts for <1% of total runtime after optimization — alignment is not the bottleneck.
+5. **Trigram data lifecycle is correct.** Building and freeing per checkpoint prevents memory accumulation. Only compiled patterns and clusters persist.
 
-6. **These are small files.** Real-world production logs of 1–10 GB with proportionally more unique keys would amplify both time and memory overhead beyond usable thresholds.
+6. **Inline::C compute_mask provides 100× speedup** on character alignment but accounts for <1% of total runtime — alignment is not the bottleneck.
 
-### Root Cause: Misapplied Consolidation Scope
+### Historical: Root Cause of Old Architecture's Performance Problem
 
-The performance problem is not the trigram algorithm itself — it is that the prototype applies expensive pairwise similarity work to far too many messages. The trigger threshold of 5000 was intended as a **checkpoint** ("you have 5000 unique keys — pause and be smart"), not as a **workload** ("index all 5000 and compare them pairwise").
-
-**What the prototype does (wrong):**
-- At trigger, indexes up to 5000 keys regardless of occurrence count
-- Runs `find_candidates` pairwise across all indexed keys
-- Every key gets trigram-indexed, every key gets compared
-
-**What the design intended:**
-- At trigger, the ceiling filter is the **first gate**: filter out keys with occurrences >= ceiling. A message that has already accumulated 2-3 occurrences within a batch of 5000 unique keys is demonstrating it's probably already a distinct, recurring message — it doesn't need consolidation help. Messages with only 1 occurrence are the ones most likely to be parameter variants of each other.
-- **Second gate: match against existing compiled patterns** — cheap regex scan absorbs keys that fit known patterns
-- Only the **remaining low-occurrence, unmatched keys** go through expensive pairwise similarity work
-- Periodically merge similar patterns (e.g., every 10 new patterns) to keep pattern count bounded
-
-This means the expensive operations (trigram indexing, `find_candidates`, alignment) should only ever touch the subset of keys that survived both gates. The 5000 threshold is a checkpoint for smart filtering, not a batch size for brute-force comparison.
-
-**Ceiling filter effectiveness** (measured on final file-wide counts — in streaming mode, the filter checks total accumulated `$log_messages{$log_key}{occurrences}` at each checkpoint, so these numbers represent the end-of-file case; mid-stream checkpoints would see fewer keys above ceiling in early batches, more in later batches as history accumulates):
-
-| Category | Diverse file | | Primary file | |
-|----------|---:|---|---:|---|
-| | Total keys | >=3 filtered | Total keys | >=3 filtered |
-| ERROR | 303 | 105 (35%) | 286,571 | 45 (0%) |
-| WARN | 7,014 | 933 (13%) | 287 | 104 (36%) |
-| DEBUG | 1,709 | 0 (0%) | — | — |
-
-The primary file's ERROR category shows 0% filtering because each UUID variant appears once — but this is exactly where the existing interleaved re-scan excels: the first discovered pattern absorbs 99%+ of keys via regex, so only a handful of `find_candidates` calls are needed. The ceiling filter's value is greatest on diverse data where it removes the already-recurring messages from expensive processing.
-
-**Open question:** ceiling of 2 vs 3. A ceiling of 2 ("seen it twice = probably unique") would filter more aggressively. Testing needed to determine which default produces better results.
-
-### Two Execution Modes
-
-The consolidation engine should support two modes sharing the same core algorithms:
-
-1. **Streaming mode** — consolidation runs periodically during ingestion at trigger checkpoints. Each checkpoint: sort by count, skip significant keys, match against existing patterns, do pairwise only on the small unmatched remainder. New patterns are compiled and applied to subsequent lines as they arrive.
-
-2. **End-of-file mode** — consolidation runs once after all lines are parsed. All occurrence counts are final, so sorting and filtering is maximally effective. The highest-occurrence messages are processed first, their patterns absorb lower-occurrence variants without pairwise comparison.
-
-Both modes use the same core: trigram indexing, Dice coefficient, character alignment, mask derivation, pattern compilation, regex matching. They differ in when checkpoints run and how much context is available for smart filtering.
-
-### Revised Consolidation Checkpoint Logic
-
-At each checkpoint (trigger reached, or end-of-file):
-
-1. **Gate 1 — Ceiling filter:** Exclude keys with **total accumulated occurrences** >= ceiling (checked via `$log_messages{$log_key}{occurrences}`, not just occurrences within the current batch). A message that appeared once in each of three previous batches already has 3 total occurrences and gets filtered out. This makes the filter increasingly effective as processing progresses — early batches may have more work, but later batches benefit from the full history. Only keys with low total occurrence counts (1-2) proceed — these are the candidates most likely to be parameter variants of each other.
-2. **Gate 2 — Pattern match:** Match survivors against existing compiled patterns (cheap regex scan). Keys absorbed by existing patterns are removed from the workload.
-3. **The unmatched remainder** is the actual consolidation workload — potentially a small fraction of the 5000 trigger threshold.
-4. **Group by prefix** (`[LEVEL][class]`) — only compare within groups.
-5. **Within each group**, do pairwise similarity (trigram Dice) to discover new patterns. Use interleaved re-scan: after each pattern discovery, immediately scan remaining unmatched keys in the same bucket to absorb variants.
-6. **After every ~10 new patterns**, merge similar patterns to prevent proliferation.
-7. **Free trigram data** — index and trigram caches are only needed during discovery; compiled patterns handle matching afterward.
+The old load-all-then-process architecture applied expensive pairwise similarity work to far too many messages. The trigger threshold of 5000 was intended as a checkpoint for smart filtering, not a batch size for brute-force comparison. This was resolved by PF-20 (checkpoint-based architecture rebuild).
 
 ### What the Prototype Validated
 
@@ -786,36 +822,78 @@ The core algorithms are sound and proven:
 - **Mask coalescing** prevents spurious anchors from single-character LCS matches
 - **Canonical form derivation** creates readable consolidated message representations
 - **Regex derivation from masks** produces correct patterns that match source messages
-- **Pattern compilation and matching** absorbs messages reliably (100% ERROR reduction on power-law data, 99% WARN on diverse data)
+- **Pattern compilation and matching** absorbs messages reliably (100% ERROR reduction on power-law data, 99.9% DEBUG on diverse data)
 - **Cross-cluster merging** correctly identifies and combines overlapping patterns
 - **Interleaved re-scan with partitioning** is essential for power-law distributions
+- **Checkpoint-based processing** with S1 inline match is the correct architecture — absorbs 98%+ of keys during parsing on power-law data
+- **UUID normalization** enables consolidation of UUID-varying messages that were previously below threshold
 
-### What Needs to Change
+### Lessons Learned
 
-The consolidation loop (Phase 4) needs to be rebuilt around the checkpoint logic above. The core algorithm functions (`dice_coefficient`, `compute_mask`, `coalesce_mask`, `derive_canonical`, `derive_regex`, `match_against_patterns`) are correct and reusable. The orchestration layer (`run_consolidation_pass`, `build_ngram_index` scope, trigger logic) needs to implement smart filtering.
+**Algorithmic design:**
+
+1. **Worked examples lie at the edges.** The DD-01 worked example used short messages with small variable parts, predicting 85% threshold. Real messages with UUIDs scored 74-82%. Always validate design assumptions against real data before committing to defaults. (PF-01, PF-08)
+
+2. **Inverted index posting list size is the hidden cost.** When most messages share common trigrams (e.g., `[ERROR]`, `[WARN]`), posting lists grow to thousands of entries. The O(trigrams × posting_list_size) cost dominates — not the Dice scoring itself. Discriminative trigram selection (smallest posting lists first) is essential. (PF-02, PF-18)
+
+3. **Coincidental matches in variable regions require coalescing.** LCS alignment finds spurious single-character matches inside UUIDs and hex strings. Two-pass coalescing (remove short keeps, then collapse variable-dominated spans) handles this reliably. The parameters (min keep=3, ratio=40%, boundary=10) proved stable across all test data. (PF-03)
+
+4. **Pattern count is a critical control lever.** Matching cost is O(lines × patterns). Unbounded pattern discovery created 103 redundant patterns where 5 sufficed. Merge-first + hard cap keeps patterns bounded while merge-first improves coverage by generalizing. (PF-04, PF-05)
+
+5. **Ceiling filters and final passes are complementary, not alternative.** The ceiling focuses discovery on the long tail (single-occurrence variants). The final pass cleans up ceiling-excluded stragglers that share obvious patterns (e.g., same message across 16 thread pools). Two-tier design: aggressive discovery on the tail, conservative cleanup on high-occurrence groups. (PF-06, PF-12)
+
+6. **Natural separation can substitute for explicit partitioning.** Log level prefixes in `$log_key` create natural trigram separation — cross-level Dice scores never exceed threshold. This deferred the need for explicit level partitioning, simplifying the data model. (PF-07)
+
+**Iterative refinement:**
+
+7. **Thresholds need to be re-evaluated after each algorithmic change.** PF-01 lowered threshold to 75%, then PF-08 raised it to 80% after merge-first generalization changed the dynamics. Each improvement shifts the balance — test the threshold again after significant changes.
+
+8. **Generalization must be idempotent.** When aligning two canonicals that already contain `*` wildcards, the derivation functions must treat `*` as variable, not literal. Otherwise repeated generalization fragments instead of converging. (PF-10)
+
+9. **Re-scan after generalization is mandatory.** When merge-first broadens a pattern, the new regex may match keys the old pattern missed. Without immediate re-scan, these keys sit as false "unmatched" entries. (PF-11)
+
+**Performance optimization:**
+
+10. **Profile before optimizing — every time.** NYTProf profiling identified `compute_mask` as 62.8% of runtime (PF-14), then after fixing that, `find_candidates` at 88% (PF-16), then after checkpoint rebuild, `dice_coefficient` at 49% (PF-19). The dominant cost shifts after each fix. Assumptions about what's slow are unreliable.
+
+11. **XS modules don't help when the bottleneck is Perl-side.** Algorithm::Diff::XS gave zero speedup over pure-Perl Algorithm::Diff because the bottleneck was `split //` and callbacks, not the LCS core. Only full Inline::C (eliminating all Perl overhead) delivered the 100× speedup. (PF-15)
+
+12. **Algorithmic improvements in Perl can be slower.** Banded DP (theoretically O(nk) vs O(mn)) was 0.8× slower in pure Perl because the band-clamping logic (`max`/`min` per iteration) added more Perl overhead than the reduced cell count saved. Theory != practice in interpreted languages. (PF-15)
+
+13. **Interleaved re-scan is essential for power-law distributions.** Batching 10 patterns before re-scanning caused 22× regression because pattern 1 absorbs 99%+ of keys — without immediate re-scan, patterns 2-10 each discover against the full set. The cascading reduction from immediate absorption is the core performance mechanism. (PF-17)
+
+14. **Partitioning composes with interleaved re-scan; batching does not.** Partitioning keys by `[LEVEL][class]` reduced re-scan scope without destroying cascading reduction. Batching traded correctness of scan cost for fewer passes — catastrophic when one pattern dominates. (PF-16, PF-17)
+
+**Architecture:**
+
+15. **Architecture matters more than micro-optimization.** Switching from load-all to checkpoint-based processing delivered 6× speedup on diverse data (12.3s → 2.06s), far more than any algorithmic optimization within the old architecture. The right processing model makes micro-optimizations less necessary. (PF-20)
+
+16. **Correctness gaps masquerade as performance problems.** The DEBUG "performance problem" (414K fruitless Dice calls) was actually a correctness problem — UUIDs prevented Dice from seeing structural similarity. UUID normalization fixed both performance and correctness simultaneously. (PF-19)
+
+17. **Normalize known variable patterns before similarity scoring.** UUIDs are structurally random noise that drags Dice scores below threshold for messages that are structurally identical. Normalizing to `<UUID>` in the scoring pipeline (not in the alignment pipeline) lets similarity see through the noise while preserving original text for pattern derivation. (PF-19)
+
+**Perl-specific:**
+
+18. **`my` declarations execute at runtime in textual order.** Variables declared below the parsing loop are `undef` when called during parsing via checkpoints. This is a Perl-specific gotcha when restructuring code flow — move all declarations above the earliest possible call site. (PF-20)
 
 ### Outstanding Decisions
 
-1. **Acceptable overhead budget** — target should be defined before re-implementation: e.g., <50% time overhead, <100% memory overhead vs ltl baseline.
-2. **Ceiling default: 2 or 3?** A ceiling of 2 means "seen it twice within a batch = probably already a distinct message, skip it." A ceiling of 3 is more conservative. Testing with the revised checkpoint logic will determine which produces better consolidation results with less work.
-3. **Pattern merge frequency** — every 10 new patterns, every pass, or adaptive?
-4. **Should Inline::C be a production dependency?** With the revised scope (far fewer alignments per checkpoint), pure Perl may be fast enough. Needs benchmarking after rebuild.
-5. **Trigram data lifecycle** — build and discard per checkpoint, or retain across checkpoints for incremental updates?
+1. **Acceptable overhead budget** — the checkpoint prototype is actually faster than ltl baseline on these test files, but memory overhead needs formal measurement.
+2. **Ceiling default: 2 or 3?** Testing needed with the checkpoint architecture.
+3. **Should Inline::C be a production dependency?** With far fewer alignments per checkpoint, pure Perl may be fast enough. Needs benchmarking.
+4. **Final pass integration** — the final pass (`--final-pass`) has not been re-validated with the checkpoint architecture. It should still work but needs testing.
 
 ### Next Steps
 
-**Performance (priority):**
+**Integration readiness:**
 
-1. **Rebuild the consolidation loop** in the prototype with the two-gate checkpoint logic. Reuse core algorithms (`dice_coefficient`, `compute_mask`, `derive_canonical`, `derive_regex`, `match_against_patterns`). Replace orchestration (`run_consolidation_pass`, `build_ngram_index` scope).
-2. **Implement end-of-file mode first** — simpler to validate since all counts are final. Streaming mode adds complexity of partial counts and incremental pattern updates.
-3. **Test ceiling=2 vs ceiling=3** — measure workload size and consolidation quality for both values.
-4. **Benchmark the revised approach** against the same test files and compare to current numbers (3.6s/535MB primary, 12.3s/192MB diverse) and ltl baseline (2.6s/171MB primary, 3.0s/28MB diverse).
-
-**Memory (after performance is resolved):**
-
-5. **Add `Devel::Size` instrumentation** — measure actual memory of `%ngram_index`, `%key_trigrams`, `%posting_size`, and `%key_message` during execution. Track trigram structure sizes at key points (after index build, after discovery, after freeing).
-6. **Free trigram data after discovery** — `%ngram_index`, `%key_trigrams`, `%posting_size` are only needed during pairwise discovery. Once patterns are compiled to regex, these can be discarded. In streaming mode, evaluate whether rebuilding per checkpoint is cheaper than retaining.
-7. **Verify net memory reduction** — the whole point of consolidation is that collapsing thousands of unique keys into a handful of patterns should **reduce** total memory, not increase it. Currently the prototype uses *more* memory than ltl without consolidation (535MB vs 171MB primary, 192MB vs 28MB diverse). After consolidation, the absorbed keys can be removed from `%log_messages` (their stats merged into the pattern's cluster), and trigram data freed. The net result should be lower memory than without consolidation, especially on files with many parameter-variant messages.
+1. ~~**Rebuild the consolidation loop** with checkpoint-based processing~~ — DONE (PF-20)
+2. ~~**UUID normalization**~~ — DONE (PF-19)
+3. **Add `Devel::Size` memory instrumentation** — measure actual memory at key points (after checkpoint, after freeing trigram data, end of processing). Verify net memory reduction vs ltl baseline.
+4. **Test ceiling=2 vs ceiling=3** — measure workload size and consolidation quality for both values with checkpoint architecture.
+5. **Re-validate final pass** (`--final-pass`) with checkpoint architecture.
+6. **Test with larger files** — validate scaling on 1+ GB production logs.
+7. **Integrate into ltl** — port checkpoint architecture into `read_and_process_logs()`, wire up stats merging (DD-07), add `--group-similar` CLI option.
 
 ## Open Questions
 
@@ -824,4 +902,4 @@ The consolidation loop (Phase 4) needs to be rebuilt around the checkpoint logic
 3. ~~**Performance benchmarks**~~: Resolved — NYTProf profiling (PF-14), alignment algorithm benchmark (PF-15)
 4. **Minimum cluster count**: Below what number of unique messages per category is consolidation not triggered at all? Likely related to the trigger threshold but may need a separate floor.
 5. ~~**Hard cap value**~~: Resolved — default 50, accommodates shared pool across log levels
-6. **Scalability**: Current prototype has unacceptable overhead (310% time, 580% memory on diverse data) due to applying pairwise similarity to all accumulated keys instead of gating through ceiling filter and pattern matching first. Revised checkpoint logic expected to dramatically reduce workload — see "Root Cause" and "Next Steps" above.
+6. ~~**Scalability**~~: Resolved — checkpoint architecture eliminates the 310% time overhead. Power-law: 1.87s (faster than ltl baseline). Diverse: 2.06s (faster than ltl baseline). Memory TBD.
