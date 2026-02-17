@@ -892,6 +892,8 @@ The prototype is 1.9× faster and uses 40% less memory than ltl -od. S1 inline m
 
 **SIGTRAP from sandbox:** When running 150 files (7.9 GB) from Claude Code, the process was killed with SIGTRAP (exit code 133). This is a Claude Code sandbox limitation, not a code bug. The 50-file subset completed successfully both from Claude Code and from the terminal. Added `$| = 1` (STDOUT autoflush) to ensure output is visible during long runs.
 
+**Integration note:** When porting to ltl, the new consolidation data structures (`clusters`, `canonical_patterns`, `unmatched_keys`, `ngram_index`, `key_trigrams`, `key_trigrams_norm`, `posting_size`, `key_message`) must be added to `measure_memory_structures()` so `-mem` output includes their high-water marks alongside existing structures like `log_messages` and `log_analysis`.
+
 ## Prototype Performance Assessment
 
 ### Test Files
@@ -1030,6 +1032,8 @@ The core algorithms are sound and proven:
 
 27. **Memory crossover depends on unique-key ratio.** On small files with few unique keys, trigram overhead makes the prototype use more memory than ltl. On large files with millions of unique keys, S1 preventing key insertion saves far more than trigrams cost — prototype uses 40% less memory than ltl -od on 3.3 GB access logs (151 MB vs 256 MB). (PF-24)
 
+28. **Small-file benchmarks can be misleading.** PF-21 concluded the prototype uses MORE memory than ltl (238 vs 172 MB on 97 MB power-law file). PF-24 showed the opposite on production-size data: 151 MB vs 256 MB on 3.3 GB. The trigram overhead that dominated small files becomes negligible relative to the savings from preventing 13M keys from entering `%log_messages`. Always validate performance conclusions at production scale. (PF-21, PF-24)
+
 ### Outstanding Decisions
 
 1. ~~**Acceptable memory overhead**~~ Resolved — on large files (the real use case), the prototype uses LESS memory than ltl: 151 MB vs 256 MB on 3.3 GB access logs. Overhead only applies to small files where trigram cost exceeds S1 savings. (PF-24)
@@ -1048,6 +1052,7 @@ The core algorithms are sound and proven:
 5. ~~**Re-validate final pass**~~ — DONE (PF-22). Works correctly with checkpoint architecture.
 6. ~~**Test with larger files**~~ — DONE (PF-24). 50 files, 3.3 GB, 16.4M lines: 81s, 151 MB, 99.9% S1 absorption. 1.9× faster and 40% less memory than ltl -od.
 7. **Integrate into ltl** — port checkpoint architecture into `read_and_process_logs()`, wire up stats merging (DD-07), add `--group-similar` CLI option.
+8. **Add consolidation structures to `-mem` tracking** — ltl's `measure_memory_structures()` currently tracks `log_messages`, `log_analysis`, `log_stats`, etc. Integration must add the new consolidation structures (`clusters`, `canonical_patterns`, `unmatched_keys`, `ngram_index`, `key_trigrams`, `key_trigrams_norm`, `posting_size`, `key_message`) to this function so `-mem` output shows their high-water marks alongside existing structures.
 
 ## Open Questions
 
