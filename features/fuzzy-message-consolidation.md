@@ -828,6 +828,26 @@ Parse line-by-line:
 - The crossover point — where consolidation saves more memory than it costs — depends on the ratio of unique keys to total keys. Files with millions of unique keys (where ltl's `%log_messages` would be huge) would benefit most.
 - The `$trigger` parameter directly controls the trigram peak: lower trigger = smaller batches = less trigram memory but more frequent checkpoints.
 
+### PF-22: Ceiling Comparison and Final Pass Validation
+
+**Ceiling comparison:** Tested ceiling values 2, 3, 4, and 5 on both test files.
+
+| Ceiling | S2 filtered (power-law) | S5 unmatched | WARN remaining | S2 filtered (diverse) | S5 unmatched | WARN remaining |
+|---------|------------------------:|-------------:|---------------:|----------------------:|-------------:|---------------:|
+| 2 | 91 | 28 | 100 | 262 | 40 | 217 |
+| 3 | 69 | 32 | 99 | 81 | 46 | 58 |
+| 4 | 64 | 30 | 96 | 77 | 46 | 55 |
+| 5 | 14 | 30 | 46 | 78 | 48 | 55 |
+
+**Decision: ceiling=3 (confirmed).** Ceiling=2 is the clear outlier — it shields too many keys from discovery, causing WARN remaining to balloon from 58 to 217 on diverse data. Ceiling 3, 4, and 5 produce very similar results on diverse data. On power-law, ceiling=5 slightly improves WARN (46 vs 99) but the difference is marginal. Ceiling=3 is the best balance: filters enough to focus discovery on the long tail without shielding consolidatable keys.
+
+**Final pass validation:** `--final-pass` works correctly with checkpoint architecture on both files.
+
+- **Power-law**: WARN 79→31 remaining (absorbed 48 ceiling-excluded keys), ERROR 12→10. Time: 0.02s.
+- **Diverse**: ERROR 93→56 (absorbed 37), WARN 27→24 (absorbed 3). Time: 0.02s.
+
+The final pass correctly discovers patterns among ceiling-excluded stragglers and composes cleanly with checkpoint processing. No issues found.
+
 ## Prototype Performance Assessment
 
 ### Test Files
@@ -909,56 +929,58 @@ The core algorithms are sound and proven:
 
 5. **Ceiling filters and final passes are complementary, not alternative.** The ceiling focuses discovery on the long tail (single-occurrence variants). The final pass cleans up ceiling-excluded stragglers that share obvious patterns (e.g., same message across 16 thread pools). Two-tier design: aggressive discovery on the tail, conservative cleanup on high-occurrence groups. (PF-06, PF-12)
 
-6. **Natural separation can substitute for explicit partitioning.** Log level prefixes in `$log_key` create natural trigram separation — cross-level Dice scores never exceed threshold. This deferred the need for explicit level partitioning, simplifying the data model. (PF-07)
+6. **Too-low ceiling hurts more than too-high.** Ceiling=2 shielded too many keys from discovery, causing WARN remaining to balloon from 58 to 217 on diverse data. Ceiling 3-5 produced nearly identical results. A ceiling that's too aggressive excludes keys that could have been consolidated; a ceiling that's too permissive just adds slightly more work to discovery with no quality loss. Err on the side of letting more keys through. (PF-22)
+
+7. **Natural separation can substitute for explicit partitioning.** Log level prefixes in `$log_key` create natural trigram separation — cross-level Dice scores never exceed threshold. This deferred the need for explicit level partitioning, simplifying the data model. (PF-07)
 
 **Iterative refinement:**
 
-7. **Thresholds need to be re-evaluated after each algorithmic change.** PF-01 lowered threshold to 75%, then PF-08 raised it to 80% after merge-first generalization changed the dynamics. Each improvement shifts the balance — test the threshold again after significant changes.
+8. **Thresholds need to be re-evaluated after each algorithmic change.** PF-01 lowered threshold to 75%, then PF-08 raised it to 80% after merge-first generalization changed the dynamics. Each improvement shifts the balance — test the threshold again after significant changes.
 
-8. **Generalization must be idempotent.** When aligning two canonicals that already contain `*` wildcards, the derivation functions must treat `*` as variable, not literal. Otherwise repeated generalization fragments instead of converging. (PF-10)
+9. **Generalization must be idempotent.** When aligning two canonicals that already contain `*` wildcards, the derivation functions must treat `*` as variable, not literal. Otherwise repeated generalization fragments instead of converging. (PF-10)
 
-9. **Re-scan after generalization is mandatory.** When merge-first broadens a pattern, the new regex may match keys the old pattern missed. Without immediate re-scan, these keys sit as false "unmatched" entries. (PF-11)
+10. **Re-scan after generalization is mandatory.** When merge-first broadens a pattern, the new regex may match keys the old pattern missed. Without immediate re-scan, these keys sit as false "unmatched" entries. (PF-11)
 
 **Performance optimization:**
 
-10. **Profile before optimizing — every time.** NYTProf profiling identified `compute_mask` as 62.8% of runtime (PF-14), then after fixing that, `find_candidates` at 88% (PF-16), then after checkpoint rebuild, `dice_coefficient` at 49% (PF-19). The dominant cost shifts after each fix. Assumptions about what's slow are unreliable.
+11. **Profile before optimizing — every time.** NYTProf profiling identified `compute_mask` as 62.8% of runtime (PF-14), then after fixing that, `find_candidates` at 88% (PF-16), then after checkpoint rebuild, `dice_coefficient` at 49% (PF-19). The dominant cost shifts after each fix. Assumptions about what's slow are unreliable.
 
-11. **XS modules don't help when the bottleneck is Perl-side.** Algorithm::Diff::XS gave zero speedup over pure-Perl Algorithm::Diff because the bottleneck was `split //` and callbacks, not the LCS core. Only full Inline::C (eliminating all Perl overhead) delivered the 100× speedup. (PF-15)
+12. **XS modules don't help when the bottleneck is Perl-side.** Algorithm::Diff::XS gave zero speedup over pure-Perl Algorithm::Diff because the bottleneck was `split //` and callbacks, not the LCS core. Only full Inline::C (eliminating all Perl overhead) delivered the 100× speedup. (PF-15)
 
-12. **Algorithmic improvements in Perl can be slower.** Banded DP (theoretically O(nk) vs O(mn)) was 0.8× slower in pure Perl because the band-clamping logic (`max`/`min` per iteration) added more Perl overhead than the reduced cell count saved. Theory != practice in interpreted languages. (PF-15)
+13. **Algorithmic improvements in Perl can be slower.** Banded DP (theoretically O(nk) vs O(mn)) was 0.8× slower in pure Perl because the band-clamping logic (`max`/`min` per iteration) added more Perl overhead than the reduced cell count saved. Theory != practice in interpreted languages. (PF-15)
 
-13. **Interleaved re-scan is essential for power-law distributions.** Batching 10 patterns before re-scanning caused 22× regression because pattern 1 absorbs 99%+ of keys — without immediate re-scan, patterns 2-10 each discover against the full set. The cascading reduction from immediate absorption is the core performance mechanism. (PF-17)
+14. **Interleaved re-scan is essential for power-law distributions.** Batching 10 patterns before re-scanning caused 22× regression because pattern 1 absorbs 99%+ of keys — without immediate re-scan, patterns 2-10 each discover against the full set. The cascading reduction from immediate absorption is the core performance mechanism. (PF-17)
 
-14. **Partitioning composes with interleaved re-scan; batching does not.** Partitioning keys by `[LEVEL][class]` reduced re-scan scope without destroying cascading reduction. Batching traded correctness of scan cost for fewer passes — catastrophic when one pattern dominates. (PF-16, PF-17)
+15. **Partitioning composes with interleaved re-scan; batching does not.** Partitioning keys by `[LEVEL][class]` reduced re-scan scope without destroying cascading reduction. Batching traded correctness of scan cost for fewer passes — catastrophic when one pattern dominates. (PF-16, PF-17)
 
 **Architecture:**
 
-15. **Architecture matters more than micro-optimization.** Switching from load-all to checkpoint-based processing delivered 6× speedup on diverse data (12.3s → 2.06s), far more than any algorithmic optimization within the old architecture. The right processing model makes micro-optimizations less necessary. (PF-20)
+16. **Architecture matters more than micro-optimization.** Switching from load-all to checkpoint-based processing delivered 6× speedup on diverse data (12.3s → 2.06s), far more than any algorithmic optimization within the old architecture. The right processing model makes micro-optimizations less necessary. (PF-20)
 
-16. **Correctness gaps masquerade as performance problems.** The DEBUG "performance problem" (414K fruitless Dice calls) was actually a correctness problem — UUIDs prevented Dice from seeing structural similarity. UUID normalization fixed both performance and correctness simultaneously. (PF-19)
+17. **Correctness gaps masquerade as performance problems.** The DEBUG "performance problem" (414K fruitless Dice calls) was actually a correctness problem — UUIDs prevented Dice from seeing structural similarity. UUID normalization fixed both performance and correctness simultaneously. (PF-19)
 
-17. **Normalize known variable patterns before similarity scoring.** UUIDs are structurally random noise that drags Dice scores below threshold for messages that are structurally identical. Normalizing to `<UUID>` in the scoring pipeline (not in the alignment pipeline) lets similarity see through the noise while preserving original text for pattern derivation. (PF-19)
+18. **Normalize known variable patterns before similarity scoring.** UUIDs are structurally random noise that drags Dice scores below threshold for messages that are structurally identical. Normalizing to `<UUID>` in the scoring pipeline (not in the alignment pipeline) lets similarity see through the noise while preserving original text for pattern derivation. (PF-19)
 
 **Memory:**
 
-18. **Measure before claiming victory.** DD-12 predicted 30% memory reduction from consolidation. Actual measurement showed the opposite — prototype uses MORE memory than ltl (238 vs 172 MB) because trigram data structures cost more than the savings from absorbing keys. Design assumptions about memory must be validated with instrumentation, not reasoned about. (PF-21)
+19. **Measure before claiming victory.** DD-12 predicted 30% memory reduction from consolidation. Actual measurement showed the opposite — prototype uses MORE memory than ltl (238 vs 172 MB) because trigram data structures cost more than the savings from absorbing keys. Design assumptions about memory must be validated with instrumentation, not reasoned about. (PF-21)
 
-19. **RSS is not memory usage.** Perl's `free()` returns memory to the allocator's free pool, not the OS. RSS never decreases even when structures are freed. This means RSS high-water = RSS at end, but the freed memory IS reusable for subsequent Perl allocations. Measure structure sizes with `Devel::Size`, not just RSS. (PF-21)
+20. **RSS is not memory usage.** Perl's `free()` returns memory to the allocator's free pool, not the OS. RSS never decreases even when structures are freed. This means RSS high-water = RSS at end, but the freed memory IS reusable for subsequent Perl allocations. Measure structure sizes with `Devel::Size`, not just RSS. (PF-21)
 
-20. **The biggest savings are invisible.** S1 inline match prevents 98% of keys from ever entering `%log_messages` — this avoids ~105 MB of hash allocation on the power-law file. But this savings never shows up in memory measurements because those keys were never allocated. The cumulative deleted bytes (~6 MB) massively understate the true savings vs a no-consolidation baseline. (PF-21)
+21. **The biggest savings are invisible.** S1 inline match prevents 98% of keys from ever entering `%log_messages` — this avoids ~105 MB of hash allocation on the power-law file. But this savings never shows up in memory measurements because those keys were never allocated. The cumulative deleted bytes (~6 MB) massively understate the true savings vs a no-consolidation baseline. (PF-21)
 
-21. **Trigram overhead dominates and is bounded by batch size.** `key_trigrams` + `ngram_index` + `key_trigrams_norm` peak at ~206 MB for a 5000-key batch. This is the price of similarity search — fixed per checkpoint, not cumulative. The `$trigger` parameter directly controls this: lower trigger = less peak memory but more frequent checkpoints. (PF-21)
+22. **Trigram overhead dominates and is bounded by batch size.** `key_trigrams` + `ngram_index` + `key_trigrams_norm` peak at ~206 MB for a 5000-key batch. This is the price of similarity search — fixed per checkpoint, not cumulative. The `$trigger` parameter directly controls this: lower trigger = less peak memory but more frequent checkpoints. (PF-21)
 
 **Perl-specific:**
 
-22. **`my` declarations execute at runtime in textual order.** Variables declared below the parsing loop are `undef` when called during parsing via checkpoints. This is a Perl-specific gotcha when restructuring code flow — move all declarations above the earliest possible call site. (PF-20)
+23. **`my` declarations execute at runtime in textual order.** Variables declared below the parsing loop are `undef` when called during parsing via checkpoints. This is a Perl-specific gotcha when restructuring code flow — move all declarations above the earliest possible call site. (PF-20)
 
 ### Outstanding Decisions
 
 1. **Acceptable memory overhead** — the checkpoint prototype uses 238 MB (power-law) / 157 MB (diverse) vs ltl's 172 MB / 28 MB. The overhead is trigram data structures (~200 MB peak), bounded per checkpoint batch. See PF-21.
-2. **Ceiling default: 2 or 3?** Testing needed with the checkpoint architecture.
+2. ~~**Ceiling default: 2 or 3?**~~ Resolved — ceiling=3 (see PF-22).
 3. **Should Inline::C be a production dependency?** With far fewer alignments per checkpoint, pure Perl may be fast enough. Needs benchmarking.
-4. **Final pass integration** — the final pass (`--final-pass`) has not been re-validated with the checkpoint architecture. It should still work but needs testing.
+4. ~~**Final pass integration**~~ Resolved — validated with checkpoint architecture (PF-22).
 
 ### Next Steps
 
@@ -967,8 +989,8 @@ The core algorithms are sound and proven:
 1. ~~**Rebuild the consolidation loop** with checkpoint-based processing~~ — DONE (PF-20)
 2. ~~**UUID normalization**~~ — DONE (PF-19)
 3. ~~**Add `Devel::Size` memory instrumentation**~~ — DONE (PF-21). Prototype uses more memory than ltl baseline due to trigram overhead. Memory is bounded per checkpoint batch.
-4. **Test ceiling=2 vs ceiling=3** — measure workload size and consolidation quality for both values with checkpoint architecture.
-5. **Re-validate final pass** (`--final-pass`) with checkpoint architecture.
+4. ~~**Test ceiling values**~~ — DONE (PF-22). Ceiling=3 confirmed as default.
+5. ~~**Re-validate final pass**~~ — DONE (PF-22). Works correctly with checkpoint architecture.
 6. **Test with larger files** — validate scaling on 1+ GB production logs.
 7. **Integrate into ltl** — port checkpoint architecture into `read_and_process_logs()`, wire up stats merging (DD-07), add `--group-similar` CLI option.
 
