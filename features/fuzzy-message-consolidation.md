@@ -764,6 +764,70 @@ Parse line-by-line:
 - Per-checkpoint output provides full pipeline visibility (S2 → S3 → S4 flow)
 - Tracking invariant catches any accounting errors immediately
 
+### PF-21: Memory Instrumentation and ltl Baseline Comparison
+
+**Problem:** The checkpoint architecture frees memory at each checkpoint (deleting absorbed keys from `%log_messages`/`%key_message`, freeing trigram data). But we'd never measured whether this actually works, or how the prototype's memory footprint compares to ltl baseline.
+
+**Implementation — `--mem` flag added to prototype:**
+- `get_rss()` — RSS via `ps` (macOS), always called to track high-water mark
+- `measure_memory($label)` — when `--mem` is set, measures 9 data structures via `Devel::Size::total_size()` and records snapshots
+- Measurement points: after consolidation pass (before cleanup), after cleanup, after parsing, after final checkpoints, after final pass, end of processing
+- ltl-equivalent projection: tracks cumulative bytes deleted from `%log_messages`/`%key_message` to show what those structures would cost if keys were retained (as ltl does)
+- Zero overhead without `--mem` — only RSS tracking via `ps`
+
+**Findings — power-law file (288K lines, 286K unique ERROR):**
+
+| Measurement | Value |
+|-------------|------:|
+| ltl baseline RSS | 172 MB |
+| ltl `log_messages` | 105 MB |
+| Prototype RSS (high-water) | 238 MB |
+| Prototype RSS (end) | 238 MB |
+| Peak structure HWM: `key_trigrams` | 73 MB |
+| Peak structure HWM: `ngram_index` | 68 MB |
+| Peak structure HWM: `key_trigrams_norm` | 65 MB |
+| Peak structure HWM: `key_message` | 3.1 MB |
+| Peak structure HWM: `log_messages` | 2.5 MB |
+| Cumulative deleted `log_messages` | 2.6 MB |
+| Cumulative deleted `key_message` | 3.2 MB |
+| Peak ltl-equivalent (all structures) | 214 MB |
+
+**Findings — diverse file (480K lines, 10K unique):**
+
+| Measurement | Value |
+|-------------|------:|
+| ltl baseline RSS | 28 MB |
+| ltl `log_messages` | 0.8 MB |
+| Prototype RSS (high-water) | 157 MB |
+| Prototype RSS (end) | 157 MB |
+| Peak structure HWM: `ngram_index` | 52 MB |
+| Peak structure HWM: `key_trigrams` | 50 MB |
+| Peak structure HWM: `key_trigrams_norm` | 29 MB |
+| Peak structure HWM: `key_message` | 3.5 MB |
+| Peak structure HWM: `log_messages` | 3.2 MB |
+| Cumulative deleted `log_messages` | 3.0 MB |
+| Cumulative deleted `key_message` | 3.3 MB |
+| Peak ltl-equivalent (all structures) | 142 MB |
+
+**Analysis:**
+
+1. **The prototype uses MORE memory than ltl, not less.** The trigram data structures (`key_trigrams` + `ngram_index` + `key_trigrams_norm`) peak at ~206 MB (power-law) and ~131 MB (diverse). This is the cost of similarity search — there's no free lunch.
+
+2. **The freed memory IS reusable.** When Perl `delete`s hash entries, that memory returns to Perl's internal free pool. Subsequent checkpoints reuse this memory for new trigram indices rather than requesting more from the OS. RSS stays flat across checkpoints despite building and tearing down 50-70 MB of trigram data each time.
+
+3. **RSS never decreases — this is normal.** `free()` returns to Perl's allocator, not the OS. The RSS high-water mark equals RSS at end for both files. The cleanup works at the Perl level (structures go to near-zero after cleanup), but the OS-level RSS doesn't shrink.
+
+4. **The deleted `log_messages`/`key_message` data is tiny** (~3-6 MB) compared to trigram overhead (~200 MB). The memory savings from absorbing keys during parsing (S1 inline match preventing `%log_messages` entries) saves far more than the explicit deletions after checkpoints.
+
+5. **The dominant memory cost is trigrams, bounded per checkpoint.** Each checkpoint builds trigrams for at most `$trigger` keys (5000), then frees them. The peak is one checkpoint's worth of trigram data, not cumulative.
+
+**Implications for ltl integration:**
+
+- **DD-12 memory target (30% reduction) will NOT be met** on these test files. The trigram overhead exceeds the savings from consolidation.
+- However, the memory IS bounded — it doesn't grow with file size beyond one checkpoint batch. On a 10 GB file with millions of lines, ltl's `%log_messages` would grow proportionally while consolidation's trigram overhead stays fixed at one batch.
+- The crossover point — where consolidation saves more memory than it costs — depends on the ratio of unique keys to total keys. Files with millions of unique keys (where ltl's `%log_messages` would be huge) would benefit most.
+- The `$trigger` parameter directly controls the trigram peak: lower trigger = smaller batches = less trigram memory but more frequent checkpoints.
+
 ## Prototype Performance Assessment
 
 ### Test Files
@@ -790,11 +854,14 @@ The checkpoint architecture is actually **faster** than ltl baseline because S1 
 
 | Metric | Primary (power-law) | Diverse (realistic) |
 |--------|--------------------:|--------------------:|
-| **ltl baseline** | **171 MB** | **28 MB** |
+| **ltl baseline RSS** | **172 MB** | **28 MB** |
+| **ltl log_messages** | **105 MB** | **0.8 MB** |
 | Old prototype (load-all) | 535 MB | 192 MB |
-| **Checkpoint prototype** | **TBD** | **TBD** |
+| **Checkpoint prototype RSS** | **238 MB** | **157 MB** |
+| **Peak ltl-equivalent (structures)** | **214 MB** | **142 MB** |
+| **Cumulative deleted (log+key)** | **5.8 MB** | **6.3 MB** |
 
-Memory has not been formally measured with `Devel::Size` on the checkpoint architecture. However, the design frees trigram data per checkpoint and deletes absorbed keys from `%log_messages`, so memory should be significantly lower than the old prototype. On power-law data, 98.4% of keys are absorbed during parsing and never create `%log_messages` entries.
+See PF-21 for detailed analysis. Key findings: the checkpoint prototype uses more RSS than ltl baseline due to trigram data structures (~206 MB peak on power-law, ~131 MB on diverse). However, the freed memory IS reusable — Perl's allocator recycles it for subsequent checkpoint work, keeping memory bounded across checkpoints rather than growing unboundedly. RSS never decreases because `free()` returns to Perl's allocator, not the OS — this is normal behavior.
 
 ### Key Findings
 
@@ -878,7 +945,7 @@ The core algorithms are sound and proven:
 
 ### Outstanding Decisions
 
-1. **Acceptable overhead budget** — the checkpoint prototype is actually faster than ltl baseline on these test files, but memory overhead needs formal measurement.
+1. **Acceptable memory overhead** — the checkpoint prototype uses 238 MB (power-law) / 157 MB (diverse) vs ltl's 172 MB / 28 MB. The overhead is trigram data structures (~200 MB peak), bounded per checkpoint batch. See PF-21.
 2. **Ceiling default: 2 or 3?** Testing needed with the checkpoint architecture.
 3. **Should Inline::C be a production dependency?** With far fewer alignments per checkpoint, pure Perl may be fast enough. Needs benchmarking.
 4. **Final pass integration** — the final pass (`--final-pass`) has not been re-validated with the checkpoint architecture. It should still work but needs testing.
@@ -889,7 +956,7 @@ The core algorithms are sound and proven:
 
 1. ~~**Rebuild the consolidation loop** with checkpoint-based processing~~ — DONE (PF-20)
 2. ~~**UUID normalization**~~ — DONE (PF-19)
-3. **Add `Devel::Size` memory instrumentation** — measure actual memory at key points (after checkpoint, after freeing trigram data, end of processing). Verify net memory reduction vs ltl baseline.
+3. ~~**Add `Devel::Size` memory instrumentation**~~ — DONE (PF-21). Prototype uses more memory than ltl baseline due to trigram overhead. Memory is bounded per checkpoint batch.
 4. **Test ceiling=2 vs ceiling=3** — measure workload size and consolidation quality for both values with checkpoint architecture.
 5. **Re-validate final pass** (`--final-pass`) with checkpoint architecture.
 6. **Test with larger files** — validate scaling on 1+ GB production logs.
@@ -902,4 +969,4 @@ The core algorithms are sound and proven:
 3. ~~**Performance benchmarks**~~: Resolved — NYTProf profiling (PF-14), alignment algorithm benchmark (PF-15)
 4. **Minimum cluster count**: Below what number of unique messages per category is consolidation not triggered at all? Likely related to the trigger threshold but may need a separate floor.
 5. ~~**Hard cap value**~~: Resolved — default 50, accommodates shared pool across log levels
-6. ~~**Scalability**~~: Resolved — checkpoint architecture eliminates the 310% time overhead. Power-law: 1.87s (faster than ltl baseline). Diverse: 2.06s (faster than ltl baseline). Memory TBD.
+6. ~~**Scalability**~~: Resolved — checkpoint architecture eliminates the 310% time overhead. Power-law: 1.87s (faster than ltl baseline). Diverse: 2.06s (faster than ltl baseline). Memory: 238 MB / 157 MB (bounded per checkpoint, see PF-21).

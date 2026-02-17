@@ -141,6 +141,7 @@ my $max_patterns = 50;
 my $final_pass = 0;
 my $final_threshold = 95;
 my $final_ceiling = 100;
+my $show_memory = 0;
 
 GetOptions(
     'file=s'              => \$file,
@@ -153,7 +154,8 @@ GetOptions(
     'final-pass'          => \$final_pass,
     'final-threshold=i'   => \$final_threshold,
     'final-ceiling=i'     => \$final_ceiling,
-) or die "Usage: $0 --file <logfile> [--threshold N] [--trigger N] [--top N] [--ceiling N] [--max-patterns N] [--final-pass] [--final-threshold N] [--final-ceiling N] [--verbose]\n";
+    'mem'                 => \$show_memory,
+) or die "Usage: $0 --file <logfile> [--threshold N] [--trigger N] [--top N] [--ceiling N] [--max-patterns N] [--final-pass] [--final-threshold N] [--final-ceiling N] [--mem] [--verbose]\n";
 
 die "Error: --file is required\n" unless defined $file;
 die "Error: file '$file' not found\n" unless -f $file;
@@ -167,6 +169,13 @@ my %key_trigrams_norm;   # {log_key} => { trigram => 1, ... }  (UUID-normalized,
 my %key_message;         # {log_key} => $message  (deleted when key absorbed)
 my %canonical_patterns;  # {category} => [ { pattern => qr//, cluster_key => $key, canonical => $str, match_count => N }, ... ]
 my %clusters;            # {category}{canonical} => { canonical, pattern, mask, occurrences, match_count }
+
+# --- Memory Tracking ---
+my $rss_high_water = 0;          # MB — progressive high-water mark
+my %structure_hwm;               # {name} => peak bytes (Devel::Size)
+my @memory_snapshots;            # [ { label, rss, structures => { name => bytes } }, ... ]
+my $deleted_log_messages_bytes = 0;  # cumulative bytes freed from %log_messages (would still exist in ltl)
+my $deleted_key_message_bytes = 0;   # cumulative bytes freed from %key_message
 
 # --- UUID normalization for Dice scoring ---
 my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -253,10 +262,16 @@ while (my $line = <$fh>) {
 }
 close($fh);
 
+# MEASURE: after parsing loop completes, before final checkpoints
+measure_memory("after parsing");
+
 # Final checkpoint for all categories with remaining unmatched keys
 for my $cat (sort keys %unmatched_keys) {
     run_checkpoint($cat) if scalar(keys %{$unmatched_keys{$cat}}) >= 2;
 }
+
+# MEASURE: after final checkpoints
+measure_memory("after final checkpoints");
 
 my $t_parsed = time();
 
@@ -283,6 +298,63 @@ for my $cat (sort keys %cat_keys_seen) {
     printf "  %-10s %6d seen, %6d remaining, %d checkpoints\n", $cat, $seen, $remaining, $checkpoints;
 }
 print "\n";
+
+# ========================================================================
+# Memory Instrumentation
+# ========================================================================
+
+sub get_rss {
+    my $rss = `ps -o rss= -p $$`;
+    chomp $rss;
+    return ($rss && $rss > 0) ? $rss / 1024 : 0;  # returns MB
+}
+
+sub measure_memory {
+    my ($label) = @_;
+
+    # Always update RSS high-water mark
+    my $rss = get_rss();
+    $rss_high_water = $rss if $rss > $rss_high_water;
+
+    return unless $show_memory;
+
+    require Devel::Size;
+
+    my %sizes = (
+        log_messages       => Devel::Size::total_size(\%log_messages),
+        key_message        => Devel::Size::total_size(\%key_message),
+        clusters           => Devel::Size::total_size(\%clusters),
+        canonical_patterns => Devel::Size::total_size(\%canonical_patterns),
+        unmatched_keys     => Devel::Size::total_size(\%unmatched_keys),
+        ngram_index        => Devel::Size::total_size(\%ngram_index),
+        key_trigrams       => Devel::Size::total_size(\%key_trigrams),
+        key_trigrams_norm  => Devel::Size::total_size(\%key_trigrams_norm),
+        posting_size       => Devel::Size::total_size(\%posting_size),
+    );
+
+    # Update per-structure high-water marks
+    for my $name (keys %sizes) {
+        my $hwm = $structure_hwm{$name} // 0;
+        $structure_hwm{$name} = $sizes{$name} if $sizes{$name} > $hwm;
+    }
+
+    # ltl-equivalent: log_messages + key_message would retain deleted keys
+    my $ltl_log_messages = $sizes{log_messages} + $deleted_log_messages_bytes;
+    my $ltl_key_message  = $sizes{key_message}  + $deleted_key_message_bytes;
+
+    # Record snapshot
+    push @memory_snapshots, {
+        label      => $label,
+        rss        => $rss,
+        structures => \%sizes,
+        ltl_equiv  => {
+            log_messages => $ltl_log_messages,
+            key_message  => $ltl_key_message,
+            deleted_lm   => $deleted_log_messages_bytes,
+            deleted_km   => $deleted_key_message_bytes,
+        },
+    };
+}
 
 # ========================================================================
 # N-gram Functions (Phase 1)
@@ -981,6 +1053,9 @@ sub run_checkpoint {
     my ($discovered, $absorbed, $ceiling_skipped, $cap_hit, $g2_absorbed, $fc_calls, $g2_survivors) =
         run_consolidation_pass($cat, \@unmatched, $cp_num);
 
+    # MEASURE: after consolidation pass, BEFORE freeing memory — this is peak
+    measure_memory("CP $cp_num [$cat] after consolidation");
+
     # S4 pairwise absorbed = total absorbed minus S3 checkpoint absorbed
     my $pairwise_absorbed = $absorbed - $g2_absorbed;
     my $discovery_candidates = $pre_count - $ceiling_skipped;
@@ -1009,10 +1084,25 @@ sub run_checkpoint {
     %{$unmatched_keys{$cat}} = map { $_ => 1 } @unmatched;
 
     # Delete absorbed keys from %log_messages and %key_message to free memory
-    for my $key (keys %{$log_messages{$cat}}) {
-        unless (exists $unmatched_keys{$cat}{$key}) {
-            delete $log_messages{$cat}{$key};
-            delete $key_message{$key};
+    # Track deleted bytes for ltl-equivalent projection
+    if ($show_memory) {
+        require Devel::Size;
+        my $lm_before = Devel::Size::total_size(\%log_messages);
+        my $km_before = Devel::Size::total_size(\%key_message);
+        for my $key (keys %{$log_messages{$cat}}) {
+            unless (exists $unmatched_keys{$cat}{$key}) {
+                delete $log_messages{$cat}{$key};
+                delete $key_message{$key};
+            }
+        }
+        $deleted_log_messages_bytes += $lm_before - Devel::Size::total_size(\%log_messages);
+        $deleted_key_message_bytes  += $km_before - Devel::Size::total_size(\%key_message);
+    } else {
+        for my $key (keys %{$log_messages{$cat}}) {
+            unless (exists $unmatched_keys{$cat}{$key}) {
+                delete $log_messages{$cat}{$key};
+                delete $key_message{$key};
+            }
         }
     }
 
@@ -1031,6 +1121,9 @@ sub run_checkpoint {
         merge_overlapping_patterns($cat);
         $cat_stats{$cat}{patterns_final} = exists $canonical_patterns{$cat} ? scalar @{$canonical_patterns{$cat}} : 0;
     }
+
+    # MEASURE: after freeing — shows what cleanup achieved
+    measure_memory("CP $cp_num [$cat] after cleanup");
 }
 
 # ========================================================================
@@ -1173,10 +1266,23 @@ if ($final_pass) {
         }
 
         # Update unmatched keys — remove consumed
-        for my $key (keys %consumed) {
-            delete $unmatched_keys{$cat}{$key};
-            delete $log_messages{$cat}{$key};
-            delete $key_message{$key};
+        if ($show_memory) {
+            require Devel::Size;
+            my $lm_before = Devel::Size::total_size(\%log_messages);
+            my $km_before = Devel::Size::total_size(\%key_message);
+            for my $key (keys %consumed) {
+                delete $unmatched_keys{$cat}{$key};
+                delete $log_messages{$cat}{$key};
+                delete $key_message{$key};
+            }
+            $deleted_log_messages_bytes += $lm_before - Devel::Size::total_size(\%log_messages);
+            $deleted_key_message_bytes  += $km_before - Devel::Size::total_size(\%key_message);
+        } else {
+            for my $key (keys %consumed) {
+                delete $unmatched_keys{$cat}{$key};
+                delete $log_messages{$cat}{$key};
+                delete $key_message{$key};
+            }
         }
 
         my $final_patterns = exists $canonical_patterns{$cat} ? scalar @{$canonical_patterns{$cat}} : 0;
@@ -1188,6 +1294,9 @@ if ($final_pass) {
 
     my $t_final_done = time();
     printf "\nFinal pass time: %.2f s\n", $t_final_done - $t_final_start;
+
+    # MEASURE: after final pass
+    measure_memory("after final pass");
 }
 
 # ========================================================================
@@ -1340,17 +1449,67 @@ $total_patterns += scalar @{$canonical_patterns{$_}} for keys %canonical_pattern
 my $total_clusters = 0;
 $total_clusters += scalar keys %{$clusters{$_}} for keys %clusters;
 
-printf "\n=== Memory ===\n";
-printf "  Compiled patterns:  %d (cap: %d)\n", $total_patterns, $max_patterns;
-printf "  Total clusters:     %d\n", $total_clusters;
-printf "  Cached trigram sets: %d\n", scalar keys %key_trigrams;
-printf "  Remaining log_messages keys: %d\n", $remaining_keys;
+# MEASURE: end of processing
+measure_memory("end of processing");
 
-eval {
-    my $pid = $$;
-    my $rss = `ps -o rss= -p $pid`;
-    chomp $rss;
-    if ($rss && $rss > 0) {
-        printf "  Process RSS:        %.1f MB\n", $rss / 1024;
+printf "\n=== Memory ===\n";
+printf "  RSS high-water mark: %.1f MB\n", $rss_high_water;
+printf "  RSS at end:          %.1f MB\n", get_rss();
+
+if ($show_memory && @memory_snapshots) {
+    # Per-snapshot timeline
+    printf "\n  --- Memory Timeline ---\n";
+    my $peak_ltl_equiv = 0;
+    for my $snap (@memory_snapshots) {
+        printf "  [%6.1f MB] %s\n", $snap->{rss}, $snap->{label};
+        my %s = %{$snap->{structures}};
+        my $total = 0;
+        $total += $_ for values %s;
+        # Show structures > 1KB, sorted by size descending
+        for my $name (sort { $s{$b} <=> $s{$a} } grep { $s{$_} >= 1024 } keys %s) {
+            printf "    %-20s %7.1f MB  (%4.1f%%)\n",
+                $name, $s{$name} / 1024 / 1024,
+                $total > 0 ? ($s{$name} / $total) * 100 : 0;
+        }
+        # ltl-equivalent projection
+        if ($snap->{ltl_equiv} && $snap->{ltl_equiv}{deleted_lm} > 0) {
+            printf "    --- ltl-equivalent (retained keys) ---\n";
+            printf "    log_messages         %7.1f MB  (actual %.1f + deleted %.1f)\n",
+                $snap->{ltl_equiv}{log_messages} / 1024 / 1024,
+                $s{log_messages} / 1024 / 1024,
+                $snap->{ltl_equiv}{deleted_lm} / 1024 / 1024;
+            printf "    key_message          %7.1f MB  (actual %.1f + deleted %.1f)\n",
+                $snap->{ltl_equiv}{key_message} / 1024 / 1024,
+                $s{key_message} / 1024 / 1024,
+                $snap->{ltl_equiv}{deleted_km} / 1024 / 1024;
+            my $ltl_total = $total + $snap->{ltl_equiv}{deleted_lm} + $snap->{ltl_equiv}{deleted_km};
+            printf "    projected total      %7.1f MB  (vs actual %.1f)\n",
+                $ltl_total / 1024 / 1024, $total / 1024 / 1024;
+            $peak_ltl_equiv = $ltl_total if $ltl_total > $peak_ltl_equiv;
+        }
+        # Track peak even for snapshots without deletions yet
+        my $ltl_total = $total + ($snap->{ltl_equiv}{deleted_lm} // 0) + ($snap->{ltl_equiv}{deleted_km} // 0);
+        $peak_ltl_equiv = $ltl_total if $ltl_total > $peak_ltl_equiv;
     }
-};
+
+    # High-water marks per structure
+    printf "\n  --- Structure High-Water Marks ---\n";
+    my $total_hwm = 0;
+    $total_hwm += $_ for values %structure_hwm;
+    for my $name (sort { $structure_hwm{$b} <=> $structure_hwm{$a} }
+                  grep { $structure_hwm{$_} >= 1024 } keys %structure_hwm) {
+        printf "    %-20s %7.1f MB  (%4.1f%%)\n",
+            $name, $structure_hwm{$name} / 1024 / 1024,
+            $total_hwm > 0 ? ($structure_hwm{$name} / $total_hwm) * 100 : 0;
+    }
+
+    # ltl comparison summary
+    printf "\n  --- ltl Comparison ---\n";
+    printf "    Peak ltl-equivalent (structures): %7.1f MB\n", $peak_ltl_equiv / 1024 / 1024;
+    printf "    Cumulative deleted log_messages:   %7.1f MB\n", $deleted_log_messages_bytes / 1024 / 1024;
+    printf "    Cumulative deleted key_message:    %7.1f MB\n", $deleted_key_message_bytes / 1024 / 1024;
+}
+
+printf "\n  Compiled patterns:  %d (cap: %d)\n", $total_patterns, $max_patterns;
+printf "  Total clusters:     %d\n", $total_clusters;
+printf "  Remaining log_messages keys: %d\n", $remaining_keys;
