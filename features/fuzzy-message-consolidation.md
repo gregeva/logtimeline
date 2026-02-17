@@ -1,7 +1,7 @@
 # Fuzzy Message Consolidation — Requirements
 
 **GitHub Issue:** #96
-**Status:** Prototype complete — Checkpoint architecture, core algorithms, and memory profile validated (PF-01 through PF-21). Ready for ltl integration.
+**Status:** Prototype complete — validated at production scale (PF-01 through PF-24). 1.9× faster and 40% less memory than ltl on 3.3 GB access logs. Ready for ltl integration.
 **Blocks:** #97 (hierarchical message roll-up grouping)
 
 ## Problem Statement
@@ -1061,4 +1061,4 @@ The core algorithms are sound and proven:
 3. ~~**Performance benchmarks**~~: Resolved — NYTProf profiling (PF-14), alignment algorithm benchmark (PF-15)
 4. **Minimum cluster count**: Below what number of unique messages per category is consolidation not triggered at all? Likely related to the trigger threshold but may need a separate floor.
 5. ~~**Hard cap value**~~: Resolved — default 50, accommodates shared pool across log levels
-6. ~~**Scalability**~~: Resolved — checkpoint architecture eliminates the 310% time overhead. Power-law: 1.87s (faster than ltl baseline). Diverse: 2.06s (faster than ltl baseline). Memory: 238 MB / 157 MB (bounded per checkpoint, see PF-21).
+6. ~~**Scalability**~~: Resolved — validated at production scale (PF-24). 50 files, 3.3 GB, 16.4M lines: 81s, 151 MB, 99.9% S1 absorption. 1.9× faster and 40% less memory than ltl -od.
