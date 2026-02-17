@@ -82,7 +82,7 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 4. Switch to main: `git checkout main && git pull origin main`
 5. Create release branch: `git checkout -b release/X.Y.Z` (no `v` prefix)
 6. Merge each feature/bugfix branch: `git merge {branch-name} --no-edit` (repeat for all branches going into this release)
-7. Update version in `ltl` (line 74: `$version_number`)
+7. Update version in `ltl` (`$version_number` near top of GLOBALS section)
 8. Create release notes: `releases/v{version}.md` — **keep it concise**: one bullet per feature/fix with issue reference. No usage examples, no file lists, no "Breaking Changes: None", no "Known Issues", no root cause analysis. See `releases/TEMPLATE.md`.
 9. Commit: `git commit -am "Release vX.Y.Z"`
 10. Push release branch: `git push -u origin release/X.Y.Z`
@@ -98,16 +98,17 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 ./ltl [options] <logfile(s)>
 ```
 
-Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-if/-ef/-hf` (pattern files), `-du` (duration unit), `-hm` (heatmap), `-ms` (millisecond precision), `-st/-et` (time range filters, supports milliseconds), `--help` (full help)
+Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-if/-ef/-hf` (pattern files), `-du` (duration unit), `-hm` (heatmap), `-hg` (histogram), `-ms` (millisecond precision), `-st/-et` (time range filters, supports milliseconds), `-hs` (hide sessions column), `--help` (full help)
 
-**Hidden option for Claude Code:** `--disable-progress` - ALWAYS use this flag when running ltl to suppress progress output that wastes tokens.
+**Hidden options:** `--disable-progress` (ALWAYS use this flag when running ltl from Claude Code — suppresses progress output that wastes tokens), `--terminal-width N` (control terminal width in piped/non-TTY contexts), `--debug-layout`, `--validate-layout`.
 
 ## Architecture
 
 ### Code Structure (ltl)
-- **GLOBALS** (lines 74-232): Version, configuration, data structures, command-line options
-- **SUBS** (lines 235-2498): Processing and output subroutines
-- **MAIN** (lines 2499+): Execution flow
+Search for these section markers in the file — line numbers shift as the codebase grows:
+- **`## GLOBALS ##`**: Version (`$version_number`), configuration, data structures, command-line options
+- **`## SUBS ##`**: All processing and output subroutines
+- **`## MAIN ##`**: Execution flow
 
 ### Key Data Structures
 - `%log_occurrences` - Count tallies across time buckets
@@ -118,7 +119,9 @@ Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV ou
 - `@heatmap_boundaries` - Logarithmic bucket boundaries (N+1 elements for N columns)
 
 ### Output Column Layout
-The bar graph uses a column layout system with multiple width variables and padding constants. For detailed technical documentation, see `features/column-layout-refactor.md` (issue #33).
+`@column_layout` is the single source of truth for all column rendering — widths, spacing, visibility, colors. Dynamic columns (threadpools, sessions, user-defined metrics) are inserted via `add_dynamic_column()`. The layout engine handles auto-hiding columns at narrow terminal widths. `@column_colors` carries ANSI color definitions per column. For detailed technical documentation, see `features/column-layout-refactor.md` (issue #33).
+
+Hidden CLI options: `--disable-progress` (ALWAYS use from Claude Code), `--terminal-width N`, `--debug-layout`, `--validate-layout`.
 
 ### Core Processing Flow
 1. `adapt_to_command_line_options()` - Parse command line
