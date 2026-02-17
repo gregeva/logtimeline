@@ -804,12 +804,18 @@ The consolidation loop (Phase 4) needs to be rebuilt around the checkpoint logic
 
 ### Next Steps
 
-1. **Measure actual workload size after gating** — on both test files, simulate the checkpoint: how many keys survive Gate 1 (ceiling filter) and Gate 2 (pattern match)? This is the critical number — if gating reduces 5000 keys to 200, the current trigram algorithms are already fast enough.
-2. **Rebuild the consolidation loop** in the prototype with the two-gate checkpoint logic. Reuse core algorithms (`dice_coefficient`, `compute_mask`, `derive_canonical`, `derive_regex`, `match_against_patterns`). Replace orchestration (`run_consolidation_pass`, `build_ngram_index` scope).
-3. **Implement end-of-file mode first** — simpler to validate since all counts are final. Streaming mode adds complexity of partial counts and incremental pattern updates.
+**Performance (priority):**
+
+1. **Rebuild the consolidation loop** in the prototype with the two-gate checkpoint logic. Reuse core algorithms (`dice_coefficient`, `compute_mask`, `derive_canonical`, `derive_regex`, `match_against_patterns`). Replace orchestration (`run_consolidation_pass`, `build_ngram_index` scope).
+2. **Implement end-of-file mode first** — simpler to validate since all counts are final. Streaming mode adds complexity of partial counts and incremental pattern updates.
+3. **Test ceiling=2 vs ceiling=3** — measure workload size and consolidation quality for both values.
 4. **Benchmark the revised approach** against the same test files and compare to current numbers (3.6s/535MB primary, 12.3s/192MB diverse) and ltl baseline (2.6s/171MB primary, 3.0s/28MB diverse).
-5. **Test ceiling=2 vs ceiling=3** — measure workload size and consolidation quality for both values.
-6. **Profile memory with revised scope** — if gating reduces indexed keys from 5000 to a few hundred, trigram memory drops proportionally and may become negligible.
+
+**Memory (after performance is resolved):**
+
+5. **Add `Devel::Size` instrumentation** — measure actual memory of `%ngram_index`, `%key_trigrams`, `%posting_size`, and `%key_message` during execution. Track trigram structure sizes at key points (after index build, after discovery, after freeing).
+6. **Free trigram data after discovery** — `%ngram_index`, `%key_trigrams`, `%posting_size` are only needed during pairwise discovery. Once patterns are compiled to regex, these can be discarded. In streaming mode, evaluate whether rebuilding per checkpoint is cheaper than retaining.
+7. **Verify net memory reduction** — the whole point of consolidation is that collapsing thousands of unique keys into a handful of patterns should **reduce** total memory, not increase it. Currently the prototype uses *more* memory than ltl without consolidation (535MB vs 171MB primary, 192MB vs 28MB diverse). After consolidation, the absorbed keys can be removed from `%log_messages` (their stats merged into the pattern's cluster), and trigram data freed. The net result should be lower memory than without consolidation, especially on files with many parameter-variant messages.
 
 ## Open Questions
 
