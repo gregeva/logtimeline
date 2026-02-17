@@ -123,10 +123,10 @@ END_C
 
 # ============================================================================
 # Prototype for #96 — Fuzzy Message Consolidation
-# Phase 1: Log Parsing + N-gram Indexing + Dice Scoring
-# Phase 2: Diff-Style Alignment + Mask + Canonical Form
-# Phase 3: Pattern Compilation + Incoming Matching
-# Phase 4: Full Consolidation Loop
+# Checkpoint-based batched processing architecture:
+#   Parse line-by-line → S1 inline match → accumulate unmatched →
+#   checkpoint fires at trigger → S2 ceiling → S3 checkpoint match →
+#   S4 pairwise discovery → interleaved re-scan → delete absorbed keys
 # ============================================================================
 
 # --- CLI Options ---
@@ -159,18 +159,35 @@ die "Error: --file is required\n" unless defined $file;
 die "Error: file '$file' not found\n" unless -f $file;
 
 # --- Data Structures ---
-my %log_messages;        # {category}{log_key} => { occurrences => N }
-my %ngram_index;         # {category}{trigram}{log_key} => 1
-my %posting_size;        # {category}{trigram} => count  (posting list size cache)
-my %key_trigrams;        # {log_key} => { trigram => 1, ... }  (cache)
-my %key_message;         # {log_key} => $message  (the message portion, for similarity)
+my %log_messages;        # {category}{log_key} => { occurrences => N } — currently unmatched + cluster entries
+my %ngram_index;         # {category}{trigram}{log_key} => 1  (built and freed per checkpoint)
+my %posting_size;        # {category}{trigram} => count  (posting list size cache, per checkpoint)
+my %key_trigrams;        # {log_key} => { trigram => 1, ... }  (freed per checkpoint)
+my %key_trigrams_norm;   # {log_key} => { trigram => 1, ... }  (UUID-normalized, for Dice scoring)
+my %key_message;         # {log_key} => $message  (deleted when key absorbed)
 my %canonical_patterns;  # {category} => [ { pattern => qr//, cluster_key => $key, canonical => $str, match_count => N }, ... ]
+my %clusters;            # {category}{canonical} => { canonical, pattern, mask, occurrences, match_count }
+
+# --- UUID normalization for Dice scoring ---
+my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+# --- Find-candidates tuning ---
+my $discriminative_topk = 50;       # use top-50 most discriminative trigrams
+my $prefilter_ratio    = 0.30;      # require 30% of topk hits as loose pre-filter
+
+# --- Checkpoint Tracking ---
+my %unmatched_keys;      # {category} => { $log_key => 1 } — keys awaiting consolidation
+my %checkpoint_count;    # {category} => N
+my $total_keys_seen = 0; # total unique keys ever encountered
+my %cat_keys_seen;       # {category} => N — unique keys seen per category
+my %cat_stats;           # {category} => { s1_inline, s2_ceiling, s3_checkpoint, s4_pairwise, fc_calls,
+                         #                  patterns_discovered, patterns_final, checkpoints }
 
 # --- ThingWorx ApplicationLog Regex (from ltl line 1827) ---
 my $twx_regex = qr/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ((?:\](?! )|[^\]])*)] (.*)/;
 
 # ========================================================================
-# Phase 1: Parse Log File
+# Parse Log File with Checkpoint-Based Consolidation
 # ========================================================================
 my $t_start = time();
 my $total_lines = 0;
@@ -198,10 +215,37 @@ while (my $line = <$fh>) {
         my $truncated_object = substr($object, length($object) > $max_object_length ? length($object) - $max_object_length : 0, $max_object_length);
         my $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, 350);
 
-        $log_messages{$category}{$log_key}{occurrences}++;
+        # Is this a brand-new unique key?
+        my $is_new_key = !exists $log_messages{$category}{$log_key};
 
-        unless (exists $key_message{$log_key}) {
+        if ($is_new_key) {
+            $total_keys_seen++;
+            $cat_keys_seen{$category}++;
+
+            # S1 inline match: try matching against existing patterns
+            my $entry = match_against_patterns($category, substr($log_key, 0, $message_length_cap));
+            if ($entry) {
+                # Absorbed — merge into cluster, don't create %log_messages entry
+                my $cluster = $clusters{$category}{$entry->{canonical}};
+                if ($cluster) {
+                    $cluster->{occurrences}++;
+                }
+                $cat_stats{$category}{s1_inline}++;
+                next;  # don't add to %log_messages or unmatched
+            }
+
+            # No pattern match — add as unmatched
+            $log_messages{$category}{$log_key} = { occurrences => 1 };
             $key_message{$log_key} = substr($log_key, 0, $message_length_cap);
+            $unmatched_keys{$category}{$log_key} = 1;
+
+            # Check if checkpoint should fire
+            if (scalar(keys %{$unmatched_keys{$category}}) >= $trigger) {
+                run_checkpoint($category);
+            }
+        } else {
+            # Existing key — just increment
+            $log_messages{$category}{$log_key}{occurrences}++;
         }
     } else {
         $unmatched_lines++;
@@ -209,26 +253,34 @@ while (my $line = <$fh>) {
 }
 close($fh);
 
-my $t_parsed = time();
-
-my $total_categories = scalar keys %log_messages;
-my $total_unique_keys = 0;
-for my $cat (sort keys %log_messages) {
-    $total_unique_keys += scalar keys %{$log_messages{$cat}};
+# Final checkpoint for all categories with remaining unmatched keys
+for my $cat (sort keys %unmatched_keys) {
+    run_checkpoint($cat) if scalar(keys %{$unmatched_keys{$cat}}) >= 2;
 }
 
-print "=== Parsing Complete ===\n";
+my $t_parsed = time();
+
+my $total_categories = scalar keys %cat_keys_seen;
+my $remaining_keys = 0;
+for my $cat (sort keys %log_messages) {
+    $remaining_keys += scalar keys %{$log_messages{$cat}};
+}
+
+print "\n=== Parsing + Checkpoints Complete ===\n";
 printf "Total lines:      %d\n", $total_lines;
 printf "Matched lines:    %d\n", $matched_lines;
 printf "Unmatched lines:  %d\n", $unmatched_lines;
 printf "Categories:       %d\n", $total_categories;
-printf "Total unique keys: %d\n", $total_unique_keys;
-printf "Parse time:       %.2f s\n\n", $t_parsed - $t_start;
+printf "Total unique keys seen: %d\n", $total_keys_seen;
+printf "Remaining in log_messages: %d\n", $remaining_keys;
+printf "Processing time:  %.2f s\n\n", $t_parsed - $t_start;
 
 print "=== Category Breakdown ===\n";
-for my $cat (sort keys %log_messages) {
-    my $count = scalar keys %{$log_messages{$cat}};
-    printf "  %-10s %6d unique keys\n", $cat, $count;
+for my $cat (sort keys %cat_keys_seen) {
+    my $seen = $cat_keys_seen{$cat};
+    my $remaining = scalar keys %{$log_messages{$cat} // {}};
+    my $checkpoints = $cat_stats{$cat}{checkpoints} // 0;
+    printf "  %-10s %6d seen, %6d remaining, %d checkpoints\n", $cat, $seen, $remaining, $checkpoints;
 }
 print "\n";
 
@@ -277,6 +329,11 @@ sub build_ngram_index {
         for my $trig (keys %$trigrams) {
             $ngram_index{$category}{$trig}{$log_key} = 1;
         }
+        # Build UUID-normalized trigrams for Dice scoring
+        if ($message =~ $uuid_re) {
+            (my $normalized = $message) =~ s/$uuid_re/<UUID>/g;
+            $key_trigrams_norm{$log_key} = get_trigrams($normalized);
+        }
         $indexed++;
     }
     # Cache posting list sizes for discriminative trigram selection
@@ -286,9 +343,6 @@ sub build_ngram_index {
     }
     return $indexed;
 }
-
-my $discriminative_topk = 50;       # use top-50 most discriminative trigrams
-my $prefilter_ratio    = 0.30;      # require 30% of topk hits as loose pre-filter
 
 sub find_candidates {
     my ($category, $source_key, $threshold_pct, $max_candidates) = @_;
@@ -325,7 +379,12 @@ sub find_candidates {
     }
 
     # Phase 2: Full Dice verification on candidates passing the loose pre-filter.
-    # The pre-filter narrows ~5000 candidates to ~200, then Dice is cheap.
+    # Uses UUID-normalized trigrams when available, so UUIDs don't drag scores down.
+    my $source_trig_dice = $key_trigrams_norm{$source_key} // $source_trigrams;
+    my $source_size_dice = scalar keys %$source_trig_dice;
+    my $min_dice_size = int($source_size_dice * $threshold_pct / (200 - $threshold_pct));
+    my $max_dice_size = int($source_size_dice * (200 - $threshold_pct) / $threshold_pct) + 1;
+
     my @results;
     for my $cand_key (keys %candidate_hits) {
         next if $candidate_hits{$cand_key} < $loose_min;
@@ -336,7 +395,12 @@ sub find_candidates {
         my $cand_size = scalar keys %$cand_trigrams;
         next if $cand_size < $min_cand_size || $cand_size > $max_cand_size;
 
-        my $score = dice_coefficient($source_trigrams, $cand_trigrams);
+        # Dice on normalized trigrams (UUID-stripped) when available
+        my $cand_trig_dice = $key_trigrams_norm{$cand_key} // $cand_trigrams;
+        my $cand_size_dice = scalar keys %$cand_trig_dice;
+        next if $cand_size_dice < $min_dice_size || $cand_size_dice > $max_dice_size;
+
+        my $score = dice_coefficient($source_trig_dice, $cand_trig_dice);
         if ($score >= $threshold_pct) {
             push @results, { key => $cand_key, score => $score };
         }
@@ -527,122 +591,11 @@ sub derive_regex {
 }
 
 # ========================================================================
-# Phase 1: Build Index and Find Similar Pairs
-# ========================================================================
-
-my $t_index_start = time();
-my $total_indexed = 0;
-my $total_trigrams = 0;
-
-for my $cat (sort keys %log_messages) {
-    my @keys = keys %{$log_messages{$cat}};
-    my $batch_size = $trigger < scalar @keys ? $trigger : scalar @keys;
-    my @batch = @keys[0 .. $batch_size - 1];
-
-    my $indexed = build_ngram_index($cat, \@batch);
-    $total_indexed += $indexed;
-
-    my $cat_trigrams = exists $ngram_index{$cat} ? scalar keys %{$ngram_index{$cat}} : 0;
-    $total_trigrams += $cat_trigrams;
-
-    printf "  %-10s indexed %d keys, %d unique trigrams\n", $cat, $indexed, $cat_trigrams if $verbose;
-}
-
-my $t_index_done = time();
-printf "=== N-gram Index Built ===\n";
-printf "Total indexed:    %d keys\n", $total_indexed;
-printf "Total trigrams:   %d unique\n", $total_trigrams;
-printf "Index time:       %.2f s\n\n", $t_index_done - $t_index_start;
-
-# --- Find sample similar pairs per category, with diversity ---
-print "=== Sample Similar Pairs with Alignment (Phase 2 Validation) ===\n";
-
-my $pairs_found = 0;
-my $pairs_searched = 0;
-my $t_search_start = time();
-
-for my $cat (sort keys %log_messages) {
-    my @indexed_keys = grep { exists $key_trigrams{$_} } keys %{$log_messages{$cat}};
-    next unless @indexed_keys;
-
-    my $cat_pairs = 0;
-    my $max_cat_pairs = ($cat eq 'ERROR') ? 5 : 5;  # up to 5 pairs per category
-    my $max_cat_search = 500;  # search budget per category
-    my $cat_searched = 0;
-    my %already_paired;
-    # Track which message "prefix" we've already shown, for diversity within ERROR
-    my %seen_prefix;
-
-    printf "\n--- Category: %s (%d indexed keys) ---\n", $cat, scalar @indexed_keys;
-
-    for my $key (@indexed_keys) {
-        last if $cat_searched >= $max_cat_search;
-        last if $cat_pairs >= $max_cat_pairs;
-        next if $already_paired{$key};
-
-        # For diversity: extract first 30 chars of message as a "prefix signature"
-        my $msg = $key_message{$key} // '';
-        my $prefix = substr($msg, 0, 30);
-        next if $seen_prefix{$prefix} && $cat eq 'ERROR';  # skip same-prefix in ERROR
-
-        $cat_searched++;
-        $pairs_searched++;
-        my @matches = find_candidates($cat, $key, $threshold);
-
-        for my $match (@matches) {
-            next if $already_paired{$match->{key}};
-            $cat_pairs++;
-            $pairs_found++;
-            $already_paired{$key} = 1;
-            $already_paired{$match->{key}} = 1;
-            $seen_prefix{$prefix} = 1;
-
-            my $msg_a = substr($key_message{$key} // '', 0, $message_length_cap);
-            my $msg_b = substr($key_message{$match->{key}} // '', 0, $message_length_cap);
-
-            printf "\n  Pair %d (Dice: %d%%):\n", $pairs_found, $match->{score};
-            printf "    A: %s\n", $msg_a;
-            printf "    B: %s\n", $msg_b;
-
-            # Phase 2: Alignment
-            my $raw_mask = compute_mask($msg_a, $msg_b);
-            my $mask = coalesce_mask($raw_mask);
-            my $canonical = derive_canonical($msg_a, $mask);
-            my $regex = derive_regex($msg_a, $mask);
-
-            # Mask visualization: K=keep, .=variable
-            my $mask_vis = join('', map { $_ ? 'K' : '.' } @$mask);
-            printf "    Mask: %s\n", $mask_vis;
-            printf "    Canon: %s\n", $canonical;
-
-            # Validate regex matches both messages
-            my $match_a = ($msg_a =~ $regex) ? 'Y' : 'N';
-            my $match_b = ($msg_b =~ $regex) ? 'Y' : 'N';
-            printf "    Regex matches: A=%s B=%s\n", $match_a, $match_b;
-            if ($verbose) {
-                printf "    Regex: %s\n", $regex;
-            }
-
-            last;  # one match per source key
-        }
-    }
-
-    if ($cat_pairs == 0) {
-        print "  (no similar pairs found)\n";
-    }
-}
-
-my $t_search_done = time();
-printf "\nTotal keys searched: %d\n", $pairs_searched;
-printf "Total pairs found:   %d\n", $pairs_found;
-printf "Search time:         %.2f s\n", $t_search_done - $t_search_start;
-
-# ========================================================================
-# Phase 3: Pattern Compilation + Incoming Matching
+# Pattern Matching + Checkpoint Subroutines
 # ========================================================================
 
 # match_against_patterns: linear scan of compiled patterns for a category
-# Returns cluster_key on match, undef otherwise
+# Returns pattern entry on match, undef otherwise
 sub match_against_patterns {
     my ($category, $message) = @_;
     return undef unless exists $canonical_patterns{$category};
@@ -662,139 +615,9 @@ sub match_against_patterns {
     return undef;
 }
 
-# Phase 3 validation: discover patterns from sample pairs, then test matching
-# against ALL messages in each category.
-# This is a validation-only step — not needed in the actual ltl implementation.
-# Gated behind --verbose since it scans all keys and takes ~6s on the test file.
-
-my $t_phase3_start = time();
-my $t_phase3_done = $t_phase3_start;
-
-if ($verbose) {
-print "\n=== Phase 3: Pattern Compilation + Matching Validation ===\n";
-
-# Step 1: Discover patterns by finding similar pairs and creating canonical forms
-# Process each category: find pairs, build patterns
-for my $cat (sort keys %log_messages) {
-    my @indexed_keys = grep { exists $key_trigrams{$_} } keys %{$log_messages{$cat}};
-    next unless @indexed_keys;
-
-    my %consumed;  # keys already consumed into a pattern
-    my $patterns_created = 0;
-    my $max_patterns = 50;  # cap pattern discovery for prototype
-    my $keys_searched = 0;
-    my $max_search = 500;
-
-    for my $key (@indexed_keys) {
-        last if $keys_searched >= $max_search;
-        last if $patterns_created >= $max_patterns;
-        next if $consumed{$key};
-
-        $keys_searched++;
-        my @matches = find_candidates($cat, $key, $threshold);
-
-        for my $match (@matches) {
-            next if $consumed{$match->{key}};
-
-            # Create pattern from this pair
-            my $msg_a = substr($key_message{$key} // '', 0, $message_length_cap);
-            my $msg_b = substr($key_message{$match->{key}} // '', 0, $message_length_cap);
-
-            my $raw_mask = compute_mask($msg_a, $msg_b);
-            my $mask = coalesce_mask($raw_mask);
-            my $canonical = derive_canonical($msg_a, $mask);
-            my $regex = derive_regex($msg_a, $mask);
-
-            # Only keep patterns where regex matches both source messages
-            my $match_a = ($msg_a =~ $regex);
-            my $match_b = ($msg_b =~ $regex);
-            next unless $match_a && $match_b;
-
-            $consumed{$key} = 1;
-            $consumed{$match->{key}} = 1;
-
-            push @{$canonical_patterns{$cat}}, {
-                pattern     => $regex,
-                cluster_key => $canonical,
-                canonical   => $canonical,
-                match_count => 2,  # the two source messages
-            };
-            $patterns_created++;
-            last;  # one pattern per source key
-        }
-    }
-
-    printf "\n  %s: discovered %d patterns (searched %d keys)\n", $cat, $patterns_created, $keys_searched;
-}
-
-# Step 2: Test all messages against discovered patterns
-print "\n--- Pattern Matching Results ---\n";
-
-my $total_matched = 0;
-my $total_unmatched = 0;
-
-for my $cat (sort keys %log_messages) {
-    my $cat_total = scalar keys %{$log_messages{$cat}};
-    my $cat_matched = 0;
-    my $cat_unmatched = 0;
-    my $t_cat_start = time();
-
-    for my $log_key (keys %{$log_messages{$cat}}) {
-        my $message = $key_message{$log_key};
-        next unless defined $message;
-        my $hit = match_against_patterns($cat, $message);
-        if ($hit) {
-            $cat_matched++;
-        } else {
-            $cat_unmatched++;
-        }
-    }
-
-    my $t_cat_elapsed = time() - $t_cat_start;
-    my $pct = $cat_total > 0 ? ($cat_matched * 100.0 / $cat_total) : 0;
-    my $pattern_count = exists $canonical_patterns{$cat} ? scalar @{$canonical_patterns{$cat}} : 0;
-
-    printf "\n  %s: %d patterns, %d/%d matched (%.1f%%), %d unmatched, %.2f s\n",
-        $cat, $pattern_count, $cat_matched, $cat_total, $pct, $cat_unmatched, $t_cat_elapsed;
-
-    $total_matched += $cat_matched;
-    $total_unmatched += $cat_unmatched;
-
-    # Show top patterns by match count
-    if (exists $canonical_patterns{$cat}) {
-        my @sorted = sort { $b->{match_count} <=> $a->{match_count} } @{$canonical_patterns{$cat}};
-        my $show = min(5, scalar @sorted);
-        for my $i (0 .. $show - 1) {
-            printf "    Pattern %d: %d matches — %s\n",
-                $i + 1, $sorted[$i]{match_count}, $sorted[$i]{canonical};
-        }
-    }
-}
-
-$t_phase3_done = time();
-my $grand_total = $total_matched + $total_unmatched;
-printf "\n  Total: %d/%d matched (%.1f%%), %d unmatched\n",
-    $total_matched, $grand_total, ($grand_total > 0 ? $total_matched * 100.0 / $grand_total : 0), $total_unmatched;
-printf "  Phase 3 time: %.2f s\n", $t_phase3_done - $t_phase3_start;
-
-# Reset patterns and structures from Phase 3 validation
-%canonical_patterns = ();
-%ngram_index = ();
-%key_trigrams = ();
-
-} else {
-    print "\n(Phase 3 validation skipped — use --verbose to enable)\n";
-}
-
 # ========================================================================
-# Phase 4: Full Consolidation Loop
+# Consolidation Subroutines
 # ========================================================================
-
-my $t_phase4_start = time();
-print "\n=== Phase 4: Full Consolidation Loop ===\n";
-
-# Consolidated clusters: {category}{cluster_key} => { canonical, pattern, mask, occurrences, match_count }
-my %clusters;
 
 # merge_stats: sum occurrences from source into target
 sub merge_stats {
@@ -892,14 +715,14 @@ sub extract_pattern_bucket {
 # its matching bucket instead of all unmatched keys.
 # Keeps interleaved re-scan (after each pattern discovery) to preserve cascading reduction —
 # critical for power-law data where pattern 1 absorbs 99%+ of keys.
-# Returns: ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit)
+# Returns: ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit, $gate2_absorbed, $fc_calls, $gate2_survivors_count)
 
 sub run_consolidation_pass {
     my ($cat, $unmatched_ref, $pass_num) = @_;
     my @unmatched_keys = @$unmatched_ref;
     my $initial_count = scalar @unmatched_keys;
 
-    return (0, 0, 0, 0) if $initial_count < 2;
+    return (0, 0, 0, 0, 0, 0, 0) if $initial_count < 2;
 
     # Separate keys by occurrence ceiling
     my @discovery_candidates;  # below ceiling — eligible for pattern discovery
@@ -914,20 +737,49 @@ sub run_consolidation_pass {
     }
     my $ceiling_skipped = scalar @ceiling_keys;
 
-    return (0, 0, $ceiling_skipped, 0) if scalar @discovery_candidates < 2;
+    # Hoist %consumed before Gate 2 so both gates share it
+    my %consumed;
+    my $gate2_absorbed = 0;
+    my $fc_calls = 0;
+    my $messages_absorbed = 0;
 
-    # Build n-gram index for discovery candidates only
-    my $index_limit = min($trigger, scalar @discovery_candidates);
-    my @index_batch = @discovery_candidates[0 .. $index_limit - 1];
+    return (0, 0, $ceiling_skipped, 0, 0, 0, scalar @discovery_candidates) if scalar @discovery_candidates < 2;
+
+    # Gate 2: match discovery candidates against existing compiled patterns
+    # Keys that match existing patterns are absorbed without expensive pairwise work
+    my @gate2_survivors;
+    for my $key (@discovery_candidates) {
+        my $entry = match_against_patterns($cat, $key_message{$key});
+        if ($entry) {
+            $consumed{$key} = 1;
+            my $cluster = $clusters{$cat}{$entry->{canonical}};
+            if ($cluster && exists $log_messages{$cat}{$key}) {
+                merge_stats($cluster, $log_messages{$cat}{$key});
+                $messages_absorbed++;
+            }
+            $gate2_absorbed++;
+        } else {
+            push @gate2_survivors, $key;
+        }
+    }
+
+    if (scalar @gate2_survivors < 2) {
+        # Remove consumed keys from unmatched list
+        my @remaining = grep { !$consumed{$_} } @unmatched_keys;
+        @$unmatched_ref = @remaining;
+        return (0, $messages_absorbed, $ceiling_skipped, 0, $gate2_absorbed, $fc_calls, scalar @gate2_survivors);
+    }
+
+    # Build n-gram index for gate2 survivors only
+    my $index_limit = min($trigger, scalar @gate2_survivors);
+    my @index_batch = @gate2_survivors[0 .. $index_limit - 1];
 
     # Clear and rebuild category index
     delete $ngram_index{$cat};
     build_ngram_index($cat, \@index_batch);
 
-    my %consumed;  # keys consumed into patterns this pass
     my $patterns_discovered = 0;
     my $merges_into_existing = 0;
-    my $messages_absorbed = 0;
     my $keys_searched = 0;
     my $max_search = min(500, scalar @index_batch);
     my $cap_hit = 0;
@@ -949,6 +801,7 @@ sub run_consolidation_pass {
         next if $consumed{$key};
 
         $keys_searched++;
+        $fc_calls++;
         my @matches = find_candidates($cat, $key, $threshold);
 
         for my $match (@matches) {
@@ -1063,8 +916,9 @@ sub run_consolidation_pass {
 
     printf "    (merge-first: %d merged into existing patterns)\n", $merges_into_existing if $verbose && $merges_into_existing > 0;
     printf "    (ceiling: %d keys skipped with occurrences >= %d)\n", $ceiling_skipped, $occurrence_ceiling if $verbose && $ceiling_skipped > 0;
+    printf "    (gate2: %d absorbed by existing patterns)\n", $gate2_absorbed if $verbose && $gate2_absorbed > 0;
 
-    return ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit);
+    return ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit, $gate2_absorbed, $fc_calls, scalar @gate2_survivors);
 }
 
 # Cross-cluster merge: compare canonical forms and merge overlapping patterns
@@ -1113,99 +967,71 @@ sub merge_overlapping_patterns {
     return $merges;
 }
 
-# Main consolidation loop
-my $max_passes = 10;
-my $total_ceiling_skipped = 0;
-my $total_cap_hits = 0;
-my %phase4_unmatched;  # {category} => [ @remaining_keys ] — preserved for Phase 5
+# run_checkpoint: fire a consolidation checkpoint for one category.
+# Called during parsing when unmatched count hits trigger, and after EOF for remaining keys.
+sub run_checkpoint {
+    my ($cat) = @_;
+    $cat_stats{$cat}{checkpoints}++;
+    my $cp_num = $cat_stats{$cat}{checkpoints};
 
-for my $cat (sort keys %log_messages) {
-    my @unmatched = keys %{$log_messages{$cat}};
-    my $original_count = scalar @unmatched;
-    next if $original_count < 10;  # skip tiny categories
+    my @unmatched = keys %{$unmatched_keys{$cat}};
+    my $pre_count = scalar @unmatched;
+    return if $pre_count < 2;
 
-    my $current_trigger = $trigger;
-    my $pass_num = 0;
+    my ($discovered, $absorbed, $ceiling_skipped, $cap_hit, $g2_absorbed, $fc_calls, $g2_survivors) =
+        run_consolidation_pass($cat, \@unmatched, $cp_num);
 
-    printf "\n--- %s: %d unique keys, trigger=%d, ceiling=%d, max_patterns=%d ---\n",
-        $cat, $original_count, $current_trigger, $occurrence_ceiling, $max_patterns;
+    # S4 pairwise absorbed = total absorbed minus S3 checkpoint absorbed
+    my $pairwise_absorbed = $absorbed - $g2_absorbed;
+    my $discovery_candidates = $pre_count - $ceiling_skipped;
+    my $post_count = scalar @unmatched;
 
-    while ($pass_num < $max_passes && scalar @unmatched >= min($current_trigger, 10)) {
-        $pass_num++;
-        my $pre_count = scalar @unmatched;
+    # Update per-category accumulators (S2-S4)
+    $cat_stats{$cat}{s2_ceiling}          += $ceiling_skipped;
+    $cat_stats{$cat}{s3_checkpoint}       += $g2_absorbed;
+    $cat_stats{$cat}{s4_pairwise}         += $pairwise_absorbed;
+    $cat_stats{$cat}{fc_calls}            += $fc_calls;
+    $cat_stats{$cat}{patterns_discovered} += $discovered;
+    $cat_stats{$cat}{patterns_final} = exists $canonical_patterns{$cat} ? scalar @{$canonical_patterns{$cat}} : 0;
 
-        my ($discovered, $absorbed, $ceiling_skipped, $cap_hit) =
-            run_consolidation_pass($cat, \@unmatched, $pass_num);
+    # Per-checkpoint output: full pipeline visibility (S2 → S3 → S4)
+    printf "  CP %d [%s]: %d keys → S2: %d ceiling, %d candidates → S3: %d absorbed, %d survivors → S4: fc=%d, %d new patterns (%d total), %d absorbed → %d remaining\n",
+        $cp_num, $cat,
+        $pre_count,
+        $ceiling_skipped, $discovery_candidates,
+        $g2_absorbed, $g2_survivors,
+        $fc_calls, $discovered, $cat_stats{$cat}{patterns_final},
+        $pairwise_absorbed,
+        $post_count;
 
-        $total_ceiling_skipped += $ceiling_skipped;
-        $total_cap_hits += $cap_hit;
+    # Rebuild %unmatched_keys from the modified @unmatched list
+    # (run_consolidation_pass modifies it in-place via $unmatched_ref)
+    %{$unmatched_keys{$cat}} = map { $_ => 1 } @unmatched;
 
-        my $yield = $pre_count > 0 ? ($absorbed * 100.0 / $pre_count) : 0;
-        my $post_count = scalar @unmatched;
-        my $current_pattern_count = exists $canonical_patterns{$cat} ? scalar @{$canonical_patterns{$cat}} : 0;
-
-        printf "  Pass %d: discovered %d patterns (%d total), absorbed %d/%d messages (%.1f%% yield), %d remaining\n",
-            $pass_num, $discovered, $current_pattern_count, $absorbed, $pre_count, $yield, $post_count;
-
-        if ($cap_hit) {
-            printf "    [WARN] Pattern cap reached (%d) — stopping discovery for %s\n", $max_patterns, $cat;
-            last;
-        }
-
-        # Adaptive trigger
-        if ($yield > 50) {
-            $current_trigger = min($current_trigger * 2, 50000);
-            printf "    Trigger raised to %d (high yield)\n", $current_trigger if $verbose;
-        } elsif ($yield < 10) {
-            $current_trigger = max(int($current_trigger / 2), 1000);
-            printf "    Trigger lowered to %d (low yield)\n", $current_trigger if $verbose;
-        }
-
-        last if $discovered == 0;
-        last if $absorbed == 0;
-    }
-
-    # Cross-cluster merge
-    my $merges = merge_overlapping_patterns($cat);
-    my $final_patterns = exists $canonical_patterns{$cat} ? scalar @{$canonical_patterns{$cat}} : 0;
-
-    # Separate remaining keys into ceiling-excluded vs genuinely unmatched
-    my $ceiling_excluded = 0;
-    my $genuinely_unmatched = 0;
-    for my $key (@unmatched) {
-        my $occ = $log_messages{$cat}{$key}{occurrences} // 1;
-        if ($occ >= $occurrence_ceiling) {
-            $ceiling_excluded++;
-        } else {
-            $genuinely_unmatched++;
+    # Delete absorbed keys from %log_messages and %key_message to free memory
+    for my $key (keys %{$log_messages{$cat}}) {
+        unless (exists $unmatched_keys{$cat}{$key}) {
+            delete $log_messages{$cat}{$key};
+            delete $key_message{$key};
         }
     }
 
-    printf "  Cross-cluster merges: %d, final patterns: %d\n", $merges, $final_patterns;
-    printf "  Remaining: %d ceiling-excluded (occurrences >= %d), %d genuinely unmatched\n",
-        $ceiling_excluded, $occurrence_ceiling, $genuinely_unmatched;
-    printf "  Reduction: %d → %d unique entries (%.1f%% reduction)\n",
-        $original_count, scalar(@unmatched) + $final_patterns,
-        (1 - (scalar(@unmatched) + $final_patterns) / $original_count) * 100;
-
-    # Show top patterns
-    if (exists $canonical_patterns{$cat}) {
-        my @sorted = sort { ($clusters{$cat}{$b->{canonical}}{match_count} // 0) <=> ($clusters{$cat}{$a->{canonical}}{match_count} // 0) } @{$canonical_patterns{$cat}};
-        my $show = min(5, scalar @sorted);
-        for my $i (0 .. $show - 1) {
-            my $c = $clusters{$cat}{$sorted[$i]{canonical}};
-            printf "    Top %d: %d matches, %d occurrences — %s\n",
-                $i + 1, $c->{match_count}, $c->{occurrences},
-                substr($sorted[$i]{canonical}, 0, 120);
+    # Free trigram data — only needed during pairwise discovery
+    delete $ngram_index{$cat};
+    delete $posting_size{$cat};
+    for my $key (keys %key_trigrams) {
+        unless (exists $unmatched_keys{$cat}{$key}) {
+            delete $key_trigrams{$key};
+            delete $key_trigrams_norm{$key};
         }
     }
 
-    # Preserve unmatched list for Phase 5
-    $phase4_unmatched{$cat} = \@unmatched;
+    # Cross-cluster merge periodically
+    if ($discovered > 0) {
+        merge_overlapping_patterns($cat);
+        $cat_stats{$cat}{patterns_final} = exists $canonical_patterns{$cat} ? scalar @{$canonical_patterns{$cat}} : 0;
+    }
 }
-
-my $t_phase4_done = time();
-printf "\nPhase 4 time: %.2f s\n", $t_phase4_done - $t_phase4_start;
 
 # ========================================================================
 # Final Pass: High-similarity consolidation of ceiling-excluded keys
@@ -1215,8 +1041,8 @@ if ($final_pass) {
     my $t_final_start = time();
     print "\n=== Final Pass: Consolidating ceiling-excluded keys (threshold=${final_threshold}%, ceiling=$final_ceiling) ===\n";
 
-    for my $cat (sort keys %phase4_unmatched) {
-        my @remaining = @{$phase4_unmatched{$cat}};
+    for my $cat (sort keys %unmatched_keys) {
+        my @remaining = keys %{$unmatched_keys{$cat}};
         next unless @remaining > 1;
 
         # Select keys that were ceiling-excluded (occurrences >= normal ceiling but < final ceiling)
@@ -1237,7 +1063,6 @@ if ($final_pass) {
 
         # Build n-gram index for candidates
         delete $ngram_index{$cat};
-        # Clear cached trigrams for these keys so they get re-indexed
         delete $key_trigrams{$_} for @candidates;
         build_ngram_index($cat, \@candidates);
 
@@ -1347,15 +1172,17 @@ if ($final_pass) {
             }
         }
 
-        # Update unmatched list
-        my @new_remaining = grep { !$consumed{$_} } @candidates;
-        push @new_remaining, @keep_as_is;
-        $phase4_unmatched{$cat} = \@new_remaining;
+        # Update unmatched keys — remove consumed
+        for my $key (keys %consumed) {
+            delete $unmatched_keys{$cat}{$key};
+            delete $log_messages{$cat}{$key};
+            delete $key_message{$key};
+        }
 
         my $final_patterns = exists $canonical_patterns{$cat} ? scalar @{$canonical_patterns{$cat}} : 0;
         printf "    Discovered %d patterns (%d merged into existing), absorbed %d messages\n",
             $patterns_discovered, $merges_into_existing, $messages_absorbed;
-        printf "    Remaining: %d (was %d)\n", scalar @new_remaining, scalar @remaining;
+        printf "    Remaining: %d (was %d)\n", scalar(keys %{$unmatched_keys{$cat}}), scalar @remaining;
         printf "    Total patterns for %s: %d\n", $cat, $final_patterns if $verbose;
     }
 
@@ -1364,14 +1191,92 @@ if ($final_pass) {
 }
 
 # ========================================================================
-# Phase 5: Output + Verbose Stats
+# Per-Category Summary (S1-S5 Tracking)
 # ========================================================================
 
-my $t_phase5_start = time();
-print "\n=== Phase 5: Top $top_n Messages ===\n\n";
+my ($grand_keys, $grand_s1, $grand_s2, $grand_s2_cum, $grand_s3, $grand_s4, $grand_s5, $grand_fc) = (0) x 8;
 
-# Build a unified list of all entries: consolidated clusters + unconsolidated individual keys
-# Each entry: { log_key, occurrences, is_consolidated, canonical }
+for my $cat (sort keys %cat_stats) {
+    my $s = $cat_stats{$cat};
+    my $remaining = scalar(keys %{$unmatched_keys{$cat} // {}});
+    my $patterns = $s->{patterns_final} // 0;
+    my $keys_seen = $cat_keys_seen{$cat} // 0;
+
+    # Split remaining into ceiling-filtered vs genuinely unmatched
+    my $ceiling_remaining = 0;
+    my $genuinely_unmatched = 0;
+    for my $key (keys %{$unmatched_keys{$cat} // {}}) {
+        my $occ = $log_messages{$cat}{$key}{occurrences} // 1;
+        if ($occ >= $occurrence_ceiling) {
+            $ceiling_remaining++;
+        } else {
+            $genuinely_unmatched++;
+        }
+    }
+
+    printf "\n--- %s: %d unique keys seen, %d checkpoints ---\n",
+        $cat, $keys_seen, $s->{checkpoints} // 0;
+    printf "  S1 Inline match:       %d\n", $s->{s1_inline} // 0;
+    printf "  S2 Ceiling filter:     %d  (occurrences >= %d, proven distinct)\n", $ceiling_remaining, $occurrence_ceiling;
+    printf "  S3 Checkpoint match:   %d\n", $s->{s3_checkpoint} // 0;
+    printf "  S4 Pairwise discovery: %d  (discovery + interleaved re-scan)\n", $s->{s4_pairwise} // 0;
+    printf "  S5 Unmatched:          %d\n", $genuinely_unmatched;
+    printf "  ---\n";
+    printf "  S2 cumulative filtered:  %d  (across all checkpoints)\n", $s->{s2_ceiling} // 0;
+    printf "  S4 find_candidates:      %d  calls\n", $s->{fc_calls} // 0;
+    printf "  Patterns discovered:     %d  (before merging), final: %d\n",
+        $s->{patterns_discovered} // 0, $patterns;
+
+    # Sanity check: all 5 stages must sum to keys_seen
+    my $accounted = ($s->{s1_inline} // 0) + $ceiling_remaining + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + $genuinely_unmatched;
+    if ($accounted != $keys_seen) {
+        printf "  [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)\n",
+            $accounted, $keys_seen, $keys_seen - $accounted;
+    }
+
+    printf "  Reduction: %d → %d (%.1f%%)\n",
+        $keys_seen, $remaining + $patterns,
+        (1 - ($remaining + $patterns) / ($keys_seen || 1)) * 100;
+
+    # Show top patterns
+    if (exists $canonical_patterns{$cat}) {
+        my @sorted = sort { ($clusters{$cat}{$b->{canonical}}{match_count} // 0) <=> ($clusters{$cat}{$a->{canonical}}{match_count} // 0) } @{$canonical_patterns{$cat}};
+        my $show = min(5, scalar @sorted);
+        for my $i (0 .. $show - 1) {
+            my $c = $clusters{$cat}{$sorted[$i]{canonical}};
+            printf "    Top %d: %d matches, %d occurrences — %s\n",
+                $i + 1, $c->{match_count}, $c->{occurrences},
+                substr($sorted[$i]{canonical}, 0, 120);
+        }
+    }
+
+    $grand_keys += $keys_seen;
+    $grand_s1 += ($s->{s1_inline} // 0);
+    $grand_s2 += $ceiling_remaining;
+    $grand_s2_cum += ($s->{s2_ceiling} // 0);
+    $grand_s3 += ($s->{s3_checkpoint} // 0);
+    $grand_s4 += ($s->{s4_pairwise} // 0);
+    $grand_s5 += $genuinely_unmatched;
+    $grand_fc += ($s->{fc_calls} // 0);
+}
+
+printf "\n=== Grand Totals ===\n";
+printf "  Unique keys seen:        %d\n", $grand_keys;
+printf "  S1 Inline match:         %d\n", $grand_s1;
+printf "  S2 Ceiling filter:       %d\n", $grand_s2;
+printf "  S3 Checkpoint match:     %d\n", $grand_s3;
+printf "  S4 Pairwise discovery:   %d\n", $grand_s4;
+printf "  S5 Unmatched:            %d\n", $grand_s5;
+printf "  S2 cumulative filtered:  %d  (across all checkpoints)\n", $grand_s2_cum;
+printf "  S4 find_candidates:      %d  calls\n", $grand_fc;
+
+# ========================================================================
+# Top N Output
+# ========================================================================
+
+print "\n=== Top $top_n Messages ===\n\n";
+
+# Build a unified list of all entries: consolidated clusters + remaining unmatched
 my @all_entries;
 
 # Add consolidated clusters
@@ -1388,25 +1293,8 @@ for my $cat (keys %clusters) {
     }
 }
 
-# Add unconsolidated keys from Phase 4's unmatched lists (no re-scanning needed)
+# Add remaining unmatched keys from %log_messages
 for my $cat (sort keys %log_messages) {
-    my $unmatched_ref = $phase4_unmatched{$cat};
-    next unless $unmatched_ref;
-    for my $log_key (@$unmatched_ref) {
-        push @all_entries, {
-            log_key         => $log_key,
-            occurrences     => $log_messages{$cat}{$log_key}{occurrences},
-            is_consolidated => 0,
-            category        => $cat,
-            match_count     => 0,
-        };
-    }
-
-    # Also add keys from categories too small for consolidation (< 10 unique keys)
-}
-# Add keys from categories that were skipped by Phase 4 (< 10 unique keys)
-for my $cat (sort keys %log_messages) {
-    next if exists $phase4_unmatched{$cat};
     for my $log_key (keys %{$log_messages{$cat}}) {
         push @all_entries, {
             log_key         => $log_key,
@@ -1441,52 +1329,10 @@ sub commify {
     return scalar reverse $text;
 }
 
-# --- Verbose Stats ---
-if ($verbose) {
-    print "\n=== Verbose Consolidation Stats ===\n";
-
-    for my $cat (sort keys %log_messages) {
-        my $original = scalar keys %{$log_messages{$cat}};
-        my $pattern_count = exists $canonical_patterns{$cat} ? scalar @{$canonical_patterns{$cat}} : 0;
-        my $cluster_count = exists $clusters{$cat} ? scalar keys %{$clusters{$cat}} : 0;
-
-        # Count remaining unconsolidated
-        my $unconsolidated = 0;
-        my $ceiling_excluded = 0;
-        for my $e (@all_entries) {
-            next unless $e->{category} eq $cat && !$e->{is_consolidated};
-            if ($e->{occurrences} >= $occurrence_ceiling) {
-                $ceiling_excluded++;
-            } else {
-                $unconsolidated++;
-            }
-        }
-
-        printf "\n  %s:\n", $cat;
-        printf "    Original unique keys:   %d\n", $original;
-        printf "    Consolidated clusters:  %d\n", $cluster_count;
-        printf "    Active patterns:        %d\n", $pattern_count;
-        printf "    Ceiling-excluded:       %d (occurrences >= %d)\n", $ceiling_excluded, $occurrence_ceiling;
-        printf "    Genuinely unmatched:    %d\n", $unconsolidated;
-        printf "    Final unique entries:   %d\n", $cluster_count + $ceiling_excluded + $unconsolidated;
-
-        if ($original > 0) {
-            my $reduction = (1 - ($cluster_count + $ceiling_excluded + $unconsolidated) / $original) * 100;
-            printf "    Reduction:              %.1f%%\n", $reduction;
-        }
-    }
-}
-
-# --- Timing Breakdown ---
-my $t_phase5_done = time();
+# --- Timing ---
+my $t_done = time();
 printf "\n=== Timing ===\n";
-printf "  Parse:          %.2f s\n", $t_parsed - $t_start;
-printf "  Index (Ph1):    %.2f s\n", $t_index_done - $t_index_start;
-printf "  Pairs (Ph1-2):  %.2f s\n", $t_search_done - $t_search_start;
-printf "  Phase 3:        %.2f s\n", $t_phase3_done - $t_phase3_start;
-printf "  Phase 4:        %.2f s\n", $t_phase4_done - $t_phase4_start;
-printf "  Phase 5:        %.2f s\n", $t_phase5_done - $t_phase5_start;
-printf "  Total:          %.2f s\n", $t_phase5_done - $t_start;
+printf "  Total:          %.2f s\n", $t_done - $t_start;
 
 # --- Memory ---
 my $total_patterns = 0;
@@ -1498,7 +1344,7 @@ printf "\n=== Memory ===\n";
 printf "  Compiled patterns:  %d (cap: %d)\n", $total_patterns, $max_patterns;
 printf "  Total clusters:     %d\n", $total_clusters;
 printf "  Cached trigram sets: %d\n", scalar keys %key_trigrams;
-printf "  Cap hits:           %d\n", $total_cap_hits;
+printf "  Remaining log_messages keys: %d\n", $remaining_keys;
 
 eval {
     my $pid = $$;
