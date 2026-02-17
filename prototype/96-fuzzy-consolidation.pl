@@ -130,7 +130,7 @@ END_C
 # ============================================================================
 
 # --- CLI Options ---
-my $file;
+my @files;
 my $threshold = 80;
 my $trigger = 5000;
 my $top_n = 20;
@@ -138,27 +138,41 @@ my $verbose = 0;
 my $message_length_cap = 300;
 my $occurrence_ceiling = 3;
 my $max_patterns = 50;
-my $final_pass = 0;
-my $final_threshold = 95;
-my $final_ceiling = 100;
+my $final_pass = 1;
+my $final_threshold = 80;
+my $final_ceiling = 1000000;
 my $show_memory = 0;
 
 GetOptions(
-    'file=s'              => \$file,
+    'file=s@'             => \@files,
     'threshold=i'         => \$threshold,
     'trigger=i'           => \$trigger,
     'top=i'               => \$top_n,
     'verbose'             => \$verbose,
     'ceiling=i'           => \$occurrence_ceiling,
     'max-patterns=i'      => \$max_patterns,
-    'final-pass'          => \$final_pass,
+    'final-pass!'         => \$final_pass,
     'final-threshold=i'   => \$final_threshold,
     'final-ceiling=i'     => \$final_ceiling,
     'mem'                 => \$show_memory,
-) or die "Usage: $0 --file <logfile> [--threshold N] [--trigger N] [--top N] [--ceiling N] [--max-patterns N] [--final-pass] [--final-threshold N] [--final-ceiling N] [--mem] [--verbose]\n";
+) or die "Usage: $0 --file <logfile> [--file <logfile2> ...] [--threshold N] [--trigger N] [--top N] [--ceiling N] [--max-patterns N] [--final-pass] [--final-threshold N] [--final-ceiling N] [--mem] [--verbose]\n";
 
-die "Error: --file is required\n" unless defined $file;
-die "Error: file '$file' not found\n" unless -f $file;
+# Expand globs in --file arguments (for shell quoting convenience)
+my @expanded_files;
+for my $pattern (@files) {
+    my @matched = glob($pattern);
+    if (@matched) {
+        push @expanded_files, @matched;
+    } else {
+        die "Error: no files match '$pattern'\n";
+    }
+}
+@files = @expanded_files;
+
+die "Error: --file is required\n" unless @files;
+for my $f (@files) {
+    die "Error: file '$f' not found\n" unless -f $f;
+}
 
 # --- Data Structures ---
 my %log_messages;        # {category}{log_key} => { occurrences => N } — currently unmatched + cluster entries
@@ -195,6 +209,9 @@ my %cat_stats;           # {category} => { s1_inline, s2_ceiling, s3_checkpoint,
 # --- ThingWorx ApplicationLog Regex (from ltl line 1827) ---
 my $twx_regex = qr/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ((?:\](?! )|[^\]])*)] (.*)/;
 
+# --- Tomcat Access Log Regex (from ltl line 1885) ---
+my $access_log_regex = qr/^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?/;
+
 # ========================================================================
 # Parse Log File with Checkpoint-Based Consolidation
 # ========================================================================
@@ -202,29 +219,61 @@ my $t_start = time();
 my $total_lines = 0;
 my $matched_lines = 0;
 my $unmatched_lines = 0;
+my $total_files = scalar @files;
 
-print "Parsing: $file\n";
+printf "Parsing: %d file(s)\n", $total_files;
 print "Threshold: ${threshold}%  Trigger: $trigger  Top: $top_n  Ceiling: $occurrence_ceiling  MaxPatterns: $max_patterns\n";
 if ($final_pass) {
     print "Final pass: enabled  Threshold: ${final_threshold}%  Ceiling: $final_ceiling\n";
 }
 print "\n";
 
-open(my $fh, '<', $file) or die "Cannot open $file: $!\n";
-while (my $line = <$fh>) {
-    chomp $line;
-    $total_lines++;
+for my $file (@files) {
+    open(my $fh, '<', $file) or die "Cannot open $file: $!\n";
+    while (my $line = <$fh>) {
+        chomp $line;
+        $total_lines++;
 
-    if (my ($timestamp, $category, $object, $instance, $user, $session, $platform, $thread, $message) = $line =~ $twx_regex) {
-        $matched_lines++;
+        my ($category, $log_key);
 
-        my $log_level = $category;
-        my $max_object_length = 25;
-        my $truncated_thread = substr($thread, 0, 20);
-        my $truncated_object = substr($object, length($object) > $max_object_length ? length($object) - $max_object_length : 0, $max_object_length);
-        my $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, 350);
+        if (my ($timestamp, $cat, $object, $instance, $user, $session, $platform, $thread, $message) = $line =~ $twx_regex) {
+            # ThingWorx ApplicationLog
+            $matched_lines++;
+            $category = $cat;
+            my $max_object_length = 25;
+            my $truncated_thread = substr($thread, 0, 20);
+            my $truncated_object = substr($object, length($object) > $max_object_length ? length($object) - $max_object_length : 0, $max_object_length);
+            $log_key = substr("[$cat] [$truncated_thread] [$truncated_object] $message", 0, 350);
 
-        # Is this a brand-new unique key?
+        } elsif (my (undef, $ts, $msg, $status_code, $bytes, $duration, $thr, $sess) = $line =~ $access_log_regex) {
+            # Tomcat Access Log — mirror ltl's key construction (match_type 3, lines 1885-1896, 2146-2167)
+            $matched_lines++;
+            $msg =~ s/ HTTP\/\d\.\d$//;     # strip HTTP version
+            $msg =~ s/\?.+$//;              # strip query string
+            $category = $status_code;
+            $category =~ s/(\d)\d{2}/$1xx/; # bucket to Nxx (category_bucket)
+
+            # ltl uses $status_code (raw) for $log_level, not the bucketed category
+            # threadpool derived from thread by stripping trailing -N
+            my $threadname;
+            if (defined $thr && $thr ne "") {
+                my ($threadpool) = $thr =~ /(.*)-\d+$/;
+                $threadname = defined $threadpool ? $threadpool : $thr;
+            }
+
+            if (defined $threadname) {
+                my $truncated_thread = substr($threadname, 0, 20);
+                $log_key = substr("[$status_code] [$truncated_thread] $msg", 0, 350);
+            } else {
+                $log_key = substr("[$status_code] $msg", 0, 350);
+            }
+
+        } else {
+            $unmatched_lines++;
+            next;
+        }
+
+        # Common key processing for both log formats
         my $is_new_key = !exists $log_messages{$category}{$log_key};
 
         if ($is_new_key) {
@@ -234,13 +283,12 @@ while (my $line = <$fh>) {
             # S1 inline match: try matching against existing patterns
             my $entry = match_against_patterns($category, substr($log_key, 0, $message_length_cap));
             if ($entry) {
-                # Absorbed — merge into cluster, don't create %log_messages entry
                 my $cluster = $clusters{$category}{$entry->{canonical}};
                 if ($cluster) {
                     $cluster->{occurrences}++;
                 }
                 $cat_stats{$category}{s1_inline}++;
-                next;  # don't add to %log_messages or unmatched
+                next;
             }
 
             # No pattern match — add as unmatched
@@ -253,14 +301,11 @@ while (my $line = <$fh>) {
                 run_checkpoint($category);
             }
         } else {
-            # Existing key — just increment
             $log_messages{$category}{$log_key}{occurrences}++;
         }
-    } else {
-        $unmatched_lines++;
     }
+    close($fh);
 }
-close($fh);
 
 # MEASURE: after parsing loop completes, before final checkpoints
 measure_memory("after parsing");
@@ -478,7 +523,7 @@ sub find_candidates {
         }
     }
 
-    @results = sort { $b->{score} <=> $a->{score} } @results;
+    @results = sort { $b->{score} <=> $a->{score} || $a->{key} cmp $b->{key} } @results;
     splice(@results, $max_candidates) if @results > $max_candidates;
     return @results;
 }
@@ -1046,7 +1091,7 @@ sub run_checkpoint {
     $cat_stats{$cat}{checkpoints}++;
     my $cp_num = $cat_stats{$cat}{checkpoints};
 
-    my @unmatched = keys %{$unmatched_keys{$cat}};
+    my @unmatched = sort keys %{$unmatched_keys{$cat}};
     my $pre_count = scalar @unmatched;
     return if $pre_count < 2;
 
@@ -1135,7 +1180,7 @@ if ($final_pass) {
     print "\n=== Final Pass: Consolidating ceiling-excluded keys (threshold=${final_threshold}%, ceiling=$final_ceiling) ===\n";
 
     for my $cat (sort keys %unmatched_keys) {
-        my @remaining = keys %{$unmatched_keys{$cat}};
+        my @remaining = sort keys %{$unmatched_keys{$cat}};
         next unless @remaining > 1;
 
         # Select keys that were ceiling-excluded (occurrences >= normal ceiling but < final ceiling)
