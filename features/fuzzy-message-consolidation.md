@@ -848,6 +848,22 @@ Parse line-by-line:
 
 The final pass correctly discovers patterns among ceiling-excluded stragglers and composes cleanly with checkpoint processing. No issues found.
 
+### PF-23: Determinism Fix and Final Pass Default Changes
+
+**Non-determinism:** Consecutive runs of the prototype on the same file produced different results (e.g., S4=1806 vs S4=1628, clusters=170 vs 172). Root cause: Perl hash iteration order is randomized per process. The pairwise discovery loop in `run_checkpoint()` iterated `keys %{$unmatched_keys{$cat}}` in random order, so which key pairs were compared first — and which patterns were discovered — varied per run.
+
+**Fix:** Three changes to make results deterministic:
+1. `sort keys %{$unmatched_keys{$cat}}` in `run_checkpoint()` — primary source, controls all downstream iteration
+2. `sort keys %{$unmatched_keys{$cat}}` in the final pass loop
+3. Tiebreaker `$a->{key} cmp $b->{key}` in `find_candidates()` result sorting — breaks ties when multiple candidates have the same Dice score
+
+**Final pass defaults changed:** Testing with access logs revealed that the original final pass defaults (`--final-pass` off, `--final-threshold 95`, `--final-ceiling 100`) were inadequate:
+- Ceiling-excluded keys (occurrences >= 3) include the highest-value consolidation targets in access logs (e.g., `GetNamedProperties` URLs with 10,000+ occurrences each, scoring 85-87% Dice)
+- `--final-threshold 95` was too high — these keys score 85-87%, well below 95%
+- `--final-ceiling 100` excluded keys with > 100 occurrences, which in access logs is most of the interesting data
+
+New defaults: `--final-pass` on by default, `--final-threshold 80`, `--final-ceiling 1000000`. Use `--no-final-pass` to disable. Validated on all three test files — ThingWorx logs also benefit (e.g., WARN remaining 82→30 on power-law file).
+
 ## Prototype Performance Assessment
 
 ### Test Files
@@ -974,6 +990,10 @@ The core algorithms are sound and proven:
 **Perl-specific:**
 
 23. **`my` declarations execute at runtime in textual order.** Variables declared below the parsing loop are `undef` when called during parsing via checkpoints. This is a Perl-specific gotcha when restructuring code flow — move all declarations above the earliest possible call site. (PF-20)
+
+24. **Hash iteration order makes algorithms non-deterministic.** Perl randomizes hash key order per process. Any algorithm that iterates hash keys and where iteration order affects outcomes (pairwise comparison, pattern discovery) will produce different results per run. Sort keys at the entry point to downstream processing. (PF-23)
+
+25. **Defaults tuned on one log format fail on another.** The original final pass defaults (threshold 95%, ceiling 100, off by default) worked for ThingWorx logs but completely missed the highest-value targets in access logs. Access log keys are shorter with smaller variable regions, producing Dice scores of 85-87% (below 95%), and have 10,000+ occurrences (above ceiling 100). Always validate defaults across log formats. (PF-23)
 
 ### Outstanding Decisions
 
