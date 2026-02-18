@@ -235,6 +235,9 @@ When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from t
 **Limitations:**
 - No support for quoted fields with embedded separators (uses simple `split()`)
 - Timestamp column must be named `timestamp` (case-insensitive) or defaults to column 0
+- Same metric name with different aggregation functions is not supported (#99)
+
+**Epoch timestamps** (Issue #98): Numeric epoch timestamps (e.g., `1771078373.207929`) are auto-detected on the first CSV data line. No new flags needed. The `-du` flag overrides the epoch unit if values aren't seconds (`-du ms` for milliseconds, `-du us` for microseconds, `-du ns` for nanoseconds).
 
 ## Future Enhancements (Out of Scope)
 
