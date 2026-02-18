@@ -145,18 +145,26 @@ These logs contain `durationMS=`, `result bytes=`, and `result count=` fields en
 
 ---
 
-## / - Other Test Logs (system_cpu_total, bytes_sent, bytes_received)
+## /UDM - User Defined Metric Test Logs (system_cpu_total, bytes_sent, bytes_received, latency_ms)
 
 | File | Application | Metrics | Size | Use Case |
 |------|-------------|---------|------|----------|
 | `rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log` | ThingWorx Edge C SDK | TSV formatted metrics Recv-Q=0 Send-Q=0 bytes_sent=6185 bytes_retrans=347 bytes_acked=5839 bytes_received=8373 | Use include filer for text "CONN_MON statistics" to target the relevant lines | 2.1 MB | For UDM/user defined metrics testing in pattern mode |
 | `connection-server-custom-metrics.csv` | Custom Monitoring Script | Various CSV formatted system metrics: system_cpu_total, tcp_inuse, tcp_established, tcp_timewait, ctx_switches, ctx_nonvoluntary, tcp_delayed_acks | 29 KB | For UDM/user defined metrics testing in CSV mode |
+| `results_data_idonly-timestampMs.csv` | Custom TCP Packet Data Analysis | Various CSV formatted system metrics: latency_ms, request_size, response_size, request_id, stream | 9.8 MB | For UDM/user defined metrics testing in CSV mode |
 
-
-**Format**: ThingWorx ScriptLog with embedded metrics
+**Format**: ThingWorx Edge SDK agent logs with embedded TCP connection statisits (rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log)
 ```
-2025-04-10 04:46:35.844+0000 [L: WARN] ... durationMS=167 events to be processed count=0
-2025-04-10 05:00:03.529+0000 [L: INFO] ... durationMS=1041 result count=12 result bytes=6059
+INFO 2025-09-23 15:58:05,021 CONN_MON statistics: Local=10.244.35.50:49664 Peer=193.58.155.1:https sev=9 Recv-Q=0 Send-Q=0 cubic=1 wscale_sndr=13 wscale_rcvr=7 rto=248 rtt=46.941 rttvar=15.761 ato=40 mss=1448 pmtu=1500 rcvmss=1428 advmss=1448 cwnd=4 ssthresh=7 bytes_sent=6185 bytes_retrans=347 bytes_acked=5839 bytes_received=8373 segs_out=144 segs_in=196 data_segs_out=129 data_segs_in=71
+```
+**Format**: Generic CSV File starting with a timestamp, followed by a variable set of metric columns (results_data_idonly-timestampMs.csv)
+```
+request_timestamp,response_timestamp,latency_ms,request_size,response_size,request_id,stream
+1771078373.207929,1771078373.217339,9.410143,60,17,1,0
+1771078373.237935,1771078373.247892,9.956837,61,2911,2,0
+1771078373.306736,1771078373.325041,18.305063,38,17,3,0
+1771078373.333200,1771078373.343861,10.661125,459,340,4,0
+1771078373.361570,1771078373.369284,7.714033,239,17,5,0
 ```
 
 ---
