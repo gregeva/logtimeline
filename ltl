@@ -70,7 +70,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.12.3";
+my $version_number = "0.12.4";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
@@ -1602,6 +1602,7 @@ sub adapt_to_command_line_options {
     # Validate UDM heatmap metric name (must run after parse_udm_configs)
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
         my ($match) = grep { $_->{name} eq $heatmap_metric } @udm_configs;
+        ($match) = grep { $_->{base_name} eq $heatmap_metric } @udm_configs if !$match;
         if ($match) {
             $heatmap_udm_config = $match;
             $heatmap_metric_map{$heatmap_metric} = { column => undef };
@@ -1616,6 +1617,11 @@ sub adapt_to_command_line_options {
         for my $metric (keys %histogram_metrics) {
             next if $metric =~ /^(duration|bytes|count)$/;
             my ($match) = grep { $_->{name} eq $metric } @udm_configs;
+            # Fallback: match against base_name for disambiguated metrics (#104)
+            if (!$match) {
+                ($match) = grep { $_->{base_name} eq $metric } @udm_configs;
+                $histogram_metrics{$match->{name}} = 1 if $match;
+            }
             if ($match) {
                 push @histogram_udm_configs, $match;
                 # Colors resolved from @column_layout in normalize_data_for_output()
@@ -3874,7 +3880,7 @@ sub format_heatmap_value {
         return format_bytes($value, 'B');
     } elsif ($metric eq 'count') {
         return format_number($value);
-    } elsif (defined $heatmap_udm_config && $metric eq $heatmap_udm_config->{name}) {
+    } elsif (defined $heatmap_udm_config && ($metric eq $heatmap_udm_config->{name} || $metric eq $heatmap_udm_config->{base_name})) {
         my $ut = $heatmap_udm_config->{unit_type};
         return $ut eq 'time'  ? format_time($value, 'ms') :
                $ut eq 'bytes' ? format_bytes($value, 'B') :
