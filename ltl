@@ -70,7 +70,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.12.2";
+my $version_number = "0.12.3";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
@@ -163,6 +163,7 @@ my ( @udm_configs, @udm_raw_args, %udm_last_value );
 my ( $csv_separator_override, @udm_csv_message_col_names );
 my ( $csv_detected, $csv_separator, $csv_timestamp_col, %csv_col_index );
 my ( @csv_udm_col_indices, @csv_message_col_indices );
+my $csv_epoch_timestamp = 0;  # 1 if CSV timestamp column contains epoch values
 
 # Pattern file filter options (Issue #19)
 my (@include_files, @exclude_files, @highlight_files);   # File paths from command line (arrays for multiple files)
@@ -851,6 +852,7 @@ sub parse_udm_configs {
 
         push @udm_configs, {
             name        => $name,
+            base_name   => $name,
             unit        => $unit,
             function    => $function,
             transform   => $transform,
@@ -860,9 +862,18 @@ sub parse_udm_configs {
             converter   => $converter,
             formatter   => $formatter,
         };
-
-        push @graph_user_defined_metrics, $name;
     }
+
+    # Disambiguate duplicate metric names by appending :aggregation (#99)
+    my %name_counts;
+    $name_counts{$_->{name}}++ for @udm_configs;
+    for my $config (@udm_configs) {
+        if ($name_counts{$config->{name}} > 1) {
+            $config->{name} = "$config->{base_name}:$config->{aggregation}";
+        }
+    }
+
+    push @graph_user_defined_metrics, $_->{name} for @udm_configs;
 
     # Add UDM metric names to graph columns
     push @graph_columns, map { "udm_$_->{name}" } @udm_configs;
@@ -908,12 +919,12 @@ sub detect_and_parse_csv_header {
     # Map UDM configs to column indices
     @csv_udm_col_indices = ();
     for my $i (0 .. $#udm_configs) {
-        my $col_name = lc($udm_configs[$i]->{name});
+        my $col_name = lc($udm_configs[$i]->{base_name});
         if (exists $csv_col_index{$col_name}) {
             $csv_udm_col_indices[$i] = $csv_col_index{$col_name};
         } else {
             $csv_udm_col_indices[$i] = -1;
-            print STDERR "Warning: UDM metric '$udm_configs[$i]->{name}' not found in CSV headers\n";
+            print STDERR "Warning: UDM metric '$udm_configs[$i]->{base_name}' not found in CSV headers\n";
         }
     }
 
@@ -1762,6 +1773,7 @@ sub read_and_process_logs {
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
         %udm_last_value = () if @udm_configs;  # Reset delta state between files (Issue #22)
         $csv_detected = 0;
+        $csv_epoch_timestamp = 0;
         %csv_col_index = ();
         @csv_udm_col_indices = ();
         @csv_message_col_indices = ();
@@ -1810,6 +1822,11 @@ sub read_and_process_logs {
                 @csv_fields = split(/\Q$csv_separator\E/, $_, -1);
                 $timestamp_str = $csv_fields[$csv_timestamp_col];
                 $timestamp_str =~ s/^\s+|\s+$//g if defined $timestamp_str;
+
+                # Detect epoch timestamps on first data line
+                if ($line_number == 2 && defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/) {
+                    $csv_epoch_timestamp = 1;
+                }
 
                 # Build message from -ucm columns or default label
                 if (@csv_message_col_indices) {
@@ -2056,7 +2073,18 @@ sub read_and_process_logs {
 
                 # Extract milliseconds if present (supports . or , separator, 1-6 digits)
                 my $fractional_ms = 0;
-                if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {
+                if ($csv_epoch_timestamp) {
+                    # Epoch timestamp: value is already epoch seconds (or other unit via -du)
+                    my $epoch_val = $timestamp_str;
+                    if (defined $duration_unit_override) {
+                        $epoch_val /= 1000         if $duration_unit_override eq 'ms';
+                        $epoch_val /= 1000000      if $duration_unit_override eq 'us';
+                        $epoch_val /= 1000000000   if $duration_unit_override eq 'ns';
+                    }
+                    $timestamp = int($epoch_val);
+                    my $frac = $epoch_val - $timestamp;
+                    $fractional_ms = $frac * 1000 if $frac > 0;
+                } elsif ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {
                     my $frac_digits = $2;
                     # Normalize to milliseconds (e.g., .1 = 100ms, .12 = 120ms, .123 = 123ms, .123456 = 123.456ms)
                     $fractional_ms = $frac_digits * (10 ** (3 - length($frac_digits)));
@@ -2064,6 +2092,8 @@ sub read_and_process_logs {
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
+                } elsif ($csv_epoch_timestamp) {
+                    # Epoch already parsed above, skip timegm()
                 } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 || $match_type == 7 || $match_type == 8 || $match_type == 10 || $match_type == 11 || $match_type == 13 ) {
                     if (exists $timestamp_cache{$timestamp_str}) {
                         $timestamp = $timestamp_cache{$timestamp_str};
@@ -3725,8 +3755,14 @@ sub normalize_data_for_output {
             } elsif ($key =~ /^udm_/) {
                 (my $csv_key = $key) =~ s/^udm_//;
                 my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
-                my $csv_prefix = ($cfg && $cfg->{unit}) ? "${csv_key}_$cfg->{unit}" : $csv_key;
-                push @output_columns, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
+                if ($cfg && $cfg->{name} ne $cfg->{base_name}) {
+                    # Disambiguated metric: single value column (#99)
+                    my $csv_prefix = $cfg->{unit} ? "${csv_key}_$cfg->{unit}" : $csv_key;
+                    push @output_columns, $csv_prefix;
+                } else {
+                    my $csv_prefix = ($cfg && $cfg->{unit}) ? "${csv_key}_$cfg->{unit}" : $csv_key;
+                    push @output_columns, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
+                }
             } else {
                 push @output_columns, $key;
             }
@@ -4312,8 +4348,13 @@ sub print_bar_graph {
                                     $trend_value = " " . format_number($log_stats{$bucket}{$key}, ' ', 2);
                                 }
                             }
-                            foreach my $metric ( qw( occurrences min mean max sum ) ) {
-                                push @csv_data, $log_stats{$bucket}{"${key}_${metric}"};
+                            if ($config && $config->{name} ne $config->{base_name}) {
+                                # Disambiguated metric: single value (#99)
+                                push @csv_data, $log_stats{$bucket}{$key};
+                            } else {
+                                foreach my $metric ( qw( occurrences min mean max sum ) ) {
+                                    push @csv_data, $log_stats{$bucket}{"${key}_${metric}"};
+                                }
                             }
                         } else {
                             my $decimals = $col_w > 10 ? 2 : ($col_w > 8 ? 1 : 0);
@@ -5384,12 +5425,19 @@ sub print_message_summary {
                         my @udm_csv_values;
                         foreach my $config (@udm_configs) {
                             my $name = $config->{name};
-                            push @udm_csv_values,
-                                $log_messages{$grouping}{$key}{"udm_${name}_occurrences"},
-                                $log_messages{$grouping}{$key}{"udm_${name}_min"},
-                                $log_messages{$grouping}{$key}{"udm_${name}_mean"},
-                                $log_messages{$grouping}{$key}{"udm_${name}_max"},
-                                $log_messages{$grouping}{$key}{"udm_${name}_sum"};
+                            if ($config->{name} ne $config->{base_name}) {
+                                # Disambiguated metric: single aggregated value (#99)
+                                my $agg = $config->{aggregation};
+                                my $stat_key = $agg eq 'avg' ? 'mean' : $agg;
+                                push @udm_csv_values, $log_messages{$grouping}{$key}{"udm_${name}_${stat_key}"};
+                            } else {
+                                push @udm_csv_values,
+                                    $log_messages{$grouping}{$key}{"udm_${name}_occurrences"},
+                                    $log_messages{$grouping}{$key}{"udm_${name}_min"},
+                                    $log_messages{$grouping}{$key}{"udm_${name}_mean"},
+                                    $log_messages{$grouping}{$key}{"udm_${name}_max"},
+                                    $log_messages{$grouping}{$key}{"udm_${name}_sum"};
+                            }
                         }
                         $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact, @udm_csv_values ]);
                     }
@@ -5612,7 +5660,12 @@ if( $write_messages_to_csv ) {                     # If write to CSV enabled, op
     foreach my $config (@udm_configs) {
         my $name = $config->{name};
         my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
-        push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
+        if ($config->{name} ne $config->{base_name}) {
+            # Disambiguated metric: single value column (#99)
+            push @udm_csv_headers, $csv_prefix;
+        } else {
+            push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
+        }
     }
     $csv->print($csv_fh, [qw(Category Message Occurrences MeanBytes TotalBytes TotalBytesNice count_occurrences count_min count_mean count_max count_sum MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact), @udm_csv_headers]);
 }
