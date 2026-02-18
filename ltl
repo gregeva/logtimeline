@@ -852,6 +852,7 @@ sub parse_udm_configs {
 
         push @udm_configs, {
             name        => $name,
+            base_name   => $name,
             unit        => $unit,
             function    => $function,
             transform   => $transform,
@@ -861,9 +862,18 @@ sub parse_udm_configs {
             converter   => $converter,
             formatter   => $formatter,
         };
-
-        push @graph_user_defined_metrics, $name;
     }
+
+    # Disambiguate duplicate metric names by appending :aggregation (#99)
+    my %name_counts;
+    $name_counts{$_->{name}}++ for @udm_configs;
+    for my $config (@udm_configs) {
+        if ($name_counts{$config->{name}} > 1) {
+            $config->{name} = "$config->{base_name}:$config->{aggregation}";
+        }
+    }
+
+    push @graph_user_defined_metrics, $_->{name} for @udm_configs;
 
     # Add UDM metric names to graph columns
     push @graph_columns, map { "udm_$_->{name}" } @udm_configs;
@@ -909,12 +919,12 @@ sub detect_and_parse_csv_header {
     # Map UDM configs to column indices
     @csv_udm_col_indices = ();
     for my $i (0 .. $#udm_configs) {
-        my $col_name = lc($udm_configs[$i]->{name});
+        my $col_name = lc($udm_configs[$i]->{base_name});
         if (exists $csv_col_index{$col_name}) {
             $csv_udm_col_indices[$i] = $csv_col_index{$col_name};
         } else {
             $csv_udm_col_indices[$i] = -1;
-            print STDERR "Warning: UDM metric '$udm_configs[$i]->{name}' not found in CSV headers\n";
+            print STDERR "Warning: UDM metric '$udm_configs[$i]->{base_name}' not found in CSV headers\n";
         }
     }
 
@@ -3745,8 +3755,14 @@ sub normalize_data_for_output {
             } elsif ($key =~ /^udm_/) {
                 (my $csv_key = $key) =~ s/^udm_//;
                 my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
-                my $csv_prefix = ($cfg && $cfg->{unit}) ? "${csv_key}_$cfg->{unit}" : $csv_key;
-                push @output_columns, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
+                if ($cfg && $cfg->{name} ne $cfg->{base_name}) {
+                    # Disambiguated metric: single value column (#99)
+                    my $csv_prefix = $cfg->{unit} ? "${csv_key}_$cfg->{unit}" : $csv_key;
+                    push @output_columns, $csv_prefix;
+                } else {
+                    my $csv_prefix = ($cfg && $cfg->{unit}) ? "${csv_key}_$cfg->{unit}" : $csv_key;
+                    push @output_columns, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
+                }
             } else {
                 push @output_columns, $key;
             }
@@ -4332,8 +4348,13 @@ sub print_bar_graph {
                                     $trend_value = " " . format_number($log_stats{$bucket}{$key}, ' ', 2);
                                 }
                             }
-                            foreach my $metric ( qw( occurrences min mean max sum ) ) {
-                                push @csv_data, $log_stats{$bucket}{"${key}_${metric}"};
+                            if ($config && $config->{name} ne $config->{base_name}) {
+                                # Disambiguated metric: single value (#99)
+                                push @csv_data, $log_stats{$bucket}{$key};
+                            } else {
+                                foreach my $metric ( qw( occurrences min mean max sum ) ) {
+                                    push @csv_data, $log_stats{$bucket}{"${key}_${metric}"};
+                                }
                             }
                         } else {
                             my $decimals = $col_w > 10 ? 2 : ($col_w > 8 ? 1 : 0);
@@ -5404,12 +5425,19 @@ sub print_message_summary {
                         my @udm_csv_values;
                         foreach my $config (@udm_configs) {
                             my $name = $config->{name};
-                            push @udm_csv_values,
-                                $log_messages{$grouping}{$key}{"udm_${name}_occurrences"},
-                                $log_messages{$grouping}{$key}{"udm_${name}_min"},
-                                $log_messages{$grouping}{$key}{"udm_${name}_mean"},
-                                $log_messages{$grouping}{$key}{"udm_${name}_max"},
-                                $log_messages{$grouping}{$key}{"udm_${name}_sum"};
+                            if ($config->{name} ne $config->{base_name}) {
+                                # Disambiguated metric: single aggregated value (#99)
+                                my $agg = $config->{aggregation};
+                                my $stat_key = $agg eq 'avg' ? 'mean' : $agg;
+                                push @udm_csv_values, $log_messages{$grouping}{$key}{"udm_${name}_${stat_key}"};
+                            } else {
+                                push @udm_csv_values,
+                                    $log_messages{$grouping}{$key}{"udm_${name}_occurrences"},
+                                    $log_messages{$grouping}{$key}{"udm_${name}_min"},
+                                    $log_messages{$grouping}{$key}{"udm_${name}_mean"},
+                                    $log_messages{$grouping}{$key}{"udm_${name}_max"},
+                                    $log_messages{$grouping}{$key}{"udm_${name}_sum"};
+                            }
                         }
                         $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact, @udm_csv_values ]);
                     }
@@ -5632,7 +5660,12 @@ if( $write_messages_to_csv ) {                     # If write to CSV enabled, op
     foreach my $config (@udm_configs) {
         my $name = $config->{name};
         my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
-        push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
+        if ($config->{name} ne $config->{base_name}) {
+            # Disambiguated metric: single value column (#99)
+            push @udm_csv_headers, $csv_prefix;
+        } else {
+            push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
+        }
     }
     $csv->print($csv_fh, [qw(Category Message Occurrences MeanBytes TotalBytes TotalBytesNice count_occurrences count_min count_mean count_max count_sum MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact), @udm_csv_headers]);
 }
