@@ -45,10 +45,20 @@ if [ ! -f "build/cpanfile.windows" ]; then
 fi
 
 docker run --rm --platform=linux/$architecture \
-   -e PACKAGE_NAME -e SCRIPT_NAME -v "$PWD":/work -w /work/build "${base_os}:${version}" bash -lc '
+   -e PACKAGE_NAME -e SCRIPT_NAME -e GITHUB_TOKEN="${GITHUB_TOKEN:-}" \
+   -v "$PWD":/work -w /work/build "${base_os}:${version}" bash -lc '
     set -euo pipefail
     export DEBIAN_FRONTEND=noninteractive
     export WINEDEBUG=-all WINEPREFIX=/wine64
+
+    # Build auth header for GitHub API requests (unauthenticated: 60 req/hr, authenticated: 5000 req/hr)
+    GITHUB_AUTH_HEADER=""
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+      GITHUB_AUTH_HEADER="Authorization: token $GITHUB_TOKEN"
+      echo "[info] Using authenticated GitHub API requests"
+    else
+      echo "[warn] GITHUB_TOKEN not set - GitHub API rate limit is 60 req/hour"
+    fi
 
     echo "[1/7] Installing system packages..."
     apt-get update -qq
@@ -62,14 +72,18 @@ docker run --rm --platform=linux/$architecture \
     # Discover Strawberry Perl portable x64 ZIP
     echo "[3/7] Downloading Strawberry Perl..."
     GITHUB_API="https://api.github.com/repos/StrawberryPerl/Perl-Dist-Strawberry/releases/latest"
-    GITHUB_URL=$(curl -fsSL "$GITHUB_API" \
+    CURL_GITHUB_OPTS=(--retry 3 --retry-delay 5)
+    if [ -n "$GITHUB_AUTH_HEADER" ]; then
+      CURL_GITHUB_OPTS+=(-H "$GITHUB_AUTH_HEADER")
+    fi
+    GITHUB_URL=$(curl -fsSL "${CURL_GITHUB_OPTS[@]}" "$GITHUB_API" \
       | jq -r ".assets[]?.browser_download_url | select(endswith(\"64bit-portable.zip\"))" || true)
 
     # Fallback to SourceForge mirror
     if [ -z "$GITHUB_URL" ]; then
       echo "[warn] GitHub asset not found, trying SourceForge mirror..."
       SF_INDEX="https://sourceforge.net/projects/perl-dist-strawberry.mirror/files/"
-      SF_URL=$(curl -fsSL "$SF_INDEX" \
+      SF_URL=$(curl -fsSL --retry 3 --retry-delay 5 "$SF_INDEX" \
         | grep -Eo "https://sourceforge.net/projects/perl-dist-strawberry.mirror/files/[^\\\"]*64bit-portable\\.zip/download" \
         | head -n1 || true)
       if [ -n "$SF_URL" ]; then
@@ -105,7 +119,11 @@ docker run --rm --platform=linux/$architecture \
       /d "Z:\\opt\\strawberry\\perl\\bin;Z:\\opt\\strawberry\\c\\bin" /f 2>/dev/null || true
 
     echo "[5/7] Installing PAR::Packer..."
-    curl -fsSL -o /tmp/cpanm.pl https://raw.githubusercontent.com/miyagawa/cpanminus/master/cpanm
+    CURL_RAW_OPTS=(--retry 3 --retry-delay 5)
+    if [ -n "$GITHUB_AUTH_HEADER" ]; then
+      CURL_RAW_OPTS+=(-H "$GITHUB_AUTH_HEADER")
+    fi
+    curl -fsSL "${CURL_RAW_OPTS[@]}" -o /tmp/cpanm.pl https://raw.githubusercontent.com/miyagawa/cpanminus/master/cpanm
     wine "$STRAWBERRY/perl/bin/perl.exe" /tmp/cpanm.pl --notest PAR::Packer Module::ScanDeps 2>&1 | tail -5
 
     echo "[6/7] Installing dependencies from cpanfile.windows..."
