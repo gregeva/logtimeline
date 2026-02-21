@@ -1183,7 +1183,7 @@ sub format_bytes {
     }
 
     $formatted_value = sprintf("%.1f", $formatted_value);
-    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;       # remove trailing .0 if present
+    $formatted_value =~ s/\.0+(?=\s|$)//;             # remove trailing .0 if followed by space or end of string
 
     return "$formatted_value $formatted_unit";
 }
@@ -1283,7 +1283,7 @@ sub format_number {
     }
 
     $formatted_value = sprintf("%.${decimals}f%s%s", $formatted_value, defined($space) ? " " : "", $formatted_unit eq "1" ? "" : $formatted_unit );
-    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;       # remove trailing .0 if present
+    $formatted_value =~ s/\.0+(?=\s|$)//;             # remove trailing .0 if followed by space or end of string
 
     return $formatted_value;
 }
@@ -1327,7 +1327,7 @@ sub format_time {
     }
 
     $formatted_value = sprintf("%.1f", $formatted_value);
-    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;                                              # remove trailing .0 if present
+    $formatted_value =~ s/\.0+(?=\s|$)//;                                                    # remove trailing .0 if followed by space or end of string
     
 
     my $unit_name = $unit_names{$formatted_unit}{$format};                                  # Get the appropriate unit name based on format
