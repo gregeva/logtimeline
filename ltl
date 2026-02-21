@@ -70,7 +70,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.12.4";
+my $version_number = "0.12.5";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
@@ -1183,7 +1183,7 @@ sub format_bytes {
     }
 
     $formatted_value = sprintf("%.1f", $formatted_value);
-    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;       # remove trailing .0 if present
+    $formatted_value =~ s/\.0+(?=\s|$)//;             # remove trailing .0 if followed by space or end of string
 
     return "$formatted_value $formatted_unit";
 }
@@ -1283,7 +1283,7 @@ sub format_number {
     }
 
     $formatted_value = sprintf("%.${decimals}f%s%s", $formatted_value, defined($space) ? " " : "", $formatted_unit eq "1" ? "" : $formatted_unit );
-    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;       # remove trailing .0 if present
+    $formatted_value =~ s/\.0+(?=\s|$)//;             # remove trailing .0 if followed by space or end of string
 
     return $formatted_value;
 }
@@ -1327,7 +1327,7 @@ sub format_time {
     }
 
     $formatted_value = sprintf("%.1f", $formatted_value);
-    $formatted_value =~ s/\.[0]+(\s|\w|$)/$1/;                                              # remove trailing .0 if present
+    $formatted_value =~ s/\.0+(?=\s|$)//;                                                    # remove trailing .0 if followed by space or end of string
     
 
     my $unit_name = $unit_names{$formatted_unit}{$format};                                  # Get the appropriate unit name based on format
@@ -1783,6 +1783,7 @@ sub read_and_process_logs {
         %csv_col_index = ();
         @csv_udm_col_indices = ();
         @csv_message_col_indices = ();
+        my $potential_csv_header;
 
         while (<$fh>) {
             s/[\r\n]+$//;                                   # Remove Windows line endings (CRLF) or Unix line endings (LF) if present
@@ -1819,12 +1820,8 @@ sub read_and_process_logs {
                 $| = 1;                                     # Flush output to stdout
             }
 
-            ## CSV header detection (first line only, requires -udm) ##
-            if (!$csv_detected && $line_number == 1 && @udm_configs && detect_and_parse_csv_header($_)) {
-                next;  # Header consumed, skip to data lines
-
-            ## CSV data line ##
-            } elsif ($csv_detected) {
+            ## CSV data line (only after CSV confirmed via two-line validation) ##
+            if ($csv_detected) {
                 @csv_fields = split(/\Q$csv_separator\E/, $_, -1);
                 $timestamp_str = $csv_fields[$csv_timestamp_col];
                 $timestamp_str =~ s/^\s+|\s+$//g if defined $timestamp_str;
@@ -1998,6 +1995,53 @@ sub read_and_process_logs {
                     $object = $1;
                 }
             
+            }
+
+            ## LAZY CSV DETECTION (Issue #107) ##
+            # CSV detection is deferred: line 1 is stashed as a potential header, and only
+            # confirmed as CSV when line 2 also fails all log pattern matches and validates
+            # as CSV data. A log pattern match on any line disqualifies CSV.
+            if (@udm_configs && !$csv_detected) {
+                if ($is_line_match) {
+                    $potential_csv_header = undef;  # Log pattern matched — not a CSV file
+                } elsif ($line_number == 1) {
+                    $potential_csv_header = $_;     # Stash as potential CSV header
+                    next;
+                } elsif ($line_number == 2 && defined $potential_csv_header) {
+                    # Validate: parse header, check that line 2 has matching field count
+                    if (detect_and_parse_csv_header($potential_csv_header)) {
+                        my @data_fields = split(/\Q$csv_separator\E/, $_, -1);
+                        my $header_count = scalar keys %csv_col_index;
+                        if (scalar @data_fields >= $header_count * 0.8) {
+                            # Confirmed CSV — process line 2 as data
+                            @csv_fields = @data_fields;
+                            $timestamp_str = $csv_fields[$csv_timestamp_col];
+                            $timestamp_str =~ s/^\s+|\s+$//g if defined $timestamp_str;
+
+                            if (defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/) {
+                                $csv_epoch_timestamp = 1;
+                            }
+
+                            if (@csv_message_col_indices) {
+                                $message = join(' ', map { ($_ < @csv_fields ? $csv_fields[$_] : '') =~ s/^\s+|\s+$//gr } @csv_message_col_indices);
+                            } else {
+                                $message = "CSV data";
+                            }
+
+                            $category_bucket = "DATA";
+                            $is_line_match = 1;
+                            $is_access_log = 1;
+                            $match_type = 13;
+                        } else {
+                            # Field count mismatch — not CSV, reset
+                            $csv_detected = 0;
+                            %csv_col_index = ();
+                            $potential_csv_header = undef;
+                        }
+                    } else {
+                        $potential_csv_header = undef;  # Header parse failed — not CSV
+                    }
+                }
             }
 
             ## COUNT METRICS # capture count metrics unless explicitly omitted
