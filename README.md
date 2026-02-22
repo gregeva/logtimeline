@@ -53,9 +53,31 @@ ltl [options] <logfile> [logfile2 ...]
 | `-bmax, --bytes-max <N>` | Hide log entries with response size above this threshold |
 | `-cmin, --count-min <N>` | Hide log entries with count below this threshold |
 | `-cmax, --count-max <N>` | Hide log entries with count above this threshold |
-| `-uuid, --mask-uuid` | Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together |
-
 > **Note:** Filters affect all computed statistics. For example, `-dmin 1000` will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population of data in the file.
+
+### Message Grouping
+
+Log messages frequently contain variable parameters — user IDs, UUIDs, session tokens, IP addresses, endpoint paths, locale prefixes, and more. Two messages representing the same operation with different parameters create separate entries. Message grouping (`-g`) detects these variations using character-level similarity analysis and merges them into canonical patterns with `*` wildcards, aggregating their statistics.
+
+**How it works:** During parsing, ltl discovers patterns by comparing unique messages using Dice coefficient scoring on character trigrams. When two messages are sufficiently similar, it aligns them character-by-character to identify which parts are constant and which vary, producing a canonical form like `GET /Thingworx/Things/*/Services/* HTTP/1.1`. Discovered patterns are compiled into regex and applied inline to all subsequent messages — matched messages never enter the main data structures, which is why consolidation reduces memory at scale.
+
+Consolidated entries are marked with `~` in the summary table output. All statistics (occurrences, duration, bytes, percentiles, etc.) are aggregated across matched messages.
+
+| Option | Description |
+|--------|-------------|
+| `-g, --group-similar <N>` | Enable fuzzy message consolidation with N% Dice similarity threshold (50-99, default: 80). Lower values are more aggressive. |
+| `-uuid, --mask-uuid` | Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to `-g` for UUID-only variation) |
+| `-iqs, --include-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
+| `-is, --include-session` | Keep session/user IDs when grouping messages, so each session is tracked separately |
+| `--no-final-pass` | Skip the final consolidation pass that re-processes high-frequency keys against discovered patterns |
+| `--consolidate-full-key` | Score similarity on the full log key including metadata prefix (level, thread, object). Default: message body only with metadata as exact-match grouping keys. |
+| `--consolidation-trigger <N>` | Unmatched keys before triggering a checkpoint (default: 5000) |
+| `--consolidation-ceiling <N>` | Max occurrences for a key to be eligible for pattern discovery (default: 3) |
+| `--consolidation-max-patterns <N>` | Hard cap on patterns per grouping key; 0 = unlimited (default: 0) |
+| `--final-threshold <N>` | Similarity threshold for the final pass (default: 80) |
+| `--final-ceiling <N>` | Occurrence ceiling for the final pass (default: 1000000) |
+
+**Performance characteristics:** Time overhead is ~20-30% at all scales. Memory overhead depends on data size — at small scale (< 200 MB) consolidation uses more memory due to trigram structures during checkpoint processing, but at production scale (1+ GB) it saves memory dramatically (up to 88% reduction on 7.9 GB) because matched keys are absorbed inline and never stored.
 
 ### Recording & Processing
 
@@ -70,8 +92,6 @@ ltl [options] <logfile> [logfile2 ...]
 | `-ob, --omit-bytes` | Suppress byte-size extraction and related columns |
 | `-oc, --omit-count` | Suppress count extraction and related columns |
 | `-ic, --include-count` | Add a count column to the output (off by default) |
-| `-iqs, --include-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
-| `-is, --include-session` | Keep session/user IDs when grouping messages, so each session is tracked separately |
 | `-hl, --hide-legend` | Hide the legend column (category breakdowns and rates) |
 | `-ho, --hide-occurrences` | Hide the occurrences bar graph column, freeing space for other metric columns |
 | `-hd, --hide-duration` | Hide the duration bar graph column |
@@ -162,6 +182,12 @@ ltl -hm duration -bs 5 access.log
 
 # Track a custom metric from application logs
 ltl -udm "rows:/(\d+) rows processed/" my-app.log
+
+# Group similar messages to consolidate URL/UUID variations into patterns
+ltl -g 80 access.log
+
+# Group similar with no final pass (faster, skips re-processing high-frequency keys)
+ltl -g 80 --no-final-pass access.log
 ```
 
 ## Download & Installation
