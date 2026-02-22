@@ -1176,46 +1176,117 @@ The core algorithms are sound and proven:
 
 The following questions must be addressed before integrating the prototype into ltl. TODO: resolve each before integration begins.
 
-### IQ-01: Category Model Mismatch
+### ~~IQ-01: Category Model Mismatch~~ — RESOLVED
 
-The prototype uses `$category` derived from log level (e.g., `ERROR`, `WARN`). ltl uses `$category = 'plain'` or `'highlight'` — log level is baked into `$log_key`. The prototype's category handling works because log level prefixes create natural trigram separation (PF-07), but the integration needs to decide: add real level-based partitioning, or operate on the `plain` pool as-is? How do `%unmatched_keys{$cat}` and `%clusters{$cat}` translate when `$cat` is always `'plain'`?
+**Decision:** Do not change ltl's data model. The consolidation engine operates within ltl's existing `$category` (`plain`/`highlight`), not by log level.
 
-### IQ-02: `$log_key` Construction and Message Capping
+**Key insight:** Consolidation should operate on `$message` only, not the full `$log_key`. The metadata fields (`$log_level`, `$truncated_thread`, `$truncated_object`, and `$session` when `--include-session` is active) serve as an **exact-match grouping key** — two messages are only consolidation candidates if all their metadata fields match. Similarity scoring (trigrams, Dice, alignment) applies only to the `$message` portion.
 
-The prototype builds its own `$log_key` and caps at 350 chars. ltl constructs `$log_key` in `read_and_process_logs()` with truncation controlled by terminal width or CSV width. The similarity engine needs a capped message for indexing. Where does capping happen in ltl's flow, and does the existing truncation suffice or does a separate cap for indexing need to be added?
+**Reasoning — prefix domination on short messages:** When the full `$log_key` is used for Dice scoring, the ~50-char metadata prefix dominates the trigram set. On messages with short bodies (< ~20 chars), cross-level pairs score above 80% and would be incorrectly merged. Tested examples:
+- `[WARN] ... SUCCEEDED - Foo` vs `[ERROR] ... SUCCEEDED - Foo` → Dice 91.5% (incorrect merge)
+- `[WARN] ... Done` vs `[ERROR] ... Done` → Dice 89.7% (incorrect merge)
+- On longer messages (70+ char bodies), cross-level Dice drops to 54% — safe, but the short-message vulnerability makes message-only scoring the correct default.
 
-Additional differences between prototype and ltl key construction:
-- **Metric value masking:** ltl replaces extracted duration/bytes values in `$log_key` with `?` (e.g., `durationMS=167` → `durationMS=?`). This is core ltl functionality during key construction — not related to `$mask_uuid`. It ensures messages differing only by metric values group under the same key. The prototype doesn't replicate this, so the consolidation engine must discover these as similar patterns. At integration time, keys will already have `?` masking before the consolidation engine sees them.
-- **Thread name stripping:** ltl strips trailing thread numbers (e.g., `TWEventProcessor-29` → `TWEventProcessor`). The prototype does this for access logs but not for ThingWorx logs.
+**How it maps to ltl's data flow:**
+- `$message` is already available as a separate variable before `$log_key` construction (ltl lines 2235-2248)
+- The metadata fields used in `$log_key` (`$log_level`, `$truncated_thread`, `$truncated_object`) are also available at that point
+- Session (`$session`) is prepended to `$message` at lines 1902/1916 when `--include-session` is active — for consolidation purposes, it should be treated as a metadata grouping field, not part of the similarity-scored message
+- The consolidation grouping key is the concatenation of available metadata fields: `"$log_level|$truncated_thread|$truncated_object|$session"` (with absent fields omitted). Only messages sharing the same grouping key enter pairwise comparison.
+
+**`--consolidate-full-key` option:** Overrides the default to score similarity on the entire `$log_key` including metadata. For edge cases where metadata itself is variable noise (e.g., `pool-2437346-thread-1`, `pool-243999-thread-1` — infinite dynamically-created thread pools).
+
+**Prototype impact:** The prototype's per-level `$cat` partitioning (`%clusters{$cat}`, `%unmatched_keys{$cat}`) maps naturally to the grouping key concept — just replace the log-level category with the full metadata grouping key. The `%canonical_patterns{$cat}` structure already supports this: patterns are only matched within their category.
+
+### ~~IQ-02: `$log_key` Construction and Message Capping~~ — RESOLVED
+
+**Decision:** The consolidation engine receives `$message` directly (per IQ-01), not the full `$log_key`. This eliminates the prototype's key construction differences and shortens the indexed text by ~50 chars (the metadata prefix).
+
+**Adaptive consolidation cap:** The cap on `$message` length for trigram indexing adapts to both the output context and the observed data:
+
+- Track `$max_observed_message_length` during parsing (on `$message` body, not full `$log_key`)
+- Define upper bounds as global variables (not hardcoded): `$consolidation_cap_csv` for CSV mode, `$terminal_width` for terminal mode
+- Effective cap at each checkpoint: `min($max_observed_message_length, $upper_bound)`
+- By the first checkpoint (5000 keys), the observed max is representative
+
+**Rationale — memory matters:** Trigram structures (`key_trigrams`, `ngram_index`, `key_trigrams_norm`) are the dominant memory cost (~206 MB peak on power-law data, PF-21). Longer messages generate proportionally more trigrams. Benchmarking showed cap 200→300 adds 46 MB RSS; 300→500 adds zero on files with ~300-char messages but would add proportionally on files with longer messages. The adaptive cap avoids wasting memory when messages are short while allowing full context when messages are long.
+
+**Resolved sub-questions:**
+- **Metric value masking:** Not a consolidation concern. ltl masks `$message` before the consolidation engine sees it (e.g., `durationMS=167` → `durationMS=?`). The engine receives pre-masked messages — fewer false unique keys, less work for the similarity engine.
+- **Thread name stripping:** Not a consolidation concern. Per IQ-01, thread is an exact-match grouping field. ltl already strips trailing thread numbers before key construction.
 
 ### ~~IQ-03: Stats Merging~~ — Resolved (PF-25)
 
 Stats merging validated in prototype. All fields match ltl's MESSAGES CSV output exactly (tested on both access logs and ThingWorx DPM logs). DD-07 updated with three missing fields: `sum_of_squares` (sum), `impact` (recompute), `total_duration_num` (sum). See PF-25 for details.
 
-### IQ-04: Per-Bucket Data (`%log_analysis`) Routing
+### ~~IQ-04: Per-Bucket Data (`%log_analysis`) Routing~~ — RESOLVED (non-issue)
 
-ltl accumulates per-time-bucket data in `%log_analysis{$bucket}`. This is a flat structure keyed only by bucket (no `$log_key` dimension), so consolidation does not affect it directly. However, `%log_occurrences{$bucket}{$category_bucket}` tracks per-bucket per-category counts for the bar graph — if `$category_bucket` includes `$log_key`, then consolidation must remap these. Needs investigation during integration.
+**Answer:** Consolidation does not affect per-bucket data structures. `%log_analysis{$bucket}` is flat (no `$log_key` dimension). `%log_occurrences{$bucket}{$category_bucket}` is keyed by log level (`WARN`, `2xx`, etc.), not by message key. `$log_key` is only used as a key into `%log_messages{$category}`. The bar graph and per-bucket statistics are completely independent of message grouping — no remapping needed.
 
 ### ~~IQ-05: Inline::C as Production Dependency~~ — RESOLVED (PF-26)
 
 **Answer:** Inline::C is NOT needed for production. Pure Perl banded edit distance is the default. The checkpoint architecture reduced `compute_mask` calls so dramatically that the 100× per-call speedup translates to only 1.2-1.6× end-to-end improvement (3.67s vs 2.29s on power-law). Additionally, Inline::C has platform-specific crash bugs (bus errors on macOS). For ltl integration: use pure Perl only, no C compiler requirement, no `_Inline/` cache.
 
-### IQ-06: `--group-similar` CLI Integration
+### ~~IQ-06: `--group-similar` CLI Integration~~ — RESOLVED
 
-How does `--group-similar` interact with: (a) `-o` CSV output — how are consolidated entries represented? (b) `-n` top N — after consolidation, count may "just work." (c) Summary table rendering — canonical form replaces `$log_key`, visual indicator per DD-10? (d) `-V` verbose output — what consolidation stats are shown?
+**How `--group-similar` interacts with existing features:**
 
-### IQ-07: Placement in ltl's Processing Flow
+**(a) `-o` CSV output:** Consolidated entries appear naturally — absorbed keys are deleted from `%log_messages`, canonical keys replace them. The consolidated indicator (`~` prefix) appears as the first additional field in the CSV row (same position as in terminal output). A boolean `is_consolidated` column is added to the CSV schema.
 
-ltl's flow: `adapt_to_command_line_options()` → `read_and_process_logs()` → `calculate_all_statistics()` → `normalize_data_for_output()` → `print_bar_graph()` → `print_summary_table()`. Checkpoint logic fires during `read_and_process_logs()`. Does consolidation go inline in that function or in a sub called from it? Where do new data structures live — as globals or scoped?
+**(b) `-n` top N:** Just works. Sorting at `print_summary_table()` iterates `keys %{$log_messages{$grouping}}`. After consolidation there are fewer, higher-occurrence entries. The sort and top-N slicing see the reduced set — no changes needed.
 
-### IQ-08: `%log_messages` Key Replacement — Full Data Model
+**(c) Summary table rendering:** The canonical form is the key in `%log_messages` after consolidation — renders in the same column as any `$log_key`. Consolidated entries are flagged with `$log_messages{$cat}{$log_key}{is_consolidated} = 1` and display the `~` prefix character (matching prototype behavior) per DD-10.
 
-When consolidation absorbs keys, the prototype deletes from `%log_messages` and creates a canonical-keyed entry. In ltl, `%log_messages{plain}{$log_key}` carries more data (highlight forms, first/last seen, etc.). The canonical key must inherit or aggregate all fields. Full field inventory needed during integration.
+**(d) `-V` verbose output:** Consolidation statistics shown under `-V`, gated by `--group-similar` being active. Subset of prototype output relevant for testing and debugging — checkpoint counts, S1-S5 breakdown, pattern counts, reduction percentages. Not all prototype diagnostic output is needed in production.
 
-### IQ-09: Adaptive Trigger — Status
+### ~~IQ-07: Placement in ltl's Processing Flow~~ — RESOLVED
 
-DD-02 describes an adaptive trigger that adjusts based on consolidation yield. The prototype uses a fixed trigger of 5000. Has this been abandoned, or is it still planned? Feature doc still references it. Decision needed.
+**Consolidation integrates into `read_and_process_logs()` at three points:**
 
-### IQ-10: Final Pass Stats Merging
+1. **S1 inline match (line ~2254):** Before adding to `%log_messages{$category}{$log_key}`, try matching `$message` against compiled patterns for the grouping key. If matched, route duration/bytes/stats to the cluster and skip `%log_messages` insertion. This is the primary performance mechanism — prevents 98-99% of keys from entering `%log_messages`.
 
-The final pass re-discovers patterns among ceiling-excluded keys after parsing is complete. When it absorbs keys, their full accumulated stats (including `durations` arrays, per-bucket data) must be merged into the new cluster. Same problem as IQ-03/IQ-04 but at a different point in the processing flow.
+2. **Checkpoint trigger (after line ~2453):** After per-line stats accumulation, check if unmatched count for the grouping key exceeds the trigger. If so, call `run_checkpoint()` which runs S2→S3→S4, discovers new patterns, and deletes absorbed keys from `%log_messages`.
+
+3. **Final pass (after line ~2460):** After all files are closed and before `return`, run the final consolidation pass on ceiling-excluded keys.
+
+**Consolidation logic lives in dedicated subroutines** called from `read_and_process_logs()` — not inline. Key functions: `try_inline_match()`, `run_checkpoint()`, `run_consolidation_pass()`, `build_ngram_index()`, `find_candidates()`, `compute_mask()`, `derive_canonical()`, `derive_regex()`, `merge_stats()`.
+
+**Data structures are globals**, alongside existing `%log_messages`, `%log_analysis`, etc. They persist across the parsing loop and are referenced for verbose output and stats. Key structures: `%clusters`, `%canonical_patterns`, `%unmatched_keys`, plus per-checkpoint transient structures (`%ngram_index`, `%key_trigrams`, etc.) that are built and freed within `run_checkpoint()`.
+
+**Downstream functions are unaffected.** `calculate_all_statistics()`, `normalize_data_for_output()`, `print_bar_graph()`, and `print_summary_table()` operate on `%log_messages` which already has consolidated entries by the time they run. No changes needed to these functions (except the `~` indicator rendering in `print_summary_table()` per IQ-06).
+
+### ~~IQ-08: `%log_messages` Key Replacement — Full Data Model~~ — RESOLVED
+
+**Full field inventory for `%log_messages{$category}{$log_key}`:**
+
+Fields set during parsing (must be merged by `merge_stats()`):
+
+| Field | Merge rule | PF-25 covered? |
+|-------|-----------|----------------|
+| `occurrences` | sum | Yes |
+| `total_bytes` | sum | Yes |
+| `total_duration` | sum | Yes |
+| `total_duration_num` | sum | No — add |
+| `sum_of_squares` | sum | Yes |
+| `durations` | concatenate arrays | Yes |
+| `impact` | **recompute** after merge | No — add |
+| `count_sum` | sum | No — add |
+| `count_occurrences` | count (sum) | No — add |
+| `count_min` | min of mins | No — add |
+| `count_max` | max of maxes | No — add |
+| `udm_${name}_sum` | sum (per UDM config) | No — add |
+| `udm_${name}_occurrences` | count (sum) | No — add |
+| `udm_${name}_min` | min of mins | No — add |
+| `udm_${name}_max` | max of maxes | No — add |
+| `is_consolidated` | set to 1 on canonical entry | N/A — new field |
+
+Fields computed downstream in `calculate_all_statistics()` — **not merged**, recomputed from raw fields: `min`, `mean`, `max`, `std_dev`, `cv`, `p1`-`p999`, `count_mean`, `udm_${name}_mean`, `total_duration` (overwritten with formatted string).
+
+**Key insight:** All merge rules follow the same three patterns: sum, min-of-mins, or concatenate. The count/UDM fields use the same rules as the duration/bytes fields already implemented in PF-25. `impact` is the only field that requires recomputation rather than arithmetic merge. The downstream `calculate_all_statistics()` function handles all derived fields correctly from the raw merged data — no changes needed there.
+
+### ~~IQ-09: Adaptive Trigger — Status~~ — RESOLVED (deferred)
+
+**Decision:** Use fixed trigger of 5000 for initial integration. The adaptive trigger described in DD-02 is deferred — it's an optimization, not a correctness requirement. The fixed trigger worked correctly across all test files (power-law, diverse, access logs, DPM). On power-law data, checkpoint 1 discovers dominant patterns and S1 absorbs 98%+ thereafter. On diverse data, 2 checkpoints fire and both are productive. Adaptive behavior can be added later if profiling shows it's needed.
+
+### ~~IQ-10: Final Pass Stats Merging~~ — RESOLVED (non-issue)
+
+**Answer:** Same `merge_stats()` operation as checkpoint-time S4 merging — no special handling needed. The final pass absorbs ceiling-excluded keys from `%log_messages`, merging their full stats (per IQ-08 field inventory) into new clusters and deleting the absorbed entries. The prototype already does this correctly (PF-23). Per IQ-04, `%log_analysis` has no `$log_key` dimension and is unaffected. The only difference from checkpoint-time merging is that entries have larger `durations` arrays (accumulated across the entire file), but the merge rules are identical.
