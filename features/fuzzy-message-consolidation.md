@@ -1168,7 +1168,7 @@ The core algorithms are sound and proven:
 1. ~~**Character-level alignment algorithm**~~: Resolved — LCS with two-pass coalescing (PF-03)
 2. ~~**CLI option naming**~~: Resolved — `--ceiling`, `--max-patterns`, `--final-pass`, `--final-threshold`, `--final-ceiling`
 3. ~~**Performance benchmarks**~~: Resolved — NYTProf profiling (PF-14), alignment algorithm benchmark (PF-15)
-4. **Minimum cluster count**: Below what number of unique messages per category is consolidation not triggered at all? Likely related to the trigger threshold but may need a separate floor.
+4. ~~**Minimum cluster count**~~: Resolved — no separate floor needed. The EOF checkpoint runs on all remaining unmatched keys regardless of count, so files with fewer unique keys than the trigger threshold (5000) still get one consolidation pass.
 5. ~~**Hard cap value**~~: Resolved — default 50, accommodates shared pool across log levels
 6. ~~**Scalability**~~: Resolved — validated at production scale (PF-24). 50 files, 3.3 GB, 16.4M lines: 81s, 151 MB, 99.9% S1 absorption. 1.9× faster and 40% less memory than ltl -od.
 
