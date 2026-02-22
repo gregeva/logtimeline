@@ -894,6 +894,110 @@ The prototype is 1.9× faster and uses 40% less memory than ltl -od. S1 inline m
 
 **Integration note:** When porting to ltl, the new consolidation data structures (`clusters`, `canonical_patterns`, `unmatched_keys`, `ngram_index`, `key_trigrams`, `key_trigrams_norm`, `posting_size`, `key_message`) must be added to `measure_memory_structures()` so `-mem` output includes their high-water marks alongside existing structures like `log_messages` and `log_analysis`.
 
+### PF-25: Stats Merging Validation
+
+**Problem:** The prototype only tracked `occurrences` on clusters — no durations, bytes, min/max, or percentile data. DD-07 defined how stats should merge but this was untested. Before integrating into ltl, stats merging must be validated to ensure consolidated entries produce correct output matching ltl's MESSAGES CSV format.
+
+**Changes to prototype:**
+
+1. **Parse duration and bytes during ingestion:** Access logs capture `$bytes` and `$duration` from the regex. ThingWorx logs extract duration via `/ durationM[sS]\s*=\s*(\d+)/` (matching ltl line 1853). Handle `-` as missing bytes value.
+
+2. **Store full stats on `%log_messages` entries:** Each entry now tracks `occurrences`, `total_duration`, `sum_of_squares`, `durations` array, `min`, `max`, and `total_bytes`.
+
+3. **Enhanced `merge_stats()`:** Merges all fields per DD-07 rules: sum occurrences/totals/sum_of_squares, min of mins, max of maxes, concatenate durations arrays, sum bytes.
+
+4. **S1 inline match routes full stats:** When a key is absorbed during parsing (never enters `%log_messages`), its duration/bytes are added directly to the cluster — not just `occurrences++`.
+
+5. **Statistics calculation matching ltl exactly:**
+   - Population variance: `sum_of_squares / N - mean^2` (not sample variance)
+   - Mean: `int(total_duration / duration_count)` where `duration_count` is length of durations array
+   - Percentiles: `int($sorted[int($n * fraction)])` index method
+   - MeanBytes: `int(total_bytes / occurrences + 0.5)` (rounded)
+   - StdDev formatted to 3 decimal places, CV to 2
+
+6. **CSV output:** Prototype writes `/tmp/prototype-messages.csv` in ltl's MESSAGES CSV format for comparison.
+
+**Validation results:**
+
+Tested against ltl CSV baseline for two unconsolidated entries that exist in both outputs with identical keys:
+
+**Access log — `GetClientNonce` (12,466 occurrences):**
+
+| Field | ltl | Prototype |
+|-------|-----|-----------|
+| Occurrences | 12466 | 12466 |
+| MeanBytes | 87 | 87 |
+| TotalBytes | 1078390 | 1078390 |
+| Min/Mean/Max | 0/1/13 | 0/1/13 |
+| StdDev | 1.181 | 1.181 |
+| P1/P50/P75/P90/P95/P99/P99.9 | 0/1/2/3/3/3/4 | 0/1/2/3/3/3/4 |
+| CV | 1.18 | 1.18 |
+| TotalDuration | 13829 | 13829 |
+
+**ThingWorx DPM — `GetMetricsList` (32 occurrences):**
+
+| Field | ltl | Prototype |
+|-------|-----|-----------|
+| Occurrences | 32 | 32 |
+| Min/Mean/Max | 949/1018/1149 | 949/1018/1149 |
+| StdDev | 62.659 | 62.659 |
+| P1/P50/P75/P90/P95/P99/P99.9 | 949/1016/1041/1070/1128/1149/1149 | 949/1016/1041/1070/1128/1149/1149 |
+| CV | 0.06 | 0.06 |
+| TotalDuration | 32606 | 32606 |
+
+**All fields match exactly** across both log formats. The stats merging implementation is correct and matches ltl's computation.
+
+**DD-07 update — missing fields identified:** DD-07 omits three fields that ltl actually stores and that must be merged:
+- `sum_of_squares` — sum (required for variance/std_dev/CV calculation)
+- `impact` — must be **recomputed** after merging, not summed (derived from `log(mean^exp * occ)`)
+- `total_duration_num` — sum (numeric copy of total_duration, used for CSV/sorting)
+
+**Key insight — initial risk assessment was partially wrong:** The arithmetic of stats merging is straightforward (sums and mins). The actual risk was in matching ltl's specific formulas (population vs sample variance, percentile indexing, rounding). These turned out to differ from standard implementations and required reading ltl's `calculate_statistics()` to get right.
+
+### PF-26: Pure Perl Fallback and Inline::C Re-evaluation
+
+**Problem:** Inline::C `compute_mask_c()` causes bus errors / trace trap crashes on some macOS systems. The compiled `.bundle` crashes intermittently during S4 pairwise discovery — it compiles successfully and runs for a while, then segfaults on specific inputs. Deleting `_Inline/` cache and recompiling does not fix it. The crash is not deterministic per invocation.
+
+**Root cause:** Likely a memory safety bug in the C code (out-of-bounds access in the banded edit distance backtrace or direction table packing), triggered by specific string length combinations. Not debugged further — the architectural question is whether Inline::C is even needed.
+
+**Solution — conditional loading with pure Perl default:**
+
+1. Inline::C is now **off by default** in the prototype. Use `--inline-c` to opt in.
+2. `compute_mask()` dispatches to `compute_mask_c()` (Inline::C) or `compute_mask_perl()` (pure Perl banded edit distance) based on `$have_inline_c`.
+3. The pure Perl implementation uses the same banded edit distance algorithm as the C version (not the old LCS DP), with identical prefix/suffix stripping and backtrace logic.
+4. Inline::C loading is guarded by `eval { require Inline; ... }` so compilation failures fall back silently.
+
+**Benchmark — 4 test files, 3 runs each (median):**
+
+| File | Lines | Unique Keys | Pure Perl | Inline::C | Speedup |
+|------|-------|-------------|-----------|-----------|---------|
+| Power-law (ThingWorx) | 288K | 287K | 3.67s | 2.29s | 1.6× |
+| Diverse (ThingWorx) | 480K | 10K | 3.84s | 2.47s | 1.6× |
+| Access log | 762K | 3.2K | 4.26s | 4.25s | 1.0× |
+| DPM log (ThingWorx) | 123K | 122K | 5.00s | 4.31s | 1.2× |
+
+**Comparison to PF-20 baselines (Inline::C, before PF-25 stats merging):**
+
+| File | PF-20 | Current (Inline::C) | Current (Pure Perl) |
+|------|-------|---------------------|---------------------|
+| Power-law | 1.87s | 2.29s (+0.42s) | 3.67s (+1.80s) |
+| Diverse | 2.06s | 2.47s (+0.41s) | 3.84s (+1.78s) |
+
+The +0.4s increase vs PF-20 is from PF-25 stats merging (durations array management, bytes tracking).
+
+**Analysis:**
+
+- **Inline::C makes no difference on parsing-dominated workloads.** Access logs (762K lines, only 3.2K unique keys) spend nearly all time in line parsing and S1 regex matching. The few dozen `compute_mask` calls in S4 are negligible.
+- **Inline::C saves 1.4-1.8s on alignment-heavy workloads.** Files with high unique-key counts trigger more S4 pairwise discovery, making `compute_mask` a larger fraction of total time. But even then, pure Perl at 3.7-5.0s is well within acceptable limits.
+- **The checkpoint architecture made Inline::C optional.** PF-15 showed 100× per-call speedup, but the old architecture called `compute_mask` thousands of times. The checkpoint architecture reduced calls to dozens per checkpoint — the 100× speedup on a 0.01s cost is irrelevant.
+
+**Decision: Inline::C is NOT needed for production.**
+
+This resolves IQ-05 (Inline::C dependency question). For ltl integration:
+- Use pure Perl `compute_mask` only — no C compiler requirement, no `_Inline/` cache, no platform-specific crashes
+- The pure Perl implementation is the same banded edit distance algorithm, not the slower LCS DP from PF-15
+- If profiling at production scale reveals alignment as a bottleneck (unlikely given S1 dominance), Inline::C can be reconsidered after fixing the bus error bug
+
 ## Prototype Performance Assessment
 
 ### Test Files
@@ -902,18 +1006,23 @@ The prototype is 1.9× faster and uses 40% less memory than ltl -od. S1 inline m
 |------|-------|------|-------------|---------|
 | HundredsOfThousandsOfUniqueErrors.log | 288K | 97 MB | 286,870 | Power-law: 286K identical ERROR with varying UUIDs |
 | ApplicationLog.2025-05-05.0.log | 480K | 85 MB | 9,031 | Diverse: 4 categories, varied message structures |
+| localhost_access_log-*-0.2025-05-07.txt | 762K | — | 3,184 | Access log: parsing-dominated, low unique ratio |
+| ScriptLog-DPMExtended-clean.log | 123K | — | 121,903 | ThingWorx DPM: high unique ratio, stats-rich |
 | really-big/*2026-01-2*.txt (50 files) | 16.4M | 3.3 GB | 13,266,088 | Access logs: high-volume, URL path variation |
 
-The first two files are small; the third validates scaling on production-size data.
+The first four files are small; the fifth validates scaling on production-size data.
 
 ### Execution Time Comparison
 
-| Metric | Primary (power-law) | Diverse (realistic) | Access logs (50 files, 3.3 GB) |
-|--------|--------------------:|--------------------:|-------------------------------:|
-| **ltl baseline (-od)** | **2.6s** | **3.0s** | **150s** |
-| Old prototype (load-all) | 3.6s | 12.3s | — |
-| **Checkpoint prototype** | **1.87s** | **2.06s** | **81s** |
-| **Overhead vs ltl** | **-28%** | **-31%** | **-46%** |
+| Metric | Power-law | Diverse | Access log | DPM log | Access logs (50×, 3.3 GB) |
+|--------|----------:|--------:|-----------:|--------:|--------------------------:|
+| **ltl baseline (-od)** | **2.6s** | **3.0s** | — | — | **150s** |
+| Old prototype (load-all) | 3.6s | 12.3s | — | — | — |
+| Checkpoint + Inline::C (PF-20) | 1.87s | 2.06s | — | — | 81s |
+| **Checkpoint + Inline::C (PF-26)** | **2.29s** | **2.47s** | **4.25s** | **4.31s** | — |
+| **Checkpoint + Pure Perl (PF-26)** | **3.67s** | **3.84s** | **4.26s** | **5.00s** | — |
+
+PF-26 numbers include PF-25 stats merging overhead (+0.4s vs PF-20). Pure Perl is the default — Inline::C is opt-in via `--inline-c`. Pure Perl uses the same banded edit distance algorithm as the C version, not the old LCS DP.
 
 The checkpoint architecture is actually **faster** than ltl baseline because S1 inline matching prevents most keys from ever entering `%log_messages`, reducing hash allocation overhead. The speedup grows with file size — 46% faster on 3.3 GB access logs.
 
@@ -942,7 +1051,7 @@ See PF-21 for detailed analysis. On small files, the prototype uses more RSS tha
 
 5. **Trigram data lifecycle is correct.** Building and freeing per checkpoint prevents memory accumulation. Only compiled patterns and clusters persist.
 
-6. **Inline::C compute_mask provides 100× speedup** on character alignment but accounts for <1% of total runtime — alignment is not the bottleneck.
+6. **Inline::C is not needed for production.** The 100× per-call speedup (PF-15) is irrelevant when the checkpoint architecture reduces `compute_mask` calls to dozens per batch. Pure Perl banded edit distance runs at equivalent speed on parsing-dominated workloads and adds only 1.4-1.8s on alignment-heavy workloads. Inline::C also has platform-specific crash bugs (bus errors on macOS). See PF-26.
 
 ### Historical: Root Cause of Old Architecture's Performance Problem
 
@@ -1038,7 +1147,7 @@ The core algorithms are sound and proven:
 
 1. ~~**Acceptable memory overhead**~~ Resolved — on large files (the real use case), the prototype uses LESS memory than ltl: 151 MB vs 256 MB on 3.3 GB access logs. Overhead only applies to small files where trigram cost exceeds S1 savings. (PF-24)
 2. ~~**Ceiling default: 2 or 3?**~~ Resolved — ceiling=3 (see PF-22).
-3. **Should Inline::C be a production dependency?** With far fewer alignments per checkpoint, pure Perl may be fast enough. Needs benchmarking.
+3. ~~**Should Inline::C be a production dependency?**~~ Resolved — NO. Pure Perl is fast enough. See PF-26.
 4. ~~**Final pass integration**~~ Resolved — validated with checkpoint architecture (PF-22).
 
 ### Next Steps
@@ -1062,3 +1171,51 @@ The core algorithms are sound and proven:
 4. **Minimum cluster count**: Below what number of unique messages per category is consolidation not triggered at all? Likely related to the trigger threshold but may need a separate floor.
 5. ~~**Hard cap value**~~: Resolved — default 50, accommodates shared pool across log levels
 6. ~~**Scalability**~~: Resolved — validated at production scale (PF-24). 50 files, 3.3 GB, 16.4M lines: 81s, 151 MB, 99.9% S1 absorption. 1.9× faster and 40% less memory than ltl -od.
+
+## Integration Open Questions
+
+The following questions must be addressed before integrating the prototype into ltl. TODO: resolve each before integration begins.
+
+### IQ-01: Category Model Mismatch
+
+The prototype uses `$category` derived from log level (e.g., `ERROR`, `WARN`). ltl uses `$category = 'plain'` or `'highlight'` — log level is baked into `$log_key`. The prototype's category handling works because log level prefixes create natural trigram separation (PF-07), but the integration needs to decide: add real level-based partitioning, or operate on the `plain` pool as-is? How do `%unmatched_keys{$cat}` and `%clusters{$cat}` translate when `$cat` is always `'plain'`?
+
+### IQ-02: `$log_key` Construction and Message Capping
+
+The prototype builds its own `$log_key` and caps at 350 chars. ltl constructs `$log_key` in `read_and_process_logs()` with truncation controlled by terminal width or CSV width. The similarity engine needs a capped message for indexing. Where does capping happen in ltl's flow, and does the existing truncation suffice or does a separate cap for indexing need to be added?
+
+Additional differences between prototype and ltl key construction:
+- **Metric value masking:** ltl replaces extracted duration/bytes values in `$log_key` with `?` (e.g., `durationMS=167` → `durationMS=?`). This is core ltl functionality during key construction — not related to `$mask_uuid`. It ensures messages differing only by metric values group under the same key. The prototype doesn't replicate this, so the consolidation engine must discover these as similar patterns. At integration time, keys will already have `?` masking before the consolidation engine sees them.
+- **Thread name stripping:** ltl strips trailing thread numbers (e.g., `TWEventProcessor-29` → `TWEventProcessor`). The prototype does this for access logs but not for ThingWorx logs.
+
+### ~~IQ-03: Stats Merging~~ — Resolved (PF-25)
+
+Stats merging validated in prototype. All fields match ltl's MESSAGES CSV output exactly (tested on both access logs and ThingWorx DPM logs). DD-07 updated with three missing fields: `sum_of_squares` (sum), `impact` (recompute), `total_duration_num` (sum). See PF-25 for details.
+
+### IQ-04: Per-Bucket Data (`%log_analysis`) Routing
+
+ltl accumulates per-time-bucket data in `%log_analysis{$bucket}`. This is a flat structure keyed only by bucket (no `$log_key` dimension), so consolidation does not affect it directly. However, `%log_occurrences{$bucket}{$category_bucket}` tracks per-bucket per-category counts for the bar graph — if `$category_bucket` includes `$log_key`, then consolidation must remap these. Needs investigation during integration.
+
+### ~~IQ-05: Inline::C as Production Dependency~~ — RESOLVED (PF-26)
+
+**Answer:** Inline::C is NOT needed for production. Pure Perl banded edit distance is the default. The checkpoint architecture reduced `compute_mask` calls so dramatically that the 100× per-call speedup translates to only 1.2-1.6× end-to-end improvement (3.67s vs 2.29s on power-law). Additionally, Inline::C has platform-specific crash bugs (bus errors on macOS). For ltl integration: use pure Perl only, no C compiler requirement, no `_Inline/` cache.
+
+### IQ-06: `--group-similar` CLI Integration
+
+How does `--group-similar` interact with: (a) `-o` CSV output — how are consolidated entries represented? (b) `-n` top N — after consolidation, count may "just work." (c) Summary table rendering — canonical form replaces `$log_key`, visual indicator per DD-10? (d) `-V` verbose output — what consolidation stats are shown?
+
+### IQ-07: Placement in ltl's Processing Flow
+
+ltl's flow: `adapt_to_command_line_options()` → `read_and_process_logs()` → `calculate_all_statistics()` → `normalize_data_for_output()` → `print_bar_graph()` → `print_summary_table()`. Checkpoint logic fires during `read_and_process_logs()`. Does consolidation go inline in that function or in a sub called from it? Where do new data structures live — as globals or scoped?
+
+### IQ-08: `%log_messages` Key Replacement — Full Data Model
+
+When consolidation absorbs keys, the prototype deletes from `%log_messages` and creates a canonical-keyed entry. In ltl, `%log_messages{plain}{$log_key}` carries more data (highlight forms, first/last seen, etc.). The canonical key must inherit or aggregate all fields. Full field inventory needed during integration.
+
+### IQ-09: Adaptive Trigger — Status
+
+DD-02 describes an adaptive trigger that adjusts based on consolidation yield. The prototype uses a fixed trigger of 5000. Has this been abandoned, or is it still planned? Feature doc still references it. Decision needed.
+
+### IQ-10: Final Pass Stats Merging
+
+The final pass re-discovers patterns among ceiling-excluded keys after parsing is complete. When it absorbs keys, their full accumulated stats (including `durations` arrays, per-bucket data) must be merged into the new cluster. Same problem as IQ-03/IQ-04 but at a different point in the processing flow.

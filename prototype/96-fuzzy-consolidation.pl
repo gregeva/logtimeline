@@ -6,7 +6,13 @@ use Time::HiRes qw(time);
 use List::Util qw(min max);
 $| = 1;  # autoflush STDOUT
 
-use Inline C => <<'END_C';
+# Inline::C for fast compute_mask — disabled by default due to bus errors on some systems.
+# Use --inline-c to enable. Pure Perl fallback runs at equivalent speed on typical datasets.
+my $have_inline_c = 0;
+if (grep { $_ eq '--inline-c' } @ARGV) {
+eval {
+    require Inline;
+    Inline->import(C => <<'END_C');
 
 /* Banded edit distance with backtrace — returns mask as arrayref.
  * Handles prefix/suffix stripping in C for zero Perl overhead.
@@ -121,6 +127,12 @@ SV* compute_mask_c(const char *str_a, const char *str_b) {
 }
 
 END_C
+    $have_inline_c = 1;
+};
+if (!$have_inline_c) {
+    warn "Inline::C not available or failed to compile — using pure Perl compute_mask\n";
+}
+} # end if --inline-c
 
 # ============================================================================
 # Prototype for #96 — Fuzzy Message Consolidation
@@ -143,6 +155,7 @@ my $final_pass = 1;
 my $final_threshold = 80;
 my $final_ceiling = 1000000;
 my $show_memory = 0;
+my $use_inline_c = 0;
 
 GetOptions(
     'file=s@'             => \@files,
@@ -156,7 +169,8 @@ GetOptions(
     'final-threshold=i'   => \$final_threshold,
     'final-ceiling=i'     => \$final_ceiling,
     'mem'                 => \$show_memory,
-) or die "Usage: $0 --file <logfile> [--file <logfile2> ...] [--threshold N] [--trigger N] [--top N] [--ceiling N] [--max-patterns N] [--final-pass] [--final-threshold N] [--final-ceiling N] [--mem] [--verbose]\n";
+    'inline-c'            => \$use_inline_c,
+) or die "Usage: $0 --file <logfile> [--file <logfile2> ...] [--threshold N] [--trigger N] [--top N] [--ceiling N] [--max-patterns N] [--final-pass] [--final-threshold N] [--final-ceiling N] [--mem] [--inline-c] [--verbose]\n";
 
 # Expand globs in --file arguments (for shell quoting convenience)
 my @expanded_files;
@@ -237,6 +251,8 @@ for my $file (@files) {
 
         my ($category, $log_key);
 
+        my ($bytes, $duration);  # available to common section below
+
         if (my ($timestamp, $cat, $object, $instance, $user, $session, $platform, $thread, $message) = $line =~ $twx_regex) {
             # ThingWorx ApplicationLog
             $matched_lines++;
@@ -246,7 +262,12 @@ for my $file (@files) {
             my $truncated_object = substr($object, length($object) > $max_object_length ? length($object) - $max_object_length : 0, $max_object_length);
             $log_key = substr("[$cat] [$truncated_thread] [$truncated_object] $message", 0, 350);
 
-        } elsif (my (undef, $ts, $msg, $status_code, $bytes, $duration, $thr, $sess) = $line =~ $access_log_regex) {
+            # Extract duration from message (matching ltl line 1853)
+            ($duration) = $message =~ / durationM[sS]\s*=\s*(\d+)/;
+
+        } elsif (my (undef, $ts, $msg, $status_code, $bytes_val, $duration_val, $thr, $sess) = $line =~ $access_log_regex) {
+            $bytes = $bytes_val;
+            $duration = $duration_val;
             # Tomcat Access Log — mirror ltl's key construction (match_type 3, lines 1885-1896, 2146-2167)
             $matched_lines++;
             $msg =~ s/ HTTP\/\d\.\d$//;     # strip HTTP version
@@ -275,6 +296,10 @@ for my $file (@files) {
         }
 
         # Common key processing for both log formats
+        # $duration and $bytes are set by the ThingWorx or access log branch above
+        my $line_duration = (defined $duration && $duration ne '-') ? $duration + 0 : undef;
+        my $line_bytes    = (defined $bytes    && $bytes    ne '-') ? $bytes + 0    : undef;
+
         my $is_new_key = !exists $log_messages{$category}{$log_key};
 
         if ($is_new_key) {
@@ -287,13 +312,34 @@ for my $file (@files) {
                 my $cluster = $clusters{$category}{$entry->{canonical}};
                 if ($cluster) {
                     $cluster->{occurrences}++;
+                    if (defined $line_duration) {
+                        $cluster->{total_duration} += $line_duration;
+                        $cluster->{sum_of_squares} += $line_duration ** 2;
+                        push @{$cluster->{durations}}, $line_duration;
+                        $cluster->{min} = $line_duration if !defined $cluster->{min} || $line_duration < $cluster->{min};
+                        $cluster->{max} = $line_duration if !defined $cluster->{max} || $line_duration > $cluster->{max};
+                    }
+                    if (defined $line_bytes) {
+                        $cluster->{total_bytes} += $line_bytes;
+                    }
                 }
                 $cat_stats{$category}{s1_inline}++;
                 next;
             }
 
             # No pattern match — add as unmatched
-            $log_messages{$category}{$log_key} = { occurrences => 1 };
+            my %new_entry = ( occurrences => 1 );
+            if (defined $line_duration) {
+                $new_entry{total_duration}  = $line_duration;
+                $new_entry{sum_of_squares}  = $line_duration ** 2;
+                $new_entry{durations}       = [ $line_duration ];
+                $new_entry{min}             = $line_duration;
+                $new_entry{max}             = $line_duration;
+            }
+            if (defined $line_bytes) {
+                $new_entry{total_bytes} = $line_bytes;
+            }
+            $log_messages{$category}{$log_key} = \%new_entry;
             $key_message{$log_key} = substr($log_key, 0, $message_length_cap);
             $unmatched_keys{$category}{$log_key} = 1;
 
@@ -302,7 +348,18 @@ for my $file (@files) {
                 run_checkpoint($category);
             }
         } else {
-            $log_messages{$category}{$log_key}{occurrences}++;
+            my $entry = $log_messages{$category}{$log_key};
+            $entry->{occurrences}++;
+            if (defined $line_duration) {
+                $entry->{total_duration} += $line_duration;
+                $entry->{sum_of_squares} += $line_duration ** 2;
+                push @{$entry->{durations}}, $line_duration;
+                $entry->{min} = $line_duration if !defined $entry->{min} || $line_duration < $entry->{min};
+                $entry->{max} = $line_duration if !defined $entry->{max} || $line_duration > $entry->{max};
+            }
+            if (defined $line_bytes) {
+                $entry->{total_bytes} += $line_bytes;
+            }
         }
     }
     close($fh);
@@ -534,10 +591,95 @@ sub find_candidates {
 # ========================================================================
 
 # Character-level alignment returning mask array (1=keep, 0=variable).
-# Uses Inline::C banded edit distance — 100x faster than pure Perl LCS DP.
+# Uses Inline::C banded edit distance when available, falls back to pure Perl LCS.
 sub compute_mask {
     my ($str_a, $str_b) = @_;
-    return compute_mask_c($str_a, $str_b);
+    return compute_mask_c($str_a, $str_b) if $have_inline_c;
+    return compute_mask_perl($str_a, $str_b);
+}
+
+# Pure Perl LCS-based compute_mask fallback
+sub compute_mask_perl {
+    my ($str_a, $str_b) = @_;
+    my @a = split //, $str_a;
+    my @b = split //, $str_b;
+    my $la = scalar @a;
+    my $lb = scalar @b;
+
+    # Strip common prefix/suffix
+    my $prefix = 0;
+    my $min_len = $la < $lb ? $la : $lb;
+    while ($prefix < $min_len && $a[$prefix] eq $b[$prefix]) { $prefix++; }
+    my $suffix = 0;
+    while ($suffix < ($min_len - $prefix) &&
+           $a[$la - 1 - $suffix] eq $b[$lb - 1 - $suffix]) { $suffix++; }
+
+    my @mask = (0) x $la;
+    for my $i (0 .. $prefix - 1) { $mask[$i] = 1; }
+    for my $i (0 .. $suffix - 1) { $mask[$la - 1 - $i] = 1; }
+
+    my $mid_a = $la - $prefix - $suffix;
+    my $mid_b = $lb - $prefix - $suffix;
+
+    if ($mid_a > 0 && $mid_b > 0) {
+        # Banded edit distance with backtrace (same algorithm as C version)
+        my $m = $mid_a;
+        my $n = $mid_b;
+        my $k = int(($m > $n ? $m : $n) * 0.6) + 2;
+        my $big = $m + $n + 1;
+
+        # Direction: 0=diag, 1=up(delete), 2=left(insert)
+        my @dir;
+        my @prev = map { $_ } (0 .. $n);
+        $dir[0] = [(0) x ($n + 1)];
+        for my $j (1 .. min($n, $k)) { $dir[0][$j] = 2; }
+
+        for my $i (1 .. $m) {
+            my $j_min = $i - $k; $j_min = 1 if $j_min < 1;
+            my $j_max = $i + $k; $j_max = $n if $j_max > $n;
+            my @curr = ($big) x ($n + 1);
+            $curr[0] = $i;
+            $dir[$i] = [(0) x ($n + 1)];
+
+            for my $j ($j_min .. $j_max) {
+                if ($a[$prefix + $i - 1] eq $b[$prefix + $j - 1]) {
+                    $curr[$j] = $prev[$j - 1];
+                    $dir[$i][$j] = 0;
+                } else {
+                    my $sc = $prev[$j - 1] + 1;
+                    my $dc = $prev[$j] + 1;
+                    my $ic = $curr[$j - 1] + 1;
+                    if ($sc <= $dc && $sc <= $ic) {
+                        $curr[$j] = $sc;
+                        $dir[$i][$j] = 0;
+                    } elsif ($dc <= $ic) {
+                        $curr[$j] = $dc;
+                        $dir[$i][$j] = 1;
+                    } else {
+                        $curr[$j] = $ic;
+                        $dir[$i][$j] = 2;
+                    }
+                }
+            }
+            @prev = @curr;
+        }
+
+        # Backtrace
+        my ($i, $j) = ($m, $n);
+        while ($i > 0 && $j > 0) {
+            my $d = $dir[$i][$j];
+            if ($d == 0) {
+                $mask[$prefix + $i - 1] = 1 if $a[$prefix + $i - 1] eq $b[$prefix + $j - 1];
+                $i--; $j--;
+            } elsif ($d == 1) {
+                $i--;
+            } else {
+                $j--;
+            }
+        }
+    }
+
+    return \@mask;
 }
 
 # Remove spurious keep regions that are accidental matches inside variable spans.
@@ -741,6 +883,26 @@ sub match_against_patterns {
 sub merge_stats {
     my ($target, $source) = @_;
     $target->{occurrences} += $source->{occurrences};
+
+    # Duration stats
+    if (defined $source->{total_duration}) {
+        $target->{total_duration} = ($target->{total_duration} // 0) + $source->{total_duration};
+        $target->{sum_of_squares} = ($target->{sum_of_squares} // 0) + $source->{sum_of_squares};
+        if (defined $source->{min}) {
+            $target->{min} = $source->{min} if !defined $target->{min} || $source->{min} < $target->{min};
+        }
+        if (defined $source->{max}) {
+            $target->{max} = $source->{max} if !defined $target->{max} || $source->{max} > $target->{max};
+        }
+        if ($source->{durations} && @{$source->{durations}}) {
+            push @{$target->{durations}}, @{$source->{durations}};
+        }
+    }
+
+    # Bytes stats
+    if (defined $source->{total_bytes}) {
+        $target->{total_bytes} = ($target->{total_bytes} // 0) + $source->{total_bytes};
+    }
 }
 
 # try_merge_into_existing: before creating a new pattern, check if a similar one exists
@@ -1438,12 +1600,14 @@ my @all_entries;
 for my $cat (keys %clusters) {
     for my $canonical (keys %{$clusters{$cat}}) {
         my $c = $clusters{$cat}{$canonical};
+        my %stats = calculate_statistics($c);
         push @all_entries, {
             log_key         => $canonical,
             occurrences     => $c->{occurrences},
             is_consolidated => 1,
             category        => $cat,
             match_count     => $c->{match_count},
+            stats           => \%stats,
         };
     }
 }
@@ -1451,12 +1615,15 @@ for my $cat (keys %clusters) {
 # Add remaining unmatched keys from %log_messages
 for my $cat (sort keys %log_messages) {
     for my $log_key (keys %{$log_messages{$cat}}) {
+        my $e = $log_messages{$cat}{$log_key};
+        my %stats = calculate_statistics($e);
         push @all_entries, {
             log_key         => $log_key,
-            occurrences     => $log_messages{$cat}{$log_key}{occurrences},
+            occurrences     => $e->{occurrences},
             is_consolidated => 0,
             category        => $cat,
             match_count     => 0,
+            stats           => \%stats,
         };
     }
 }
@@ -1464,17 +1631,66 @@ for my $cat (sort keys %log_messages) {
 # Sort by occurrences descending
 @all_entries = sort { $b->{occurrences} <=> $a->{occurrences} } @all_entries;
 
-# Print top N
+# Print top N with stats
 my $show_count = min($top_n, scalar @all_entries);
-printf "  %1s %12s  %s\n", '', 'Occurrences', 'Message';
-printf "  %1s %12s  %s\n", '', '-----------', '-------';
+printf "  %1s %12s  %8s %6s %6s %6s %6s %6s %6s  %s\n",
+    '', 'Occurrences', 'MnBytes', 'Min', 'Mean', 'Max', 'P50', 'P95', 'P99.9', 'Message';
+printf "  %1s %12s  %8s %6s %6s %6s %6s %6s %6s  %s\n",
+    '', '-----------', '-------', '---', '----', '---', '---', '---', '-----', '-------';
 
 for my $i (0 .. $show_count - 1) {
     my $e = $all_entries[$i];
+    my $s = $e->{stats};
     my $prefix = $e->{is_consolidated} ? '~' : ' ';
-    my $display_msg = substr($e->{log_key}, 0, 200);
-    printf "  %1s %12s  %s\n", $prefix, commify($e->{occurrences}), $display_msg;
+    my $display_msg = substr($e->{log_key}, 0, 140);
+    printf "  %1s %12s  %8s %6s %6s %6s %6s %6s %6s  %s\n",
+        $prefix,
+        commify($e->{occurrences}),
+        defined $s->{mean_bytes} ? $s->{mean_bytes} : '',
+        defined $s->{min}  ? $s->{min}  : '',
+        defined $s->{mean} ? int($s->{mean}) : '',
+        defined $s->{max}  ? $s->{max}  : '',
+        defined $s->{p50}  ? $s->{p50}  : '',
+        defined $s->{p95}  ? $s->{p95}  : '',
+        defined $s->{p999} ? $s->{p999} : '',
+        $display_msg;
 }
+
+# Write MESSAGES CSV (matching ltl format for validation)
+my $csv_file = "/tmp/prototype-messages.csv";
+open my $csv_fh, '>', $csv_file or die "Cannot open $csv_file: $!";
+print $csv_fh "Category,Message,Occurrences,MeanBytes,TotalBytes,TotalBytesNice,count_occurrences,count_min,count_mean,count_max,count_sum,MinDuration,MeanDuration,MaxDuration,StdDev,P1,P50,P75,P90,P95,P99,P99.9,CV,TotalDuration,TotalDurationNice,Impact\n";
+
+for my $e (@all_entries) {
+    my $s = $e->{stats};
+    my $occ = $e->{occurrences};
+    my $msg = $e->{log_key};
+    $msg =~ s/"/""/g;  # CSV escape
+
+    # Format values matching ltl output
+    my $mean_bytes     = defined $s->{mean_bytes}     ? $s->{mean_bytes}               : '';
+    my $total_bytes    = defined $s->{total_bytes}     ? $s->{total_bytes}              : '';
+    my $total_bytes_n  = '';  # TotalBytesNice — cosmetic, skip for validation
+    my $min_dur        = defined $s->{min}             ? $s->{min}                      : '';
+    my $mean_dur       = defined $s->{mean}            ? int($s->{mean})                : '';
+    my $max_dur        = defined $s->{max}             ? $s->{max}                      : '';
+    my $std_dev        = defined $s->{std_dev}         ? sprintf("%.3f", $s->{std_dev}) : '';
+    my $p1             = defined $s->{p1}              ? $s->{p1}                       : '';
+    my $p50            = defined $s->{p50}             ? $s->{p50}                      : '';
+    my $p75            = defined $s->{p75}             ? $s->{p75}                      : '';
+    my $p90            = defined $s->{p90}             ? $s->{p90}                      : '';
+    my $p95            = defined $s->{p95}             ? $s->{p95}                      : '';
+    my $p99            = defined $s->{p99}             ? $s->{p99}                      : '';
+    my $p999           = defined $s->{p999}            ? $s->{p999}                     : '';
+    my $cv             = defined $s->{cv}              ? sprintf("%.2f", $s->{cv})      : '';
+    my $total_dur      = defined $s->{total_duration}  ? $s->{total_duration}           : '';
+    my $total_dur_nice = '';  # TotalDurationNice — cosmetic, skip for validation
+    my $impact         = '';  # Impact — derived, skip for now
+
+    print $csv_fh "plain,\"$msg\",$occ,$mean_bytes,$total_bytes,$total_bytes_n,,,,,,$min_dur,$mean_dur,$max_dur,$std_dev,$p1,$p50,$p75,$p90,$p95,$p99,$p999,$cv,$total_dur,$total_dur_nice,$impact\n";
+}
+close $csv_fh;
+printf "\n  CSV written to: %s (%d entries)\n", $csv_file, scalar @all_entries;
 
 # commify: add thousands separators
 sub commify {
@@ -1482,6 +1698,51 @@ sub commify {
     my $text = reverse $n;
     $text =~ s/(\d{3})(?=\d)/$1,/g;
     return scalar reverse $text;
+}
+
+# calculate_statistics: compute percentiles and derived stats from a durations array
+# Returns hash with min, mean, max, std_dev, cv, p1, p50, p75, p90, p95, p99, p999
+sub calculate_statistics {
+    my ($entry) = @_;
+    my %stats;
+
+    my $occ = $entry->{occurrences} // 0;
+    return %stats unless $occ > 0;
+
+    # Duration stats — matching ltl's calculate_statistics() exactly
+    if (defined $entry->{total_duration} && $entry->{durations} && @{$entry->{durations}}) {
+        my @sorted = sort { $a <=> $b } @{$entry->{durations}};
+        my $n = scalar @sorted;  # duration_count — entries with duration data
+
+        $stats{min}  = min(@sorted);
+        $stats{max}  = max(@sorted);
+        $stats{mean} = int($entry->{total_duration} / $n);
+
+        # Percentiles — matching ltl: int($n * fraction) as array index
+        $stats{p1}   = int($sorted[int($n * 0.01)]);
+        $stats{p50}  = int($sorted[int($n * 0.5)]);
+        $stats{p75}  = int($sorted[int($n * 0.75)]);
+        $stats{p90}  = int($sorted[int($n * 0.9)]);
+        $stats{p95}  = int($sorted[int($n * 0.95)]);
+        $stats{p99}  = int($sorted[int($n * 0.99)]);
+        $stats{p999} = int($sorted[int($n * 0.999)]);
+
+        # Variance — matching ltl: population variance (sum_of_sq / N - mean^2)
+        my $variance = ($entry->{sum_of_squares} / $n) - ($stats{mean} ** 2);
+        $variance = 0 if $variance < 0;  # floating point guard
+        $stats{std_dev} = sprintf("%.3f", sqrt($variance));
+        $stats{cv} = $stats{mean} != 0 ? sprintf("%.2f", $stats{std_dev} / $stats{mean}) : undef;
+
+        $stats{total_duration} = $entry->{total_duration};
+    }
+
+    # Bytes stats — matching ltl: int(total_bytes / occurrences + 0.5) for mean
+    if (defined $entry->{total_bytes}) {
+        $stats{total_bytes} = $entry->{total_bytes};
+        $stats{mean_bytes} = int($entry->{total_bytes} / $occ + 0.5);
+    }
+
+    return %stats;
 }
 
 # --- Timing ---
