@@ -2219,7 +2219,8 @@ sub convert_bytes {
 }
 
 sub format_bytes {
-    my ($value, $unit) = @_;
+    my ($value, $unit, $decimals) = @_;
+    $decimals = 1 if !defined $decimals;
     my %units = (
         'b'  => 1,
         'B'  => 1,
@@ -2249,7 +2250,7 @@ sub format_bytes {
         }
     }
 
-    $formatted_value = sprintf("%.1f", $formatted_value);
+    $formatted_value = sprintf("%.${decimals}f", $formatted_value);
     $formatted_value =~ s/\.0+(?=\s|$)//;             # remove trailing .0 if followed by space or end of string
 
     return "$formatted_value $formatted_unit";
@@ -2517,7 +2518,7 @@ sub adapt_to_command_line_options {
         'udm-csv-message|ucm=s'    => \@udm_csv_message_col_names,
         'udm-csv-separator|ucs=s'  => \$csv_separator_override,
         'mask-uuid|uuid' => \$mask_uuid,
-        'group-similar|g=s' => \$group_similar_sensitivity,
+        'group-similar|g:s' => \$group_similar_sensitivity,
         'consolidate-full-key|cfk' => \$consolidate_full_key,
         'no-final-pass' => sub { $consolidation_final_pass = 0; },
         'consolidation-trigger=i' => \$consolidation_trigger,
@@ -2545,12 +2546,20 @@ sub adapt_to_command_line_options {
 
     # Consolidation option processing (Issue #96)
     if ($group_similar_sensitivity ne "none") {
-        if ($group_similar_sensitivity =~ /^\d+$/) {
+        if ($group_similar_sensitivity eq '') {
+            # -g with no value: use default threshold (80)
+            $consolidation_threshold = 80;
+        } elsif ($group_similar_sensitivity =~ /^\d+$/) {
             $consolidation_threshold = int($group_similar_sensitivity);
+        } else {
+            # Non-numeric value captured (likely a filename) — push it back
+            unshift @ARGV, $group_similar_sensitivity;
+            $consolidation_threshold = 80;
         }
         # Ensure threshold is in valid range
         $consolidation_threshold = 50 if $consolidation_threshold < 50;
         $consolidation_threshold = 99 if $consolidation_threshold > 99;
+        $group_similar_sensitivity = $consolidation_threshold;  # normalize for downstream checks
     }
 
     # Heatmap option processing
@@ -6387,14 +6396,13 @@ sub print_summary_table {
 
             for my $struct (@sorted) {
                 my $size = $memory_high_water_marks{$struct};
+                my $category_width = $category_column_width + 2;
+                my $occurrences_width = $occurrences_column_width - 2;
                 my $pct = $total_measured > 0 ? ($size / $total_measured) * 100 : 0;
-
-                # Format percentage: <1% for small values, otherwise rounded
                 my $pct_str = $pct < 1 ? "(<1%)" : sprintf("(%2.0f%%)", $pct);
 
-                # Right-align percentage within a fixed width, then append to indented label
-                my $indented_label = sprintf("  %-20s %5s", $struct, $pct_str);
-                push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", $indented_label, format_bytes( $size, 'B' ) );
+                my $indented_label = sprintf(" %-25s %5s", $struct, $pct_str);
+                push @summary_table, sprintf( "$padding%-${category_width}s %${occurrences_width}s$padding\n", $indented_label, format_bytes( $size, 'B', 0 ) );
             }
     }
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
