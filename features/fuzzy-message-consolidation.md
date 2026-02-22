@@ -1290,3 +1290,58 @@ Fields computed downstream in `calculate_all_statistics()` — **not merged**, r
 ### ~~IQ-10: Final Pass Stats Merging~~ — RESOLVED (non-issue)
 
 **Answer:** Same `merge_stats()` operation as checkpoint-time S4 merging — no special handling needed. The final pass absorbs ceiling-excluded keys from `%log_messages`, merging their full stats (per IQ-08 field inventory) into new clusters and deleting the absorbed entries. The prototype already does this correctly (PF-23). Per IQ-04, `%log_analysis` has no `$log_key` dimension and is unaffected. The only difference from checkpoint-time merging is that entries have larger `durations` arrays (accumulated across the entire file), but the merge rules are identical.
+
+---
+
+## Integration Benchmarks (ltl with `-g 80`)
+
+macOS ARM64 (Apple M4 Max). Memory = RSS high-water mark.
+
+### Scaling Summary
+
+| Scale | Baseline | `-g 80 --no-final-pass` | Time ratio | Memory ratio |
+|-------|----------|------------------------|-----------|-------------|
+| 1 file (95 MB) | 5.0s / 40 MiB | 6.6s / 120 MiB | 1.32× | 3.0× |
+| 5 files (440 MB) | 15.6s / 85 MiB | 20.0s / 143 MiB | 1.28× | 1.68× |
+| 30 files (1.5 GB) | 77.8s / 868 MiB | 96.6s / 380 MiB | 1.24× | **0.44×** |
+| 120 files (7.9 GB) | 390s / 3,661 MiB | 473s / 437 MiB | 1.21× | **0.12×** |
+
+Time overhead decreases with scale (1.32× → 1.21×). Memory crossover occurs between 1-5 files — at production scale, consolidation **saves 3.2 GB of RAM** by preventing unique keys from entering `%log_messages` via S1 inline absorption.
+
+### Production-Scale — 7.9 GB, 40.6M lines, 120 files (4 servers × 28 days)
+
+| Mode | Time | Memory | Ratio to baseline |
+|------|------|--------|-------------------|
+| No `-g` (baseline) | 390s | 3,661 MiB | — |
+| `-g 80 --no-final-pass` | 473s | 437 MiB | 1.21× time, **0.12× memory** |
+| `-g 80` | 489s | 451 MiB | 1.25× time, **0.12× memory** |
+
+Final pass adds ~16s (3.4% overhead) and 14 MiB at production scale.
+
+### Profiling Breakdown (Devel::NYTProf, 1 file / 95 MB / 463K lines)
+
+| Component | Baseline | With `-g 80` | Delta |
+|-----------|----------|-------------|-------|
+| `read_and_process_logs` (excl) | 8.30s | 8.87s | +570ms (inline per-line code) |
+| `find_consolidation_candidates` | — | 1.16s | checkpoint pairwise Dice scoring |
+| `CORE:match` (regex) | 1.05s | 1.10s | +50ms (S1 pattern matching) |
+| `build_consolidation_ngram_index` | — | 217ms | trigram index construction |
+| `get_consolidation_trigrams` | — | 172ms | trigram generation |
+| `match_consolidation_patterns` | — | 135ms | S1 inline matching (new keys only) |
+
+Per-line overhead of `-g`: ~1.2μs (grouping key join, message cap, boolean guards). S1 pattern matching only fires for new unique keys (44K of 463K lines = 9.5%), not every line. Checkpoint work (`find_consolidation_candidates`, `build_consolidation_ngram_index`) is batched and amortized.
+
+### Performance Optimization History
+
+1. **Hard pattern cap (50)**: Original prototype design. At production scale (7.9 GB), caused checkpoint stall — 50 patterns couldn't cover the URL diversity in access logs (45K+ unique URLs per file). Hundreds of unproductive checkpoints fired, each re-scanning 5000 keys against patterns that couldn't match. Result: 3+ hours for server-0 alone (vs 77s baseline).
+
+2. **Raised cap to 500 + stall detection**: Stall detection stops triggering checkpoints after 2 consecutive unproductive ones. Reduced server-0 from 3+ hours to 104s.
+
+3. **Removed hard cap (unlimited) + `build_grouping_key` inlining**: Patterns grow naturally until stall detection stops. More patterns = more S1 absorption = less memory. Inlining the grouping key construction saved ~400ms per 463K lines (eliminated function call overhead). Server-0: 104s → 97s. Full 7.9 GB: 473s with 88% less memory than baseline.
+
+### Observations
+
+- **S1 dominance at scale**: At production scale, the vast majority of unique keys match existing S1 patterns and never enter `%log_messages`. This is the primary mechanism for both memory savings and time efficiency.
+- **Memory crossover**: At small file sizes (< ~200 MB), consolidation uses more memory than baseline (trigram structures during checkpoints). At large file sizes, the memory saved by S1 absorption far exceeds the checkpoint overhead, since trigram structures are freed per checkpoint while `%log_messages` entries persist for the entire run.
+- **Stall detection as natural bound**: With no hard pattern cap, pattern count plateaus naturally when the data's diversity is exhausted. Stall detection (2 consecutive unproductive checkpoints) prevents wasted work on irreconcilable keys.
+- **Final pass cost is proportional**: At small scale, the final pass dominates consolidation time. At large scale, it's a small fraction (16s / 489s = 3.4%) because most keys are already absorbed by S1 during parsing.
