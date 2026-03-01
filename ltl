@@ -685,238 +685,253 @@ sub print_usage {
 }
 
 sub print_help {
-    my $help = <<'END';
-Identify hotspots in large log files through statistical analysis and time-bucket visualization.
+    my $ul  = "\e[4m";   # underline on
+    my $rst = "\e[0m";   # reset
 
-USAGE
+    # Description column starts at this position; adapt to terminal width
+    my $opt_col   = 4;    # indent for option text
+    my $desc_col  = 47;   # column where descriptions begin
+    my $wrap_width = ($terminal_width && $terminal_width > 80) ? $terminal_width : 80;
 
-  ltl [options] <logfile> [logfile2 ...]
+    # Word-wrap a description string to fit between $desc_col and $wrap_width
+    my $wrap = sub {
+        my ($text) = @_;
+        my $max_desc = $wrap_width - $desc_col;
+        $max_desc = 30 if $max_desc < 30;
+        my @words = split /\s+/, $text;
+        my @lines;
+        my $line = "";
+        for my $word (@words) {
+            if ($line eq "") {
+                $line = $word;
+            } elsif (length($line) + 1 + length($word) <= $max_desc) {
+                $line .= " $word";
+            } else {
+                push @lines, $line;
+                $line = $word;
+            }
+        }
+        push @lines, $line if $line ne "";
+        return $lines[0] . "\n" . join("\n", map { " " x $desc_col . $_ } @lines[1..$#lines]) if @lines > 1;
+        return $lines[0] // "";
+    };
 
-OPTIONS
+    # Format an option line: option text left-aligned, description word-wrapped
+    my $short_col = 7;  # width allocated for short option (e.g. "-bs,  " or "-osum,")
+    my $opt = sub {
+        my ($flags, $desc) = @_;
+        my $formatted;
+        if ($flags =~ /^(\S+,)\s+(.+)$/) {
+            # Short + long option: pad short to fixed width
+            my ($short, $long) = ($1, $2);
+            my $short_pad = $short_col - length($short);
+            $short_pad = 1 if $short_pad < 1;
+            $formatted = $short . " " x $short_pad . $long;
+        } elsif ($flags =~ /^\s+(--\S.*)$/) {
+            # Long option only: pad to align -- with other long options
+            $formatted = " " x $short_col . $1;
+        } else {
+            $formatted = $flags;
+        }
+        my $padding = $desc_col - $opt_col - length($formatted);
+        $padding = 2 if $padding < 2;
+        return " " x $opt_col . $formatted . " " x $padding . $wrap->($desc) . "\n";
+    };
 
-  Time & Buckets
-    -bs,  --bucket-size <N>                    Set the width of each time bucket on the timeline
-                                               (default unit: minutes; see -s, -ms)
-    -s,   --seconds                            Interpret bucket size as seconds instead of minutes
-    -ms,  --milliseconds                       Enable sub-second timestamp parsing and allow bucket
-                                               sizes down to 100ms
-    -st,  --start <timestamp>                  Only process log lines at or after this time
-                                               (YYYY-MM-DD HH:MM:SS[.mmm])
-    -et,  --end <timestamp>                    Only process log lines before this time
-                                               (HH:MM:SS[.mmm])
-    -du,  --duration-unit <unit>               Specify the duration unit used in the log file when
-                                               auto-detection is not possible (ns, us, ms, s)
+    # Section heading: underlined, uppercase
+    my $heading = sub {
+        my ($text) = @_;
+        return "\n${ul}${text}${rst}\n\n";
+    };
 
-  Filtering
-    -i,   --include <regex>                    Only process lines matching this pattern, discard
-                                               everything else. Can be specified multiple times;
-                                               patterns are combined with OR. Use & for AND:
-                                               "A&B" matches lines containing both A and B.
-                                               && for literal &. & binds tighter than |.
-    -e,   --exclude <regex>                    Discard lines matching this pattern before analysis.
-                                               Can be specified multiple times; patterns are combined
-                                               with OR. Supports & (AND) and && (literal &).
-    -h,   --highlight <regex>                  Show matching lines as a separate colored bar alongside
-                                               the main bar for visual comparison. Can be specified
-                                               multiple times; patterns are combined with OR.
-                                               Supports & (AND) and && (literal &).
-    -if,  --include-file <file>                Load include patterns from a file (one pattern per line)
-    -ef,  --exclude-file <file>                Load exclude patterns from a file (one pattern per line)
-    -hf,  --highlight-file <file>              Load highlight patterns from a file (one pattern per line)
-    -dmin, --duration-min <N>                  Hide log entries with duration below this threshold
-    -dmax, --duration-max <N>                  Hide log entries with duration above this threshold
-    -bmin, --bytes-min <N>                     Hide log entries with response size below this threshold
-    -bmax, --bytes-max <N>                     Hide log entries with response size above this threshold
-    -cmin, --count-min <N>                     Hide log entries with count below this threshold
-    -cmax, --count-max <N>                     Hide log entries with count above this threshold
+    # Subsection heading: underlined
+    my $subheading = sub {
+        my ($text) = @_;
+        return "\n  ${ul}${text}${rst}\n\n";
+    };
 
-    Note: filters affect all computed statistics. For example, -dmin 1000 will show a
-    minimum duration of ~1s because faster entries were excluded. The statistics reflect
-    the filtered subset, not the full population of data in the file.
+    my $out = "";
 
-  Message Grouping
-    -g,   --group-similar <N>                  Consolidate similar log messages using fuzzy matching
-                                               with N% Dice similarity threshold (50-99, default: 80).
-                                               Messages that differ only in variable parts (UUIDs,
-                                               session IDs, paths, numbers, etc.) are merged into a
-                                               single canonical pattern using * wildcards.
+    my $intro = "LogTimeLine -- a command-line log analysis tool that aggregates timestamped log files into visual timelines. Filter, highlight, zoom, and switch between occurrence counts, latency statistics, heatmaps, histograms, and custom metrics to investigate system behavior over time.";
+    my @intro_words = split /\s+/, $intro;
+    my $intro_line = "";
+    for my $word (@intro_words) {
+        if ($intro_line eq "") {
+            $intro_line = $word;
+        } elsif (length($intro_line) + 1 + length($word) <= $wrap_width) {
+            $intro_line .= " $word";
+        } else {
+            $out .= $intro_line . "\n";
+            $intro_line = $word;
+        }
+    }
+    $out .= $intro_line . "\n" if $intro_line ne "";
 
-                                               Consolidated entries are marked with ~ in the output.
-                                               Statistics (occurrences, duration, bytes, etc.) are
-                                               aggregated across all matched messages.
+    # USAGE
+    $out .= $heading->("USAGE");
+    $out .= "    ltl [options] <logfile> [logfile2 ...]\n";
 
-                                               Uses a checkpoint-based pipeline: patterns are
-                                               discovered in batches of 5000 unique keys, then
-                                               applied inline to subsequent keys during parsing.
-                                               At production scale (7+ GB), this typically reduces
-                                               memory usage by 80-90% while adding ~20% processing
-                                               time.
+    # OPTIONS
+    $out .= $heading->("OPTIONS");
 
-    -uuid, --mask-uuid                         Replace UUIDs/GUIDs with a placeholder so that requests
-                                               differing only by ID are grouped together (simpler
-                                               alternative to -g for UUID-only variation)
-    -iqs, --include-query-string               Keep the query string when grouping URLs, so /api?a=1
-                                               and /api?b=2 are tracked separately
-    -is,  --include-session                    Keep session/user IDs when grouping messages, so each
-                                               session is tracked separately
+    # Time & Buckets
+    $out .= $subheading->("Time & Buckets");
+    $out .= $opt->("-bs,  --bucket-size <N>",       "Set the width of each time bucket on the timeline (default unit: minutes; see -s, -ms)");
+    $out .= $opt->("-s,   --seconds",               "Interpret bucket size as seconds instead of minutes");
+    $out .= $opt->("-ms,  --milliseconds",          "Enable sub-second timestamp parsing and allow bucket sizes down to 100ms");
+    $out .= $opt->("-st,  --start <timestamp>",     "Only process log lines at or after this time (YYYY-MM-DD HH:MM:SS[.mmm])");
+    $out .= $opt->("-et,  --end <timestamp>",       "Only process log lines before this time (HH:MM:SS[.mmm])");
+    $out .= $opt->("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when auto-detection is not possible (ns, us, ms, s)");
+    $out .= $opt->("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: s (second), m (minute, default), h (hour), d (day)");
 
-    --no-final-pass                            Skip the final consolidation pass. By default, a final
-                                               pass re-processes high-frequency keys (those excluded
-                                               from discovery by the occurrence ceiling) against all
-                                               discovered patterns. Disabling saves time when these
-                                               keys are not of interest.
+    # Filtering
+    $out .= $subheading->("Filtering");
+    $out .= $opt->("-i,   --include <regex>",       "Only process lines matching this pattern, discard everything else. Can be specified multiple times; patterns are combined with OR. Use & for AND: \"A&B\" matches lines containing both A and B. && for literal &. & binds tighter than |.");
+    $out .= $opt->("-e,   --exclude <regex>",       "Discard lines matching this pattern before analysis. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
+    $out .= $opt->("-h,   --highlight <regex>",     "Show matching lines as a separate colored bar alongside the main bar for visual comparison. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
+    $out .= $opt->("-if,  --include-file <file>",   "Load include patterns from a file (one pattern per line)");
+    $out .= $opt->("-ef,  --exclude-file <file>",   "Load exclude patterns from a file (one pattern per line)");
+    $out .= $opt->("-hf,  --highlight-file <file>", "Load highlight patterns from a file (one pattern per line)");
+    $out .= $opt->("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold");
+    $out .= $opt->("-dmax, --duration-max <N>",     "Hide log entries with duration above this threshold");
+    $out .= $opt->("-bmin, --bytes-min <N>",        "Hide log entries with response size below this threshold");
+    $out .= $opt->("-bmax, --bytes-max <N>",        "Hide log entries with response size above this threshold");
+    $out .= $opt->("-cmin, --count-min <N>",        "Hide log entries with count below this threshold");
+    $out .= $opt->("-cmax, --count-max <N>",        "Hide log entries with count above this threshold");
+    $out .= "\n";
+    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population.";
+    my $note_width = $wrap_width - $opt_col;
+    $note_width = 30 if $note_width < 30;
+    my @note_words = split /\s+/, $note_text;
+    my $note_line = "";
+    for my $word (@note_words) {
+        if ($note_line eq "") {
+            $note_line = $word;
+        } elsif (length($note_line) + 1 + length($word) <= $note_width) {
+            $note_line .= " $word";
+        } else {
+            $out .= " " x $opt_col . $note_line . "\n";
+            $note_line = $word;
+        }
+    }
+    $out .= " " x $opt_col . $note_line . "\n" if $note_line ne "";
 
-    --consolidate-full-key                     Score similarity on the full log key including metadata
-                                               prefix (level, thread, object). Default: message body
-                                               only, with metadata fields used as exact-match grouping
-                                               keys.
+    # Recording & Processing
+    $out .= $subheading->("Recording & Processing");
+    $out .= $opt->("-ov,  --omit-values",           "Hide the per-bucket numeric values on the bar graph");
+    $out .= $opt->("-os,  --omit-stats",            "Hide the statistics columns (min/avg/max/stddev/etc.)");
+    $out .= $opt->("-oe,  --omit-empty",            "Skip time buckets that contain zero log entries");
+    $out .= $opt->("-or,  --omit-rate",             "Hide the error/message rate from the legend");
+    $out .= $opt->("-od,  --omit-durations",        "Suppress duration extraction and related columns");
+    $out .= $opt->("-ob,  --omit-bytes",            "Suppress byte-size extraction and related columns");
+    $out .= $opt->("-oc,  --omit-count",            "Suppress count extraction and related columns");
+    $out .= $opt->("-ic,  --include-count",         "Add a count column to the output (off by default)");
 
-    --consolidation-trigger <N>                Number of unmatched unique keys that triggers a
-                                               consolidation checkpoint (default: 5000)
-    --consolidation-ceiling <N>                Keys with fewer than N occurrences are eligible for
-                                               pattern discovery. Higher-frequency keys are deferred
-                                               to the final pass (default: 3)
-    --consolidation-max-patterns <N>           Hard cap on patterns per grouping key. 0 = unlimited
-                                               (default: 0). Patterns are naturally bounded by stall
-                                               detection.
-    --final-threshold <N>                      Similarity threshold for the final pass (default: 80)
-    --final-ceiling <N>                        Occurrence ceiling for the final pass (default: 1000000)
+    # Message Grouping
+    $out .= $subheading->("Message Grouping");
+    $out .= $opt->("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 80). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output.");
+    $out .= $opt->("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
+    $out .= $opt->("-iqs, --include-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
+    $out .= $opt->("-is,  --include-session",       "Keep session/user IDs when grouping messages, so each session is tracked separately");
+    $out .= $opt->("-nfp, --no-final-pass",         "Skip the final consolidation pass that re-processes high-frequency keys against discovered patterns");
+    $out .= $opt->("-cfk, --consolidate-full-key",  "Score similarity on the full log key including metadata prefix (level, thread, object). Default: message body only with metadata as exact-match grouping keys.");
+    $out .= $opt->("      --consolidation-trigger <N>",      "Unmatched keys before triggering a checkpoint (default: 5000)");
+    $out .= $opt->("      --consolidation-ceiling <N>",      "Max occurrences for a key to be eligible for pattern discovery (default: 3)");
+    $out .= $opt->("      --consolidation-max-patterns <N>", "Hard cap on patterns per grouping key; 0 = unlimited (default: 0)");
+    $out .= $opt->("      --final-threshold <N>",            "Similarity threshold for the final pass (default: 80)");
+    $out .= $opt->("      --final-ceiling <N>",              "Occurrence ceiling for the final pass (default: 1000000)");
 
-  Recording & Processing
-    -ov,  --omit-values                        Hide the per-bucket numeric values on the bar graph
-    -os,  --omit-stats                         Hide the statistics columns (min/avg/max/stddev/etc.)
-    -oe,  --omit-empty                         Skip time buckets that contain zero log entries
-    -osum, --omit-summary                      Hide the summary table printed after the bar graph
-    -or,  --omit-rate                          Hide the error/message rate from the legend
-    -ru,  --rate-unit <unit>                   Set the time unit for rate normalization (s, m, h, d)
-                                               Default: m (per minute)
-    -od,  --omit-durations                     Suppress duration extraction and related columns
-    -ob,  --omit-bytes                         Suppress byte-size extraction and related columns
-    -oc,  --omit-count                         Suppress count extraction and related columns
-    -ic,  --include-count                      Add a count column to the output (off by default)
-    -hl,  --hide-legend                        Hide the legend column (category breakdowns and rates)
-    -ho,  --hide-occurrences                   Hide the occurrences bar graph column, freeing space
-                                               for other metric columns
-    -hd,  --hide-duration                      Hide the duration bar graph column
-    -hb,  --hide-bytes                         Hide the bytes bar graph column
-    -hc,  --hide-count                         Hide the count bar graph column
-    -hs,  --hide-session                       Hide the Sessions column that automatically appears
-                                               when session IDs are found in the log data
-    -hst, --hide-stats                         Hide the latency statistics or heatmap column
+    # Display & Output
+    $out .= $subheading->("Display & Output");
+    $out .= $opt->("-n,   --top-messages <N>",      "Number of unique messages to show in the summary table (default: 10)");
+    $out .= $opt->("-o,   --output-csv",            "Write all extracted data to a CSV file for external analysis");
+    $out .= $opt->("-osum, --omit-summary",         "Hide the summary table printed after the bar graph");
+    $out .= $opt->("-hl,  --hide-legend",           "Hide the legend column (category breakdowns and rates)");
+    $out .= $opt->("-ho,  --hide-occurrences",      "Hide the occurrences bar graph column, freeing space for other metric columns");
+    $out .= $opt->("-hd,  --hide-duration",         "Hide the duration bar graph column");
+    $out .= $opt->("-hb,  --hide-bytes",            "Hide the bytes bar graph column");
+    $out .= $opt->("-hc,  --hide-count",            "Hide the count bar graph column");
+    $out .= $opt->("-hs,  --hide-session",          "Hide the Sessions column that automatically appears when session IDs are found in the log data");
+    $out .= $opt->("-hst, --hide-stats",            "Hide the latency statistics or heatmap column");
+    $out .= $opt->("-lbg, --light-background",      "Use pale-to-bright color gradients suited for light/white terminal backgrounds");
+    $out .= $opt->("-nah, --no-auto-hide",          "Disable automatic column hiding at narrow terminal widths (squeeze all columns instead)");
+    $out .= $opt->("-p,   --pause",                 "Wait for a keypress between pages of output");
+    $out .= $opt->("-V,   --verbose",               "Print detailed processing information including regex matches and parsing decisions");
 
-  Output
-    -n,   --top-messages <N>                   Number of unique messages to show in the summary table
-                                               (default: 10)
-    -o,   --output-csv                         Write all extracted data to a CSV file for external
-                                               analysis
-    -so,  --sort-on <field>                    Choose which metric to rank messages by in the summary
-                                               (occurrences, duration, min, mean, max, stddev,
-                                               bytes, count, impact, cv)
-    -sa,  --sort-ascending                     Reverse the sort order to show lowest values first
+    # Sorting
+    $out .= $subheading->("Sorting");
+    $out .= $opt->("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary (occurrences, duration, min, mean, max, stddev, bytes, count, impact, cv)");
+    $out .= $opt->("-sa,  --sort-ascending",        "Reverse the sort order to show lowest values first");
 
-  Heatmap
-    -hm,  --heatmap [metric]                   Replace statistics with a color-intensity histogram
-                                               showing value distribution per time bucket
-                                               (duration, bytes, or count)
-    -hmw, --heatmap-width <N>                  Number of columns for the heatmap display (default: 52)
+    # Heatmap
+    $out .= $subheading->("Heatmap");
+    $out .= $opt->("-hm,  --heatmap [metric]",      "Replace statistics with a color-intensity histogram showing value distribution per time bucket (duration, bytes, or count)");
+    $out .= $opt->("-hmw, --heatmap-width <N>",     "Number of columns for the heatmap display (default: 52)");
 
-  Histogram
-    -hg,  --histogram [metric]                 Show an overall distribution histogram after the bar
-                                               graph (duration, bytes, or count)
-    -hgw, --histogram-width <N>                Histogram width as percentage of terminal (default: 95)
-    -hgh, --histogram-height <N>               Histogram height in rows (default: 8)
+    # Histogram
+    $out .= $subheading->("Histogram");
+    $out .= $opt->("-hg,  --histogram [metric]",    "Show an overall distribution histogram after the bar graph (duration, bytes, or count)");
+    $out .= $opt->("-hgw, --histogram-width <N>",   "Histogram width as percentage of terminal (default: 95)");
+    $out .= $opt->("-hgh, --histogram-height <N>",  "Histogram height in rows (default: 8)");
 
-  User-Defined Metrics
-    -udm, --user-defined-metrics <spec>        Extract a custom numeric metric from each log line
+    # User-Defined Metrics
+    $out .= $subheading->("User-Defined Metrics");
+    $out .= $opt->("-udm, --user-defined-metrics <spec>", "Extract a custom numeric metric from each log line. Format: name[:unit[:function]][:/regex/]");
+    $out .= $opt->("      name",                   "Metric name; also matches \"name=value\" or \"name: value\" in log lines");
+    $out .= $opt->("      unit",                   "Time: ns, us, ms, s, m, h. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T. Omit for raw numbers.");
+    $out .= $opt->("      function",               "Aggregations: sum (default), min, max, avg. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), avg(delta), max(idelta), etc.");
+    $out .= $opt->("      /regex/",                "Custom extraction pattern with one capture group around the numeric value to extract. Overrides default name=value matching.");
+    $out .= $opt->("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
+    $out .= $opt->("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter when using -ucm (default: comma)");
 
-      Format: name[:unit[:function]][:/ regex /]
+    # Thread Pool Activity
+    $out .= $subheading->("Thread Pool Activity");
+    $out .= $opt->("-tpa, --threadpool-activity <regex>",  "Track activity over time for threads whose name matches the given pattern. Can be specified multiple times; patterns are combined with OR.");
+    $out .= $opt->("-tpas, --threadpool-activity-summary", "Show a summary of activity across all detected thread pools based on thread names in the log");
 
-      name      Metric name — also used as the default pattern to match
-                "name=value" or "name: value" in log lines
-      unit      Unit for display formatting and conversion:
-                  Time:  ns, us, ms, s, m, h
-                  Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB
-                  SI:    k, K, M, G, T  (multipliers: k/K=1000, M=10^6, etc.)
-                  Omit for raw numbers
-      function  Aggregation and/or transform per time bucket:
-                  Aggregations: sum (default), min, max, avg
-                  Transforms:   delta  (difference between consecutive values,
-                                       negative deltas become 0)
-                                idelta (unclamped delta, keeps negatives)
-                  Combined:     sum(delta), avg(delta), max(idelta), etc.
-      /regex/   Custom extraction pattern with one capture group
-                  around the numeric value to extract. The rest of the
-                  pattern matches the surrounding context in the log line.
-                  Overrides the default name=value matching.
-                  e.g. for "[Duration 134ms]":  /\[Duration (\d+)(?:ms|Ms)\]/
+    # ENVIRONMENT
+    $out .= $heading->("ENVIRONMENT");
+    $out .= $opt->("LTL_CONFIG", "Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (-i, -e, -h, -if, -ef, -hf, -tpa, -udm, -ucm) combine from both sources.");
 
-      Examples:
-        -udm "rows:/(\d+) rows processed/"     Pattern match, raw number
-        -udm "busy:ms:sum(delta)"              Time unit, delta aggregation
-        -udm "bytes_sent:B:sum(delta)"         Byte unit, delta aggregation
-        -udm Send-Q::max                       No unit, max aggregation
+    # INFO
+    $out .= $heading->("INFO");
+    $out .= $opt->("-v,   --version",       "Print the version number and exit");
+    $out .= $opt->("      --help",          "Show this help screen and exit");
+    $out .= $opt->("-mem, --memory-usage",  "Display memory consumption statistics after processing completes");
 
-    -ucm, --udm-csv-message <cols>             Treat the message field as CSV and name the columns
-                                               for use with -udm
-    -ucs, --udm-csv-separator <sep>            Set the CSV field delimiter when using -ucm
-                                               (default: comma)
+    $out .= $heading->("EXAMPLES");
+    my $ex_desc_col = 68;  # description column for examples (commands are longer than options)
+    my $ex = sub {
+        my ($cmd, $desc) = @_;
+        my $padding = $ex_desc_col - $opt_col - length($cmd);
+        $padding = 2 if $padding < 2;
+        return " " x $opt_col . $cmd . " " x $padding . $desc . "\n";
+    };
+    # Header row — account for ANSI codes not taking visual space
+    my $cmd_header = "${ul}Command${rst}";
+    my $desc_header = "${ul}Description${rst}";
+    my $header_pad = $ex_desc_col - $opt_col - 7;  # 7 = visible length of "Command"
+    $header_pad = 2 if $header_pad < 2;
+    $out .= " " x $opt_col . $cmd_header . " " x $header_pad . $desc_header . "\n";
+    $out .= "\n";
+    $out .= $ex->("ltl access.log",                                                "Basic analysis");
+    $out .= $ex->("ltl -bs 5 access.log",                                          "5-minute time buckets");
+    $out .= $ex->("ltl -ms -bs 100 -st \"08:15:00\" -et \"08:16:00\" app.log",     "Millisecond zoom into one minute");
+    $out .= $ex->("ltl -i \"POST\" -e healthcheck access.log",                     "Include POST, exclude health checks");
+    $out .= $ex->("ltl -h \"/api/v2/orders\" access.log",                          "Highlight a pattern against all traffic");
+    $out .= $ex->("ltl -dmin 5000 access.log",                                     "Only requests slower than 5 seconds");
+    $out .= $ex->("ltl -od -ob access.log",                                        "Occurrences only, no duration or bytes");
+    $out .= $ex->("ltl -g 80 access.log",                                          "Fuzzy consolidation at 80% similarity");
+    $out .= $ex->("ltl -n 50 -so duration access.log",                             "Top 50 messages by total duration");
+    $out .= $ex->("ltl -hm duration -bs 5 access.log",                             "Duration heatmap, 5-minute buckets");
+    $out .= $ex->("ltl -hg duration,bytes access.log",                             "Duration and bytes histograms");
+    $out .= $ex->("ltl -udm \"rows:/(\\d+) rows processed/\" app.log",             "Custom metric extraction by regex");
+    $out .= $ex->("ltl -tpa \"http-\" access.log",                                 "Track HTTP thread pool activity");
+    $out .= $ex->("ltl -o access.log",                                             "Export full analysis to CSV");
+    $out .= $ex->("ltl logs/2025-05-*.txt",                                        "Glob multiple files");
+    $out .= "\n";
 
-  Thread Pool Activity
-    -tpa, --threadpool-activity <regex>        Track activity over time for threads whose name matches
-                                               the given pattern. Can be specified multiple times;
-                                               patterns are combined with OR.
-    -tpas, --threadpool-activity-summary       Show a summary of activity across all detected thread
-                                               pools based on thread names in the log
-
-  Display
-    -lbg, --light-background                   Use pale-to-bright color gradients suited for
-                                               light/white terminal backgrounds
-    -nah, --no-auto-hide                       Disable automatic column hiding at narrow terminal
-                                               widths (squeeze all columns instead)
-    -p,   --pause                              Wait for a keypress between pages of output
-    -V,   --verbose                            Print detailed processing information including regex
-                                               matches and parsing decisions
-
-  Info
-    -v,   --version                            Print the version number and exit
-          --help                               Show this help screen and exit
-    -mem, --memory-usage                       Display memory consumption statistics after processing
-                                               completes
-
-ENVIRONMENT
-
-  LTL_CONFIG                                   Default command-line options. Parsed at startup and
-                                               merged with command-line arguments. Command-line
-                                               values override environment values for scalar options.
-                                               Additive options (-i, -e, -h, -if, -ef, -hf, -tpa,
-                                               -udm, -ucm) combine from both sources.
-
-                                               Example:
-                                                 export LTL_CONFIG="-n 20 -bs 5 -lbg -e healthcheck"
-                                                 ltl -e metrics access.log
-                                                 # Uses n=20, bs=5, lbg from env; excludes both
-                                                 # healthcheck (env) and metrics (CLI)
-
-EXAMPLES
-
-  Basic analysis of an access log:
-    ltl access.log
-
-  Analyze with millisecond precision over a one-minute window:
-    ltl -ms -bs 100 -st "08:15:00.000" -et "08:16:00.000" my-app.log
-
-  Filter to POST requests and highlight a specific API:
-    ltl -i "POST" -h "/api/v2/orders" access.log
-
-  Duration heatmap with 5-minute buckets:
-    ltl -hm duration -bs 5 access.log
-
-  Track a custom metric from application logs:
-    ltl -udm "rows:/(\d+) rows processed/" my-app.log
-
-END
-
-    print $help;
+    print $out;
     return;
 }
 
