@@ -23,7 +23,7 @@ ltl [options] <logfile> [logfile2 ...]
 
 ## Documentation
 
-See [docs/usage.md](docs/usage.md) for the full options reference, feature explanations, and examples.
+See the [Wiki](https://github.com/gregeva/logtimeline/wiki) for the full options reference, feature explanations, and examples.
 
 ## Screenshots
 
