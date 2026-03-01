@@ -41,9 +41,9 @@ ltl [options] <logfile> [logfile2 ...]
 
 | Option | Description |
 |--------|-------------|
-| `-i, --include <regex>` | Only process lines matching this pattern, discard everything else. Can be specified multiple times; patterns are combined with OR. |
-| `-e, --exclude <regex>` | Discard lines matching this pattern before analysis. Can be specified multiple times; patterns are combined with OR. |
-| `-h, --highlight <regex>` | Show matching lines as a separate colored bar alongside the main bar for visual comparison. Can be specified multiple times; patterns are combined with OR. |
+| `-i, --include <regex>` | Only process lines matching this pattern, discard everything else. Can be specified multiple times; patterns are combined with OR. Use `&` for AND: `A&B` matches lines containing both A and B. `&&` for literal `&`. `&` binds tighter than `\|`. |
+| `-e, --exclude <regex>` | Discard lines matching this pattern before analysis. Can be specified multiple times; patterns are combined with OR. Supports `&` (AND) and `&&` (literal `&`). |
+| `-h, --highlight <regex>` | Show matching lines as a separate colored bar alongside the main bar for visual comparison. Can be specified multiple times; patterns are combined with OR. Supports `&` (AND) and `&&` (literal `&`). |
 | `-if, --include-file <file>` | Load include patterns from a file (one pattern per line) |
 | `-ef, --exclude-file <file>` | Load exclude patterns from a file (one pattern per line) |
 | `-hf, --highlight-file <file>` | Load highlight patterns from a file (one pattern per line) |
