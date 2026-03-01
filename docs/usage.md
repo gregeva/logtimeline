@@ -208,8 +208,8 @@ Histograms show the overall distribution shape of a metric across the entire tim
 | Option | Description |
 |--------|-------------|
 | `-hg, --histogram [metric]` | Show an overall distribution histogram after the bar graph (`duration`, `bytes`, or `count`) |
-| `-hgw, --histogram-width <N>` | Histogram width as percentage of terminal (default: 65) |
-| `-hgh, --histogram-height <N>` | Histogram height in rows (default: 20) |
+| `-hgw, --histogram-width <N>` | Histogram width as percentage of terminal (default: 95) |
+| `-hgh, --histogram-height <N>` | Histogram height in rows (default: 8) |
 
 ```bash
 # Show duration and bytes histograms side by side
@@ -284,3 +284,16 @@ Version, help, and diagnostic options.
 | `--help` | Show the help screen and exit |
 | `-mem, --memory-usage` | Display memory consumption statistics after processing completes |
 
+## Alternate Names
+
+LogTimeLine uses precise metric names to avoid ambiguity. `duration` explicitly means a time lapse — how long something took. `count` means an amount of work completed in the metrics sense (e.g. rows processed, items returned), distinct from `occurrences` which is the total number of log entries matched. `bytes` means response or payload size. These distinctions matter because imprecise terms like "time" or "size" could refer to different things depending on context.
+
+That said, logtimeline accepts conventional alternates for convenience. These aliases work anywhere a metric or function name is used — sorting (`-so`), heatmap (`-hm`), histogram (`-hg`), and user-defined metric aggregations.
+
+| Canonical Name | Alternates |
+|---------------|------------|
+| `duration` | `time` |
+| `bytes` | `size` |
+| `occurrences` | `total` |
+| `mean` | `avg` |
+| `stddev` | `std_dev` |
