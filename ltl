@@ -823,8 +823,8 @@ OPTIONS
   Histogram
     -hg,  --histogram [metric]                 Show an overall distribution histogram after the bar
                                                graph (duration, bytes, or count)
-    -hgw, --histogram-width <N>                Histogram width as percentage of terminal (default: 65)
-    -hgh, --histogram-height <N>               Histogram height in rows (default: 20)
+    -hgw, --histogram-width <N>                Histogram width as percentage of terminal (default: 95)
+    -hgh, --histogram-height <N>               Histogram height in rows (default: 8)
 
   User-Defined Metrics
     -udm, --user-defined-metrics <spec>        Extract a custom numeric metric from each log line
