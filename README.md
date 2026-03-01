@@ -36,6 +36,7 @@ ltl [options] <logfile> [logfile2 ...]
 | `-st, --start <timestamp>` | Only process log lines at or after this time (`YYYY-MM-DD HH:MM:SS[.mmm]`) |
 | `-et, --end <timestamp>` | Only process log lines before this time (`HH:MM:SS[.mmm]`) |
 | `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when auto-detection is not possible (`ns`, `us`, `ms`, `s`) |
+| `-ru, --rate-unit <unit>` | Set the time unit for rate normalization: `s` (second), `m` (minute, default), `h` (hour), `d` (day) |
 
 ### Filtering
 
@@ -87,7 +88,7 @@ Consolidated entries are marked with `~` in the summary table output. All statis
 | `-os, --omit-stats` | Hide the statistics columns (min/avg/max/stddev/etc.) |
 | `-oe, --omit-empty` | Skip time buckets that contain zero log entries |
 | `-osum, --omit-summary` | Hide the summary table printed after the bar graph |
-| `-or, --omit-rate` | Hide the lines/sec processing rate from output |
+| `-or, --omit-rate` | Hide the error/message rate from the legend |
 | `-od, --omit-durations` | Suppress duration extraction and related columns |
 | `-ob, --omit-bytes` | Suppress byte-size extraction and related columns |
 | `-oc, --omit-count` | Suppress count extraction and related columns |
