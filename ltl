@@ -200,6 +200,7 @@ my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 my ( @in_files, @output_columns );
 my %in_files_matched;
+my %index_file_data;    # Per-file metadata for index file (Issue #46)
 my ($terminal_width, $terminal_height);
 my $terminal_height_detected = 0;  # Flag: was terminal height actually detected?
 {
@@ -456,6 +457,204 @@ foreach my $key (keys %colors) {
 }
 
 ## SUBS ##
+
+# Index file subroutines (Issue #46)
+
+sub has_active_filters {
+    return 1 if @include_args || @exclude_args;
+    return 1 if @include_files || @exclude_files;
+    return 1 if $filter_range_start ne "" || $filter_range_end ne "";
+    return 1 if defined $filter_duration_min || defined $filter_duration_max;
+    return 1 if defined $filter_bytes_min    || defined $filter_bytes_max;
+    return 1 if defined $filter_count_min    || defined $filter_count_max;
+    return 0;
+}
+
+sub serialize_filters {
+    my @parts;
+    my $url_encode = sub {
+        my ($str) = @_;
+        $str =~ s/([^A-Za-z0-9\-_.~])/sprintf("%%%02X", ord($1))/ge;
+        return $str;
+    };
+    push @parts, "-bmax=$filter_bytes_max"       if defined $filter_bytes_max;
+    push @parts, "-bmin=$filter_bytes_min"        if defined $filter_bytes_min;
+    push @parts, "-cmax=$filter_count_max"       if defined $filter_count_max;
+    push @parts, "-cmin=$filter_count_min"        if defined $filter_count_min;
+    push @parts, "-dmax=$filter_duration_max"    if defined $filter_duration_max;
+    push @parts, "-dmin=$filter_duration_min"     if defined $filter_duration_min;
+    push @parts, "-e=" . $url_encode->(join(',', @exclude_args))   if @exclude_args;
+    push @parts, "-ef=" . $url_encode->(join(',', @exclude_files)) if @exclude_files;
+    push @parts, "-et=" . $url_encode->($filter_range_end)         if $filter_range_end ne "";
+    push @parts, "-i=" . $url_encode->(join(',', @include_args))   if @include_args;
+    push @parts, "-if=" . $url_encode->(join(',', @include_files)) if @include_files;
+    push @parts, "-st=" . $url_encode->($filter_range_start)       if $filter_range_start ne "";
+    return join(';', @parts);
+}
+
+sub format_epoch_iso {
+    my ($epoch) = @_;
+    return '-' unless defined $epoch && $epoch > 0;
+    my $int_part = int($epoch);
+    my $ms = int(($epoch - $int_part) * 1000 + 0.5);
+    return sprintf("%s.%03d", strftime("%Y-%m-%dT%H:%M:%S", gmtime($int_part)), $ms);
+}
+
+sub parse_iso_date_to_epoch {
+    my ($iso_str) = @_;
+    return undef unless defined $iso_str && $iso_str =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/;
+    return eval { timegm($6, $5, $4, $3, $2 - 1, $1) };
+}
+
+sub write_index_file {
+    my $index_filename = 'ltl-index.csv';
+    my $index_dir;
+    my $use_absolute_paths = 0;
+
+    if (-w '.') {
+        $index_dir = '.';
+    } else {
+        $index_dir = File::Spec->tmpdir();
+        $use_absolute_paths = 1;
+    }
+
+    my $index_path = File::Spec->catfile($index_dir, $index_filename);
+    my $temp_path  = File::Spec->catfile($index_dir, ".ltl-index.$$.tmp");
+
+    my @index_columns = qw(
+        entry_type entry_date file_path file_size file_mtime
+        line_count match_count first_timestamp last_timestamp ts_precision
+        duration_count duration_min duration_max duration_avg
+        bytes_count bytes_min bytes_max bytes_avg
+        count_count count_min count_max count_avg
+        read_rate memory_used processing_time filters
+    );
+    my $col_count = scalar @index_columns;
+
+    # Column indices for fields we need to inspect during read
+    my %col_idx;
+    for my $i (0..$#index_columns) { $col_idx{$index_columns[$i]} = $i; }
+
+    my $index_csv = Text::CSV->new({ binary => 1, eol => $/ });
+
+    # Read existing entries, preserving those not being overwritten
+    my @preserved_rows;  # Array of arrayrefs
+    my %files_in_this_run = map { $_ => 1 } @files_processed;
+    my %files_unchanged;
+    my $current_filters = has_active_filters() ? serialize_filters() : '-';
+    my $expiry_epoch = time() - (90 * 86400);
+
+    if (-f $index_path) {
+        if (open my $fh, '<', $index_path) {
+            my $header_seen = 0;
+            while (my $row = $index_csv->getline($fh)) {
+                next unless @$row >= 3;
+
+                # Skip header row
+                if (!$header_seen && $row->[0] eq 'entry_type') {
+                    $header_seen = 1;
+                    next;
+                }
+
+                my $etype    = $row->[$col_idx{entry_type}] // '';
+                my $edate    = $row->[$col_idx{entry_date}] // '';
+                my $epath    = $row->[$col_idx{file_path}]  // '';
+                my $efilters = $row->[$col_idx{filters}]    // '';
+
+                # Expire old entries
+                my $entry_epoch = parse_iso_date_to_epoch($edate);
+                next if defined $entry_epoch && $entry_epoch < $expiry_epoch;
+
+                # Handle entries for files in this run
+                if ($files_in_this_run{$epath}) {
+                    if ($etype eq 'file') {
+                        my $existing_mtime = $row->[$col_idx{file_mtime}] // '';
+                        my $fd = $index_file_data{$epath};
+                        if ($fd && $existing_mtime ne '') {
+                            my $current_mtime = strftime("%Y-%m-%dT%H:%M:%S", gmtime($fd->{file_mtime}));
+                            if ($existing_mtime eq $current_mtime) {
+                                $files_unchanged{$epath} = 1;
+                                push @preserved_rows, $row;
+                                next;
+                            }
+                        }
+                        next;
+                    }
+                    next if $etype eq 'selection' && $efilters eq $current_filters;
+                }
+
+                push @preserved_rows, $row;
+            }
+            close $fh;
+        }
+    }
+
+    # Write atomically via temp file
+    my $write_ok = eval {
+        open my $ofh, '>', $temp_path or die "Cannot write $temp_path: $!";
+
+        $index_csv->print($ofh, \@index_columns);
+
+        for my $row (@preserved_rows) {
+            $index_csv->print($ofh, $row);
+        }
+
+        my $now_iso = strftime("%Y-%m-%dT%H:%M:%S", gmtime());
+
+        for my $file (@files_processed) {
+            my $fd = $index_file_data{$file} or next;
+            my $path = $use_absolute_paths ? File::Spec->rel2abs($file) : $file;
+
+            unless ($files_unchanged{$file}) {
+                my $mtime_iso = strftime("%Y-%m-%dT%H:%M:%S", gmtime($fd->{file_mtime}));
+                my $first_ts  = format_epoch_iso($fd->{first_timestamp});
+                my $last_ts   = format_epoch_iso($fd->{last_timestamp});
+
+                my $dur_avg   = $fd->{duration_count} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_count}) : '-';
+                my $bytes_avg = $fd->{bytes_count}    > 0 ? sprintf("%.2f", $fd->{bytes_sum}    / $fd->{bytes_count})    : '-';
+                my $count_avg = $fd->{count_count}    > 0 ? sprintf("%.2f", $fd->{count_sum}    / $fd->{count_count})    : '-';
+                my $read_rate = $fd->{read_elapsed}   > 0 ? sprintf("%.0f", $fd->{line_count}   / $fd->{read_elapsed})   : '-';
+
+                my @file_row = (
+                    'file', $now_iso, $path, $fd->{file_size}, $mtime_iso,
+                    $fd->{line_count}, $fd->{match_count}, $first_ts, $last_ts, $fd->{ts_precision},
+                    $fd->{duration_count}, $fd->{duration_min} // '-', $fd->{duration_max} // '-', $dur_avg,
+                    $fd->{bytes_count}, $fd->{bytes_min} // '-', $fd->{bytes_max} // '-', $bytes_avg,
+                    $fd->{count_count}, $fd->{count_min} // '-', $fd->{count_max} // '-', $count_avg,
+                    $read_rate, '-', '-', '-'
+                );
+                $index_csv->print($ofh, \@file_row);
+            }
+
+            {
+                my $sel_first = format_epoch_iso($fd->{sel_first_timestamp});
+                my $sel_last  = format_epoch_iso($fd->{sel_last_timestamp});
+                my $sel_dur_avg   = $fd->{sel_duration_count} > 0 ? sprintf("%.2f", $fd->{sel_duration_sum} / $fd->{sel_duration_count}) : '-';
+                my $sel_bytes_avg = $fd->{sel_bytes_count}    > 0 ? sprintf("%.2f", $fd->{sel_bytes_sum}    / $fd->{sel_bytes_count})    : '-';
+                my $sel_count_avg = $fd->{sel_count_count}    > 0 ? sprintf("%.2f", $fd->{sel_count_sum}    / $fd->{sel_count_count})    : '-';
+
+                my @sel_row = (
+                    'selection', $now_iso, $path, '-', '-',
+                    '-', $fd->{sel_match_count}, $sel_first, $sel_last, '-',
+                    $fd->{sel_duration_count}, $fd->{sel_duration_min} // '-', $fd->{sel_duration_max} // '-', $sel_dur_avg,
+                    $fd->{sel_bytes_count}, $fd->{sel_bytes_min} // '-', $fd->{sel_bytes_max} // '-', $sel_bytes_avg,
+                    $fd->{sel_count_count}, $fd->{sel_count_min} // '-', $fd->{sel_count_max} // '-', $sel_count_avg,
+                    '-', $max_memory_usage, sprintf("%.3f", $elapsed_total), $current_filters
+                );
+                $index_csv->print($ofh, \@sel_row);
+            }
+        }
+
+        close $ofh or die "Cannot close $temp_path: $!";
+        1;
+    };
+
+    if ($write_ok) {
+        rename($temp_path, $index_path) or warn "Cannot rename index file: $!";
+    } else {
+        unlink $temp_path;
+    }
+}
 
 sub print_title {
     my $title = <<"END";
@@ -2895,6 +3094,28 @@ sub read_and_process_logs {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
         push @files_processed, $in_file;
         my $line_number = 0;
+
+        # Index file: capture file metadata and initialize per-file counters (Issue #46)
+        my @file_stat = stat($in_file);
+        $index_file_data{$in_file} = {
+            file_size       => $file_stat[7],
+            file_mtime      => $file_stat[9],
+            line_count      => 0,
+            match_count     => 0,
+            first_timestamp => undef,
+            last_timestamp  => undef,
+            ts_precision    => 's',
+            duration_count  => 0, duration_min => undef, duration_max => undef, duration_sum => 0,
+            bytes_count     => 0, bytes_min    => undef, bytes_max    => undef, bytes_sum    => 0,
+            count_count     => 0, count_min    => undef, count_max    => undef, count_sum    => 0,
+            read_start      => [gettimeofday],
+            sel_match_count      => 0,
+            sel_first_timestamp  => undef,
+            sel_last_timestamp   => undef,
+            sel_duration_count   => 0, sel_duration_min => undef, sel_duration_max => undef, sel_duration_sum => 0,
+            sel_bytes_count      => 0, sel_bytes_min    => undef, sel_bytes_max    => undef, sel_bytes_sum    => 0,
+            sel_count_count      => 0, sel_count_min    => undef, sel_count_max    => undef, sel_count_sum    => 0,
+        };
         my $filter_range_filter_initialized = 0;
         my %month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
@@ -3304,6 +3525,33 @@ sub read_and_process_logs {
 
                 $filter_range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp_epoch ) unless $filter_range_filter_initialized;
 
+                # Index file: pre-filter per-file tracking (Issue #46)
+                {
+                    my $fd = $index_file_data{$in_file};
+                    $fd->{match_count}++;
+                    $fd->{first_timestamp} = $timestamp_epoch if !defined $fd->{first_timestamp} || $timestamp_epoch < $fd->{first_timestamp};
+                    $fd->{last_timestamp}  = $timestamp_epoch if !defined $fd->{last_timestamp}  || $timestamp_epoch > $fd->{last_timestamp};
+                    $fd->{ts_precision} = 'ms' if $fractional_ms > 0 && $fd->{ts_precision} eq 's';
+                    if (defined $duration) {
+                        $fd->{duration_count}++;
+                        $fd->{duration_sum} += $duration;
+                        $fd->{duration_min} = $duration if !defined $fd->{duration_min} || $duration < $fd->{duration_min};
+                        $fd->{duration_max} = $duration if !defined $fd->{duration_max} || $duration > $fd->{duration_max};
+                    }
+                    if (defined $bytes && $bytes > 0) {
+                        $fd->{bytes_count}++;
+                        $fd->{bytes_sum} += $bytes;
+                        $fd->{bytes_min} = $bytes if !defined $fd->{bytes_min} || $bytes < $fd->{bytes_min};
+                        $fd->{bytes_max} = $bytes if !defined $fd->{bytes_max} || $bytes > $fd->{bytes_max};
+                    }
+                    if (defined $count) {
+                        $fd->{count_count}++;
+                        $fd->{count_sum} += $count;
+                        $fd->{count_min} = $count if !defined $fd->{count_min} || $count < $fd->{count_min};
+                        $fd->{count_max} = $count if !defined $fd->{count_max} || $count > $fd->{count_max};
+                    }
+                }
+
                 ## FILTERING CONDITIONS ##
                 next if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} );
                 next if( defined( $exclude_regex )          && /$exclude_regex/ );
@@ -3317,6 +3565,32 @@ sub read_and_process_logs {
 
                 # take note if any results were found in this file
                 $in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
+
+                # Index file: post-filter per-file tracking for selection entry (Issue #46)
+                {
+                    my $fd = $index_file_data{$in_file};
+                    $fd->{sel_match_count}++;
+                    $fd->{sel_first_timestamp} = $timestamp_epoch if !defined $fd->{sel_first_timestamp} || $timestamp_epoch < $fd->{sel_first_timestamp};
+                    $fd->{sel_last_timestamp}  = $timestamp_epoch if !defined $fd->{sel_last_timestamp}  || $timestamp_epoch > $fd->{sel_last_timestamp};
+                    if (defined $duration) {
+                        $fd->{sel_duration_count}++;
+                        $fd->{sel_duration_sum} += $duration;
+                        $fd->{sel_duration_min} = $duration if !defined $fd->{sel_duration_min} || $duration < $fd->{sel_duration_min};
+                        $fd->{sel_duration_max} = $duration if !defined $fd->{sel_duration_max} || $duration > $fd->{sel_duration_max};
+                    }
+                    if (defined $bytes && $bytes > 0) {
+                        $fd->{sel_bytes_count}++;
+                        $fd->{sel_bytes_sum} += $bytes;
+                        $fd->{sel_bytes_min} = $bytes if !defined $fd->{sel_bytes_min} || $bytes < $fd->{sel_bytes_min};
+                        $fd->{sel_bytes_max} = $bytes if !defined $fd->{sel_bytes_max} || $bytes > $fd->{sel_bytes_max};
+                    }
+                    if (defined $count) {
+                        $fd->{sel_count_count}++;
+                        $fd->{sel_count_sum} += $count;
+                        $fd->{sel_count_min} = $count if !defined $fd->{sel_count_min} || $count < $fd->{sel_count_min};
+                        $fd->{sel_count_max} = $count if !defined $fd->{sel_count_max} || $count > $fd->{sel_count_max};
+                    }
+                }
 
                 # determine if this line should be highlighted (matches in result search)
                 if( defined( $highlight_regex ) && /$highlight_regex/ ) {
@@ -3662,6 +3936,11 @@ sub read_and_process_logs {
         }
 
         close $fh;
+
+        # Index file: finalize per-file counters (Issue #46)
+        $index_file_data{$in_file}{line_count} = $line_number;
+        $index_file_data{$in_file}{read_elapsed} = tv_interval($index_file_data{$in_file}{read_start});
+        delete $index_file_data{$in_file}{read_start};
 
         print "\r" . " " x ($terminal_width - 1) . "\r" unless $disable_progress;		# clear the line of progress messages when moving on to the next file
     }
@@ -6946,6 +7225,8 @@ print_message_summary();														                    # Print and write mess
 close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
 
 print_threadpool_summary() if $include_threadpool_summary;										    # Print threadpool summaries
+
+write_index_file();  # Write persistent index file with per-file metadata (Issue #46)
 
 print "\n";
 exit;
