@@ -71,6 +71,42 @@ Moving the match loop to C (using `pregexec()` on Perl's compiled `REGEXP*`) eli
 - The same set of strings is matched against multiple patterns
 - The string set is already in a C-accessible format
 
+### Avoid Lookahead Chains for AND Matching
+Chaining lookaheads like `(?=.*A)(?=.*B)` to match lines containing both A and B is **5-8× slower** than independent matches. Each `(?=.*X)` scans the entire line from position 0, so N lookaheads means N full-line scans per line — and this compounds over millions of lines.
+
+Benchmarked on 1.4M access log lines (#117):
+- **Lookahead chain** `(?=.*POST)(?=.*GetNamedProperties)`: 145s
+- **Independent regex** `$line =~ qr/POST/ && $line =~ qr/GetNamedProperties/`: 14s
+- **Perl `index()`** (literal-only): 6× faster than independent regex
+
+Micro-benchmark (per-call rates):
+```
+               Rate lookahead two_regex     index
+lookahead 1165543/s        --      -55%      -83%
+two_regex 2572312/s      121%        --      -61%
+index     6666664/s      472%      159%        --
+```
+
+**Best practice:** For AND-type matching where all terms must appear on a line, compile each term as a separate `qr//` and match independently with short-circuit `&&`. Use `index()` when all terms are literal strings. Reserve lookaheads for cases where position-relative matching is actually needed (e.g., "A must appear before B").
+
+### Keep Alternation for OR Matching
+Unlike AND, OR matching (`A|B|C|D`) should **not** be split into independent matches. Perl's regex engine uses trie optimization for alternation, scanning the line once for all branches simultaneously. Splitting into independent `$line =~ qr/A/ || $line =~ qr/B/ || ...` loses this optimization and adds per-call overhead.
+
+Benchmarked with realistic match ratios (~30% match rate, 4 terms):
+```
+                Rate independent    combined
+independent 280436/s          --        -53%
+combined    592111/s        111%          --
+```
+
+Independent OR only wins when the first term matches (short-circuit), but loses badly on non-matching lines — which typically dominate in log filtering. Combined alternation is consistent regardless of match/no-match.
+
+**Why AND and OR differ:**
+- **AND** (`(?=.*A)(?=.*B)`): each lookahead forces a full-line scan from position 0 — N terms = N scans, always. Independent matches avoid this by checking each term only once.
+- **OR** (`A|B|C`): trie optimization checks all branches in a single scan. Independent matches add per-call regex engine overhead on every non-matching line.
+
+**Best practice:** Use a single compiled `qr/A|B|C/` for OR. Use separate compiled `qr//` with short-circuit `&&` for AND.
+
 ### Profile Before Optimizing
 NYTProf revealed that regex matching was only 2.1% of runtime — the actual bottleneck was posting list iteration in the candidate search (88.1%). Always profile with real data before assuming regex is the performance problem.
 
