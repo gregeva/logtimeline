@@ -10,7 +10,7 @@
 # - Filter options for min/max impact (count*duration)
 # - Work in a "Test Mode" which would output a number of parameters and values during the run which could then be tested against for automated testing
 # - investigate moving extraction and processing of bytes out of each of the conditions and put into a common section (be careful of log formats where bytes is implied by column and should not be overwritten)
-# - I'd like a way to change the normalization of messages per minute to second
+# - (done - #122) configurable rate unit normalization (-ru s/m/h/d)
 # - new command line options for "show-bytes and show-counts" to add these columns to the message table instead of the duration statistics (plan forward for unknown custom metric as well)
 # - add total counts for duration and bytes; what makes this harder to fit in is that there should obviously also be seperate counters for "highlight" (bottom of table makes sense, also summary table, or both)
 # - Add AND match possibility for include and exclude using RegEx lookahead (?=.*word)
@@ -170,6 +170,12 @@ my %pattern_file_status;                                 # {filter_type}{filenam
 
 # Duration unit override (Issue #17)
 my $duration_unit_override = undef;                      # User-specified unit via -du (ns, us, ms, s)
+
+# Rate unit override (Issue #122)
+my $rate_unit = 'm';                                     # Default: per-minute (preserves existing behavior)
+my %rate_multiplier = ( 's' => 1, 'm' => 60, 'h' => 3600, 'd' => 86400 );
+my %rate_suffix     = ( 's' => '/s', 'm' => '/m', 'h' => '/h', 'd' => '/d' );
+my %rate_csv_suffix = ( 's' => '_sec', 'm' => '_min', 'h' => '_hr', 'd' => '_day' );
 
 my $pause_output = 0;
 my $omit_values = 0;
@@ -672,7 +678,7 @@ END
 sub print_usage {
     my ( $error_reason ) = @_;
     print "Usage: ltl [-bs <N>] [-n <N>] [-i <regex>] [-e <regex>] [-h <regex>] [-st <time>] [-et <time>]\n";
-    print "           [-ov] [-or] [-osum] [-so <field>] [-hm [metric]] [-hg [metric]] <logfile> ...\n";
+    print "           [-ov] [-or] [-ru <unit>] [-osum] [-so <field>] [-hm [metric]] [-hg [metric]] <logfile> ...\n";
     print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
     print "Try 'ltl --help' for more information.\n\n";
     return;
@@ -781,7 +787,9 @@ OPTIONS
     -os,  --omit-stats                         Hide the statistics columns (min/avg/max/stddev/etc.)
     -oe,  --omit-empty                         Skip time buckets that contain zero log entries
     -osum, --omit-summary                      Hide the summary table printed after the bar graph
-    -or,  --omit-rate                          Hide the lines/sec processing rate from output
+    -or,  --omit-rate                          Hide the error/message rate from the legend
+    -ru,  --rate-unit <unit>                   Set the time unit for rate normalization (s, m, h, d)
+                                               Default: m (per minute)
     -od,  --omit-durations                     Suppress duration extraction and related columns
     -ob,  --omit-bytes                         Suppress byte-size extraction and related columns
     -oc,  --omit-count                         Suppress count extraction and related columns
@@ -2835,6 +2843,7 @@ sub adapt_to_command_line_options {
         'duration-min|dmin=i' => \$filter_duration_min,
         'duration-max|dmax=i' => \$filter_duration_max,
         'duration-unit|du=s' => \$duration_unit_override,
+        'rate-unit|ru=s' => \$rate_unit,
         'bytes-min|bmin=i' => \$filter_bytes_min,
         'bytes-max|bmax=i' => \$filter_bytes_max,
         'count-min|cmin=i' => \$filter_count_min,
@@ -2949,6 +2958,10 @@ sub adapt_to_command_line_options {
         die print_usage("Invalid duration unit '$duration_unit_override'. Valid values: ns, us, ms, s")
             unless $duration_unit_override =~ /^(ns|us|ms|s)$/;
     }
+
+    # Rate unit option validation (Issue #122)
+    die print_usage("Invalid rate unit '$rate_unit'. Valid values: s, m, h, d")
+        unless $rate_unit =~ /^(s|m|h|d)$/;
 
     # Build compiled filter matchers (Issue #21, #117)
     # Handles CLI args with AND (&) / OR (|) operators and pattern files
@@ -5250,10 +5263,10 @@ sub normalize_data_for_output {
             $error_occurrences += $occurrences if $category_bucket =~ /^ERROR|5xx|4xx$/i;
         }
 
-        # this part takes the time windows error and message counts and converts them to a per minute rate
+        # this part takes the time windows error and message counts and converts them to a rate (unit controlled by -ru, default per minute)
         unless( defined( $omit_rate ) && $omit_rate ) {
-            $log_occurrences{$bucket}{'err-rate'}{occurrences} = $error_occurrences / $bucket_size_seconds * 60;
-            $log_occurrences{$bucket}{'msg-rate'}{occurrences} = $total_occurrences / $bucket_size_seconds * 60;
+            $log_occurrences{$bucket}{'err-rate'}{occurrences} = $error_occurrences / $bucket_size_seconds * $rate_multiplier{$rate_unit};
+            $log_occurrences{$bucket}{'msg-rate'}{occurrences} = $total_occurrences / $bucket_size_seconds * $rate_multiplier{$rate_unit};
         }
 
         # Calculate the maximum value of the selected trend type if it is activated
@@ -5304,7 +5317,7 @@ sub normalize_data_for_output {
                 $title_length = length(format_number( $occurrences ) . ":");
                 $title_length += length(" ") if !$omit_values;                              # need to add the spacing between values and rate if both will be printed
             } elsif( $category_bucket =~ /^msg-rate$/ ) {
-                $title_length = length( format_number( $occurrences ) . "/m ");
+                $title_length = length( format_number( $occurrences ) . "$rate_suffix{$rate_unit} ");
             } else {
                 $title_length = length("$category_bucket: $occurrences ");
             }
@@ -5890,8 +5903,8 @@ sub print_bar_graph {
                             $legend_length_bucket += length( format_number( $occurrences ) . ":" );
                         } elsif( $category_bucket =~ /^msg-rate$/ ) {
                             $rate_metrics .= "${color}" . format_number( $occurrences ) . "$colors{'NC'}";
-                            $rate_metrics .= "$colors{'bright-black'}/m$colors{'NC'} ";
-                            $legend_length_bucket += length( format_number( $occurrences ) . "/m " );
+                            $rate_metrics .= "$colors{'bright-black'}$rate_suffix{$rate_unit}$colors{'NC'} ";
+                            $legend_length_bucket += length( format_number( $occurrences ) . "$rate_suffix{$rate_unit} " );
                         } else {
                             $log_details .= "${color}$occurrences$colors{'NC'}" . " " if $category_bucket =~ /-HL$/;
                             $legend_length_bucket += length("$occurrences ");
@@ -7301,7 +7314,12 @@ if( $write_messages_to_csv ) {                     # If write to CSV enabled, op
     $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
     my $csv_file_name = build_csv_filename('STATS');
     open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
-    $csv->print($csv_fh, [ @output_columns ] );
+    my @csv_columns = map {
+        if    ($_ eq 'err-rate') { "err-rate$rate_csv_suffix{$rate_unit}" }
+        elsif ($_ eq 'msg-rate') { "msg-rate$rate_csv_suffix{$rate_unit}" }
+        else  { $_ }
+    } @output_columns;
+    $csv->print($csv_fh, [ @csv_columns ] );
 }
 
 print_bar_graph();
