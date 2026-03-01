@@ -52,6 +52,7 @@ use List::Util qw(min max);
 use File::Spec;
 use Text::CSV;
 use Text::CSV_PP;
+use Text::ParseWords qw(shellwords);
 
 
 if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to support UTF-8 characters in terminal
@@ -59,7 +60,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.13.0";
+my $version_number = "0.14.0";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
@@ -148,6 +149,8 @@ my $output_timestamp_format = "%Y-%m-%d %H:%M";
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
+my( @exclude_args, @include_args, @highlight_args, @threadpool_activity_args );
+my $ltl_config_raw = '';                                 # Raw LTL_CONFIG env var string for display
 my ( @udm_configs, @udm_raw_args, %udm_last_value );
 my ( $csv_separator_override, @udm_csv_message_col_names );
 my ( $csv_detected, $csv_separator, $csv_timestamp_col, %csv_col_index );
@@ -500,13 +503,17 @@ OPTIONS
 
   Filtering
     -i,   --include <regex>                    Only process lines matching this pattern, discard
-                                               everything else
-    -e,   --exclude <regex>                    Discard lines matching this pattern before analysis
+                                               everything else. Can be specified multiple times;
+                                               patterns are combined with OR.
+    -e,   --exclude <regex>                    Discard lines matching this pattern before analysis.
+                                               Can be specified multiple times; patterns are combined
+                                               with OR.
     -h,   --highlight <regex>                  Show matching lines as a separate colored bar alongside
-                                               the main bar for visual comparison
-    -if,  --include-file <file>                Load include patterns from a file (one regex per line)
-    -ef,  --exclude-file <file>                Load exclude patterns from a file (one regex per line)
-    -hf,  --highlight-file <file>              Load highlight patterns from a file (one regex per line)
+                                               the main bar for visual comparison. Can be specified
+                                               multiple times; patterns are combined with OR.
+    -if,  --include-file <file>                Load include patterns from a file (one pattern per line)
+    -ef,  --exclude-file <file>                Load exclude patterns from a file (one pattern per line)
+    -hf,  --highlight-file <file>              Load highlight patterns from a file (one pattern per line)
     -dmin, --duration-min <N>                  Hide log entries with duration below this threshold
     -dmax, --duration-max <N>                  Hide log entries with duration above this threshold
     -bmin, --bytes-min <N>                     Hide log entries with response size below this threshold
@@ -645,7 +652,8 @@ OPTIONS
 
   Thread Pool Activity
     -tpa, --threadpool-activity <regex>        Track activity over time for threads whose name matches
-                                               the given pattern
+                                               the given pattern. Can be specified multiple times;
+                                               patterns are combined with OR.
     -tpas, --threadpool-activity-summary       Show a summary of activity across all detected thread
                                                pools based on thread names in the log
 
@@ -663,6 +671,20 @@ OPTIONS
           --help                               Show this help screen and exit
     -mem, --memory-usage                       Display memory consumption statistics after processing
                                                completes
+
+ENVIRONMENT
+
+  LTL_CONFIG                                   Default command-line options. Parsed at startup and
+                                               merged with command-line arguments. Command-line
+                                               values override environment values for scalar options.
+                                               Additive options (-i, -e, -h, -if, -ef, -hf, -tpa,
+                                               -udm, -ucm) combine from both sources.
+
+                                               Example:
+                                                 export LTL_CONFIG="-n 20 -bs 5 -lbg -e healthcheck"
+                                                 ltl -e metrics access.log
+                                                 # Uses n=20, bs=5, lbg from env; excludes both
+                                                 # healthcheck (env) and metrics (CLI)
 
 EXAMPLES
 
@@ -2453,6 +2475,13 @@ sub handle_histogram_option {
 sub adapt_to_command_line_options {
     @ORIGINAL_ARGV = @ARGV;
 
+    # Parse LTL_CONFIG environment variable (Issue #21)
+    if (defined $ENV{LTL_CONFIG} && $ENV{LTL_CONFIG} ne '') {
+        $ltl_config_raw = $ENV{LTL_CONFIG};
+        my @env_args = shellwords($ltl_config_raw);
+        unshift @ARGV, @env_args;
+    }
+
     @ARGV = map { ($_ eq '-?' || $_ eq '/help' || $_ eq '/?') ? '--help' : $_ } @ARGV;
 
     GetOptions(
@@ -2460,9 +2489,9 @@ sub adapt_to_command_line_options {
         'pause|p' => \$pause_output,
         'start|st=s' => \$filter_range_start,
         'end|et=s' => \$filter_range_end,
-        'exclude|e=s' => \$exclude_regex,
-        'include|i=s' => \$include_regex,
-        'highlight|h=s' => \$highlight_regex,
+        'exclude|e=s' => \@exclude_args,
+        'include|i=s' => \@include_args,
+        'highlight|h=s' => \@highlight_args,
         'exclude-file|ef=s' => \@exclude_files,
         'include-file|if=s' => \@include_files,
         'highlight-file|hf=s' => \@highlight_files,
@@ -2502,7 +2531,7 @@ sub adapt_to_command_line_options {
         'sort-on|so=s' => \$sort_type,
         'sort-ascending|sa' => \$sort_ascending,
         'threadpool-activity-summary|tpas' => \$include_threadpool_summary,
-        'threadpool-activity|tpa=s' => \$threadpool_activity_regex,
+        'threadpool-activity|tpa=s' => \@threadpool_activity_args,
         'user-defined-metrics|udm=s' => \@udm_raw_args,
         'udm-csv-message|ucm=s'    => \@udm_csv_message_col_names,
         'udm-csv-separator|ucs=s'  => \$csv_separator_override,
@@ -2607,6 +2636,12 @@ sub adapt_to_command_line_options {
             unless $duration_unit_override =~ /^(ns|us|ms|s)$/;
     }
 
+    # Combine additive CLI options (Issue #21) - multiple -i/-e/-h/-tpa combine with OR
+    $include_regex   = join('|', @include_args)   if @include_args;
+    $exclude_regex   = join('|', @exclude_args)    if @exclude_args;
+    $highlight_regex = join('|', @highlight_args)  if @highlight_args;
+    $threadpool_activity_regex = join('|', @threadpool_activity_args) if @threadpool_activity_args;
+
     # Process pattern files (Issue #19) - supports multiple files per filter type
     foreach my $file (@include_files) {
         my @patterns = read_pattern_file($file, 'include');
@@ -2621,12 +2656,16 @@ sub adapt_to_command_line_options {
         $highlight_regex = build_merged_regex($highlight_regex, @patterns) if @patterns;
     }
 
-    # Verbose output (Issue #19)
+    # Verbose output (Issue #19, #21)
     if ($verbose) {
         print "=== Verbose ===\n";
-        print "include: " . (defined $include_regex ? $include_regex : "(not set)") . "\n";
-        print "exclude: " . (defined $exclude_regex ? $exclude_regex : "(not set)") . "\n";
-        print "highlight: " . (defined $highlight_regex ? $highlight_regex : "(not set)") . "\n";
+        if ($ltl_config_raw ne '') {
+            print "LTL_CONFIG: $ltl_config_raw\n";
+        }
+        print "include (merged): " . (defined $include_regex ? $include_regex : "(not set)") . "\n";
+        print "exclude (merged): " . (defined $exclude_regex ? $exclude_regex : "(not set)") . "\n";
+        print "highlight (merged): " . (defined $highlight_regex ? $highlight_regex : "(not set)") . "\n";
+        print "threadpool-activity (merged): " . (defined $threadpool_activity_regex ? $threadpool_activity_regex : "(not set)") . "\n";
         print "\n";
     }
 
@@ -6309,9 +6348,11 @@ sub print_summary_table {
     $max_timestamp_str .= sprintf ".%03d", ($output_timestamp_max-int($output_timestamp_max))*1000 if $print_milliseconds;
 
     ## PRINT COMMAND AND ARGUMENTS ##
-    print "\n$colors{'bright-black'}options: ";
+    if ($ltl_config_raw ne '') {
+        print "\n$colors{'bright-black'}environment options: $ltl_config_raw$colors{'NC'}";
+    }
     my %argv_hash = map { $_ => 1 } @ARGV;
-    my $skip_next = 0;
+    my $cli_options = '';
     for (my $i = 0; $i < @ORIGINAL_ARGV; $i++) {
         my $arg = $ORIGINAL_ARGV[$i];
         next if exists $argv_hash{$arg};  # Skip log files
@@ -6320,23 +6361,26 @@ sub print_summary_table {
         if ($arg =~ /^(-ef|--exclude-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
             my $indicator = get_pattern_file_indicator('exclude', $file);
-            print "$arg $file$indicator ";
+            $cli_options .= "$arg $file$indicator ";
             $i++;  # Skip the filename in next iteration
         } elsif ($arg =~ /^(-if|--include-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
             my $indicator = get_pattern_file_indicator('include', $file);
-            print "$arg $file$indicator ";
+            $cli_options .= "$arg $file$indicator ";
             $i++;  # Skip the filename in next iteration
         } elsif ($arg =~ /^(-hf|--highlight-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
             my $indicator = get_pattern_file_indicator('highlight', $file);
-            print "$arg $file$indicator ";
+            $cli_options .= "$arg $file$indicator ";
             $i++;  # Skip the filename in next iteration
         } else {
-            print "$arg ";
+            $cli_options .= "$arg ";
         }
     }
-    print "$colors{'NC'}\n";
+    if ($cli_options ne '') {
+        print "\n$colors{'bright-black'}command-line options: $cli_options$colors{'NC'}";
+    }
+    print "\n";
 
     return if $omit_summary;
 

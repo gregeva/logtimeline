@@ -1,6 +1,6 @@
  
 ──────────────────────────────────────────────────────────────────────────────────────────────
-   ,:: ltl ::' log timeline [0.12.0] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
+   ,:: ltl ::' log timeline [0.13.0] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
 ──────────────────────────────────────────────────────────────────────────────────────────────
 
                                                                                                    
@@ -12,5 +12,5 @@
  2025-04-10 06:00 3.4:535.1/m │ ███████████████████████████████   8.7 hr      430.6 KiB   32.54 k   
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-options: --disable-progress -osum -n 1 --terminal-width 100 -os -ov 
+command-line options: --disable-progress -osum -n 1 --terminal-width 100 -os -ov 
 

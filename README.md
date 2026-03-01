@@ -41,12 +41,12 @@ ltl [options] <logfile> [logfile2 ...]
 
 | Option | Description |
 |--------|-------------|
-| `-i, --include <regex>` | Only process lines matching this pattern, discard everything else |
-| `-e, --exclude <regex>` | Discard lines matching this pattern before analysis |
-| `-h, --highlight <regex>` | Show matching lines as a separate colored bar alongside the main bar for visual comparison |
-| `-if, --include-file <file>` | Load include patterns from a file (one regex per line) |
-| `-ef, --exclude-file <file>` | Load exclude patterns from a file (one regex per line) |
-| `-hf, --highlight-file <file>` | Load highlight patterns from a file (one regex per line) |
+| `-i, --include <regex>` | Only process lines matching this pattern, discard everything else. Can be specified multiple times; patterns are combined with OR. |
+| `-e, --exclude <regex>` | Discard lines matching this pattern before analysis. Can be specified multiple times; patterns are combined with OR. |
+| `-h, --highlight <regex>` | Show matching lines as a separate colored bar alongside the main bar for visual comparison. Can be specified multiple times; patterns are combined with OR. |
+| `-if, --include-file <file>` | Load include patterns from a file (one pattern per line) |
+| `-ef, --exclude-file <file>` | Load exclude patterns from a file (one pattern per line) |
+| `-hf, --highlight-file <file>` | Load highlight patterns from a file (one pattern per line) |
 | `-dmin, --duration-min <N>` | Hide log entries with duration below this threshold |
 | `-dmax, --duration-max <N>` | Hide log entries with duration above this threshold |
 | `-bmin, --bytes-min <N>` | Hide log entries with response size below this threshold |
@@ -145,7 +145,7 @@ Consolidated entries are marked with `~` in the summary table output. All statis
 
 | Option | Description |
 |--------|-------------|
-| `-tpa, --threadpool-activity <regex>` | Track activity over time for threads whose name matches the given pattern |
+| `-tpa, --threadpool-activity <regex>` | Track activity over time for threads whose name matches the given pattern. Can be specified multiple times; patterns are combined with OR. |
 | `-tpas, --threadpool-activity-summary` | Show a summary of activity across all detected thread pools based on thread names in the log |
 
 ### Display
@@ -164,6 +164,24 @@ Consolidated entries are marked with `~` in the summary table output. All statis
 | `-v, --version` | Print the version number and exit |
 | `--help` | Show the help screen and exit |
 | `-mem, --memory-usage` | Display memory consumption statistics after processing completes |
+
+## Environment
+
+| Variable | Description |
+|----------|-------------|
+| `LTL_CONFIG` | Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (`-i`, `-e`, `-h`, `-if`, `-ef`, `-hf`, `-tpa`, `-udm`, `-ucm`) combine from both sources. |
+
+```bash
+# Set defaults in shell profile (~/.bashrc, ~/.zshrc, etc.)
+export LTL_CONFIG="-n 20 -bs 5 -lbg -e healthcheck"
+
+# Defaults apply automatically
+ltl access.log
+
+# CLI overrides scalar options, combines with additive options
+ltl -n 50 -e metrics access.log
+# Result: n=50 (CLI wins), bs=5, lbg from env; excludes both healthcheck and metrics
+```
 
 ## Examples
 
