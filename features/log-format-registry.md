@@ -240,7 +240,7 @@ Requirements:
 - This engine should be shared with/reused by the existing "group-similar" feature
 - When derived metrics produce anomalous results due to grouping issues, the user is expected to refine their filtering to isolate the relevant messages
 
-**TODO**: Research fuzzy matching algorithms suitable for this use case and document options.
+**RESOLVED**: Fuzzy matching algorithms researched and implemented in #96 (Fuzzy Message Consolidation, shipped v0.13.0). See `docs/similarity-engine-best-practices.md` for algorithm choices and `docs/staged-processing-pipeline.md` for architecture. The same engine serves both message identity and group-similar display — the difference is configuration (grouping key granularity and similarity threshold), not algorithm.
 
 #### 10. Memory Tracking for State
 
@@ -336,12 +336,13 @@ The following functions already exist in `ltl` and provide a solid base:
 
 ## Research Areas
 
-### 1. Fuzzy Matching Algorithms
-Message identity grouping (section 9) is a core dependency for inter-line derived metrics. We need to research:
-- Existing algorithms for fuzzy string grouping (edit distance, token-based, n-gram)
-- How monitoring platforms (Prometheus, Datadog, Splunk) handle metric identity in semi-structured logs
-- Whether the same algorithm can serve both derived metric identity and the "group-similar" display feature, or whether these have conflicting requirements (one wants tight identity, the other wants loose grouping)
-- Performance characteristics at scale — this runs per-line within each bucket
+### ~~1. Fuzzy Matching Algorithms~~ — RESOLVED (#54/#96)
+Message identity grouping (section 9) is a core dependency for inter-line derived metrics. Research completed and engine implemented:
+- **Algorithm**: Trigram indexing with Dice coefficient for candidate identification, character-level banded edit distance for alignment. Token-based splitting was prototyped and failed (variable parts don't respect token boundaries).
+- **Monitoring platforms**: Exact-match metadata grouping key + fuzzy message body scoring — same approach as Datadog's log pattern detection.
+- **Same algorithm for both**: Yes. The grouping key controls granularity — tight identity uses more metadata fields + higher threshold; loose grouping uses fewer fields + standard 80% threshold.
+- **Performance at scale**: S1 inline matching absorbs 98-99.9% of keys during parsing. 7.9 GB / 40.6M lines: 489s, 88% less memory than baseline.
+- See: `docs/similarity-engine-best-practices.md`, `docs/staged-processing-pipeline.md`, `features/fuzzy-message-consolidation.md`
 
 ### 2. Expression Engine Design
 The derived metric expression syntax needs to support arithmetic, function calls, and field references. Research needed:
@@ -378,9 +379,10 @@ The sliding window is expected to reduce peak memory, but this is unproven. If b
 Linear interpolation of counter deltas across buckets is an approximation. For bursty workloads, this smoothing may hide real patterns (a spike that happened in one minute gets spread across five). Users coming from Prometheus may expect different behavior.
 - **Mitigation**: Research how other tools handle this and document the trade-offs. Consider making the interpolation strategy configurable (linear, last-bucket-only, none).
 
-### 4. Fuzzy Matching is a Hard Problem — HIGH
+### 4. Fuzzy Matching is a Hard Problem — ~~HIGH~~ MITIGATED
 Getting message identity right is critical for inter-line metrics to produce meaningful results. Too loose: different counters get mixed. Too tight: the same logical counter doesn't match itself across lines due to minor variations.
 - **Mitigation**: This is a research-first item. Prototype and test against real log data before integrating. Make the matching configurable so users can tune it. Accept that some cases will require user filtering.
+- **Status**: Research and implementation completed in #96 (shipped v0.13.0). Trigram Dice coefficient with character-level alignment, checkpoint-based architecture, exact-match metadata grouping key + fuzzy message body scoring. Validated at production scale (7.9 GB, 40.6M lines). The engine is configurable via threshold (default 80%) and grouping key granularity. See `docs/similarity-engine-best-practices.md` and `docs/fuzzy-consolidation-lessons-learned.md`.
 
 ### 5. Scope Creep — HIGH
 This issue now encompasses: format registry, staged detection, user extensibility, processing model redesign, derived metrics (two types), expression engine, fuzzy matching, metric visibility, memory model changes, and memory tracking enhancements. The risk of this becoming an unbounded rewrite is real.
@@ -413,7 +415,7 @@ Inter-line functions need state that persists across bucket boundaries (the last
 
 ## TODOs
 
-- [ ] Research fuzzy matching algorithms for message identity grouping (section 9)
+- [x] Research fuzzy matching algorithms for message identity grouping (section 9) — completed via #96/#54, see `docs/similarity-engine-best-practices.md`
 - [ ] Define the expression/function syntax for derived metrics
 - [ ] Research existing Perl expression parsing libraries
 - [ ] Map out the full dependency between existing processing steps and the new deferred-per-bucket model
@@ -432,7 +434,7 @@ This refactor is staged into phases with independent deliverables. Each phase bu
 | Issue | Title | Purpose |
 |-------|-------|---------|
 | #53 | Automated test suite with golden files | Regression detection and performance tracking |
-| #54 | Fuzzy matching engine research & prototype | Standalone component for message identity (needed by Phase 4) |
+| #54 | ~~Fuzzy matching engine research & prototype~~ | **COMPLETE** — implemented in #96 (v0.13.0). See `docs/similarity-engine-best-practices.md` |
 | #55 | Expression parser research & build | Standalone component for derived metric arithmetic (needed by Phase 4) |
 | #56 | Memory baseline profiling | Establish current memory usage for comparison |
 | #57 | Bucket data structure prototype | Validate sliding window feasibility (needed by Phase 2) |
@@ -476,4 +478,10 @@ Discussion established that derived metrics require a fundamental change to the 
 - Issue #17: Duration unit autodetection (blocked by this refactor)
 - Issue #22: User-defined metrics with custom regex and unit conversion (lighter-weight proving ground for custom metric extraction and unit handling)
 - Issue #48: Performance profiling (provided evidence for processing model changes)
+- Issue #54: Fuzzy matching engine research — **COMPLETE**, resolved by #96
+- Issue #96: Fuzzy message consolidation — **SHIPPED** (v0.13.0), provides the similarity engine for Phase 4 message identity
 - features/duration-unit-autodetection.md
+- features/fuzzy-message-consolidation.md
+- docs/similarity-engine-best-practices.md
+- docs/staged-processing-pipeline.md
+- docs/fuzzy-consolidation-lessons-learned.md
