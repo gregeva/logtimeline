@@ -149,6 +149,7 @@ my $output_timestamp_format = "%Y-%m-%d %H:%M";
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
+my( $include_filter, $exclude_filter, $highlight_filter );  # Compiled filter matchers (Issue #117)
 my( @exclude_args, @include_args, @highlight_args, @threadpool_activity_args );
 my $ltl_config_raw = '';                                 # Raw LTL_CONFIG env var string for display
 my ( @udm_configs, @udm_raw_args, %udm_last_value );
@@ -703,13 +704,16 @@ OPTIONS
   Filtering
     -i,   --include <regex>                    Only process lines matching this pattern, discard
                                                everything else. Can be specified multiple times;
-                                               patterns are combined with OR.
+                                               patterns are combined with OR. Use & for AND:
+                                               "A&B" matches lines containing both A and B.
+                                               && for literal &. & binds tighter than |.
     -e,   --exclude <regex>                    Discard lines matching this pattern before analysis.
                                                Can be specified multiple times; patterns are combined
-                                               with OR.
+                                               with OR. Supports & (AND) and && (literal &).
     -h,   --highlight <regex>                  Show matching lines as a separate colored bar alongside
                                                the main bar for visual comparison. Can be specified
                                                multiple times; patterns are combined with OR.
+                                               Supports & (AND) and && (literal &).
     -if,  --include-file <file>                Load include patterns from a file (one pattern per line)
     -ef,  --exclude-file <file>                Load exclude patterns from a file (one pattern per line)
     -hf,  --highlight-file <file>              Load highlight patterns from a file (one pattern per line)
@@ -1008,6 +1012,117 @@ sub build_merged_regex {
     }
 
     return $merged;
+}
+
+# AND operator (&) support for filter patterns (Issue #117)
+# Supports && as escape for literal &
+# & binds tighter than | : A&B|C&D = (A AND B) OR (C AND D)
+#
+# Performance: lookahead chains (?=.*A)(?=.*B) are 5-8x slower than independent
+# regex matches because each lookahead scans the full line from position 0.
+# Instead, AND terms are compiled as separate qr// and matched independently.
+
+# Parse a pattern string containing & and | operators into OR groups of AND terms.
+# Returns arrayref of arrayrefs: [ [term1, term2], [term3] ] for "term1&term2|term3"
+sub parse_and_or_pattern {
+    my ($pattern) = @_;
+
+    # Replace escaped && with placeholder before splitting
+    my $placeholder = "\x00";
+    $pattern =~ s/&&/$placeholder/g;
+
+    # Split on | to get OR groups
+    my @or_groups = split(/\|/, $pattern, -1);
+
+    my @result;
+    for my $group (@or_groups) {
+        # Split on & to get AND terms
+        my @terms = split(/&/, $group, -1);
+
+        # Restore literal & from placeholder in each term
+        @terms = map { s/\Q$placeholder\E/&/gr } @terms;
+
+        push @result, \@terms;
+    }
+
+    return \@result;
+}
+
+# Build a compiled matcher from CLI args and optional file patterns.
+# Returns: { regex => "string for display", matcher => compiled_form }
+# compiled_form is either:
+#   - a single qr// when no AND operators are present (fast path)
+#   - arrayref of arrayrefs of qr// for AND/OR groups
+sub build_filter_matcher {
+    my ($args_ref, $files_ref, $filter_type) = @_;
+
+    my $has_and = 0;
+    my @parsed_groups;  # arrayrefs of AND term arrayrefs
+
+    # Parse CLI args for AND/OR structure
+    for my $arg (@$args_ref) {
+        my $groups = parse_and_or_pattern($arg);
+        for my $group (@$groups) {
+            push @parsed_groups, $group;
+            $has_and = 1 if @$group > 1;
+        }
+    }
+
+    # Add file patterns (literal, no AND support)
+    if ($files_ref && @$files_ref) {
+        for my $file (@$files_ref) {
+            my @patterns = read_pattern_file($file, $filter_type);
+            for my $pat (@patterns) {
+                push @parsed_groups, [ quotemeta($pat) ];
+            }
+        }
+    }
+
+    return undef unless @parsed_groups;
+
+    # Build display string: join all groups with | for verbose/defined checks
+    my $regex_str = join('|', map {
+        @$_ == 1 ? $_->[0] : join('&', @$_)
+    } @parsed_groups);
+
+    my $matcher;
+    if ($has_and) {
+        # AND present: compile each term separately for independent matching
+        $matcher = [ map {
+            [ map { qr/$_/ } @$_ ]
+        } @parsed_groups ];
+    } else {
+        # No AND: single compiled regex (fast path, identical to pre-#117 behavior)
+        my $combined = join('|', map { $_->[0] } @parsed_groups);
+        $matcher = qr/$combined/;
+    }
+
+    return { regex => $regex_str, matcher => $matcher };
+}
+
+# Match a line against a compiled filter matcher.
+# Returns true if the line matches (any OR group has all AND terms match).
+sub match_filter {
+    my ($line, $filter) = @_;
+    my $matcher = $filter->{matcher};
+
+    # Fast path: single compiled regex
+    if (ref $matcher eq 'Regexp') {
+        return $line =~ $matcher;
+    }
+
+    # AND/OR path: check each OR group
+    for my $group (@$matcher) {
+        my $all_match = 1;
+        for my $term (@$group) {
+            unless ($line =~ $term) {
+                $all_match = 0;
+                last;
+            }
+        }
+        return 1 if $all_match;
+    }
+    return 0;
 }
 
 sub get_pattern_file_indicator {
@@ -2835,25 +2950,17 @@ sub adapt_to_command_line_options {
             unless $duration_unit_override =~ /^(ns|us|ms|s)$/;
     }
 
-    # Combine additive CLI options (Issue #21) - multiple -i/-e/-h/-tpa combine with OR
-    $include_regex   = join('|', @include_args)   if @include_args;
-    $exclude_regex   = join('|', @exclude_args)    if @exclude_args;
-    $highlight_regex = join('|', @highlight_args)  if @highlight_args;
+    # Build compiled filter matchers (Issue #21, #117)
+    # Handles CLI args with AND (&) / OR (|) operators and pattern files
+    $include_filter   = build_filter_matcher(\@include_args,   \@include_files,   'include');
+    $exclude_filter   = build_filter_matcher(\@exclude_args,   \@exclude_files,   'exclude');
+    $highlight_filter = build_filter_matcher(\@highlight_args,  \@highlight_files, 'highlight');
     $threadpool_activity_regex = join('|', @threadpool_activity_args) if @threadpool_activity_args;
 
-    # Process pattern files (Issue #19) - supports multiple files per filter type
-    foreach my $file (@include_files) {
-        my @patterns = read_pattern_file($file, 'include');
-        $include_regex = build_merged_regex($include_regex, @patterns) if @patterns;
-    }
-    foreach my $file (@exclude_files) {
-        my @patterns = read_pattern_file($file, 'exclude');
-        $exclude_regex = build_merged_regex($exclude_regex, @patterns) if @patterns;
-    }
-    foreach my $file (@highlight_files) {
-        my @patterns = read_pattern_file($file, 'highlight');
-        $highlight_regex = build_merged_regex($highlight_regex, @patterns) if @patterns;
-    }
+    # Set legacy regex strings for defined-checks and display
+    $include_regex   = $include_filter->{regex}   if $include_filter;
+    $exclude_regex   = $exclude_filter->{regex}   if $exclude_filter;
+    $highlight_regex = $highlight_filter->{regex}  if $highlight_filter;
 
     # Verbose output (Issue #19, #21)
     if ($verbose) {
@@ -3554,8 +3661,8 @@ sub read_and_process_logs {
 
                 ## FILTERING CONDITIONS ##
                 next if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} );
-                next if( defined( $exclude_regex )          && /$exclude_regex/ );
-                next if( defined( $include_regex )          && !/$include_regex/ );
+                next if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) );
+                next if( defined( $include_filter )         && !match_filter($_, $include_filter) );
                 next if( defined( $filter_duration_min )    && ( !defined( $duration )  || $duration <= $filter_duration_min ));		# skip if duration value is below specified minimum filter
                 next if( defined( $filter_duration_max )    && ( !defined( $duration )  || $duration >= $filter_duration_max ));		# skip if duration value is above specified maximum filter
                 next if( defined( $filter_bytes_min )       && ( !defined( $bytes )     || $bytes < $filter_bytes_min ));				# skip if bytes value is below specified minimum filter
@@ -3593,7 +3700,7 @@ sub read_and_process_logs {
                 }
 
                 # determine if this line should be highlighted (matches in result search)
-                if( defined( $highlight_regex ) && /$highlight_regex/ ) {
+                if( defined( $highlight_filter ) && match_filter($_, $highlight_filter) ) {
                     $category_bucket .= '-HL';
                     $category = 'highlight';
                     $in_files_matched{$in_file} = 2 unless $in_files_matched{$in_file} == 2;
