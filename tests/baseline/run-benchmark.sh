@@ -156,10 +156,11 @@ for file_def in "${FILE_SELECTIONS[@]}"; do
             local_options="$base_options $scenario_options"
         fi
         # Trim leading/trailing whitespace
-        local_options="$(echo "$local_options" | xargs)"
+        local_options="${local_options## }"
+        local_options="${local_options%% }"
 
         if result=$(run_test "$test_name" "$files_glob" "$local_options"); then
-            echo "$result" >> "$OUTPUT_FILE"
+            printf '%s\n' "$result" >> "$OUTPUT_FILE"
             ((run_count++))
         else
             ((skip_count++))

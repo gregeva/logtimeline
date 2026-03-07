@@ -49,6 +49,7 @@ use Devel::Size qw(total_size);
 # Proc::ProcessTable is loaded conditionally in get_memory_usage() based on platform
 # On Windows, Win32::Process::Info is used instead
 use List::Util qw(min max);
+use Cwd qw(abs_path);
 use File::Spec;
 use Text::CSV;
 use Text::CSV_PP;
@@ -5869,7 +5870,7 @@ sub print_verbose_output {
     my @abs_paths;
     for my $f (@files_processed) {
         $total_file_size += (-s $f) // 0;
-        push @abs_paths, File::Spec->rel2abs($f);
+        push @abs_paths, abs_path($f);
     }
     print "FILES\t" . join(';', @abs_paths) . "\t$total_file_size\n";
 
