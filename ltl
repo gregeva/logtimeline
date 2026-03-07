@@ -685,8 +685,15 @@ sub print_usage {
 }
 
 sub print_help {
-    my $ul  = "\e[4m";   # underline on
-    my $rst = "\e[0m";   # reset
+    # Backspace overstrike decoration (compatible with less, more, and terminals)
+    my $bs_bold = sub {
+        my ($text) = @_;
+        return join('', map { "$_\b$_" } split(//, $text));
+    };
+    my $bs_underline = sub {
+        my ($text) = @_;
+        return join('', map { "_\b$_" } split(//, $text));
+    };
 
     # Description column starts at this position; adapt to terminal width
     my $opt_col   = 4;    # indent for option text
@@ -738,16 +745,16 @@ sub print_help {
         return " " x $opt_col . $formatted . " " x $padding . $wrap->($desc) . "\n";
     };
 
-    # Section heading: underlined, uppercase
+    # Section heading: bold, uppercase
     my $heading = sub {
         my ($text) = @_;
-        return "\n${ul}${text}${rst}\n\n";
+        return "\n" . $bs_bold->($text) . "\n\n";
     };
 
     # Subsection heading: underlined
     my $subheading = sub {
         my ($text) = @_;
-        return "\n  ${ul}${text}${rst}\n\n";
+        return "\n  " . $bs_underline->($text) . "\n\n";
     };
 
     my $out = "";
@@ -907,9 +914,9 @@ sub print_help {
         $padding = 2 if $padding < 2;
         return " " x $opt_col . $cmd . " " x $padding . $desc . "\n";
     };
-    # Header row — account for ANSI codes not taking visual space
-    my $cmd_header = "${ul}Command${rst}";
-    my $desc_header = "${ul}Description${rst}";
+    # Header row
+    my $cmd_header = $bs_underline->("Command");
+    my $desc_header = $bs_underline->("Description");
     my $header_pad = $ex_desc_col - $opt_col - 7;  # 7 = visible length of "Command"
     $header_pad = 2 if $header_pad < 2;
     $out .= " " x $opt_col . $cmd_header . " " x $header_pad . $desc_header . "\n";
@@ -931,7 +938,14 @@ sub print_help {
     $out .= $ex->("ltl logs/2025-05-*.txt",                                        "Glob multiple files");
     $out .= "\n";
 
-    print $out;
+    # Auto-pipe through a pager for proper overstrike rendering
+    my $pager = $ENV{PAGER} || ($^O eq 'MSWin32' ? 'more' : 'less');
+    if (open(my $pager_fh, '|-', $pager)) {
+        print $pager_fh $out;
+        close $pager_fh;
+    } else {
+        print $out;
+    }
     return;
 }
 
