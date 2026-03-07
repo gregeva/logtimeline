@@ -188,9 +188,10 @@ my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 my ( %consolidation_clusters, %consolidation_patterns, %consolidation_key_message );
 my ( %consolidation_unmatched, %consolidation_ngram_index, %consolidation_posting_size );
 my ( %consolidation_key_trigrams, %consolidation_key_trigrams_norm );
-my ( %consolidation_cat_stats, %consolidation_gk_prefix );
+my %consolidation_cat_stats;
 my %consolidation_key_message_cat_gk;  # maps log_key -> cat_gk for cleanup safety
 my $consolidation_total_keys_seen = 0;
+my %consolidation_category_unmatched_count;  # {category} => total unmatched keys across all cat_gk groups in this category
 
 # Consolidation configuration
 my $consolidation_threshold          = 80;
@@ -203,7 +204,6 @@ my $consolidation_final_threshold    = 80;
 my $consolidation_final_ceiling      = 1_000_000;
 my $consolidation_discriminative_topk = 50;
 my $consolidation_prefilter_ratio    = 0.30;
-my $consolidate_full_key             = 0;
 my $max_observed_message_length      = 0;
 my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -843,7 +843,6 @@ sub print_help {
     $out .= $opt->("-iqs, --include-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
     $out .= $opt->("-is,  --include-session",       "Keep session/user IDs when grouping messages, so each session is tracked separately");
     $out .= $opt->("-nfp, --no-final-pass",         "Skip the final consolidation pass that re-processes high-frequency keys against discovered patterns");
-    $out .= $opt->("-cfk, --consolidate-full-key",  "Score similarity on the full log key including metadata prefix (level, thread, object). Default: message body only with metadata as exact-match grouping keys.");
     $out .= $opt->("      --consolidation-trigger <N>",      "Unmatched keys before triggering a checkpoint (default: 5000)");
     $out .= $opt->("      --consolidation-ceiling <N>",      "Max occurrences for a key to be eligible for pattern discovery (default: 3)");
     $out .= $opt->("      --consolidation-max-patterns <N>", "Hard cap on patterns per grouping key; 0 = unlimited (default: 0)");
@@ -1508,7 +1507,9 @@ sub get_memory_usage {
 # ==================================================================================
 # FUZZY MESSAGE CONSOLIDATION (Issue #96)
 # Consolidates similar log messages to reduce noise in the top-N message summary.
-# Operates on $message body only (metadata fields are exact-match grouping keys).
+# Operates on the full $log_key (including [level] [thread] [object] prefix).
+# Grouping key partitions by $log_level to prevent cross-level merges.
+# See features/fuzzy-message-consolidation.md for design and debugging guide.
 # ==================================================================================
 
 sub group_similar_messages {
@@ -1643,6 +1644,9 @@ sub group_similar_messages {
                 delete $consolidation_key_message_cat_gk{$key};
             }
 
+            # Track final pass absorptions in S4
+            $consolidation_cat_stats{$cat_gk}{s4_pairwise} += $messages_absorbed;
+
             # Free trigram data from final pass
             delete $consolidation_ngram_index{$cat_gk};
             delete $consolidation_posting_size{$cat_gk};
@@ -1661,12 +1665,8 @@ sub group_similar_messages {
             my $cluster = $consolidation_clusters{$cat_gk}{$canonical};
             next unless $cluster->{occurrences} > 0;
 
-            # Reconstruct the canonical log_key from the prefix + canonical message
-            my $prefix = $consolidation_gk_prefix{$cat_gk} // "";
-            my $canonical_log_key = $prefix . $canonical;
-
-            # Truncate to match the display width
-            $canonical_log_key = substr($canonical_log_key, 0, ($write_messages_to_csv == 1 ? 350 : $max_log_message_length));
+            # Canonical form is already the full log_key (includes [level] [thread] [object] prefix)
+            my $canonical_log_key = substr($canonical, 0, ($write_messages_to_csv == 1 ? 350 : $max_log_message_length));
 
             # Create the %log_messages entry with all merged stats
             $log_messages{$category}{$canonical_log_key} = {
@@ -1715,17 +1715,6 @@ sub group_similar_messages {
             }
         }
     }
-}
-
-# Build a composite grouping key from metadata fields for exact-match partitioning
-sub build_grouping_key {
-    my ($log_level, $truncated_thread, $truncated_object, $session_for_key) = @_;
-    return "" if $consolidate_full_key;
-    my @parts = ($log_level // "");
-    push @parts, ($truncated_thread // "");
-    push @parts, ($truncated_object // "");
-    push @parts, ($session_for_key // "");
-    return join("|", @parts);
 }
 
 # Returns hashref of all 3-character substrings from capped message
@@ -2891,7 +2880,6 @@ sub adapt_to_command_line_options {
         'udm-csv-separator|ucs=s'  => \$csv_separator_override,
         'mask-uuid|uuid' => \$mask_uuid,
         'group-similar|g:s' => \$group_similar_sensitivity,
-        'consolidate-full-key|cfk' => \$consolidate_full_key,
         'no-final-pass' => sub { $consolidation_final_pass = 0; },
         'consolidation-trigger=i' => \$consolidation_trigger,
         'consolidation-ceiling=i' => \$consolidation_occurrence_ceiling,
@@ -3796,29 +3784,13 @@ sub read_and_process_logs {
                     ## CONSOLIDATION: S1 INLINE MATCH (Issue #96) ##
                     my $consolidation_s1_matched = 0;
                     if ($group_similar_sensitivity ne "none") {
-                        my $grouping_key = $consolidate_full_key ? "" :
-                            join("|", $log_level // "", $truncated_thread // "", $truncated_object // "",
-                                 (defined $session && $include_session) ? $session : "");
-                        my $consolidation_message = $consolidate_full_key ? $log_key : $message;
-                        my $capped_msg = substr($consolidation_message, 0, $consolidation_message_length_cap);
+                        my $grouping_key = $log_level // "";
+                        my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);
                         my $cat_gk = "$category|$grouping_key";
 
                         # Track max observed message length for adaptive cap
-                        my $msg_len = length($consolidation_message);
+                        my $msg_len = length($log_key);
                         $max_observed_message_length = $msg_len if $msg_len > $max_observed_message_length;
-
-                        # Store the log_key prefix format per grouping key (for reconstructing canonical log_key later)
-                        unless (exists $consolidation_gk_prefix{$cat_gk}) {
-                            if (defined($threadname) && defined($object)) {
-                                $consolidation_gk_prefix{$cat_gk} = "[$log_level] [$truncated_thread] [$truncated_object] ";
-                            } elsif (defined($object)) {
-                                $consolidation_gk_prefix{$cat_gk} = "[$log_level] [$truncated_object] ";
-                            } elsif (defined($threadname)) {
-                                $consolidation_gk_prefix{$cat_gk} = "[$log_level] [$truncated_thread] ";
-                            } else {
-                                $consolidation_gk_prefix{$cat_gk} = "[$log_level] ";
-                            }
-                        }
 
                         my $is_new_key = !exists $log_messages{$category}{$log_key};
 
@@ -3867,11 +3839,18 @@ sub read_and_process_logs {
                                 $consolidation_key_message{$log_key} = $capped_msg;
                                 $consolidation_key_message_cat_gk{$log_key} = $cat_gk;
                                 $consolidation_unmatched{$cat_gk}{$log_key} = 1;
+                                $consolidation_category_unmatched_count{$category}++;
 
-                                # Check trigger (skip if checkpoint stalled — 2+ consecutive unproductive checkpoints)
-                                if (scalar(keys %{$consolidation_unmatched{$cat_gk}}) >= $consolidation_trigger
-                                    && ($consolidation_cat_stats{$cat_gk}{stall_count} // 0) < 2) {
-                                    run_consolidation_checkpoint($category, $grouping_key);
+                                # Check trigger per category — fire checkpoints for all groups in this category
+                                if (($consolidation_category_unmatched_count{$category} // 0) >= $consolidation_trigger) {
+                                    for my $ck (keys %consolidation_unmatched) {
+                                        next unless $ck =~ /^\Q$category\E\|/;
+                                        next if scalar(keys %{$consolidation_unmatched{$ck}}) < 2;
+                                        next if ($consolidation_cat_stats{$ck}{stall_count} // 0) >= 2;
+                                        my ($c, $gk) = split(/\|/, $ck, 2);
+                                        run_consolidation_checkpoint($c, $gk);
+                                    }
+                                    $consolidation_category_unmatched_count{$category} = 0;
                                 }
                             }
                         }
@@ -7352,6 +7331,89 @@ unless( $group_similar_sensitivity eq "none" ) {
     group_similar_messages();
     $end_time = [gettimeofday];
     $elapsed_group_similar_messages = tv_interval($start_time, $end_time);
+
+    # Consolidation verbose diagnostics
+    if ($verbose) {
+        push @verbose_output, "";
+        push @verbose_output, "=== Consolidation Summary (Issue #96) ===";
+        push @verbose_output, sprintf("  Threshold: %d%%  Trigger: %d  Ceiling: %d  Final pass: %s",
+            $consolidation_threshold, $consolidation_trigger, $consolidation_occurrence_ceiling,
+            $consolidation_final_pass ? "on (threshold=${consolidation_final_threshold}%, ceiling=${consolidation_final_ceiling})" : "off");
+
+        my ($grand_keys, $grand_s1, $grand_s2, $grand_s3, $grand_s4, $grand_s5, $grand_fc) = (0,0,0,0,0,0,0);
+        my $grand_checkpoints = 0;
+        my $grand_patterns = 0;
+
+        for my $cat_gk (sort keys %consolidation_cat_stats) {
+            my $s = $consolidation_cat_stats{$cat_gk};
+            my $keys_seen = $s->{keys_seen} // 0;
+            next unless $keys_seen > 0;
+
+            my $checkpoints = $s->{checkpoints} // 0;
+            my $patterns = $s->{patterns_final} // 0;
+
+            # S2 and S5: partition remaining unmatched keys by occurrence ceiling
+            my ($category_part) = split(/\|/, $cat_gk, 2);
+            my $ceiling_filtered = 0;
+            my $genuinely_unmatched = 0;
+            for my $key (keys %{$consolidation_unmatched{$cat_gk} // {}}) {
+                my $occ = $log_messages{$category_part}{$key}{occurrences} // 1;
+                if ($occ >= $consolidation_occurrence_ceiling) {
+                    $ceiling_filtered++;
+                } else {
+                    $genuinely_unmatched++;
+                }
+            }
+
+            push @verbose_output, "";
+            push @verbose_output, sprintf("  --- %s: %d unique keys seen, %d checkpoints, %d patterns ---",
+                $cat_gk, $keys_seen, $checkpoints, $patterns);
+            push @verbose_output, sprintf("    S1 Inline match:       %d", $s->{s1_inline} // 0);
+            push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d, remaining after all passes)", $ceiling_filtered, $consolidation_occurrence_ceiling);
+            push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{s3_checkpoint} // 0);
+            push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{s4_pairwise} // 0);
+            push @verbose_output, sprintf("    S5 Unmatched:          %d", $genuinely_unmatched);
+
+            # Sanity check: all 5 stages must sum to keys_seen
+            my $accounted = ($s->{s1_inline} // 0) + $ceiling_filtered + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + $genuinely_unmatched;
+            if ($accounted != $keys_seen) {
+                push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
+                    $accounted, $keys_seen, $keys_seen - $accounted);
+            }
+
+            push @verbose_output, sprintf("    Reduction: %d → %d (%.1f%%)",
+                $keys_seen, $genuinely_unmatched + $ceiling_filtered + $patterns,
+                (1 - ($genuinely_unmatched + $ceiling_filtered + $patterns) / ($keys_seen || 1)) * 100);
+
+            $grand_keys += $keys_seen;
+            $grand_s1 += ($s->{s1_inline} // 0);
+            $grand_s2 += $ceiling_filtered;
+            $grand_s3 += ($s->{s3_checkpoint} // 0);
+            $grand_s4 += ($s->{s4_pairwise} // 0);
+            $grand_s5 += $genuinely_unmatched;
+            $grand_fc += ($s->{fc_calls} // 0);
+            $grand_checkpoints += $checkpoints;
+            $grand_patterns += $patterns;
+        }
+
+        if (scalar keys %consolidation_cat_stats > 1) {
+            push @verbose_output, "";
+            push @verbose_output, "  === Grand Totals ===";
+            push @verbose_output, sprintf("    Unique keys seen:      %d", $grand_keys);
+            push @verbose_output, sprintf("    S1 Inline match:       %d", $grand_s1);
+            push @verbose_output, sprintf("    S2 Ceiling filter:     %d", $grand_s2);
+            push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $grand_s3);
+            push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $grand_s4);
+            push @verbose_output, sprintf("    S5 Unmatched:          %d", $grand_s5);
+            push @verbose_output, sprintf("    Checkpoints:           %d", $grand_checkpoints);
+            push @verbose_output, sprintf("    Patterns:              %d", $grand_patterns);
+            push @verbose_output, sprintf("    find_candidates calls: %d", $grand_fc);
+            push @verbose_output, sprintf("    Reduction: %d → %d (%.1f%%)",
+                $grand_keys, $grand_s5 + $grand_s2 + $grand_patterns,
+                (1 - ($grand_s5 + $grand_s2 + $grand_patterns) / ($grand_keys || 1)) * 100);
+        }
+        push @verbose_output, "";
+    }
 }
 
 # CALCULATE STATISTICS #

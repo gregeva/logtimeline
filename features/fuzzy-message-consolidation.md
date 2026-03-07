@@ -1345,3 +1345,143 @@ Per-line overhead of `-g`: ~1.2μs (grouping key join, message cap, boolean guar
 - **Memory crossover**: At small file sizes (< ~200 MB), consolidation uses more memory than baseline (trigram structures during checkpoints). At large file sizes, the memory saved by S1 absorption far exceeds the checkpoint overhead, since trigram structures are freed per checkpoint while `%log_messages` entries persist for the entire run.
 - **Stall detection as natural bound**: With no hard pattern cap, pattern count plateaus naturally when the data's diversity is exhausted. Stall detection (2 consecutive unproductive checkpoints) prevents wasted work on irreconcilable keys.
 - **Final pass cost is proportional**: At small scale, the final pass dominates consolidation time. At large scale, it's a small fraction (16s / 489s = 3.4%) because most keys are already absorbed by S1 during parsing.
+
+## Validation and Debugging
+
+### Verbose Output (`-V -g`)
+
+When both `-V` and `-g` are active, ltl outputs a consolidation summary block in the verbose section. This is the primary diagnostic tool for validating that consolidation is working as expected.
+
+#### Example Output
+
+```
+=== Consolidation Summary (Issue #96) ===
+  Threshold: 80%  Trigger: 5000  Ceiling: 3  Final pass: on (threshold=80%, ceiling=1000000)
+
+  --- plain|WARN: 8782 unique keys seen, 2 checkpoints, 36 patterns ---
+    S1 Inline match:       6101
+    S2 Ceiling filter:     8  (occurrences >= 3, remaining after all passes)
+    S3 Checkpoint match:   0
+    S4 Pairwise discovery: 2668
+    S5 Unmatched:          5
+    Reduction: 8782 → 49 (99.4%)
+
+  === Grand Totals ===
+    Unique keys seen:      23389
+    S1 Inline match:       17613
+    S2 Ceiling filter:     29
+    S3 Checkpoint match:   0
+    S4 Pairwise discovery: 5728
+    S5 Unmatched:          19
+    Checkpoints:           6
+    Patterns:              79
+    find_candidates calls: 285
+    Reduction: 23389 → 127 (99.5%)
+```
+
+#### Field Reference
+
+| Field | Meaning | Healthy Range |
+|-------|---------|---------------|
+| Unique keys seen | Total new unique `$log_key` values encountered during parsing for this group | Depends on file |
+| S1 Inline match | Keys matched by compiled regex during parsing (cheap, hot path) | Should dominate at scale (>90%) |
+| S2 Ceiling filter | Keys with occurrences >= ceiling, excluded from pairwise discovery | Small number; high means many distinct high-frequency keys |
+| S3 Checkpoint match | Keys absorbed by re-scanning against patterns discovered in the same checkpoint | Often 0; non-zero means patterns discovered mid-checkpoint helped |
+| S4 Pairwise discovery | Keys absorbed by Dice similarity + alignment during checkpoint passes | Main discovery mechanism; decreases as S1 takes over |
+| S5 Unmatched | Keys that survived all stages — genuinely unique messages | Should be small; if large, threshold may be too high |
+| Checkpoints | Number of checkpoint passes fired during parsing + EOF | Typically 2-10; very high means trigger too low or poor S1 absorption |
+| Patterns | Number of compiled regex patterns discovered | Grows with data diversity; stall detection stops unproductive discovery |
+| find_candidates calls | Number of trigram-based candidate searches in S4 | Cost indicator for pairwise discovery |
+| Reduction | `keys_seen → (S5 + S2 + patterns)` as percentage | Higher is better; >95% on repetitive data |
+
+#### Tracking Invariant
+
+The five stages must account for all keys seen:
+
+```
+S1 + S2 + S3 + S4 + S5 = keys_seen
+```
+
+If this invariant fails, a `[WARN] Tracking mismatch` line appears with the delta. This indicates a counting bug in the stage tracking — the consolidation itself may still be functionally correct, but the diagnostic counters are not reliable until the mismatch is resolved.
+
+**Counting approach:** S1, S3, and S4 are accumulated during processing. S2 and S5 are computed at report time by partitioning the remaining `%consolidation_unmatched` keys: keys with `occurrences >= ceiling` are S2, the rest are S5. This avoids double-counting ceiling keys that survive multiple checkpoints. Final pass absorptions (ceiling keys matched by pairwise discovery) are added to S4.
+
+#### What to Look For
+
+**Healthy consolidation:**
+- S1 dominates (>75% of keys_seen), especially on larger files
+- Few checkpoints (2-6 typical)
+- S5 is small relative to keys_seen
+- Reduction >90% on repetitive log data
+
+**Poor consolidation (threshold too high):**
+- S4 discovers few patterns
+- S5 is large — many keys survive all stages
+- S1 percentage is low because few patterns exist to match against
+- Fix: lower the `-g` threshold (e.g., `-g 70`)
+
+**Poor performance (too many checkpoints):**
+- High checkpoint count (>20)
+- S1 percentage is low despite many patterns
+- Indicates patterns are too specific to catch incoming variation
+- May indicate the trigger threshold is too low
+
+**Stall detection active:**
+- Checkpoints stop firing for a group after 2 consecutive unproductive ones (0 discovered, 0 absorbed)
+- This is normal — it means the remaining unmatched keys are genuinely diverse
+
+### Data Structures for Debugging
+
+All consolidation state is accessible for debugging:
+
+| Structure | Key | Contents |
+|-----------|-----|----------|
+| `%consolidation_cat_stats` | `"$category\|$grouping_key"` | Per-group counters: `keys_seen`, `s1_inline`, `s3_checkpoint`, `s4_pairwise`, `checkpoints`, `patterns_discovered`, `patterns_final`, `stall_count`, `fc_calls` |
+| `%consolidation_clusters` | `{cat_gk}{canonical}` | Cluster data: `occurrences`, `match_count`, `canonical`, `pattern`, `mask`, duration/bytes/count stats |
+| `%consolidation_patterns` | `{cat_gk}` | Array of `{pattern, canonical, cluster_key, match_count}` — the compiled regex list for S1 |
+| `%consolidation_unmatched` | `{cat_gk}{log_key}` | Keys that have not been absorbed — S2 + S5 survivors |
+| `%consolidation_key_message` | `{log_key}` | Capped message text for each unmatched key |
+| `%consolidation_ngram_index` | `{cat_gk}{trigram}{log_key}` | Trigram posting lists — built and freed per checkpoint |
+| `%consolidation_key_trigrams` | `{log_key}` | Per-key trigram sets — freed per checkpoint |
+
+### Grouping Key Design
+
+The `cat_gk` (category + grouping key) partitions consolidation into independent groups. Each group has its own patterns, clusters, unmatched set, and stage counters.
+
+- `$category` = `plain` or `highlight` (matches `%log_messages` structure)
+- `$grouping_key` = `$log_level` (ERROR, WARN, INFO, or HTTP status code)
+
+Cross-level merges are prevented by the grouping key partition — an ERROR message is never compared against a WARN message. Thread names and object names are part of the `$log_key` string and participate in similarity scoring and wildcarding within a level group.
+
+**Why not finer grouping (thread, object)?** Thread names can be unique per-instance identifiers (e.g., `WC_0K011012_ProcessPTCAutomationEventsForWorkUnitAsync`), creating hundreds of tiny groups. This defeats the checkpoint trigger mechanism (per-category, not per-group) and generates hundreds of unproductive checkpoint calls. Grouping by level only produces 3-6 groups, allowing checkpoints to fire during parsing and S1 inline matching to absorb the majority of keys.
+
+**Why not coarser grouping (category only)?** Short messages with different log levels can score above the Dice threshold on the full `$log_key` due to prefix domination (e.g., `[WARN] ... Done` vs `[ERROR] ... Done` → Dice 91.5%). Level-based grouping prevents this without adding per-line cost.
+
+### Checkpoint Trigger Design
+
+The checkpoint trigger counts total unmatched keys per `$category` (plain/highlight), not per cat_gk group. When the trigger fires, checkpoints run for all cat_gk groups within that category that have >= 2 unmatched keys. This ensures checkpoints fire during parsing even when keys are distributed across many level-based groups.
+
+```
+$consolidation_category_unmatched_count{$category} >= $consolidation_trigger
+```
+
+After firing, the counter resets to 0 and accumulation resumes.
+
+### Test Files and Expected Results
+
+| File | Size | Keys Seen | S1% | Reduction | Time (no -g) | Time (-g) | Notes |
+|------|------|-----------|-----|-----------|-------------|-----------|-------|
+| `ScriptLog.2025-04-09.4.log` | 72MB | ~223K | ~97% | ~99.9% | ~4s | ~9s | ThingWorx script log, many unique thread names |
+| `ScriptLog.2025-*` (5 files) | 463MB | ~499K | ~96% | ~99.9% | — | ~30s | Multi-file scale test; 1.53M lines |
+| `HundredsOfThousandsOfUniqueErrors.log` | 102MB | ~286K | >99% | >99% | — | — | Primary prototype test file |
+
+### Common Issues and Fixes
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| `-g` makes execution 10x+ slower | Checkpoint trigger per-cat_gk instead of per-category | Fixed in #131: trigger is now per-category |
+| Too many small groups, hundreds of checkpoints | Grouping key includes thread/object names | Fixed in #131: grouping key is level-only |
+| Tracking mismatch in verbose output | Stage counter not incremented for some absorption path | Fixed in #131: S2/S5 computed at report time (not accumulated per checkpoint); final pass absorptions tracked in S4 |
+| S3 always 0 | No patterns discovered early enough in a checkpoint for re-scan to absorb keys | Normal for small files; at scale with multiple checkpoints, S3 may contribute |
+| High S5 count | Threshold too high for the data's variation | Lower `-g` threshold |
+| `gk_prefix` errors or missing prefixes | Legacy code from pre-#131 grouping key design | Removed in #131: canonical form is the full `$log_key` |
