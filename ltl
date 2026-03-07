@@ -5866,10 +5866,12 @@ sub print_verbose_output {
 
     # File metadata
     my $total_file_size = 0;
+    my @abs_paths;
     for my $f (@files_processed) {
         $total_file_size += (-s $f) // 0;
+        push @abs_paths, File::Spec->rel2abs($f);
     }
-    print "FILES\t" . join(';', @files_processed) . "\t$total_file_size\n";
+    print "FILES\t" . join(';', @abs_paths) . "\t$total_file_size\n";
 
     print "lines_read\t$total_lines_read\n";
     print "lines_included\t$total_lines_included\n";

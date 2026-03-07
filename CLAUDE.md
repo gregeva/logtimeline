@@ -89,10 +89,12 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 11. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
 
 ### Post-release
-12. **Merge to main via PR (NEVER direct merge):** `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` (do NOT use `--delete-branch` — release branches must be preserved)
-13. **Sync Wiki:** `git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cp docs/purpose.md /tmp/ltl-wiki/Purpose-and-Design-Philosophy.md && cd /tmp/ltl-wiki && git add Home.md Purpose-and-Design-Philosophy.md && git commit -m "Sync wiki docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki` — `docs/usage.md` and `docs/purpose.md` are the single sources of truth; the wiki is overwritten on each release.
-14. Close all issues included in release: `gh issue close {number} --reason completed`
-15. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each, NOT the release branch)
+12. **Run benchmarks**: `./tests/baseline/run-benchmark.sh full --label vX.Y.Z` — captures baseline for this release
+13. **Compare benchmarks** (if previous baseline exists): `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv` — saves full report to `tests/baseline/results/`. Include the table output (`--markdown table`) in release notes.
+14. **Merge to main via PR (NEVER direct merge):** `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` (do NOT use `--delete-branch` — release branches must be preserved)
+15. **Sync Wiki:** `git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cp docs/purpose.md /tmp/ltl-wiki/Purpose-and-Design-Philosophy.md && cd /tmp/ltl-wiki && git add Home.md Purpose-and-Design-Philosophy.md && git commit -m "Sync wiki docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki` — `docs/usage.md` and `docs/purpose.md` are the single sources of truth; the wiki is overwritten on each release.
+16. Close all issues included in release: `gh issue close {number} --reason completed`
+17. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each, NOT the release branch)
 
 ### Run Directly
 ```bash
