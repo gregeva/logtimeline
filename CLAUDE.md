@@ -90,7 +90,7 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 
 ### Post-release
 12. **Merge to main via PR (NEVER direct merge):** `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` (do NOT use `--delete-branch` — release branches must be preserved)
-13. **Sync Wiki:** `git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cd /tmp/ltl-wiki && git add Home.md && git commit -m "Sync usage docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki` — `docs/usage.md` is the single source of truth; the wiki is overwritten on each release.
+13. **Sync Wiki:** `git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cp docs/purpose.md /tmp/ltl-wiki/Purpose-and-Design-Philosophy.md && cd /tmp/ltl-wiki && git add Home.md Purpose-and-Design-Philosophy.md && git commit -m "Sync wiki docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki` — `docs/usage.md` and `docs/purpose.md` are the single sources of truth; the wiki is overwritten on each release.
 14. Close all issues included in release: `gh issue close {number} --reason completed`
 15. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each, NOT the release branch)
 
