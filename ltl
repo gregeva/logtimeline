@@ -1644,6 +1644,9 @@ sub group_similar_messages {
                 delete $consolidation_key_message_cat_gk{$key};
             }
 
+            # Track final pass absorptions in S4
+            $consolidation_cat_stats{$cat_gk}{s4_pairwise} += $messages_absorbed;
+
             # Free trigram data from final pass
             delete $consolidation_ngram_index{$cat_gk};
             delete $consolidation_posting_size{$cat_gk};
@@ -7349,14 +7352,14 @@ unless( $group_similar_sensitivity eq "none" ) {
             my $checkpoints = $s->{checkpoints} // 0;
             my $patterns = $s->{patterns_final} // 0;
 
-            # S2: ceiling-excluded keys remaining in unmatched (occurrences >= ceiling)
-            my $ceiling_remaining = 0;
+            # S2 and S5: partition remaining unmatched keys by occurrence ceiling
+            my ($category_part) = split(/\|/, $cat_gk, 2);
+            my $ceiling_filtered = 0;
             my $genuinely_unmatched = 0;
-            my ($category) = split(/\|/, $cat_gk, 2);
-            for my $key (keys %{$consolidation_unmatched{$cat_gk}}) {
-                my $occ = $log_messages{$category}{$key}{occurrences} // 1;
+            for my $key (keys %{$consolidation_unmatched{$cat_gk} // {}}) {
+                my $occ = $log_messages{$category_part}{$key}{occurrences} // 1;
                 if ($occ >= $consolidation_occurrence_ceiling) {
-                    $ceiling_remaining++;
+                    $ceiling_filtered++;
                 } else {
                     $genuinely_unmatched++;
                 }
@@ -7366,25 +7369,25 @@ unless( $group_similar_sensitivity eq "none" ) {
             push @verbose_output, sprintf("  --- %s: %d unique keys seen, %d checkpoints, %d patterns ---",
                 $cat_gk, $keys_seen, $checkpoints, $patterns);
             push @verbose_output, sprintf("    S1 Inline match:       %d", $s->{s1_inline} // 0);
-            push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d)", $ceiling_remaining, $consolidation_occurrence_ceiling);
+            push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d, remaining after all passes)", $ceiling_filtered, $consolidation_occurrence_ceiling);
             push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{s3_checkpoint} // 0);
             push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{s4_pairwise} // 0);
             push @verbose_output, sprintf("    S5 Unmatched:          %d", $genuinely_unmatched);
 
             # Sanity check: all 5 stages must sum to keys_seen
-            my $accounted = ($s->{s1_inline} // 0) + $ceiling_remaining + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + $genuinely_unmatched;
+            my $accounted = ($s->{s1_inline} // 0) + $ceiling_filtered + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + $genuinely_unmatched;
             if ($accounted != $keys_seen) {
                 push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
                     $accounted, $keys_seen, $keys_seen - $accounted);
             }
 
             push @verbose_output, sprintf("    Reduction: %d → %d (%.1f%%)",
-                $keys_seen, $genuinely_unmatched + $ceiling_remaining + $patterns,
-                (1 - ($genuinely_unmatched + $ceiling_remaining + $patterns) / ($keys_seen || 1)) * 100);
+                $keys_seen, $genuinely_unmatched + $ceiling_filtered + $patterns,
+                (1 - ($genuinely_unmatched + $ceiling_filtered + $patterns) / ($keys_seen || 1)) * 100);
 
             $grand_keys += $keys_seen;
             $grand_s1 += ($s->{s1_inline} // 0);
-            $grand_s2 += $ceiling_remaining;
+            $grand_s2 += $ceiling_filtered;
             $grand_s3 += ($s->{s3_checkpoint} // 0);
             $grand_s4 += ($s->{s4_pairwise} // 0);
             $grand_s5 += $genuinely_unmatched;

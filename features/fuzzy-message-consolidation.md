@@ -1360,9 +1360,9 @@ When both `-V` and `-g` are active, ltl outputs a consolidation summary block in
 
   --- plain|WARN: 8782 unique keys seen, 2 checkpoints, 36 patterns ---
     S1 Inline match:       6101
-    S2 Ceiling filter:     8  (occurrences >= 3)
+    S2 Ceiling filter:     8  (occurrences >= 3, remaining after all passes)
     S3 Checkpoint match:   0
-    S4 Pairwise discovery: 2555
+    S4 Pairwise discovery: 2668
     S5 Unmatched:          5
     Reduction: 8782 → 49 (99.4%)
 
@@ -1371,11 +1371,11 @@ When both `-V` and `-g` are active, ltl outputs a consolidation summary block in
     S1 Inline match:       17613
     S2 Ceiling filter:     29
     S3 Checkpoint match:   0
-    S4 Pairwise discovery: 5603
+    S4 Pairwise discovery: 5728
     S5 Unmatched:          19
     Checkpoints:           6
     Patterns:              79
-    find_candidates calls: 262
+    find_candidates calls: 285
     Reduction: 23389 → 127 (99.5%)
 ```
 
@@ -1403,6 +1403,8 @@ S1 + S2 + S3 + S4 + S5 = keys_seen
 ```
 
 If this invariant fails, a `[WARN] Tracking mismatch` line appears with the delta. This indicates a counting bug in the stage tracking — the consolidation itself may still be functionally correct, but the diagnostic counters are not reliable until the mismatch is resolved.
+
+**Counting approach:** S1, S3, and S4 are accumulated during processing. S2 and S5 are computed at report time by partitioning the remaining `%consolidation_unmatched` keys: keys with `occurrences >= ceiling` are S2, the rest are S5. This avoids double-counting ceiling keys that survive multiple checkpoints. Final pass absorptions (ceiling keys matched by pairwise discovery) are added to S4.
 
 #### What to Look For
 
@@ -1470,6 +1472,7 @@ After firing, the counter resets to 0 and accumulation resumes.
 | File | Size | Keys Seen | S1% | Reduction | Time (no -g) | Time (-g) | Notes |
 |------|------|-----------|-----|-----------|-------------|-----------|-------|
 | `ScriptLog.2025-04-09.4.log` | 72MB | ~223K | ~97% | ~99.9% | ~4s | ~9s | ThingWorx script log, many unique thread names |
+| `ScriptLog.2025-*` (5 files) | 463MB | ~499K | ~96% | ~99.9% | — | ~30s | Multi-file scale test; 1.53M lines |
 | `HundredsOfThousandsOfUniqueErrors.log` | 102MB | ~286K | >99% | >99% | — | — | Primary prototype test file |
 
 ### Common Issues and Fixes
@@ -1478,7 +1481,7 @@ After firing, the counter resets to 0 and accumulation resumes.
 |---------|-------------|-----|
 | `-g` makes execution 10x+ slower | Checkpoint trigger per-cat_gk instead of per-category | Fixed in #131: trigger is now per-category |
 | Too many small groups, hundreds of checkpoints | Grouping key includes thread/object names | Fixed in #131: grouping key is level-only |
-| Tracking mismatch in verbose output | Stage counter not incremented for some absorption path | Debug: check `run_consolidation_pass` and `run_consolidation_checkpoint` for uncounted paths |
+| Tracking mismatch in verbose output | Stage counter not incremented for some absorption path | Fixed in #131: S2/S5 computed at report time (not accumulated per checkpoint); final pass absorptions tracked in S4 |
 | S3 always 0 | No patterns discovered early enough in a checkpoint for re-scan to absorb keys | Normal for small files; at scale with multiple checkpoints, S3 may contribute |
 | High S5 count | Threshold too high for the data's variation | Lower `-g` threshold |
 | `gk_prefix` errors or missing prefixes | Legacy code from pre-#131 grouping key design | Removed in #131: canonical form is the full `$log_key` |
