@@ -71,6 +71,7 @@ my ( $include_query_string, $include_session, $include_threadpool_summary, $incl
 my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages, $elapsed_heatmap_statistics, $elapsed_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
+my @verbose_output;           # Accumulated verbose output lines (Issue #56)
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_sessions );
 my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
@@ -3004,17 +3005,17 @@ sub adapt_to_command_line_options {
     $exclude_regex   = $exclude_filter->{regex}   if $exclude_filter;
     $highlight_regex = $highlight_filter->{regex}  if $highlight_filter;
 
-    # Verbose output (Issue #19, #21)
+    # Verbose output (Issue #19, #21, #56)
     if ($verbose) {
-        print "=== Verbose ===\n";
+        push @verbose_output, "=== Verbose ===";
         if ($ltl_config_raw ne '') {
-            print "LTL_CONFIG: $ltl_config_raw\n";
+            push @verbose_output, "LTL_CONFIG: $ltl_config_raw";
         }
-        print "include (merged): " . (defined $include_regex ? $include_regex : "(not set)") . "\n";
-        print "exclude (merged): " . (defined $exclude_regex ? $exclude_regex : "(not set)") . "\n";
-        print "highlight (merged): " . (defined $highlight_regex ? $highlight_regex : "(not set)") . "\n";
-        print "threadpool-activity (merged): " . (defined $threadpool_activity_regex ? $threadpool_activity_regex : "(not set)") . "\n";
-        print "\n";
+        push @verbose_output, "include (merged): " . (defined $include_regex ? $include_regex : "(not set)");
+        push @verbose_output, "exclude (merged): " . (defined $exclude_regex ? $exclude_regex : "(not set)");
+        push @verbose_output, "highlight (merged): " . (defined $highlight_regex ? $highlight_regex : "(not set)");
+        push @verbose_output, "threadpool-activity (merged): " . (defined $threadpool_activity_regex ? $threadpool_activity_regex : "(not set)");
+        push @verbose_output, "";
     }
 
     if( $print_version ) {
@@ -4352,24 +4353,24 @@ sub calculate_histogram_buckets {
         print " " x ( $terminal_width - length( "Calculating histogram statistics completed." ) );
     }
 
-    # Verbose output for bucket calculation (Issue #25)
+    # Verbose output for bucket calculation (Issue #25, #56)
     if ($verbose && @metrics_with_data) {
-        print "\nHistogram bucket calculation:\n";
+        push @verbose_output, "";
+        push @verbose_output, "Histogram bucket calculation:";
         for my $metric (@metrics_with_data) {
             my $stats = $histogram_stats{$metric};
-            # Reuse format_heatmap_value which wraps format_time, format_bytes, format_number
             my $min_fmt = format_heatmap_value($stats->{min}, $metric);
             my $max_fmt = format_heatmap_value($stats->{max}, $metric);
-            printf "  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d\n",
+            push @verbose_output, sprintf("  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d",
                    ucfirst($metric) . ":",
                    $stats->{count},
                    $min_fmt,
                    $max_fmt,
                    $stats->{decades},
                    $histogram_buckets_per_decade,
-                   $stats->{bucket_count};
+                   $stats->{bucket_count});
         }
-        print "\n";
+        push @verbose_output, "";
     }
 
     return;
@@ -5849,6 +5850,51 @@ sub print_heatmap_footer_scale {
 
     print join("", @scale_chars);
     print "$colors{'NC'}\n";
+}
+
+# Issue #56: Print accumulated verbose output and benchmark data block
+sub print_verbose_output {
+    return unless $verbose && @verbose_output;
+
+    for my $line (@verbose_output) {
+        print "$line\n";
+    }
+
+    # Benchmark data block — machine-parseable TSV
+    print "=== BENCHMARK DATA ===\n";
+    print "version\t$version_number\n";
+
+    # File metadata
+    my $total_file_size = 0;
+    for my $f (@files_processed) {
+        $total_file_size += (-s $f) // 0;
+    }
+    print "FILES\t" . join(';', @files_processed) . "\t$total_file_size\n";
+
+    print "lines_read\t$total_lines_read\n";
+    print "lines_included\t$total_lines_included\n";
+
+    # Timing rows (raw seconds)
+    printf "TIMING\tread_files\t%.3f\n", $elapsed_read_files;
+    printf "TIMING\tinitialize_buckets\t%.3f\n", $elapsed_initialize_empty_time_windows;
+    printf "TIMING\tgroup_similar\t%.3f\n", $elapsed_group_similar_messages;
+    printf "TIMING\tcalculate_statistics\t%.3f\n", $elapsed_calculate_statistics;
+    printf "TIMING\theatmap_statistics\t%.3f\n", $elapsed_heatmap_statistics;
+    printf "TIMING\thistogram_statistics\t%.3f\n", $elapsed_histogram_statistics;
+    printf "TIMING\tnormalize_data\t%.3f\n", $elapsed_normalize_data;
+    printf "TIMING\ttotal\t%.3f\n", $elapsed_total;
+
+    # Memory rows (raw bytes)
+    printf "MEMORY\trss_peak\t%d\n", $max_memory_usage;
+
+    # Per-structure HWMs (only with -mem)
+    if ($show_memory && %memory_high_water_marks) {
+        for my $struct (sort keys %memory_high_water_marks) {
+            printf "MEMORY\t%s\t%d\n", $struct, $memory_high_water_marks{$struct};
+        }
+    }
+
+    print "=== END BENCHMARK DATA ===\n";
 }
 
 sub print_bar_graph {
@@ -7338,6 +7384,8 @@ $end_time = [gettimeofday];
 $elapsed_normalize_data = tv_interval($start_time, $end_time);
 
 $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_heatmap_statistics + $elapsed_histogram_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
+
+print_verbose_output();
 
 if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
     $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
