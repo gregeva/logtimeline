@@ -1,6 +1,4 @@
-# ltl Usage Reference
-
-## Usage
+LogTimeLine (ltl) is a command-line log analysis tool that identifies hotspots in large log files through time-bucketed visualization and statistical analysis. It reads log files directly, aggregates them into color-coded bar graphs, and pairs temporal metrics with the specific messages that produced them. For more on the design philosophy and intended workflow, see [Purpose and Design Philosophy](Purpose-and-Design-Philosophy).
 
 ```
 ltl [options] <logfile> [logfile2 ...]
