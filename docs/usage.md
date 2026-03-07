@@ -108,7 +108,7 @@ Consolidated entries are marked with `~` in the summary table output. All statis
 
 | Option | Description |
 |--------|-------------|
-| `-g, --group-similar <N>` | Enable fuzzy message consolidation with N% Dice similarity threshold (50-99, default: 80). Lower values are more aggressive. |
+| `-g, --group-similar <N>` | Enable fuzzy message consolidation with N% Dice similarity threshold (50-99, default: 90). Lower values are more aggressive. |
 | `-uuid, --mask-uuid` | Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to `-g` for UUID-only variation) |
 | `-iqs, --include-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
 | `-is, --include-session` | Keep session/user IDs when grouping messages, so each session is tracked separately |
@@ -117,14 +117,14 @@ Consolidated entries are marked with `~` in the summary table output. All statis
 | `--consolidation-trigger <N>` | Unmatched keys before triggering a checkpoint (default: 5000) |
 | `--consolidation-ceiling <N>` | Max occurrences for a key to be eligible for pattern discovery (default: 3) |
 | `--consolidation-max-patterns <N>` | Hard cap on patterns per grouping key; 0 = unlimited (default: 0) |
-| `--final-threshold <N>` | Similarity threshold for the final pass (default: 80) |
+| `--final-threshold <N>` | Similarity threshold for the final pass (default: 90) |
 | `--final-ceiling <N>` | Occurrence ceiling for the final pass (default: 1000000) |
 
 ```bash
-# Consolidate similar messages at 80% similarity threshold
-ltl -g 80 access.log
+# Consolidate similar messages at 90% similarity threshold
+ltl -g access.log
 # Raise the occurrence ceiling to include higher-frequency keys in pattern discovery
-ltl -g 80 --consolidation-ceiling 10 access.log
+ltl -g --consolidation-ceiling 10 access.log
 # Consolidate but keep query strings and sessions as separate entries
 ltl -g 80 -iqs -is access.log
 ```
