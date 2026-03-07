@@ -8,7 +8,7 @@ The timeline is the anchor. Every feature — heatmaps, histograms, session trac
 
 Unlike log management platforms, logtimeline works directly on files with no infrastructure, no retention limits, and no query timeouts. Download a single binary, point it at a log, and start investigating. It runs the same on a Linux container, a macOS laptop, or a Windows server. The analysis command line is shown on every run, making investigations reproducible and shareable.
 
-For more on the design philosophy and intended workflow, see [Purpose and Design Philosophy](docs/purpose.md).
+For more on the design philosophy and intended workflow, see [Purpose and Design Philosophy](https://github.com/gregeva/logtimeline/wiki/Purpose-and-Design-Philosophy).
 
 ## Getting Started
 
@@ -23,7 +23,7 @@ ltl [options] <logfile> [logfile2 ...]
 
 ## Documentation
 
-See the [Wiki](https://github.com/gregeva/logtimeline/wiki) for the full options reference, feature explanations, and examples.
+See the [Usage Reference](https://github.com/gregeva/logtimeline/wiki) for the full options reference, feature explanations, and examples.
 
 ## Screenshots
 
