@@ -400,13 +400,22 @@ run_table_timing() {
             for (s = 1; s <= ns; s++) {
                 test = files[f] "-" scenarios[s]
                 if (test in base && test in cur) {
-                    printf "\t%s", format_time_signed(cur[test] - base[test])
+                    printf "\t%s", format_pct(cur[test], base[test])
                 } else {
                     printf "\t-"
                 }
             }
             printf "\n"
         }
+    }
+
+    function format_pct(current, baseline,    delta, pct) {
+        delta = current - baseline
+        if (delta == 0) return "="
+        if (baseline == 0) return "NEW"
+        pct = (delta / baseline) * 100
+        if (pct > 0) return sprintf("+%.1f%%", pct)
+        return sprintf("%.1f%%", pct)
     }
     ' "$BASELINE" "$CURRENT" | format_table
 }
@@ -425,13 +434,22 @@ run_table_memory() {
             for (s = 1; s <= ns; s++) {
                 test = files[f] "-" scenarios[s]
                 if (test in base && test in cur) {
-                    printf "\t%s", format_bytes_signed(cur[test] - base[test])
+                    printf "\t%s", format_pct(cur[test], base[test])
                 } else {
                     printf "\t-"
                 }
             }
             printf "\n"
         }
+    }
+
+    function format_pct(current, baseline,    delta, pct) {
+        delta = current - baseline
+        if (delta == 0) return "="
+        if (baseline == 0) return "NEW"
+        pct = (delta / baseline) * 100
+        if (pct > 0) return sprintf("+%.1f%%", pct)
+        return sprintf("%.1f%%", pct)
     }
     ' "$BASELINE" "$CURRENT" | format_table
 }
