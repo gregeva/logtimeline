@@ -742,6 +742,9 @@ Parse line-by-line:
 - Trigram data (`%ngram_index`, `%key_trigrams`, `%posting_size`, `%key_trigrams_norm`) built and freed per checkpoint
 - Only compiled patterns (`%canonical_patterns`) and clusters (`%clusters`) persist across checkpoints
 - Absorbed keys deleted from `%log_messages` and `%key_message` to free memory
+- **Unmatched key eviction:** keys in `%unmatched_keys` and `%key_message` are transient working data, not permanent storage. Each key should survive a limited number of checkpoint attempts (2-3). If a key has been through multiple checkpoints without being absorbed by S3, S4, or S1, it is evicted from the consolidation tracking structures and remains in `%log_messages` as a unique entry. This bounds the consolidation working set to roughly one checkpoint batch worth of recent keys, regardless of file size. The final pass (`group_similar_messages`) serves as the safety net — it re-examines remaining `%log_messages` entries against all discovered patterns to catch keys that arrived before their matching pattern was discovered.
+
+**Design intent:** The consolidation tracking structures (`%unmatched_keys`, `%key_message`) must remain small relative to the total lines processed. They are a transient working set for pattern discovery, not a mirror of `%log_messages`. Keys pass through briefly for a few checkpoint opportunities, then get evicted if unmatched. Without eviction, these structures grow unboundedly on data with high key diversity (e.g., access logs with unique URL paths), causing memory and time regressions that defeat the purpose of consolidation.
 
 **Results — power-law file (288K lines, 286K unique ERROR):**
 - Total: 1.87s (was 3.6s in old architecture)
@@ -1484,4 +1487,6 @@ After firing, the counter resets to 0 and accumulation resumes.
 | Tracking mismatch in verbose output | Stage counter not incremented for some absorption path | Fixed in #131: S2/S5 computed at report time (not accumulated per checkpoint); final pass absorptions tracked in S4 |
 | S3 always 0 | No patterns discovered early enough in a checkpoint for re-scan to absorb keys | Normal for small files; at scale with multiple checkpoints, S3 may contribute |
 | High S5 count | Threshold too high for the data's variation | Lower `-g` threshold |
+| Memory regression with `-g` | Unmatched keys accumulate in consolidation tracking structures indefinitely | Implement key eviction after N checkpoint attempts (see #135) |
+| Time regression in `read_files` with `-g` | S1 inline matching failing for most keys + overhead of storing every key in tracking structures | Same root cause as memory regression — evict keys to stop accumulation |
 | `gk_prefix` errors or missing prefixes | Legacy code from pre-#131 grouping key design | Removed in #131: canonical form is the full `$log_key` |

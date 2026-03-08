@@ -194,13 +194,13 @@ my $consolidation_total_keys_seen = 0;
 my %consolidation_category_unmatched_count;  # {category} => total unmatched keys across all cat_gk groups in this category
 
 # Consolidation configuration
-my $consolidation_threshold          = 90;
+my $consolidation_threshold          = 85;
 my $consolidation_trigger            = 5000;
 my $consolidation_message_length_cap = 350;
 my $consolidation_occurrence_ceiling = 3;
 my $consolidation_max_patterns       = 0;  # 0 = unlimited (stall detection is the natural bound)
 my $consolidation_final_pass         = 1;
-my $consolidation_final_threshold    = 90;
+my $consolidation_final_threshold    = 85;
 my $consolidation_final_ceiling      = 1_000_000;
 my $consolidation_discriminative_topk = 50;
 my $consolidation_prefilter_ratio    = 0.30;
@@ -838,7 +838,7 @@ sub print_help {
 
     # Message Grouping
     $out .= $subheading->("Message Grouping");
-    $out .= $opt->("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 90). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output.");
+    $out .= $opt->("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output.");
     $out .= $opt->("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
     $out .= $opt->("-iqs, --include-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
     $out .= $opt->("-is,  --include-session",       "Keep session/user IDs when grouping messages, so each session is tracked separately");
@@ -929,7 +929,7 @@ sub print_help {
     $out .= $ex->("ltl -h \"/api/v2/orders\" access.log",                          "Highlight a pattern against all traffic");
     $out .= $ex->("ltl -dmin 5000 access.log",                                     "Only requests slower than 5 seconds");
     $out .= $ex->("ltl -od -ob access.log",                                        "Occurrences only, no duration or bytes");
-    $out .= $ex->("ltl -g 90 access.log",                                          "Fuzzy consolidation at 90% similarity");
+    $out .= $ex->("ltl -g 85 access.log",                                          "Fuzzy consolidation at 85% similarity");
     $out .= $ex->("ltl -n 50 -so duration access.log",                             "Top 50 messages by total duration");
     $out .= $ex->("ltl -hm duration -bs 5 access.log",                             "Duration heatmap, 5-minute buckets");
     $out .= $ex->("ltl -hg duration,bytes access.log",                             "Duration and bytes histograms");
@@ -2915,14 +2915,14 @@ sub adapt_to_command_line_options {
     # Consolidation option processing (Issue #96)
     if ($group_similar_sensitivity ne "none") {
         if ($group_similar_sensitivity eq '') {
-            # -g with no value: use default threshold (90)
-            $consolidation_threshold = 90;
+            # -g with no value: use default threshold (85)
+            $consolidation_threshold = 85;
         } elsif ($group_similar_sensitivity =~ /^\d+$/) {
             $consolidation_threshold = int($group_similar_sensitivity);
         } else {
             # Non-numeric value captured (likely a filename) — push it back
             unshift @ARGV, $group_similar_sensitivity;
-            $consolidation_threshold = 90;
+            $consolidation_threshold = 85;
         }
         # Ensure threshold is in valid range
         $consolidation_threshold = 50 if $consolidation_threshold < 50;
