@@ -742,9 +742,9 @@ Parse line-by-line:
 - Trigram data (`%ngram_index`, `%key_trigrams`, `%posting_size`, `%key_trigrams_norm`) built and freed per checkpoint
 - Only compiled patterns (`%canonical_patterns`) and clusters (`%clusters`) persist across checkpoints
 - Absorbed keys deleted from `%log_messages` and `%key_message` to free memory
-- **Unmatched key eviction:** keys in `%unmatched_keys` and `%key_message` are transient working data, not permanent storage. Each key should survive a limited number of checkpoint attempts (2-3). If a key has been through multiple checkpoints without being absorbed by S3, S4, or S1, it is evicted from the consolidation tracking structures and remains in `%log_messages` as a unique entry. This bounds the consolidation working set to roughly one checkpoint batch worth of recent keys, regardless of file size. The final pass (`group_similar_messages`) serves as the safety net — it re-examines remaining `%log_messages` entries against all discovered patterns to catch keys that arrived before their matching pattern was discovered.
+- **Unmatched key eviction:** keys in `%unmatched_keys` and `%key_message` are transient working data, not permanent storage. Each key should survive a limited number of checkpoint attempts (2-3). If a key has been through multiple checkpoints without being absorbed by S3, S4, or S1, it is evicted from the consolidation tracking structures and remains in `%log_messages` as a unique entry. This bounds the consolidation working set to roughly one checkpoint batch worth of recent keys, regardless of file size. The final pass (`group_similar_messages`) serves as the safety net — it re-examines remaining `%log_messages` entries against all discovered patterns to catch keys that arrived before their matching pattern was discovered. **Note:** the final pass currently only re-scans keys in `consolidation_unmatched`, not all of `%log_messages` — see #137.
 
-**Design intent:** The consolidation tracking structures (`%unmatched_keys`, `%key_message`) must remain small relative to the total lines processed. They are a transient working set for pattern discovery, not a mirror of `%log_messages`. Keys pass through briefly for a few checkpoint opportunities, then get evicted if unmatched. Without eviction, these structures grow unboundedly on data with high key diversity (e.g., access logs with unique URL paths), causing memory and time regressions that defeat the purpose of consolidation.
+**Design intent:** The consolidation tracking structures (`%unmatched_keys`, `%key_message`) must remain small relative to the total lines processed. They are a transient working set for pattern discovery, not a mirror of `%log_messages`. Keys pass through briefly for a few checkpoint opportunities, then get evicted if unmatched. Without eviction, these structures grow unboundedly on data with high key diversity (e.g., access logs with unique URL paths), causing memory and time regressions that defeat the purpose of consolidation. **Caveat (#135):** eviction alone bounds memory but not CPU — if stall detection is removed, checkpoints fire indefinitely as fresh keys cycle in, each costing 14s+ on diverse data. A complete solution must bound both memory (eviction) and CPU (checkpoint cost control) independently. See lessons 29-30.
 
 **Results — power-law file (288K lines, 286K unique ERROR):**
 - Total: 1.87s (was 3.6s in old architecture)
@@ -1146,12 +1146,18 @@ The core algorithms are sound and proven:
 
 28. **Small-file benchmarks can be misleading.** PF-21 concluded the prototype uses MORE memory than ltl (238 vs 172 MB on 97 MB power-law file). PF-24 showed the opposite on production-size data: 151 MB vs 256 MB on 3.3 GB. The trigram overhead that dominated small files becomes negligible relative to the savings from preventing 13M keys from entering `%log_messages`. Always validate performance conclusions at production scale. (PF-21, PF-24)
 
+29. **Memory bounding and CPU bounding are independent problems.** Stall detection gates CPU (stops expensive checkpoints). Per-key eviction gates memory (removes old keys from tracking structures). Removing stall detection and adding only eviction bounds memory but causes unbounded checkpoint CPU on diverse data. A complete solution needs both mechanisms — eviction to cycle out old keys, and something to control per-checkpoint cost when yield is low. (#135)
+
+30. **Per-checkpoint cost is data-dependent.** On standard access logs (3184 unique keys over 762K lines), one checkpoint takes <1s. On XL access logs (3509 unique keys in 5500 lines, 80% unique ratio), one checkpoint takes 14.4s. The difference is key diversity within the checkpoint batch — diverse keys produce poor Dice scores, causing `find_consolidation_candidates` to search more of the trigram index without finding matches. (#135)
+
 ### Outstanding Decisions
 
 1. ~~**Acceptable memory overhead**~~ Resolved — on large files (the real use case), the prototype uses LESS memory than ltl: 151 MB vs 256 MB on 3.3 GB access logs. Overhead only applies to small files where trigram cost exceeds S1 savings. (PF-24)
 2. ~~**Ceiling default: 2 or 3?**~~ Resolved — ceiling=3 (see PF-22).
 3. ~~**Should Inline::C be a production dependency?**~~ Resolved — NO. Pure Perl is fast enough. See PF-26.
 4. ~~**Final pass integration**~~ Resolved — validated with checkpoint architecture (PF-22).
+5. **Unmatched key eviction (#135)** — Per-key eviction bounds memory but not CPU. Need a design that addresses both: eviction for memory + checkpoint cost control for CPU. See Performance Optimization History item 4.
+6. **Final pass does not re-scan `%log_messages` (#137)** — The final pass only operates on keys in `consolidation_unmatched`, not all of `%log_messages`. Becomes more important if/when per-key eviction is implemented, since evicted keys return to `%log_messages` with no path back to consolidation.
 
 ### Next Steps
 
@@ -1342,6 +1348,8 @@ Per-line overhead of `-g`: ~1.2μs (grouping key join, message cap, boolean guar
 
 3. **Removed hard cap (unlimited) + `build_grouping_key` inlining**: Patterns grow naturally until stall detection stops. More patterns = more S1 absorption = less memory. Inlining the grouping key construction saved ~400ms per 463K lines (eliminated function call overhead). Server-0: 104s → 97s. Full 7.9 GB: 473s with 88% less memory than baseline.
 
+4. **Per-key eviction investigation (#135)**: Attempted removing stall detection entirely and adding per-key eviction (age counter in `consolidation_unmatched`, evict after 3 checkpoint attempts). Eviction correctly bounds memory but NOT CPU — without stall gating, checkpoints fire indefinitely on diverse data. A single checkpoint on XL access logs (3509 unique keys, 80% unique ratio) costs 14.4s (`build_consolidation_ngram_index` + `find_consolidation_candidates`). On 169K-line files: ~27 checkpoints × 14s ≈ 6 min per file. **Key insight: memory bounding and CPU bounding are independent problems requiring independent solutions.** Stall detection gates CPU; eviction gates memory. A complete fix needs both. Reverted pending design that addresses both dimensions. See #135.
+
 ### Observations
 
 - **S1 dominance at scale**: At production scale, the vast majority of unique keys match existing S1 patterns and never enter `%log_messages`. This is the primary mechanism for both memory savings and time efficiency.
@@ -1393,7 +1401,7 @@ When both `-V` and `-g` are active, ltl outputs a consolidation summary block in
 | S4 Pairwise discovery | Keys absorbed by Dice similarity + alignment during checkpoint passes | Main discovery mechanism; decreases as S1 takes over |
 | S5 Unmatched | Keys that survived all stages — genuinely unique messages | Should be small; if large, threshold may be too high |
 | Checkpoints | Number of checkpoint passes fired during parsing + EOF | Typically 2-10; very high means trigger too low or poor S1 absorption |
-| Patterns | Number of compiled regex patterns discovered | Grows with data diversity; stall detection stops unproductive discovery |
+| Patterns | Number of compiled regex patterns discovered | Grows with data diversity; plateaus when data's diversity is exhausted |
 | find_candidates calls | Number of trigram-based candidate searches in S4 | Cost indicator for pairwise discovery |
 | Reduction | `keys_seen → (S5 + S2 + patterns)` as percentage | Higher is better; >95% on repetitive data |
 
@@ -1487,6 +1495,6 @@ After firing, the counter resets to 0 and accumulation resumes.
 | Tracking mismatch in verbose output | Stage counter not incremented for some absorption path | Fixed in #131: S2/S5 computed at report time (not accumulated per checkpoint); final pass absorptions tracked in S4 |
 | S3 always 0 | No patterns discovered early enough in a checkpoint for re-scan to absorb keys | Normal for small files; at scale with multiple checkpoints, S3 may contribute |
 | High S5 count | Threshold too high for the data's variation | Lower `-g` threshold |
-| Memory regression with `-g` | Unmatched keys accumulate in consolidation tracking structures indefinitely | Implement key eviction after N checkpoint attempts (see #135) |
-| Time regression in `read_files` with `-g` | S1 inline matching failing for most keys + overhead of storing every key in tracking structures | Same root cause as memory regression — evict keys to stop accumulation |
+| Memory regression with `-g` | Unmatched keys accumulate in consolidation tracking structures indefinitely | Requires per-key eviction to bound memory — but eviction alone causes unbounded CPU (see #135, lesson 29) |
+| Time regression in `read_files` with `-g` | Checkpoints fire indefinitely on diverse data; per-checkpoint cost is 14s+ on XL access logs | Requires both memory bounding (eviction) and CPU bounding (checkpoint cost control) — see #135, lesson 30 |
 | `gk_prefix` errors or missing prefixes | Legacy code from pre-#131 grouping key design | Removed in #131: canonical form is the full `$log_key` |
