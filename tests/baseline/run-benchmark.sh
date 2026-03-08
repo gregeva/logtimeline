@@ -130,8 +130,14 @@ run_test() {
     echo "OK:   $test_name" >&2
 }
 
-# Write TSV header
+# Prepare output file — merge with existing results if file already exists
 mkdir -p "$RESULTS_DIR"
+MERGE_EXISTING=false
+if [[ -f "$OUTPUT_FILE" ]]; then
+    MERGE_EXISTING=true
+    EXISTING_FILE="${OUTPUT_FILE}.existing"
+    cp "$OUTPUT_FILE" "$EXISTING_FILE"
+fi
 echo -e "test_name\toptions\tmetric_type\tmetric_name\tvalue" > "$OUTPUT_FILE"
 
 # Generate and run cross-product of file selections x scenarios
@@ -188,7 +194,32 @@ if [[ $run_count -eq 0 ]]; then
     echo "Test names: {file-selection}-{scenario} (e.g. twx-unique-errors-standard)" >&2
     echo "Targets: quick (1 test), full (std files, default), xl (extra-large files), all (everything)" >&2
     rm -f "$OUTPUT_FILE"
+    # Restore previous results if we backed them up
+    if [[ "$MERGE_EXISTING" == true && -f "$EXISTING_FILE" ]]; then
+        mv "$EXISTING_FILE" "$OUTPUT_FILE"
+    fi
     exit 1
+fi
+
+# Merge previous results for test names not re-run in this invocation
+if [[ "$MERGE_EXISTING" == true && -f "$EXISTING_FILE" ]]; then
+    # Extract unique test names from this run
+    ran_tests=$(tail -n +2 "$OUTPUT_FILE" | cut -f1 | sort -u)
+
+    # Append rows from previous file whose test_name was not re-run
+    merged_count=0
+    while IFS= read -r line; do
+        tname="${line%%	*}"
+        if ! echo "$ran_tests" | grep -qxF "$tname"; then
+            printf '%s\n' "$line" >> "$OUTPUT_FILE"
+            ((merged_count++))
+        fi
+    done < <(tail -n +2 "$EXISTING_FILE")
+
+    rm -f "$EXISTING_FILE"
+    if [[ $merged_count -gt 0 ]]; then
+        echo "Merged:  $merged_count rows from previous run" >&2
+    fi
 fi
 
 echo "" >&2
