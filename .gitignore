@@ -1,5 +1,6 @@
 nytprof/
 _Inline/
+tests/profile/samples/
 logs/
 .DS_Store
 .idea
