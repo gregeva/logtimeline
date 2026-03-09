@@ -31,13 +31,18 @@ Verify: `/opt/homebrew/bin/perl -MDevel::NYTProf::Data -e 'print "ok\n"'`
 ```
 tests/profile/
   run-profile.sh        Main entry point — runs ltl under NYTProf
-  extract-profile.pl    Programmatic text extractor (no HTML parsing)
+  extract-profile.pl    Programmatic text extractor and cross-validator (no HTML parsing)
+  checks/               Declarative cross-validation tables — one TSV per feature
+    README.md           Format documentation
+    consolidation.tsv   Checks for fuzzy consolidation (-g flag)
   samples/              Pre-truncated sample files (gitignored)
     <basename>-1k.log
     <basename>-10k.log
     <basename>-100k.log
   results/              All profiling output — DELIVERABLES, same protection as benchmarks
     <label>/
+      hypothesis.md     Written before profiling — states expected behavior
+      analysis.md       Written after profiling — findings, surprises, learnings
       <sample_size>/
         nytprof.out     Raw profile data
         nytprof/        HTML report (unless --no-html)
@@ -48,6 +53,108 @@ tests/profile/
 Results in `tests/profile/results/` follow the same protection policy as
 `tests/baseline/results/` — they are deliverables and must never be overwritten
 without `--force`.
+
+---
+
+## Profile-Ready Contract
+
+Before profiling any function, it must satisfy this contract. A function that doesn't satisfy it
+cannot be cross-validated — profiling will show a call count with no way to determine if it's correct.
+
+**A function requires profiling observability if it:**
+- Is called more than once per log line or more than once per checkpoint
+- Has conditional branches (called differently based on data shape)
+- Could be O(N²) or worse
+
+**The contract requires:**
+
+1. **A counter in `-V` output** tracking how many times the function was called AND from which
+   code path. The counter must be granular enough to distinguish "called correctly" from "called
+   too many times." For example, `fc_calls` alone is not enough — you also need to know how many
+   of those calls came from S4 vs final pass vs S3.
+
+2. **Grouped with its functional area.** Counters live in the feature's own section of `-V` output
+   (e.g., consolidation counters in the consolidation summary block). Do NOT put investigative
+   counters in the `=== BENCHMARK DATA ===` block — that block is for benchmark regression
+   tracking across releases, not for per-investigation flow analysis.
+
+3. **Machine-parseable format.** Use a consistent label:value pattern so `extract-profile.pl
+   --verbose-file` (or a feature-specific checks file) can extract it by regex.
+
+4. **Documented in a checks file.** Add an entry to `tests/profile/checks/<feature>.tsv` mapping
+   the NYTProf subroutine name to the `-V` counter expression and expected tolerance.
+
+**Example (consolidation):**
+```
+# In -V consolidation summary output:
+#   S4 find_candidates: 430 calls
+#   Final pass find_candidates: 12 calls
+#
+# NYTProf total for find_candidates = 430 + 12 = 442 (within 5% of expected)
+#
+# checks/consolidation.tsv entry:
+# find_candidates   fc_calls_s4+fc_calls_final   5%
+```
+
+If a function you want to profile lacks this instrumentation, **add the counters first** before
+profiling. Running NYTProf without a counterpart in `-V` produces an unvalidatable number.
+
+---
+
+## Pre-Profiling Checklist
+
+Do this before running `run-profile.sh`. If you can't answer all questions, stop and fix the gaps.
+
+1. **State your hypothesis.** What function do you expect to dominate? Why? What call count do you
+   expect? Write it down in `tests/profile/results/<label>/hypothesis.md` before running.
+
+2. **Check the profile-ready contract.** Does the function you're investigating have a corresponding
+   counter in `-V` output? If not, add instrumentation first.
+
+3. **Check known Perl traps.** Review `docs/perl-performance-optimization.md` for issues relevant
+   to your hypothesis (hash non-determinism, `my` declaration order, XS bottleneck location, etc.).
+
+4. **Check the diagnostic pattern index.** In MEMORY.md, the "Profiling Diagnostic Patterns" table
+   lists symptoms and their likely causes based on past findings (PF-01 through PF-26). If your
+   hypothesis matches a known pattern, you already know the fix.
+
+5. **Confirm sample size plan.** Start at 1k. Only scale up once you've located the behavior.
+
+---
+
+## Post-Profiling Analysis
+
+After each profiling run, write `tests/profile/results/<label>/analysis.md`. This is what
+transforms a profiling session into captured learning. The file is a deliverable.
+
+Template:
+```markdown
+# Profiling Analysis: <label>
+
+## Hypothesis
+What we expected to find and why.
+
+## What NYTProf Showed
+Top functions by excl_time. Key call counts that were surprising or confirming.
+
+## Cross-Validation
+Did NYTProf call counts match -V counters? Any [WARN]s? What did they indicate?
+
+## Surprises
+Anything that didn't match the hypothesis. Include the actual numbers.
+
+## Diagnosis
+Root cause analysis for each surprise. Be specific about the code path.
+
+## Action
+What change was made (or why no change was needed). Reference commit if applicable.
+
+## Learnings
+Anything to add to docs/ reference files or MEMORY.md diagnostic patterns.
+```
+
+Do not skip this step. The analysis.md is what allows future sessions to build on this work
+instead of rediscovering the same findings.
 
 ---
 
@@ -130,24 +237,32 @@ over-calling bugs and accounting gaps that pure timing analysis misses.
 
 ### What to check
 
-| NYTProf metric | Should match ltl -V metric | Tolerance |
-|---------------|---------------------------|-----------|
-| `find_candidates` call count | `fc_calls` in consolidation summary | ≤5% |
-| `match_against_patterns` call count | S1 inline count | ≤5% |
-| `read_and_process_logs` call count | 1 (called once) | exact |
-| `dice_coefficient` call count | Derived: `fc_calls × avg_candidates_per_call` | directional |
+Use `--checks-file tests/profile/checks/<feature>.tsv` for declarative per-function checks.
+The checks file maps NYTProf subroutine names to `-V` counter expressions with tolerances.
+See `tests/profile/checks/README.md` for the format.
+
+For consolidation (`-g`), `tests/profile/checks/consolidation.tsv` provides:
+
+| NYTProf sub | `-V` counter | Tolerance | Notes |
+|------------|-------------|-----------|-------|
+| `find_candidates` | `fc_calls` (grand total) | ≤5% | Covers S4 + final pass |
+| `match_against_patterns` | `s1_inline + s3_checkpoint` | ≤5% | S3 is expected but should be small |
+| `read_and_process_logs` | 1 | exact | Called once; loops internally |
 
 ### When to investigate discrepancies
 
-- `find_candidates` NYTProf count >> `fc_calls` from `-V`: function is being called from
-  an unexpected code path (e.g., in a loop that should be bypassed).
-- `match_against_patterns` count >> S1 inline count: patterns are being re-evaluated
-  against keys that should have been absorbed already.
-- `dice_coefficient` count growing super-linearly: trigram pre-filter is not effective
-  enough, or candidate list is much larger than expected.
+- **NYTProf count >> ltl-V counter**: function is being called from an unexpected code path.
+  Search all call sites; check if a bypass condition is broken.
+- **`match_against_patterns` >> S1+S3**: patterns are being re-evaluated against keys that
+  should have been absorbed. Check S3 count separately — if S3 is large, checkpoint gate
+  is not absorbing as expected.
+- **`dice_coefficient` growing super-linearly**: trigram pre-filter is ineffective, or
+  candidate list is much larger than expected.
+- **Counter not found in -V**: the function lacks profile-ready instrumentation. Add
+  counters before profiling.
 
-`extract-profile.pl --verbose-file verbose.txt` runs these checks automatically and
-prints `[WARN]` for any discrepancy > 5%.
+`extract-profile.pl --verbose-file verbose.txt --checks-file checks/consolidation.tsv`
+runs these checks automatically and prints `[WARN]` for any discrepancy > tolerance.
 
 ---
 
@@ -192,11 +307,18 @@ cd /Users/gregeva/Documents/GitHub/logtimeline
     --verbose-file tests/profile/results/issue-138/10k/verbose.txt \
     --sort excl --top 40
 
+# Re-extract with declarative cross-validation (consolidation)
+/opt/homebrew/bin/perl tests/profile/extract-profile.pl \
+    --file tests/profile/results/issue-138/10k/nytprof.out \
+    --verbose-file tests/profile/results/issue-138/10k/verbose.txt \
+    --checks-file tests/profile/checks/consolidation.tsv
+
 # Focus on consolidation functions
 /opt/homebrew/bin/perl tests/profile/extract-profile.pl \
     --file tests/profile/results/issue-138/100k/nytprof.out \
     --match "consolidat|dice|candidate|checkpoint" \
-    --verbose-file tests/profile/results/issue-138/100k/verbose.txt
+    --verbose-file tests/profile/results/issue-138/100k/verbose.txt \
+    --checks-file tests/profile/checks/consolidation.tsv
 
 # Line-level hotspots for a specific sub
 /opt/homebrew/bin/perl tests/profile/extract-profile.pl \
@@ -234,11 +356,12 @@ Note: %Tot = incl_time / 3.8421 s (total Perl CPU time)
 ====================================================================================================
 Cross-Validation: NYTProf call counts vs ltl -V output
 ----------------------------------------------------------------------------------------------------
-  find_candidates:        NYTProf=    430  ltl-V=    428  diff=+0.5%  [OK]
-  match/inline vs S1:     NYTProf=   2140  ltl-V=   2138  diff=+0.1%  [OK]
-  read_and_process_logs:  NYTProf calls=1  ltl-V lines_read=10000
+  find_candidates vs fc_calls (grand total)  NYTProf=    430  ltl-V=    428  diff=+0.5%  [OK]
+  match_against_patterns vs S1+S3            NYTProf=   2140  ltl-V=   2138  diff=+0.1%  [OK]
+  read_and_process_logs                      NYTProf calls=1  ltl-V lines_read=10000
+    (called once; loops internally over lines)
 
-  [OK] All cross-validation checks within 5% tolerance.
+  [OK] All cross-validation checks within tolerance.
 ```
 
 ---
@@ -255,6 +378,7 @@ Cross-Validation: NYTProf call counts vs ltl -V output
 | `--match <pattern>` | Regex filter on subroutine name | (none) |
 | `--lines <subname>` | Show line-level hotspots for a sub | (none) |
 | `--verbose-file <path>` | Parse ltl -V output for cross-validation | (none) |
+| `--checks-file <path>` | Declarative cross-validation table (TSV) | (none) |
 
 ---
 
@@ -279,7 +403,11 @@ Cross-Validation: NYTProf call counts vs ltl -V output
   you understand the behavior.
 
 - **Do not skip cross-validation.** Always pass `--verbose-file` to `extract-profile.pl`.
+  For consolidation, also pass `--checks-file tests/profile/checks/consolidation.tsv`.
   Skipping it leaves potential over-calling bugs undetected.
+
+- **Do not profile a function that lacks `-V` instrumentation.** NYTProf will show a call
+  count but you'll have no way to know if it's correct. Satisfy the profile-ready contract first.
 
 ---
 

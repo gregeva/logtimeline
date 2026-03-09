@@ -1,0 +1,27 @@
+# Cross-validation checks for fuzzy message consolidation (-g flag)
+# Feature: #96 Fuzzy Message Consolidation
+# See: features/fuzzy-message-consolidation.md, features/nytprof-profiling-workflow.md
+#
+# Format: nytprof_sub <TAB> v_expression <TAB> tolerance <TAB> label <TAB> regex
+#
+# Notes on match_against_patterns:
+#   Called from S1 inline matching during parsing AND from S3 checkpoint gate.
+#   The correct expected value is S1 + S3, not S1 alone.
+#   Both counters are summed via the s1_inline+s3_checkpoint expression.
+#   If S3 is small (typical when patterns are effective), the total ≈ S1.
+#
+# Notes on find_candidates:
+#   Called from S4 pairwise discovery loop (one call per unmatched key).
+#   Also called from final pass (if enabled).
+#   fc_calls in -V output is the grand total across all checkpoints and passes.
+#   NYTProf total should equal this grand total within 5%.
+#
+# Notes on dice_coefficient:
+#   Called from within find_candidates for each candidate that passes the
+#   trigram pre-filter. No direct counter in -V (derived from fc_calls).
+#   Checked directionally only — use this to detect super-linear growth.
+
+find_candidates	fc_calls	5%	find_candidates vs fc_calls (grand total)	Grand total.*find_candidates calls:\s*(\d+)
+match_against_patterns	s1_inline+s3_checkpoint	5%	match_against_patterns vs S1+S3	+S1 inline.*?:\s*(\d+)
+match_against_patterns	s3_checkpoint	(informational)	  of which S3 checkpoint re-scan	+S3 Checkpoint.*?:\s*(\d+)
+read_and_process_logs	1	exact	read_and_process_logs called exactly once

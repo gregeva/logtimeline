@@ -14,17 +14,23 @@
 #   --match <pattern>      Filter subroutine names by regex pattern
 #   --lines <subname>      Show line-level hotspots for a specific subroutine
 #   --verbose-file <path>  Parse ltl -V output for cross-validation
+#   --checks-file <path>   Declarative cross-validation table (TSV) — see tests/profile/checks/
 #   --help                 Show this help
 #
 # Output columns:
 #   Rank  Subroutine  Calls  Incl(s)  Excl(s)  ms/call  %Tot
 #
 # Cross-validation (--verbose-file):
-#   Compares NYTProf call counts against ltl's internal counters from -V output:
-#   - find_candidates NYTProf calls vs fc_calls from consolidation summary
-#   - match_against_patterns calls vs S1 inline match count
-#   - lines_read sanity check
-#   Flags >5% discrepancies as [WARN].
+#   Parses -V output from the feature's own section (NOT the BENCHMARK DATA block).
+#   With --checks-file: runs declarative checks from TSV table.
+#   Without --checks-file: runs built-in checks (lines_read sanity only).
+#   Flags >tolerance discrepancies as [WARN].
+#
+# Checks file format (TSV, see tests/profile/checks/README.md):
+#   nytprof_sub   v_expression   tolerance   label
+#   find_candidates   fc_calls   5%   "find_candidates vs fc_calls"
+#   match_against_patterns   s1_inline+s3_checkpoint   5%   "match vs S1+S3"
+#   read_and_process_logs   1   exact   "called exactly once"
 #
 # Examples:
 #   extract-profile.pl --file results/20260309-120000/1k/nytprof.out
@@ -32,6 +38,7 @@
 #   extract-profile.pl --match consolidat --all
 #   extract-profile.pl --lines dice_coefficient
 #   extract-profile.pl --verbose-file verbose.txt
+#   extract-profile.pl --verbose-file verbose.txt --checks-file tests/profile/checks/consolidation.tsv
 #
 # Issue #138: Standardized NYTProf profiling workflow
 
@@ -49,6 +56,7 @@ my $package_filt = undef;
 my $match        = undef;
 my $lines_sub    = undef;
 my $verbose_file = undef;
+my $checks_file  = undef;
 my $help         = 0;
 
 GetOptions(
@@ -60,6 +68,7 @@ GetOptions(
     'match=s'        => \$match,
     'lines=s'        => \$lines_sub,
     'verbose-file=s' => \$verbose_file,
+    'checks-file=s'  => \$checks_file,
     'help'           => \$help,
 ) or die "Error parsing options. Use --help for usage.\n";
 
@@ -155,13 +164,18 @@ for my $si (values %subs) {
     $nytprof_calls{$short} = eval { $si->calls } // 0;
 }
 
-# --- Parse verbose file for cross-validation ---
+# --- Parse verbose file ---
+# Extracts machine-readable counters from ltl -V output.
+# The BENCHMARK DATA block covers performance regression metrics (lines_read, timing, memory).
+# Feature-specific flow counters (fc_calls, S1-S5, etc.) live in their own sections.
 my %v;  # verbose metrics
+my @verbose_lines;  # all lines, for regex-based extraction by checks file
 if (defined $verbose_file && -f $verbose_file) {
     open my $fh, '<', $verbose_file or die "Cannot read verbose file: $verbose_file\n";
     my $in_benchmark = 0;
     while (<$fh>) {
         chomp;
+        push @verbose_lines, $_;
         if (/^=== BENCHMARK DATA ===/) { $in_benchmark = 1; next }
         if (/^=== END BENCHMARK DATA ===/) { $in_benchmark = 0; next }
         if ($in_benchmark) {
@@ -169,15 +183,59 @@ if (defined $verbose_file && -f $verbose_file) {
             if (/^TIMING\ttotal\t([\d.]+)/) { $v{total_time}  = $1 }
             if (/^MEMORY\trss_peak\t(\d+)/) { $v{rss_peak}    = $1 }
         }
-        # Consolidation summary — fc_calls
-        if (/Grand total.*find_candidates calls:\s*(\d+)/i) { $v{fc_calls} = $1 }
-        if (/find_candidates calls:\s*(\d+)/) { $v{fc_calls} //= $1 }
-        # S1 inline match count (sum across all cat_gk)
-        if (/S1 inline.*?:\s*(\d+)/) { $v{s1_inline} = ($v{s1_inline} // 0) + $1 }
-        # Single cat_gk fc_calls (fallback if no grand total)
-        if (/fc_calls:\s*(\d+)/) { $v{fc_calls} //= $1 }
     }
     close $fh;
+}
+
+# --- Parse checks file ---
+# Format: nytprof_sub <TAB> v_expression <TAB> tolerance <TAB> label
+# v_expression: a key name (extracted by regex from verbose file), a sum (key1+key2),
+#               or a literal integer (for "exact N" checks).
+# tolerance: "N%" for percentage, "exact" for exact match.
+# Lines starting with # are comments.
+#
+# Each check entry declares an extraction regex to find its counter in the verbose output.
+# Format with regex: nytprof_sub <TAB> v_expression <TAB> tolerance <TAB> label <TAB> regex
+# If regex is absent, v_expression is treated as a key already populated in %v.
+my @check_rows;
+if (defined $checks_file) {
+    die "Checks file not found: $checks_file\n" unless -f $checks_file;
+    open my $fh, '<', $checks_file or die "Cannot read checks file: $checks_file\n";
+    while (<$fh>) {
+        chomp;
+        next if /^\s*#/ || /^\s*$/;
+        my ($sub, $expr, $tol, $label, $regex) = split /\t/, $_, 5;
+        next unless defined $sub && defined $expr && defined $tol;
+        $label //= "$sub vs $expr";
+        push @check_rows, {
+            sub   => $sub,
+            expr  => $expr,
+            tol   => $tol,
+            label => $label,
+            regex => $regex,
+        };
+    }
+    close $fh;
+    # Extract values for each check that has a regex
+    for my $row (@check_rows) {
+        next unless defined $row->{regex} && length($row->{regex});
+        my $rx = $row->{regex};
+        # Support summing across multiple lines (e.g., S1 per category)
+        my $accumulate = ($rx =~ s/^\+//);  # leading + means sum all matches
+        my $val = undef;
+        for my $line (@verbose_lines) {
+            if ($line =~ /$rx/) {
+                my $n = $1 // 0;
+                if ($accumulate) {
+                    $val = ($val // 0) + $n;
+                } else {
+                    $val //= $n;
+                }
+            }
+        }
+        # Store extracted value under the expression key for later evaluation
+        $v{$row->{expr}} = $val if defined $val && !exists $v{$row->{expr}};
+    }
 }
 
 # --- Print header ---
@@ -239,7 +297,8 @@ print  "      Use --all to include XSubs [xs] and opcodes [op]\n" unless $show_a
 print  "      Use --sort excl to rank by exclusive time\n" if $sort_by eq 'incl';
 
 # --- Cross-validation section ---
-if (defined $verbose_file && -f $verbose_file && %v) {
+my $do_xval = (defined $verbose_file && -f $verbose_file && %v) || @check_rows;
+if ($do_xval) {
     print "\n" . "=" x 100 . "\n";
     print "Cross-Validation: NYTProf call counts vs ltl -V output\n";
     print "-" x 100 . "\n";
@@ -247,38 +306,57 @@ if (defined $verbose_file && -f $verbose_file && %v) {
     my @warnings;
     my @checks;
 
-    # Check 1: find_candidates call count
-    if (exists $v{fc_calls}) {
-        my $nyt = $nytprof_calls{find_candidates} // 0;
-        my $v   = $v{fc_calls};
-        my $pct = $v > 0 ? abs($nyt - $v) / $v * 100 : 0;
-        my $status = $pct <= 5 ? "OK" : "MISMATCH";
-        push @checks, sprintf("  find_candidates:        NYTProf=%7d  ltl-V=%7d  diff=%+.1f%%  [%s]",
-            $nyt, $v, ($nyt - $v) / ($v || 1) * 100, $status);
-        push @warnings, "find_candidates call count mismatch ($pct% diff)" if $pct > 5;
-    } else {
-        push @checks, "  find_candidates:        (no fc_calls in -V output — run with -g to get consolidation stats)";
+    # --- Declarative checks from --checks-file ---
+    for my $row (@check_rows) {
+        my $sub_name = $row->{sub};
+        my $expr     = $row->{expr};
+        my $tol      = $row->{tol};
+        my $label    = $row->{label};
+
+        my $nyt = $nytprof_calls{$sub_name} // 0;
+
+        # Evaluate v_expression: may be a key, a sum (key1+key2), or a literal integer
+        my $expected = undef;
+        if ($expr =~ /^\d+$/) {
+            $expected = $expr + 0;
+        } elsif ($expr =~ /\+/) {
+            my $sum = 0;
+            my $all_defined = 1;
+            for my $key (split /\+/, $expr) {
+                if (exists $v{$key}) { $sum += $v{$key} }
+                else { $all_defined = 0 }
+            }
+            $expected = $sum if $all_defined;
+        } elsif (exists $v{$expr}) {
+            $expected = $v{$expr};
+        }
+
+        unless (defined $expected) {
+            push @checks, sprintf("  %-40s  (counter not found in -V output — check regex or run with relevant options)", $label);
+            next;
+        }
+
+        if ($tol eq 'exact') {
+            my $status = $nyt == $expected ? "OK" : "MISMATCH";
+            push @checks, sprintf("  %-40s  NYTProf=%7d  ltl-V=%7d  [%s]", $label, $nyt, $expected, $status);
+            push @warnings, "$label (expected $expected, got $nyt)" if $nyt != $expected;
+        } else {
+            my ($pct_tol) = $tol =~ /^([\d.]+)%$/;
+            $pct_tol //= 5;
+            my $pct = $expected > 0 ? abs($nyt - $expected) / $expected * 100 : 0;
+            my $status = $pct <= $pct_tol ? "OK" : "MISMATCH";
+            push @checks, sprintf("  %-40s  NYTProf=%7d  ltl-V=%7d  diff=%+.1f%%  [%s]",
+                $label, $nyt, $expected, ($nyt - $expected) / ($expected || 1) * 100, $status);
+            push @warnings, "$label ($pct% diff, tolerance ${pct_tol}%)" if $pct > $pct_tol;
+        }
     }
 
-    # Check 2: match_against_patterns vs S1 inline count
-    if (exists $v{s1_inline}) {
-        my $nyt = $nytprof_calls{match_against_patterns}
-               // $nytprof_calls{inline_match}
-               // 0;
-        my $v   = $v{s1_inline};
-        my $pct = $v > 0 ? abs($nyt - $v) / $v * 100 : 0;
-        my $status = $pct <= 5 ? "OK" : "MISMATCH";
-        push @checks, sprintf("  match/inline vs S1:     NYTProf=%7d  ltl-V=%7d  diff=%+.1f%%  [%s]",
-            $nyt, $v, ($nyt - $v) / ($v || 1) * 100, $status);
-        push @warnings, "match_against_patterns vs S1 inline mismatch ($pct% diff)" if $pct > 5;
-    }
-
-    # Check 3: lines_read sanity
+    # --- Always: lines_read sanity (from BENCHMARK DATA block) ---
     if (exists $v{lines_read}) {
         my $nyt_read = $nytprof_calls{read_and_process_logs} // 0;
-        push @checks, sprintf("  read_and_process_logs:  NYTProf calls=%d  ltl-V lines_read=%d",
-            $nyt_read, $v{lines_read});
-        push @checks, "    (read_and_process_logs is called once; it loops internally over lines)";
+        push @checks, sprintf("  %-40s  NYTProf calls=%d  ltl-V lines_read=%d",
+            "read_and_process_logs", $nyt_read, $v{lines_read});
+        push @checks, "    (called once; loops internally over lines)";
     }
 
     print "$_\n" for @checks;
@@ -286,12 +364,14 @@ if (defined $verbose_file && -f $verbose_file && %v) {
     if (@warnings) {
         print "\n";
         for my $w (@warnings) {
-            print "  [WARN] Cross-validation mismatch: $w\n";
+            print "  [WARN] $w\n";
         }
-        print "  => Investigate: are hot functions being called more than expected?\n";
-        print "     Check S1/S2/S3/S4/S5 counts in verbose.txt for accounting gaps.\n";
+        print "  => Investigate: is a function being called from an unexpected code path?\n";
+        print "     Check flow counters in verbose.txt for accounting gaps.\n";
+    } elsif (@checks) {
+        print "\n  [OK] All cross-validation checks within tolerance.\n";
     } else {
-        print "\n  [OK] All cross-validation checks within 5% tolerance.\n";
+        print "  (no checks — pass --checks-file to enable declarative cross-validation)\n";
     }
 }
 

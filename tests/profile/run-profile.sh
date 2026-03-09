@@ -303,3 +303,11 @@ fi
 
 echo ""
 echo "Results: $OUTPUT_BASE"
+echo ""
+echo "Next steps:"
+echo "  1. Extract profile:  /opt/homebrew/bin/perl tests/profile/extract-profile.pl \\"
+echo "       --file $OUTPUT_BASE/<sample>/nytprof.out \\"
+echo "       --verbose-file $OUTPUT_BASE/<sample>/verbose.txt \\"
+echo "       --checks-file tests/profile/checks/<feature>.tsv --sort excl"
+echo "  2. Write analysis:   $OUTPUT_BASE/analysis.md"
+echo "     (hypothesis, surprises, diagnosis, learnings — see nytprof-profiling-workflow.md)"
