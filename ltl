@@ -192,6 +192,7 @@ my %consolidation_cat_stats;
 my %consolidation_key_message_cat_gk;  # maps log_key -> cat_gk for cleanup safety
 my $consolidation_total_keys_seen = 0;
 my %consolidation_category_unmatched_count;  # {category} => total unmatched keys across all cat_gk groups in this category
+my %consolidation_pattern_generation;  # {cat_gk} => increments on each pattern discovery; used to skip S3 for keys that already tested against all current patterns
 
 # Consolidation configuration
 my $consolidation_threshold          = 85;
@@ -1548,6 +1549,7 @@ sub group_similar_messages {
                 next if $consumed{$key};
 
                 $keys_searched++;
+                $consolidation_cat_stats{$cat_gk}{fc_calls}++;
                 my @matches = find_consolidation_candidates($cat_gk, $key, $consolidation_final_threshold);
 
                 for my $match (@matches) {
@@ -1598,7 +1600,7 @@ sub group_similar_messages {
                     }
 
                     # Try merge-first into existing patterns
-                    my $merged_regex = try_consolidation_merge_into_existing($cat_gk, $canonical, $regex, $mask, $new_cluster);
+                    my ($merged_regex, $merged_entry, $merged_cluster) = try_consolidation_merge_into_existing($cat_gk, $canonical, $regex, $mask, $new_cluster);
                     if ($merged_regex) {
                         $patterns_discovered++;
                         # Re-scan remaining candidates against generalized pattern
@@ -1608,17 +1610,11 @@ sub group_similar_messages {
                             next unless defined $umsg;
                             if ($umsg =~ $merged_regex) {
                                 $consumed{$ukey} = 1;
-                                for my $entry (@{$consolidation_patterns{$cat_gk}}) {
-                                    if ($entry->{pattern} eq $merged_regex) {
-                                        my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
-                                        if ($cluster && exists $log_messages{$category}{$ukey}) {
-                                            merge_consolidation_stats($cluster, $log_messages{$category}{$ukey});
-                                            $cluster->{match_count}++;
-                                            $entry->{match_count} = $cluster->{match_count};
-                                            $messages_absorbed++;
-                                        }
-                                        last;
-                                    }
+                                if (exists $log_messages{$category}{$ukey}) {
+                                    merge_consolidation_stats($merged_cluster, $log_messages{$category}{$ukey});
+                                    $merged_cluster->{match_count}++;
+                                    $merged_entry->{match_count} = $merged_cluster->{match_count};
+                                    $messages_absorbed++;
                                 }
                             }
                         }
@@ -2177,10 +2173,10 @@ sub try_consolidation_merge_into_existing {
                 delete $consolidation_clusters{$cat_gk}{$old_canonical};
             }
 
-            return $merged_regex;
+            return ($merged_regex, $entry, $existing);
         }
     }
-    return undef;
+    return ();
 }
 
 # Extract partitioning key from a message for re-scan bucketing
@@ -2210,7 +2206,7 @@ sub run_consolidation_pass {
     my @unmatched_keys = @$unmatched_ref;
     my $initial_count = scalar @unmatched_keys;
 
-    return (0, 0, 0, 0, 0, 0, 0) if $initial_count < 2;
+    return (0, 0, 0, 0, 0, 0, 0, {}, 0, 0) if $initial_count < 2;
 
     # Extract the ltl category (plain/highlight) from the composite key
     my ($category) = split(/\|/, $cat_gk, 2);
@@ -2233,14 +2229,26 @@ sub run_consolidation_pass {
     my $fc_calls = 0;
     my $messages_absorbed = 0;
 
-    return (0, 0, $ceiling_skipped, 0, 0, 0, scalar @discovery_candidates) if scalar @discovery_candidates < 2;
+    return (0, 0, $ceiling_skipped, 0, 0, 0, scalar @discovery_candidates, {}, 0, 0) if scalar @discovery_candidates < 2;
 
     # Gate 2 (S3): match discovery candidates against existing compiled patterns
+    # Skip keys that entered at the current pattern generation — they already failed S1
+    # against the same patterns S3 would test (#135: S3 match rate was 0% on first checkpoint)
+    my $current_gen = $consolidation_pattern_generation{$cat_gk} // 0;
+    my ($c, $gk) = split(/\|/, $cat_gk, 2);
     my @gate2_survivors;
+    my $s3_tested = 0;
+    my $s3_skipped = 0;
     for my $key (@discovery_candidates) {
+        my $key_gen = $consolidation_unmatched{$cat_gk}{$key} // 0;
+        if ($key_gen >= $current_gen) {
+            # Key entered at or after current generation — already tested against all patterns
+            push @gate2_survivors, $key;
+            $s3_skipped++;
+            next;
+        }
+        $s3_tested++;
         my $msg = $consolidation_key_message{$key};
-        # Use the composite key to look up patterns
-        my ($c, $gk) = split(/\|/, $cat_gk, 2);
         my $entry = match_consolidation_patterns($c, $gk, $msg);
         if ($entry) {
             $consumed{$key} = 1;
@@ -2258,7 +2266,7 @@ sub run_consolidation_pass {
     if (scalar @gate2_survivors < 2) {
         my @remaining = grep { !$consumed{$_} } @unmatched_keys;
         @$unmatched_ref = @remaining;
-        return (0, $messages_absorbed, $ceiling_skipped, 0, $gate2_absorbed, $fc_calls, scalar @gate2_survivors);
+        return (0, $messages_absorbed, $ceiling_skipped, 0, $gate2_absorbed, $fc_calls, scalar @gate2_survivors, \%consumed, $s3_tested, $s3_skipped);
     }
 
     # Build n-gram index for gate2 survivors
@@ -2326,19 +2334,13 @@ sub run_consolidation_pass {
             my $scan_regex = $regex;
             my $scan_cluster = $new_cluster;
             my $scan_entry;
-            my $merged_regex = try_consolidation_merge_into_existing($cat_gk, $canonical, $regex, $mask, $new_cluster);
+            my ($merged_regex, $merged_entry, $merged_cluster) = try_consolidation_merge_into_existing($cat_gk, $canonical, $regex, $mask, $new_cluster);
             if ($merged_regex) {
                 $merges_into_existing++;
                 $patterns_discovered++;
                 $scan_regex = $merged_regex;
-
-                for my $entry (@{$consolidation_patterns{$cat_gk}}) {
-                    if ($entry->{pattern} eq $merged_regex) {
-                        $scan_entry = $entry;
-                        $scan_cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
-                        last;
-                    }
-                }
+                $scan_entry = $merged_entry;
+                $scan_cluster = $merged_cluster;
             } else {
                 # Optional hard cap (--consolidation-max-patterns N, default 0 = unlimited)
                 if ($consolidation_max_patterns > 0 && $current_pattern_count >= $consolidation_max_patterns) {
@@ -2390,7 +2392,7 @@ sub run_consolidation_pass {
     my @remaining = grep { !$consumed{$_} } @unmatched_keys;
     @$unmatched_ref = @remaining;
 
-    return ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit, $gate2_absorbed, $fc_calls, scalar @gate2_survivors);
+    return ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit, $gate2_absorbed, $fc_calls, scalar @gate2_survivors, \%consumed, $s3_tested, $s3_skipped);
 }
 
 # Cross-cluster merge: merge overlapping patterns whose canonical forms match each other
@@ -2445,13 +2447,15 @@ sub run_consolidation_checkpoint {
     my $pre_count = scalar @unmatched;
     return if $pre_count < 2;
 
-    my ($discovered, $absorbed, $ceiling_skipped, $cap_hit, $g2_absorbed, $fc_calls, $g2_survivors) =
+    my ($discovered, $absorbed, $ceiling_skipped, $cap_hit, $g2_absorbed, $fc_calls, $g2_survivors, $consumed_ref, $s3_tested, $s3_skipped) =
         run_consolidation_pass($cat_gk, \@unmatched, $cp_num);
 
     my $post_count = scalar @unmatched;
 
     # Update per-category accumulators
     $consolidation_cat_stats{$cat_gk}{s3_checkpoint} += $g2_absorbed;
+    $consolidation_cat_stats{$cat_gk}{s3_calls}      += $s3_tested;
+    $consolidation_cat_stats{$cat_gk}{s3_skipped}    += $s3_skipped;
     $consolidation_cat_stats{$cat_gk}{s4_pairwise}   += ($absorbed - $g2_absorbed);
     $consolidation_cat_stats{$cat_gk}{fc_calls}      += $fc_calls;
     $consolidation_cat_stats{$cat_gk}{patterns_discovered} += $discovered;
@@ -2460,34 +2464,25 @@ sub run_consolidation_checkpoint {
     # Rebuild %consolidation_unmatched from the modified @unmatched list
     %{$consolidation_unmatched{$cat_gk}} = map { $_ => 1 } @unmatched;
 
-    # Delete absorbed keys from %log_messages and %consolidation_key_message
-    for my $key (keys %{$log_messages{$category}}) {
-        unless (exists $consolidation_unmatched{$cat_gk}{$key}) {
-            # Only delete if this key belongs to this cat_gk grouping
-            # (other grouping keys within the same category should not be affected)
-            next unless exists $consolidation_key_message{$key};
-            my $key_cat_gk = $consolidation_key_message_cat_gk{$key} // "";
-            next unless $key_cat_gk eq $cat_gk;
-            delete $log_messages{$category}{$key};
-            delete $consolidation_key_message{$key};
-            delete $consolidation_key_message_cat_gk{$key};
-        }
+    # Delete absorbed keys — targeted O(consumed) instead of O(all_keys) (#135)
+    $consolidation_cat_stats{$cat_gk}{cleanup_keys_scanned} += scalar keys %$consumed_ref;
+    for my $key (keys %$consumed_ref) {
+        delete $log_messages{$category}{$key};
+        delete $consolidation_key_message{$key};
+        delete $consolidation_key_message_cat_gk{$key};
+        delete $consolidation_key_trigrams{$key};
+        delete $consolidation_key_trigrams_norm{$key};
     }
 
-    # Free trigram data
+    # Free index structures (per-checkpoint, not per-key)
     delete $consolidation_ngram_index{$cat_gk};
     delete $consolidation_posting_size{$cat_gk};
-    for my $key (keys %consolidation_key_trigrams) {
-        unless (exists $consolidation_unmatched{$cat_gk}{$key}) {
-            delete $consolidation_key_trigrams{$key};
-            delete $consolidation_key_trigrams_norm{$key};
-        }
-    }
 
-    # Cross-cluster merge
+    # Cross-cluster merge and pattern generation bump
     if ($discovered > 0) {
         merge_consolidation_overlapping_patterns($cat_gk);
         $consolidation_cat_stats{$cat_gk}{patterns_final} = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
+        $consolidation_pattern_generation{$cat_gk} = ($consolidation_pattern_generation{$cat_gk} // 0) + 1;
     }
 
     # Track checkpoint stall — consecutive unproductive checkpoints
@@ -3846,7 +3841,7 @@ sub read_and_process_logs {
                             if (!$consolidation_s1_matched) {
                                 $consolidation_key_message{$log_key} = $capped_msg;
                                 $consolidation_key_message_cat_gk{$log_key} = $cat_gk;
-                                $consolidation_unmatched{$cat_gk}{$log_key} = 1;
+                                $consolidation_unmatched{$cat_gk}{$log_key} = $consolidation_pattern_generation{$cat_gk} // 0;
                                 $consolidation_category_unmatched_count{$category}++;
 
                                 # Check trigger per category — fire checkpoints for all groups in this category
@@ -7381,6 +7376,12 @@ unless( $group_similar_sensitivity eq "none" ) {
             push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{s3_checkpoint} // 0);
             push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{s4_pairwise} // 0);
             push @verbose_output, sprintf("    S5 Unmatched:          %d", $genuinely_unmatched);
+            push @verbose_output, sprintf("    find_candidates calls: %d", $s->{fc_calls} // 0);
+            push @verbose_output, sprintf("    S3 attempts:           %d  (skipped: %d, match rate: %.1f%%)",
+                $s->{s3_calls} // 0, $s->{s3_skipped} // 0,
+                ($s->{s3_calls} // 0) > 0 ? (($s->{s3_checkpoint} // 0) / ($s->{s3_calls} // 1)) * 100 : 0);
+            push @verbose_output, sprintf("    Cleanup keys scanned:  %d  (cumulative across %d checkpoints)",
+                $s->{cleanup_keys_scanned} // 0, $checkpoints);
 
             # Sanity check: all 5 stages must sum to keys_seen
             my $accounted = ($s->{s1_inline} // 0) + $ceiling_filtered + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + $genuinely_unmatched;
@@ -7407,15 +7408,15 @@ unless( $group_similar_sensitivity eq "none" ) {
         if (scalar keys %consolidation_cat_stats > 1) {
             push @verbose_output, "";
             push @verbose_output, "  === Grand Totals ===";
-            push @verbose_output, sprintf("    Unique keys seen:      %d", $grand_keys);
-            push @verbose_output, sprintf("    S1 Inline match:       %d", $grand_s1);
-            push @verbose_output, sprintf("    S2 Ceiling filter:     %d", $grand_s2);
-            push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $grand_s3);
-            push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $grand_s4);
-            push @verbose_output, sprintf("    S5 Unmatched:          %d", $grand_s5);
-            push @verbose_output, sprintf("    Checkpoints:           %d", $grand_checkpoints);
-            push @verbose_output, sprintf("    Patterns:              %d", $grand_patterns);
-            push @verbose_output, sprintf("    find_candidates calls: %d", $grand_fc);
+            push @verbose_output, sprintf("    Total keys seen:       %d", $grand_keys);
+            push @verbose_output, sprintf("    Total S1 Inline:       %d", $grand_s1);
+            push @verbose_output, sprintf("    Total S2 Ceiling:      %d", $grand_s2);
+            push @verbose_output, sprintf("    Total S3 Checkpoint:   %d", $grand_s3);
+            push @verbose_output, sprintf("    Total S4 Pairwise:     %d", $grand_s4);
+            push @verbose_output, sprintf("    Total S5 Unmatched:    %d", $grand_s5);
+            push @verbose_output, sprintf("    Total checkpoints:     %d", $grand_checkpoints);
+            push @verbose_output, sprintf("    Total patterns:        %d", $grand_patterns);
+            push @verbose_output, sprintf("    Total fc calls:        %d", $grand_fc);
             push @verbose_output, sprintf("    Reduction: %d → %d (%.1f%%)",
                 $grand_keys, $grand_s5 + $grand_s2 + $grand_patterns,
                 (1 - ($grand_s5 + $grand_s2 + $grand_patterns) / ($grand_keys || 1)) * 100);
