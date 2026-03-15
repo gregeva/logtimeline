@@ -4,24 +4,29 @@
 #
 # Format: nytprof_sub <TAB> v_expression <TAB> tolerance <TAB> label <TAB> regex
 #
-# Notes on match_against_patterns:
-#   Called from S1 inline matching during parsing AND from S3 checkpoint gate.
-#   The correct expected value is S1 + S3, not S1 alone.
-#   Both counters are summed via the s1_inline+s3_checkpoint expression.
-#   If S3 is small (typical when patterns are effective), the total ≈ S1.
+# Notes on match_consolidation_patterns:
+#   Called once per new key for S1 inline matching (= keys_seen) plus once per
+#   S3 checkpoint attempt (= s3_calls). Total NYTProf calls = keys_seen + s3_calls.
+#   The extraction rows for keys_seen and s3_calls must appear BEFORE the sum row.
 #
-# Notes on find_candidates:
+# Notes on find_consolidation_candidates:
 #   Called from S4 pairwise discovery loop (one call per unmatched key).
 #   Also called from final pass (if enabled).
 #   fc_calls in -V output is the grand total across all checkpoints and passes.
 #   NYTProf total should equal this grand total within 5%.
 #
 # Notes on dice_coefficient:
-#   Called from within find_candidates for each candidate that passes the
+#   Called from within find_consolidation_candidates for each candidate that passes the
 #   trigram pre-filter. No direct counter in -V (derived from fc_calls).
 #   Checked directionally only — use this to detect super-linear growth.
 
-find_candidates	fc_calls	5%	find_candidates vs fc_calls (grand total)	Grand total.*find_candidates calls:\s*(\d+)
-match_against_patterns	s1_inline+s3_checkpoint	5%	match_against_patterns vs S1+S3	+S1 inline.*?:\s*(\d+)
-match_against_patterns	s3_checkpoint	(informational)	  of which S3 checkpoint re-scan	+S3 Checkpoint.*?:\s*(\d+)
+# Extraction rows (populate %v keys for sum expressions below)
+match_consolidation_patterns	keys_seen	(informational)	  keys_seen (S1 call count)	+(\d[\d,]*) unique keys seen
+match_consolidation_patterns	s3_calls	(informational)	  S3 attempts (match rate in -V)	+S3 attempts:\s*(\d[\d,]*)
+match_consolidation_patterns	s1_inline	(informational)	  S1 successful matches	+S1 Inline match:\s*(\d[\d,]*)
+match_consolidation_patterns	s3_checkpoint	(informational)	  S3 successful matches	+S3 Checkpoint match:\s*(\d[\d,]*)
+find_consolidation_candidates	fc_calls	5%	find_consolidation_candidates vs fc_calls	+find_candidates calls:\s*(\d[\d,]*)
+
+# Validation checks (use %v keys populated above)
+match_consolidation_patterns	keys_seen+s3_calls	5%	match_consolidation_patterns vs keys_seen+S3 attempts
 read_and_process_logs	1	exact	read_and_process_logs called exactly once
