@@ -484,9 +484,11 @@ Matching 286K unique messages against 103 compiled regex patterns took 18.4s in 
 
 ### PF-12: Final Pass — Optional High-Similarity Cleanup of Ceiling-Excluded Keys
 
+> **Superseded by #137:** The final pass was redesigned to iterate ALL `%log_messages` keys through the same S1→checkpoint pipeline used during streaming, not just ceiling-excluded keys. The original PF-12 approach (separate inline pairwise discovery on ceiling-excluded keys only) was replaced because it bypassed the S1→S2→S3→S4 architecture, missed evicted keys (S6), and missed non-ceiling keys. The findings below are historical context only.
+
 **Finding:** The occurrence ceiling (default 3) prevents high-occurrence messages from entering discovery. But some high-occurrence messages share patterns (e.g., `CheckHeartbeat` across 16 thread pools, each with 29-47 occurrences). These are obvious consolidation candidates that the ceiling blocks.
 
-**Design decisions:**
+**Design decisions (historical — superseded by #137):**
 - The final pass is a **separate optional process flow** (`--final-pass`), not part of the normal consolidation. It is not always-on — users opt in when they want cleanup of high-occurrence stragglers.
 - The similarity threshold for the final pass is deliberately high (default 95%, configurable via `--final-threshold`). At 95%, only nearly-identical messages consolidate — the only variation allowed is small fields like thread numbers or short IDs. This prevents over-generalization of messages that happen to share common boilerplate.
 - The final pass ceiling (default 100, configurable via `--final-ceiling`) defines the upper bound — messages with more than this many occurrences are left alone even in the final pass.
@@ -1159,6 +1161,8 @@ The core algorithms are sound and proven:
 
 33. **Trigrams are kept while a key is in the unmatched set.** Trigrams are reused across checkpoints — no need to recompute. `build_consolidation_ngram_index` skips keys that already have trigrams. Delete trigrams when key is consumed by consolidation OR evicted. The memory regression (+26.6%) seen in Fixes 1-3 was caused by correctly retaining trigrams for surviving keys (old code wastefully deleted and recomputed them). Per-key eviction naturally resolves this by bounding the surviving set. (#135)
 
+34. **The final pass must use the same pipeline architecture as streaming.** The original final pass (PF-12) was a separate mini-pipeline with its own inline pairwise discovery — it bypassed S1 matching, skipped checkpoint batching, and missed all keys not in `%consolidation_unmatched`. The fix (#137) extracts `consolidation_process_key()` as a shared subroutine and has the final pass iterate sorted `%log_messages` keys through the same S1→checkpoint pipeline. Sorting groups similar messages together for better S3/S4 checkpoint yield. Eviction is disabled during the final pass (bounded set, last opportunity to consolidate). Separate `fp_*` counters track final pass work independently from streaming. (#137)
+
 ### Outstanding Decisions
 
 1. ~~**Acceptable memory overhead**~~ Resolved — on large files (the real use case), the prototype uses LESS memory than ltl: 151 MB vs 256 MB on 3.3 GB access logs. Overhead only applies to small files where trigram cost exceeds S1 savings. (PF-24)
@@ -1166,7 +1170,7 @@ The core algorithms are sound and proven:
 3. ~~**Should Inline::C be a production dependency?**~~ Resolved — NO. Pure Perl is fast enough. See PF-26.
 4. ~~**Final pass integration**~~ Resolved — validated with checkpoint architecture (PF-22).
 5. ~~**Unmatched key eviction (#135)**~~ Resolved — adaptive per-key eviction implemented with EMA-based absorption rate tracking. Survival count scales exponentially with rolling average absorption: <5%→0, 5-50%→1, 50-90%→2, 90-95%→3, 95-99%→4, ≥99%→5. Fast-path eviction skips `run_consolidation_pass` entirely when max_survivals=0 and cp_num>2. Replaces stall detection. XL benchmark: 3.4× faster (55s vs 185s), 47.7% less memory (238 MiB vs 455 MiB). Curve thresholds may need tuning over time (see lesson 32).
-6. **Final pass does not re-scan `%log_messages` (#137)** — The final pass only operates on keys in `consolidation_unmatched`, not all of `%log_messages`. Becomes more important if/when per-key eviction is implemented, since evicted keys return to `%log_messages` with no path back to consolidation.
+6. ~~**Final pass does not re-scan `%log_messages` (#137)**~~ Resolved — Final pass redesigned (#137) to iterate all `%log_messages` keys through the same S1→checkpoint pipeline used during streaming. Extracted `consolidation_process_key()` subroutine shared by both streaming and final pass paths. Eviction disabled during final pass (bounded set, last chance). Sorted key iteration groups similar messages for better checkpoint yield. Separate `fp_*` observability counters. Evicted keys (S6) from streaming are now picked up by the final pass.
 
 ### Next Steps
 

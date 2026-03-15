@@ -210,6 +210,7 @@ my $consolidation_final_ceiling      = 1_000_000;
 my $consolidation_discriminative_topk = 50;
 my $consolidation_prefilter_ratio    = 0.30;
 my $max_observed_message_length      = 0;
+my $consolidation_phase              = 'streaming';  # 'streaming' or 'final_pass' — controls counter set and eviction behavior
 my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 my ( @in_files, @output_columns );
@@ -1520,143 +1521,77 @@ sub get_memory_usage {
 sub group_similar_messages {
     print "\rConsolidating similar messages..." unless $disable_progress;
 
-    # Final pass: consolidate ceiling-excluded keys with higher threshold
+    # Final pass (#137): re-scan all %log_messages keys through the full consolidation pipeline.
+    # Same architecture as streaming — S1 match against compiled patterns, accumulate unmatched,
+    # fire checkpoints at trigger threshold. Keys are sorted to group similar messages together,
+    # improving S3 checkpoint match yield.
+    # Eviction is disabled — this is the last chance to consolidate; the set is bounded.
     if ($consolidation_final_pass) {
-        for my $cat_gk (sort keys %consolidation_unmatched) {
-            my ($category, $grouping_key) = split(/\|/, $cat_gk, 2);
-            my @remaining = sort keys %{$consolidation_unmatched{$cat_gk}};
-            next unless @remaining > 1;
+        # Save streaming S2/S5 before resetting (needed for verbose output)
+        for my $cat_gk (keys %consolidation_unmatched) {
+            my ($category_part) = split(/\|/, $cat_gk, 2);
+            my ($s2, $s5) = (0, 0);
+            for my $key (keys %{$consolidation_unmatched{$cat_gk}}) {
+                my $occ = $log_messages{$category_part}{$key}{occurrences} // 1;
+                if ($occ >= $consolidation_occurrence_ceiling) { $s2++; } else { $s5++; }
+            }
+            $consolidation_cat_stats{$cat_gk}{streaming_s2} = $s2;
+            $consolidation_cat_stats{$cat_gk}{streaming_s5} = $s5;
+        }
 
-            # Select keys that were ceiling-excluded
-            my @candidates;
-            for my $key (@remaining) {
-                my $occ = $log_messages{$category}{$key}{occurrences} // 1;
-                if ($occ >= $consolidation_occurrence_ceiling && $occ < $consolidation_final_ceiling) {
-                    push @candidates, $key;
+        # Reset transient working structures (final pass builds its own working set)
+        %consolidation_unmatched = ();
+        %consolidation_key_message = ();
+        %consolidation_key_message_cat_gk = ();
+        %consolidation_key_generation = ();
+        %consolidation_key_checkpoint_count = ();
+        %consolidation_ngram_index = ();
+        %consolidation_key_trigrams = ();
+        %consolidation_key_trigrams_norm = ();
+        %consolidation_posting_size = ();
+        %consolidation_category_unmatched_count = ();
+        %consolidation_absorption_ema = ();
+        # Preserved: %consolidation_patterns, %consolidation_clusters, %consolidation_pattern_generation, %consolidation_cat_stats
+
+        # Swap threshold and ceiling for final pass parameters
+        my $saved_threshold = $consolidation_threshold;
+        my $saved_ceiling   = $consolidation_occurrence_ceiling;
+        $consolidation_threshold          = $consolidation_final_threshold;
+        $consolidation_occurrence_ceiling = $consolidation_final_ceiling;
+
+        $consolidation_phase = 'final_pass';
+
+        # Iterate all remaining %log_messages keys through the pipeline (sorted for checkpoint efficiency)
+        for my $category (sort keys %log_messages) {
+            for my $log_key (sort keys %{$log_messages{$category}}) {
+                my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);
+                my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
+                $grouping_key //= "";
+                my $cat_gk = "$category|$grouping_key";
+
+                my $matched = consolidation_process_key(
+                    $log_key, $category, $cat_gk, $capped_msg,
+                    $log_messages{$category}{$log_key}
+                );
+
+                if ($matched) {
+                    delete $log_messages{$category}{$log_key};
                 }
-            }
-            next unless @candidates >= 2;
-
-            # Build n-gram index for candidates
-            delete $consolidation_ngram_index{$cat_gk};
-            delete $consolidation_key_trigrams{$_} for @candidates;
-            build_consolidation_ngram_index($cat_gk, \@candidates);
-
-            my %consumed;
-            my $patterns_discovered = 0;
-            my $messages_absorbed = 0;
-            my $keys_searched = 0;
-            my $max_search = min(500, scalar @candidates);
-
-            for my $key (@candidates) {
-                last if $keys_searched >= $max_search;
-                next if $consumed{$key};
-
-                $keys_searched++;
-                $consolidation_cat_stats{$cat_gk}{fc_calls}++;
-                my @matches = find_consolidation_candidates($cat_gk, $key, $consolidation_final_threshold);
-
-                for my $match (@matches) {
-                    next if $consumed{$match->{key}};
-
-                    my $msg_a = substr($consolidation_key_message{$key} // '', 0, $consolidation_message_length_cap);
-                    my $msg_b = substr($consolidation_key_message{$match->{key}} // '', 0, $consolidation_message_length_cap);
-
-                    my $raw_mask = compute_mask($msg_a, $msg_b);
-                    my $mask = coalesce_mask($raw_mask);
-                    my $canonical = derive_canonical($msg_a, $mask);
-                    my $regex = derive_regex($msg_a, $mask);
-
-                    next unless ($msg_a =~ $regex) && ($msg_b =~ $regex);
-
-                    $consumed{$key} = 1;
-                    $consumed{$match->{key}} = 1;
-
-                    my $new_cluster = {
-                        canonical   => $canonical,
-                        pattern     => $regex,
-                        mask        => $mask,
-                        occurrences => 0,
-                        match_count => 0,
-                    };
-
-                    for my $src_key ($key, $match->{key}) {
-                        if (exists $log_messages{$category}{$src_key}) {
-                            merge_consolidation_stats($new_cluster, $log_messages{$category}{$src_key});
-                            $new_cluster->{match_count}++;
-                            $messages_absorbed++;
-                        }
-                    }
-
-                    # Interleaved re-scan against remaining candidates
-                    for my $ukey (@candidates) {
-                        next if $consumed{$ukey};
-                        my $umsg = $consolidation_key_message{$ukey};
-                        next unless defined $umsg;
-                        if ($umsg =~ $regex) {
-                            $consumed{$ukey} = 1;
-                            if (exists $log_messages{$category}{$ukey}) {
-                                merge_consolidation_stats($new_cluster, $log_messages{$category}{$ukey});
-                                $new_cluster->{match_count}++;
-                                $messages_absorbed++;
-                            }
-                        }
-                    }
-
-                    # Try merge-first into existing patterns
-                    my ($merged_regex, $merged_entry, $merged_cluster) = try_consolidation_merge_into_existing($cat_gk, $canonical, $regex, $mask, $new_cluster);
-                    if ($merged_regex) {
-                        $patterns_discovered++;
-                        # Re-scan remaining candidates against generalized pattern
-                        for my $ukey (@candidates) {
-                            next if $consumed{$ukey};
-                            my $umsg = $consolidation_key_message{$ukey};
-                            next unless defined $umsg;
-                            if ($umsg =~ $merged_regex) {
-                                $consumed{$ukey} = 1;
-                                if (exists $log_messages{$category}{$ukey}) {
-                                    merge_consolidation_stats($merged_cluster, $log_messages{$category}{$ukey});
-                                    $merged_cluster->{match_count}++;
-                                    $merged_entry->{match_count} = $merged_cluster->{match_count};
-                                    $messages_absorbed++;
-                                }
-                            }
-                        }
-                        last;
-                    }
-
-                    # Add as new pattern
-                    $consolidation_clusters{$cat_gk}{$canonical} = $new_cluster;
-                    push @{$consolidation_patterns{$cat_gk}}, {
-                        pattern     => $regex,
-                        cluster_key => $canonical,
-                        canonical   => $canonical,
-                        match_count => $new_cluster->{match_count},
-                    };
-                    $patterns_discovered++;
-                    last;
-                }
-            }
-
-            # Remove consumed keys from %log_messages and tracking structures
-            for my $key (keys %consumed) {
-                delete $consolidation_unmatched{$cat_gk}{$key};
-                delete $log_messages{$category}{$key};
-                delete $consolidation_key_message{$key};
-                delete $consolidation_key_message_cat_gk{$key};
-            }
-
-            # Track final pass absorptions in S4
-            $consolidation_cat_stats{$cat_gk}{s4_pairwise} += $messages_absorbed;
-
-            # Free trigram data from final pass
-            delete $consolidation_ngram_index{$cat_gk};
-            delete $consolidation_posting_size{$cat_gk};
-            for my $key (keys %consumed) {
-                delete $consolidation_key_trigrams{$key};
-                delete $consolidation_key_trigrams_norm{$key};
             }
         }
+
+        # EOF checkpoints for final pass remainder
+        for my $cat_gk (sort keys %consolidation_unmatched) {
+            if (scalar(keys %{$consolidation_unmatched{$cat_gk}}) >= 2) {
+                my ($cat, $gk) = split(/\|/, $cat_gk, 2);
+                run_consolidation_checkpoint($cat, $gk);
+            }
+        }
+
+        # Restore threshold, ceiling, and phase
+        $consolidation_threshold          = $saved_threshold;
+        $consolidation_occurrence_ceiling = $saved_ceiling;
+        $consolidation_phase = 'streaming';
     }
 
     # Inject consolidated clusters back into %log_messages
@@ -2142,6 +2077,52 @@ sub merge_consolidation_stats {
     }
 }
 
+# Process a single key through the consolidation pipeline (S1 match → accumulate → trigger checkpoint)
+# Used by both streaming (parsing) and final pass (group_similar_messages) paths.
+# Returns: 1 if S1 matched (key absorbed into cluster), 0 if not (key stored for checkpoint processing)
+sub consolidation_process_key {
+    my ($log_key, $category, $cat_gk, $capped_msg, $stats_source) = @_;
+    my ($c, $grouping_key) = split(/\|/, $cat_gk, 2);
+
+    # Phase-appropriate counter prefix
+    my $pfx = ($consolidation_phase eq 'final_pass') ? 'fp_' : '';
+
+    $consolidation_total_keys_seen++;
+    $consolidation_cat_stats{$cat_gk}{"${pfx}keys_seen"}++;
+
+    # S1: try matching against existing compiled patterns
+    my $entry = match_consolidation_patterns($category, $grouping_key, $capped_msg);
+    if ($entry) {
+        my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
+        if ($cluster) {
+            merge_consolidation_stats($cluster, $stats_source);
+            $consolidation_cat_stats{$cat_gk}{"${pfx}s1_inline"}++;
+            return 1;
+        }
+    }
+
+    # Not matched by S1 — store for checkpoint processing
+    $consolidation_key_message{$log_key} = $capped_msg;
+    $consolidation_key_message_cat_gk{$log_key} = $cat_gk;
+    $consolidation_unmatched{$cat_gk}{$log_key} = 1;
+    $consolidation_key_generation{$log_key} = $consolidation_pattern_generation{$cat_gk} // 0;
+    $consolidation_key_checkpoint_count{$log_key} = 0;
+    $consolidation_category_unmatched_count{$category}++;
+
+    # Check trigger per category — fire checkpoints for all groups in this category
+    if (($consolidation_category_unmatched_count{$category} // 0) >= $consolidation_trigger) {
+        for my $ck (keys %consolidation_unmatched) {
+            next unless $ck =~ /^\Q$category\E\|/;
+            next if scalar(keys %{$consolidation_unmatched{$ck}}) < 2;
+            my ($cc, $gk) = split(/\|/, $ck, 2);
+            run_consolidation_checkpoint($cc, $gk);
+        }
+        $consolidation_category_unmatched_count{$category} = 0;
+    }
+
+    return 0;
+}
+
 # Try to merge new pattern into an existing similar pattern (merge-first strategy)
 sub try_consolidation_merge_into_existing {
     my ($cat_gk, $new_canonical, $new_regex, $new_mask, $new_cluster) = @_;
@@ -2462,8 +2443,11 @@ sub get_consolidation_max_survivals {
 sub run_consolidation_checkpoint {
     my ($category, $grouping_key) = @_;
     my $cat_gk = "$category|$grouping_key";
-    $consolidation_cat_stats{$cat_gk}{checkpoints}++;
-    my $cp_num = $consolidation_cat_stats{$cat_gk}{checkpoints};
+    my $is_final_pass = ($consolidation_phase eq 'final_pass');
+    my $pfx = $is_final_pass ? 'fp_' : '';
+
+    $consolidation_cat_stats{$cat_gk}{"${pfx}checkpoints"}++;
+    my $cp_num = $consolidation_cat_stats{$cat_gk}{"${pfx}checkpoints"};
 
     my @unmatched = sort keys %{$consolidation_unmatched{$cat_gk}};
     my $pre_count = scalar @unmatched;
@@ -2471,32 +2455,33 @@ sub run_consolidation_checkpoint {
 
     # Fast-path eviction: if EMA indicates all keys should be evicted immediately,
     # skip the expensive checkpoint pass entirely (#135).
-    # Require at least 2 prior checkpoints before activating — a single unproductive
-    # checkpoint on a small batch is not representative of the group's consolidation potential.
-    my $current_max_survivals = exists $consolidation_absorption_ema{$cat_gk}
-        ? get_consolidation_max_survivals($consolidation_absorption_ema{$cat_gk})
-        : undef;  # first checkpoint — no EMA yet, must run the pass
+    # Disabled during final pass — eviction is not applicable (bounded set, last chance to consolidate).
+    if (!$is_final_pass) {
+        my $current_max_survivals = exists $consolidation_absorption_ema{$cat_gk}
+            ? get_consolidation_max_survivals($consolidation_absorption_ema{$cat_gk})
+            : undef;  # first checkpoint — no EMA yet, must run the pass
 
-    if (defined $current_max_survivals && $current_max_survivals == 0 && $cp_num > 2) {
-        # All surviving keys would be evicted — skip run_consolidation_pass entirely
-        my $evicted = 0;
-        for my $key (@unmatched) {
-            $consolidation_key_checkpoint_count{$key} = ($consolidation_key_checkpoint_count{$key} // 0) + 1;
-            # Evict: remove from consolidation working set, keep in %log_messages
-            delete $consolidation_key_message{$key};
-            delete $consolidation_key_message_cat_gk{$key};
-            delete $consolidation_key_trigrams{$key};
-            delete $consolidation_key_trigrams_norm{$key};
-            delete $consolidation_key_generation{$key};
-            delete $consolidation_key_checkpoint_count{$key};
-            delete $consolidation_unmatched{$cat_gk}{$key};
-            $evicted++;
-            $consolidation_category_unmatched_count{$category}-- if ($consolidation_category_unmatched_count{$category} // 0) > 0;
+        if (defined $current_max_survivals && $current_max_survivals == 0 && $cp_num > 2) {
+            # All surviving keys would be evicted — skip run_consolidation_pass entirely
+            my $evicted = 0;
+            for my $key (@unmatched) {
+                $consolidation_key_checkpoint_count{$key} = ($consolidation_key_checkpoint_count{$key} // 0) + 1;
+                # Evict: remove from consolidation working set, keep in %log_messages
+                delete $consolidation_key_message{$key};
+                delete $consolidation_key_message_cat_gk{$key};
+                delete $consolidation_key_trigrams{$key};
+                delete $consolidation_key_trigrams_norm{$key};
+                delete $consolidation_key_generation{$key};
+                delete $consolidation_key_checkpoint_count{$key};
+                delete $consolidation_unmatched{$cat_gk}{$key};
+                $evicted++;
+                $consolidation_category_unmatched_count{$category}-- if ($consolidation_category_unmatched_count{$category} // 0) > 0;
+            }
+            $consolidation_cat_stats{$cat_gk}{evicted} = ($consolidation_cat_stats{$cat_gk}{evicted} // 0) + $evicted;
+            $consolidation_cat_stats{$cat_gk}{absorption_ema} = $consolidation_absorption_ema{$cat_gk};
+            $consolidation_cat_stats{$cat_gk}{max_survivals} = 0;
+            return;
         }
-        $consolidation_cat_stats{$cat_gk}{evicted} = ($consolidation_cat_stats{$cat_gk}{evicted} // 0) + $evicted;
-        $consolidation_cat_stats{$cat_gk}{absorption_ema} = $consolidation_absorption_ema{$cat_gk};
-        $consolidation_cat_stats{$cat_gk}{max_survivals} = 0;
-        return;
     }
 
     my ($discovered, $absorbed, $ceiling_skipped, $cap_hit, $g2_absorbed, $fc_calls, $g2_survivors, $consumed_ref, $s3_tested, $s3_skipped) =
@@ -2504,17 +2489,17 @@ sub run_consolidation_checkpoint {
 
     my $post_count = scalar @unmatched;
 
-    # Update per-category accumulators
-    $consolidation_cat_stats{$cat_gk}{s3_checkpoint} += $g2_absorbed;
-    $consolidation_cat_stats{$cat_gk}{s3_calls}      += $s3_tested;
-    $consolidation_cat_stats{$cat_gk}{s3_skipped}    += $s3_skipped;
-    $consolidation_cat_stats{$cat_gk}{s4_pairwise}   += ($absorbed - $g2_absorbed);
-    $consolidation_cat_stats{$cat_gk}{fc_calls}      += $fc_calls;
-    $consolidation_cat_stats{$cat_gk}{patterns_discovered} += $discovered;
-    $consolidation_cat_stats{$cat_gk}{patterns_final} = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
+    # Update per-category accumulators (phase-appropriate counters)
+    $consolidation_cat_stats{$cat_gk}{"${pfx}s3_checkpoint"} += $g2_absorbed;
+    $consolidation_cat_stats{$cat_gk}{"${pfx}s3_calls"}      += $s3_tested;
+    $consolidation_cat_stats{$cat_gk}{"${pfx}s3_skipped"}    += $s3_skipped;
+    $consolidation_cat_stats{$cat_gk}{"${pfx}s4_pairwise"}   += ($absorbed - $g2_absorbed);
+    $consolidation_cat_stats{$cat_gk}{"${pfx}fc_calls"}      += $fc_calls;
+    $consolidation_cat_stats{$cat_gk}{"${pfx}patterns_discovered"} += $discovered;
+    $consolidation_cat_stats{$cat_gk}{"${pfx}patterns_final"} = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
 
     # Delete absorbed keys — targeted O(consumed) instead of O(all_keys) (#135)
-    $consolidation_cat_stats{$cat_gk}{cleanup_keys_scanned} += scalar keys %$consumed_ref;
+    $consolidation_cat_stats{$cat_gk}{"${pfx}cleanup_keys_scanned"} += scalar keys %$consumed_ref;
     for my $key (keys %$consumed_ref) {
         delete $log_messages{$category}{$key};
         delete $consolidation_key_message{$key};
@@ -2532,11 +2517,14 @@ sub run_consolidation_checkpoint {
     # Cross-cluster merge and pattern generation bump
     if ($discovered > 0) {
         merge_consolidation_overlapping_patterns($cat_gk);
-        $consolidation_cat_stats{$cat_gk}{patterns_final} = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
+        $consolidation_cat_stats{$cat_gk}{"${pfx}patterns_final"} = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
         $consolidation_pattern_generation{$cat_gk} = ($consolidation_pattern_generation{$cat_gk} // 0) + 1;
     }
 
     # Adaptive eviction (#135): update EMA, increment checkpoint counts, evict stale keys
+    # Disabled during final pass — the final pass is the last chance to consolidate,
+    # and the working set is bounded (no new keys arrive). Eviction here would
+    # permanently lose keys with no subsequent pass to catch them.
     my $absorption_rate = $pre_count > 0 ? $absorbed / $pre_count : 0;
     if (exists $consolidation_absorption_ema{$cat_gk}) {
         $consolidation_absorption_ema{$cat_gk} = $consolidation_eviction_ema_alpha * $absorption_rate
@@ -2545,35 +2533,44 @@ sub run_consolidation_checkpoint {
         $consolidation_absorption_ema{$cat_gk} = $absorption_rate;  # first checkpoint initializes directly
     }
 
-    my $max_survivals = get_consolidation_max_survivals($consolidation_absorption_ema{$cat_gk});
-    $consolidation_cat_stats{$cat_gk}{absorption_ema} = $consolidation_absorption_ema{$cat_gk};
-    $consolidation_cat_stats{$cat_gk}{max_survivals} = $max_survivals;
-
-    # Increment checkpoint count for surviving keys and evict those exceeding threshold
-    my $evicted = 0;
-    my %survivors;
-    for my $key (@unmatched) {
-        next if exists $consumed_ref->{$key};  # already deleted above
-        $consolidation_key_checkpoint_count{$key} = ($consolidation_key_checkpoint_count{$key} // 0) + 1;
-        if ($consolidation_key_checkpoint_count{$key} > $max_survivals) {
-            # Evict: remove from consolidation working set, keep in %log_messages
-            delete $consolidation_key_message{$key};
-            delete $consolidation_key_message_cat_gk{$key};
-            delete $consolidation_key_trigrams{$key};
-            delete $consolidation_key_trigrams_norm{$key};
-            delete $consolidation_key_generation{$key};
-            delete $consolidation_key_checkpoint_count{$key};
-            $evicted++;
-            $consolidation_category_unmatched_count{$category}-- if ($consolidation_category_unmatched_count{$category} // 0) > 0;
-        } else {
+    if ($is_final_pass) {
+        # Final pass: all survivors stay — rebuild unmatched from non-consumed keys
+        my %survivors;
+        for my $key (@unmatched) {
+            next if exists $consumed_ref->{$key};
             $survivors{$key} = 1;
         }
+        %{$consolidation_unmatched{$cat_gk}} = %survivors;
+    } else {
+        # Streaming: evict keys exceeding adaptive survival threshold
+        my $max_survivals = get_consolidation_max_survivals($consolidation_absorption_ema{$cat_gk});
+        $consolidation_cat_stats{$cat_gk}{absorption_ema} = $consolidation_absorption_ema{$cat_gk};
+        $consolidation_cat_stats{$cat_gk}{max_survivals} = $max_survivals;
+
+        my $evicted = 0;
+        my %survivors;
+        for my $key (@unmatched) {
+            next if exists $consumed_ref->{$key};  # already deleted above
+            $consolidation_key_checkpoint_count{$key} = ($consolidation_key_checkpoint_count{$key} // 0) + 1;
+            if ($consolidation_key_checkpoint_count{$key} > $max_survivals) {
+                # Evict: remove from consolidation working set, keep in %log_messages
+                delete $consolidation_key_message{$key};
+                delete $consolidation_key_message_cat_gk{$key};
+                delete $consolidation_key_trigrams{$key};
+                delete $consolidation_key_trigrams_norm{$key};
+                delete $consolidation_key_generation{$key};
+                delete $consolidation_key_checkpoint_count{$key};
+                $evicted++;
+                $consolidation_category_unmatched_count{$category}-- if ($consolidation_category_unmatched_count{$category} // 0) > 0;
+            } else {
+                $survivors{$key} = 1;
+            }
+        }
+
+        # Rebuild %consolidation_unmatched from survivors only
+        %{$consolidation_unmatched{$cat_gk}} = %survivors;
+        $consolidation_cat_stats{$cat_gk}{evicted} = ($consolidation_cat_stats{$cat_gk}{evicted} // 0) + $evicted;
     }
-
-    # Rebuild %consolidation_unmatched from survivors only
-    %{$consolidation_unmatched{$cat_gk}} = %survivors;
-    $consolidation_cat_stats{$cat_gk}{evicted} = ($consolidation_cat_stats{$cat_gk}{evicted} // 0) + $evicted;
-
 }
 
 # Issue #45: Measure all data structures and update high-water marks
@@ -3880,66 +3877,34 @@ sub read_and_process_logs {
                         my $is_new_key = !exists $log_messages{$category}{$log_key};
 
                         if ($is_new_key) {
-                            $consolidation_total_keys_seen++;
-                            $consolidation_cat_stats{$cat_gk}{keys_seen}++;
-
-                            # S1: try matching against existing compiled patterns
-                            my $entry = match_consolidation_patterns($category, $grouping_key, $capped_msg);
-                            if ($entry) {
-                                my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
-                                if ($cluster) {
-                                    # Accumulate stats directly into cluster
-                                    $cluster->{occurrences}++;
-                                    if ($is_access_log) {
-                                        $cluster->{total_bytes} = ($cluster->{total_bytes} // 0) + $bytes if defined $bytes;
-                                        if (defined $count) {
-                                            $cluster->{count_sum} = ($cluster->{count_sum} // 0) + $count;
-                                            $cluster->{count_occurrences} = ($cluster->{count_occurrences} // 0) + 1;
-                                            $cluster->{count_min} = $count if !defined $cluster->{count_min} || $count < $cluster->{count_min};
-                                            $cluster->{count_max} = $count if !defined $cluster->{count_max} || $count > $cluster->{count_max};
-                                        }
-                                        foreach my $config (@udm_configs) {
-                                            my $name = $config->{name};
-                                            next unless defined $udm_values{$name};
-                                            my $value = $udm_values{$name};
-                                            $cluster->{"udm_${name}_sum"} = ($cluster->{"udm_${name}_sum"} // 0) + $value;
-                                            $cluster->{"udm_${name}_occurrences"} = ($cluster->{"udm_${name}_occurrences"} // 0) + 1;
-                                            $cluster->{"udm_${name}_min"} = $value if !defined $cluster->{"udm_${name}_min"} || $value < $cluster->{"udm_${name}_min"};
-                                            $cluster->{"udm_${name}_max"} = $value if !defined $cluster->{"udm_${name}_max"} || $value > $cluster->{"udm_${name}_max"};
-                                        }
-                                        if (defined $duration && !$omit_durations) {
-                                            $cluster->{total_duration} = ($cluster->{total_duration} // 0) + $duration;
-                                            $cluster->{total_duration_num} = ($cluster->{total_duration_num} // 0) + $duration;
-                                            $cluster->{sum_of_squares} = ($cluster->{sum_of_squares} // 0) + $duration ** 2;
-                                            push @{$cluster->{durations}}, $duration;
-                                        }
-                                    }
-                                    $consolidation_cat_stats{$cat_gk}{s1_inline}++;
-                                    $consolidation_s1_matched = 1;
+                            # Build stats source from parsed line values for merge_consolidation_stats()
+                            my $stats_source = { occurrences => 1 };
+                            if ($is_access_log) {
+                                $stats_source->{total_bytes} = $bytes if defined $bytes;
+                                if (defined $count) {
+                                    $stats_source->{count_sum} = $count;
+                                    $stats_source->{count_occurrences} = 1;
+                                    $stats_source->{count_min} = $count;
+                                    $stats_source->{count_max} = $count;
+                                }
+                                foreach my $config (@udm_configs) {
+                                    my $name = $config->{name};
+                                    next unless defined $udm_values{$name};
+                                    my $value = $udm_values{$name};
+                                    $stats_source->{"udm_${name}_sum"} = $value;
+                                    $stats_source->{"udm_${name}_occurrences"} = 1;
+                                    $stats_source->{"udm_${name}_min"} = $value;
+                                    $stats_source->{"udm_${name}_max"} = $value;
+                                }
+                                if (defined $duration && !$omit_durations) {
+                                    $stats_source->{total_duration} = $duration;
+                                    $stats_source->{total_duration_num} = $duration;
+                                    $stats_source->{sum_of_squares} = $duration ** 2;
+                                    $stats_source->{durations} = [$duration];
                                 }
                             }
 
-                            # Not matched by S1 — store for checkpoint processing
-                            if (!$consolidation_s1_matched) {
-                                $consolidation_key_message{$log_key} = $capped_msg;
-                                $consolidation_key_message_cat_gk{$log_key} = $cat_gk;
-                                $consolidation_unmatched{$cat_gk}{$log_key} = 1;
-                                $consolidation_key_generation{$log_key} = $consolidation_pattern_generation{$cat_gk} // 0;
-                                $consolidation_key_checkpoint_count{$log_key} = 0;
-                                $consolidation_category_unmatched_count{$category}++;
-
-                                # Check trigger per category — fire checkpoints for all groups in this category
-                                if (($consolidation_category_unmatched_count{$category} // 0) >= $consolidation_trigger) {
-                                    for my $ck (keys %consolidation_unmatched) {
-                                        next unless $ck =~ /^\Q$category\E\|/;
-                                        next if scalar(keys %{$consolidation_unmatched{$ck}}) < 2;
-                                        # Stall detection removed — adaptive eviction (#135) bounds the working set
-                                        my ($c, $gk) = split(/\|/, $ck, 2);
-                                        run_consolidation_checkpoint($c, $gk);
-                                    }
-                                    $consolidation_category_unmatched_count{$category} = 0;
-                                }
-                            }
+                            $consolidation_s1_matched = consolidation_process_key($log_key, $category, $cat_gk, $capped_msg, $stats_source);
                         }
                     }
 
@@ -7431,36 +7396,48 @@ unless( $group_similar_sensitivity eq "none" ) {
         my $grand_checkpoints = 0;
         my $grand_patterns = 0;
 
+        # Total patterns across all cat_gk groups (final count after both phases)
+        my $total_patterns_all = 0;
+        for my $cat_gk (keys %consolidation_patterns) {
+            $total_patterns_all += scalar @{$consolidation_patterns{$cat_gk}};
+        }
+
         for my $cat_gk (sort keys %consolidation_cat_stats) {
             my $s = $consolidation_cat_stats{$cat_gk};
             my $keys_seen = $s->{keys_seen} // 0;
             next unless $keys_seen > 0;
 
+            my ($category_part) = split(/\|/, $cat_gk, 2);
+
+            # --- Streaming phase ---
             my $checkpoints = $s->{checkpoints} // 0;
             my $patterns = $s->{patterns_final} // 0;
+            my $evicted = $s->{evicted} // 0;
 
-            # S2 and S5: partition remaining unmatched keys by occurrence ceiling
-            my ($category_part) = split(/\|/, $cat_gk, 2);
-            my $ceiling_filtered = 0;
-            my $genuinely_unmatched = 0;
-            for my $key (keys %{$consolidation_unmatched{$cat_gk} // {}}) {
-                my $occ = $log_messages{$category_part}{$key}{occurrences} // 1;
-                if ($occ >= $consolidation_occurrence_ceiling) {
-                    $ceiling_filtered++;
-                } else {
-                    $genuinely_unmatched++;
+            # S2/S5: saved before final pass reset (or computed from current unmatched if no final pass)
+            my $ceiling_filtered;
+            my $genuinely_unmatched;
+            if ($consolidation_final_pass && exists $s->{streaming_s2}) {
+                $ceiling_filtered = $s->{streaming_s2};
+                $genuinely_unmatched = $s->{streaming_s5};
+            } else {
+                # No final pass — compute from current %consolidation_unmatched
+                $ceiling_filtered = 0;
+                $genuinely_unmatched = 0;
+                for my $key (keys %{$consolidation_unmatched{$cat_gk} // {}}) {
+                    my $occ = $log_messages{$category_part}{$key}{occurrences} // 1;
+                    if ($occ >= $consolidation_occurrence_ceiling) { $ceiling_filtered++; } else { $genuinely_unmatched++; }
                 }
             }
 
             push @verbose_output, "";
-            push @verbose_output, sprintf("  --- %s: %d unique keys seen, %d checkpoints, %d patterns ---",
-                $cat_gk, $keys_seen, $checkpoints, $patterns);
+            push @verbose_output, sprintf("  --- %s: Streaming Phase ---", $cat_gk);
+            push @verbose_output, sprintf("    Keys seen:             %d  (%d checkpoints, %d patterns)", $keys_seen, $checkpoints, $patterns);
             push @verbose_output, sprintf("    S1 Inline match:       %d", $s->{s1_inline} // 0);
-            push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d, remaining after all passes)", $ceiling_filtered, $consolidation_occurrence_ceiling);
+            push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d)", $ceiling_filtered, $consolidation_occurrence_ceiling);
             push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{s3_checkpoint} // 0);
             push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{s4_pairwise} // 0);
             push @verbose_output, sprintf("    S5 Unmatched:          %d", $genuinely_unmatched);
-            my $evicted = $s->{evicted} // 0;
             push @verbose_output, sprintf("    S6 Evicted:            %d", $evicted);
             my $ema_pct = ($s->{absorption_ema} // 0) * 100;
             my $ms = $s->{max_survivals} // 0;
@@ -7472,16 +7449,12 @@ unless( $group_similar_sensitivity eq "none" ) {
             push @verbose_output, sprintf("    Cleanup keys scanned:  %d  (cumulative across %d checkpoints)",
                 $s->{cleanup_keys_scanned} // 0, $checkpoints);
 
-            # Sanity check: all 6 stages must sum to keys_seen
+            # Streaming tracking invariant
             my $accounted = ($s->{s1_inline} // 0) + $ceiling_filtered + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + $genuinely_unmatched + $evicted;
             if ($accounted != $keys_seen) {
                 push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
                     $accounted, $keys_seen, $keys_seen - $accounted);
             }
-
-            push @verbose_output, sprintf("    Reduction: %d → %d (%.1f%%)",
-                $keys_seen, $genuinely_unmatched + $evicted + $ceiling_filtered + $patterns,
-                (1 - ($genuinely_unmatched + $evicted + $ceiling_filtered + $patterns) / ($keys_seen || 1)) * 100);
 
             $grand_keys += $keys_seen;
             $grand_s1 += ($s->{s1_inline} // 0);
@@ -7493,11 +7466,61 @@ unless( $group_similar_sensitivity eq "none" ) {
             $grand_fc += ($s->{fc_calls} // 0);
             $grand_checkpoints += $checkpoints;
             $grand_patterns += $patterns;
+
+            # --- Final pass phase ---
+            my $fp_keys = $s->{fp_keys_seen} // 0;
+            if ($fp_keys > 0) {
+                my $fp_checkpoints = $s->{fp_checkpoints} // 0;
+                my $fp_patterns = $s->{fp_patterns_final} // 0;
+
+                # Final pass S2/S5: partition from final pass's %consolidation_unmatched
+                my $fp_ceiling_filtered = 0;
+                my $fp_genuinely_unmatched = 0;
+                for my $key (keys %{$consolidation_unmatched{$cat_gk} // {}}) {
+                    my $occ = $log_messages{$category_part}{$key}{occurrences} // 1;
+                    if ($occ >= $consolidation_final_ceiling) { $fp_ceiling_filtered++; } else { $fp_genuinely_unmatched++; }
+                }
+
+                push @verbose_output, sprintf("  --- %s: Final Pass ---", $cat_gk);
+                push @verbose_output, sprintf("    Keys seen:             %d  (%d checkpoints, %d new patterns)", $fp_keys, $fp_checkpoints, $fp_patterns);
+                push @verbose_output, sprintf("    S1 Inline match:       %d", $s->{fp_s1_inline} // 0);
+                push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d)", $fp_ceiling_filtered, $consolidation_final_ceiling);
+                push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{fp_s3_checkpoint} // 0);
+                push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{fp_s4_pairwise} // 0);
+                push @verbose_output, sprintf("    S5 Unmatched:          %d", $fp_genuinely_unmatched);
+                push @verbose_output, sprintf("    find_candidates calls: %d", $s->{fp_fc_calls} // 0);
+
+                # Final pass tracking invariant (no S6 — eviction disabled)
+                my $fp_accounted = ($s->{fp_s1_inline} // 0) + $fp_ceiling_filtered + ($s->{fp_s3_checkpoint} // 0) + ($s->{fp_s4_pairwise} // 0) + $fp_genuinely_unmatched;
+                if ($fp_accounted != $fp_keys) {
+                    push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
+                        $fp_accounted, $fp_keys, $fp_keys - $fp_accounted);
+                }
+            }
+
+            # Combined reduction: streaming keys_seen → final remaining (S5 + S2 from last active phase + patterns)
+            my $final_remaining;
+            if ($fp_keys > 0) {
+                my $fp_unmatched_total = 0;
+                for my $key (keys %{$consolidation_unmatched{$cat_gk} // {}}) {
+                    $fp_unmatched_total++;
+                }
+                my $combined_patterns = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
+                $final_remaining = $fp_unmatched_total + $combined_patterns;
+                push @verbose_output, sprintf("    Reduction: %d → %d (%.1f%%)",
+                    $keys_seen, $final_remaining,
+                    (1 - $final_remaining / ($keys_seen || 1)) * 100);
+            } else {
+                $final_remaining = $genuinely_unmatched + $evicted + $ceiling_filtered + $patterns;
+                push @verbose_output, sprintf("    Reduction: %d → %d (%.1f%%)",
+                    $keys_seen, $final_remaining,
+                    (1 - $final_remaining / ($keys_seen || 1)) * 100);
+            }
         }
 
         if (scalar keys %consolidation_cat_stats > 1) {
             push @verbose_output, "";
-            push @verbose_output, "  === Grand Totals ===";
+            push @verbose_output, "  === Grand Totals (Streaming) ===";
             push @verbose_output, sprintf("    Total keys seen:       %d", $grand_keys);
             push @verbose_output, sprintf("    Total S1 Inline:       %d", $grand_s1);
             push @verbose_output, sprintf("    Total S2 Ceiling:      %d", $grand_s2);
@@ -7508,9 +7531,6 @@ unless( $group_similar_sensitivity eq "none" ) {
             push @verbose_output, sprintf("    Total checkpoints:     %d", $grand_checkpoints);
             push @verbose_output, sprintf("    Total patterns:        %d", $grand_patterns);
             push @verbose_output, sprintf("    Total fc calls:        %d", $grand_fc);
-            push @verbose_output, sprintf("    Reduction: %d → %d (%.1f%%)",
-                $grand_keys, $grand_s5 + $grand_s6 + $grand_s2 + $grand_patterns,
-                (1 - ($grand_s5 + $grand_s6 + $grand_s2 + $grand_patterns) / ($grand_keys || 1)) * 100);
         }
         push @verbose_output, "";
     }
