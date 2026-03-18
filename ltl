@@ -47,7 +47,7 @@ use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
 use Devel::Size qw(total_size);
 # Proc::ProcessTable is loaded conditionally in get_memory_usage() based on platform
-# On Windows, Win32::Process::Info is used instead
+# On Windows, Win32::API calls K32GetProcessMemoryInfo directly (kernel32.dll)
 use List::Util qw(min max);
 use Cwd qw(abs_path);
 use File::Spec;
@@ -1495,12 +1495,24 @@ sub get_memory_usage {
             }
         }
     } elsif ($^O eq 'MSWin32') {                                # Windows
+        # Direct kernel32.dll syscall via Win32::API — replaces Win32::Process::Info
+        # which used WMI (extremely slow, ~15-20s per call). See #143.
         eval {
-            require Win32::Process::Info;
-            Win32::Process::Info->import();
-            my $pi = Win32::Process::Info->new();
-            my $info = $pi->GetProcInfo();
-            ($memory_usage) = map { $_->{WorkingSetSize} } grep { $_->{ProcessId} == $$ } @$info;
+            require Win32::API;
+            my $get_current = Win32::API->new('kernel32', 'GetCurrentProcess', [], 'N');
+            my $handle = $get_current->Call();
+            # PROCESS_MEMORY_COUNTERS struct: cb(DWORD) + PageFaultCount(DWORD) + 8 SIZE_T fields
+            my $is_64bit = length(pack('P', 0)) == 8;
+            my $struct_size = $is_64bit ? 72 : 40;
+            my $buf = "\0" x $struct_size;
+            substr($buf, 0, 4, pack('V', $struct_size));
+            my $get_mem_info = Win32::API->new('kernel32', 'K32GetProcessMemoryInfo', ['N', 'P', 'N'], 'I');
+            if ($get_mem_info->Call($handle, $buf, $struct_size)) {
+                # WorkingSetSize: after cb(4) + PageFaultCount(4) + PeakWorkingSetSize(SIZE_T)
+                my $offset = $is_64bit ? 24 : 16;
+                $memory_usage = $is_64bit ? unpack('Q', substr($buf, $offset, 8))
+                                          : unpack('V', substr($buf, $offset, 4));
+            }
         };
         if ($@) {
             warn "Failed to get memory usage on Windows: $@";
