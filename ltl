@@ -7379,6 +7379,12 @@ measure_memory_structures();
 
 # GROUP SIMILAR MESSAGES TOGETHER (Issue #96) #
 unless( $group_similar_sensitivity eq "none" ) {
+    # Auto-disable final pass on large files (#144) — too slow above 2M lines
+    if ($consolidation_final_pass && $total_lines_read > 2_000_000) {
+        $consolidation_final_pass = 0;
+        print "Note: Final consolidation pass auto-disabled ($total_lines_read lines read > 2M threshold).\n";
+    }
+
     $start_time = [gettimeofday];
     group_similar_messages();
     $end_time = [gettimeofday];
