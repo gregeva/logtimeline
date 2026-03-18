@@ -33,7 +33,7 @@ done
 
 # Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin
 strip_nondeterministic() {
-    perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g' \
+    perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[0-9.]+\]/log timeline [VERSION]/' \
     | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|SCALE DATA/i'
 }
 

@@ -1,0 +1,331 @@
+test_name	options	metric_type	metric_name	value
+humungous-log-uniqueness-standard		version	0.14.3
+humungous-log-uniqueness-standard		FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
+humungous-log-uniqueness-standard		lines_read	288025
+humungous-log-uniqueness-standard		lines_included	288025
+humungous-log-uniqueness-standard		TIMING	read_files	2.388
+humungous-log-uniqueness-standard		TIMING	initialize_buckets	0.000
+humungous-log-uniqueness-standard		TIMING	group_similar	0.000
+humungous-log-uniqueness-standard		TIMING	calculate_statistics	0.303
+humungous-log-uniqueness-standard		TIMING	heatmap_statistics	0.000
+humungous-log-uniqueness-standard		TIMING	histogram_statistics	0.000
+humungous-log-uniqueness-standard		TIMING	normalize_data	0.001
+humungous-log-uniqueness-standard		TIMING	total	2.692
+humungous-log-uniqueness-standard		MEMORY	rss_peak	180502528
+humungous-log-uniqueness-standard		MEMORY	consolidation_clusters	120
+humungous-log-uniqueness-standard		MEMORY	consolidation_key_message	120
+humungous-log-uniqueness-standard		MEMORY	consolidation_patterns	120
+humungous-log-uniqueness-standard		MEMORY	consolidation_unmatched	120
+humungous-log-uniqueness-standard		MEMORY	heatmap_data	120
+humungous-log-uniqueness-standard		MEMORY	heatmap_data_hl	120
+humungous-log-uniqueness-standard		MEMORY	heatmap_raw	120
+humungous-log-uniqueness-standard		MEMORY	heatmap_raw_hl	120
+humungous-log-uniqueness-standard		MEMORY	histogram_values	576
+humungous-log-uniqueness-standard		MEMORY	log_analysis	232
+humungous-log-uniqueness-standard		MEMORY	log_messages	110244244
+humungous-log-uniqueness-standard		MEMORY	log_occurrences	2899
+humungous-log-uniqueness-standard		MEMORY	log_sessions	120
+humungous-log-uniqueness-standard		MEMORY	log_stats	120
+humungous-log-uniqueness-standard		MEMORY	log_threadpools	232
+humungous-log-uniqueness-standard		MEMORY	threadpool_activity	762
+humungous-log-uniqueness-standard		MEMORY	udm_last_value	120
+humungous-log-uniqueness-top25	-n 25	version	0.14.3
+humungous-log-uniqueness-top25	-n 25	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
+humungous-log-uniqueness-top25	-n 25	lines_read	288025
+humungous-log-uniqueness-top25	-n 25	lines_included	288025
+humungous-log-uniqueness-top25	-n 25	TIMING	read_files	2.239
+humungous-log-uniqueness-top25	-n 25	TIMING	initialize_buckets	0.000
+humungous-log-uniqueness-top25	-n 25	TIMING	group_similar	0.000
+humungous-log-uniqueness-top25	-n 25	TIMING	calculate_statistics	0.281
+humungous-log-uniqueness-top25	-n 25	TIMING	heatmap_statistics	0.000
+humungous-log-uniqueness-top25	-n 25	TIMING	histogram_statistics	0.000
+humungous-log-uniqueness-top25	-n 25	TIMING	normalize_data	0.001
+humungous-log-uniqueness-top25	-n 25	TIMING	total	2.520
+humungous-log-uniqueness-top25	-n 25	MEMORY	rss_peak	182927360
+humungous-log-uniqueness-top25	-n 25	MEMORY	consolidation_clusters	120
+humungous-log-uniqueness-top25	-n 25	MEMORY	consolidation_key_message	120
+humungous-log-uniqueness-top25	-n 25	MEMORY	consolidation_patterns	120
+humungous-log-uniqueness-top25	-n 25	MEMORY	consolidation_unmatched	120
+humungous-log-uniqueness-top25	-n 25	MEMORY	heatmap_data	120
+humungous-log-uniqueness-top25	-n 25	MEMORY	heatmap_data_hl	120
+humungous-log-uniqueness-top25	-n 25	MEMORY	heatmap_raw	120
+humungous-log-uniqueness-top25	-n 25	MEMORY	heatmap_raw_hl	120
+humungous-log-uniqueness-top25	-n 25	MEMORY	histogram_values	576
+humungous-log-uniqueness-top25	-n 25	MEMORY	log_analysis	232
+humungous-log-uniqueness-top25	-n 25	MEMORY	log_messages	110244244
+humungous-log-uniqueness-top25	-n 25	MEMORY	log_occurrences	2899
+humungous-log-uniqueness-top25	-n 25	MEMORY	log_sessions	120
+humungous-log-uniqueness-top25	-n 25	MEMORY	log_stats	120
+humungous-log-uniqueness-top25	-n 25	MEMORY	log_threadpools	232
+humungous-log-uniqueness-top25	-n 25	MEMORY	threadpool_activity	762
+humungous-log-uniqueness-top25	-n 25	MEMORY	udm_last_value	120
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	version	0.14.3
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	lines_read	288025
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	lines_included	288025
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	TIMING	read_files	3.002
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	TIMING	initialize_buckets	0.000
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	TIMING	group_similar	0.191
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	TIMING	calculate_statistics	0.000
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	TIMING	heatmap_statistics	0.000
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	TIMING	histogram_statistics	0.000
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	TIMING	normalize_data	0.001
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	TIMING	total	3.194
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	rss_peak	130990080
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	consolidation_clusters	86597
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	consolidation_key_message	117149
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	consolidation_patterns	16467
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	consolidation_unmatched	100265
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	heatmap_data	120
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	heatmap_data_hl	120
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	heatmap_raw	120
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	heatmap_raw_hl	120
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	histogram_values	576
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	log_analysis	232
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	log_messages	124114
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	log_occurrences	2899
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	log_sessions	120
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	log_stats	120
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	log_threadpools	232
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	threadpool_activity	762
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	MEMORY	udm_last_value	120
+humungous-log-uniqueness-heatmap	-hm	version	0.14.3
+humungous-log-uniqueness-heatmap	-hm	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
+humungous-log-uniqueness-heatmap	-hm	lines_read	288025
+humungous-log-uniqueness-heatmap	-hm	lines_included	288025
+humungous-log-uniqueness-heatmap	-hm	TIMING	read_files	2.349
+humungous-log-uniqueness-heatmap	-hm	TIMING	initialize_buckets	0.000
+humungous-log-uniqueness-heatmap	-hm	TIMING	group_similar	0.000
+humungous-log-uniqueness-heatmap	-hm	TIMING	calculate_statistics	0.273
+humungous-log-uniqueness-heatmap	-hm	TIMING	heatmap_statistics	0.000
+humungous-log-uniqueness-heatmap	-hm	TIMING	histogram_statistics	0.000
+humungous-log-uniqueness-heatmap	-hm	TIMING	normalize_data	0.001
+humungous-log-uniqueness-heatmap	-hm	TIMING	total	2.623
+humungous-log-uniqueness-heatmap	-hm	MEMORY	rss_peak	180797440
+humungous-log-uniqueness-heatmap	-hm	MEMORY	consolidation_clusters	120
+humungous-log-uniqueness-heatmap	-hm	MEMORY	consolidation_key_message	120
+humungous-log-uniqueness-heatmap	-hm	MEMORY	consolidation_patterns	120
+humungous-log-uniqueness-heatmap	-hm	MEMORY	consolidation_unmatched	120
+humungous-log-uniqueness-heatmap	-hm	MEMORY	heatmap_data	120
+humungous-log-uniqueness-heatmap	-hm	MEMORY	heatmap_data_hl	120
+humungous-log-uniqueness-heatmap	-hm	MEMORY	heatmap_raw	120
+humungous-log-uniqueness-heatmap	-hm	MEMORY	heatmap_raw_hl	120
+humungous-log-uniqueness-heatmap	-hm	MEMORY	histogram_values	576
+humungous-log-uniqueness-heatmap	-hm	MEMORY	log_analysis	232
+humungous-log-uniqueness-heatmap	-hm	MEMORY	log_messages	110244244
+humungous-log-uniqueness-heatmap	-hm	MEMORY	log_occurrences	2899
+humungous-log-uniqueness-heatmap	-hm	MEMORY	log_sessions	120
+humungous-log-uniqueness-heatmap	-hm	MEMORY	log_stats	120
+humungous-log-uniqueness-heatmap	-hm	MEMORY	log_threadpools	232
+humungous-log-uniqueness-heatmap	-hm	MEMORY	threadpool_activity	762
+humungous-log-uniqueness-heatmap	-hm	MEMORY	udm_last_value	120
+humungous-log-uniqueness-histogram	-hg	version	0.14.3
+humungous-log-uniqueness-histogram	-hg	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
+humungous-log-uniqueness-histogram	-hg	lines_read	288025
+humungous-log-uniqueness-histogram	-hg	lines_included	288025
+humungous-log-uniqueness-histogram	-hg	TIMING	read_files	2.365
+humungous-log-uniqueness-histogram	-hg	TIMING	initialize_buckets	0.000
+humungous-log-uniqueness-histogram	-hg	TIMING	group_similar	0.000
+humungous-log-uniqueness-histogram	-hg	TIMING	calculate_statistics	0.281
+humungous-log-uniqueness-histogram	-hg	TIMING	heatmap_statistics	0.000
+humungous-log-uniqueness-histogram	-hg	TIMING	histogram_statistics	0.000
+humungous-log-uniqueness-histogram	-hg	TIMING	normalize_data	0.001
+humungous-log-uniqueness-histogram	-hg	TIMING	total	2.647
+humungous-log-uniqueness-histogram	-hg	MEMORY	rss_peak	182157312
+humungous-log-uniqueness-histogram	-hg	MEMORY	consolidation_clusters	120
+humungous-log-uniqueness-histogram	-hg	MEMORY	consolidation_key_message	120
+humungous-log-uniqueness-histogram	-hg	MEMORY	consolidation_patterns	120
+humungous-log-uniqueness-histogram	-hg	MEMORY	consolidation_unmatched	120
+humungous-log-uniqueness-histogram	-hg	MEMORY	heatmap_data	120
+humungous-log-uniqueness-histogram	-hg	MEMORY	heatmap_data_hl	120
+humungous-log-uniqueness-histogram	-hg	MEMORY	heatmap_raw	120
+humungous-log-uniqueness-histogram	-hg	MEMORY	heatmap_raw_hl	120
+humungous-log-uniqueness-histogram	-hg	MEMORY	histogram_values	576
+humungous-log-uniqueness-histogram	-hg	MEMORY	log_analysis	232
+humungous-log-uniqueness-histogram	-hg	MEMORY	log_messages	110244244
+humungous-log-uniqueness-histogram	-hg	MEMORY	log_occurrences	2899
+humungous-log-uniqueness-histogram	-hg	MEMORY	log_sessions	120
+humungous-log-uniqueness-histogram	-hg	MEMORY	log_stats	120
+humungous-log-uniqueness-histogram	-hg	MEMORY	log_threadpools	232
+humungous-log-uniqueness-histogram	-hg	MEMORY	threadpool_activity	762
+humungous-log-uniqueness-histogram	-hg	MEMORY	udm_last_value	120
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	version	0.14.3
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	lines_read	288025
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	lines_included	288025
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	TIMING	read_files	2.390
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	TIMING	initialize_buckets	0.000
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	TIMING	group_similar	0.000
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	TIMING	calculate_statistics	0.278
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	TIMING	heatmap_statistics	0.000
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	TIMING	histogram_statistics	0.000
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	TIMING	normalize_data	0.001
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	TIMING	total	2.669
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	rss_peak	182468608
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	consolidation_clusters	120
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	consolidation_key_message	120
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	consolidation_patterns	120
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	consolidation_unmatched	120
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	heatmap_data	120
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	heatmap_data_hl	120
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	heatmap_raw	120
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	heatmap_raw_hl	120
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	histogram_values	576
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	log_analysis	232
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	log_messages	110244244
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	log_occurrences	2899
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	log_sessions	120
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	log_stats	120
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	log_threadpools	232
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	threadpool_activity	762
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	MEMORY	udm_last_value	120
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	version	0.14.3
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	lines_read	288025
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	lines_included	288025
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	TIMING	read_files	3.027
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	TIMING	initialize_buckets	0.000
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	TIMING	group_similar	0.193
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	TIMING	calculate_statistics	0.000
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	TIMING	heatmap_statistics	0.000
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	TIMING	histogram_statistics	0.000
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	TIMING	normalize_data	0.001
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	TIMING	total	3.220
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	rss_peak	131268608
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	consolidation_clusters	86597
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	consolidation_key_message	117149
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	consolidation_patterns	16467
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	consolidation_unmatched	100265
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	heatmap_data	120
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	heatmap_data_hl	120
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	heatmap_raw	120
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	heatmap_raw_hl	120
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	histogram_values	576
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	log_analysis	232
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	log_messages	124114
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	log_occurrences	2899
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	log_sessions	120
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	log_stats	120
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	log_threadpools	232
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	threadpool_activity	762
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	MEMORY	udm_last_value	120
+single-day-application-log-standard		version	0.14.3
+single-day-application-log-standard		FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
+single-day-application-log-standard		lines_read	479904
+single-day-application-log-standard		lines_included	479904
+single-day-application-log-standard		TIMING	read_files	3.636
+single-day-application-log-standard		TIMING	initialize_buckets	0.000
+single-day-application-log-standard		TIMING	group_similar	0.000
+single-day-application-log-standard		TIMING	calculate_statistics	0.002
+single-day-application-log-standard		TIMING	heatmap_statistics	0.000
+single-day-application-log-standard		TIMING	histogram_statistics	0.000
+single-day-application-log-standard		TIMING	normalize_data	0.001
+single-day-application-log-standard		TIMING	total	3.638
+single-day-application-log-standard		MEMORY	rss_peak	31703040
+single-day-application-log-standard		MEMORY	consolidation_clusters	120
+single-day-application-log-standard		MEMORY	consolidation_key_message	120
+single-day-application-log-standard		MEMORY	consolidation_patterns	120
+single-day-application-log-standard		MEMORY	consolidation_unmatched	120
+single-day-application-log-standard		MEMORY	heatmap_data	120
+single-day-application-log-standard		MEMORY	heatmap_data_hl	120
+single-day-application-log-standard		MEMORY	heatmap_raw	120
+single-day-application-log-standard		MEMORY	heatmap_raw_hl	120
+single-day-application-log-standard		MEMORY	histogram_values	576
+single-day-application-log-standard		MEMORY	log_analysis	232
+single-day-application-log-standard		MEMORY	log_messages	818483
+single-day-application-log-standard		MEMORY	log_occurrences	11734
+single-day-application-log-standard		MEMORY	log_sessions	120
+single-day-application-log-standard		MEMORY	log_stats	120
+single-day-application-log-standard		MEMORY	log_threadpools	232
+single-day-application-log-standard		MEMORY	threadpool_activity	762
+single-day-application-log-standard		MEMORY	udm_last_value	120
+single-day-application-log-top25	-n 25	version	0.14.3
+single-day-application-log-top25	-n 25	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
+single-day-application-log-top25	-n 25	lines_read	479904
+single-day-application-log-top25	-n 25	lines_included	479904
+single-day-application-log-top25	-n 25	TIMING	read_files	3.585
+single-day-application-log-top25	-n 25	TIMING	initialize_buckets	0.000
+single-day-application-log-top25	-n 25	TIMING	group_similar	0.000
+single-day-application-log-top25	-n 25	TIMING	calculate_statistics	0.002
+single-day-application-log-top25	-n 25	TIMING	heatmap_statistics	0.000
+single-day-application-log-top25	-n 25	TIMING	histogram_statistics	0.000
+single-day-application-log-top25	-n 25	TIMING	normalize_data	0.001
+single-day-application-log-top25	-n 25	TIMING	total	3.588
+single-day-application-log-top25	-n 25	MEMORY	rss_peak	32030720
+single-day-application-log-top25	-n 25	MEMORY	consolidation_clusters	120
+single-day-application-log-top25	-n 25	MEMORY	consolidation_key_message	120
+single-day-application-log-top25	-n 25	MEMORY	consolidation_patterns	120
+single-day-application-log-top25	-n 25	MEMORY	consolidation_unmatched	120
+single-day-application-log-top25	-n 25	MEMORY	heatmap_data	120
+single-day-application-log-top25	-n 25	MEMORY	heatmap_data_hl	120
+single-day-application-log-top25	-n 25	MEMORY	heatmap_raw	120
+single-day-application-log-top25	-n 25	MEMORY	heatmap_raw_hl	120
+single-day-application-log-top25	-n 25	MEMORY	histogram_values	576
+single-day-application-log-top25	-n 25	MEMORY	log_analysis	232
+single-day-application-log-top25	-n 25	MEMORY	log_messages	818483
+single-day-application-log-top25	-n 25	MEMORY	log_occurrences	11734
+single-day-application-log-top25	-n 25	MEMORY	log_sessions	120
+single-day-application-log-top25	-n 25	MEMORY	log_stats	120
+single-day-application-log-top25	-n 25	MEMORY	log_threadpools	232
+single-day-application-log-top25	-n 25	MEMORY	threadpool_activity	762
+single-day-application-log-top25	-n 25	MEMORY	udm_last_value	120
+single-day-application-log-top25-consolidate	-n 25 -g	version	0.14.3
+single-day-application-log-top25-consolidate	-n 25 -g	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
+single-day-application-log-top25-consolidate	-n 25 -g	lines_read	479904
+single-day-application-log-top25-consolidate	-n 25 -g	lines_included	479904
+single-day-application-log-top25-consolidate	-n 25 -g	TIMING	read_files	12.196
+single-day-application-log-top25-consolidate	-n 25 -g	TIMING	initialize_buckets	0.000
+single-day-application-log-top25-consolidate	-n 25 -g	TIMING	group_similar	0.016
+single-day-application-log-top25-consolidate	-n 25 -g	TIMING	calculate_statistics	0.001
+single-day-application-log-top25-consolidate	-n 25 -g	TIMING	heatmap_statistics	0.000
+single-day-application-log-top25-consolidate	-n 25 -g	TIMING	histogram_statistics	0.000
+single-day-application-log-top25-consolidate	-n 25 -g	TIMING	normalize_data	0.001
+single-day-application-log-top25-consolidate	-n 25 -g	TIMING	total	12.213
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	rss_peak	64307200
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_clusters	71541
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_key_message	635802
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_patterns	13735
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_unmatched	401551
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	heatmap_data	120
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	heatmap_data_hl	120
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	heatmap_raw	120
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	heatmap_raw_hl	120
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	histogram_values	576
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	log_analysis	232
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	log_messages	697141
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	log_occurrences	11734
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	log_sessions	120
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	log_stats	120
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	log_threadpools	232
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	threadpool_activity	762
+single-day-application-log-top25-consolidate	-n 25 -g	MEMORY	udm_last_value	120
+single-day-application-log-heatmap	-hm	version	0.14.3
+single-day-application-log-heatmap	-hm	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
+single-day-application-log-heatmap	-hm	lines_read	479904
+single-day-application-log-heatmap	-hm	lines_included	479904
+single-day-application-log-heatmap	-hm	TIMING	read_files	3.637
+single-day-application-log-heatmap	-hm	TIMING	initialize_buckets	0.000
+single-day-application-log-heatmap	-hm	TIMING	group_similar	0.000
+single-day-application-log-heatmap	-hm	TIMING	calculate_statistics	0.002
+single-day-application-log-heatmap	-hm	TIMING	heatmap_statistics	0.000
+single-day-application-log-heatmap	-hm	TIMING	histogram_statistics	0.000
+single-day-application-log-heatmap	-hm	TIMING	normalize_data	0.001
+single-day-application-log-heatmap	-hm	TIMING	total	3.639
+single-day-application-log-heatmap	-hm	MEMORY	rss_peak	30818304
+single-day-application-log-heatmap	-hm	MEMORY	consolidation_clusters	120
+single-day-application-log-heatmap	-hm	MEMORY	consolidation_key_message	120
+single-day-application-log-heatmap	-hm	MEMORY	consolidation_patterns	120
+single-day-application-log-heatmap	-hm	MEMORY	consolidation_unmatched	120
+single-day-application-log-heatmap	-hm	MEMORY	heatmap_data	120
+single-day-application-log-heatmap	-hm	MEMORY	heatmap_data_hl	120
+single-day-application-log-heatmap	-hm	MEMORY	heatmap_raw	120
+single-day-application-log-heatmap	-hm	MEMORY	heatmap_raw_hl	120
+single-day-application-log-heatmap	-hm	MEMORY	histogram_values	576
+single-day-application-log-heatmap	-hm	MEMORY	log_analysis	232
+single-day-application-log-heatmap	-hm	MEMORY	log_messages	818483
+single-day-application-log-heatmap	-hm	MEMORY	log_occurrences	11606
+single-day-application-log-heatmap	-hm	MEMORY	log_sessions	120
+single-day-application-log-heatmap	-hm	MEMORY	log_stats	120
+single-day-application-log-heatmap	-hm	MEMORY	log_threadpools	232
+single-day-application-log-heatmap	-hm	MEMORY	threadpool_activity	762
+single-day-application-log-heatmap	-hm	MEMORY	udm_last_value	120
