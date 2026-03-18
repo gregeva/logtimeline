@@ -26,7 +26,7 @@ cd "$REPO_ROOT"
 
 # Platform-specific modules that should be excluded from cross-platform builds
 UNIX_ONLY_MODULES="Proc::ProcessTable"
-WINDOWS_ONLY_MODULES="Win32::Process::Info"
+WINDOWS_ONLY_MODULES="Win32::Process::Info\|Win32::API"
 
 generate_cpanfile() {
     local exclude_pattern="$1"
