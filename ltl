@@ -2231,8 +2231,9 @@ sub run_consolidation_pass {
     my $gate2_absorbed = 0;
     my $fc_calls = 0;
     my $messages_absorbed = 0;
+    my $rescan_absorbed = 0;
 
-    return (0, 0, $ceiling_skipped, 0, 0, 0, scalar @discovery_candidates, {}, 0, 0) if scalar @discovery_candidates < 2;
+    return (0, 0, $ceiling_skipped, 0, 0, 0, scalar @discovery_candidates, {}, 0, 0, 0) if scalar @discovery_candidates < 2;
 
     # Gate 2 (S3): match discovery candidates against existing compiled patterns
     # Skip keys that entered at the current pattern generation — they already failed S1
@@ -2380,6 +2381,7 @@ sub run_consolidation_pass {
                             $scan_cluster->{match_count}++;
                             $scan_entry->{match_count} = $scan_cluster->{match_count} if $scan_entry;
                             $messages_absorbed++;
+                            $rescan_absorbed++;
                         }
                     } else {
                         push @surviving, $ukey;
@@ -2395,7 +2397,7 @@ sub run_consolidation_pass {
     my @remaining = grep { !$consumed{$_} } @unmatched_keys;
     @$unmatched_ref = @remaining;
 
-    return ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit, $gate2_absorbed, $fc_calls, scalar @gate2_survivors, \%consumed, $s3_tested, $s3_skipped);
+    return ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit, $gate2_absorbed, $fc_calls, scalar @gate2_survivors, \%consumed, $s3_tested, $s3_skipped, $rescan_absorbed);
 }
 
 # Cross-cluster merge: merge overlapping patterns whose canonical forms match each other
@@ -2498,7 +2500,7 @@ sub run_consolidation_checkpoint {
         }
     }
 
-    my ($discovered, $absorbed, $ceiling_skipped, $cap_hit, $g2_absorbed, $fc_calls, $g2_survivors, $consumed_ref, $s3_tested, $s3_skipped) =
+    my ($discovered, $absorbed, $ceiling_skipped, $cap_hit, $g2_absorbed, $fc_calls, $g2_survivors, $consumed_ref, $s3_tested, $s3_skipped, $rescan_absorbed) =
         run_consolidation_pass($cat_gk, \@unmatched, $cp_num);
 
     my $post_count = scalar @unmatched;
@@ -2507,7 +2509,8 @@ sub run_consolidation_checkpoint {
     $consolidation_cat_stats{$cat_gk}{"${pfx}s3_checkpoint"} += $g2_absorbed;
     $consolidation_cat_stats{$cat_gk}{"${pfx}s3_calls"}      += $s3_tested;
     $consolidation_cat_stats{$cat_gk}{"${pfx}s3_skipped"}    += $s3_skipped;
-    $consolidation_cat_stats{$cat_gk}{"${pfx}s4_pairwise"}   += ($absorbed - $g2_absorbed);
+    $consolidation_cat_stats{$cat_gk}{"${pfx}s4_pairwise"}   += ($absorbed - $g2_absorbed - ($rescan_absorbed // 0));
+    $consolidation_cat_stats{$cat_gk}{"${pfx}s4_rescan"}     += ($rescan_absorbed // 0);
     $consolidation_cat_stats{$cat_gk}{"${pfx}fc_calls"}      += $fc_calls;
     $consolidation_cat_stats{$cat_gk}{"${pfx}patterns_discovered"} += $discovered;
     $consolidation_cat_stats{$cat_gk}{"${pfx}patterns_final"} = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
@@ -7460,6 +7463,7 @@ unless( $group_similar_sensitivity eq "none" ) {
             push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d)", $ceiling_filtered, $consolidation_occurrence_ceiling);
             push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{s3_checkpoint} // 0);
             push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{s4_pairwise} // 0);
+            push @verbose_output, sprintf("    S4 Re-scan absorbed:   %d", $s->{s4_rescan} // 0);
             push @verbose_output, sprintf("    S5 Unmatched:          %d", $genuinely_unmatched);
             push @verbose_output, sprintf("    S6 Evicted:            %d", $evicted);
             my $ema_pct = ($s->{absorption_ema} // 0) * 100;
@@ -7473,7 +7477,7 @@ unless( $group_similar_sensitivity eq "none" ) {
                 $s->{cleanup_keys_scanned} // 0, $checkpoints);
 
             # Streaming tracking invariant
-            my $accounted = ($s->{s1_inline} // 0) + $ceiling_filtered + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + $genuinely_unmatched + $evicted;
+            my $accounted = ($s->{s1_inline} // 0) + $ceiling_filtered + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + ($s->{s4_rescan} // 0) + $genuinely_unmatched + $evicted;
             if ($accounted != $keys_seen) {
                 push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
                     $accounted, $keys_seen, $keys_seen - $accounted);
@@ -7483,7 +7487,7 @@ unless( $group_similar_sensitivity eq "none" ) {
             $grand_s1 += ($s->{s1_inline} // 0);
             $grand_s2 += $ceiling_filtered;
             $grand_s3 += ($s->{s3_checkpoint} // 0);
-            $grand_s4 += ($s->{s4_pairwise} // 0);
+            $grand_s4 += ($s->{s4_pairwise} // 0) + ($s->{s4_rescan} // 0);
             $grand_s5 += $genuinely_unmatched;
             $grand_s6 += $evicted;
             $grand_fc += ($s->{fc_calls} // 0);
@@ -7510,11 +7514,12 @@ unless( $group_similar_sensitivity eq "none" ) {
                 push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d)", $fp_ceiling_filtered, $consolidation_final_ceiling);
                 push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{fp_s3_checkpoint} // 0);
                 push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{fp_s4_pairwise} // 0);
+                push @verbose_output, sprintf("    S4 Re-scan absorbed:   %d", $s->{fp_s4_rescan} // 0);
                 push @verbose_output, sprintf("    S5 Unmatched:          %d", $fp_genuinely_unmatched);
                 push @verbose_output, sprintf("    find_candidates calls: %d", $s->{fp_fc_calls} // 0);
 
                 # Final pass tracking invariant (no S6 — eviction disabled)
-                my $fp_accounted = ($s->{fp_s1_inline} // 0) + $fp_ceiling_filtered + ($s->{fp_s3_checkpoint} // 0) + ($s->{fp_s4_pairwise} // 0) + $fp_genuinely_unmatched;
+                my $fp_accounted = ($s->{fp_s1_inline} // 0) + $fp_ceiling_filtered + ($s->{fp_s3_checkpoint} // 0) + ($s->{fp_s4_pairwise} // 0) + ($s->{fp_s4_rescan} // 0) + $fp_genuinely_unmatched;
                 if ($fp_accounted != $fp_keys) {
                     push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
                         $fp_accounted, $fp_keys, $fp_keys - $fp_accounted);
