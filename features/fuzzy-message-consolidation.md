@@ -316,30 +316,178 @@ Additional CLI option names TBD during implementation planning.
 
 ## Processing Flow
 
-### Initialization
-1. If `--group-similar` is specified, initialize per-category n-gram index and canonical pattern list structures
+### Process Flow — Detailed Implementation
 
-### Line Processing (hot path)
-1. Log line arrives, `$message` is extracted as today
-2. `$mask_uuid` processing runs if active (before consolidation)
-3. `$log_key` is built from metadata + `$message` as today
-4. **Pattern match check:** If canonical patterns exist for this category, check `$message` against known compiled patterns
-   - If match found: add stats directly to the matching cluster (cheap regex operation)
-   - If no match: store as new entry in `%log_messages` as today (unconsolidated)
-5. Track unconsolidated unique message count per category
+The consolidation engine operates as a 6-stage pipeline integrated into the log parsing loop. Understanding the exact call sequence is critical — the stages execute in a specific order, and some stages operate on the full batch sequentially (not per-key).
 
-### Consolidation Pass (triggered)
-6. When unconsolidated unique count exceeds trigger threshold:
-   a. Build/update n-gram index for unconsolidated entries in the category
-   b. Score pairwise Dice similarity between candidate clusters (using n-gram candidate narrowing)
-   c. For pairs exceeding similarity threshold: run diff-style character-level alignment to produce mask
-   d. Derive canonical form and compiled regex from mask
-   e. Merge matched entries — aggregate stats, remove original keys, insert canonical key
-   f. **Re-scan pass:** Check remaining unconsolidated messages against newly discovered patterns — absorb additional matches cheaply
-   g. Update n-gram index to reflect merged/removed clusters
-   h. Calculate consolidation yield; adjust trigger threshold for next pass
-   i. Reset unconsolidated count tracking
-7. Continue line processing — subsequent consolidation passes trigger as needed
+#### Overview: Parsing Loop with Inline Consolidation
+
+```
+read_and_process_logs()
+│
+├─ for each log line:
+│    parse line → extract $message, $log_key, $log_level, etc.
+│    $mask_uuid processing (if active, before consolidation)
+│    $log_key constructed from metadata + $message
+│
+│    if $is_new_key AND -g active:
+│    │
+│    │  consolidation_process_key($log_key, $category, $cat_gk, $capped_msg, $stats_source)
+│    │  │
+│    │  ├─ S1: match_consolidation_patterns($category, $grouping_key, $capped_msg)
+│    │  │    Test $capped_msg against %consolidation_patterns{$cat_gk}
+│    │  │    These are compiled regexes from previously discovered patterns
+│    │  │    → MATCH: merge stats into cluster, return 1 (key absorbed)
+│    │  │             Key never enters %log_messages     ──► verbose: "S1 Inline match"
+│    │  │    → NO MATCH: fall through
+│    │  │
+│    │  ├─ Store in unmatched buffer:
+│    │  │    %consolidation_unmatched{$cat_gk}{$log_key} = 1
+│    │  │    %consolidation_key_message{$log_key} = $capped_msg
+│    │  │    Record key's pattern generation number
+│    │  │    Increment category unmatched count
+│    │  │
+│    │  └─ Check trigger: if category unmatched count >= trigger (default 5000):
+│    │       for each cat_gk group in this category with >= 2 unmatched keys:
+│    │         run_consolidation_checkpoint($category, $grouping_key)
+│    │         (see Checkpoint Processing below)
+│    │       Reset category unmatched count = 0
+│    │
+│    if NOT $is_new_key: increment occurrences on existing %log_messages entry (no consolidation)
+│
+├─ after EOF:
+│    EOF checkpoints: run_consolidation_checkpoint() for all remaining
+│    unmatched groups with >= 2 keys
+│
+└─ group_similar_messages()
+     Final pass (if enabled): iterate all remaining %log_messages keys
+     through the same consolidation_process_key() pipeline
+     (see #150 for scalability concerns with this approach)
+```
+
+**Key insight:** S1 inline matching runs for every new key during parsing, but can only match against patterns that already exist in `%consolidation_patterns`. Patterns are created during checkpoint processing (S4). Therefore, S1 provides zero benefit until the first checkpoint completes. All keys in the first batch (up to the trigger threshold) get no S1 matching.
+
+#### Checkpoint Processing — Sequential Stage Execution
+
+When the trigger fires, `run_consolidation_checkpoint()` runs the full batch through stages sequentially. **Each stage processes the entire batch before the next stage begins** — this is NOT a per-key pipeline.
+
+```
+run_consolidation_checkpoint($category, $grouping_key)
+│
+├─ Collect all unmatched keys for this cat_gk (sorted)
+│
+├─ [Streaming only] Fast-path eviction check:
+│    If EMA indicates 0% absorption and checkpoint > 2,
+│    evict all keys immediately, skip expensive processing
+│
+└─ run_consolidation_pass($cat_gk, \@unmatched, $checkpoint_num)
+     │
+     ├─ STAGE S2 — Ceiling Filter (one pass over ALL unmatched keys)
+     │    Split into @ceiling_keys (occurrences >= ceiling)
+     │    and @discovery_candidates (the rest)
+     │    Ceiling keys excluded from discovery    ──► verbose: "S2 Ceiling filter"
+     │
+     ├─ STAGE S3 — Checkpoint Match (one pass over ALL discovery candidates)
+     │    For each candidate:
+     │      if key entered at current pattern generation → SKIP
+     │        (already failed S1 against same patterns)  ──► verbose: "S3 attempts: skipped"
+     │      else → match_consolidation_patterns()
+     │        (test against patterns from PREVIOUS checkpoints)
+     │        → MATCH: absorbed                          ──► verbose: "S3 Checkpoint match"
+     │        → NO MATCH: becomes gate2_survivor
+     │
+     ├─ Build trigram index for gate2_survivors
+     │    (up to trigger-size keys indexed)
+     │
+     ├─ STAGE S4 — Pairwise Discovery (loop over index batch, max 500 keys)
+     │    For each source key:
+     │    │
+     │    ├─ find_consolidation_candidates()             ──► verbose: "find_candidates calls"
+     │    │    Phase 1: discriminative trigram pre-filter (raw trigrams)
+     │    │    Phase 2: Dice verification (UUID-normalized trigrams)
+     │    │    → returns candidate pairs scoring above threshold
+     │    │
+     │    ├─ For best candidate match:
+     │    │    compute_mask() → coalesce_mask()
+     │    │    derive_canonical() → derive_regex()
+     │    │    Validate: both source and candidate match the derived regex
+     │    │    Mark both source + candidate as consumed   ──► verbose: "S4 Pairwise discovery"
+     │    │                                                   (counts the pair source keys)
+     │    │
+     │    ├─ ┌─────────────────────────────────────────┐
+     │    │  │ NEW COMPILED REGEX PATTERN CREATED HERE  │
+     │    │  │ try_consolidation_merge_into_existing()  │
+     │    │  │   → merged into existing? update pattern │
+     │    │  │   → new? push to %consolidation_patterns │
+     │    │  └─────────────────────────────────────────┘
+     │    │                                               ──► verbose: "N patterns" in header
+     │    │
+     │    └─ Interleaved re-scan:
+     │         Match new regex against remaining unmatched keys
+     │         in same partition bucket (cheap regex match)
+     │         → MATCH: consumed, stats merged            ──► verbose: "S4 Re-scan absorbed"
+     │         → NO MATCH: stays in bucket
+     │
+     ├─ Return: ($discovered, $absorbed, ..., $rescan_absorbed)
+     │
+     ├─ Delete consumed keys from %log_messages, trigrams, etc.
+     ├─ Free ngram index (per-checkpoint, rebuilt each time)
+     ├─ Merge overlapping patterns (cross-cluster)
+     ├─ Bump pattern_generation (enables S3 skip optimization)
+     │
+     ├─ [Streaming] Adaptive eviction:
+     │    Update absorption EMA
+     │    Keys exceeding survival threshold → evicted    ──► verbose: "S6 Evicted"
+     │    Remaining keys → survive to next checkpoint    ──► verbose: "S5 Unmatched"
+     │
+     └─ [Final pass] No eviction — all survivors stay
+```
+
+#### Verbose Metric Correlation
+
+The `-V` verbose output maps directly to the stages above. Understanding which metric corresponds to which stage is essential for diagnosing consolidation behavior.
+
+**Per-category section header:**
+```
+--- plain|200: Streaming Phase ---
+  Keys seen:             3324  (1 checkpoints, 28 patterns)
+```
+- `Keys seen` = total unique keys that entered `consolidation_process_key()` for this cat_gk
+- `checkpoints` = number of times `run_consolidation_checkpoint()` fired
+- `patterns` = total compiled regex patterns in `%consolidation_patterns` after all checkpoints
+
+**Stage metrics (cumulative across all checkpoints):**
+```
+  S1 Inline match:       0       ← keys absorbed during PARSING by matching existing patterns
+  S2 Ceiling filter:     172     ← keys excluded from discovery (occurrences >= ceiling)
+  S3 Checkpoint match:   0       ← keys matched at CHECKPOINT TIME against patterns from previous checkpoints
+  S4 Pairwise discovery: 80      ← source keys consumed by expensive Dice/alignment pair matching
+  S4 Re-scan absorbed:   2998    ← keys consumed by cheap regex re-scan after pattern creation
+  S5 Unmatched:          74      ← keys that survived all stages and eviction (truly unique)
+  S6 Evicted:            0       ← keys removed by adaptive eviction (streaming only)
+```
+
+**Tracking invariant:** `S1 + S2 + S3 + S4_pairwise + S4_rescan + S5 + S6 = Keys seen`
+
+**Diagnostic metrics:**
+```
+  find_candidates calls: 185     ← number of Dice similarity searches (expensive)
+  S3 attempts:           0       ← keys tested by S3 (skipped = at current generation, already failed S1)
+  Cleanup keys scanned:  3078    ← keys deleted from structures after checkpoint
+```
+
+**Interpreting the metrics:**
+
+| Observation | Diagnosis |
+|-------------|-----------|
+| S1=0, S4 high | Patterns not available early enough — first checkpoint too late, or only checkpoint at EOF (#162) |
+| S1 high, S4 low | Healthy — patterns discovered early, S1 absorbs most subsequent keys |
+| S3=0, S3 skipped=all | Normal for first checkpoint — all keys at current generation |
+| S3 > 0 | Keys from previous checkpoint matched patterns discovered since they entered |
+| S4 Pairwise high, Re-scan low | Poor pattern generality — patterns match their source pair but few other keys |
+| S4 Pairwise low, Re-scan high | Good pattern generality — each pattern absorbs many keys cheaply |
+| S6 high | High eviction — many keys couldn't be consolidated (genuinely diverse data) |
+| find_candidates >> S4 Pairwise | Many Dice searches yielded no viable pairs (diverse or threshold too high) |
 
 ### Post-Processing
 8. `calculate_all_statistics()` operates on the consolidated entries as normal — no awareness of consolidation needed
