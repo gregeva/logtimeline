@@ -2400,7 +2400,9 @@ sub run_consolidation_pass {
     return ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit, $gate2_absorbed, $fc_calls, scalar @gate2_survivors, \%consumed, $s3_tested, $s3_skipped, $rescan_absorbed);
 }
 
-# Cross-cluster merge: merge overlapping patterns whose canonical forms match each other
+# Cross-cluster merge: merge overlapping patterns where a more general pattern's regex
+# matches a more specific pattern's canonical form. The more general pattern absorbs
+# the more specific one(s), merging all accumulated statistics.
 sub merge_consolidation_overlapping_patterns {
     my ($cat_gk) = @_;
     return 0 unless exists $consolidation_patterns{$cat_gk};
@@ -2410,27 +2412,50 @@ sub merge_consolidation_overlapping_patterns {
     my $merges = 0;
     my %removed;
 
-    @patterns = sort { ($consolidation_clusters{$cat_gk}{$b->{canonical}}{match_count} // 0) <=> ($consolidation_clusters{$cat_gk}{$a->{canonical}}{match_count} // 0) } @patterns;
-
     for my $i (0 .. $#patterns) {
         next if $removed{$i};
-        my $parent = $patterns[$i];
-        my $parent_cluster = $consolidation_clusters{$cat_gk}{$parent->{canonical}};
-        next unless $parent_cluster;
+        my $pattern_a = $patterns[$i];
+        my $cluster_a = $consolidation_clusters{$cat_gk}{$pattern_a->{canonical}};
+        next unless $cluster_a;
 
         for my $j ($i + 1 .. $#patterns) {
             next if $removed{$j};
-            my $child = $patterns[$j];
-            my $child_cluster = $consolidation_clusters{$cat_gk}{$child->{canonical}};
-            next unless $child_cluster;
+            my $pattern_b = $patterns[$j];
+            my $cluster_b = $consolidation_clusters{$cat_gk}{$pattern_b->{canonical}};
+            next unless $cluster_b;
 
-            if ($child->{canonical} =~ $parent->{pattern}) {
-                merge_consolidation_stats($parent_cluster, $child_cluster);
-                $parent_cluster->{match_count} += $child_cluster->{match_count};
-                delete $consolidation_clusters{$cat_gk}{$child->{canonical}};
-                $removed{$j} = 1;
-                $merges++;
+            # Test both directions: which pattern's regex matches the other's canonical?
+            # The pattern whose regex matches is more general and absorbs the other.
+            my ($general, $general_cluster, $general_idx, $specific, $specific_cluster, $specific_idx);
+
+            if ($pattern_a->{canonical} =~ $pattern_b->{pattern}) {
+                # B's regex matches A's canonical — B is more general, absorbs A
+                ($general, $general_cluster, $general_idx) = ($pattern_b, $cluster_b, $j);
+                ($specific, $specific_cluster, $specific_idx) = ($pattern_a, $cluster_a, $i);
+            } elsif ($pattern_b->{canonical} =~ $pattern_a->{pattern}) {
+                # A's regex matches B's canonical — A is more general, absorbs B
+                ($general, $general_cluster, $general_idx) = ($pattern_a, $cluster_a, $i);
+                ($specific, $specific_cluster, $specific_idx) = ($pattern_b, $cluster_b, $j);
+            } else {
+                next;  # No subsumption in either direction
             }
+
+            if ($ENV{LTL_MERGE_DEBUG}) {
+                printf STDERR "[MERGE_DEBUG] %s absorbs %s (occ %d + %d)\n",
+                    substr($general->{canonical}, 0, 80),
+                    substr($specific->{canonical}, 0, 80),
+                    $general_cluster->{occurrences} // 0,
+                    $specific_cluster->{occurrences} // 0;
+            }
+
+            merge_consolidation_stats($general_cluster, $specific_cluster);
+            $general_cluster->{match_count} += $specific_cluster->{match_count};
+            delete $consolidation_clusters{$cat_gk}{$specific->{canonical}};
+            $removed{$specific_idx} = 1;
+            $merges++;
+
+            # If A was absorbed (specific_idx == i), stop checking A against further patterns
+            last if $specific_idx == $i;
         }
     }
 
@@ -2533,7 +2558,8 @@ sub run_consolidation_checkpoint {
 
     # Cross-cluster merge and pattern generation bump
     if ($discovered > 0) {
-        merge_consolidation_overlapping_patterns($cat_gk);
+        my $cross_merges = merge_consolidation_overlapping_patterns($cat_gk);
+        $consolidation_cat_stats{$cat_gk}{"${pfx}cross_cluster_merges"} += $cross_merges;
         $consolidation_cat_stats{$cat_gk}{"${pfx}patterns_final"} = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
         $consolidation_pattern_generation{$cat_gk} = ($consolidation_pattern_generation{$cat_gk} // 0) + 1;
     }
@@ -7473,6 +7499,7 @@ unless( $group_similar_sensitivity eq "none" ) {
             push @verbose_output, sprintf("    S3 attempts:           %d  (skipped: %d, match rate: %.1f%%)",
                 $s->{s3_calls} // 0, $s->{s3_skipped} // 0,
                 ($s->{s3_calls} // 0) > 0 ? (($s->{s3_checkpoint} // 0) / ($s->{s3_calls} // 1)) * 100 : 0);
+            push @verbose_output, sprintf("    Cross-cluster merges:  %d", $s->{cross_cluster_merges} // 0);
             push @verbose_output, sprintf("    Cleanup keys scanned:  %d  (cumulative across %d checkpoints)",
                 $s->{cleanup_keys_scanned} // 0, $checkpoints);
 
@@ -7517,6 +7544,7 @@ unless( $group_similar_sensitivity eq "none" ) {
                 push @verbose_output, sprintf("    S4 Re-scan absorbed:   %d", $s->{fp_s4_rescan} // 0);
                 push @verbose_output, sprintf("    S5 Unmatched:          %d", $fp_genuinely_unmatched);
                 push @verbose_output, sprintf("    find_candidates calls: %d", $s->{fp_fc_calls} // 0);
+                push @verbose_output, sprintf("    Cross-cluster merges:  %d", $s->{fp_cross_cluster_merges} // 0);
 
                 # Final pass tracking invariant (no S6 — eviction disabled)
                 my $fp_accounted = ($s->{fp_s1_inline} // 0) + $fp_ceiling_filtered + ($s->{fp_s3_checkpoint} // 0) + ($s->{fp_s4_pairwise} // 0) + ($s->{fp_s4_rescan} // 0) + $fp_genuinely_unmatched;
