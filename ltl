@@ -1617,7 +1617,7 @@ sub group_similar_messages {
             next unless $cluster->{occurrences} > 0;
 
             # Canonical form is already the full log_key (includes [level] [thread] [object] prefix)
-            my $canonical_log_key = substr($canonical, 0, ($write_messages_to_csv == 1 ? 350 : $max_log_message_length));
+            my $canonical_log_key = substr($canonical, 0, (($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length));
 
             # Create the %log_messages entry with all merged stats
             $log_messages{$category}{$canonical_log_key} = {
@@ -3871,13 +3871,13 @@ sub read_and_process_logs {
 
                     if( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
                         # truncate the log message key to either the screen width or hardcoded value if writing to output to CSV file
-                        $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
+                        $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
                     } elsif( defined( $object ) ) {
-                        $log_key = substr("[$log_level] [$truncated_object] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
+                        $log_key = substr("[$log_level] [$truncated_object] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
                     } elsif( defined( $threadname ) ) {
-                        $log_key = substr("[$log_level] [$truncated_thread] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
+                        $log_key = substr("[$log_level] [$truncated_thread] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
                     } else {
-                        $log_key = substr("[$log_level] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
+                        $log_key = substr("[$log_level] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
                     }
 
                     ## CONSOLIDATION: S1 INLINE MATCH (Issue #96) ##
