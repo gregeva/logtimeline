@@ -3196,15 +3196,6 @@ sub adapt_to_command_line_options {
     }
 
     $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
-    #$bucket_size_seconds = $print_seconds ? $time_bucket_size : $time_bucket_size * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
-    if( $print_seconds ) {
-        $bucket_size_seconds = $time_bucket_size;
-    } elsif( $print_milliseconds ) {
-        $bucket_size_seconds = $time_bucket_size / 1000;
-    } else {
-        $bucket_size_seconds = $time_bucket_size * 60;
-    }
-
     my %argv_hash = map { $_ => 1 } @ARGV;
     my $skip_next = 0;
     foreach my $arg (@ORIGINAL_ARGV) {
@@ -3274,21 +3265,33 @@ sub adapt_to_terminal_settings {
     $terminal_height //= 24;                                            # Default to 24 if terminal height cannot be determined
 
     # Auto-adjust the bucket size based on the terminal height (larger terminal can handle more rows)
-    if( $terminal_height <= 30 ) {
-        $time_bucket_size = 120;
-    } elsif( $terminal_height <= 45 ) {
-        $time_bucket_size = 90;
-    } elsif( $terminal_height <= 65 ) {
-        $time_bucket_size = 60;
-    } elsif( $terminal_height <= 85 ) {
-        $time_bucket_size = 30;
-    } elsif( $terminal_height > 85 ) {
-        $time_bucket_size = 10;
-    } else {
-        $time_bucket_size = 60;
+    # Skip if already set by command-line option (-bs)
+    if( !$time_bucket_size ) {
+        if( $terminal_height <= 30 ) {
+            $time_bucket_size = 120;
+        } elsif( $terminal_height <= 45 ) {
+            $time_bucket_size = 90;
+        } elsif( $terminal_height <= 65 ) {
+            $time_bucket_size = 60;
+        } elsif( $terminal_height <= 85 ) {
+            $time_bucket_size = 30;
+        } elsif( $terminal_height > 85 ) {
+            $time_bucket_size = 10;
+        } else {
+            $time_bucket_size = 60;
+        }
     }
 
-    $max_log_message_length = $terminal_width;		# this is the max that we can print without wrapping, depends on the summary table width, and terminal width 
+    # Convert time_bucket_size to seconds based on the time precision mode
+    if( $print_seconds ) {
+        $bucket_size_seconds = $time_bucket_size;
+    } elsif( $print_milliseconds ) {
+        $bucket_size_seconds = $time_bucket_size / 1000;
+    } else {
+        $bucket_size_seconds = $time_bucket_size * 60;
+    }
+
+    $max_log_message_length = $terminal_width;		# this is the max that we can print without wrapping, depends on the summary table width, and terminal width
     return;
 }
 
@@ -7374,8 +7377,8 @@ sub print_threadpool_summary {
 ## MAIN ##
 
 print_title();
-adapt_to_terminal_settings(); 
 adapt_to_command_line_options();
+adapt_to_terminal_settings();
 
 # READ AND PROCESS LOGS #
 $start_time = [gettimeofday];
