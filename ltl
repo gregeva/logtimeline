@@ -2611,6 +2611,9 @@ sub process_final_pass_window {
         delete $log_messages{$category}{$key};
     }
 
+    # Capture transient structure HWMs before they're freed (#171)
+    measure_memory_structures();
+
     # Cleanup: free window working structures
     for my $log_key (@key_list) {
         delete $consolidation_key_message{$log_key};
@@ -2751,6 +2754,9 @@ sub run_consolidation_checkpoint {
     my ($discovered, $absorbed, $ceiling_skipped, $cap_hit, $g2_absorbed, $fc_calls, $g2_survivors, $consumed_ref, $s3_tested, $s3_skipped, $rescan_absorbed) =
         run_consolidation_pass($cat_gk, \@unmatched, $cp_num);
 
+    # Capture transient structure HWMs before they're freed (#171)
+    measure_memory_structures();
+
     my $post_count = scalar @unmatched;
 
     # Update per-category accumulators (phase-appropriate counters)
@@ -2872,6 +2878,10 @@ sub measure_memory_structures {
         consolidation_patterns => Devel::Size::total_size(\%consolidation_patterns),
         consolidation_key_message => Devel::Size::total_size(\%consolidation_key_message),
         consolidation_unmatched => Devel::Size::total_size(\%consolidation_unmatched),
+        consolidation_ngram_index => Devel::Size::total_size(\%consolidation_ngram_index),
+        consolidation_posting_size => Devel::Size::total_size(\%consolidation_posting_size),
+        consolidation_key_trigrams => Devel::Size::total_size(\%consolidation_key_trigrams),
+        consolidation_key_trigrams_norm => Devel::Size::total_size(\%consolidation_key_trigrams_norm),
     );
 
     # Update high-water marks (only if current value is larger)
@@ -6216,6 +6226,9 @@ sub print_verbose_output {
         printf "MEMORY_FINAL\tconsolidation_patterns\t%d\n", Devel::Size::total_size(\%consolidation_patterns);
         printf "MEMORY_FINAL\tconsolidation_key_message\t%d\n", Devel::Size::total_size(\%consolidation_key_message);
         printf "MEMORY_FINAL\tconsolidation_unmatched\t%d\n", Devel::Size::total_size(\%consolidation_unmatched);
+        printf "MEMORY_FINAL\tconsolidation_ngram_index\t%d\n", Devel::Size::total_size(\%consolidation_ngram_index);
+        printf "MEMORY_FINAL\tconsolidation_key_trigrams\t%d\n", Devel::Size::total_size(\%consolidation_key_trigrams);
+        printf "MEMORY_FINAL\tconsolidation_key_trigrams_norm\t%d\n", Devel::Size::total_size(\%consolidation_key_trigrams_norm);
     }
 
     # Hash entry counts for key structures
