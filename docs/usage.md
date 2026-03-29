@@ -84,7 +84,7 @@ These options control which metrics logtimeline extracts and computes during pro
 | `-os, --omit-stats` | Hide the statistics columns (min/avg/max/stddev/etc.) |
 | `-oe, --omit-empty` | Skip time buckets that contain zero log entries |
 | `-or, --omit-rate` | Hide the error/message rate from the legend |
-| `-od, --omit-durations` | Suppress duration extraction and related columns |
+| `-od, --omit-durations` | Suppress duration extraction and related columns (significantly reduces memory and processing time on large files) |
 | `-ob, --omit-bytes` | Suppress byte-size extraction and related columns |
 | `-oc, --omit-count` | Suppress count extraction and related columns |
 | `-ic, --include-count` | Add a count column to the output (off by default) |
@@ -112,19 +112,13 @@ Consolidated entries are marked with `~` in the summary table output. All statis
 | `-uuid, --mask-uuid` | Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to `-g` for UUID-only variation) |
 | `-iqs, --include-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
 | `-is, --include-session` | Keep session/user IDs when grouping messages, so each session is tracked separately |
-| `--no-final-pass` | Skip the final consolidation pass that re-processes high-frequency keys against discovered patterns |
-| `--consolidate-full-key` | Score similarity on the full log key including metadata prefix (level, thread, object). Default: message body only with metadata as exact-match grouping keys. |
-| `--consolidation-trigger <N>` | Unmatched keys before triggering a checkpoint (default: 5000) |
-| `--consolidation-ceiling <N>` | Max occurrences for a key to be eligible for pattern discovery (default: 3) |
-| `--consolidation-max-patterns <N>` | Hard cap on patterns per grouping key; 0 = unlimited (default: 0) |
-| `--final-threshold <N>` | Similarity threshold for the final pass (default: 85) |
-| `--final-ceiling <N>` | Occurrence ceiling for the final pass (default: 1000000) |
+| `-gc, --group-ceiling <N>` | Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000) |
 
 ```bash
 # Consolidate similar messages at 85% similarity threshold
 ltl -g access.log
-# Raise the occurrence ceiling to include higher-frequency keys in pattern discovery
-ltl -g --consolidation-ceiling 10 access.log
+# Don't consolidate messages with more than 5000 occurrences
+ltl -g -gc 5000 access.log
 # Consolidate but keep query strings and sessions as separate entries
 ltl -g 80 -iqs -is access.log
 ```
