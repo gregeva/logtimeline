@@ -5978,7 +5978,7 @@ sub print_verbose_output {
     my $log_messages_entries = 0;
     for my $cat (keys %log_messages) { $log_messages_entries += scalar keys %{$log_messages{$cat}}; }
     printf "COUNTS\tlog_messages_entries\t%d\n", $log_messages_entries;
-    printf "COUNTS\tlog_occurrences_buckets\t%d\n", scalar keys %log_occurrences;
+    printf "COUNTS\tlog_occurrences_entries\t%d\n", scalar keys %log_occurrences;
     printf "COUNTS\tlog_stats_entries\t%d\n", scalar keys %log_stats;
 
     # Terminal and bucket settings (for benchmark reproducibility)
