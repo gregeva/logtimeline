@@ -112,15 +112,23 @@ Batch consolidation runs when unique unmatched message count within a category e
 This is computationally expensive but only runs when discovering *new* patterns.
 
 **Phase 2 — Pattern Matching (cheap, continuous):**
-Once canonical patterns exist, incoming messages are checked against known compiled patterns at line processing time. This is a simple regex match, not a pairwise similarity comparison — fundamentally different cost from discovery. Messages matching a known pattern are immediately added to the existing cluster.
+Once canonical patterns exist, incoming messages are checked against known compiled patterns at line processing time (S1 inline match). This is a simple regex match, not a pairwise similarity comparison — fundamentally different cost from discovery. Messages matching a known pattern are immediately added to the existing cluster.
+
+**Implementation note:** S1 can only match patterns that have already been discovered by previous checkpoints. The first batch of keys (up to the trigger threshold) always receives zero S1 benefit because no patterns exist yet. S1 effectiveness grows with the number of checkpoints — on 100K-line access logs with 2 checkpoints, S1 absorbs 72.8% of keys; on power-law data with 4 checkpoints, S1 absorbs 98.4%. See "Process Flow — Detailed Implementation" for the exact execution sequence.
+
+**S1 vs S3 — same operation, different timing:** Both S1 and S3 call `match_consolidation_patterns()` to test a key against compiled regexes. The difference is *when* they run:
+- **S1** runs during **parsing**, for each new key as it arrives. It tests against patterns that exist at that moment (from all previous checkpoints).
+- **S3** runs during **checkpoint processing**, for keys already in the unmatched buffer. It tests keys from *previous* pattern generations against patterns discovered since those keys entered. Keys at the current generation are skipped (they already failed S1 against the same patterns).
+
+S3 bridges the gap for keys that entered the unmatched buffer before new patterns were discovered. On the first checkpoint, S3 skips all keys (all at generation 0) because no prior patterns exist. S3 becomes relevant starting from checkpoint 2 onwards.
 
 **Rationale:** The key insight is that pattern discovery and pattern matching are fundamentally different operations. Discovery requires expensive pairwise comparison and alignment. Matching against a known compiled pattern is cheap. As patterns accumulate, fewer incoming messages need the expensive discovery path — the system gets faster as it learns.
 
 **Multi-pass behavior:** After a consolidation pass discovers patterns and reduces unique count, accumulation continues. If unmatched unique count exceeds threshold again, another discovery pass runs. Each pass may discover new similarities as the dataset grows — patterns that were initially constant (e.g., a single user name) become variable when new data introduces variation.
 
-**Adaptive trigger threshold:** The consolidation trigger adapts based on consolidation yield — the percentage of messages consolidated in each pass. High yield (data is highly repetitive) raises the trigger, allowing more to accumulate since known patterns catch most incoming messages via cheap matching. Low yield (data is genuinely diverse) lowers the trigger, running discovery more frequently to catch new patterns before the unmatched set grows too large. Default starting threshold is 5000, configurable as a hidden/debug option for tuning during prototyping.
+**Adaptive trigger threshold (design — not yet implemented):** The consolidation trigger could adapt based on consolidation yield — the percentage of messages consolidated in each pass. High yield (data is highly repetitive) would raise the trigger, allowing more to accumulate since known patterns catch most incoming messages via cheap matching. Low yield (data is genuinely diverse) would lower the trigger, running discovery more frequently to catch new patterns before the unmatched set grows too large. **Current implementation:** Fixed trigger of 5000, configurable via `--consolidation-trigger`.
 
-**Consolidation focus:** Multi-pass consolidation may prioritize messages with low occurrence counts (e.g., single-occurrence entries) in early passes, as these represent pure uniqueness that is most likely to benefit from grouping. Messages with higher occurrence counts that haven't matched any pattern are more likely to be genuinely distinct. This priority is configurable — a threshold for minimum occurrences below which consolidation is attempted more aggressively.
+**Consolidation focus (design — not yet implemented):** Multi-pass consolidation could prioritize messages with low occurrence counts (e.g., single-occurrence entries) in early passes, as these represent pure uniqueness that is most likely to benefit from grouping. Messages with higher occurrence counts that haven't matched any pattern are more likely to be genuinely distinct.
 
 ### DD-03: One-Way Generalization
 
@@ -163,6 +171,8 @@ This separation means that `*` or `#` appearing in the original message text cau
 **Decision:** N-gram indexing operates on a truncated message, capped at a few hundred characters.
 
 **Rationale:** Log lines can be arbitrarily long (stack traces, serialized objects, large payloads). Indexing beyond the meaningful prefix wastes memory and CPU without improving similarity detection. The existing `$log_key` truncation provides a natural model — similarity detection operates on the same truncated form used for display.
+
+**WARNING — Truncation breaks UUID normalization (#158):** The cap must be large enough to preserve variable content (UUIDs, session IDs, query strings) that appears at the end of long messages. UUID-normalized Dice scoring (`$uuid_re`) requires the full 8-4-4-4-12 UUID pattern (36 chars). If the log key is truncated mid-UUID, normalization silently fails and the consolidation engine treats each key as unique — causing catastrophic performance regression (14s → 0.14s on 10K lines when fixed). The current cap is 350 chars when `-g` is active. If log formats with variable content beyond 350 chars are encountered, this cap will need to increase or the adaptive cap from IQ-02 must be implemented.
 
 ### DD-07: Stats Merging at Consolidation Time
 
@@ -314,30 +324,178 @@ Additional CLI option names TBD during implementation planning.
 
 ## Processing Flow
 
-### Initialization
-1. If `--group-similar` is specified, initialize per-category n-gram index and canonical pattern list structures
+### Process Flow — Detailed Implementation
 
-### Line Processing (hot path)
-1. Log line arrives, `$message` is extracted as today
-2. `$mask_uuid` processing runs if active (before consolidation)
-3. `$log_key` is built from metadata + `$message` as today
-4. **Pattern match check:** If canonical patterns exist for this category, check `$message` against known compiled patterns
-   - If match found: add stats directly to the matching cluster (cheap regex operation)
-   - If no match: store as new entry in `%log_messages` as today (unconsolidated)
-5. Track unconsolidated unique message count per category
+The consolidation engine operates as a 6-stage pipeline integrated into the log parsing loop. Understanding the exact call sequence is critical — the stages execute in a specific order, and some stages operate on the full batch sequentially (not per-key).
 
-### Consolidation Pass (triggered)
-6. When unconsolidated unique count exceeds trigger threshold:
-   a. Build/update n-gram index for unconsolidated entries in the category
-   b. Score pairwise Dice similarity between candidate clusters (using n-gram candidate narrowing)
-   c. For pairs exceeding similarity threshold: run diff-style character-level alignment to produce mask
-   d. Derive canonical form and compiled regex from mask
-   e. Merge matched entries — aggregate stats, remove original keys, insert canonical key
-   f. **Re-scan pass:** Check remaining unconsolidated messages against newly discovered patterns — absorb additional matches cheaply
-   g. Update n-gram index to reflect merged/removed clusters
-   h. Calculate consolidation yield; adjust trigger threshold for next pass
-   i. Reset unconsolidated count tracking
-7. Continue line processing — subsequent consolidation passes trigger as needed
+#### Overview: Parsing Loop with Inline Consolidation
+
+```
+read_and_process_logs()
+│
+├─ for each log line:
+│    parse line → extract $message, $log_key, $log_level, etc.
+│    $mask_uuid processing (if active, before consolidation)
+│    $log_key constructed from metadata + $message
+│
+│    if $is_new_key AND -g active:
+│    │
+│    │  consolidation_process_key($log_key, $category, $cat_gk, $capped_msg, $stats_source)
+│    │  │
+│    │  ├─ S1: match_consolidation_patterns($category, $grouping_key, $capped_msg)
+│    │  │    Test $capped_msg against %consolidation_patterns{$cat_gk}
+│    │  │    These are compiled regexes from previously discovered patterns
+│    │  │    → MATCH: merge stats into cluster, return 1 (key absorbed)
+│    │  │             Key never enters %log_messages     ──► verbose: "S1 Inline match"
+│    │  │    → NO MATCH: fall through
+│    │  │
+│    │  ├─ Store in unmatched buffer:
+│    │  │    %consolidation_unmatched{$cat_gk}{$log_key} = 1
+│    │  │    %consolidation_key_message{$log_key} = $capped_msg
+│    │  │    Record key's pattern generation number
+│    │  │    Increment category unmatched count
+│    │  │
+│    │  └─ Check trigger: if category unmatched count >= trigger (default 5000):
+│    │       for each cat_gk group in this category with >= 2 unmatched keys:
+│    │         run_consolidation_checkpoint($category, $grouping_key)
+│    │         (see Checkpoint Processing below)
+│    │       Reset category unmatched count = 0
+│    │
+│    if NOT $is_new_key: increment occurrences on existing %log_messages entry (no consolidation)
+│
+├─ after EOF:
+│    EOF checkpoints: run_consolidation_checkpoint() for all remaining
+│    unmatched groups with >= 2 keys
+│
+└─ group_similar_messages()
+     Final pass (if enabled): iterate all remaining %log_messages keys
+     through the same consolidation_process_key() pipeline
+     (see #150 for scalability concerns with this approach)
+```
+
+**Key insight:** S1 inline matching runs for every new key during parsing, but can only match against patterns that already exist in `%consolidation_patterns`. Patterns are created during checkpoint processing (S4). Therefore, S1 provides zero benefit until the first checkpoint completes. All keys in the first batch (up to the trigger threshold) get no S1 matching.
+
+#### Checkpoint Processing — Sequential Stage Execution
+
+When the trigger fires, `run_consolidation_checkpoint()` runs the full batch through stages sequentially. **Each stage processes the entire batch before the next stage begins** — this is NOT a per-key pipeline.
+
+```
+run_consolidation_checkpoint($category, $grouping_key)
+│
+├─ Collect all unmatched keys for this cat_gk (sorted)
+│
+├─ [Streaming only] Fast-path eviction check:
+│    If EMA indicates 0% absorption and checkpoint > 2,
+│    evict all keys immediately, skip expensive processing
+│
+└─ run_consolidation_pass($cat_gk, \@unmatched, $checkpoint_num)
+     │
+     ├─ STAGE S2 — Ceiling Filter (one pass over ALL unmatched keys)
+     │    Split into @ceiling_keys (occurrences >= ceiling)
+     │    and @discovery_candidates (the rest)
+     │    Ceiling keys excluded from discovery    ──► verbose: "S2 Ceiling filter"
+     │
+     ├─ STAGE S3 — Checkpoint Match (one pass over ALL discovery candidates)
+     │    For each candidate:
+     │      if key entered at current pattern generation → SKIP
+     │        (already failed S1 against same patterns)  ──► verbose: "S3 attempts: skipped"
+     │      else → match_consolidation_patterns()
+     │        (test against patterns from PREVIOUS checkpoints)
+     │        → MATCH: absorbed                          ──► verbose: "S3 Checkpoint match"
+     │        → NO MATCH: becomes gate2_survivor
+     │
+     ├─ Build trigram index for gate2_survivors
+     │    (up to trigger-size keys indexed)
+     │
+     ├─ STAGE S4 — Pairwise Discovery (loop over index batch, max 500 keys)
+     │    For each source key:
+     │    │
+     │    ├─ find_consolidation_candidates()             ──► verbose: "find_candidates calls"
+     │    │    Phase 1: discriminative trigram pre-filter (raw trigrams)
+     │    │    Phase 2: Dice verification (UUID-normalized trigrams)
+     │    │    → returns candidate pairs scoring above threshold
+     │    │
+     │    ├─ For best candidate match:
+     │    │    compute_mask() → coalesce_mask()
+     │    │    derive_canonical() → derive_regex()
+     │    │    Validate: both source and candidate match the derived regex
+     │    │    Mark both source + candidate as consumed   ──► verbose: "S4 Pairwise discovery"
+     │    │                                                   (counts the pair source keys)
+     │    │
+     │    ├─ ┌─────────────────────────────────────────┐
+     │    │  │ NEW COMPILED REGEX PATTERN CREATED HERE  │
+     │    │  │ try_consolidation_merge_into_existing()  │
+     │    │  │   → merged into existing? update pattern │
+     │    │  │   → new? push to %consolidation_patterns │
+     │    │  └─────────────────────────────────────────┘
+     │    │                                               ──► verbose: "N patterns" in header
+     │    │
+     │    └─ Interleaved re-scan:
+     │         Match new regex against remaining unmatched keys
+     │         in same partition bucket (cheap regex match)
+     │         → MATCH: consumed, stats merged            ──► verbose: "S4 Re-scan absorbed"
+     │         → NO MATCH: stays in bucket
+     │
+     ├─ Return: ($discovered, $absorbed, ..., $rescan_absorbed)
+     │
+     ├─ Delete consumed keys from %log_messages, trigrams, etc.
+     ├─ Free ngram index (per-checkpoint, rebuilt each time)
+     ├─ Merge overlapping patterns (cross-cluster)
+     ├─ Bump pattern_generation (enables S3 skip optimization)
+     │
+     ├─ [Streaming] Adaptive eviction:
+     │    Update absorption EMA
+     │    Keys exceeding survival threshold → evicted    ──► verbose: "S6 Evicted"
+     │    Remaining keys → survive to next checkpoint    ──► verbose: "S5 Unmatched"
+     │
+     └─ [Final pass] No eviction — all survivors stay
+```
+
+#### Verbose Metric Correlation
+
+The `-V` verbose output maps directly to the stages above. Understanding which metric corresponds to which stage is essential for diagnosing consolidation behavior.
+
+**Per-category section header:**
+```
+--- plain|200: Streaming Phase ---
+  Keys seen:             3324  (1 checkpoints, 28 patterns)
+```
+- `Keys seen` = total unique keys that entered `consolidation_process_key()` for this cat_gk
+- `checkpoints` = number of times `run_consolidation_checkpoint()` fired
+- `patterns` = total compiled regex patterns in `%consolidation_patterns` after all checkpoints
+
+**Stage metrics (cumulative across all checkpoints):**
+```
+  S1 Inline match:       0       ← keys absorbed during PARSING by matching existing patterns
+  S2 Ceiling filter:     172     ← keys excluded from discovery (occurrences >= ceiling)
+  S3 Checkpoint match:   0       ← keys matched at CHECKPOINT TIME against patterns from previous checkpoints
+  S4 Pairwise discovery: 80      ← source keys consumed by expensive Dice/alignment pair matching
+  S4 Re-scan absorbed:   2998    ← keys consumed by cheap regex re-scan after pattern creation
+  S5 Unmatched:          74      ← keys that survived all stages and eviction (truly unique)
+  S6 Evicted:            0       ← keys removed by adaptive eviction (streaming only)
+```
+
+**Tracking invariant:** `S1 + S2 + S3 + S4_pairwise + S4_rescan + S5 + S6 = Keys seen`
+
+**Diagnostic metrics:**
+```
+  find_candidates calls: 185     ← number of Dice similarity searches (expensive)
+  S3 attempts:           0       ← keys tested by S3 (skipped = at current generation, already failed S1)
+  Cleanup keys scanned:  3078    ← keys deleted from structures after checkpoint
+```
+
+**Interpreting the metrics:**
+
+| Observation | Diagnosis |
+|-------------|-----------|
+| S1=0, S4 high | Patterns not available early enough — first checkpoint too late, or only checkpoint at EOF (#162) |
+| S1 high, S4 low | Healthy — patterns discovered early, S1 absorbs most subsequent keys |
+| S3=0, S3 skipped=all | Normal for first checkpoint — all keys at current generation |
+| S3 > 0 | Keys from previous checkpoint matched patterns discovered since they entered |
+| S4 Pairwise high, Re-scan low | Poor pattern generality — patterns match their source pair but few other keys |
+| S4 Pairwise low, Re-scan high | Good pattern generality — each pattern absorbs many keys cheaply |
+| S6 high | High eviction — many keys couldn't be consolidated (genuinely diverse data) |
+| find_candidates >> S4 Pairwise | Many Dice searches yielded no viable pairs (diverse or threshold too high) |
 
 ### Post-Processing
 8. `calculate_all_statistics()` operates on the consolidated entries as normal — no awareness of consolidation needed
@@ -1163,6 +1321,8 @@ The core algorithms are sound and proven:
 
 34. **The final pass must use the same pipeline architecture as streaming.** The original final pass (PF-12) was a separate mini-pipeline with its own inline pairwise discovery — it bypassed S1 matching, skipped checkpoint batching, and missed all keys not in `%consolidation_unmatched`. The fix (#137) extracts `consolidation_process_key()` as a shared subroutine and has the final pass iterate sorted `%log_messages` keys through the same S1→checkpoint pipeline. Sorting groups similar messages together for better S3/S4 checkpoint yield. Eviction is disabled during the final pass (bounded set, last opportunity to consolidate). Separate `fp_*` counters track final pass work independently from streaming. (#137)
 
+35. **Log key truncation silently breaks UUID normalization.** When `$log_key` is truncated before the consolidation engine sees it, UUIDs at the end of long messages get cut mid-pattern. `$uuid_re` requires the full 8-4-4-4-12 format (36 chars) — a partial UUID doesn't match, so UUID-normalized Dice scoring silently falls back to raw trigrams, and the UUID variation drags scores below threshold. The failure is invisible: no error, no warning, just thousands of keys that should consolidate but don't, causing 100× performance regression. The fix (#158) uses a 350-char cap when `-g` is active instead of terminal width. **This remains a latent risk:** any log format with variable content beyond 350 chars will hit the same problem. The adaptive cap designed in IQ-02 would address this fully but is not yet implemented.
+
 ### Outstanding Decisions
 
 1. ~~**Acceptable memory overhead**~~ Resolved — on large files (the real use case), the prototype uses LESS memory than ltl: 151 MB vs 256 MB on 3.3 GB access logs. Overhead only applies to small files where trigram cost exceeds S1 savings. (PF-24)
@@ -1204,6 +1364,8 @@ The following questions must be addressed before integrating the prototype into 
 
 **Key insight:** Consolidation should operate on `$message` only, not the full `$log_key`. The metadata fields (`$log_level`, `$truncated_thread`, `$truncated_object`, and `$session` when `--include-session` is active) serve as an **exact-match grouping key** — two messages are only consolidation candidates if all their metadata fields match. Similarity scoring (trigrams, Dice, alignment) applies only to the `$message` portion.
 
+**Implementation note (v0.14.4):** The current implementation passes `$capped_msg = substr($log_key, 0, 350)` to the consolidation engine, which includes the `[$log_level]` prefix. The grouping key (`$cat_gk = "$category|$log_level"`) ensures keys are only compared within the same level, so the prefix doesn't cause cross-level false matches. However, the prefix does consume ~6 chars of the 350-char cap and adds prefix trigrams to the index. For access logs where the grouping key is short (`[200]`), this is negligible. For ThingWorx logs with longer metadata prefixes, this could reduce the effective message content available for similarity scoring.
+
 **Reasoning — prefix domination on short messages:** When the full `$log_key` is used for Dice scoring, the ~50-char metadata prefix dominates the trigram set. On messages with short bodies (< ~20 chars), cross-level pairs score above 80% and would be incorrectly merged. Tested examples:
 - `[WARN] ... SUCCEEDED - Foo` vs `[ERROR] ... SUCCEEDED - Foo` → Dice 91.5% (incorrect merge)
 - `[WARN] ... Done` vs `[ERROR] ... Done` → Dice 89.7% (incorrect merge)
@@ -1223,12 +1385,16 @@ The following questions must be addressed before integrating the prototype into 
 
 **Decision:** The consolidation engine receives `$message` directly (per IQ-01), not the full `$log_key`. This eliminates the prototype's key construction differences and shortens the indexed text by ~50 chars (the metadata prefix).
 
-**Adaptive consolidation cap:** The cap on `$message` length for trigram indexing adapts to both the output context and the observed data:
+**Implementation note (v0.14.4):** The implementation passes `$capped_msg = substr($log_key, 0, 350)` — using the full `$log_key` (including metadata prefix), not `$message` alone. See IQ-01 implementation note. The 350-char cap is applied when `-g` is active (#158), decoupled from terminal width.
+
+**Adaptive consolidation cap (design — not yet implemented):** The cap on `$message` length for trigram indexing could adapt to both the output context and the observed data:
 
 - Track `$max_observed_message_length` during parsing (on `$message` body, not full `$log_key`)
 - Define upper bounds as global variables (not hardcoded): `$consolidation_cap_csv` for CSV mode, `$terminal_width` for terminal mode
 - Effective cap at each checkpoint: `min($max_observed_message_length, $upper_bound)`
 - By the first checkpoint (5000 keys), the observed max is representative
+
+**Current implementation:** Fixed 350-char cap when `-g` is active, `$max_log_message_length` (terminal width) otherwise. See DD-06 warning about truncation breaking UUID normalization.
 
 **Rationale — memory matters:** Trigram structures (`key_trigrams`, `ngram_index`, `key_trigrams_norm`) are the dominant memory cost (~206 MB peak on power-law data, PF-21). Longer messages generate proportionally more trigrams. Benchmarking showed cap 200→300 adds 46 MB RSS; 300→500 adds zero on files with ~300-char messages but would add proportionally on files with longer messages. The adaptive cap avoids wasting memory when messages are short while allowing full context when messages are long.
 
