@@ -1,123 +1,185 @@
 # Issue #150: Final Pass Scalability Redesign
 
 **GitHub Issue:** #150
-**Status:** Investigation phase — root cause analysis in progress
-**Related:** #137 (final pass pipeline redesign), #144 (auto-disable workaround), #135 (eviction mechanics), #96 (consolidation engine)
+**Status:** Design phase
+**Related:** #137 (current final pass implementation), #144 (2M auto-disable workaround), #135 (eviction mechanics), #96 (consolidation engine)
 
 ## Problem
 
-The final consolidation pass causes catastrophic performance regression on large files. On 7.7M lines, `group_similar` goes from 484ms (v0.14.2) to 64.5 minutes (v0.14.3) — a 799,371% regression. A 2M-line auto-disable workaround (#144) currently prevents the final pass from running on large files, meaning large-file users get no final pass benefit.
+The current final pass simulates streaming processing on a static dataset — it feeds all remaining `%log_messages` keys through `consolidation_process_key()` one by one, triggering checkpoints at the same 5000-key cadence as streaming. This causes:
 
-## Investigation Findings
+1. **Unbounded working set accumulation** — without eviction, `%consolidation_unmatched` grows linearly with each checkpoint. S3 testing cost, bucket partitioning, and trigram memory all grow without bound.
+2. **Data duplication** — every key is copied into `%consolidation_key_message`, `%consolidation_unmatched`, and related tracking structures, duplicating data already in `%log_messages`.
+3. **Inefficient S4 discovery** — the large accumulated working set means S4 builds trigram indices over thousands of keys that will never match, wasting memory and CPU.
 
-### Test Setup
+A 2M-line auto-disable workaround (#144) currently prevents the final pass from running on large files, meaning large-file users get no final pass benefit at all.
 
-- Sample: 100K lines from XL access log dataset (`localhost_access_log-twx01-twx-thingworx-0.2026-01-07.txt`)
-- Command: `./ltl -g 85 -V --disable-progress --terminal-width 200`
-- Comparison: same command with `-uuid` to mask UUIDs
+## Investigation Findings (v0.14.3 → v0.14.4)
 
-### Key Observations
+### Upstream bugs resolved
 
-#### 1. UUID-containing keys are not consolidating (CRITICAL — likely root cause)
+The catastrophic regression reported in v0.14.3 was primarily caused by upstream consolidation engine bugs, not the final pass architecture:
 
-With `-uuid` (UUIDs masked): `group_similar` = 0.4s, streaming S1 absorbs 10,433/15,763 keys (66%)
-Without `-uuid` (real UUIDs): `group_similar` = 115.8s, streaming S1 absorbs 75/17,798 keys (0.4%)
+- **#158** — Log key truncated to terminal width (120 chars), cutting UUIDs and breaking UUID-normalized Dice scoring. Fixed to use 350-char cap when `-g` active. This was the primary cause: UUID-heavy keys couldn't consolidate during streaming, flooding the final pass with an enormous unconsolidatable key set.
+- **#157** — `--terminal-width` CLI option not propagated to `$max_log_message_length`.
+- **#164** — Cross-cluster pattern merge tested subsumption in wrong direction.
 
-The output shows hundreds of `FileRepositories` entries with occurrence=1, each with a unique UUID, **none consolidated** despite being nearly identical:
+**Benchmark impact of upstream fixes (v0.14.3 → v0.14.4):**
+
+| Test | v0.14.3 | v0.14.4 | Change |
+|------|---------|---------|--------|
+| 7.7M lines consolidate | 67.4 min | 2.3 min | -96.6% |
+| 38.7M lines consolidate | 477.7 min | 10.3 min | -97.9% |
+| 38.7M hm+hg+consolidate | crashed (OOM) | 13.6 min | now completes |
+
+### Remaining architectural concerns
+
+Despite the upstream fixes resolving the catastrophic regression, the final pass architecture still has structural problems:
+
+1. **Sort order** — sorts by full `$log_key` which groups by `[$status_code]` prefix, separating messages that are consolidation candidates across different status codes
+2. **Data duplication** — copies keys into consolidation working structures instead of operating on `%log_messages` directly
+3. **Unbounded accumulation** — no eviction means working set still grows without bound (just less severe now that streaming consolidation works better)
+4. **Trigram lifecycle** — per-key trigrams accumulate across checkpoints without cleanup for definitively unmatched keys
+
+## Design — Redesigned Final Pass
+
+### Key Principle
+
+The final pass uses the **same functions** as streaming (S3 pattern matching, S4 pairwise discovery, `find_consolidation_candidates`, `compute_mask`, `derive_regex`, etc.) but a **different execution mechanism** suited to operating on a static dataset rather than a stream of incoming keys.
+
+### Architecture
+
+**Pass 1 — Sorted iteration with sliding window:**
+
 ```
-[200] GET /Thingworx/FileRepositories/RD.RS.MRD.FileRepository/MRD/CobasLink/SCL202553_COBASLINK/71ba24a5-48cb-4d9b-a709
-[200] GET /Thingworx/FileRepositories/RD.RS.MRD.FileRepository/MRD/CobasLink/SCL290141_COBASLINK/0f21fd02-982b-4d49-a02c
+Sort remaining %log_messages keys by message body (strip [$grouping_key] prefix)
+
+Initialize sliding window (capacity: 1000 keys)
+new_patterns_created = 0
+
+For each key in sorted %log_messages:
+    capped_msg = substr($log_key, 0, $consolidation_message_length_cap)
+
+    # S3: test against all compiled patterns
+    if match_consolidation_patterns($category, $grouping_key, $capped_msg):
+        merge stats into matched cluster
+        delete key from %log_messages
+        → absorbed (S3)
+        continue to next key
+
+    # S2: ceiling filter (user-configurable)
+    if key occurrences >= $consolidation_final_ceiling:
+        → skip S4 for this key (leave in %log_messages)
+        continue to next key
+
+    # S3 miss, below ceiling → add to sliding window
+    add key to sliding window
+
+    # Window full? → run S4 pairwise discovery
+    if window.size >= 1000:
+        build trigram index for window contents
+        run pairwise discovery (find_candidates → compute_mask → derive_regex)
+        for each new pattern discovered:
+            new_patterns_created++
+            pattern immediately available for S3 on subsequent keys
+        absorb matched keys → delete from %log_messages
+        free trigrams and index
+        clear window
+
+# End of iteration — process remaining window if >= 2 keys
+if window.size >= 2:
+    run S4 on remaining window contents
+    free trigrams and index
 ```
 
-These keys share a long common prefix and differ in two variable regions (device ID + UUID). UUID-normalized trigrams for Dice scoring ARE present in the code (lines 1721-1724, 1772-1773, 1788 in ltl), but consolidation is not occurring. **This is a separate issue tracked as #156** and may be the most consequential problem — it affects both streaming and final pass.
+**Pass 2 — Conditional cleanup sweep (only if Pass 1 created new patterns):**
 
-#### 2. Unbounded working set accumulation in final pass
+```
+if new_patterns_created > 0:
+    For each key still in %log_messages:
+        # S3 only — test against newly created patterns from Pass 1
+        if match against new patterns:
+            merge stats into cluster
+            delete key from %log_messages
+```
 
-During streaming, eviction removes stale keys from the working set after each checkpoint, keeping it bounded. The final pass correctly disables eviction (it's the last chance to consolidate), but provides no alternative bounding mechanism.
+No S4 in Pass 2. No trigrams. Just regex matching against the new patterns. This catches keys that appeared *before* their matching pattern was discovered in Pass 1's sorted order.
 
-**What happens:**
-- All remaining `%log_messages` keys feed through `consolidation_process_key()` one by one
-- Keys that fail S1 accumulate in `%consolidation_unmatched`
-- Checkpoints fire every 5000 unmatched keys per category
-- Survivors stay in `%consolidation_unmatched` indefinitely
-- After N checkpoints, the unmatched set contains ~N×4500 keys (assuming ~10% absorption per checkpoint)
+### Sort Order
 
-**Consequences:**
-- S3 gate (lines 2245-2267) tests ALL unmatched keys against patterns — cost grows linearly with each checkpoint
-- Bucket partitioning (lines 2291-2295) scans ALL unmatched keys — grows linearly
-- `%consolidation_key_trigrams` holds per-key trigram hashes for ALL survivors — memory grows linearly
-- On 700K+ keys, this produces hundreds of checkpoints with a massive accumulated working set
+Sort by message body, stripping the `[$grouping_key]` prefix:
 
-**Contrast with streaming:** Streaming uses adaptive eviction (#135) to bound the working set. After 2-3 unproductive checkpoints, EMA drops to 0% and all keys are evicted. The working set stays at roughly one trigger batch (5000 keys). The final pass has no equivalent mechanism.
+```perl
+my @sorted_keys = sort {
+    my ($msg_a) = $a =~ /^\[[^\]]+\]\s*(.*)/;
+    my ($msg_b) = $b =~ /^\[[^\]]+\]\s*(.*)/;
+    ($msg_a // $a) cmp ($msg_b // $b)
+} keys %{$log_messages{$category}};
+```
 
-#### 3. Sort order groups by status code, not by message similarity
+This clusters similar API paths together regardless of status code, maximizing S4 yield within each sliding window.
 
-The final pass sorts keys with `sort keys %{$log_messages{$category}}` (line 1580). Since log keys are prefixed with `[grouping_key]` (e.g., `[200]`, `[404]`), sorting groups all 200s together, all 404s together, etc.
+### No Data Duplication
 
-This is counterproductive for consolidation. The consolidation candidates are messages with similar API paths regardless of status code. Sorting by the message body (stripping the grouping key prefix) would cluster similar API calls together, maximizing within-batch S3/S4 yield.
+The current implementation copies keys into `%consolidation_key_message`, `%consolidation_unmatched`, `%consolidation_key_generation`, `%consolidation_key_checkpoint_count`. The new design operates directly on `%log_messages`:
 
-Similarly, `%consolidation_unmatched` should be sorted by message content between checkpoints so that subsequent rounds benefit from message proximity.
+- `$capped_msg` is computed on the fly from the `$log_key` (which is the hash key in `%log_messages`)
+- The sliding window holds only references/keys, not copies of message data
+- Trigrams are built for window contents and freed after each window
+- No `%consolidation_unmatched` — keys that aren't absorbed simply stay in `%log_messages`
 
-#### 4. Final pass ceiling effectively disabled
+### Bounded Resource Usage
 
-`$consolidation_final_ceiling = 1,000,000` means virtually all keys pass the S2 ceiling filter into `@discovery_candidates`. During streaming, `$consolidation_occurrence_ceiling = 3` excludes high-occurrence keys from expensive S4 pairwise discovery. The final pass loses this gating.
+| Resource | Current (unbounded) | New design (bounded) |
+|----------|-------------------|---------------------|
+| Working set | Grows by ~4500 keys per checkpoint | Fixed at 1000 keys (window size) |
+| Trigrams | Accumulate for all unmatched keys | Built and freed per window |
+| Ngram index | Rebuilt but over growing key set | Built over window contents only |
+| Key message copies | All keys duplicated | No duplication |
 
-#### 5. Trigram lifecycle during final pass
+### Ceiling as User Control
 
-- `%consolidation_ngram_index` (posting-list index): correctly rebuilt fresh per checkpoint (deleted at line 2279, rebuilt at 2280, deleted at 2528)
-- `%consolidation_key_trigrams` (per-key trigram hashes): preserved across checkpoints for reuse (line 1716-1717), which is the intended design for efficiency
-- Problem: without eviction, the per-key trigrams accumulate without bound. During streaming, eviction cleans these up (line 2573). During the final pass, nothing cleans them up for keys that are definitively unmatched.
+The streaming ceiling (`$consolidation_occurrence_ceiling = 3`) is a performance optimization — it excludes high-occurrence keys from S4 discovery during streaming to keep discovery focused on the long tail.
 
-### Verbose Counter Data (100K lines, no -uuid)
+The final pass ceiling (`$consolidation_final_ceiling`) serves a different purpose: it is a **user-facing control** that allows users to scope consolidation. A user might set `--final-ceiling 50` to say "only consolidate messages with fewer than 50 occurrences — high-occurrence entries are already meaningful as individual entries." The default should be high (effectively unlimited) so consolidation works fully by default.
 
-**plain|200 Streaming Phase:**
-- Keys seen: 17,798 (4 checkpoints, 4 patterns)
-- S1 Inline match: 75
-- S4 Pairwise discovery: 20
-- S6 Evicted: 17,703
+This distinction should be documented in the help text and user documentation.
 
-**plain|200 Final Pass:**
-- Keys seen: 17,703 (4 checkpoints, 5 new patterns)
-- S1 Inline match: 0
-- S4 Pairwise discovery: 3
-- S5 Unmatched: 17,700
-- find_candidates calls: 2,000
+### Observability
 
-S1=0 on 17,703 keys is the smoking gun — the patterns discovered during streaming catch none of the evicted keys when they re-enter the final pass.
+The `-V` verbose output for the final pass should report:
 
-## Open Questions
+- **Pass 1:** keys iterated, S3 absorbed, S2 ceiling skipped, windows processed, S4 pairwise discovered, S4 re-scan absorbed, new patterns created, keys remaining
+- **Pass 2:** keys tested, S3 absorbed (new patterns only), keys remaining
+- Total reduction: keys entering final pass → keys remaining after both passes
 
-1. **Why does UUID-normalized Dice scoring fail to consolidate UUID-containing messages?** The code has `%consolidation_key_trigrams_norm` with UUID→`<UUID>` normalization at lines 1721-1724, and `find_consolidation_candidates` uses it at lines 1772-1773, 1788. Yet consolidation doesn't occur. This needs investigation — tracked as #156.
+### Removal of 2M Auto-Disable (#144)
 
-2. **What is the right bounding mechanism for the final pass?** Options discussed:
-   - **Bounded batches**: Process keys in fixed-size batches with full cleanup between batches. Patterns accumulate across batches (S1 benefit compounds), but working set resets per batch.
-   - **Multi-pass with threshold tiers**: Raise/lower ceiling progressively. Likely flawed — would double-process keys that remain across threshold changes.
-   - The bounded batch approach seems most promising but needs detailed design.
+The 2M-line auto-disable workaround should be removed as part of this implementation. The new bounded architecture makes the final pass safe to run on any file size. The auto-disable must be removed during development to enable testing of the final pass on large files.
 
-3. **How should keys be sorted for the final pass?** Sorting by message body (stripping grouping key prefix) would cluster similar API calls together. Need to validate this improves consolidation yield. Same principle should apply to sorting `%consolidation_unmatched` between checkpoints.
+## Resolved Questions (from investigation phase)
 
-4. **Should surviving keys get a second chance?** After a batch closes, should survivors be carried forward to one more batch before being left as-is? Or should batch boundaries be hard?
+1. ~~UUID consolidation failure~~ — Resolved by #158. Log key truncation was cutting UUIDs.
+2. ~~Bounding mechanism~~ — Sliding window of 1000 keys with per-window trigram lifecycle.
+3. ~~Sort order~~ — Sort by message body, stripping grouping key prefix.
+4. ~~Should survivors get a second chance?~~ — Pass 2 provides this. Keys that appeared before their pattern was discovered get a second S3 pass.
+5. ~~Interaction with #156~~ — Resolved. Upstream fixes dramatically reduced keys entering final pass.
 
-5. **What is the interaction between #156 (UUID consolidation failure) and #150?** If UUID consolidation is fixed, streaming may absorb most UUID keys via S1, dramatically reducing the number of keys entering the final pass. The final pass scalability problem may become much less severe — but still needs fixing for correctness.
+## Implementation Plan
 
-## Design Direction (preliminary — not yet validated)
-
-The final pass should behave like bounded batch processing:
-1. Sort remaining `%log_messages` keys by message body (not full log key)
-2. Process in fixed-size batches through the full S1→S2→S3→S4 pipeline
-3. Patterns discovered in batch N are available for S1 matching in batch N+1
-4. Trigram structures and working set are cleaned up per batch
-5. Batch survivors get definitive disposition — left in `%log_messages` as unique entries
-
-This preserves the same pipeline architecture as streaming (addressing the original #137 concern) while maintaining bounded resource usage.
+1. Remove 2M auto-disable (#144)
+2. Replace `group_similar_messages()` final pass section with new Pass 1 + Pass 2 architecture
+3. Reuse existing functions: `match_consolidation_patterns()`, `build_consolidation_ngram_index()`, `find_consolidation_candidates()`, `compute_mask()`, `derive_regex()`, `derive_canonical()`, `merge_consolidation_stats()`
+4. Update `-V` verbose output with new final pass metrics
+5. Update `--final-ceiling` help text to describe user-facing scoping purpose
+6. Validate with benchmarks: 10K, 100K, and XL access logs + application logs
 
 ## References
 
-- #137 — Final pass redesign (current implementation)
-- #144 — Auto-disable workaround for large files
-- #135 — Eviction mechanics
-- #156 — UUID-normalized Dice scoring not producing matches (root cause investigation)
+- #137 — Current final pass implementation (superseded by this design)
+- #144 — 2M auto-disable workaround (to be removed)
+- #135 — Eviction mechanics (streaming only, not applicable to new final pass)
+- #157, #158, #164 — Upstream fixes that resolved the catastrophic regression
+- #156, #162 — Investigation findings that informed this design
 - `features/137-final-pass-redesign.md` — Design document for current implementation
-- `features/fuzzy-message-consolidation.md` — Full consolidation engine documentation
-- PF-19 — UUID normalization for Dice scoring (prototype)
-- Benchmark evidence in #150 issue body
+- `features/fuzzy-message-consolidation.md` — Full consolidation engine documentation (includes process flow diagram)
