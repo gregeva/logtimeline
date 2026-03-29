@@ -107,8 +107,14 @@ run_test() {
     echo "RUN:  $test_name ($found file(s))" >&2
 
     # Run ltl and capture output
+    # Always pass --terminal-width 200 for consistent key truncation across environments.
+    # Pass -bs 60 as default bucket size unless the test already specifies -bs.
+    local benchmark_defaults="--terminal-width 200"
+    if [[ ! "$options" =~ -bs ]]; then
+        benchmark_defaults="$benchmark_defaults -bs 60"
+    fi
     local output
-    if ! output=$($LTL --disable-progress -V -mem $options $file_args 2>&1); then
+    if ! output=$($LTL --disable-progress -V -mem $benchmark_defaults $options $file_args 2>&1); then
         echo "FAIL: $test_name — ltl returned non-zero" >&2
         return 1
     fi
