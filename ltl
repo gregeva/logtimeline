@@ -4913,7 +4913,17 @@ sub calculate_statistics {
     my $max = max(@sorted);
     my $variance = ($bucket_data->{sum_of_squares} / $duration_count) - ($mean ** 2);
     my $std_dev = sprintf("%.3f", sqrt($variance));
-    my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean ) : undef;
+    my $cv = undef;
+    if ($mean != 0) {
+        my $cv_raw = $std_dev / $mean;
+        if ($cv_raw >= 100) {
+            $cv = sprintf("%d", $cv_raw);
+        } elsif ($cv_raw >= 10) {
+            $cv = sprintf("%.1f", $cv_raw);
+        } else {
+            $cv = sprintf("%.2f", $cv_raw);
+        }
+    }
 
     # Percentile calculations must use duration_count, not occurrences
     # to correctly index into the sorted durations array
