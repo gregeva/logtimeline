@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # run-benchmark.sh — Run ltl benchmark test cases and capture results as TSV
-# Usage: ./run-benchmark.sh [target] [--label <name>]
+# Usage: ./run-benchmark.sh [target] [--label <name>] [--options "<ltl options>"]
 #
 # Targets:
 #   quick — single test case for dev/testing (twx-unique-errors-standard)
@@ -24,12 +24,17 @@ LOGS_DIR="$SCRIPT_DIR/../../logs"
 # Default label is timestamp
 LABEL="$(date +%Y%m%d-%H%M%S)"
 TARGET="full"
+EXTRA_OPTIONS=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --label)
             LABEL="$2"
+            shift 2
+            ;;
+        --options)
+            EXTRA_OPTIONS="$2"
             shift 2
             ;;
         *)
@@ -107,8 +112,14 @@ run_test() {
     echo "RUN:  $test_name ($found file(s))" >&2
 
     # Run ltl and capture output
+    # Always pass --terminal-width 200 for consistent key truncation across environments.
+    # Pass -bs 60 as default bucket size unless the test already specifies -bs.
+    local benchmark_defaults="--terminal-width 200"
+    if [[ ! "$options" =~ -bs ]]; then
+        benchmark_defaults="$benchmark_defaults -bs 60"
+    fi
     local output
-    if ! output=$($LTL --disable-progress -V -mem $options $file_args 2>&1); then
+    if ! output=$($LTL --disable-progress -V -mem $benchmark_defaults $options $EXTRA_OPTIONS $file_args 2>&1); then
         echo "FAIL: $test_name — ltl returned non-zero" >&2
         return 1
     fi

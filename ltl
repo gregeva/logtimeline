@@ -61,7 +61,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.14.3";
+my $version_number = "0.14.4";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
@@ -837,7 +837,7 @@ sub print_help {
     $out .= $opt->("-os,  --omit-stats",            "Hide the statistics columns (min/avg/max/stddev/etc.)");
     $out .= $opt->("-oe,  --omit-empty",            "Skip time buckets that contain zero log entries");
     $out .= $opt->("-or,  --omit-rate",             "Hide the error/message rate from the legend");
-    $out .= $opt->("-od,  --omit-durations",        "Suppress duration extraction and related columns");
+    $out .= $opt->("-od,  --omit-durations",        "Suppress duration extraction and related columns (significantly reduces memory and processing time on large files)");
     $out .= $opt->("-ob,  --omit-bytes",            "Suppress byte-size extraction and related columns");
     $out .= $opt->("-oc,  --omit-count",            "Suppress count extraction and related columns");
     $out .= $opt->("-ic,  --include-count",         "Add a count column to the output (off by default)");
@@ -848,12 +848,7 @@ sub print_help {
     $out .= $opt->("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
     $out .= $opt->("-iqs, --include-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
     $out .= $opt->("-is,  --include-session",       "Keep session/user IDs when grouping messages, so each session is tracked separately");
-    $out .= $opt->("-nfp, --no-final-pass",         "Skip the final consolidation pass that re-processes high-frequency keys against discovered patterns");
-    $out .= $opt->("      --consolidation-trigger <N>",      "Unmatched keys before triggering a checkpoint (default: 5000)");
-    $out .= $opt->("      --consolidation-ceiling <N>",      "Max occurrences for a key to be eligible for pattern discovery (default: 3)");
-    $out .= $opt->("      --consolidation-max-patterns <N>", "Hard cap on patterns per grouping key; 0 = unlimited (default: 0)");
-    $out .= $opt->("      --final-threshold <N>",            "Similarity threshold for the final pass (default: 80)");
-    $out .= $opt->("      --final-ceiling <N>",              "Occurrence ceiling for the final pass (default: 1000000)");
+    $out .= $opt->("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
 
     # Display & Output
     $out .= $subheading->("Display & Output");
@@ -1535,11 +1530,11 @@ sub get_memory_usage {
 sub group_similar_messages {
     print "\rConsolidating similar messages..." unless $disable_progress;
 
-    # Final pass (#137): re-scan all %log_messages keys through the full consolidation pipeline.
-    # Same architecture as streaming — S1 match against compiled patterns, accumulate unmatched,
-    # fire checkpoints at trigger threshold. Keys are sorted to group similar messages together,
-    # improving S3 checkpoint match yield.
-    # Eviction is disabled — this is the last chance to consolidate; the set is bounded.
+    # Final pass (#150): two-pass architecture operating directly on %log_messages.
+    # Pass 1: sorted iteration with sliding window — S3 pattern matching + S4 pairwise discovery.
+    # Pass 2: conditional cleanup sweep if Pass 1 created new patterns.
+    # No data duplication — keys stay in %log_messages until absorbed.
+    # Bounded resources — trigrams built and freed per sliding window (1000 keys).
     if ($consolidation_final_pass) {
         # Save streaming S2/S5 before resetting (needed for verbose output)
         for my $cat_gk (keys %consolidation_unmatched) {
@@ -1553,7 +1548,7 @@ sub group_similar_messages {
             $consolidation_cat_stats{$cat_gk}{streaming_s5} = $s5;
         }
 
-        # Reset transient working structures (final pass builds its own working set)
+        # Reset transient working structures (final pass uses sliding window, not streaming buffers)
         %consolidation_unmatched = ();
         %consolidation_key_message = ();
         %consolidation_key_message_cat_gk = ();
@@ -1567,44 +1562,113 @@ sub group_similar_messages {
         %consolidation_absorption_ema = ();
         # Preserved: %consolidation_patterns, %consolidation_clusters, %consolidation_pattern_generation, %consolidation_cat_stats
 
-        # Swap threshold and ceiling for final pass parameters
+        # Swap threshold for final pass (used by find_consolidation_candidates and try_consolidation_merge_into_existing)
         my $saved_threshold = $consolidation_threshold;
-        my $saved_ceiling   = $consolidation_occurrence_ceiling;
-        $consolidation_threshold          = $consolidation_final_threshold;
-        $consolidation_occurrence_ceiling = $consolidation_final_ceiling;
+        $consolidation_threshold = $consolidation_final_threshold;
 
         $consolidation_phase = 'final_pass';
+        my $fp_total_new_patterns = 0;
+        my $fp_window_capacity = 1000;
 
-        # Iterate all remaining %log_messages keys through the pipeline (sorted for checkpoint efficiency)
+        # Pass 1: sorted iteration with sliding window
         for my $category (sort keys %log_messages) {
-            for my $log_key (sort keys %{$log_messages{$category}}) {
+            # Collect and sort keys by message body (strip [$grouping_key] prefix)
+            my @sorted_keys = sort {
+                my ($msg_a) = $a =~ /^\[[^\]]+\]\s*(.*)/s;
+                my ($msg_b) = $b =~ /^\[[^\]]+\]\s*(.*)/s;
+                ($msg_a // $a) cmp ($msg_b // $b)
+            } keys %{$log_messages{$category}};
+
+            my @window;
+            my $window_cat_gk = "";
+
+            # Helper to flush the current window through S4
+            my $flush_window = sub {
+                return if scalar @window < 2 || $window_cat_gk eq "";
+                my ($discovered, $s4_pair, $s4_rescan, $fc, $absorbed, $cross_merges) =
+                    process_final_pass_window($window_cat_gk, \@window);
+                $consolidation_cat_stats{$window_cat_gk}{fp_p1_windows} = ($consolidation_cat_stats{$window_cat_gk}{fp_p1_windows} // 0) + 1;
+                $consolidation_cat_stats{$window_cat_gk}{fp_p1_s4_pairwise} = ($consolidation_cat_stats{$window_cat_gk}{fp_p1_s4_pairwise} // 0) + $s4_pair;
+                $consolidation_cat_stats{$window_cat_gk}{fp_p1_s4_rescan} = ($consolidation_cat_stats{$window_cat_gk}{fp_p1_s4_rescan} // 0) + $s4_rescan;
+                $consolidation_cat_stats{$window_cat_gk}{fp_p1_fc_calls} = ($consolidation_cat_stats{$window_cat_gk}{fp_p1_fc_calls} // 0) + $fc;
+                $consolidation_cat_stats{$window_cat_gk}{fp_p1_patterns} = ($consolidation_cat_stats{$window_cat_gk}{fp_p1_patterns} // 0) + $discovered;
+                $consolidation_cat_stats{$window_cat_gk}{fp_p1_cross_merges} = ($consolidation_cat_stats{$window_cat_gk}{fp_p1_cross_merges} // 0) + $cross_merges;
+                $fp_total_new_patterns += $discovered;
+                @window = ();
+            };
+
+            for my $log_key (@sorted_keys) {
+                next unless exists $log_messages{$category}{$log_key};  # may have been deleted by window processing
+
                 my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);
                 my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
                 $grouping_key //= "";
                 my $cat_gk = "$category|$grouping_key";
 
-                my $matched = consolidation_process_key(
-                    $log_key, $category, $cat_gk, $capped_msg,
-                    $log_messages{$category}{$log_key}
-                );
+                $consolidation_cat_stats{$cat_gk}{fp_keys_seen} = ($consolidation_cat_stats{$cat_gk}{fp_keys_seen} // 0) + 1;
 
-                if ($matched) {
-                    delete $log_messages{$category}{$log_key};
+                # Flush window when grouping key changes (patterns are per cat_gk)
+                if ($cat_gk ne $window_cat_gk && @window) {
+                    $flush_window->();
+                }
+                $window_cat_gk = $cat_gk;
+
+                # S3: test against existing compiled patterns
+                my $entry = match_consolidation_patterns($category, $grouping_key, $capped_msg);
+                if ($entry) {
+                    my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
+                    if ($cluster) {
+                        merge_consolidation_stats($cluster, $log_messages{$category}{$log_key});
+                        delete $log_messages{$category}{$log_key};
+                        $consolidation_cat_stats{$cat_gk}{fp_p1_s3} = ($consolidation_cat_stats{$cat_gk}{fp_p1_s3} // 0) + 1;
+                        next;
+                    }
+                }
+
+                # S2: ceiling filter — skip S4 for high-occurrence keys (user-configurable scope control)
+                my $occ = $log_messages{$category}{$log_key}{occurrences} // 1;
+                if ($occ >= $consolidation_final_ceiling) {
+                    $consolidation_cat_stats{$cat_gk}{fp_p1_s2_ceiling} = ($consolidation_cat_stats{$cat_gk}{fp_p1_s2_ceiling} // 0) + 1;
+                    next;
+                }
+
+                # S3 miss, below ceiling → add to sliding window
+                push @window, [$log_key, $capped_msg];
+
+                # Window full → run S4 pairwise discovery
+                if (scalar @window >= $fp_window_capacity) {
+                    $flush_window->();
+                }
+            }
+
+            # Process remaining window
+            $flush_window->();
+        }
+
+        # Pass 2: conditional cleanup sweep — only if Pass 1 created new patterns
+        if ($fp_total_new_patterns > 0) {
+            for my $category (sort keys %log_messages) {
+                for my $log_key (sort keys %{$log_messages{$category}}) {
+                    my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);
+                    my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
+                    $grouping_key //= "";
+                    my $cat_gk = "$category|$grouping_key";
+
+                    my $entry = match_consolidation_patterns($category, $grouping_key, $capped_msg);
+                    if ($entry) {
+                        my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
+                        if ($cluster) {
+                            merge_consolidation_stats($cluster, $log_messages{$category}{$log_key});
+                            delete $log_messages{$category}{$log_key};
+                            $consolidation_cat_stats{$cat_gk}{fp_p2_s3} = ($consolidation_cat_stats{$cat_gk}{fp_p2_s3} // 0) + 1;
+                        }
+                    }
                 }
             }
         }
 
-        # EOF checkpoints for final pass remainder
-        for my $cat_gk (sort keys %consolidation_unmatched) {
-            if (scalar(keys %{$consolidation_unmatched{$cat_gk}}) >= 2) {
-                my ($cat, $gk) = split(/\|/, $cat_gk, 2);
-                run_consolidation_checkpoint($cat, $gk);
-            }
-        }
-
-        # Restore threshold, ceiling, and phase
-        $consolidation_threshold          = $saved_threshold;
-        $consolidation_occurrence_ceiling = $saved_ceiling;
+        # Restore threshold and phase
+        $consolidation_threshold = $saved_threshold;
         $consolidation_phase = 'streaming';
     }
 
@@ -1617,7 +1681,7 @@ sub group_similar_messages {
             next unless $cluster->{occurrences} > 0;
 
             # Canonical form is already the full log_key (includes [level] [thread] [object] prefix)
-            my $canonical_log_key = substr($canonical, 0, ($write_messages_to_csv == 1 ? 350 : $max_log_message_length));
+            my $canonical_log_key = substr($canonical, 0, (($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length));
 
             # Create the %log_messages entry with all merged stats
             $log_messages{$category}{$canonical_log_key} = {
@@ -2231,8 +2295,9 @@ sub run_consolidation_pass {
     my $gate2_absorbed = 0;
     my $fc_calls = 0;
     my $messages_absorbed = 0;
+    my $rescan_absorbed = 0;
 
-    return (0, 0, $ceiling_skipped, 0, 0, 0, scalar @discovery_candidates, {}, 0, 0) if scalar @discovery_candidates < 2;
+    return (0, 0, $ceiling_skipped, 0, 0, 0, scalar @discovery_candidates, {}, 0, 0, 0) if scalar @discovery_candidates < 2;
 
     # Gate 2 (S3): match discovery candidates against existing compiled patterns
     # Skip keys that entered at the current pattern generation — they already failed S1
@@ -2380,6 +2445,7 @@ sub run_consolidation_pass {
                             $scan_cluster->{match_count}++;
                             $scan_entry->{match_count} = $scan_cluster->{match_count} if $scan_entry;
                             $messages_absorbed++;
+                            $rescan_absorbed++;
                         }
                     } else {
                         push @surviving, $ukey;
@@ -2395,10 +2461,174 @@ sub run_consolidation_pass {
     my @remaining = grep { !$consumed{$_} } @unmatched_keys;
     @$unmatched_ref = @remaining;
 
-    return ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit, $gate2_absorbed, $fc_calls, scalar @gate2_survivors, \%consumed, $s3_tested, $s3_skipped);
+    return ($patterns_discovered, $messages_absorbed, $ceiling_skipped, $cap_hit, $gate2_absorbed, $fc_calls, scalar @gate2_survivors, \%consumed, $s3_tested, $s3_skipped, $rescan_absorbed);
 }
 
-# Cross-cluster merge: merge overlapping patterns whose canonical forms match each other
+# Final pass sliding window: S4 pairwise discovery on a bounded set of keys.
+# Operates directly on %log_messages — no %consolidation_unmatched accumulation.
+# Trigrams are built for the window and freed after processing.
+sub process_final_pass_window {
+    my ($cat_gk, $window_ref) = @_;
+    my @window = @$window_ref;
+    my $window_size = scalar @window;
+    return (0, 0, 0, 0, 0, 0) if $window_size < 2;
+
+    my ($category) = split(/\|/, $cat_gk, 2);
+
+    # Populate working structures for window keys only
+    my @key_list;
+    for my $entry (@window) {
+        my ($log_key, $capped_msg) = @$entry;
+        $consolidation_key_message{$log_key} = $capped_msg;
+        push @key_list, $log_key;
+    }
+
+    # Build trigram index for window
+    delete $consolidation_ngram_index{$cat_gk};
+    build_consolidation_ngram_index($cat_gk, \@key_list);
+
+    # Build window-local partition buckets for re-scan
+    my %buckets;
+    for my $log_key (@key_list) {
+        my $bk = extract_consolidation_bucket_key($consolidation_key_message{$log_key} // $log_key);
+        push @{$buckets{$bk}}, $log_key;
+    }
+
+    my %consumed;
+    my $patterns_discovered = 0;
+    my $messages_absorbed = 0;
+    my $rescan_absorbed = 0;
+    my $fc_calls = 0;
+    my $keys_searched = 0;
+    my $max_search = min(500, $window_size);
+    my $current_pattern_count = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
+
+    for my $log_key (@key_list) {
+        last if $keys_searched >= $max_search;
+        next if $consumed{$log_key};
+
+        $keys_searched++;
+        $fc_calls++;
+        my @matches = find_consolidation_candidates($cat_gk, $log_key, $consolidation_threshold);
+
+        for my $match (@matches) {
+            next if $consumed{$match->{key}};
+
+            my $msg_a = substr($consolidation_key_message{$log_key} // '', 0, $consolidation_message_length_cap);
+            my $msg_b = substr($consolidation_key_message{$match->{key}} // '', 0, $consolidation_message_length_cap);
+
+            my $raw_mask = compute_mask($msg_a, $msg_b);
+            my $mask = coalesce_mask($raw_mask);
+            my $canonical = derive_canonical($msg_a, $mask);
+            my $regex = derive_regex($msg_a, $mask);
+
+            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex);
+
+            $consumed{$log_key} = 1;
+            $consumed{$match->{key}} = 1;
+
+            my $new_cluster = {
+                canonical   => $canonical,
+                pattern     => $regex,
+                mask        => $mask,
+                occurrences => 0,
+                match_count => 0,
+            };
+
+            for my $src_key ($log_key, $match->{key}) {
+                if (exists $log_messages{$category}{$src_key}) {
+                    merge_consolidation_stats($new_cluster, $log_messages{$category}{$src_key});
+                    $new_cluster->{match_count}++;
+                    $messages_absorbed++;
+                }
+            }
+
+            my $scan_regex = $regex;
+            my $scan_cluster = $new_cluster;
+            my $scan_entry;
+            my ($merged_regex, $merged_entry, $merged_cluster) = try_consolidation_merge_into_existing($cat_gk, $canonical, $regex, $mask, $new_cluster);
+            if ($merged_regex) {
+                $patterns_discovered++;
+                $scan_regex = $merged_regex;
+                $scan_entry = $merged_entry;
+                $scan_cluster = $merged_cluster;
+            } else {
+                if ($consolidation_max_patterns > 0 && $current_pattern_count >= $consolidation_max_patterns) {
+                    $consolidation_clusters{$cat_gk}{$canonical} = $new_cluster;
+                    $patterns_discovered++;
+                    last;
+                }
+
+                $consolidation_clusters{$cat_gk}{$canonical} = $new_cluster;
+                $scan_entry = {
+                    pattern     => $regex,
+                    cluster_key => $canonical,
+                    canonical   => $canonical,
+                    match_count => $new_cluster->{match_count},
+                };
+                push @{$consolidation_patterns{$cat_gk}}, $scan_entry;
+                $current_pattern_count++;
+                $patterns_discovered++;
+            }
+
+            # Interleaved re-scan within window partition buckets
+            my $pattern_bk = extract_consolidation_bucket_key($scan_entry ? $scan_entry->{canonical} : $canonical);
+            my $bucket_keys = $buckets{$pattern_bk};
+            if ($bucket_keys) {
+                my @surviving;
+                for my $ukey (@$bucket_keys) {
+                    if ($consumed{$ukey}) { next; }
+                    my $umsg = $consolidation_key_message{$ukey};
+                    unless (defined $umsg) { push @surviving, $ukey; next; }
+                    if ($umsg =~ $scan_regex) {
+                        $consumed{$ukey} = 1;
+                        if (exists $log_messages{$category}{$ukey}) {
+                            merge_consolidation_stats($scan_cluster, $log_messages{$category}{$ukey});
+                            $scan_cluster->{match_count}++;
+                            $scan_entry->{match_count} = $scan_cluster->{match_count} if $scan_entry;
+                            $messages_absorbed++;
+                            $rescan_absorbed++;
+                        }
+                    } else {
+                        push @surviving, $ukey;
+                    }
+                }
+                $buckets{$pattern_bk} = \@surviving;
+            }
+
+            last;
+        }
+    }
+
+    # Cross-cluster merge if patterns discovered
+    my $cross_merges = 0;
+    if ($patterns_discovered > 0) {
+        $cross_merges = merge_consolidation_overlapping_patterns($cat_gk);
+    }
+
+    # Delete consumed keys from %log_messages
+    for my $key (keys %consumed) {
+        delete $log_messages{$category}{$key};
+    }
+
+    # Capture transient structure HWMs before they're freed (#171)
+    measure_memory_structures();
+
+    # Cleanup: free window working structures
+    for my $log_key (@key_list) {
+        delete $consolidation_key_message{$log_key};
+        delete $consolidation_key_trigrams{$log_key};
+        delete $consolidation_key_trigrams_norm{$log_key};
+    }
+    delete $consolidation_ngram_index{$cat_gk};
+    delete $consolidation_posting_size{$cat_gk};
+
+    return ($patterns_discovered, $messages_absorbed - $rescan_absorbed, $rescan_absorbed, $fc_calls, $messages_absorbed, $cross_merges);
+}
+
+# Cross-cluster merge: merge overlapping patterns where a more general pattern's regex
+# matches a more specific pattern's canonical form. The more general pattern absorbs
+# the more specific one(s), merging all accumulated statistics.
 sub merge_consolidation_overlapping_patterns {
     my ($cat_gk) = @_;
     return 0 unless exists $consolidation_patterns{$cat_gk};
@@ -2408,27 +2638,50 @@ sub merge_consolidation_overlapping_patterns {
     my $merges = 0;
     my %removed;
 
-    @patterns = sort { ($consolidation_clusters{$cat_gk}{$b->{canonical}}{match_count} // 0) <=> ($consolidation_clusters{$cat_gk}{$a->{canonical}}{match_count} // 0) } @patterns;
-
     for my $i (0 .. $#patterns) {
         next if $removed{$i};
-        my $parent = $patterns[$i];
-        my $parent_cluster = $consolidation_clusters{$cat_gk}{$parent->{canonical}};
-        next unless $parent_cluster;
+        my $pattern_a = $patterns[$i];
+        my $cluster_a = $consolidation_clusters{$cat_gk}{$pattern_a->{canonical}};
+        next unless $cluster_a;
 
         for my $j ($i + 1 .. $#patterns) {
             next if $removed{$j};
-            my $child = $patterns[$j];
-            my $child_cluster = $consolidation_clusters{$cat_gk}{$child->{canonical}};
-            next unless $child_cluster;
+            my $pattern_b = $patterns[$j];
+            my $cluster_b = $consolidation_clusters{$cat_gk}{$pattern_b->{canonical}};
+            next unless $cluster_b;
 
-            if ($child->{canonical} =~ $parent->{pattern}) {
-                merge_consolidation_stats($parent_cluster, $child_cluster);
-                $parent_cluster->{match_count} += $child_cluster->{match_count};
-                delete $consolidation_clusters{$cat_gk}{$child->{canonical}};
-                $removed{$j} = 1;
-                $merges++;
+            # Test both directions: which pattern's regex matches the other's canonical?
+            # The pattern whose regex matches is more general and absorbs the other.
+            my ($general, $general_cluster, $general_idx, $specific, $specific_cluster, $specific_idx);
+
+            if ($pattern_a->{canonical} =~ $pattern_b->{pattern}) {
+                # B's regex matches A's canonical — B is more general, absorbs A
+                ($general, $general_cluster, $general_idx) = ($pattern_b, $cluster_b, $j);
+                ($specific, $specific_cluster, $specific_idx) = ($pattern_a, $cluster_a, $i);
+            } elsif ($pattern_b->{canonical} =~ $pattern_a->{pattern}) {
+                # A's regex matches B's canonical — A is more general, absorbs B
+                ($general, $general_cluster, $general_idx) = ($pattern_a, $cluster_a, $i);
+                ($specific, $specific_cluster, $specific_idx) = ($pattern_b, $cluster_b, $j);
+            } else {
+                next;  # No subsumption in either direction
             }
+
+            if ($ENV{LTL_MERGE_DEBUG}) {
+                printf STDERR "[MERGE_DEBUG] %s absorbs %s (occ %d + %d)\n",
+                    substr($general->{canonical}, 0, 80),
+                    substr($specific->{canonical}, 0, 80),
+                    $general_cluster->{occurrences} // 0,
+                    $specific_cluster->{occurrences} // 0;
+            }
+
+            merge_consolidation_stats($general_cluster, $specific_cluster);
+            $general_cluster->{match_count} += $specific_cluster->{match_count};
+            delete $consolidation_clusters{$cat_gk}{$specific->{canonical}};
+            $removed{$specific_idx} = 1;
+            $merges++;
+
+            # If A was absorbed (specific_idx == i), stop checking A against further patterns
+            last if $specific_idx == $i;
         }
     }
 
@@ -2498,8 +2751,11 @@ sub run_consolidation_checkpoint {
         }
     }
 
-    my ($discovered, $absorbed, $ceiling_skipped, $cap_hit, $g2_absorbed, $fc_calls, $g2_survivors, $consumed_ref, $s3_tested, $s3_skipped) =
+    my ($discovered, $absorbed, $ceiling_skipped, $cap_hit, $g2_absorbed, $fc_calls, $g2_survivors, $consumed_ref, $s3_tested, $s3_skipped, $rescan_absorbed) =
         run_consolidation_pass($cat_gk, \@unmatched, $cp_num);
+
+    # Capture transient structure HWMs before they're freed (#171)
+    measure_memory_structures();
 
     my $post_count = scalar @unmatched;
 
@@ -2507,7 +2763,8 @@ sub run_consolidation_checkpoint {
     $consolidation_cat_stats{$cat_gk}{"${pfx}s3_checkpoint"} += $g2_absorbed;
     $consolidation_cat_stats{$cat_gk}{"${pfx}s3_calls"}      += $s3_tested;
     $consolidation_cat_stats{$cat_gk}{"${pfx}s3_skipped"}    += $s3_skipped;
-    $consolidation_cat_stats{$cat_gk}{"${pfx}s4_pairwise"}   += ($absorbed - $g2_absorbed);
+    $consolidation_cat_stats{$cat_gk}{"${pfx}s4_pairwise"}   += ($absorbed - $g2_absorbed - ($rescan_absorbed // 0));
+    $consolidation_cat_stats{$cat_gk}{"${pfx}s4_rescan"}     += ($rescan_absorbed // 0);
     $consolidation_cat_stats{$cat_gk}{"${pfx}fc_calls"}      += $fc_calls;
     $consolidation_cat_stats{$cat_gk}{"${pfx}patterns_discovered"} += $discovered;
     $consolidation_cat_stats{$cat_gk}{"${pfx}patterns_final"} = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
@@ -2530,7 +2787,8 @@ sub run_consolidation_checkpoint {
 
     # Cross-cluster merge and pattern generation bump
     if ($discovered > 0) {
-        merge_consolidation_overlapping_patterns($cat_gk);
+        my $cross_merges = merge_consolidation_overlapping_patterns($cat_gk);
+        $consolidation_cat_stats{$cat_gk}{"${pfx}cross_cluster_merges"} += $cross_merges;
         $consolidation_cat_stats{$cat_gk}{"${pfx}patterns_final"} = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
         $consolidation_pattern_generation{$cat_gk} = ($consolidation_pattern_generation{$cat_gk} // 0) + 1;
     }
@@ -2620,6 +2878,10 @@ sub measure_memory_structures {
         consolidation_patterns => Devel::Size::total_size(\%consolidation_patterns),
         consolidation_key_message => Devel::Size::total_size(\%consolidation_key_message),
         consolidation_unmatched => Devel::Size::total_size(\%consolidation_unmatched),
+        consolidation_ngram_index => Devel::Size::total_size(\%consolidation_ngram_index),
+        consolidation_posting_size => Devel::Size::total_size(\%consolidation_posting_size),
+        consolidation_key_trigrams => Devel::Size::total_size(\%consolidation_key_trigrams),
+        consolidation_key_trigrams_norm => Devel::Size::total_size(\%consolidation_key_trigrams_norm),
     );
 
     # Update high-water marks (only if current value is larger)
@@ -2981,7 +3243,7 @@ sub adapt_to_command_line_options {
         'consolidation-ceiling=i' => \$consolidation_occurrence_ceiling,
         'consolidation-max-patterns=i' => \$consolidation_max_patterns,
         'final-threshold=i' => \$consolidation_final_threshold,
-        'final-ceiling=i' => \$consolidation_final_ceiling,
+        'group-ceiling|gc=i' => \$consolidation_final_ceiling,
         'heatmap|hm:s' => \$heatmap_metric,
         'heatmap-width|hmw=i' => \$heatmap_width,
         'light-background|lbg' => sub { $heatmap_light_bg = 1; $heatmap_light_bg_auto = 0; },
@@ -3196,15 +3458,6 @@ sub adapt_to_command_line_options {
     }
 
     $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
-    #$bucket_size_seconds = $print_seconds ? $time_bucket_size : $time_bucket_size * 60;		# if they say they want milliseconds, we're going to assume that their bucket sizes are in seconds instead
-    if( $print_seconds ) {
-        $bucket_size_seconds = $time_bucket_size;
-    } elsif( $print_milliseconds ) {
-        $bucket_size_seconds = $time_bucket_size / 1000;
-    } else {
-        $bucket_size_seconds = $time_bucket_size * 60;
-    }
-
     my %argv_hash = map { $_ => 1 } @ARGV;
     my $skip_next = 0;
     foreach my $arg (@ORIGINAL_ARGV) {
@@ -3274,21 +3527,33 @@ sub adapt_to_terminal_settings {
     $terminal_height //= 24;                                            # Default to 24 if terminal height cannot be determined
 
     # Auto-adjust the bucket size based on the terminal height (larger terminal can handle more rows)
-    if( $terminal_height <= 30 ) {
-        $time_bucket_size = 120;
-    } elsif( $terminal_height <= 45 ) {
-        $time_bucket_size = 90;
-    } elsif( $terminal_height <= 65 ) {
-        $time_bucket_size = 60;
-    } elsif( $terminal_height <= 85 ) {
-        $time_bucket_size = 30;
-    } elsif( $terminal_height > 85 ) {
-        $time_bucket_size = 10;
-    } else {
-        $time_bucket_size = 60;
+    # Skip if already set by command-line option (-bs)
+    if( !$time_bucket_size ) {
+        if( $terminal_height <= 30 ) {
+            $time_bucket_size = 120;
+        } elsif( $terminal_height <= 45 ) {
+            $time_bucket_size = 90;
+        } elsif( $terminal_height <= 65 ) {
+            $time_bucket_size = 60;
+        } elsif( $terminal_height <= 85 ) {
+            $time_bucket_size = 30;
+        } elsif( $terminal_height > 85 ) {
+            $time_bucket_size = 10;
+        } else {
+            $time_bucket_size = 60;
+        }
     }
 
-    $max_log_message_length = $terminal_width;		# this is the max that we can print without wrapping, depends on the summary table width, and terminal width 
+    # Convert time_bucket_size to seconds based on the time precision mode
+    if( $print_seconds ) {
+        $bucket_size_seconds = $time_bucket_size;
+    } elsif( $print_milliseconds ) {
+        $bucket_size_seconds = $time_bucket_size / 1000;
+    } else {
+        $bucket_size_seconds = $time_bucket_size * 60;
+    }
+
+    $max_log_message_length = $terminal_width;		# this is the max that we can print without wrapping, depends on the summary table width, and terminal width
     return;
 }
 
@@ -3868,13 +4133,13 @@ sub read_and_process_logs {
 
                     if( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
                         # truncate the log message key to either the screen width or hardcoded value if writing to output to CSV file
-                        $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
+                        $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
                     } elsif( defined( $object ) ) {
-                        $log_key = substr("[$log_level] [$truncated_object] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
+                        $log_key = substr("[$log_level] [$truncated_object] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
                     } elsif( defined( $threadname ) ) {
-                        $log_key = substr("[$log_level] [$truncated_thread] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
+                        $log_key = substr("[$log_level] [$truncated_thread] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
                     } else {
-                        $log_key = substr("[$log_level] $message", 0, ( $write_messages_to_csv == 1 ? 350 : $max_log_message_length ) );
+                        $log_key = substr("[$log_level] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
                     }
 
                     ## CONSOLIDATION: S1 INLINE MATCH (Issue #96) ##
@@ -4881,7 +5146,17 @@ sub calculate_statistics {
     my $max = max(@sorted);
     my $variance = ($bucket_data->{sum_of_squares} / $duration_count) - ($mean ** 2);
     my $std_dev = sprintf("%.3f", sqrt($variance));
-    my $cv = $mean != 0 ? sprintf("%.2f", $std_dev / $mean ) : undef;
+    my $cv = undef;
+    if ($mean != 0) {
+        my $cv_raw = $std_dev / $mean;
+        if ($cv_raw >= 100) {
+            $cv = sprintf("%d", $cv_raw);
+        } elsif ($cv_raw >= 10) {
+            $cv = sprintf("%.1f", $cv_raw);
+        } else {
+            $cv = sprintf("%.2f", $cv_raw);
+        }
+    }
 
     # Percentile calculations must use duration_count, not occurrences
     # to correctly index into the sorted durations array
@@ -5941,6 +6216,34 @@ sub print_verbose_output {
             printf "MEMORY\t%s\t%d\n", $struct, $memory_high_water_marks{$struct};
         }
     }
+
+    # Final-state memory snapshot (only with -mem) — shows where memory ended up after consolidation
+    if ($show_memory) {
+        require Devel::Size;
+        printf "MEMORY_FINAL\tlog_messages\t%d\n", Devel::Size::total_size(\%log_messages);
+        printf "MEMORY_FINAL\tlog_analysis\t%d\n", Devel::Size::total_size(\%log_analysis);
+        printf "MEMORY_FINAL\tconsolidation_clusters\t%d\n", Devel::Size::total_size(\%consolidation_clusters);
+        printf "MEMORY_FINAL\tconsolidation_patterns\t%d\n", Devel::Size::total_size(\%consolidation_patterns);
+        printf "MEMORY_FINAL\tconsolidation_key_message\t%d\n", Devel::Size::total_size(\%consolidation_key_message);
+        printf "MEMORY_FINAL\tconsolidation_unmatched\t%d\n", Devel::Size::total_size(\%consolidation_unmatched);
+        printf "MEMORY_FINAL\tconsolidation_ngram_index\t%d\n", Devel::Size::total_size(\%consolidation_ngram_index);
+        printf "MEMORY_FINAL\tconsolidation_key_trigrams\t%d\n", Devel::Size::total_size(\%consolidation_key_trigrams);
+        printf "MEMORY_FINAL\tconsolidation_key_trigrams_norm\t%d\n", Devel::Size::total_size(\%consolidation_key_trigrams_norm);
+    }
+
+    # Hash entry counts for key structures
+    my $log_messages_entries = 0;
+    for my $cat (keys %log_messages) { $log_messages_entries += scalar keys %{$log_messages{$cat}}; }
+    printf "COUNTS\tlog_messages_entries\t%d\n", $log_messages_entries;
+    printf "COUNTS\tlog_occurrences_entries\t%d\n", scalar keys %log_occurrences;
+    printf "COUNTS\tlog_stats_entries\t%d\n", scalar keys %log_stats;
+
+    # Terminal and bucket settings (for benchmark reproducibility)
+    printf "CONFIG\tterminal_width\t%d\n", $terminal_width;
+    printf "CONFIG\tterminal_height\t%d\n", $terminal_height;
+    printf "CONFIG\tmax_log_message_length\t%d\n", $max_log_message_length;
+    printf "CONFIG\ttime_bucket_size\t%d\n", $time_bucket_size;
+    printf "CONFIG\tbucket_size_seconds\t%.2f\n", $bucket_size_seconds;
 
     print "=== END BENCHMARK DATA ===\n";
 }
@@ -7374,8 +7677,8 @@ sub print_threadpool_summary {
 ## MAIN ##
 
 print_title();
-adapt_to_terminal_settings(); 
 adapt_to_command_line_options();
+adapt_to_terminal_settings();
 
 # READ AND PROCESS LOGS #
 $start_time = [gettimeofday];
@@ -7393,11 +7696,7 @@ measure_memory_structures();
 
 # GROUP SIMILAR MESSAGES TOGETHER (Issue #96) #
 unless( $group_similar_sensitivity eq "none" ) {
-    # Auto-disable final pass on large files (#144) — too slow above 2M lines
-    if ($consolidation_final_pass && $total_lines_read > 2_000_000) {
-        $consolidation_final_pass = 0;
-        print "Note: Final consolidation pass auto-disabled ($total_lines_read lines read > 2M threshold).\n";
-    }
+
 
     $start_time = [gettimeofday];
     group_similar_messages();
@@ -7457,6 +7756,7 @@ unless( $group_similar_sensitivity eq "none" ) {
             push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d)", $ceiling_filtered, $consolidation_occurrence_ceiling);
             push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{s3_checkpoint} // 0);
             push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{s4_pairwise} // 0);
+            push @verbose_output, sprintf("    S4 Re-scan absorbed:   %d", $s->{s4_rescan} // 0);
             push @verbose_output, sprintf("    S5 Unmatched:          %d", $genuinely_unmatched);
             push @verbose_output, sprintf("    S6 Evicted:            %d", $evicted);
             my $ema_pct = ($s->{absorption_ema} // 0) * 100;
@@ -7466,11 +7766,12 @@ unless( $group_similar_sensitivity eq "none" ) {
             push @verbose_output, sprintf("    S3 attempts:           %d  (skipped: %d, match rate: %.1f%%)",
                 $s->{s3_calls} // 0, $s->{s3_skipped} // 0,
                 ($s->{s3_calls} // 0) > 0 ? (($s->{s3_checkpoint} // 0) / ($s->{s3_calls} // 1)) * 100 : 0);
+            push @verbose_output, sprintf("    Cross-cluster merges:  %d", $s->{cross_cluster_merges} // 0);
             push @verbose_output, sprintf("    Cleanup keys scanned:  %d  (cumulative across %d checkpoints)",
                 $s->{cleanup_keys_scanned} // 0, $checkpoints);
 
             # Streaming tracking invariant
-            my $accounted = ($s->{s1_inline} // 0) + $ceiling_filtered + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + $genuinely_unmatched + $evicted;
+            my $accounted = ($s->{s1_inline} // 0) + $ceiling_filtered + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + ($s->{s4_rescan} // 0) + $genuinely_unmatched + $evicted;
             if ($accounted != $keys_seen) {
                 push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
                     $accounted, $keys_seen, $keys_seen - $accounted);
@@ -7480,53 +7781,58 @@ unless( $group_similar_sensitivity eq "none" ) {
             $grand_s1 += ($s->{s1_inline} // 0);
             $grand_s2 += $ceiling_filtered;
             $grand_s3 += ($s->{s3_checkpoint} // 0);
-            $grand_s4 += ($s->{s4_pairwise} // 0);
+            $grand_s4 += ($s->{s4_pairwise} // 0) + ($s->{s4_rescan} // 0);
             $grand_s5 += $genuinely_unmatched;
             $grand_s6 += $evicted;
             $grand_fc += ($s->{fc_calls} // 0);
             $grand_checkpoints += $checkpoints;
             $grand_patterns += $patterns;
 
-            # --- Final pass phase ---
+            # --- Final pass phase (2-pass architecture) ---
             my $fp_keys = $s->{fp_keys_seen} // 0;
             if ($fp_keys > 0) {
-                my $fp_checkpoints = $s->{fp_checkpoints} // 0;
-                my $fp_patterns = $s->{fp_patterns_final} // 0;
+                my $fp_p1_s3 = $s->{fp_p1_s3} // 0;
+                my $fp_p1_ceiling = $s->{fp_p1_s2_ceiling} // 0;
+                my $fp_p1_windows = $s->{fp_p1_windows} // 0;
+                my $fp_p1_s4_pair = $s->{fp_p1_s4_pairwise} // 0;
+                my $fp_p1_s4_rescan = $s->{fp_p1_s4_rescan} // 0;
+                my $fp_p1_patterns = $s->{fp_p1_patterns} // 0;
+                my $fp_p1_fc = $s->{fp_p1_fc_calls} // 0;
+                my $fp_p1_cross = $s->{fp_p1_cross_merges} // 0;
+                my $fp_p2_s3 = $s->{fp_p2_s3} // 0;
 
-                # Final pass S2/S5: partition from final pass's %consolidation_unmatched
-                my $fp_ceiling_filtered = 0;
-                my $fp_genuinely_unmatched = 0;
-                for my $key (keys %{$consolidation_unmatched{$cat_gk} // {}}) {
-                    my $occ = $log_messages{$category_part}{$key}{occurrences} // 1;
-                    if ($occ >= $consolidation_final_ceiling) { $fp_ceiling_filtered++; } else { $fp_genuinely_unmatched++; }
-                }
+                push @verbose_output, sprintf("  --- %s: Final Pass (2-pass) ---", $cat_gk);
+                push @verbose_output, sprintf("    Keys seen:             %d", $fp_keys);
+                push @verbose_output, sprintf("    Pass 1:");
+                push @verbose_output, sprintf("      S3 Pattern match:      %d", $fp_p1_s3);
+                push @verbose_output, sprintf("      S2 Ceiling skipped:    %d  (occurrences >= %d)", $fp_p1_ceiling, $consolidation_final_ceiling);
+                push @verbose_output, sprintf("      Windows processed:     %d  (capacity 1000)", $fp_p1_windows);
+                push @verbose_output, sprintf("      S4 Pairwise discovery: %d", $fp_p1_s4_pair);
+                push @verbose_output, sprintf("      S4 Re-scan absorbed:   %d", $fp_p1_s4_rescan);
+                push @verbose_output, sprintf("      New patterns created:  %d", $fp_p1_patterns);
+                push @verbose_output, sprintf("      find_candidates calls: %d", $fp_p1_fc);
+                push @verbose_output, sprintf("      Cross-cluster merges:  %d", $fp_p1_cross);
+                push @verbose_output, sprintf("    Pass 2:");
+                push @verbose_output, sprintf("      S3 Absorbed (cleanup): %d", $fp_p2_s3);
 
-                push @verbose_output, sprintf("  --- %s: Final Pass ---", $cat_gk);
-                push @verbose_output, sprintf("    Keys seen:             %d  (%d checkpoints, %d new patterns)", $fp_keys, $fp_checkpoints, $fp_patterns);
-                push @verbose_output, sprintf("    S1 Inline match:       %d", $s->{fp_s1_inline} // 0);
-                push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d)", $fp_ceiling_filtered, $consolidation_final_ceiling);
-                push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{fp_s3_checkpoint} // 0);
-                push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{fp_s4_pairwise} // 0);
-                push @verbose_output, sprintf("    S5 Unmatched:          %d", $fp_genuinely_unmatched);
-                push @verbose_output, sprintf("    find_candidates calls: %d", $s->{fp_fc_calls} // 0);
+                # Tracking invariant: all keys accounted for
+                my $fp_absorbed = $fp_p1_s3 + $fp_p1_s4_pair + $fp_p1_s4_rescan + $fp_p2_s3;
+                my $fp_remaining = $fp_keys - $fp_absorbed - $fp_p1_ceiling;
+                push @verbose_output, sprintf("    Remaining unmatched:   %d", $fp_remaining);
 
-                # Final pass tracking invariant (no S6 — eviction disabled)
-                my $fp_accounted = ($s->{fp_s1_inline} // 0) + $fp_ceiling_filtered + ($s->{fp_s3_checkpoint} // 0) + ($s->{fp_s4_pairwise} // 0) + $fp_genuinely_unmatched;
+                my $fp_accounted = $fp_p1_s3 + $fp_p1_ceiling + $fp_p1_s4_pair + $fp_p1_s4_rescan + $fp_p2_s3 + $fp_remaining;
                 if ($fp_accounted != $fp_keys) {
                     push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
                         $fp_accounted, $fp_keys, $fp_keys - $fp_accounted);
                 }
             }
 
-            # Combined reduction: streaming keys_seen → final remaining (S5 + S2 from last active phase + patterns)
+            # Combined reduction: streaming keys_seen → final remaining
             my $final_remaining;
             if ($fp_keys > 0) {
-                my $fp_unmatched_total = 0;
-                for my $key (keys %{$consolidation_unmatched{$cat_gk} // {}}) {
-                    $fp_unmatched_total++;
-                }
+                my $fp_absorbed = ($s->{fp_p1_s3} // 0) + ($s->{fp_p1_s4_pairwise} // 0) + ($s->{fp_p1_s4_rescan} // 0) + ($s->{fp_p2_s3} // 0);
                 my $combined_patterns = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
-                $final_remaining = $fp_unmatched_total + $combined_patterns;
+                $final_remaining = $fp_keys - $fp_absorbed - ($s->{fp_p1_s2_ceiling} // 0) + $combined_patterns;
                 push @verbose_output, sprintf("    Reduction: %d → %d (%.1f%%)",
                     $keys_seen, $final_remaining,
                     (1 - $final_remaining / ($keys_seen || 1)) * 100);
