@@ -64,3 +64,22 @@ cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
 ```bash
 ./ltl [options] <logfile>
 ```
+
+### Developer Setup
+
+After cloning, activate the tracked pre-commit guard once:
+
+```bash
+./build/setup-hooks.sh
+```
+
+This sets `core.hooksPath` to `.githooks/` and enables `pre-commit`, which blocks accidentally staging Claude Code state (`.claude/`), secret-bearing files (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `.netrc`, `.npmrc`, etc.), and content matching common token patterns. Override with `git commit --no-verify` only when you've verified the match is a false positive.
+
+**Maintainer tools (occasional use):** History hygiene operations require `git-filter-repo`:
+
+```bash
+brew install git-filter-repo          # macOS
+sudo apt-get install git-filter-repo  # Debian/Ubuntu
+```
+
+Not needed for normal development.

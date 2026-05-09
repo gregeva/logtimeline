@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Pre-commit guard: blocks Claude state, secret-bearing files, and inline secret tokens.
+# Activate via: ./build/setup-hooks.sh
+# Override (only with reason): git commit --no-verify
+
+set -euo pipefail
+
+fail() {
+    echo "[pre-commit] BLOCKED: $1" >&2
+    echo "[pre-commit] If this is intentional, run: git commit --no-verify (and explain in the message)" >&2
+    exit 1
+}
+
+staged_paths=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged_paths" ] && exit 0
+
+path_patterns=(
+    '^\.claude/'
+    '^\.claude\.local/'
+    '(^|/)\.env(\..+)?$'
+    '\.(pem|key|p12|pfx|kdbx)$'
+    '(^|/)id_rsa(\..+)?$'
+    '(^|/)id_ed25519(\..+)?$'
+    '(^|/)\.netrc$'
+    '(^|/)\.npmrc$'
+    '^secrets/'
+    '(^|/)credentials'
+)
+
+while IFS= read -r path; do
+    for re in "${path_patterns[@]}"; do
+        if [[ "$path" =~ $re ]]; then
+            fail "path '$path' matches blocked pattern /$re/"
+        fi
+    done
+done <<< "$staged_paths"
+
+content_patterns=(
+    'AKIA[0-9A-Z]{16}'
+    'ghp_[A-Za-z0-9]{30,}'
+    'github_pat_[A-Za-z0-9_]{22,}'
+    'sk-[A-Za-z0-9]{20,}'
+    'xox[baprs]-[A-Za-z0-9-]+'
+    '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+)
+
+diff_added=$(git diff --cached -U0 --diff-filter=ACMR | grep -E '^\+' | grep -Ev '^\+\+\+' || true)
+[ -z "$diff_added" ] && exit 0
+
+for re in "${content_patterns[@]}"; do
+    if echo "$diff_added" | grep -Eq "$re"; then
+        match=$(echo "$diff_added" | grep -Eo "$re" | head -1)
+        fail "staged content matches secret pattern /$re/ (sample: ${match:0:8}…)"
+    fi
+done
+
+exit 0
