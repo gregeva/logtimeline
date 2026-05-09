@@ -48,8 +48,8 @@ diff_added=$(git diff --cached -U0 --diff-filter=ACMR | grep -E '^\+' | grep -Ev
 [ -z "$diff_added" ] && exit 0
 
 for re in "${content_patterns[@]}"; do
-    if echo "$diff_added" | grep -Eq "$re"; then
-        match=$(echo "$diff_added" | grep -Eo "$re" | head -1)
+    if echo "$diff_added" | grep -E -e "$re" -q; then
+        match=$(echo "$diff_added" | grep -E -o -e "$re" | head -1)
         fail "staged content matches secret pattern /$re/ (sample: ${match:0:8}…)"
     fi
 done
