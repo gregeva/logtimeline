@@ -1,15 +1,20 @@
 # Feature Requirements: Log Format Registry
 
+## Status
+
+- **Last reviewed:** 2026-05-09
+- **Sequencing change (2026-05-09):** Pre-requisite "staging primitive" work lands on separate branches against today's architecture *before* #23 implementation begins. This shrinks the rewrite's surface area. New prerequisite issues filed: #179 (index read-back), #180 (named pipeline stages), #181 (buffered read pipeline). Existing issues #41, #34, #51 updated with Phase 2 alignment requirements and re-classified as Phase 2 prerequisites. See "Decision Log" entry for 2026-05-09 below.
+
 ## Overview
 
 Refactor the core parsing architecture from an implicit match-type conditional chain to a data-driven format registry. This enables format-aware features, user-extensible format definitions, and improved processing performance.
 
 ## Background / Problem Statement
 
-### Current Architecture
+### Current Architecture (as of 2026-05-09)
 
-The main parsing loop in `read_and_process_logs()` uses a numbered match-type system:
-- 12+ conditional branches, each with a regex pattern
+The main parsing loop in `read_and_process_logs()` (`ltl:3590-4407`) uses a numbered match-type system:
+- **13 conditional branches** confirmed at `ltl:3689-3840`, each with a regex pattern
 - Match type is determined implicitly by which regex matches first
 - Format metadata (like duration unit) is not captured
 - The `$is_access_log` flag is a boolean that loses format-specific information
@@ -25,8 +30,15 @@ elsif ($_ =~ /Access log pattern/) {
     $is_access_log = 1;
     # extract fields positionally
 }
-# ... 10+ more patterns
+# ... 11 more patterns through match_type 13
 ```
+
+#### Adjacent state worth noting (added 2026-05-09)
+
+- **#46 Index file (`ltl-index.csv`)** — `write_index_file()` at `ltl:524-668` *writes* per-file metadata (line/match counts, first/last timestamps, duration/bytes/count min/max/avg, ts_precision) on every run. **No code path reads it back today.** Issue #179 will add read-back so prior-run metadata can pre-seed bound discovery.
+- **#22 UDM (custom metrics + units + simple delta)** — shipped at `ltl:3905-3955`. Includes a *global, last-value-only* `delta()`/`idelta()` (`ltl:3933-3946`, state in `%udm_last_value` `ltl:157`). Phase 4 of this issue replaces it with the per-message-identity engine (decision D10, 2026-05-09).
+- **#96 Fuzzy message consolidation** — shipped v0.13.0. Established the S1-S5 staged pipeline pattern, the architectural template Phase 2 reuses (see "Architectural Template" section below). State in `%consolidation_*` persists across the entire run.
+- **Implicit pipeline order** — the call sequence in `## MAIN ##` (`ltl:7677`) is: `read_and_process_logs` → `initialize_empty_time_windows` → `group_similar_messages` → `calculate_all_statistics` → `calculate_heatmap_buckets` → `calculate_histogram_buckets` → `normalize_data_for_output` → `print_bar_graph` → `print_histograms` → `write_index_file`. Issue #180 will name these stages explicitly (detect / parse / accumulate / finalize / render).
 
 ### Problems with Current Approach
 
@@ -93,6 +105,33 @@ Having a single source of truth for format definitions:
 10. **Metric visibility control**: Allow each metric (raw or derived) to declare where and how it is used — graph columns, CSV output, internal-only, time-bucket rows, message-level stats
 11. **Sliding window memory model**: Hold raw data only for active buckets, freeing memory as buckets are finalized, with visibility into per-pattern memory usage
 12. **Unit system**: Every metric carries a declared unit type with normalization and display formatting, building on existing conversion functions
+
+## Architectural Template: Staged Pipeline (added 2026-05-09)
+
+The S1-S5 staged pipeline shipped in #96 (v0.13.0, fuzzy message consolidation) is the canonical architectural template for the engine rewrite. See `docs/staged-processing-pipeline.md` for the full pattern. Phase 2 (#59) and Phase 4 (#61) must reuse the following patterns rather than reinventing them:
+
+### Patterns to reuse from #96
+
+- **Checkpoint-based batched processing.** Work happens in named checkpoints rather than per-line. Memory is bounded per checkpoint; transient data structures are built and freed within each checkpoint. Phase 2's per-bucket finalization is the same shape — open bucket, accumulate, close bucket, finalize, free.
+- **Deterministic ordering via `sort keys %hash`.** Perl's hash iteration is randomized per process. Any ordering-sensitive loop must use `sort keys` to produce reproducible results. Violated → PF-23 in #96 produced different consolidations per run. Phase 4's per-message-identity state tracking has the same risk.
+- **Hot-sort for hot-path lookups.** Frequently-matched entries bubble up by one position per hit (`match_consolidation_patterns()` in #96). Phase 1's format-detection cache and Phase 4's per-identity state cache should adopt this.
+- **Profile-ready counter contract.** Every staged function emits a per-run counter visible in `-V` output (e.g., `S1=282081, S4=4416, S5=24`). The tracking invariant `S1 + S2 + S3 + S4 + S5 = keys_seen` is a built-in sanity check. Phase 2's per-bucket lifecycle and Phase 4's derived-metric calculations must emit equivalent counters.
+- **Per-checkpoint memory release.** `%key_trigrams`, `%ngram_index`, `%key_trigrams_norm` are freed at each checkpoint boundary (`run_checkpoint()` in #96). Phase 2's sliding window does the same for raw bucket data once stats are computed.
+
+### Specific subroutines from #96 that Phase 4 will reuse
+
+The similarity engine that powers fuzzy consolidation also serves Phase 4's per-message-identity grouping (already noted in Section 9 — RESOLVED). Phase 4 should call these existing subs directly rather than reimplement:
+
+- `find_candidates($source_key)` — trigram pre-filter + Dice verification, returns candidate keys above threshold.
+- `dice_coefficient(@a, @b, $threshold)` — numeric similarity 0–1.
+- `compute_mask($string_a, $string_b)` — character-position keep/variable mask.
+- `derive_canonical(@mask, $reference)` — generalized display string with `*` wildcards.
+- `derive_regex(@mask, $reference)` — compiled `qr//` pattern.
+- `try_consolidation_merge_into_existing($new, \%patterns)` — merge-first generalization.
+- `consolidation_process_key($log_key, $category, $capped_msg)` — S1 inline match gate.
+- `run_consolidation_checkpoint($category, $grouping_key)` — orchestrates S2→S3→S4 pipeline.
+
+These are production-tested at 7.9 GB / 40.6M lines (488s, 88% less memory than baseline). Phase 4 imports them; it does not reimplement.
 
 ## Requirements
 
@@ -314,25 +353,25 @@ The following functions already exist in `ltl` and provide a solid base:
 ## Open Questions
 
 ### Format Registry
-1. What file format should user-defined formats use? (YAML, JSON, custom DSL)
-2. How should format priority/ordering work when multiple patterns could match?
-3. Should format definitions support inheritance (e.g., "like tomcat9 but with microseconds")?
-4. How to handle logs that switch formats mid-file?
-5. Should there be a "strict mode" that fails on unrecognized formats vs. current permissive behavior?
+1. ~~What file format should user-defined formats use?~~ **RESOLVED 2026-05-09 (D12): YAML.** Ecosystem standard for monitoring tools (Prometheus, Datadog). Adds YAML::PP or YAML::Tiny dependency. Best fit for nested structures (derived metrics, dependency graphs).
+2. How should format priority/ordering work when multiple patterns could match? *— Phase 1 (#58) design decision.*
+3. Should format definitions support inheritance (e.g., "like tomcat9 but with microseconds")? *— Phase 1 (#58) design decision.*
+4. ~~How to handle logs that switch formats mid-file?~~ **RESOLVED 2026-05-09 (D13): Detect once, fall back to per-line on low-confidence. Skipped/non-matching lines must be re-testable.** This requires the buffered-read architecture filed as #181 — the file reader pushes lines into a bounded buffer; the processor pulls and may push lines back for re-testing against alternate patterns.
+5. Should there be a "strict mode" that fails on unrecognized formats vs. current permissive behavior? *— Phase 1 (#58) design decision.*
 
 ### Processing Model
-6. How many trailing buckets should the sliding window retain? (Minimum needed for inter-line calculations, likely 1-2, but may depend on data sparsity)
-7. How does the deferred-per-bucket model interact with the existing `-st`/`-et` time range filters?
+6. ~~How many trailing buckets should the sliding window retain?~~ **RESOLVED 2026-05-09 (D14): Auto-adjust at runtime; power-user CLI override.** "Sliding window" tracks transaction-spanning events (e.g., start in bucket 1, end 20 minutes later in bucket 5), not clock skew. Window auto-sizes based on observed transaction span; CLI flag exposes manual override for power users.
+7. How does the deferred-per-bucket model interact with the existing `-st`/`-et` time range filters? *— Phase 2 (#59) design decision.*
 
 ### Derived Metrics
-8. What is the configuration syntax for derived metric expressions? (Must support arithmetic with named fields, function calls like `delta()`, and dependency ordering)
-9. Should there be a maximum staleness/time-gap for inter-line functions beyond which a delta is discarded rather than interpolated?
-10. How should temporal interpolation handle non-uniform bucket boundaries or partial buckets at the start/end of a file?
-11. What is the full set of inter-line functions to support? (Minimum: `delta`, `idelta`. Candidates: `rate`, `irate`, `increase`, others from Prometheus)
+8. What is the configuration syntax for derived metric expressions? *— Owned by #55 (expression parser research).*
+9. Should there be a maximum staleness/time-gap for inter-line functions beyond which a delta is discarded rather than interpolated? *— Phase 4 (#61) design decision.*
+10. How should temporal interpolation handle non-uniform bucket boundaries or partial buckets at the start/end of a file? *— Phase 4 (#61) design decision.*
+11. What is the full set of inter-line functions to support? (Minimum: `delta`, `idelta`. Candidates: `rate`, `irate`, `increase`, others from Prometheus.) *— Phase 4 (#61) design decision.*
 
 ### Metric Visibility
-12. How are visibility flags configured — per metric in the format definition, or as a separate overlay/profile?
-13. Should there be default visibility presets (e.g., "full", "minimal", "csv-only")?
+12. How are visibility flags configured — per metric in the format definition, or as a separate overlay/profile? *— Phase 3 (#60) design decision.*
+13. Should there be default visibility presets (e.g., "full", "minimal", "csv-only")? *— Phase 3 (#60) design decision.*
 
 ## Research Areas
 
@@ -396,6 +435,18 @@ The new model stores raw data per bucket before processing, which adds overhead 
 If derived metric expressions are user-defined (via configuration files), and we evaluate them in Perl, there's a risk of code injection through crafted expressions.
 - **Mitigation**: The expression engine must parse and evaluate a restricted grammar, never `eval()` raw user input. Use a proper parser.
 
+### 8. Index Drift Correctness — MEDIUM (added 2026-05-09)
+Once #179 (index read-back) ships, ltl pre-seeds heatmap/histogram boundary structures from `ltl-index.csv` when fresh. If live values exceed the index bounds and the index isn't refreshed at end-of-run, the *next* run will silently compute boundaries against incorrect ranges and produce visualizations that omit out-of-range values.
+- **Mitigation**: #179's hard requirement is end-of-run drift detection and refresh — compare live captured min/max/timestamps to the pre-seeded values, and atomically update the index entry on any drift. Documented and tested before this issue's Phase 1 begins.
+
+### 9. Buffered-Read Memory Accounting — MEDIUM (added 2026-05-09)
+The buffered read pipeline (#181) introduces a new memory consumer between file I/O and the processor. If unbounded or invisible to memory tracking, it could mask regressions.
+- **Mitigation**: #181 requires the buffer to be bounded with documented spillover behavior, sized via auto-adjust + power-user CLI override, and reported in `-V` output alongside existing memory consumers.
+
+### 10. #22 Delta Semantics Change — LOW (added 2026-05-09)
+Phase 4 silently replaces #22's global last-value-only `delta()`/`idelta()` (`ltl:3933-3946`) with per-message-identity delta. Same syntax, different (correct) results. Some users may have built monitoring scripts around the current incorrect-on-interleaved-messages behavior.
+- **Mitigation**: Release notes for the version that ships Phase 4 must call this out as a behavior fix. Old behavior was undocumented for interleaved-message cases (only "no per-message-identity tracking" was noted as a limitation), so the surface area of impacted users should be small.
+
 ## Architectural Challenges (Consult Experienced Architects)
 
 ### 1. Bucket Finalization Ordering
@@ -430,22 +481,28 @@ Inter-line functions need state that persists across bucket boundaries (the last
 
 This refactor is staged into phases with independent deliverables. Each phase builds on the previous and can be validated independently. Prerequisites must be completed before Phase 1 begins.
 
-### Prerequisites
-| Issue | Title | Purpose |
-|-------|-------|---------|
-| #53 | Automated test suite with golden files | Regression detection and performance tracking |
-| #54 | ~~Fuzzy matching engine research & prototype~~ | **COMPLETE** — implemented in #96 (v0.13.0). See `docs/similarity-engine-best-practices.md` |
-| #55 | Expression parser research & build | Standalone component for derived metric arithmetic (needed by Phase 4) |
-| #56 | Memory baseline profiling | Establish current memory usage for comparison |
-| #57 | Bucket data structure prototype | Validate sliding window feasibility (needed by Phase 2) |
+### Prerequisites (revised 2026-05-09)
+| Issue | Title | Status / Purpose |
+|-------|-------|------------------|
+| #53 | Automated test suite with golden files | **COMPLETE** (delivered with #56, v0.14.2) |
+| #54 | Fuzzy matching engine research | **COMPLETE** — implemented in #96 (v0.13.0). See `docs/similarity-engine-best-practices.md` |
+| #56 | Memory baseline profiling | **COMPLETE** (v0.14.2) |
+| **#179** | **Index read-back with drift detection and refresh** | **NEW (2026-05-09)** — pre-seeds heatmap/histogram bounds from `ltl-index.csv`; refreshes on drift. Phase 1 + Phase 2 prerequisite. |
+| **#180** | **Name the implicit pipeline stages (detect/parse/accumulate/finalize/render)** | **NEW (2026-05-09)** — names the existing implicit pipeline so Phase 1 inserts the registry into the `detect` stage and Phase 2 adds per-bucket lifecycle inside `finalize`. Phase 1 prerequisite. |
+| **#181** | **Decouple file I/O from processing via a buffered read pipeline** | **NEW (2026-05-09)** — substrate for multi-format detection-fallback (Phase 1) and transaction-spanning event correlation (Phase 2 sliding window). Phase 1 + Phase 2 prerequisite. |
+| **#41** | **Heatmap/histogram unified binning** | **OPEN — Phase 2 prerequisite** (alignment requirements added 2026-05-09). |
+| **#34** | **Memory-optimized two-pass streaming** | **OPEN — Phase 2 prerequisite** (alignment requirements added 2026-05-09). |
+| **#51** | **Highlight-data memory optimization** | **OPEN — Phase 2 prerequisite** (alignment requirements added 2026-05-09). |
+| #55 | Expression parser research & build | **OPEN — Phase 4 prerequisite.** Standalone component for derived metric arithmetic. |
+| #57 | Bucket data structure prototype | **OPEN — Phase 2 prerequisite.** Validates sliding window feasibility. |
 
-### Phases
+### Phases (revised 2026-05-09)
 | Issue | Phase | Title | Depends On |
 |-------|-------|-------|------------|
-| #58 | 1 | Format registry and staged detection | #53 |
-| #59 | 2 | Sliding window deferred-per-bucket processing | #58, #56, #57 |
+| #58 | 1 | Format registry and staged detection | #179, #180, #181 |
+| #59 | 2 | Sliding-window deferred-per-bucket processing | #58, #181, #57, **#41, #34, #51** |
 | #60 | 3 | Configurable metric visibility and purpose | #59 |
-| #61 | 4 | Derived metrics (intra-line and inter-line) | #60, #54, #55 |
+| #61 | 4 | Derived metrics (intra-line and inter-line) | #60, #55 (#54 already COMPLETE) |
 
 ### Phasing Principles
 - Each phase must produce identical output for existing functionality (golden file comparison)
@@ -458,6 +515,22 @@ This refactor is staged into phases with independent deliverables. Each phase bu
 [Issue #23: Log Format Registry - Refactor core parsing architecture](https://github.com/gregeva/logtimeline/issues/23)
 
 ## Design Decisions Log
+
+### 2026-05-09: Pre-rewrite planning session — staging primitives and sequencing
+
+After ~4 months gap, picked up #23 to refresh requirements and structure work breakdown. Significant work shipped in the interim (#46 index file, #22 UDM with simple delta, #96 fuzzy consolidation S1-S5 pipeline) materially changes the planning picture. Decisions reached:
+
+1. **D5 — Sequencing.** Pre-requisite "staging primitives" land on separate branches against today's architecture *before* #23 implementation begins. Shrinks the rewrite's surface area; when the engine rewrite begins, it migrates between named primitives rather than inventing them. New issues: #179 (index read-back), #180 (named pipeline stages), #181 (buffered read pipeline). Existing issues #41/#34/#51 updated with Phase 2 alignment requirements.
+2. **D6/D7 — Index read-back (#179).** Read silently when entry is fresh (file_size + mtime match). Pre-seed heatmap/histogram bounds and timestamp range. **At end of execution, compare live values to index; on drift, refresh the index entry atomically.** No new CLI flag in v1. Drift detection is a hard requirement — without it, next-run boundaries are silently wrong.
+3. **D8 — Named pipeline stages (#180).** Coarse 5-stage shape: detect / parse / accumulate / finalize / render. Light-touch refactor that names the implicit pipeline; no intra-stage restructuring. Phase 1 (#58) inserts the format registry into `detect`; Phase 2 (#59) adds per-bucket lifecycle hooks inside `finalize`.
+4. **D9 — Heatmap/histogram pre-work (#41/#34/#51).** Land independently before Phase 2. Each existing issue updated with a "Phase 2 Alignment Requirements" comment specifying: reusable binning subroutine, bounds as parameters, structures live inside the named stages from #180, structures compose across the three issues. When Phase 2 begins, it inherits a coherent memory model — not three competing ones.
+5. **D10 — #22 simple delta migration.** Phase 4 silently replaces the global last-value-only `delta()`/`idelta()` (`ltl:3933-3946`) with per-message-identity delta. Same `-udm` syntax, correct results on interleaved messages. Documented as a behavior fix in release notes.
+6. **D11 — Architectural template.** New section in this file ("Architectural Template: Staged Pipeline") references `docs/staged-processing-pipeline.md` as the canonical pattern Phase 2 must reuse. Lists specific subs from #96 that Phase 4 will import directly (similarity engine for message identity).
+7. **D12 — YAML for the format-registry config file** (Open Question 1 resolved).
+8. **D13 — Multi-format files** (Open Question 4 resolved): detect once, fall back to per-line on low-confidence; skipped/non-matching lines must be re-testable. Requires the buffered-read substrate from #181.
+9. **D14 — Sliding-window meaning** (Open Question 6 resolved): tracks transaction-spanning events (start in bucket 1, end in bucket 5+), not clock skew. Window auto-adjusts at runtime; power-user CLI override for tuning.
+
+Branch: `23-format-registry-prep`. Documentation-and-issue-tracking only — no code changes.
 
 ### 2026-02-06: Derived Metrics and Processing Model
 
@@ -475,13 +548,32 @@ Discussion established that derived metrics require a fundamental change to the 
 
 ## Related
 
-- Issue #17: Duration unit autodetection (blocked by this refactor)
-- Issue #22: User-defined metrics with custom regex and unit conversion (lighter-weight proving ground for custom metric extraction and unit handling)
-- Issue #48: Performance profiling (provided evidence for processing model changes)
+### Prerequisites filed/updated 2026-05-09
+- **Issue #179**: Index read-back with drift detection and refresh — Phase 1 + Phase 2 prerequisite (NEW)
+- **Issue #180**: Name the implicit pipeline stages — Phase 1 prerequisite (NEW)
+- **Issue #181**: Decouple file I/O from processing via buffered read — Phase 1 + Phase 2 prerequisite (NEW)
+- **Issue #41**: Align heatmap with histogram binning — Phase 2 prerequisite (alignment requirements added)
+- **Issue #34**: Two-pass streaming memory mode — Phase 2 prerequisite (alignment requirements added)
+- **Issue #51**: Highlight-data memory optimization — Phase 2 prerequisite (alignment requirements added)
+
+### Already-shipped foundations
+- Issue #46: Index file (`ltl-index.csv`) — provides the data #179 will consume
+- Issue #22: User-defined metrics with simple delta — Phase 4 replaces its global delta with per-identity
 - Issue #54: Fuzzy matching engine research — **COMPLETE**, resolved by #96
-- Issue #96: Fuzzy message consolidation — **SHIPPED** (v0.13.0), provides the similarity engine for Phase 4 message identity
+- Issue #96: Fuzzy message consolidation — **SHIPPED** (v0.13.0), provides the similarity engine for Phase 4 message identity and the architectural template (S1-S5 pipeline) for Phase 2
+
+### Other related
+- Issue #17: Duration unit autodetection (blocked by this refactor)
+- Issue #44: Source file heuristics — depends on #179 (index read-back)
+- Issue #48: Performance profiling (provided evidence for processing model changes)
+
+### Documentation
 - features/duration-unit-autodetection.md
 - features/fuzzy-message-consolidation.md
+- features/index-file.md
+- features/user-defined-metrics.md
 - docs/similarity-engine-best-practices.md
 - docs/staged-processing-pipeline.md
 - docs/fuzzy-consolidation-lessons-learned.md
+- docs/perl-performance-optimization.md
+- docs/regex-best-practices.md
