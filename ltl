@@ -602,11 +602,23 @@ sub read_index_file {
                 $selection_entries{$key} = \%r;
             }
         }
+        # Distinguish clean EOF from a parse error mid-stream. Text::CSV
+        # always sets error_diag at end of loop; code 2012 is clean EOF.
+        # Any other code means a row failed to parse and rows after it
+        # were not seen — corrupts our trust in the whole file.
+        my @diag = $csv->error_diag;
+        my $code = $diag[0] // 0;
+        if ($code && $code != 2012) {
+            die "CSV parse error: " . ($diag[1] // 'unknown') . "\n";
+        }
         close $fh;
         1;
     };
     unless ($parse_ok) {
-        warn "ltl-index.csv malformed; skipping read-back ($@)\n";
+        warn "ltl-index.csv malformed; skipping read-back ($@)";
+        # Discard any partial parse — spec §"Edge cases" requires no pre-seed.
+        %file_entries = ();
+        %selection_entries = ();
         return;
     }
 
