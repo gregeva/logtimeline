@@ -61,7 +61,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.14.4";
+my $version_number = "0.14.5";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
@@ -216,6 +216,18 @@ my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 my ( @in_files, @output_columns );
 my %in_files_matched;
 my %index_file_data;    # Per-file metadata for index file (Issue #46)
+
+# Issue #179: index file read-back state
+my %index_preseed;        # Per-file: { lookup, matched_entry_date, freshness,
+                          # duration_min/max, bytes_min/max, count_min/max,
+                          # first_timestamp, last_timestamp, ts_precision }
+my %index_aggregated;     # Global aggregated bounds + provenance:
+                          # { duration_min => { value, from }, ... }
+my %index_drift;          # Per-file drift detail:
+                          # { duration_min => { live, preseed, drifted }, ... }
+my $index_used        = 0;
+my $index_filter_sig  = '-';   # Current run's filter signature
+my $index_drift_any   = 0;     # True if any file drifted on any metric
 my ($terminal_width, $terminal_height);
 my $terminal_height_detected = 0;  # Flag: was terminal height actually detected?
 {
@@ -521,7 +533,7 @@ sub parse_iso_date_to_epoch {
     return eval { timegm($6, $5, $4, $3, $2 - 1, $1) };
 }
 
-sub write_index_file {
+sub locate_index_file {
     my $index_filename = 'ltl-index.csv';
     my $index_dir;
     my $use_absolute_paths = 0;
@@ -535,6 +547,350 @@ sub write_index_file {
 
     my $index_path = File::Spec->catfile($index_dir, $index_filename);
     my $temp_path  = File::Spec->catfile($index_dir, ".ltl-index.$$.tmp");
+
+    return ($index_path, $temp_path, $use_absolute_paths);
+}
+
+# Issue #179: Read existing ltl-index.csv at startup, perform tiered lookup
+# (Tier 1: selection entry matching current filter signature; Tier 2: file entry),
+# freshness-check via file_size + file_mtime, pre-seed bound state when all
+# input files match at the same tier and are fresh.
+sub read_index_file {
+    # Compute the current run's filter signature (matches write side).
+    $index_filter_sig = has_active_filters() ? serialize_filters() : '-';
+
+    my ($index_path) = locate_index_file();
+    return unless -f $index_path;
+
+    unless (-r $index_path) {
+        warn "ltl-index.csv exists but is unreadable; skipping read-back\n";
+        return;
+    }
+
+    my @index_columns = qw(
+        entry_type entry_date file_path file_size file_mtime
+        line_count match_count first_timestamp last_timestamp ts_precision
+        duration_count duration_min duration_max duration_avg
+        bytes_count bytes_min bytes_max bytes_avg
+        count_count count_min count_max count_avg
+        read_rate memory_used processing_time filters
+    );
+    my %col_idx;
+    for my $i (0..$#index_columns) { $col_idx{$index_columns[$i]} = $i; }
+
+    my $csv = Text::CSV->new({ binary => 1, eol => $/ });
+    my %file_entries;        # path => row hashref
+    my %selection_entries;   # "path\0filters" => row hashref
+
+    my $parse_ok = eval {
+        open my $fh, '<', $index_path or die "open: $!";
+        my $header_seen = 0;
+        while (my $row = $csv->getline($fh)) {
+            next unless @$row >= scalar(@index_columns);
+            if (!$header_seen && ($row->[0] // '') eq 'entry_type') {
+                $header_seen = 1;
+                next;
+            }
+            my %r;
+            for my $col (@index_columns) {
+                $r{$col} = $row->[$col_idx{$col}] // '';
+            }
+            if ($r{entry_type} eq 'file') {
+                $file_entries{$r{file_path}} = \%r;
+            } elsif ($r{entry_type} eq 'selection') {
+                my $key = $r{file_path} . "\0" . $r{filters};
+                $selection_entries{$key} = \%r;
+            }
+        }
+        # Distinguish clean EOF from a parse error mid-stream. Text::CSV
+        # always sets error_diag at end of loop; code 2012 is clean EOF.
+        # Any other code means a row failed to parse and rows after it
+        # were not seen — corrupts our trust in the whole file.
+        my @diag = $csv->error_diag;
+        my $code = $diag[0] // 0;
+        if ($code && $code != 2012) {
+            die "CSV parse error: " . ($diag[1] // 'unknown') . "\n";
+        }
+        close $fh;
+        1;
+    };
+    unless ($parse_ok) {
+        warn "ltl-index.csv malformed; skipping read-back ($@)";
+        # Discard any partial parse — spec §"Edge cases" requires no pre-seed.
+        %file_entries = ();
+        %selection_entries = ();
+        return;
+    }
+
+    # Per-file tiered lookup with freshness check.
+    my %tier_seen;     # tier name => 1, used to enforce same-tier rule
+    for my $in_file (@in_files) {
+        my @stat = stat($in_file);
+        unless (@stat) {
+            $index_preseed{$in_file} = {
+                lookup => 'none', matched_entry_date => '-', freshness => 'no_entry',
+            };
+            $tier_seen{none} = 1;
+            next;
+        }
+        my $on_disk_size  = $stat[7];
+        my $on_disk_mtime = strftime("%Y-%m-%dT%H:%M:%S", gmtime($stat[9]));
+
+        my $file_row = $file_entries{$in_file};
+        my $file_fresh = 0;
+        if ($file_row) {
+            my $size_match  = ($file_row->{file_size}  eq "$on_disk_size");
+            my $mtime_match = ($file_row->{file_mtime} eq $on_disk_mtime);
+            $file_fresh = $size_match && $mtime_match;
+        }
+
+        # Tier 1: selection entry for current filter signature, with fresh companion file row.
+        my $sel_key = $in_file . "\0" . $index_filter_sig;
+        my $sel_row = $selection_entries{$sel_key};
+        if ($sel_row && $file_fresh) {
+            $index_preseed{$in_file} = _preseed_from_row($sel_row, $file_row, 'tier_1_selection');
+            $tier_seen{tier_1_selection} = 1;
+            next;
+        }
+
+        # Tier 2: file row, fresh.
+        if ($file_row && $file_fresh) {
+            $index_preseed{$in_file} = _preseed_from_row($file_row, $file_row, 'tier_2_file');
+            $tier_seen{tier_2_file} = 1;
+            next;
+        }
+
+        # No usable entry: classify the freshness result for diagnostics.
+        my $freshness = 'no_entry';
+        if ($file_row) {
+            if ($file_row->{file_size} ne "$on_disk_size") {
+                $freshness = 'stale_size';
+            } elsif ($file_row->{file_mtime} ne $on_disk_mtime) {
+                $freshness = 'stale_mtime';
+            }
+        }
+        $index_preseed{$in_file} = {
+            lookup => 'none', matched_entry_date => '-', freshness => $freshness,
+        };
+        $tier_seen{none} = 1;
+    }
+
+    # Multi-file rule: pre-seed activates only when every input file matched
+    # at the same tier (Tier 1 or Tier 2) AND all matches are fresh.
+    my @tiers = keys %tier_seen;
+    if (@tiers != 1 || $tiers[0] eq 'none') {
+        return;   # mixed or any unmatched -> no aggregated pre-seed
+    }
+    my $active_tier = $tiers[0];
+
+    # Build aggregated bounds with provenance.
+    for my $metric (qw(duration_min duration_max bytes_min bytes_max count_min count_max
+                       first_timestamp last_timestamp)) {
+        my $best;
+        my $best_from;
+        for my $file (@in_files) {
+            my $v = $index_preseed{$file}{$metric};
+            next unless defined $v && $v ne '-' && $v ne '';
+            if (!defined $best) {
+                $best = $v; $best_from = $file; next;
+            }
+            if ($metric =~ /_min$|^first_/) {
+                if (_lt($v, $best)) { $best = $v; $best_from = $file; }
+            } else {
+                if (_gt($v, $best)) { $best = $v; $best_from = $file; }
+            }
+        }
+        if (defined $best) {
+            $index_aggregated{$metric} = { value => $best, from => $best_from };
+        }
+    }
+
+    # Copy heatmap-relevant scalar bounds into the live globals so the
+    # parse pass starts with a non-undef baseline. Pre-seed corresponds
+    # to whichever metric -hm uses; if heatmap is disabled, this is a
+    # no-op since the read pass and calculate_heatmap_buckets() are gated
+    # by $heatmap_enabled.
+    my $hm_metric_col;
+    if ($heatmap_enabled) {
+        if    ($heatmap_metric eq 'duration') { $hm_metric_col = 'duration'; }
+        elsif ($heatmap_metric eq 'bytes')    { $hm_metric_col = 'bytes';    }
+        elsif ($heatmap_metric eq 'count')    { $hm_metric_col = 'count';    }
+        # UDM heatmap metrics are not in the index schema; skip.
+    }
+    if ($hm_metric_col
+        && defined $index_aggregated{"${hm_metric_col}_min"}
+        && defined $index_aggregated{"${hm_metric_col}_max"}) {
+        $heatmap_min = $index_aggregated{"${hm_metric_col}_min"}{value} + 0;
+        $heatmap_max = $index_aggregated{"${hm_metric_col}_max"}{value} + 0;
+    }
+
+    $index_used = 1;
+    return;
+}
+
+# Helper: build a per-file pre-seed record from a matched row (selection or file).
+# $bound_row is the row whose bounds we use. $file_row is always the companion
+# file row (used for ts_precision since selection rows have '-' there).
+sub _preseed_from_row {
+    my ($bound_row, $file_row, $tier_name) = @_;
+    my %p = (
+        lookup             => $tier_name,
+        matched_entry_date => $bound_row->{entry_date} // '-',
+        freshness          => 'fresh',
+    );
+    for my $col (qw(duration_min duration_max bytes_min bytes_max count_min count_max
+                    first_timestamp last_timestamp)) {
+        my $v = $bound_row->{$col};
+        $p{$col} = (defined $v && $v ne '' && $v ne '-') ? $v : undef;
+    }
+    # ts_precision lives only on the file row.
+    my $tp = $file_row->{ts_precision};
+    $p{ts_precision} = (defined $tp && $tp ne '' && $tp ne '-') ? $tp : undef;
+    return \%p;
+}
+
+# Numeric/timestamp comparators that handle ISO timestamps and bare numbers.
+sub _lt {
+    my ($a, $b) = @_;
+    return ($a lt $b) if $a =~ /^\d{4}-\d{2}-\d{2}T/;
+    return ($a + 0) < ($b + 0);
+}
+sub _gt {
+    my ($a, $b) = @_;
+    return ($a gt $b) if $a =~ /^\d{4}-\d{2}-\d{2}T/;
+    return ($a + 0) > ($b + 0);
+}
+
+# Issue #179: After parse pass completes, compare live captured values
+# against pre-seeded bounds. Per spec §5.5: filtered run uses live sel_*
+# values; unfiltered run uses live whole-file values (which equal sel_*
+# when no filter is active, since the sel_* accumulators run on every
+# matched line in that case). Observation only — refresh happens via
+# the existing write_index_file() side-effect that overwrites both
+# file and selection entries from %index_file_data at end of run.
+sub detect_index_drift {
+    return unless $index_used;
+
+    my $unfiltered = ($index_filter_sig eq '-');
+
+    # Map metric name -> (live source key in %index_file_data, comparison direction)
+    # Direction: 'min' (drift if live < preseed) or 'max' (drift if live > preseed)
+    # Timestamps: 'min' for first_timestamp (drift if live earlier), 'max' for last_timestamp.
+    my @metrics = (
+        [ duration_min   => $unfiltered ? 'duration_min'   : 'sel_duration_min',   'min' ],
+        [ duration_max   => $unfiltered ? 'duration_max'   : 'sel_duration_max',   'max' ],
+        [ bytes_min      => $unfiltered ? 'bytes_min'      : 'sel_bytes_min',      'min' ],
+        [ bytes_max      => $unfiltered ? 'bytes_max'      : 'sel_bytes_max',      'max' ],
+        [ count_min      => $unfiltered ? 'count_min'      : 'sel_count_min',      'min' ],
+        [ count_max      => $unfiltered ? 'count_max'      : 'sel_count_max',      'max' ],
+        [ first_timestamp => $unfiltered ? 'first_timestamp' : 'sel_first_timestamp', 'min' ],
+        [ last_timestamp  => $unfiltered ? 'last_timestamp'  : 'sel_last_timestamp',  'max' ],
+    );
+
+    for my $file (@in_files) {
+        my $pre = $index_preseed{$file} or next;
+        next if $pre->{lookup} eq 'none';
+
+        my $live = $index_file_data{$file} or next;
+
+        for my $m (@metrics) {
+            my ($metric, $live_key, $direction) = @$m;
+            my $preseed_v = $pre->{$metric};
+            next unless defined $preseed_v && $preseed_v ne '' && $preseed_v ne '-';
+
+            my $live_v = $live->{$live_key};
+            next unless defined $live_v;
+
+            # Format timestamps to match preseed ISO representation.
+            my $live_v_fmt = $live_v;
+            if ($metric eq 'first_timestamp' || $metric eq 'last_timestamp') {
+                $live_v_fmt = format_epoch_iso($live_v);
+                next if !defined $live_v_fmt || $live_v_fmt eq '-';
+            }
+
+            my $drifted = 0;
+            if ($direction eq 'min') {
+                $drifted = 1 if _lt($live_v_fmt, $preseed_v);
+            } else {
+                $drifted = 1 if _gt($live_v_fmt, $preseed_v);
+            }
+
+            $index_drift{$file}{$metric} = {
+                live    => $live_v_fmt,
+                preseed => $preseed_v,
+                drifted => $drifted,
+            };
+            $index_drift_any = 1 if $drifted;
+        }
+    }
+    return;
+}
+
+# Issue #179: Emit the dedicated `=== INDEX READ-BACK ===` section
+# into @verbose_output. Always emitted under -V; the index_used line
+# inside the section is the diagnostic, not the section's presence.
+# Format is the contract from features/179-index-read-back.md §"-V verbose output".
+sub emit_index_readback_verbose {
+    return unless $verbose;
+
+    push @verbose_output, "=== INDEX READ-BACK ===";
+    push @verbose_output, "index_used: " . ($index_used ? "yes" : "no");
+    push @verbose_output, "index_filter_signature: $index_filter_sig";
+
+    # Per-file lookup blocks (always emitted under -V, in input order).
+    for my $file (@in_files) {
+        my $pre = $index_preseed{$file} || {
+            lookup => 'none', matched_entry_date => '-', freshness => 'no_entry',
+        };
+        push @verbose_output, "file: $file";
+        push @verbose_output, "  lookup: $pre->{lookup}";
+        push @verbose_output, "  matched_entry_date: " . ($pre->{matched_entry_date} // '-');
+        push @verbose_output, "  freshness: $pre->{freshness}";
+        for my $col (qw(duration_min duration_max bytes_min bytes_max
+                        count_min count_max first_timestamp last_timestamp)) {
+            my $v = $pre->{$col};
+            push @verbose_output, sprintf("  preseed_%s: %s", $col,
+                (defined $v && $v ne '') ? $v : '-');
+        }
+    }
+
+    # Aggregated bounds + drift, only when pre-seed is active.
+    if ($index_used) {
+        push @verbose_output, "aggregated_preseed:";
+        for my $col (qw(duration_min duration_max bytes_min bytes_max
+                        count_min count_max first_timestamp last_timestamp)) {
+            my $a = $index_aggregated{$col};
+            if ($a) {
+                push @verbose_output, sprintf("  %s: %s (from %s)", $col, $a->{value}, $a->{from});
+            } else {
+                push @verbose_output, sprintf("  %s: -", $col);
+            }
+        }
+
+        push @verbose_output, "drift_detected: " . ($index_drift_any ? "yes" : "no");
+        if ($index_drift_any) {
+            for my $file (sort keys %index_drift) {
+                my $fd = $index_drift{$file};
+                next unless grep { $_ && $_->{drifted} } values %$fd;
+                push @verbose_output, "drift_file: $file";
+                for my $metric (qw(duration_min duration_max bytes_min bytes_max
+                                   count_min count_max first_timestamp last_timestamp)) {
+                    my $d = $fd->{$metric} or next;
+                    push @verbose_output, sprintf(
+                        "  %s: live=%s preseed=%s drifted=%s",
+                        $metric,
+                        (defined $d->{live}    && $d->{live}    ne '') ? $d->{live}    : '-',
+                        (defined $d->{preseed} && $d->{preseed} ne '') ? $d->{preseed} : '-',
+                        $d->{drifted} ? 'yes' : 'no'
+                    );
+                }
+            }
+        }
+    }
+}
+
+sub write_index_file {
+    my ($index_path, $temp_path, $use_absolute_paths) = locate_index_file();
 
     my @index_columns = qw(
         entry_type entry_date file_path file_size file_mtime
@@ -7680,6 +8036,9 @@ print_title();
 adapt_to_command_line_options();
 adapt_to_terminal_settings();
 
+# Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
+read_index_file();
+
 # READ AND PROCESS LOGS #
 $start_time = [gettimeofday];
 read_and_process_logs();
@@ -7895,6 +8254,11 @@ $end_time = [gettimeofday];
 $elapsed_normalize_data = tv_interval($start_time, $end_time);
 
 $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_heatmap_statistics + $elapsed_histogram_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
+
+# Issue #179: Compare live captured values against pre-seeded bounds (drift)
+# and emit the index read-back section into @verbose_output before flush.
+detect_index_drift();
+emit_index_readback_verbose();
 
 print_verbose_output();
 
