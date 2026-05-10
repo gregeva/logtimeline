@@ -521,7 +521,7 @@ sub parse_iso_date_to_epoch {
     return eval { timegm($6, $5, $4, $3, $2 - 1, $1) };
 }
 
-sub write_index_file {
+sub locate_index_file {
     my $index_filename = 'ltl-index.csv';
     my $index_dir;
     my $use_absolute_paths = 0;
@@ -535,6 +535,12 @@ sub write_index_file {
 
     my $index_path = File::Spec->catfile($index_dir, $index_filename);
     my $temp_path  = File::Spec->catfile($index_dir, ".ltl-index.$$.tmp");
+
+    return ($index_path, $temp_path, $use_absolute_paths);
+}
+
+sub write_index_file {
+    my ($index_path, $temp_path, $use_absolute_paths) = locate_index_file();
 
     my @index_columns = qw(
         entry_type entry_date file_path file_size file_mtime
