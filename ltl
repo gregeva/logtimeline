@@ -762,12 +762,64 @@ sub detect_index_drift {
 # Issue #179: Emit the dedicated `=== INDEX READ-BACK ===` section
 # into @verbose_output. Always emitted under -V; the index_used line
 # inside the section is the diagnostic, not the section's presence.
+# Format is the contract from features/179-index-read-back.md §"-V verbose output".
 sub emit_index_readback_verbose {
     return unless $verbose;
+
     push @verbose_output, "=== INDEX READ-BACK ===";
     push @verbose_output, "index_used: " . ($index_used ? "yes" : "no");
     push @verbose_output, "index_filter_signature: $index_filter_sig";
-    # Per-file blocks and aggregated/drift blocks land in step 4.
+
+    # Per-file lookup blocks (always emitted under -V, in input order).
+    for my $file (@in_files) {
+        my $pre = $index_preseed{$file} || {
+            lookup => 'none', matched_entry_date => '-', freshness => 'no_entry',
+        };
+        push @verbose_output, "file: $file";
+        push @verbose_output, "  lookup: $pre->{lookup}";
+        push @verbose_output, "  matched_entry_date: " . ($pre->{matched_entry_date} // '-');
+        push @verbose_output, "  freshness: $pre->{freshness}";
+        for my $col (qw(duration_min duration_max bytes_min bytes_max
+                        count_min count_max first_timestamp last_timestamp)) {
+            my $v = $pre->{$col};
+            push @verbose_output, sprintf("  preseed_%s: %s", $col,
+                (defined $v && $v ne '') ? $v : '-');
+        }
+    }
+
+    # Aggregated bounds + drift, only when pre-seed is active.
+    if ($index_used) {
+        push @verbose_output, "aggregated_preseed:";
+        for my $col (qw(duration_min duration_max bytes_min bytes_max
+                        count_min count_max first_timestamp last_timestamp)) {
+            my $a = $index_aggregated{$col};
+            if ($a) {
+                push @verbose_output, sprintf("  %s: %s (from %s)", $col, $a->{value}, $a->{from});
+            } else {
+                push @verbose_output, sprintf("  %s: -", $col);
+            }
+        }
+
+        push @verbose_output, "drift_detected: " . ($index_drift_any ? "yes" : "no");
+        if ($index_drift_any) {
+            for my $file (sort keys %index_drift) {
+                my $fd = $index_drift{$file};
+                next unless grep { $_ && $_->{drifted} } values %$fd;
+                push @verbose_output, "drift_file: $file";
+                for my $metric (qw(duration_min duration_max bytes_min bytes_max
+                                   count_min count_max first_timestamp last_timestamp)) {
+                    my $d = $fd->{$metric} or next;
+                    push @verbose_output, sprintf(
+                        "  %s: live=%s preseed=%s drifted=%s",
+                        $metric,
+                        (defined $d->{live}    && $d->{live}    ne '') ? $d->{live}    : '-',
+                        (defined $d->{preseed} && $d->{preseed} ne '') ? $d->{preseed} : '-',
+                        $d->{drifted} ? 'yes' : 'no'
+                    );
+                }
+            }
+        }
+    }
 }
 
 sub write_index_file {
