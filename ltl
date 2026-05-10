@@ -750,12 +750,67 @@ sub _gt {
 }
 
 # Issue #179: After parse pass completes, compare live captured values
-# against pre-seeded bounds. Layer-aware: filtered run drifts against
-# selection-entry pre-seed; unfiltered run drifts against file-entry
-# pre-seed. Observation only — refresh happens via the existing
-# write_index_file() side-effect.
+# against pre-seeded bounds. Per spec §5.5: filtered run uses live sel_*
+# values; unfiltered run uses live whole-file values (which equal sel_*
+# when no filter is active, since the sel_* accumulators run on every
+# matched line in that case). Observation only — refresh happens via
+# the existing write_index_file() side-effect that overwrites both
+# file and selection entries from %index_file_data at end of run.
 sub detect_index_drift {
-    # Stub: implementation lands in step 5.
+    return unless $index_used;
+
+    my $unfiltered = ($index_filter_sig eq '-');
+
+    # Map metric name -> (live source key in %index_file_data, comparison direction)
+    # Direction: 'min' (drift if live < preseed) or 'max' (drift if live > preseed)
+    # Timestamps: 'min' for first_timestamp (drift if live earlier), 'max' for last_timestamp.
+    my @metrics = (
+        [ duration_min   => $unfiltered ? 'duration_min'   : 'sel_duration_min',   'min' ],
+        [ duration_max   => $unfiltered ? 'duration_max'   : 'sel_duration_max',   'max' ],
+        [ bytes_min      => $unfiltered ? 'bytes_min'      : 'sel_bytes_min',      'min' ],
+        [ bytes_max      => $unfiltered ? 'bytes_max'      : 'sel_bytes_max',      'max' ],
+        [ count_min      => $unfiltered ? 'count_min'      : 'sel_count_min',      'min' ],
+        [ count_max      => $unfiltered ? 'count_max'      : 'sel_count_max',      'max' ],
+        [ first_timestamp => $unfiltered ? 'first_timestamp' : 'sel_first_timestamp', 'min' ],
+        [ last_timestamp  => $unfiltered ? 'last_timestamp'  : 'sel_last_timestamp',  'max' ],
+    );
+
+    for my $file (@in_files) {
+        my $pre = $index_preseed{$file} or next;
+        next if $pre->{lookup} eq 'none';
+
+        my $live = $index_file_data{$file} or next;
+
+        for my $m (@metrics) {
+            my ($metric, $live_key, $direction) = @$m;
+            my $preseed_v = $pre->{$metric};
+            next unless defined $preseed_v && $preseed_v ne '' && $preseed_v ne '-';
+
+            my $live_v = $live->{$live_key};
+            next unless defined $live_v;
+
+            # Format timestamps to match preseed ISO representation.
+            my $live_v_fmt = $live_v;
+            if ($metric eq 'first_timestamp' || $metric eq 'last_timestamp') {
+                $live_v_fmt = format_epoch_iso($live_v);
+                next if !defined $live_v_fmt || $live_v_fmt eq '-';
+            }
+
+            my $drifted = 0;
+            if ($direction eq 'min') {
+                $drifted = 1 if _lt($live_v_fmt, $preseed_v);
+            } else {
+                $drifted = 1 if _gt($live_v_fmt, $preseed_v);
+            }
+
+            $index_drift{$file}{$metric} = {
+                live    => $live_v_fmt,
+                preseed => $preseed_v,
+                drifted => $drifted,
+            };
+            $index_drift_any = 1 if $drifted;
+        }
+    }
     return;
 }
 
