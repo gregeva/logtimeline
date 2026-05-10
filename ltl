@@ -216,6 +216,18 @@ my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 my ( @in_files, @output_columns );
 my %in_files_matched;
 my %index_file_data;    # Per-file metadata for index file (Issue #46)
+
+# Issue #179: index file read-back state
+my %index_preseed;        # Per-file: { lookup, matched_entry_date, freshness,
+                          # duration_min/max, bytes_min/max, count_min/max,
+                          # first_timestamp, last_timestamp, ts_precision }
+my %index_aggregated;     # Global aggregated bounds + provenance:
+                          # { duration_min => { value, from }, ... }
+my %index_drift;          # Per-file drift detail:
+                          # { duration_min => { live, preseed, drifted }, ... }
+my $index_used        = 0;
+my $index_filter_sig  = '-';   # Current run's filter signature
+my $index_drift_any   = 0;     # True if any file drifted on any metric
 my ($terminal_width, $terminal_height);
 my $terminal_height_detected = 0;  # Flag: was terminal height actually detected?
 {
@@ -537,6 +549,36 @@ sub locate_index_file {
     my $temp_path  = File::Spec->catfile($index_dir, ".ltl-index.$$.tmp");
 
     return ($index_path, $temp_path, $use_absolute_paths);
+}
+
+# Issue #179: Read existing ltl-index.csv at startup, perform tiered lookup
+# (Tier 1: selection entry matching current filter signature; Tier 2: file entry),
+# freshness-check via file_size + file_mtime, pre-seed bound state when all
+# input files match at the same tier and are fresh.
+sub read_index_file {
+    # Stub: implementation lands in step 3.
+    return;
+}
+
+# Issue #179: After parse pass completes, compare live captured values
+# against pre-seeded bounds. Layer-aware: filtered run drifts against
+# selection-entry pre-seed; unfiltered run drifts against file-entry
+# pre-seed. Observation only — refresh happens via the existing
+# write_index_file() side-effect.
+sub detect_index_drift {
+    # Stub: implementation lands in step 5.
+    return;
+}
+
+# Issue #179: Emit the dedicated `=== INDEX READ-BACK ===` section
+# into @verbose_output. Always emitted under -V; the index_used line
+# inside the section is the diagnostic, not the section's presence.
+sub emit_index_readback_verbose {
+    return unless $verbose;
+    push @verbose_output, "=== INDEX READ-BACK ===";
+    push @verbose_output, "index_used: " . ($index_used ? "yes" : "no");
+    push @verbose_output, "index_filter_signature: $index_filter_sig";
+    # Per-file blocks and aggregated/drift blocks land in step 4.
 }
 
 sub write_index_file {
@@ -7686,6 +7728,9 @@ print_title();
 adapt_to_command_line_options();
 adapt_to_terminal_settings();
 
+# Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
+read_index_file();
+
 # READ AND PROCESS LOGS #
 $start_time = [gettimeofday];
 read_and_process_logs();
@@ -7901,6 +7946,11 @@ $end_time = [gettimeofday];
 $elapsed_normalize_data = tv_interval($start_time, $end_time);
 
 $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_heatmap_statistics + $elapsed_histogram_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
+
+# Issue #179: Compare live captured values against pre-seeded bounds (drift)
+# and emit the index read-back section into @verbose_output before flush.
+detect_index_drift();
+emit_index_readback_verbose();
 
 print_verbose_output();
 
