@@ -147,6 +147,8 @@ Color gradients should support light background detection used in the heatmap.  
   - Count: 1, 10, 100, 1K, 10K, 100K
 - Logarithmic scale (no linear option)
 
+**Percentile tick marks:** At each x-column corresponding to a displayed percentile, replace the horizontal axis character with an upward tick (`┴`, U+2534). If that column already carries a downward bucket-boundary tick (`┬`), render a cross (`┼`, U+253C) instead. Tick marks use the same bright black / dark grey color as all other axis box-drawing characters — not the metric series color (yellow/green/cyan). The tick set is dynamic: only percentiles currently shown in the legend generate ticks, so the number of ticks varies with terminal width.
+
 #### Legend (Below Histogram)
 
 Display population-wide percentiles below each histogram on a single centered line, dynamically selecting which percentiles to show based on available width.
@@ -319,6 +321,11 @@ Match bar graph column colors for consistency:
 19. [x] Progress messages and timing displayed for histogram statistics
 20. [x] Highlight filter support - stacked bars with highlighted portion in bright color at bottom (Issue #42)
 21. [x] Two legend lines when highlight data exists - population percentiles (base color) and highlighted percentiles (highlight color)
+22. [x] Axis line carries `┴` at each x-column matching a displayed percentile (Issue #185)
+23. [x] When a percentile column coincides with a bucket-boundary tick, `┼` is rendered instead of either alone (Issue #185)
+24. [x] Percentile tick marks rendered in the same color as the rest of the axis frame (matching `┗`, `━`, `┳`, `┛` — whatever colour the terminal renders the axis line in); not the metric series color (Issue #185)
+25. [x] Tick count tracks the legend: narrower terminals produce fewer ticks (Issue #185). Note: `tick_count <= legend_entry_count`; equality is not always reachable because percentiles with values that quantise to the same x-axis column collapse into one tick (e.g. P1 and P10 both at the data floor; P95 and P99 within the same log-scale cell). This is correct set-semantics, not a defect.
+26. [x] No new rows added; no axis characters outside the axis line affected (Issue #185)
 
 ## Test Plan
 
@@ -348,6 +355,37 @@ Match bar graph column colors for consistency:
 4. Colors match bar graph column colors (yellow, green, cyan)
 5. Bar heights accurately represent data distribution
 6. Optional color gradients enhance readability (if implemented)
+
+### Automated Test: Percentile Tick Marks (Issue #185)
+
+Script: `tests/validate-histogram-ticks.sh`
+
+Use `-hg duration` (single histogram) with varying `-hgw` percentages to exercise the dynamic percentile count across widths. Run against `logs/AccessLogs/localhost_access_log.2025-03-21.txt` with `--disable-progress`.
+
+**Width variation — at least five sizes:**
+
+| `-hgw` | Expected behaviour |
+|--------|-------------------|
+| 20 | Fewest percentiles shown; tick count matches legend count |
+| 35 | ~3–4 percentiles; tick count matches legend count |
+| 50 | ~4–5 percentiles; tick count matches legend count |
+| 75 | ~5–6 percentiles; tick count matches legend count |
+| 95 | Most percentiles (default); tick count matches legend count |
+
+**Assertions per width:**
+1. Count percentile entries in the legend line.
+2. Count `┴`/`┻` and `┼`/`╋` characters in the x-axis line (light + heavy box variants).
+3. Assert `1 <= tick_count <= legend_entry_count`. Equality is the typical case but not strictly required: percentiles with values that quantise to the same x-axis column legitimately collapse to one tick (e.g. P1 and P10 both at the data floor; P95 and P99 within the same log-scale cell). `tick_count > legend_entry_count` would mean orphan ticks — that IS a bug.
+4. Assert no `┴`/`┻`/`┼`/`╋` appears outside the x-axis line row.
+5. Assert each tick character on the axis line carries NO ANSI escape immediately preceding it. The existing axis frame chars (`┗`/`━`/`┳`/`┛`) are emitted without ANSI wrapping; the ticks must match. If a `\e[...m` prefix appears before a tick, the tick has been recoloured away from the axis frame colour.
+
+**Bucket-boundary + percentile coincidence (`┼`/`╋`):**
+- This is normal axis adaptation, not a special collision case: when a column carries both a bucket-boundary indicator and a percentile indicator, render the cross to express both. The test counts `┼`/`╋` toward the tick total in assertion #3.
+
+**Multi-histogram assertion:**
+- Run with `-hg duration,bytes`; assert each histogram's x-axis carries its own independent tick set, each within `[1, that-histogram's-legend-entry-count]`.
+
+The script emits PASS/FAIL per assertion and exits non-zero on any failure, consistent with `tests/validate-index-readback.sh`.
 
 ## Research & References
 
@@ -465,6 +503,7 @@ Complete set for axes, tick marks, and corners:
 3. **Cumulative distribution**: Show CDF alongside histogram
 4. **CSV export**: Include histogram bucket data in CSV output
 5. ~~**Percentile markers on chart**~~: Delivered via legend line below each histogram; percentiles selected from priority list (P50, P99, P99.9, P95, P90, P75, P99.99, P25, P10, P1) based on available width, then displayed in ascending order
+6. ~~**Percentile tick marks on x-axis**~~: **DELIVERED** in Issue #185 — upward tick (`┴`) on the bottom axis at each displayed percentile's x-position; cross (`┼`) when coinciding with a bucket-boundary tick; dynamic count follows the legend
 
 ## Progress Tracking
 
@@ -480,6 +519,7 @@ Complete set for axes, tick marks, and corners:
 | Implementation | Done | All phases complete |
 | Testing | Done | Visual verification complete |
 | Documentation | In Progress | Feature doc updated, help text and release notes pending |
+| Percentile tick marks on x-axis | Done | Issue #185 — implementation in `select_histogram_percentiles()`, `calculate_histogram_percentile_ticks()`, updated `render_histogram_x_axis()`; test runner `tests/validate-histogram-ticks.sh` (15/15 PASS) |
 
 ## Decisions Log
 
@@ -523,3 +563,6 @@ Complete set for axes, tick marks, and corners:
 | Highlight colors match bar graph highlight_bg | Duration: 226 (bright yellow), Bytes: 46 (bright green), Count: 51 (bright cyan) | 2026-02-05 |
 | Stacked bars for highlight | Highlighted portion renders at bottom of bar in highlight color; non-highlighted portion on top in base color; uses half-block characters for smooth transitions | 2026-02-05 |
 | Two legend lines when highlight exists | First line: population percentiles (base text color); Second line: highlighted percentiles (highlight text color) | 2026-02-05 |
+| Percentile ticks follow displayed legend (dynamic) | Ticks must correspond to what the legend shows; orphaned ticks with no matching legend entry would be confusing. Note: issue #185 body incorrectly stated "six printed percentiles" — the correct behaviour is dynamic, matching whatever the legend displays at the current width | 2026-05-16 |
+| `┼` on collision with bucket-boundary tick | Preserves both pieces of information (bucket boundary + percentile position); neither is silently lost | 2026-05-16 |
+| Axis color for percentile ticks | Ticks are axis decoration, not data series, so they must render in the same color as the rest of the axis frame (`┗`, `━`, `┳`, `┛`). Implementation: those frame chars are emitted with no ANSI wrapping, so the ticks are emitted with no wrapping either — guaranteeing identical colour regardless of what the terminal is configured to render the axis line in. Using the metric series color (yellow/green/cyan) would misattribute them as series elements; using a separate accent (e.g. ANSI 8 / dark grey) would visually detach them from the frame they belong to | 2026-05-16 |

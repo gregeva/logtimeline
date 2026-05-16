@@ -6940,6 +6940,10 @@ sub print_histograms {
         # Calculate X-axis labels
         my $x_labels = calculate_histogram_x_labels($boundaries, $bar_width, $metric);
 
+        # Issue #185: precompute the percentile set shared by the legend and the axis ticks
+        my ($selected_pcts, $pct_separator) = select_histogram_percentiles($stats, $bar_width, $metric);
+        my $percentile_cols = calculate_histogram_percentile_ticks($selected_pcts, $boundaries, $bar_width);
+
         $metric_data{$metric} = {
             display_buckets    => \@display_buckets,
             display_buckets_hl => \@display_buckets_hl,
@@ -6949,6 +6953,9 @@ sub print_histograms {
             boundaries         => $boundaries,
             stats              => $stats,
             stats_hl           => $stats_hl,
+            selected_pcts      => $selected_pcts,
+            pct_separator      => $pct_separator,
+            percentile_cols    => $percentile_cols,
         };
     }
 
@@ -7008,7 +7015,7 @@ sub print_histograms {
     for my $i (0 .. $#metrics) {
         my $metric = $metrics[$i];
         my $data = $metric_data{$metric};
-        my $xaxis_str = render_histogram_x_axis($bar_width, $data->{x_labels}, \%box);
+        my $xaxis_str = render_histogram_x_axis($bar_width, $data->{x_labels}, \%box, $data->{percentile_cols});
         $xaxis_line .= $xaxis_str;
         $xaxis_line .= " " x $gap if $i < $#metrics;
     }
@@ -7033,7 +7040,7 @@ sub print_histograms {
     for my $i (0 .. $#metrics) {
         my $metric = $metrics[$i];
         my $data = $metric_data{$metric};
-        my ($legend_str, $legend_str_hl) = render_histogram_legend($metric, $data->{stats}, $data->{stats_hl}, $bar_width, $single_width);
+        my ($legend_str, $legend_str_hl) = render_histogram_legend($metric, $data->{selected_pcts}, $data->{pct_separator}, $data->{stats_hl}, $bar_width, $single_width);
         $legend_line .= $legend_str;
         $legend_line .= " " x $gap if $i < $#metrics;
         if (defined $legend_str_hl) {
@@ -7362,17 +7369,110 @@ sub get_histogram_y_tick_chars {
     return ($box->{t_right}, $box->{t_left});
 }
 
+# Issue #185: Select percentiles to show in legend, ordered by SRE priority then sorted ascending.
+# Shared between render_histogram_legend and the x-axis tick computation so both are
+# guaranteed to use the same set — orphaned ticks (no matching legend entry) would be confusing.
+sub select_histogram_percentiles {
+    my ($stats, $bar_width, $metric) = @_;
+
+    my @percentile_priority = (
+        { key => 'p50',   label => 'P50',    sort_order => 50 },
+        { key => 'p99',   label => 'P99',    sort_order => 99 },
+        { key => 'p999',  label => 'P99.9',  sort_order => 99.9 },
+        { key => 'p95',   label => 'P95',    sort_order => 95 },
+        { key => 'p90',   label => 'P90',    sort_order => 90 },
+        { key => 'p75',   label => 'P75',    sort_order => 75 },
+        { key => 'p9999', label => 'P99.99', sort_order => 99.99 },
+        { key => 'p25',   label => 'P25',    sort_order => 25 },
+        { key => 'p10',   label => 'P10',    sort_order => 10 },
+        { key => 'p1',    label => 'P1',     sort_order => 1 },
+    );
+
+    my $separator = "   ";
+    my @all_entries;
+    for my $pct (@percentile_priority) {
+        my $value     = $stats->{$pct->{key}};
+        my $value_str = format_heatmap_value($value, $metric);
+        my $entry_str = $pct->{label} . ": " . $value_str;
+        push @all_entries, {
+            key        => $pct->{key},
+            label      => $pct->{label},
+            sort_order => $pct->{sort_order},
+            value      => $value,
+            str        => $entry_str,
+            len        => length($entry_str),
+        };
+    }
+
+    my $max_entries = 0;
+    my $total_len   = 0;
+    for my $i (0 .. $#all_entries) {
+        my $needed = $all_entries[$i]{len};
+        $needed += length($separator) if $i > 0;
+        if ($total_len + $needed <= $bar_width) {
+            $total_len += $needed;
+            $max_entries = $i + 1;
+        } else {
+            last;
+        }
+    }
+
+    return ([], $separator) unless $max_entries > 0;
+
+    my @selected = @all_entries[0 .. $max_entries - 1];
+    @selected = sort { $a->{sort_order} <=> $b->{sort_order} } @selected;
+    return (\@selected, $separator);
+}
+
+# Issue #185: Map each selected percentile to a column index on the log-scaled x-axis.
+# Uses the same logarithmic mapping as calculate_histogram_x_labels() to stay aligned
+# with bucket boundaries and labels.
+sub calculate_histogram_percentile_ticks {
+    my ($selected, $boundaries_ref, $bar_width) = @_;
+
+    my %cols;
+    return \%cols unless $selected && @$selected;
+
+    my $min_val = $boundaries_ref->[0];
+    my $max_val = $boundaries_ref->[-1];
+    return \%cols if !defined $min_val || !defined $max_val || $min_val <= 0 || $max_val <= $min_val;
+
+    my $log_range = log($max_val / $min_val);
+    for my $entry (@$selected) {
+        my $value = $entry->{value};
+        next unless defined $value && $value > 0;
+        my $pos = log($value / $min_val) / $log_range;
+        $pos = 0 if $pos < 0;
+        $pos = 1 if $pos > 1;
+        my $col = int($pos * ($bar_width - 1));
+        $cols{$col} = 1;
+    }
+    return \%cols;
+}
+
 # Render X-axis line
 sub render_histogram_x_axis {
-    my ($bar_width, $x_labels, $box) = @_;
+    my ($bar_width, $x_labels, $box, $percentile_cols) = @_;
 
     my %tick_positions = map { $_->{col} => 1 } @$x_labels;
+    $percentile_cols ||= {};
 
     # Left side: "     0 " + corner (6 chars + space = 7 to match Y-axis labels)
     my $result = sprintf("%6s ", "0") . $box->{corner_bl};
 
+    # Issue #185: tick chars (┴/┻ and ┼/╋) match the colour of the rest of the
+    # axis frame (┗ ━ ┳ ┛). Those characters are emitted without any ANSI
+    # wrapping, so the ticks are emitted the same way — whatever colour the
+    # terminal renders the axis line in, the ticks render identically.
     for my $col (0 .. $bar_width - 1) {
-        if (exists $tick_positions{$col}) {
+        my $is_bucket = exists $tick_positions{$col};
+        my $is_pct    = exists $percentile_cols->{$col};
+
+        if ($is_bucket && $is_pct) {
+            $result .= $box->{cross};
+        } elsif ($is_pct) {
+            $result .= $box->{t_up};
+        } elsif ($is_bucket) {
             $result .= $box->{t_down};
         } else {
             $result .= $box->{h_line};
@@ -7405,59 +7505,14 @@ sub render_histogram_x_labels {
 
 # Render legend with percentiles (Issue #42: supports highlight stats)
 # Returns ($legend_line, $legend_line_hl) where $legend_line_hl is undef if no highlight data
+# Issue #185: $selected (precomputed by select_histogram_percentiles) is used so the legend
+# and the x-axis ticks are guaranteed identical.
 sub render_histogram_legend {
-    my ($metric, $stats, $stats_hl, $bar_width, $single_width) = @_;
+    my ($metric, $selected, $separator, $stats_hl, $bar_width, $single_width) = @_;
 
-    # Priority order for percentile selection (SRE best practices)
-    my @percentile_priority = (
-        { key => 'p50',   label => 'P50',    sort_order => 50 },
-        { key => 'p99',   label => 'P99',    sort_order => 99 },
-        { key => 'p999',  label => 'P99.9',  sort_order => 99.9 },
-        { key => 'p95',   label => 'P95',    sort_order => 95 },
-        { key => 'p90',   label => 'P90',    sort_order => 90 },
-        { key => 'p75',   label => 'P75',    sort_order => 75 },
-        { key => 'p9999', label => 'P99.99', sort_order => 99.99 },
-        { key => 'p25',   label => 'P25',    sort_order => 25 },
-        { key => 'p10',   label => 'P10',    sort_order => 10 },
-        { key => 'p1',    label => 'P1',     sort_order => 1 },
-    );
+    return (" " x $single_width, undef) unless $selected && @$selected;
 
-    my $separator = "   ";
-    my $available_width = $bar_width;
-
-    # Build all entry strings for main stats
-    my @all_entries;
-    for my $pct (@percentile_priority) {
-        my $value_str = format_heatmap_value($stats->{$pct->{key}}, $metric);
-        my $entry_str = $pct->{label} . ": " . $value_str;
-        push @all_entries, {
-            sort_order => $pct->{sort_order},
-            str        => $entry_str,
-            len        => length($entry_str),
-        };
-    }
-
-    # Find max entries that fit
-    my $max_entries = 0;
-    my $total_len = 0;
-    for my $i (0 .. $#all_entries) {
-        my $needed = $all_entries[$i]{len};
-        $needed += length($separator) if $i > 0;
-        if ($total_len + $needed <= $available_width) {
-            $total_len += $needed;
-            $max_entries = $i + 1;
-        } else {
-            last;
-        }
-    }
-
-    return (" " x $single_width, undef) unless $max_entries > 0;
-
-    # Take first N items by priority, sort for display
-    my @selected = @all_entries[0 .. $max_entries - 1];
-    @selected = sort { $a->{sort_order} <=> $b->{sort_order} } @selected;
-
-    my $legend_line = join($separator, map { $_->{str} } @selected);
+    my $legend_line = join($separator, map { $_->{str} } @$selected);
 
     # Center within single_width, apply base metric color
     my $left_margin = 8;
@@ -7470,26 +7525,19 @@ sub render_histogram_legend {
     my $visual_len = $legend_padding + length($legend_line);
     $result .= " " x ($single_width - $visual_len) if $visual_len < $single_width;
 
-    # Issue #42: Build highlight legend line if highlight stats exist
+    # Issue #42: Build highlight legend line if highlight stats exist.
+    # Same percentile selection as main legend (sort_order/key from $selected) so the two
+    # rows align column-for-column.
     my $result_hl = undef;
     if (defined $stats_hl && defined $stats_hl->{count} && $stats_hl->{count} > 0) {
         my $highlight_color = $histogram_highlight_colors{$metric};
 
-        # Build highlight entry strings using same percentiles
-        my @all_entries_hl;
-        for my $pct (@percentile_priority) {
-            my $value_str = format_heatmap_value($stats_hl->{$pct->{key}}, $metric);
-            my $entry_str = $pct->{label} . ": " . $value_str;
-            push @all_entries_hl, {
-                sort_order => $pct->{sort_order},
-                str        => $entry_str,
-                len        => length($entry_str),
-            };
+        my @selected_hl;
+        for my $entry (@$selected) {
+            my $value_str = format_heatmap_value($stats_hl->{$entry->{key}}, $metric);
+            my $entry_str = $entry->{label} . ": " . $value_str;
+            push @selected_hl, { str => $entry_str };
         }
-
-        # Use same number of entries as main legend for alignment
-        my @selected_hl = @all_entries_hl[0 .. $max_entries - 1];
-        @selected_hl = sort { $a->{sort_order} <=> $b->{sort_order} } @selected_hl;
 
         my $legend_line_hl = join($separator, map { $_->{str} } @selected_hl);
 
