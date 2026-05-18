@@ -633,6 +633,210 @@ The memo concludes with a structured comparison (e.g., a matrix across options v
 
 D3 does **not** lock the implementation. The decision conversation between user and Claude is what locks it; D3 is the input to that conversation.
 
+#### D3 memo — options
+
+Drawn from D1's three-family synthesis. Single-algorithm options are presented first; hybrid options where the family choice differs across paths are presented second. Options that D1 found dominated (q-digest, P-square, reservoir sampling) are excluded — they appear in D1 for completeness but are not viable choices.
+
+##### Option 1 — KLL across all four paths
+
+- **What it does**: KLL sketch (randomized variant, reproducibly seeded) replaces the per-message duration array (Path A), the per-time-bucket duration array (Path B), the histogram-mode raw array (Path C1), and the heatmap-row raw array (Path C2). #34's bin counters remain for heatmap/histogram *rendering*; percentile derivation reads from the KLL sketches. #189 R4 is implemented over KLL state.
+- **What it gains**:
+  - Strongest theoretical guarantee available: rank error ≤ ε with high probability, asymptotically optimal state size.
+  - Uniform accuracy across quantiles — P50 and P99.9 carry the same bound. Matches Path C1's wide 10-quantile demand cleanly.
+  - Compact state at all N (~3 KB at ε=0.01).
+  - Mature literature; multiple reference implementations to consult.
+- **What it costs**:
+  - **Independent state coexists with #34's bin counters.** Two data structures running in parallel rather than one. Misses the architectural-harmonization opportunity that motivated the feature.
+  - **Rank error, not value error.** `-V` must report "P99 returned value at true rank 0.985–0.995" rather than "P99 within ±5% of true value." Less intuitive for SRE users.
+  - **Path A per-key overhead.** At ε=0.01, ~3 KB per key × ~10⁵ keys = ~300 MB sketch state for high-cardinality runs. Smaller than today's raw arrays for keys with large N, but *larger* for keys with N < ~400. Net memory win depends on the key-N distribution.
+  - **No published Perl implementation.** Port effort required; KLL's randomized variant carries the seeding-discipline burden.
+  - **Path C2 round-trip**: numeric value → bin index via #189 R2 adds a step that bin-derived options short-circuit.
+- **Open questions**: Whether rank-error reporting is acceptable for ltl's user base. Whether the per-key state overhead at small N degrades total memory more than today. Seeding discipline implementation cost.
+- **R2.3 gating implication**: Small-N gate per partition (per-key, per-bucket) — fall back to exact mode below the cross-over point where KLL state exceeds raw-array size. Cross-over is roughly N < 400 for ε=0.01.
+- **R4 accuracy-bound implication**: ε (rank error) reported per quantile uniformly. To translate to value error for `-V` would require either an additional empirical calibration step or a published distribution-specific result that ltl does not have.
+- **State budget implication**: ~3 KB per partition for ε=0.01. Tunable via ε.
+
+##### Option 2 — DDSketch across all four paths
+
+- **What it does**: DDSketch (log-spaced bin counters with rate 1+α) replaces all four paths' raw arrays. #189 R4 implemented over DDSketch state. Because DDSketch *is* a bin-counter structure, this option opens the door to **partial structural unification with #34's bin counters** (see Option 5 for the variant that pushes this further).
+- **What it gains**:
+  - **Value-relative-error guarantee**: every quantile within α of true value, uniformly. Matches SRE latency-reporting expectations directly — `-V` reports "P99.9 within ±1% of true P99.9 value" cleanly.
+  - Deterministic — no seeding discipline.
+  - Compact state (O((1/α) log(max/min))).
+  - Constant-time update (closed-form log-spaced index).
+  - **Structurally similar to #34's bin counters** — the data structure is the same family even if the partition is parameterized differently.
+- **What it costs**:
+  - State proportional to log(max/min). For ltl's duration range (μs to hours), this is bounded but not negligible (~1500 bins at α=0.01).
+  - **Two partition shapes coexist** if #34's heatmap partition does not match DDSketch's α-parameterized partition. The unification is structural-similarity, not identity. See Option 5.
+  - **No published Perl implementation.** Port effort required, though simpler than KLL (deterministic, closed-form bin assignment).
+  - Path A per-key overhead similar to KLL — ~10 KB per key × many keys.
+- **Open questions**: Whether #34's heatmap partition can be configured DDSketch-compatible without compromising rendering. Per-key memory at high-cardinality runs.
+- **R2.3 gating implication**: Small-N gate per partition. Cross-over higher than KLL because state is larger.
+- **R4 accuracy-bound implication**: α relative error reported per quantile uniformly. Reporting form is the most user-friendly of the bounded options.
+- **State budget implication**: ~10 KB per partition for α=0.01 over typical duration range. Tunable via α.
+
+##### Option 3 — t-digest across all four paths
+
+- **What it does**: t-digest replaces all four paths' raw arrays.
+- **What it gains**:
+  - Best **empirical** tail-quantile accuracy on heavy-tailed data — the regime ltl's primary use case lives in. Reported relative errors at P99/P99.9 typically <1%.
+  - Smallest sketch state of all bounded-state options (~5–20 KB serialized).
+  - Deterministic for fixed input order.
+- **What it costs**:
+  - **No worst-case theoretical bound.** R4 must commit to empirical accuracy (either from Dunning's published numbers or from D4 measurement on ltl data). Less defensible in `-V` than KLL/DDSketch.
+  - **P50 is the *worst* quantile.** t-digest's centroid clustering is densest at the tails; the median has the widest centroid. Phase 3's bar-graph P50 marker would have wider error than P99.
+  - **Sensitive to input order** (though deterministic per fixed order). Re-sorting input would change the output — not a problem for R6 as written but constrains future ordering optimizations.
+  - **Coexists with #34's bin counters** — no unification.
+  - **No published Perl implementation.**
+- **Open questions**: Whether empirical-only accuracy bound is acceptable in `-V`. Whether P50's wider error matters operationally. Perl port complexity.
+- **R2.3 gating implication**: Small-N gate per partition; t-digest degrades gracefully to near-exact at small N.
+- **R4 accuracy-bound implication**: Empirical, per-quantile (with tail quantiles tighter than median). Source is Dunning's paper plus optional D4 ltl-specific confirmation.
+- **State budget implication**: ~5–20 KB per partition at δ=100. Tunable via δ.
+
+##### Option 4 — Bin-derived interpolation with free partition (no #34 constraint)
+
+- **What it does**: #189 R4 is implemented as bin-derived interpolation over #34's existing bin counters. The partition shape for each consumer is whatever #34 already chose for rendering — heatmap uses `-hmw` bins, histogram uses `calculate_histogram_bucket_count` bins. Path A uses a new per-`(category, log_key)` bin store with a partition shape Phase 2 chooses (likely shared global log-spaced).
+- **What it gains**:
+  - **Maximum architectural harmonization.** One data structure (bin counters) serves rendering and percentile derivation. No independent estimator state. #189 R4 is one function.
+  - **Native fit for Path C2** — bin index is the output form already; no numeric-to-bin round-trip needed (#189 R4-bis returns bin index directly).
+  - Deterministic by construction.
+  - Zero per-update cost beyond bin counter increment.
+  - Constant-time per-finalize per quantile (linear scan over bins, B = 30–60).
+- **What it costs**:
+  - **No published accuracy bound.** Accuracy is partition-dependent; R4's bound must be derived from ltl's partition shapes empirically (D4 trigger likely).
+  - **Tail accuracy degrades with bin width at the high end.** For log-spaced partitions with B = 30 covering 6 orders of magnitude, the highest bin has ~50% relative width. P99.9 / P99.99 within this bin returns the bin midpoint — error up to ±25%. Acceptability depends on R4's tolerance.
+  - **Path A per-key partition shape question is unresolved.** One global partition risks underutilization (most keys cover a narrow sub-range); per-key partitions create a circular dependency at parse time.
+  - **Small-N step function.** When N < B, bins are sparsely populated; interpolation between empty bins produces discontinuous output.
+- **Open questions**: Path A partition shape (the single largest open question). Tail accuracy at heavy tails. Small-N fallback strategy.
+- **R2.3 gating implication**: Same small-N gate concern, but the cross-over is different — bin-derived has *zero* additional state, so the cross-over is governed by accuracy degradation at small N rather than memory crossover.
+- **R4 accuracy-bound implication**: Empirical, per-quantile, partition-dependent. Source is empirical measurement on ltl data.
+- **State budget implication**: Zero beyond #34's bin counters. Tunable via B (bin count).
+
+##### Option 5 — Bin-derived interpolation with DDSketch-compatible partition
+
+- **What it does**: Like Option 4, but the partition shape is constrained to be DDSketch-compatible (log-spaced with rate 1+α). This requires either reshaping #34's heatmap partition (which may compromise rendering) or running a parallel DDSketch-shape partition for percentile derivation only. The Path A partition is DDSketch-shaped by Phase 2 choice.
+- **What it gains**:
+  - All of Option 4's gains: harmonization, native Path C2 fit, determinism, zero update cost, zero additional state when partitions match.
+  - **Plus DDSketch's published relative-error guarantee α**, transferred to bin-derived interpolation. R4 commits to a theoretical bound, not an empirical one.
+  - Native fit for Path C2 with a published bound.
+- **What it costs**:
+  - **Conditional on partition compatibility.** If #34's heatmap rendering cannot use a DDSketch-shaped partition (heatmap `-hmw` width is user-configurable and α is fixed by the accuracy target — they may collide), this option degrades to "parallel partitions" — one for rendering, one for percentiles. The unification advantage shrinks.
+  - **Inherits DDSketch's partition cost** at large value ranges (state grows with log(max/min)).
+  - **Path A partition shape question still partially open** — DDSketch-shape resolves the *shape* question (log-spaced with α) but not the *parameter* question (what α serves SRE latency reporting acceptably).
+- **Open questions**: Whether #34's heatmap/histogram partitions can be configured DDSketch-compatible without compromising rendering aesthetics. Whether a parallel DDSketch-shape partition for percentiles (when rendering partitions don't match) is acceptable harmonization-wise.
+- **R2.3 gating implication**: Same as Option 2 (DDSketch). Cross-over governed by DDSketch state size vs. raw arrays.
+- **R4 accuracy-bound implication**: α relative error per quantile, theoretical, transferred from DDSketch literature.
+- **State budget implication**: Zero beyond bin counters if partitions match; ~DDSketch state per consumer if they don't.
+
+##### Option 6 — GK across all four paths
+
+- **What it does**: GK sketch replaces all four paths' raw arrays.
+- **What it gains**:
+  - Deterministic with no seeding required (no randomness at all).
+  - Worst-case rank-error bound.
+  - Foundational, well-studied — fewest open questions in the literature.
+- **What it costs**:
+  - **O(log(εN)) state grows with N.** Worse than KLL/DDSketch at large N — exactly the regime Phase 2 cares about.
+  - Same coexistence-with-bin-counters cost as KLL/DDSketch/t-digest.
+  - Same Path C2 round-trip cost.
+  - Rank error rather than value error in `-V`.
+  - **No published Perl implementation.**
+- **Open questions**: Few — GK is well-characterized. The main question is whether its memory overhead at scale is acceptable when KLL achieves the same accuracy without the log(εN) growth.
+- **R2.3 gating implication**: Same small-N gate. Cross-over at higher N than KLL because state is larger.
+- **R4 accuracy-bound implication**: ε rank error per quantile, theoretical worst-case.
+- **State budget implication**: O((1/ε) log(εN)) per partition. Tunable via ε but cannot escape the log(N) growth.
+
+##### Option 7 — Hybrid: bin-derived for C1/C2, sketch for A/B
+
+- **What it does**: Path C1 (histogram-mode global) and Path C2 (heatmap markers) use bin-derived interpolation over their existing bin counters. Path A (per-message) and Path B (per-time-bucket) use a sketch (KLL, DDSketch, or t-digest — the choice further parameterizes this option).
+- **What it gains**:
+  - **C1 and C2 unify with #34's bin counters** — the natural-fit cases get harmonization without compromise. C2's bin-index output form is native. C1 reuses histogram bin counters at zero extra state.
+  - **A and B get a sketch's published bound** (if KLL or DDSketch) where partition-shape questions are hardest (Path A per-key, Path B per-bucket with variable N).
+  - Resolves the Path A partition-shape open question by sidestepping it — sketches do not require a partition.
+- **What it costs**:
+  - **Two algorithms in production.** #189 R4 must have two implementations (or one polymorphic implementation) — increases code surface.
+  - **R7 `-V` reporting carries two `algorithm` values** depending on which consumer is being reported. More complex observability.
+  - **Two accuracy-bound forms in `-V`** if the sketch uses rank error and bin-derived uses value error.
+  - Inherits sketch state cost for A and B.
+- **Open questions**: Which specific sketch fills the A/B slot (KLL vs. DDSketch vs. t-digest is itself a sub-decision). Whether two-algorithm observability is acceptable.
+- **R2.3 gating implication**: Gating is per-path. C1 and C2 gates are bin-derived's gates; A and B gates are the sketch's gates.
+- **R4 accuracy-bound implication**: Bound differs across paths. Path C1 / C2 commit to bin-derived's empirical (or DDSketch-derived if Option 5's partition matches) bound; Path A / B commit to the sketch's bound.
+- **State budget implication**: Zero additional for C1/C2; sketch state per partition for A/B.
+
+##### Option 8 — Hybrid: bin-derived for B/C1/C2, sketch for A only
+
+- **What it does**: Path B (per-time-bucket) joins C1 and C2 in using bin-derived interpolation — Phase 3 reads heatmap's bin counters when heatmap is active, or populates its own per-bucket bin store when heatmap is not. Only Path A (per-message) uses a sketch.
+- **What it gains**:
+  - Same C1/C2 harmonization as Option 7, plus **Path B's natural fit with heatmap's bin counters** (audit identifies this explicitly). Three of four paths converge on one structure.
+  - Path A — the path with the hardest partition-shape question — still gets a sketch's published bound.
+  - **The cleanest mapping to the audit's findings.** R12 explicitly identified Path B's heatmap-bin-counter source as the natural Phase 3 substrate.
+- **What it costs**:
+  - Still two algorithms in production (same code-surface cost as Option 7).
+  - Path B at small per-bucket N inherits bin-derived's small-N step-function behavior — needs a per-bucket exact-mode fallback in the gate.
+- **Open questions**: Same sketch sub-choice as Option 7. Path B small-N fallback threshold.
+- **R2.3 gating implication**: Path B gates are bin-derived's (small-N → exact). Path A gates are the sketch's.
+- **R4 accuracy-bound implication**: Three paths share bin-derived's bound; Path A commits to the sketch's bound.
+- **State budget implication**: Zero additional for B/C1/C2; sketch state per partition for A only.
+
+#### D3 memo — options comparison matrix
+
+Each cell is a one-line characterization. Read columns to compare options against a single criterion; read rows to see an option's full profile.
+
+| Criterion | Opt 1: KLL | Opt 2: DDSketch | Opt 3: t-digest | Opt 4: Bin-derived (free partition) | Opt 5: Bin-derived (DDSketch partition) | Opt 6: GK | Opt 7: Hybrid bin-derived C1/C2 + sketch A/B | Opt 8: Hybrid bin-derived B/C1/C2 + sketch A |
+|---|---|---|---|---|---|---|---|---|
+| Accuracy guarantee form | Rank error, theoretical | Value-relative error, theoretical | Value-relative error, empirical only | Value error, empirical only | Value-relative error, theoretical (inherits DDSketch) | Rank error, theoretical | Mixed (depends on sketch chosen) | Mixed (depends on sketch chosen) |
+| Tail (P99.9 / P99.99) accuracy | Uniform with bulk | Uniform with bulk | Strongest empirically | Bin-width dependent | Uniform (inherits DDSketch) | Uniform with bulk | C1/C2 bin-width dependent; A/B per sketch | B/C1/C2 bin-width dependent; A per sketch |
+| Median (P50) accuracy | Uniform | Uniform | Weakest empirically (centroid widest at median) | Bin-width dependent | Uniform | Uniform | Mixed | Mixed |
+| Harmonization with #34 | None — coexists | Partial — structurally similar | None — coexists | **Maximum** — same structure | **Maximum** if partitions match; partial otherwise | None — coexists | C1/C2 maximum; A/B none | B/C1/C2 maximum; A none |
+| Native Path C2 (bin-index) fit | No — round-trip required | No — round-trip required | No — round-trip required | **Yes** — short-circuit via R4-bis | **Yes** — short-circuit via R4-bis | No — round-trip required | **Yes** for C2 | **Yes** for C2 |
+| Memory state per partition | ~3 KB (ε=0.01) | ~10 KB (α=0.01, typical range) | ~5–20 KB (δ=100) | **Zero** beyond #34's counters | **Zero** if partitions match; ~DDSketch state otherwise | O((1/ε) log εN) — grows with N | A/B per sketch; C1/C2 zero | A per sketch; B/C1/C2 zero |
+| Path A per-key memory at 10⁵ keys | ~300 MB | ~1 GB | ~1.5 GB (worst) | Depends on partition shape; ~50 MB if global B=60 | ~1 GB (DDSketch parameterization) | Worst — grows with N per key | ~300 MB or per chosen sketch | ~300 MB or per chosen sketch |
+| Determinism (R6) | Seeded randomness — discipline required | Deterministic | Deterministic per fixed order | Deterministic | Deterministic | Deterministic | Deterministic if sketch is | Deterministic if sketch is |
+| `-V` reporting form | Rank error — operationally awkward | Value-relative — operationally clean | Empirical — needs source caveat | Empirical — needs source caveat | Value-relative — operationally clean | Rank error — operationally awkward | Mixed — two forms in one section | Mixed — two forms in one section |
+| Code surface (#189 R4 implementations) | 1 | 1 | 1 | 1 | 1 | 1 | 2 | 2 |
+| Perl implementation effort | High (randomized + seeding) | Medium (deterministic + closed-form) | Medium (deterministic, merging logic) | Low (linear scan + interpolation) | Low (same as Opt 4 + α-parameterized partition) | Medium (deterministic, tuple maintenance) | Medium + Low | Medium + Low |
+| Open questions remaining (D4-trigger candidates) | 3 (per-key state, rank-vs-value, seed) | 2 (#34 partition compat, per-key state) | 3 (empirical bound, P50 acceptability, port cost) | 4 (Path A partition shape, tail at heavy tails, small-N, R4 source) | 3 (partition compat, per-consumer cost, parameter α) | 1 (vs KLL preference) | A/B sketch sub-choice + harmonization tradeoff | Sketch sub-choice + Path B small-N |
+| Path A partition-shape question | N/A (sketch) | N/A (sketch) | N/A (sketch) | **Open — biggest unresolved Phase 1 question** | Open but constrained to α-parameter | N/A (sketch) | Sidestepped (Path A is sketch) | Sidestepped (Path A is sketch) |
+| Future-extensibility to new consumers (Phases 4, 5) | Each new consumer adds a sketch instance | Each new consumer adds a DDSketch instance | Each new consumer adds a t-digest | New consumer reads existing or new bin counters | New consumer adopts DDSketch partition | Each new consumer adds GK state | Architectural mixing locks in | Architectural mixing locks in |
+
+#### D3 memo — decisions the user must make
+
+Phase 2 implementation cannot begin until these are resolved. The decision conversation that follows D3 produces the binding values.
+
+1. **Algorithm-family choice.** Between Family 1 (independent sketches with bounds — Options 1, 2, 6), Family 2 (sketch without bound — Option 3), Family 3 (bin-derived — Options 4, 5), or a Family 1+3 hybrid (Options 7, 8). The remaining sub-decisions cascade from this.
+2. **R4 reporting form.** Rank error, value-relative error, or value-absolute error. KLL/GK report rank; DDSketch/HdrHistogram-style and bin-derived report value. The choice constrains which options are viable: if value error is required, KLL and GK exit the running.
+3. **Acceptable per-quantile accuracy bound (R4 values).** The bound to commit to in `-V`. Affects sketch parameter (ε / α / δ) and partition resolution (B). The bound may differ across quantiles (P99.9 may be looser than P50); D3 records that and asks for explicit values.
+4. **Path A partition-shape decision (if bin-derived is chosen for Path A).** One global partition, per-key partitions, or per-`category` partitions. This is the single largest unresolved partition-shape question; if no clean answer emerges from the decision conversation, this becomes a D4 trigger.
+5. **#34 partition-compatibility decision (if Option 5 is chosen).** Whether #34's heatmap/histogram bin counters are constrained to DDSketch-compatible shapes, accepting any rendering-aesthetic compromise that introduces. Coordinates with #34's spec.
+6. **Whether a user-facing precision preference is introduced (R10 `user_forced_exact`).** A CLI flag (e.g., `--exact-percentiles`) that overrides the gate. Default value (auto vs. force-exact) is part of this decision.
+7. **R2.3 gating-criteria thresholds.** The specific values for index pre-seed, tier, file size, line count, memory headroom, per-partition N, etc. Each chosen algorithm has different cross-over points; the decision conversation produces them.
+8. **State-budget configuration.** The chosen sketch parameter (ε / α / δ) or the chosen bin count B. These set the state-budget value reported in R7 `-V` Layer 2.
+9. **Whether to trigger D4.** For each option's open questions, the decision conversation determines whether literature analysis is sufficient or whether prototype measurement is needed before committing. The seven open questions D1 surfaced are the candidate triggers; the conversation picks zero or more.
+10. **Phase 2 default activation policy.** R9 Phase 2 says "no automatic activation without explicit user opt-in until validated; activation policy defined by D3." The decision conversation determines: ships as opt-in only, ships with auto-activation only when all gates pass, or some intermediate.
+
+#### D3 memo — D4 trigger conditions
+
+D4 is conditional. Per D1's open questions, the conversation may trigger D4 if any of the following are unresolved after the decision conversation:
+
+- **Path A partition shape** (Options 4, 5) — if no clean literature-grounded answer emerges, prototype on `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` and `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log` to characterize per-key value-range distributions.
+- **Tail accuracy at heavy tails** (Options 4, 5; relevant to Options 1, 2, 6 in different form) — if the bound the user wants to commit to is not directly supported by published literature, prototype to confirm.
+- **Perl-implementation cost** (any sketch option) — if there is doubt about per-update cost dominating parse-loop throughput, prototype the sketch in Perl against a graduated-size series of access logs.
+- **Per-key state cost at high-cardinality runs** (Options 1, 2, 3, 7, 8) — `logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log` is the stress case, though it lacks duration values; the question is partition memory, not values, so it can be repurposed.
+
+D4's scope is bounded by whichever subset of these the conversation flags.
+
+#### D3 memo — what D3 does *not* do
+
+This memo is decision-support, not decision. It does not:
+
+- Recommend an option.
+- Lock R4 values.
+- Lock R2.3 thresholds.
+- Lock the state budget.
+- Commit to D4 work.
+
+All of those are decided in the conversation that consumes this memo. The memo's job is to make that conversation possible without the participants having to re-derive the analysis.
+
 ### D4 — Prototype (conditional)
 
 D4 is **conditional**. It is produced only if D3's analysis identifies open questions that cannot be answered from literature alone and that materially affect the decision. The scope of D4 is bounded by those specific open questions — it is not a flat "implement and measure all candidates" exercise.
