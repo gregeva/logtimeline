@@ -29,13 +29,13 @@ This feature is one of three co-developed issues (#34, #187, #189). The work is 
 | 1 | **Audit** — catalogue existing helpers (heatmap, histogram, summary-table percentile paths); produce consumer-side primitive requirements | **#34 R12** + **#187 R12**; outputs land in **#189** *Audit findings* and *Consumer-side requirements* sections | Both #189's primitive design and #187's algorithm research need to know what shapes the primitives must support. Without this first, primitives risk being designed for two consumers and reworked later. | **This file owns part of this step (R12)** |
 | 2 | **Research + prototype** — algorithm comparative study, accuracy report, recommendation memo, prototype | **#187 D1–D5** | Algorithm choice (sketch vs. bin-derived interpolation) determines what #189's percentile-interpolation primitive must do. Performed after audit but before #189 implementation so #189 isn't built blind. | No dependency from this file |
 | 3 | **Deliver #189** — implement unified primitives | **#189** | Now informed by both the audit (step 1) and the algorithm choice (step 2). | Consumed by this file at step 4 |
-| 4 | **Deliver #34 implementation** — heatmap and histogram consume #189's primitives | **#34** | First production consumer of #189. Simpler consumer (no percentile interpolation); verifies primitives work in production before more complex consumers build on top. | **This file's implementation step** |
+| 4 | **Deliver #34 implementation** — heatmap and histogram consume #189's primitives, including R4 for percentile markers (heatmap) and indicators (histogram) | **#34** | First production consumer of #189. **Gates on full R1–R4** because heatmap percentile markers and histogram percentile indicators (legend values, x-axis ticks) both derive from R4 under bin-counter mode — see amendments to R3 / R4 / R8 and the R12 audit resolution. | **This file's implementation step** |
 | 5 | **Deliver #187 Phase 2** — summary-table percentiles consume #189's primitives | **#187 Phase 2** | Second consumer. | No dependency from this file |
 | 6+ | **#187 Phases 3–5** — progressively land more consumers (per-time-bucket, highlight-data, future) | **#187 Phases 3–5** | Each phase verifies #189's primitives don't need to change to accept the new consumer. | No dependency from this file |
 
 ### Parallelism
 
-Steps 1 and 2 may proceed in parallel once the audit has produced enough consumer-side requirements for the research to evaluate bin-derived interpolation against. Step 3 (#189 implementation) cannot complete until step 2 lands the algorithm choice, but its scaffolding (primitive signatures from the consumer-side requirements) can begin earlier. Step 4 (this feature's implementation) cannot start until step 3 has at least the partition, assignment, and counter primitives complete; the percentile-interpolation primitive (needed only by #187) can land later.
+Steps 1 and 2 may proceed in parallel once the audit has produced enough consumer-side requirements for the research to evaluate bin-derived interpolation against. Step 3 (#189 implementation) cannot complete until step 2 lands the algorithm choice. Step 4 (this feature's implementation) cannot start until **#189 R1–R4 are all complete**, including the percentile-interpolation primitive (R4): the R12 audit established that heatmap percentile markers and histogram percentile indicators both derive from R4 under bin-counter mode. The earlier scaffolding plan that allowed R4 to land later (as a #187-only concern) is superseded by the R12 audit's resolution.
 
 ### Integration
 
@@ -76,9 +76,29 @@ When any criterion fails, raw-value mode runs for the whole run (R10).
 
 When eligible, each consumer's bin partition is computed once at start of run using the existing logarithmic formula `min * (max/min)^(i/num_buckets)` for `i in 0..num_buckets`. The formula, the per-consumer bucket-count determination, and the resulting bin semantics are unchanged from today (R11). Only the timing of computation moves earlier — from end-of-pass to start-of-pass.
 
+The partition is then a stable input to the per-line accumulation in R4 (per-line) and to the end-of-pass percentile derivation in R4-bis below.
+
 ### R4 — Per-line accumulation in histogram bin-counter mode
 
 During the existing single read pass, each parsed value for an active metric is assigned to a bin index against the pre-computed partition and the corresponding counter is incremented. No per-line value array is allocated for the metrics that drive heatmap or histogram rendering.
+
+### R4-bis — Percentile-marker and percentile-indicator derivation under bin-counter mode
+
+The raw value arrays (`%heatmap_raw`, `%histogram_values`) that today's code sorts to compute percentile markers (heatmap row overlays `%heatmap_percentiles`) and percentile indicators (histogram legend values `%histogram_stats{$metric}{p*}` and x-axis tick positions) are not allocated under bin-counter mode. The R12 audit identified this as the open question on this feature's implementation. **Resolution: under bin-counter mode, both consumers derive percentile values from #189 R4 (the percentile-interpolation primitive), at end of pass, against the bin counters R4 (per-line) populated.**
+
+Specifically:
+
+- **Heatmap row markers** (P50, P95, P99, P99.9): per time bucket, invoke #189 R4 against `%heatmap_data{$bucket}` for each target quantile. Map the returned numeric value to a bin index via #189 R2 (or the heatmap consumer's equivalent). Store the bin index in `%heatmap_percentiles{$bucket}` as today. Rendering is unchanged downstream.
+- **Histogram legend values and x-axis tick positions** (P1, P10, P25, P50, P75, P90, P95, P99, P99.9, P99.99): per metric, invoke #189 R4 against `%histogram_buckets{$metric}` for each target quantile. Store the numeric value in `%histogram_stats{$metric}{p*}` as today. Rendering and tick positioning (via `calculate_histogram_percentile_ticks`) are unchanged downstream.
+
+Accuracy implications:
+
+- The accuracy of these percentile values is bounded by #189 R4's accuracy contract (set by #187 D3). R8 (render equivalence) is satisfied to within R4's accuracy bound for both consumers.
+- The wider histogram percentile set (10 values, including P99.99) is supported by #189 R4. R4's percentile-set support requirement must cover both the heatmap set (4 values) and the histogram set (10 values).
+
+Delivery implication:
+
+- This feature's implementation step (delivery sequence step 4) gates on #189 R4 being available, in addition to R1–R3. Step 4 cannot begin until #187 D3 has fixed the algorithm choice and #189 has implemented R4 against it. The Delivery sequence table is updated accordingly.
 
 ### R5 — Out-of-range handling
 
@@ -111,9 +131,15 @@ The live `min` / `max` capture that #179 relies on for drift detection must cont
 
 ### R8 — Render equivalence
 
-When pre-seeded bounds match observed live values exactly, rendered heatmap and histogram output in histogram bin-counter mode is identical to raw-value mode for the same input.
+When pre-seeded bounds match observed live values exactly, rendered heatmap and histogram output in histogram bin-counter mode is equivalent to raw-value mode for the same input. "Equivalent" means:
+
+- **Bin counts and bar-graph rendering are byte-identical.** Same bin partition, same value-to-bin assignment, same counts per bin.
+- **Heatmap percentile markers and histogram percentile indicators are equivalent within #189 R4's accuracy bound** (set by #187 D3). Bin-counter mode derives these via R4 against the bin counters (per R4-bis); raw-value mode derives them by sorting the raw arrays. The two derivation paths are not byte-identical at the value level, but the rendered output (marker bin index for heatmap; numeric value displayed in histogram legend; column position for x-axis tick) is within R4's documented accuracy contract.
+- Any deviation between modes that exceeds R4's accuracy bound is a bug in R4 or its consumer, not an acceptable render difference.
 
 When raw-value mode runs (any ineligible scenario), rendered output is byte-identical to today's pre-feature implementation.
+
+The new scenario suite (see Validation) asserts the equivalence-within-accuracy-bound contract; the existing regression suite asserts the raw-value-mode byte-identity.
 
 ### R9 — `-V` observability of mode selection and out-of-range activity
 
@@ -200,46 +226,62 @@ When an eligibility gap traces to one of those features, it is recorded and file
 
 The audit is part of this feature's deliverables (R12). It captures, at the requirements level, what helpers exist today and what the unified primitives in #189 must satisfy.
 
-### Existing helpers in scope of the audit
+**Status: complete.** The audit was performed jointly with #187 R12 against `release/0.14.5` HEAD. The full catalogue of `ltl` call sites, the per-consumer constraints, and the cross-cutting constraints live in `features/189-histogram-bin-counter-primitives.md` § **Audit findings** and § **Consumer-side requirements**. The percentile-path portion (sibling deliverable owed by #187 R12) lives in `features/187-histogram-bin-counter-percentiles.md` § **Percentile-path harmonization audit**.
 
-The audit must catalogue (per the in-code section markers in `ltl`):
+This section summarizes only what is specific to this feature's consumers (heatmap + histogram). The R12 audit's original open question — how heatmap percentile markers are derived under bin-counter mode when `%heatmap_raw` is not allocated — is **resolved** below; the same investigation revealed a symmetric concern for histogram percentile indicators, which is also resolved below.
 
-- Heatmap path:
-  - Bin-partition computation (bucket count + logarithmic boundary formula application).
-  - Per-value bin-index assignment.
-  - Counter increment per `(time_bucket, bin_index)`.
-  - Rendering driver that consumes the per-time-bucket bin counts.
-- Histogram path:
-  - Bin-partition computation (per-metric, with its own bucket count).
-  - Per-value bin-index assignment.
-  - Global counter increment per `(metric, bin_index)`.
-  - Rendering driver that consumes the per-metric bin counts.
-- Summary-table per-message latency percentile path (today):
-  - Raw value accumulation per percentile-tracked metric.
-  - Sort-and-index percentile derivation.
-  - This path is the future consumer per #187 / #189 — the audit identifies what would change if it migrated to histogram bin counters.
+### Consumers catalogued for this feature
 
-### Unified primitive contract (consumer-side requirements; full contract in #189)
+- **Heatmap path**: bin-partition computation (`calculate_heatmap_buckets` `ltl:4791`), per-value bin-index assignment (`find_heatmap_bucket` `ltl:4783`), counter increment per `(time_bucket, bin_index)` (`ltl:4839`, `ltl:4850`), rendering drivers (`print_heatmap_row` `ltl:6378`, `get_heatmap_column_header` `ltl:6265`, `print_heatmap_footer_scale` `ltl:6434`, `format_heatmap_value` `ltl:6242`).
+- **Histogram path**: option handling (`handle_histogram_option` `ltl:3487`), bucket-count determination (`calculate_histogram_bucket_count` `ltl:4869`), bin-partition computation + bin-index assignment + counter increment (orchestrated in `calculate_histogram_buckets` `ltl:4908`, with bin-assignment in `find_histogram_bucket_index` `ltl:4890`), rendering drivers (`print_histograms` `ltl:6890` and its helpers `ltl:7071–7559`).
 
-From this feature's perspective as a consumer, the unified primitives must provide:
+Full per-site catalogue with line-precise references in `features/189-histogram-bin-counter-primitives.md` § Audit findings.
 
-- A partition-computation primitive parameterized by `(min, max, num_buckets)` returning a stable bin-boundary array.
-- A bin-assignment primitive that, given a value and a partition, returns a bin index (or an out-of-range flag).
-- A counter-update primitive that increments a counter keyed appropriately for the consumer (per `(time_bucket, bin_index)` for heatmap; per `(bin_index)` for histogram; future consumers may key differently).
-- A percentile-interpolation primitive that, given a partition and a counter map, returns interpolated percentile values. This primitive is the one #187 consumes; this feature does not consume it directly but R12 requires that it exists in #189 to support forward compatibility.
+### What heatmap and histogram need from #189's primitives
 
-The detailed signatures, data structure shapes, and lifecycle contracts live in #189.
+From this feature's perspective as a consumer (full contract in #189 R1–R11):
 
-### Forward-compatibility statement
+- **R1 partition computation**: `(min, max, num_buckets) → partition`. Heatmap passes `num_buckets = $heatmap_width` (default 52, `-hmw`-tunable). Histogram passes one call per active metric with `num_buckets` from the existing `calculate_histogram_bucket_count`. Partition must be computable at **start of pass** when bin-counter mode is eligible (R3 / R4 of this feature).
+- **R2 bin assignment**: `(partition, value) → bin_index | overflow_sentinel`. Per-line call in the parse hot path. Algorithm choice (linear vs. binary search — both shapes present today) is #189's discretion; either satisfies R2's correctness contract.
+- **R3 counter update** with two distinct key shapes: `time_bucket` (heatmap) and `()` (histogram). Both shapes coexist in the same run because R10 makes the two features co-eligible.
+- **Out-of-range tally per key, low and high**. This is **new behavior** — today's bin-assignment helpers silently clamp to in-range indices. #34 R5 / R6 (per-key overflow + single end-of-run warning) and #179's drift detection both depend on it.
+- **Counter-store enumeration** for the rendering drivers listed above and for `-V` Layer 2 / 3 reporting (R9).
+- **Counter store lifecycle**: per-time-bucket counter stores (heatmap) are freeable once that bucket renders; histogram's single per-metric store persists for the run.
+- **R4 percentile interpolation**: invoked at end of pass under bin-counter mode. Heatmap consumer invokes R4 per time bucket against `%heatmap_data{$bucket}` for P50/P95/P99/P99.9; maps the numeric return value back to a bin index via R2 for storage in `%heatmap_percentiles`. Histogram consumer invokes R4 per metric against `%histogram_buckets{$metric}` for the ten-value percentile set; stores the numeric return value directly in `%histogram_stats{$metric}{p*}`. See R4-bis and the Resolution section below.
 
-For the per-message latency percentile migration (per #187) to adopt histogram bin counters without primitive-level redesign:
+### Forward-compatibility implications for this feature
 
-- The bin-partition primitive must accept arbitrary `num_buckets` (not hard-coded to heatmap or histogram defaults).
-- The counter keying must be parameterizable; the primitive does not assume a time-bucket dimension.
-- The percentile-interpolation primitive's accuracy contract (per #187's R4 and D3) must hold for the partition shapes used by the per-message path.
-- Memory lifecycle: counter structures must be freeable independently of the partition (so the per-message path can free counters at end of run while the partition persists across runs if needed).
+The audit confirms:
 
-This list is the consumer-side input to #189's primitive design.
+- **#34 R15 holds.** The per-message latency percentile arrays (`log_messages{$category}{$log_key}{durations}` allocated `ltl:4591`) are structurally separate from `%heatmap_raw` (`ltl:255`) and `%histogram_values` (`ltl:290`). Three distinct key shapes, three distinct lifetimes, three distinct allocation sites. This feature's data structures do not entangle with the #187 Phase 2 migration target.
+- **Heatmap percentile markers** today (`%heatmap_percentiles` populated at `ltl:4829–4834`) are stored as bin indices derived from a sort over `%heatmap_raw`. Under bin-counter mode they are derived from #189 R4 (see R4-bis above and the resolution below). They remain stored as bin indices for backward-compatible rendering.
+- **Histogram percentile indicators** (`%histogram_stats{p*}` populated `ltl:4926–4940`; consumed by the legend at `ltl:7375` and by x-axis tick positioning at `ltl:7430`) are sort-derived from raw arrays under raw-value mode. Under bin-counter mode they are derived from #189 R4 (see R4-bis above and the resolution below). Storage and downstream rendering are unchanged; only the derivation path changes.
+
+### Resolution — percentile markers and indicators under bin-counter mode
+
+The R12 audit identified an open question about how heatmap percentile markers (`%heatmap_percentiles`) would be derived when `%heatmap_raw` is not allocated. Further investigation surfaced a symmetric question about histogram percentile indicators (`%histogram_stats{$metric}{p*}` — used in the legend and in x-axis tick positioning) when `%histogram_values{$metric}` is not allocated.
+
+**Resolution (recorded here, captured in R4-bis above):**
+
+Both consumers — heatmap percentile markers and histogram percentile indicators — derive from **#189 R4 (the percentile-interpolation primitive)** at end of pass under bin-counter mode. The heatmap consumer maps R4's numeric return value back to a bin index via #189 R2 for storage in `%heatmap_percentiles`. The histogram consumer stores R4's numeric return value directly in `%histogram_stats{$metric}{p*}`; downstream legend rendering and x-axis tick positioning are unchanged.
+
+Why this resolution:
+
+- **Heatmap markers** could in principle be derived from a simpler cumulative-count walk over the bin counters (no R4 needed). However, **histogram indicators** require a numeric value — the legend prints "P50:42ms"; a bin index alone is insufficient — and the cleanest path for that is R4. Adopting R4 for both consumers harmonizes the percentile-derivation story across the two features, matching the harmonization intent of #189.
+- Alternatives considered and rejected:
+  - Dropping markers/indicators in bin-counter mode → breaks R8.
+  - Keeping `%histogram_values` allocated under bin-counter mode purely for the legend → defeats most of the memory win.
+  - Maintaining a separate streaming sketch alongside the bin counters → adds a new primitive contract in tension with #189's harmonization goal.
+  - For heatmap alone, the cumulative-count walk is viable. We accept the (small) cost of taking the R4 dependency for the heatmap as well, in exchange for a single uniform percentile-derivation story.
+
+Delivery-sequence consequence:
+
+- **Step 4 (this feature's implementation) gates on #189 R4** in addition to R1–R3. R4 in turn gates on #187 D3's algorithm choice. The Delivery sequence table is updated to reflect this. The earlier note in #189's Parallelism section that allowed R4 to land later than R1–R3 is superseded.
+- The three issues (#34, #187 Phase 2, #189) now converge to ship together rather than in the originally planned staggered sequence.
+
+R8 (Render equivalence) is amended to permit the within-R4-accuracy-bound deviation between raw-value mode and bin-counter mode (see R8 amendment above).
+
+#189's R4 requirement and its Consumer-side requirements section are updated to add #34 as an R4 consumer (previously the spec noted "this primitive is not consumed by #34").
 
 ## Edge cases
 
