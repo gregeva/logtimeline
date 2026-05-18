@@ -2,16 +2,11 @@
 
 ## Overview
 
-ltl's summary table reports per-message latency percentiles (P1, P5, P25, P50, P75, P90, P95, P99, P99.9). Today these are computed by retaining every individual metric value in an in-memory array, sorting it, and indexing. The algorithm requires `O(n)` memory in the number of values.
+ltl's summary table reports per-message latency percentiles (P1, P5, P25, P50, P75, P90, P95, P99, P99.9). Today these are computed by retaining every individual metric value in an in-memory array (`log_messages{$category}{$log_key}{durations}` at `ltl:4591`), sorting it, and indexing. The algorithm requires `O(n)` memory in the number of values.
 
-This feature introduces a **dual-mode percentile foundation**:
+This feature replaces those raw-value arrays with the **HdrHistogram-style log-spaced bin-counter primitive that ltl already ships** in the heatmap (`-hm`) and histogram (`-hg`) paths. The substrate is not new: it is the same `min·(max/min)^(i/N)` partition, the same binary-search bin-find, the same `buckets_per_decade` precision knob that has been in production since v0.8. What this feature adds is the **percentile-derivation step** on top of that substrate — `#189` R4, the interpolation primitive — and the **dual-mode gate** that selects between exact (sorted-array) percentiles and bin-counter-derived percentiles based on input scale.
 
-- **Exact mode** — today's array-based, exact percentile values. Unchanged.
-- **Approximate mode** — quantile estimation via a sketch or via interpolation over **histogram bin counters** (the data structure introduced by #34, defined by primitives in #189), with `O(state)` memory bounded by the chosen algorithm's parameters and not growing with input size.
-
-Mode is decided at start of run by criteria modelled after #34's eligibility gate. The exact algorithm, the accuracy bound it must meet, and the precise gating criteria are research outcomes (D1–D5).
-
-This feature is **architecturally consequential beyond the summary table**. It defines the data-model and helper-function direction for percentile calculation across all of ltl, progressively. The roadmap consequence is captured in the multi-phase plan (R9) and the harmonization audit dependency on #189.
+This feature is **architecturally consequential beyond the summary table**. It defines the path by which the existing bin-counter primitives (heatmap, histogram) are extended to the four percentile-computing paths catalogued in R12. The multi-phase rollout in R9 is the staging plan.
 
 ## GitHub Issue
 
@@ -19,11 +14,23 @@ This feature is **architecturally consequential beyond the summary table**. It d
 
 ## Motivation
 
-For multi-GB runs the per-message percentile arrays are typically the largest single memory consumer in the summary path — comparable in scale to the heatmap/histogram raw arrays that #34 addresses. With #179 reading bounds at start-up and #34 introducing histogram bin counters, the per-message percentile arrays become the next consumer of the same primitive.
+For multi-GB runs the per-message percentile arrays are typically the largest single memory consumer in the summary path — comparable in scale to the heatmap/histogram raw arrays that #34 addresses. With #179 reading bounds at start-up and #34 reframing heatmap/histogram around bin counters, the per-message percentile arrays are the next array-shaped consumer to migrate to the same primitive.
 
-Unlike heatmap and histogram (where counts per bin are sufficient for rendering), percentile values require *estimating a position* in the value distribution. Multiple credible algorithms exist (t-digest, KLL sketch, Greenwald-Khanna, q-digest, and **bin-derived interpolation over histogram bin counters**) with different accuracy / memory / CPU profiles. The right choice for ltl is not obvious from prior art alone — it depends on the value distributions actually observed in ltl's log datasets, which are heavy-tailed in ways that affect tail-quantile accuracy substantially. This feature therefore prioritizes research before locking in algorithm and accuracy.
+The algorithm question for this feature is **not** "which quantile estimator do we pick" — that question was already answered when ltl shipped the heatmap and histogram features. The substrate is HdrHistogram-style log-spaced bin counters, with `buckets_per_decade` as the tunable precision knob:
 
-A second motivation is architectural: this feature is not a one-shot replacement. It establishes the foundation for a **progressive multi-phase migration** of percentile calculation across ltl, with user-driven precision selection (exact vs. approximate) and automatic determination based on input criteria (memory, file size, line count, etc.). Every percentile consumer in ltl is on the path to adopting this same dual-mode foundation. R9 makes that plan explicit.
+| Decision | Where it's already locked in code |
+|---|---|
+| Log-spaced bin geometry `min·(max/min)^(i/N)` | `ltl:4961-4966`, heatmap path |
+| Buckets-per-decade precision knob | `ltl:286`, `-hgbpd`, default 8 (~5%) |
+| Precision table (4=10%, 8=5%, 16=2.5%, 32=1%) | `histogram-charts.md` lines 258-262 |
+| Binary-search bin-find | `ltl:4889-4905` |
+| Naming/lineage as "HdrHistogram approach" | `ltl:285`, `ltl:4867`, `ltl:4956` |
+| Same primitive for heatmap markers + histogram indicators | `features/34-histogram-bin-counter-mode.md` R4-bis |
+| `#189` R4 owns the percentile-interpolation function | `features/189-histogram-bin-counter-primitives.md` R4 |
+
+What this feature contributes — that the heatmap and histogram features did not have to address, because they retain raw values during the same pass that they compute their bin counters — is the **percentile-derivation step on top of the bin counters when the raw values are not retained**. That is `#189` R4. This feature's research is scoped to the open questions about R4's behavior (Phase 1, D1–D3), and its implementation is the dual-mode gate + R4 application to Path A (Phase 2) and progressively to Paths B/C1/C2 (Phases 3+).
+
+A second motivation is architectural: this feature is not a one-shot replacement. It establishes the foundation for a **progressive multi-phase migration** of percentile calculation across ltl, with user-driven precision selection (exact vs. approximate) and automatic determination based on input criteria. Every percentile consumer in ltl is on the path to adopting this same dual-mode foundation. R9 makes that plan explicit.
 
 ## Delivery sequence
 
@@ -32,7 +39,7 @@ This feature is one of three co-developed issues (#34, #187, #189). The work is 
 | Step | Work | Owner | Why this position | Status of this file |
 |---|---|---|---|---|
 | 1 | **Audit** — catalogue existing helpers (heatmap, histogram, summary-table percentile paths); produce consumer-side primitive requirements | **#34 R12** + **#187 R12**; outputs land in **#189** *Audit findings* and *Consumer-side requirements* sections | Both #189's primitive design and this feature's algorithm research need to know what shapes the primitives must support. Without this first, primitives risk being designed for two consumers and reworked later. | **This file owns part of this step (R12); corresponds to R9 Phase 0** |
-| 2 | **Research** — literature-grounded comparative study against the audited use cases; decision-support memo presenting options and trade-offs; prototype only if specific open questions warrant measurement | **#187 D1–D5 (D4 conditional)** | Algorithm choice (sketch vs. bin-derived interpolation, or a hybrid) determines what #189's percentile-interpolation primitive must do. Performed after audit but before #189 implementation so #189 isn't built blind. | **This file's research deliverables; corresponds to R9 Phase 1** |
+| 2 | **Research** — literature-grounded extension study of the existing bin-counter substrate against the audited use cases; decision-support memo presenting options and trade-offs for the open questions the substrate's existing implementations do not answer; prototype only if specific open questions warrant measurement | **#187 D1–D5 (D4 conditional)** | The R4 in-bin interpolation strategy, `buckets_per_decade` default, and partition-lifecycle decisions all feed `#189`'s R4 implementation. Performed after audit but before `#189` implementation so `#189` isn't built blind. | **This file's research deliverables; corresponds to R9 Phase 1** |
 | 3 | **Deliver #189** — implement unified primitives | **#189** | Now informed by both the audit (step 1) and the algorithm choice (step 2). | Consumed by this file at step 5 |
 | 4 | **Deliver #34 implementation** — heatmap and histogram consume #189's primitives, **including R4** | **#34** | First production consumer of #189. Consumes **R1–R4**: per the #34 R12 audit resolution, heatmap percentile markers and histogram percentile indicators both derive from R4 under bin-counter mode. This means #34 step 4 also gates on **this feature's D3** (algorithm choice), since D3 fixes what R4 does. | **D3 (algorithm choice) is now consumed at step 4, not just step 5** |
 | 5 | **Deliver #187 Phase 2** — summary-table per-message percentiles consume #189's primitives | **#187 Phase 2** | Second R4 consumer. Verifies R4's keying flexibility for a different consumer shape (per-`(category, log_key)`). | **This file's primary implementation step; corresponds to R9 Phase 2** |
@@ -57,7 +64,7 @@ Throughout this document, the consistent term for the underlying data structure 
 The system supports two percentile-computation paths for the summary-table latency percentiles:
 
 - **Exact mode** — the existing array-based computation, producing exact percentile values for the matched data. Behavior unchanged from today.
-- **Approximate mode** — quantile estimation from a bounded-state estimator (sketch- or bin-derived), producing the required percentile values within a documented accuracy bound (R4).
+- **Approximate mode** — bin-counter-derived percentile values from the histogram bin-counter substrate (per R8), producing the required percentile values within a documented accuracy bound (R4).
 
 The selected mode is decided at run start.
 
@@ -102,7 +109,7 @@ Approximate mode must be deterministic for a given input: the same input file, f
 A dedicated `=== PERCENTILE MODE ===` section reports:
 
 - **Layer 1**: `percentile_mode` (`exact` | `approximate`) and `percentile_mode_reason` (see R10).
-- **Layer 2 (approximate mode)**: `algorithm` (the chosen estimator), `algorithm_version` where applicable, `state_budget_bytes`, `data_source` (`sketch` | `histogram_bin_counters` per #34/#189), and a per-quantile `accuracy_estimate` block reporting the bound applied to each required quantile.
+- **Layer 2 (approximate mode)**: `buckets_per_decade` (the partition precision parameter), `bin_count` (B per partition), `state_budget_bytes` (the counter store footprint), `in_bin_interpolation` (the strategy chosen at D3), and a per-quantile `accuracy_estimate` block reporting the bound applied to each required quantile. The `accuracy_estimate` block also reports `tail_sample_count_warning: yes|no` per quantile, distinguishing bin-resolution error (bounded) from sample-count starvation (the partition cannot manufacture rank precision the data does not contain).
 - **Layer 3 (exact mode)**: `n` (the value count consumed) and a `sorted: yes` line for confirmation.
 - **Layer 4 (always)**: `gating_criteria` — the input criteria the gate (R2.3) evaluated this run, each reporting `value`, `threshold`, and `passed: yes|no`. Lets tests assert each criterion independently.
 
@@ -110,11 +117,9 @@ Section name and all labels are part of the feature contract.
 
 ### R8 — Coupling to histogram bin counters
 
-When the chosen approximate algorithm is bin-derived interpolation, the data source is the **histogram bin counters from #34**, accessed via the unified primitives from #189. This feature does not maintain a parallel partition.
+Approximate mode operates on **histogram bin counters** — the same HdrHistogram-style log-spaced bin-counter substrate that heatmap (`-hm`) and histogram (`-hg`) already use today, with the partition/assignment/counter primitives defined by #189 (R1, R2, R3) and the percentile-derivation primitive defined by #189 R4. This feature does not maintain a parallel data structure and does not introduce an independent estimator.
 
-This requirement is what makes the multi-phase rollout (R9) coherent: the per-message latency percentile path consumes the same primitive that heatmap and histogram already consume, with #189 providing the interpolation routine.
-
-When the chosen approximate algorithm is sketch-based (t-digest / KLL / GK / q-digest), the estimator state is independent of histogram bin counters. The `data_source` in `-V` Layer 2 distinguishes the two.
+This is what makes the multi-phase rollout (R9) coherent: the per-message latency percentile path consumes the same primitive that heatmap and histogram already consume, with #189 R4 providing the percentile-derivation step.
 
 ### R9 — Multi-phase rollout plan
 
@@ -197,7 +202,7 @@ The audit is part of Phase 0's deliverables (R12). It identifies the percentile-
 - **Today's data structure**: `log_messages{$category}{$log_key}{durations}` — a per-message duration array, pushed during the parse loop at `ltl:4591`.
 - **Today's computation**: `calculate_all_statistics` (`ltl:5178`) aggregates per `log_key`, delegating to `calculate_statistics` (`ltl:5488`) which sorts and indexes by integer rank (`int($n * fraction)`).
 - **Percentiles emitted**: P1, P50, P75, P90, P95, P99, P99.9 (`ltl:5374–5379`); rendered in the summary table at `ltl:7900–7916`.
-- **Migration target (Phase 2)**: replace the raw `durations` array with a histogram bin-counter store keyed by `(category, log_key)` per #189 R3. Replace the sort-and-index core of `calculate_statistics` with #189 R4 invocations against the per-message counter store. Algorithm (sketch vs. bin-derived interpolation) is decided by D3.
+- **Migration target (Phase 2)**: replace the raw `durations` array with a histogram bin-counter store keyed by `(category, log_key)` per #189 R3. Replace the sort-and-index core of `calculate_statistics` with #189 R4 invocations against the per-message counter store. R4's in-bin interpolation strategy and `buckets_per_decade` default for this path are decided by D3.
 - **Compatibility constraints on #189**:
   - R3 must accept `key = (category, log_key)` (or `key = ()` per active aggregator if the aggregation happens before counter update — implementer's choice).
   - R4 must support the seven percentiles listed above with an accuracy contract sufficient for SRE latency reporting; specifics in D3.
@@ -252,7 +257,7 @@ For Phases 2–5 to consume the unified primitives without primitive-level redes
   - Small-N degenerate inputs: Path B at narrow time buckets, Path A at single-occurrence log keys, Path C2 at sparse heatmap rows.
   - Reporting alongside #34 R5 / R6 out-of-range tallies — overflow counts must be accessible to the interpolation primitive (or the consumer adjusts the partition to fold overflow into edge bins; R4 must specify which).
 - **Accuracy guarantee per quantile is parameterizable by partition shape.** Per-time-bucket and global partitions have different N regimes; D3 must produce a bound that applies to both.
-- **Memory lifecycle**: counter structures freeable per key independently of the partition; estimator state (if R4 uses any) freeable independently of the counter store.
+- **Memory lifecycle**: counter structures freeable per key independently of the partition. R4 carries no state of its own — it derives from the counter map at invocation time.
 
 This list is the consumer-side input to #189's primitive design.
 
@@ -265,13 +270,15 @@ This list is the consumer-side input to #189's primitive design.
 
 ## Considerations for implementation
 
-The spec is intentionally agnostic about the mechanisms below. Each must be addressed during research, the decision conversation, and implementation; the choice of mechanism is decided through Phase 1's decision-support process (D3), informed by D1's literature-grounded analysis and D4 only when triggered.
+The algorithm substrate is fixed (HdrHistogram-style log-spaced bin counters, per Motivation). The items below are the remaining mechanism questions that the research deliverables address.
 
-- **Algorithm choice** is a research output (D3). Candidate algorithms are enumerated in **Research deliverables**; the implementer may extend the candidate set if literature review surfaces relevant alternatives. The choice must be one of: a sketch (t-digest / KLL / GK / q-digest), bin-derived interpolation over histogram bin counters, or a hybrid.
-- **Memory behavior across modes.** The approximate-mode estimator state (sketch or counter-derived) replaces the exact-mode value array. Mixed-mode behavior is well-defined per R13; lifecycle composes with #23 Phase 2's named-stage memory model.
-- **Accuracy reporting unit.** R4 requires per-quantile reporting. The unit (percentage-of-value error, absolute value error, percentile-rank distance) is decided in research and locked at D3-time.
+- **R4 percentile-derivation formula.** Given a partition and a counter map for one key, what does `(target_quantile) → value` compute? This decomposes into a cumulative-count walk (mechanical) plus an in-bin interpolation choice (research question, D3). See **Research deliverables** for the in-bin interpolation alternatives.
+- **`buckets_per_decade` for the per-message path.** Existing consumers default to 8 (~5% bin width). For SRE tail-percentile reporting, the per-message percentile path may want a higher value (16 or 32) for tighter accuracy. This is a D3 decision, not an algorithm choice.
+- **Tail-bin behavior.** Bin-counter accuracy is bounded by bin width *uniformly* across quantiles (the same ~5% at P50 as at P99.9 for `buckets_per_decade=8`). The historically separate concern — "sample-count starvation at the tail" (P99.9 of 50 samples is meaningless) — is a property of *any* percentile estimator including the current sorted-array code; this feature does not introduce it but does make it visible via `-V`. See R4.
+- **Accuracy-reporting unit.** Value-relative error (bounded by `1 - 10^(-1/buckets_per_decade)`). This is a property of the log-spaced partition, not a research question.
+- **Memory behavior across modes.** The approximate-mode bin-counter store replaces the exact-mode value array. Mixed-mode behavior is well-defined per R13; lifecycle composes with #23 Phase 2's named-stage memory model.
 - **Highlight subsets.** Phase 4 coordination with #51.
-- **State lifecycle and reset.** Estimator state freed when no longer needed; lifecycle composes with #23 Phase 2.
+- **State lifecycle and reset.** Counter store freed when no longer needed; lifecycle composes with #23 Phase 2.
 
 ## Edge cases
 
@@ -283,7 +290,7 @@ The spec is intentionally agnostic about the mechanisms below. Each must be addr
 | Very small N below D3's threshold | Gate (R2.3) steers to exact mode; `reason: input_criteria_failed`. |
 | Stale or missing index | R2.1 fails; exact mode runs; `reason: no_index`. |
 | Filtered run with only Tier-2 pre-seed | R2.2 fails; exact mode runs; `reason: tier_mismatch`; gap recorded against #179. |
-| Approximate mode chosen but histogram bin counters unavailable (#34 ineligible) and chosen algorithm requires them | Gate (R2.3) treats absence of histogram bin counters as a failed gating criterion when bin-derived interpolation is the chosen algorithm. `reason: input_criteria_failed` with the specific criterion identified in `gating_criteria`. Sketch-based algorithms are unaffected. |
+| Approximate mode chosen but histogram bin counters unavailable (#34 ineligible) | Gate (R2.3) treats absence of histogram bin counters as a failed gating criterion. `reason: input_criteria_failed` with the specific criterion identified in `gating_criteria`. |
 | Bounds drift mid-run | Exact-mode output unchanged. Approximate-mode behavior under drift is determined by D3; the accuracy bound (R4) must still hold or the gate must have excluded the run. |
 | User-forced exact mode | If D3 introduces a user-facing precision preference and the user selects exact, gate fails by design; `reason: user_forced_exact`. |
 | Highlight pattern present (pre-Phase 4) | Highlight-subset percentiles run in exact mode regardless of main-set mode; recorded as a Phase 4 dependency. |
@@ -295,7 +302,7 @@ The spec is intentionally agnostic about the mechanisms below. Each must be addr
 - [ ] Phase 0 deliverables complete: this feature file, the audit (R12), the consumer-side primitive requirements landed in `features/189-histogram-bin-counter-primitives.md`.
 - [ ] Phase 1 research deliverables (D1, D2, D3, and D4 if triggered) complete, and the decision conversation that follows D3 has produced the binding values for algorithm choice, accuracy bound, and gating thresholds, before Phase 2 implementation.
 - [ ] For every input in the D2 set, each required quantile from approximate mode falls within the D3 accuracy bound around the exact value.
-- [ ] When approximate mode runs, R3–R8 hold; `state_budget_bytes` in `-V` matches actual estimator memory; `data_source` correctly identifies sketch vs. histogram bin counters.
+- [ ] When approximate mode runs, R3–R8 hold; `state_budget_bytes` in `-V` matches actual counter-store memory; `buckets_per_decade`, `bin_count`, and `in_bin_interpolation` are reported per R7.
 - [ ] When exact mode runs for any reason (R10), output satisfies R11 (byte-identical to pre-feature).
 - [ ] `-V` emits the section described in R7, with reason codes per R10 distinguishing every failure mode of R2, and the `gating_criteria` block in Layer 4 lets tests assert each criterion independently.
 - [ ] Heatmap and histogram bin-counter behavior is unchanged in Phase 2 (R13).
@@ -318,8 +325,7 @@ Mirrors #34's pattern: orchestrate `ltl-index.csv` state, run ltl with `-V`, ass
 | Scenario | Setup | Action | Assertions |
 |---|---|---|---|
 | `cold-no-index-exact` | No `ltl-index.csv`. | `ltl <F> -V`. | `percentile_mode: exact`, `reason: no_index`. |
-| `warm-eligible-approximate-sketch` | Fresh index pre-seed; input meets D3 criteria; chosen algorithm is sketch-based. | `ltl <F> -V`. | `percentile_mode: approximate`, `reason: approximate_eligible`, `algorithm` populated, `data_source: sketch`, `accuracy_estimate` per quantile populated. |
-| `warm-eligible-approximate-bin-derived` | Same as above; chosen algorithm is bin-derived interpolation; #34 also eligible. | `ltl -hg <F> -V`. | Same as above plus `data_source: histogram_bin_counters`. |
+| `warm-eligible-approximate` | Fresh index pre-seed; input meets D3 gating criteria. | `ltl <F> -V`. | `percentile_mode: approximate`, `reason: approximate_eligible`, `buckets_per_decade` and `bin_count` populated, `in_bin_interpolation` populated, `accuracy_estimate` per quantile populated. |
 | `warm-input-criteria-failed` | Fresh pre-seed; input below D3 thresholds. | `ltl <F> -V`. | `percentile_mode: exact`, `reason: input_criteria_failed`. `gating_criteria` Layer 4 identifies the failing criterion. |
 | `warm-tier-mismatch` | Filtered run, only Tier-2 pre-seed. | `ltl -dmin=50 <F> -V`. | `percentile_mode: exact`, `reason: tier_mismatch`. |
 | `bin-derived-needs-histogram-counters` | Fresh pre-seed; chosen algorithm is bin-derived; #34 ineligible (raw-value mode). | `ltl <F> -V`. | `percentile_mode: exact`, `reason: input_criteria_failed`. `gating_criteria` identifies `histogram_bin_counters_available: passed: no`. |
@@ -344,33 +350,26 @@ The harness is part of this feature's deliverable.
 
 Production implementation does not commence until the following deliverables are complete and recorded. The deliverables are requirements on the *work*, not prescriptions of the *mechanism*.
 
-### D1 — Comparative algorithm study (literature-grounded)
+### D1 — Extension study (literature-grounded)
 
-D1 is a literature-grounded comparative study, not an empirical bake-off. Its purpose is to characterize each candidate algorithm against the use-case demands the R12 audit identified (Paths A, B, C1, C2), so the trade-offs are visible and a decision can be made. No measurement is performed at this stage; measurement is conditional on D4 (see below).
+D1 characterizes the **HdrHistogram-style log-spaced bin-counter substrate** (the substrate already shipped in `-hm` and `-hg`) against the four percentile-computing use cases catalogued in R12, identifies what the existing implementations already answer, and isolates the questions that extending the substrate to those use cases leaves open. It is literature-grounded; measurement is conditional on D4 (see below).
 
-**Candidate algorithms** — the following list is a starting point; literature review may surface additional candidates and those are included if relevant:
+D1 does **not** open a multi-algorithm comparison. The substrate choice is settled by prior art in this codebase:
 
-- **t-digest** — Dunning's structure; recognized for tail-quantile accuracy in heavy-tailed data.
-- **KLL sketch** — deterministic-error succinct quantile sketch.
-- **Greenwald-Khanna (GK)** — classic deterministic quantile sketch.
-- **q-digest** — tree-based deterministic quantile sketch.
-- **Bin-derived interpolation over histogram bin counters** — compute percentiles by interpolating within the histogram bin counters produced by #34 via the primitives from #189.
+- `ltl:285-287, 4867-4905, 4956-4975` — log-spaced bin geometry, `buckets_per_decade` precision knob (default 8 → ~5% bin width), binary-search bin-find.
+- `features/heatmap.md` and `features/histogram-charts.md` — design decisions, color/render integration, and the `-hgbpd` CLI knob.
+- `features/34-histogram-bin-counter-mode.md` R4-bis — heatmap markers and histogram indicators both derive from `#189` R4 under bin-counter mode.
+- `features/189-histogram-bin-counter-primitives.md` R1–R4 — partition, assignment, counter-update, and percentile-interpolation primitives.
 
-The study presents *options and trade-offs*, not a preferred answer. The decision is made by the user against D3's synthesis, not by D1 implicitly.
+The study presents the substrate's known properties for each use case and lists the open questions that the decision conversation must close before Phase 2 implementation. The decision is made by the user against D3's synthesis.
 
-**For each candidate, the study characterizes:**
+**The study covers:**
 
-- **Accuracy guarantee** — quantitative where the literature supplies it (e.g., published worst-case quantile-rank error bounds, asymptotic behavior at tail quantiles); qualitative where it does not (e.g., known behavior on heavy-tailed data, sensitivity to ordering).
-- **Memory profile** — quantitative where the literature supplies it (asymptotic state size as a function of compression parameter and N); qualitative for behavior at the small-N regime relevant to Path B and Path A's single-occurrence log keys.
-- **CPU profile** — quantitative where the literature supplies it (asymptotic per-update and per-finalize cost); qualitative for Perl-implementation implications where relevant.
-- **Determinism** — does the algorithm produce identical output for identical input; if randomized, what seeding discipline is required.
-- **Fit against each audited use case** — for each of Paths A, B, C1, C2:
-  - Does the algorithm meet the use case's percentile-set demand (7-value set for A/B, 10-value set for C1, 4-marker set for C2)?
-  - Does its N-regime behavior match the use case (per-`log_key` N for A, per-`time_bucket` N for B, full-dataset N for C1, per-`time_bucket` N for C2)?
-  - Does its output form match the use case (numeric value for A/B/C1, bin-index for C2 via #189 R2 round-trip)?
-  - Where is the algorithm a poor fit, and why?
-- **Harmonization implication** — if this algorithm were chosen for all four paths, what does ltl gain or lose architecturally? If it were chosen for only some paths, which combinations make sense and what is the cost of running two algorithms?
-- **Open questions** — what about this candidate cannot be answered from literature alone, and would require measurement (D4) to resolve?
+- The substrate's properties as already shipped (bin geometry, precision knob, bin-find).
+- How those properties map to each of Paths A, B, C1, C2 (the existing implementations already cover C1 and C2 with raw-array sort for percentile derivation; A and B are the migration targets).
+- What changes when raw values are *not* retained (the per-message migration target): how percentiles are derived directly from bin counters via #189 R4.
+- The accuracy story decomposed into its two genuinely separate sources: bin-resolution error (bounded by `buckets_per_decade`) and sample-count starvation at the tail (a property of every percentile estimator including the current sorted-array code).
+- Open questions for D3 that the existing features do not answer.
 
 #### D1 study — use-case demand profile
 
@@ -389,192 +388,95 @@ Drawn from the R12 audit (above). The demands a percentile primitive must satisf
 
 **Cross-cutting demands** (not path-specific):
 
-- **Per-quantile accuracy bound (R4)**: the bound is reported in `-V` per quantile and may differ across quantiles. P99.9 may have a wider bound than P50.
+- **Per-quantile accuracy bound (R4)**: reported in `-V` per quantile. With log-spaced bins the bound is uniform across quantiles for the *bin-resolution* component; the *sample-count starvation* component is reported separately per R7's `tail_sample_count_warning`.
 - **Degenerate inputs (R5)**: zero, one, or all-same values must produce correct output without crashing.
-- **Wide percentile set support**: any chosen primitive must handle all percentiles required by any consumer; the 10-value set from Path C1 is the worst case.
-- **Out-of-range tallies (#34 R5/R6)**: under bin-counter mode, values below the partition's low edge or above its high edge are counted but not placed in interior bins. The percentile primitive must either consume these tallies or the consumer must fold them into edge bins. This is a primitive-design question, not an algorithm-choice question — recorded as input to #189 R4, not to D3.
-- **State independence**: if the chosen algorithm carries estimator state separate from the counter store (sketches do; bin-derived interpolation does not), that state must be freeable per key independently of the counter store.
+- **Wide percentile set support**: `#189` R4 must handle all percentiles required by any consumer; the 10-value set from Path C1 is the worst case.
+- **Out-of-range tallies (#34 R5/R6)**: under bin-counter mode, values below the partition's low edge or above its high edge are counted but not placed in interior bins. Handling is a `#189` R4 design question — D3 Decision 4 picks fold-into-edge-bins vs. separate-population.
 
-#### D1 study — candidate characterizations
+#### D1 study — the substrate as already shipped
 
-The five spec-listed candidates plus four adjacent candidates that the literature review surfaces as relevant: DDSketch (relative-error sketch), HdrHistogram (industry-standard latency histogram), P-square (single-pass online quantile estimator), and reservoir sampling (uniform random sample then exact).
+The HdrHistogram-style log-spaced bin-counter substrate is implemented and in production. The characterization below summarizes its properties as they apply to all four percentile-computing paths.
 
-Where the literature supplies quantitative characteristics they are stated; where it does not, the entry says so explicitly. Behavior on heavy-tailed data — the dominant regime for ltl's primary use case — is called out where the literature characterizes it.
+##### Bin geometry
 
-##### Candidate 1 — t-digest (Dunning & Ertl)
+**Partition**: `boundary[i] = min · (max/min)^(i/B)` where B is the bin count. Number of bins is `decades · buckets_per_decade` rounded to integer, with a minimum of 5 (`calculate_histogram_bucket_count` at `ltl:4867-4887`). Per-bin width ratio is `10^(1/buckets_per_decade)` — independent of position in the partition, by construction.
 
-**Source**: Dunning, *"The t-digest: Efficient estimates of distributions"* (2019, Software Impacts). Open-source reference implementations in Java, C++, Go, Python.
+**Precision knob**: `buckets_per_decade`. The values shipped in `histogram-charts.md` correspond to:
 
-- **Accuracy guarantee**: No worst-case theoretical bound on rank or relative error. Strong *empirical* tail-quantile accuracy: relative error at P99 and P99.9 is typically <1% and improves at the tails (centroid clustering is denser near 0 and 1). At median (P50) the relative error is the *worst* of any quantile in a t-digest — opposite of most sketches.
-- **Memory profile**: O(δ) state where δ is the compression parameter. Default δ=100 → ~5–20 KB serialized state. State is the centroid array, size bounded by δ but loosely (centroids merge dynamically). Asymptotically independent of N. At very small N (<100 typical for Path B narrow buckets or Path A single-occurrence keys), state is bounded by N rather than δ — degenerates gracefully.
-- **CPU profile**: Per-update O(log δ) amortized (binary search to find the host centroid, occasional merge). Per-finalize O(δ) to interpolate at requested quantiles. In Perl, the binary-search and merge overhead is the practical bottleneck — no published Perl benchmark exists, but t-digest in interpreted languages typically runs 5–20× slower per update than in JIT-compiled languages.
-- **Determinism**: Deterministic for fixed-order input. **Sensitive to input order** — different ingestion orders of the same multiset produce different (but similar-accuracy) digests because centroid merge decisions depend on arrival order. ltl's parse order is deterministic per file, so this does not break R6, but it does mean t-digest from a re-sorted input would not be byte-identical.
-- **Fit against Path A**: Good. 7-quantile demand met; numeric output; per-`(category, log_key)` partition works (one digest per key). Memory at small N degenerates gracefully. Heavy-traffic keys (N=10⁶) get the benefit of bounded state.
-- **Fit against Path B**: Acceptable. Bounded state per bucket is a memory win at scale. Small-N buckets (<100) revert to near-exact behavior. Tail accuracy is the strong suit, which matches the operational importance of P99/P99.9 on time-bucket rows.
-- **Fit against Path C1**: Acceptable. 10-quantile demand including P99.99 — t-digest's tail bias actually *helps* here, and large single-partition N is the regime t-digest is most optimized for.
-- **Fit against Path C2**: Acceptable. Numeric output mapped to bin index via #189 R2 is a clean round-trip. Bin-index stability depends on the relationship between the t-digest's internal centroids and the heatmap partition's bin boundaries — open question.
-- **Harmonization implication**: One algorithm for all four paths is feasible. Single primitive in #189 R4. Trade-off: t-digest does *not* share data structure with #34's bin counters — the digest is independent estimator state. So bin counters and t-digest coexist rather than unify. This is a missed harmonization opportunity relative to bin-derived interpolation but does not preclude its use.
-- **Open questions**:
-  - No worst-case theoretical bound means R4 must be set empirically against ltl's distributions, not derived from theory. D3 must decide whether to lock R4 on published empirical numbers (Dunning's paper reports specific datasets) or to mandate D4 measurement.
-  - Perl-implementation cost on streaming updates is not characterized in the literature. If Phase 2 lands and t-digest updates dominate parse-loop CPU, that's a regression.
-  - Bin-index stability for Path C2 across runs with the same input is open: t-digest is order-deterministic for fixed input, so the stability should hold, but no published characterization exists.
+| `buckets_per_decade` | Per-bin width ratio | Max relative error (bin midpoint) |
+|---|---|---|
+| 4 | 1.78× | ~28% |
+| 8 (default) | 1.33× | ~14% |
+| 16 | 1.155× | ~7% |
+| 32 | 1.075× | ~3.6% |
 
-##### Candidate 2 — KLL sketch (Karnin, Lang, Liberty)
+These error bounds apply *uniformly* across quantiles — P50 and P99.9 inherit the same bound from the partition. The headline numbers in `histogram-charts.md` (10%, 5%, 2.5%, 1%) report the per-bin width fraction; the worst-case midpoint error is roughly half the bin width.
 
-**Source**: Karnin, Lang, Liberty, *"Optimal Quantile Approximation in Streams"* (FOCS 2016). Reference implementations in Apache DataSketches (Java) and various ports.
+**Bin-find**: binary search over the boundary array (`find_histogram_bucket_index` at `ltl:4889-4905`). Closed-form `floor(B · log(v/min) / log(max/min))` is an alternative the consumer can choose at `#189` R2 implementation time.
 
-- **Accuracy guarantee**: **Theoretical worst-case bound**: rank error ≤ ε with probability ≥ 1−δ for randomized variant; deterministic variant exists with weaker constant. Error is in *rank space* (quantile rank), not value space. ε=0.01 means the returned value's true rank is within 1% of the requested rank. Critically, KLL's rank error is *uniform* across quantiles — same bound at P50 and P99.9, unlike t-digest's tail bias.
-- **Memory profile**: O((1/ε) · log log (1/δ)) bytes (randomized) or O((1/ε) · log(εN)) (deterministic). At ε=0.01, randomized variant is ~3 KB; deterministic variant grows logarithmically with N. Asymptotically optimal — published results prove KLL is within a constant factor of the information-theoretic lower bound.
-- **CPU profile**: Per-update O(log log (1/δ)) amortized (randomized). Per-finalize O((1/ε) log(1/ε)). Update cost is essentially constant in practice.
-- **Determinism**: **Randomized variant requires a seed.** With a fixed seed, deterministic for fixed input. Deterministic variant has no randomness but pays more memory. For R6, the randomized variant must seed reproducibly (e.g., from file hash or input checksum) — this is a non-trivial implementation discipline question.
-- **Fit against Path A**: Good. 7-quantile demand met with uniform accuracy. Memory at small N (<100): KLL of size O(1/ε) is still ~3 KB even for N=10, which is overhead relative to storing the array. Below some N threshold, exact mode is cheaper.
-- **Fit against Path B**: Good for moderate-N buckets. Same small-N overhead concern as Path A. Uniform rank error matches Path B's tail-importance well — P99.9 accuracy is no worse than P50.
-- **Fit against Path C1**: Very good. Uniform rank error and asymptotic optimality at large N. 10-quantile demand met without tail-specific concerns.
-- **Fit against Path C2**: Good. Numeric output mapped to bin index via #189 R2. Rank-error semantics mean bin-index stability is a function of how rank error translates to value error in heavy-tailed distributions — open question.
-- **Harmonization implication**: One algorithm for all four paths feasible. KLL state coexists with #34's bin counters rather than unifying with them. Same trade-off as t-digest: clean primitive but no structural unification with the bin-counter substrate.
-- **Open questions**:
-  - Whether the rank-error bound is useful to ltl users as reported in `-V`. Rank error is mathematically rigorous but operationally awkward: "P99 returned a value at true rank 0.985–0.995" is harder to reason about than "P99 returned a value within ±5% of the true P99 value." D3 must decide which reporting form R4 commits to and whether KLL's rank guarantee can be translated to value error for ltl's distributions.
-  - Seeding discipline for the randomized variant under R6.
-  - Small-N threshold below which exact mode is cheaper than KLL state.
+##### Memory profile per partition
 
-##### Candidate 3 — Greenwald-Khanna (GK)
+`B + 1` integer counters per partition. For B = 40 (default 5 decades × 8 buckets/decade), that is ~320 bytes per partition at 8 bytes per counter. Asymptotically independent of N.
 
-**Source**: Greenwald & Khanna, *"Space-efficient online computation of quantile summaries"* (SIGMOD 2001). Foundational sketch; many implementations exist.
+For Path A (per-`(category, log_key)` partitions) at 10⁵ keys × ~320 bytes = ~30 MB total counter storage. Compares against today's `durations` arrays which scale with `sum_over_keys(occurrences_per_key) · 8 bytes` — typically hundreds of MB to GB on multi-GB runs.
 
-- **Accuracy guarantee**: **Theoretical worst-case rank-error bound** of ε. Deterministic — no randomness. Uniform across quantiles like KLL.
-- **Memory profile**: O((1/ε) · log(εN)) tuples. At ε=0.01 and N=10⁶, that's ~1400 tuples (each tuple is 3 numbers) ≈ 30–60 KB. Grows with N (logarithmically), unlike KLL or t-digest. This is GK's main weakness.
-- **CPU profile**: Per-update O(log(1/ε) + log log(εN)) amortized. Per-finalize O(1/ε).
-- **Determinism**: Fully deterministic. R6 satisfied trivially.
-- **Fit against Path A**: Acceptable. Worse memory than KLL at the same accuracy because of the log(εN) factor. For heavy-traffic keys with N=10⁶, GK is ~10× larger than KLL.
-- **Fit against Path B**: Acceptable. Same trade-off — moderate-N buckets carry an O(log) memory tax that KLL avoids.
-- **Fit against Path C1**: Acceptable. Full-dataset N (10⁵–10⁷) is exactly where GK's log(εN) factor bites hardest.
-- **Fit against Path C2**: Acceptable. Same numeric-to-bin-index round-trip as the others.
-- **Harmonization implication**: Same as KLL — independent estimator state, coexists with bin counters rather than unifying. GK is the *least* memory-efficient of the sketch options at large N, which matters because Phase 2 is the primary memory-pressure motivation for this entire feature.
-- **Open questions**:
-  - Whether GK's deterministic guarantee (no seed discipline needed) is worth the extra memory relative to KLL. Some implementations argue yes for systems where reproducibility-by-default is operationally important.
-  - GK is older and well-understood; few open questions in the literature.
+For Path B (per-`time_bucket` partitions) when heatmap is active, the existing heatmap counter store is the source — zero additional state. When heatmap is not active, Phase 3 introduces a per-bucket counter store with the same shape.
 
-##### Candidate 4 — q-digest
+##### CPU profile per partition
 
-**Source**: Shrivastava et al., *"Medians and beyond: new aggregation techniques for sensor networks"* (SenSys 2004). Tree-based deterministic quantile sketch.
+Per-update: O(log B) for binary-search bin-find, or O(1) for closed-form. No additional cost beyond counter increment.
 
-- **Accuracy guarantee**: Theoretical worst-case bound on rank error ε, with state proportional to 1/ε. Designed for sensor-network aggregation (mergeable across nodes), not specifically for heavy-tailed streams.
-- **Memory profile**: O((1/ε) log U) where U is the universe size (the range of possible values). For ltl, U is the range of duration values — milliseconds from 0 to some hours-scale upper bound, so log U ≈ 20–25. State size grows with the *value range*, not with N.
-- **CPU profile**: Per-update O(log U) for tree traversal. Per-finalize O(state size).
-- **Determinism**: Fully deterministic.
-- **Fit against Path A**: Marginal. The log U factor means q-digest is heavier per partition than KLL or t-digest at comparable accuracy. Many partitions (per `log_key`) compound this cost.
-- **Fit against Path B**: Marginal. Same per-partition cost as Path A applied per bucket.
-- **Fit against Path C1**: Acceptable. Single partition amortizes the log U cost.
-- **Fit against Path C2**: Acceptable.
-- **Harmonization implication**: Independent estimator state like KLL/GK/t-digest. q-digest's mergeability is a feature ltl does not currently exploit (no distributed aggregation) — so the main advantage of the algorithm is unused.
-- **Open questions**:
-  - Whether q-digest's mergeability matters for any future Phase (5+) consumer (e.g., aggregating multiple `ltl` runs). If not, q-digest is dominated by KLL on every dimension.
+Per-finalize: O(B) cumulative-count walk to locate the target bin, plus O(1) interpolation. For ten quantiles (Path C1's demand), O(10·B). B is typically 30–60, so per-finalize is trivial.
 
-##### Candidate 5 — Bin-derived interpolation over histogram bin counters
+##### Determinism
 
-**Source**: No single canonical paper — the approach is classical (histogram-based quantile estimation) but appears in the literature primarily as a *component* of other algorithms (e.g., HdrHistogram, DDSketch) rather than as a named technique in its own right. The form proposed here is: given a partition with bin counters (the structure #34 produces and #189 R1–R3 manages), find the bin containing rank ⌈q·N⌉ and interpolate linearly within the bin.
+Fully deterministic. Output is a function of bin counters only. R6 satisfied trivially.
 
-- **Accuracy guarantee**: **No probabilistic bound** — accuracy is fully determined by partition shape. Two bounds apply:
-  1. **Worst-case per-quantile value error**: ≤ width of the bin containing the target rank. For a logarithmic partition with base b and num_buckets B, the bin width at the high end of the range is `(max/min)^(1/B) · v` for a value v near the high end — i.e., **relative error bounded by (b−1)** where b is the log base.
-  2. **Best-case (uniform within bin)**: interpolation is exact if values within a bin are uniformly distributed; degrades to bin-width error in the worst case.
-  Heavy-tailed data within a log-spaced bin is approximately log-uniform within the bin if the partition matches the distribution's scale, so the practical error is closer to the best-case than the worst-case for ltl's regime.
-- **Memory profile**: **Zero estimator state beyond the bin counters themselves.** The bin counters are already required by #34 for heatmap/histogram rendering — percentile derivation reuses them at no additional cost. This is the dominant architectural advantage.
-- **CPU profile**: Per-update is whatever #189 R2 (bin assignment) costs — typically O(log B) binary search or O(1) closed-form for log-spaced partitions. **No additional per-update cost beyond bin counter increment.** Per-finalize: O(B) linear scan to find the bin containing rank ⌈q·N⌉, plus O(1) interpolation. Per ten quantiles (Path C1's demand), O(B · 10) — but B is typically 30–60 for ltl's heatmap partitions, so this is trivial.
-- **Determinism**: Fully deterministic. Output is a function of bin counters only.
-- **Fit against Path A**: **Question of partition shape.** Path A needs per-`(category, log_key)` percentiles. If each log_key carries its own bin counter store, the per-key memory is B integers (~B × 8 bytes ≈ 500 bytes per key for B=60). For 10⁵ distinct keys, this is ~50 MB of counter storage — comparable to or worse than the current raw arrays for low-N keys, but **bounded** rather than growing with values per key. For high-traffic keys (N=10⁶), this is a massive memory win. Accuracy depends on whether the partition's bin boundaries are appropriate for the per-key value range — open question whether one global partition serves all keys or each key needs an adaptive partition.
-- **Fit against Path B**: **Natural fit.** Path B is per-`time_bucket`; #34's heatmap already produces a counter store keyed by `time_bucket`. The audit explicitly identifies this as the natural source. Accuracy is governed by the heatmap's partition shape — same partition for heatmap rendering and percentile derivation means rendering and percentile values are mutually consistent by construction.
-- **Fit against Path C1**: **Natural fit.** Histogram's bin counters are the partition; percentile derivation reads them directly. 10-quantile demand (including P99.99) hits the partition's high-end resolution — the highest bin may not have enough sub-bin resolution for P99.99 if N is small or the partition tops out. Open question whether out-of-range overflow tallies (#34 R5/R6) need special handling at the extreme tail.
-- **Fit against Path C2**: **Natural fit, and uniquely so.** Path C2 stores bin indices, not values. Bin-derived interpolation returns a value that is then mapped *back* to a bin index — but the algorithm already knows the bin during its scan, so a variant of the primitive (#189 R4-bis) returns the bin index directly without value round-trip. This is the only candidate that natively produces Path C2's output form.
-- **Harmonization implication**: **Maximum.** All four paths read the same primitive against the same counter substrate. No independent estimator state. #189 R4 is one function call, not four. The bin-counter store is already required for #34's heatmap/histogram rendering, so percentile derivation is a side benefit at zero memory overhead.
-- **Open questions**:
-  - **Per-key partition shape for Path A.** The single biggest unresolved question. If Path A uses one global partition, accuracy on per-key value ranges that fall in a narrow sub-range of the global partition degrades sharply (all values land in 2–3 bins). If Path A uses per-key partitions, the partition itself must be determined adaptively from per-key data — circular dependency at parse time. D3 must address this; if no clean answer exists from literature, it is a D4 trigger candidate.
-  - **Tail accuracy at P99.9 / P99.99 for heavy-tailed distributions.** Bin-derived interpolation's worst-case error scales with bin width at the tail bin. Log-spaced partitions have wider bins at the high end (by design — that's where the resolution savings come from). For very heavy tails, the highest bin may span 2–10× in value, meaning P99.9 has potentially that level of relative error. Whether this is acceptable for SRE latency reporting is a D3 decision that depends on R4's tolerance.
-  - **Small-N behavior.** When a partition has more bins than values (Path B narrow buckets, Path A single-occurrence keys), interpolation between sparsely-populated bins produces step-function outputs. The audit already notes this as a Path A/B concern; bin-derived interpolation must either fall back to exact-mode behavior at small N or accept the step-function output.
-  - **Out-of-range tallies.** #34 R5/R6 produce overflow counts at the low and high ends. The percentile primitive must either consume these (and treat them as values at the partition edge) or the consumer must fold them into edge bins. This is a primitive-design question for #189 R4, not an algorithm-choice question for D3.
+##### Fit against each percentile-computing path
 
-##### Adjacent candidate A — DDSketch (Datadog)
+**Path A — summary-table per-message percentiles (Phase 2 target).** Per-`(category, log_key)` partition. Each `log_messages` entry already tracks its own `min` and `max` online (`ltl:5369-5371`) — the partition can be sized from those. Bin counter store replaces the raw `durations` array at `ltl:4591`. Percentile derivation (`calculate_statistics` at `ltl:5488`) replaces sort-and-index with `#189` R4 against the counter store. Counter footprint per key is small (B integers, ~320 bytes at B=40); the win at heavy-traffic keys (N=10⁴–10⁶) is large; the loss at single-occurrence keys is bounded.
 
-**Source**: Masson, Rim, Lee, *"DDSketch: A Fast and Fully-Mergeable Quantile Sketch with Relative-Error Guarantees"* (VLDB 2019). Surfaced because: it is the modern relative-error-guaranteed sketch, designed for the latency-distribution use case ltl primarily serves.
+**Path B — per-time-bucket duration percentiles (Phase 3 target).** Per-`time_bucket` partition. When heatmap is active, the heatmap counter store *is* the partition — Path B reads it via `#189` R4. When heatmap is not active, Phase 3 introduces an equivalent per-bucket counter store. The raw `durations` array at `ltl:4634` is removed.
 
-- **Accuracy guarantee**: **Theoretical worst-case bound** of α relative error in *value space* (not rank space) — uniform across quantiles. For α=0.01, every quantile returned is within 1% of the true value. This is the strongest guarantee form for ltl's use case, where users reason in milliseconds, not ranks.
-- **Memory profile**: O((1/α) log(max/min)) bins. For α=0.01 and a duration range from 1ms to 1 hour (max/min = 3.6×10⁶), state is ~1500 bins ≈ 10–20 KB. State grows with the *log of value range*, not with N.
-- **CPU profile**: Per-update O(1) (constant-time bin assignment via a closed-form log-spaced index). Per-finalize O(state size).
-- **Determinism**: Fully deterministic.
-- **Fit against Path A**: Good — relative-error guarantee is exactly what SRE latency reporting wants. Per-key partitions where each key only sees a narrow value range are inefficient (state proportional to value range, not data range), but bounded.
-- **Fit against Path B**: Good. Mergeability is a feature (different time buckets' sketches could be combined for derived aggregations).
-- **Fit against Path C1**: Good. Relative-error guarantee at all 10 quantiles.
-- **Fit against Path C2**: Good. Numeric output to bin index.
-- **Harmonization implication**: **Structurally similar to bin-derived interpolation** — DDSketch *is* essentially a partitioned counter store with a published relative-error guarantee. The partition shape is fixed (log-spaced with rate 1+α) rather than free, but the data structure is the same family as #34's bin counters. This raises a follow-up question for D3: could #34's bin counters be *configured* as DDSketch-compatible partitions, giving the relative-error guarantee without an independent estimator? If yes, this merges with the "Bin-derived interpolation" candidate above with a published bound. If no (e.g., because heatmap rendering needs a different bin count than DDSketch's α implies), they remain distinct.
-- **Open questions**:
-  - Whether #34's partition shape is compatible with DDSketch's α-parameterized partition.
-  - Whether ltl's value range (min/max) is bounded enough to keep state small — DDSketch can blow up if max/min is extreme.
+**Path C1 — histogram-mode global percentiles (incidental Phase 2 consumer).** Single partition per metric. Histogram already builds the bin counters (`ltl:4961-4975`); today's code redundantly sorts the raw values for percentile derivation (`ltl:4926-4940`). The migration removes the redundant sort: percentiles derive from the bin counters via `#189` R4.
 
-##### Adjacent candidate B — HdrHistogram
+**Path C2 — heatmap percentile markers.** Per-`time_bucket` partition. Today's code sorts raw values to find bin indices (`ltl:4823-4834`). Under `#34` bin-counter mode, markers derive from `#189` R4 against the counter store, with the numeric return mapped back to a bin index via `#189` R2. Already documented as the migration target in `features/34-…md` R4-bis.
 
-**Source**: Tene, *HdrHistogram: A High Dynamic Range Histogram* (open-source, ~2010s). Industry standard in JVM-language latency reporting. Surfaced because: it is the de facto latency-histogram structure in the JVM ecosystem and is specifically designed for the SRE-latency use case.
+##### Accuracy story — two genuinely separate sources of error
 
-- **Accuracy guarantee**: Configurable precision; typically 3 significant digits → ~0.1% relative error in value space. Like DDSketch, value-space relative error rather than rank error.
-- **Memory profile**: Fixed-size by configuration: ~tens of KB for a 3-significant-digit histogram covering nanoseconds to hours. Does not grow with N.
-- **CPU profile**: O(1) update (closed-form bin assignment).
-- **Determinism**: Fully deterministic.
-- **Fit against all paths**: Structurally identical to bin-derived interpolation with a fixed, opinionated partition shape (log-spaced subdivided into linear sub-bins). Tail accuracy is excellent — designed for it. Harmonization opportunity same as DDSketch: if #34's bin counters can be configured HdrHistogram-style, the published bound transfers.
-- **Open questions**:
-  - HdrHistogram has no canonical Perl implementation. Reference implementations are JVM and C. Whether porting cost is acceptable, or whether the partition logic alone can be embedded in #189, is open.
-  - Whether HdrHistogram's fixed partition strategy is too rigid for ltl's variable bucket-count consumers (heatmap `-hmw`, histogram `calculate_histogram_bucket_count`).
+This is the analytical heart of D1. Tail-quantile accuracy concerns (P99.9, P99.99) decompose into two independent sources, and they need to be reasoned about separately because only one of them is introduced by the bin-counter approach.
 
-##### Adjacent candidate C — P-square (Jain & Chlamtac)
+**Source 1 — Bin-resolution error.** Bounded uniformly by partition geometry. For `buckets_per_decade = N`, each bin spans a factor of `10^(1/N)` in value, and a percentile that falls inside a bin can be returned anywhere in that range. The bound applies *equally* at P50 and at P99.9 — there is no tail-amplification of bin-resolution error in a log-spaced partition.
 
-**Source**: Jain & Chlamtac, *"The P² algorithm for dynamic calculation of quantiles and histograms without storing observations"* (CACM 1985). Surfaced because: classical single-pass online estimator with O(1) state, occasionally cited as a baseline.
+| `buckets_per_decade` | Bound (bin midpoint return) | Bound (linear-in-log interpolation in bin) |
+|---|---|---|
+| 4 | ~28% | ~14% |
+| 8 (default) | ~14% | ~7% |
+| 16 | ~7% | ~3.5% |
+| 32 | ~3.6% | ~1.8% |
 
-- **Accuracy guarantee**: No worst-case bound. Empirically accurate at moderate quantiles, **poor at extreme tails** (P99.9, P99.99) — known limitation in the literature.
-- **Memory profile**: O(1) — five marker positions. State is negligible.
-- **CPU profile**: O(1) per update.
-- **Determinism**: Deterministic for fixed input order.
-- **Fit against all paths**: **Poor for ltl's use case.** Tail-quantile accuracy is the dominant requirement; P-square's known weakness is exactly there. Listed for completeness but not seriously competitive against any of the above.
-- **Open questions**: None worth pursuing — the literature already establishes P-square as inappropriate for tail-quantile-critical workloads.
+**Source 2 — Sample-count starvation at the tail.** Not introduced by this feature. P99.9 of 1,000 samples = the single highest value; P99.9 of 50 samples is meaningless. Today's sorted-array code (`ltl:5519-5525`) silently returns `sorted[int(N · 0.999)]` regardless of whether N supports that rank — a 50-occurrence message will report `sorted[0]` (the minimum) as its "P99.9". This is not accuracy; it is silence about being inaccurate.
 
-##### Adjacent candidate D — Reservoir sampling + exact
+The bin-counter approach inherits this limitation (no estimator can manufacture rank precision the data does not contain) but can **make it visible**: once the cumulative-count walk reaches the target rank, the consumer knows exactly how many samples support it. `-V` Layer 2 reports `tail_sample_count_warning: yes|no` per quantile, surfacing what the array code hides.
 
-**Source**: Vitter, *"Random sampling with a reservoir"* (TOMS 1985). Surfaced because: it offers a simple form of bounded state — store a uniform random sample of size K, compute exact percentiles on the sample.
+**SRE implication.** For high-volume messages and time buckets — the regime where P99.9 is operationally meaningful — bin-resolution error at `buckets_per_decade = 16` or `32` is well within SRE tolerances. For low-volume messages and time buckets, neither approach gives a trustworthy P99.9, and the bin-counter approach honestly reports that. This is a feature, not a regression.
 
-- **Accuracy guarantee**: Statistical, not worst-case. Standard error scales as O(1/√K). For K=1000, ~3% standard error at any quantile. Tail quantiles (P99.9) require larger K to have meaningful resolution — at K=1000, only ~1 sample lands above the true P99.9, so the estimate is extremely noisy.
-- **Memory profile**: O(K) — fixed.
-- **CPU profile**: O(1) per update (with the standard skip-step optimization).
-- **Determinism**: **Randomized.** Requires reproducible seeding; for R6 the seed must be derived from input deterministically.
-- **Fit against all paths**: **Acceptable for low-tail-importance use cases only.** Path C2's P99.9 marker would be too noisy to render reliably; Path A's P99.9 would not meet SRE latency-reporting standards. Listed for completeness; not competitive at tail quantiles.
-- **Open questions**: None — the statistical-noise floor at low K is well-characterized, and at high K the memory advantage disappears.
+#### D1 study — open questions for D3
 
-#### D1 study — synthesis across candidates
+These are the questions the existing heatmap, histogram, `#34`, and `#189` documents do not answer, and that the decision conversation that follows D3 must close before Phase 2 implementation:
 
-The candidates fall into three architectural families, and D3's options reduce to choosing among the families:
+1. **In-bin interpolation strategy for `#189` R4.** Once the cumulative-count walk locates the target bin, what value does R4 return? Candidates:
+   - **(a) Bin lower boundary** — coarsest; no interpolation math; max relative error is the full bin width (~14% at `buckets_per_decade=8`).
+   - **(b) Bin midpoint** — half the bin width error; trivial math.
+   - **(c) Linear-in-value within the bin** — `lower + (rank_within_bin / bin_count) · (upper − lower)`. Halves the average error against (b) when values inside the bin are roughly uniform on a linear scale.
+   - **(d) Linear-in-log within the bin** — `lower · (upper/lower)^(rank_within_bin / bin_count)`. Halves the average error against (b) when values inside the bin are roughly uniform on a log scale (the natural assumption for a log-spaced partition fed heavy-tailed data).
+2. **`buckets_per_decade` default for the per-message percentile path (Path A).** Existing consumers default to 8 (~14% midpoint error). For Path A's SRE latency-reporting use case, the default may want to be 16 (~7%) or 32 (~3.6%). Memory grows linearly with `buckets_per_decade` per partition, so this is a trade-off worth setting explicitly. The CLI already exposes `-hgbpd` for the histogram path; Path A may want its own knob or may inherit `-hgbpd`.
+3. **Tail-bin behavior when `buckets_per_decade` is high.** At `buckets_per_decade = 32`, the highest bins may contain very few samples even at high N. Does R4 fall back to a coarser interpolation (return the bin midpoint) when the sample count in the target bin drops below some threshold? Related to the sample-count-starvation visibility in `-V`.
+4. **R2.3 trigger threshold — when does exact mode fire.** This feature's gate (R2) decides between exact and approximate mode. The threshold needs to be chosen: a small-N cutoff (below which sorting the array is cheaper), an index/bounds-availability check (R2.1/R2.2), or a user-facing override (`--exact-percentiles`). The decision conversation produces the specific values.
+5. **Out-of-range tally handling.** `#34` R5/R6 tracks values outside the partition's `[min, max]` range. Under bin-counter mode, does R4 fold those into edge bins (treating them as if they landed at the boundary) or count them as separate populations? `#189` R4 must specify which.
+6. **Path A partition lifecycle when the per-`(category, log_key)` `min`/`max` is only known partway through the parse.** Heatmap and histogram do a final-pass after global `min`/`max` are known (`calculate_histogram_buckets` at `ltl:4908` is end-of-pass). For per-message percentile counters built online, the partition would have to be sized from per-key `min`/`max` discovered during the parse — which means re-binning if a new value extends the range. Acceptable strategies: (a) two-pass (parse once for per-key bounds, once for counter accumulation), (b) widen-and-rescale (rebuild the partition when a new value falls outside), (c) accept a fixed default range. Each has known trade-offs; D3 picks.
 
-**Family 1 — Independent sketches with published bounds.** KLL, GK, q-digest, DDSketch. Estimator state separate from #34's bin counters. Trade-off: published accuracy bounds (a benefit for R4's reporting requirement) at the cost of running two data structures (counters for #34's rendering, sketch for percentiles). KLL and DDSketch are the strongest members — KLL for rank-space rigor with smallest memory, DDSketch for value-space relative-error guarantee.
-
-**Family 2 — Independent sketches without published bounds.** t-digest, P-square. t-digest has strong empirical tail accuracy on heavy-tailed data but no theoretical bound; P-square is dominated. The trade-off is identical to Family 1 except R4 must commit to empirical (not theoretical) accuracy.
-
-**Family 3 — Bin-derived interpolation.** Reuses #34's bin counters as the sole data structure. Trade-offs: zero additional state, maximum architectural harmonization, **and** if the partition shape is chosen to be DDSketch-compatible or HdrHistogram-compatible, transfers their published bounds. The risk concentrates in two places: (a) Path A's per-key partition shape question (the single largest open question of Phase 1), and (b) tail-quantile accuracy at very heavy tails when the highest bin is wide.
-
-**Cross-family observations:**
-
-- **The bin-derived family is the only one with native fit for Path C2** (bin-index output form). Other families require numeric-to-bin-index round-trip via #189 R2; bin-derived can short-circuit it (#189 R4-bis).
-- **The bin-derived family is the only one that eliminates an independent state structure.** All other families coexist with #34's counters rather than unify with them.
-- **The bin-derived family inherits its accuracy from the partition shape.** If the partition is "free" (data-driven, chosen for rendering aesthetics), the accuracy guarantee is empirical and partition-dependent. If the partition is "constrained" (e.g., DDSketch's log-spaced with parameter α), a published bound transfers but the partition is no longer free.
-- **For Paths A and B at small N**, all candidates degrade. The natural fallback in all families is exact mode (R2.3 gate) — which means the small-N concern is a *gating-criteria* question (D3's R2.3 design) rather than an algorithm-choice question per se.
-- **Determinism (R6)**: KLL randomized variant and reservoir sampling require seed discipline. All other candidates (including KLL deterministic variant) are deterministic for fixed input. Bin-derived interpolation is the simplest determinism story.
-
-#### D1 study — open questions surfaced for D3 / D4
-
-Questions the literature cannot resolve on its own, ordered by how directly they affect the algorithm-choice decision:
-
-1. **Path A partition shape for bin-derived interpolation.** Does ltl use one global partition, per-key adaptive partitions, or some hybrid? This question may have a satisfying literature-grounded answer (e.g., "DDSketch-style log-spaced fixed partition is good enough"), or may require D4 measurement on ltl's heavy-traffic-key value ranges.
-2. **Whether #34's bin-counter partition can be made DDSketch/HdrHistogram-compatible.** If yes, Family 3 inherits a published bound and the architectural-harmonization advantage. If no, Family 3's accuracy bound for R4 must be derived from ltl's data empirically (D4 trigger).
-3. **Tail accuracy threshold for SRE latency reporting.** What relative-error bound at P99.9 is acceptable for the use case? This is a *user/product* question that D3 must surface for the decision conversation — it bounds which candidates qualify.
-4. **R4 reporting unit.** Rank error (KLL/GK), value-relative error (DDSketch/HdrHistogram/t-digest empirical), or value-absolute error (bin-derived raw). The reporting form affects which family's guarantee is most useful in `-V`.
-5. **Perl-implementation cost.** No published benchmarks for any of these algorithms in Perl. If the chosen algorithm's update cost dominates parse-loop throughput, Phase 2 ships a regression. D4 trigger if a candidate is otherwise preferred but its Perl cost is uncharacterized.
-6. **Small-N gating threshold.** Below what N should the run/key/bucket revert to exact mode? This is an R2.3 design question. Each candidate has a different cross-over point.
-7. **Bin-index stability for Path C2 across runs.** Bin-derived interpolation is trivially stable (deterministic function of counters). Other families' stability depends on the numeric-to-bin-index round-trip's sensitivity to small numeric perturbations in the percentile estimate. May be a non-issue (all families are deterministic) but warrants confirmation.
-
-These open questions are the input to D3's decision-support memo and to any D4 prototype that D3 triggers.
+These six questions are the input to D3's memo. None of them require empirical measurement to *enumerate*; one or more may benefit from a prototype to *decide* (D4-trigger candidates).
 
 ### D2 — Representative-dataset cross-reference
 
@@ -601,7 +503,7 @@ Populated against the inventory in `docs/test-logs.md` at `release/0.14.5` HEAD.
 | Heavy-tailed access log (Tomcat / Apache) | The dominant Phase 2 use case (Path A) and a Phase 3 driver (Path B). Tomcat/Apache access logs have right-skewed duration distributions — most responses fast, a long tail of slow ones. Tail-quantile (P99, P99.9) accuracy under this shape is the primary stress test for any candidate algorithm. | `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` (277 MB Tomcat 9, ms latency); `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` (220 MB); `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` (148 MB); `logs/AccessLogs/localhost_access_log.2025-03-21.txt` (2.6 MB, fast iteration); `logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` (658 KB, Apache HTTP2 with microsecond latency — distinct unit regime) | The four Tomcat files form a graduated size series for the same workload — useful for any analysis that wants to vary N without changing distribution shape. |
 | ThingWorx mixed-traffic log | Path A and Path B coverage on a structurally different log family. ThingWorx CustomThingworxLogs carry `durationMS=` fields, enabling per-message latency percentiles on a non-access-log distribution shape (service-call latencies rather than HTTP response latencies). | `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log` (29 MB, canonical heatmap file per CLAUDE.md); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log` through `.4.log` (72–98 MB each, same workload graduated); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log` (98 MB); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.log` (54 MB) | The clean variant has duration, bytes, and count metrics simultaneously — useful for cross-metric percentile coherence checks. |
 | High-cardinality DEBUG/ERROR-heavy log | Path A under the regime where the per-`log_key` distribution flattens (many distinct log keys, few values each). Stresses the small-per-key-N behavior of any algorithm chosen for Path A. Also relevant to Path C1 if histogram mode is engaged on the same file. | `logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log` (101.7 MB; 288K lines, ~286K unique keys — per consolidation memory); `logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log` (85 MB, broader L:DEBUG/INFO/WARN/ERROR mix); `logs/ThingworxLogs/ApplicationLog.2025-05-06.0.log` (6.5 MB); `logs/ThingworxLogs/ApplicationLog.2025-12-12.282-Windows.log` (10 MB, Windows variant) | These files do not carry per-message duration values (no `durationMS=`). They are relevant to Path C1 (histogram-mode global, when `-hg` is run) and to count-based percentile regimes; per-message duration percentiles (Path A) do not apply to these files unless paired with a metric source. Documented as a constraint, not a gap. |
-| Small-N case (a few hundred values per `log_key` or per `time_bucket`) | Path B at typical bucket sizes routinely produces small N per bucket. Path A at one-off log messages produces single-occurrence keys. Any candidate algorithm must be characterized at this regime; sketches with fixed compression parameters may exceed their state size at small N, while bin-derived interpolation degenerates to bin-index accuracy. | `logs/Codebeamber/codebeamer_access_log.2025-10-29.txt` (83 KB, naturally small); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log` (739 KB, single-service slice); `logs/ThingworxLogs/AuthLog.2025-05-06.0.log` (257 KB); `logs/ThingworxLogs/DatabaseLog.2025-05-05.0.log` (700 KB); `logs/ThingworxLogs/DatabaseLog.log` (29 KB, very small) | Small-N per *time bucket* can also be induced on any larger file by narrowing the bucket size (`-b 0.1` for 6-second buckets, `-ms` for millisecond precision). The cross-reference notes that this is reachable from existing files via CLI flags rather than requiring a dedicated file. |
+| Small-N case (a few hundred values per `log_key` or per `time_bucket`) | Path B at typical bucket sizes routinely produces small N per bucket. Path A at one-off log messages produces single-occurrence keys. The substrate's behavior here is the focus of D3 Decision 3 (tail-bin fall-through) and Decision 6 (small-N gating into exact mode). | `logs/Codebeamber/codebeamer_access_log.2025-10-29.txt` (83 KB, naturally small); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log` (739 KB, single-service slice); `logs/ThingworxLogs/AuthLog.2025-05-06.0.log` (257 KB); `logs/ThingworxLogs/DatabaseLog.2025-05-05.0.log` (700 KB); `logs/ThingworxLogs/DatabaseLog.log` (29 KB, very small) | Small-N per *time bucket* can also be induced on any larger file by narrowing the bucket size (`-b 0.1` for 6-second buckets, `-ms` for millisecond precision). The cross-reference notes that this is reachable from existing files via CLI flags rather than requiring a dedicated file. |
 | Degenerate — all-same values | Edge case R5; trivially handled by exact mode; approximate mode must agree. | Reproducible by filtering any existing file to a single repeated message (`-if <pattern>` selecting one log_key) where every value is the same — common for health-check endpoints. Health-check filter pattern files exist (`patterns/probes`, `patterns/metrics`). | No dedicated file. |
 | Degenerate — single value | Edge case R5. | Reproducible by filtering any existing file to a one-occurrence message. | No dedicated file. |
 | Degenerate — zero matched values | Edge case R5. | Reproducible on any file with `-if nonexistent-pattern`. | No dedicated file. |
@@ -617,241 +519,136 @@ Populated against the inventory in `docs/test-logs.md` at `release/0.14.5` HEAD.
 
 ### D3 — Decision-support memo
 
-D3 is the central deliverable of Phase 1. It synthesizes D1 (and the D2 cross-reference) into a written memo whose purpose is to put the user in a position to decide which algorithm (or combination of algorithms) ltl ships. The memo presents *options with trade-offs*, not a pre-committed recommendation.
-
-For each viable option (single-algorithm and hybrid combinations that survive D1's analysis), D3 documents:
-
-- **What this option does** — the algorithm(s) involved, and how each one maps to Paths A, B, C1, C2.
-- **What it gains** — the accuracy guarantees, memory profile, harmonization benefits, and operational simplifications relative to status quo.
-- **What it costs** — the accuracy compromises, memory or CPU costs, implementation complexity, and any use cases that are served sub-optimally.
-- **Open questions** — what remains unresolved from literature alone; what would need D4 measurement to confirm or refute.
-- **Implication for the gating criteria (R2.3)** — what input criteria the option requires the run-start gate to evaluate, and qualitative thresholds where the literature supports them.
-- **Implication for the accuracy bound (R4)** — what per-quantile bound this option could commit to, and the source of that bound (theoretical guarantee, expected empirical confirmation, etc.).
-- **Implication for state budget** — what the option's state size would be, parameterized appropriately.
-
-The memo concludes with a structured comparison (e.g., a matrix across options vs. evaluation criteria) and an explicit list of the *decisions the user must make* to move from Phase 1 to Phase 2 — the algorithm choice, the accuracy bound, the gating thresholds, whether a user-facing precision preference is introduced, and whether any open questions warrant D4 (see below) before deciding.
+D3 is the central deliverable of Phase 1. It synthesizes D1's analysis into a memo whose purpose is to put the user in a position to **make the six decisions** D1 surfaced as open. The memo presents options for each decision with trade-offs, not a pre-committed recommendation.
 
 D3 does **not** lock the implementation. The decision conversation between user and Claude is what locks it; D3 is the input to that conversation.
 
-#### D3 memo — options
+#### D3 memo — the six decisions
 
-Drawn from D1's three-family synthesis. Single-algorithm options are presented first; hybrid options where the family choice differs across paths are presented second. Options that D1 found dominated (q-digest, P-square, reservoir sampling) are excluded — they appear in D1 for completeness but are not viable choices.
+For each open question from D1, D3 presents the candidate answers with their consequences, the dependencies between decisions, and the D4-trigger condition that fires if literature is insufficient to choose.
 
-##### Option 1 — KLL across all four paths
+##### Decision 1 — In-bin interpolation strategy for `#189` R4
 
-- **What it does**: KLL sketch (randomized variant, reproducibly seeded) replaces the per-message duration array (Path A), the per-time-bucket duration array (Path B), the histogram-mode raw array (Path C1), and the heatmap-row raw array (Path C2). #34's bin counters remain for heatmap/histogram *rendering*; percentile derivation reads from the KLL sketches. #189 R4 is implemented over KLL state.
-- **What it gains**:
-  - Strongest theoretical guarantee available: rank error ≤ ε with high probability, asymptotically optimal state size.
-  - Uniform accuracy across quantiles — P50 and P99.9 carry the same bound. Matches Path C1's wide 10-quantile demand cleanly.
-  - Compact state at all N (~3 KB at ε=0.01).
-  - Mature literature; multiple reference implementations to consult.
-- **What it costs**:
-  - **Independent state coexists with #34's bin counters.** Two data structures running in parallel rather than one. Misses the architectural-harmonization opportunity that motivated the feature.
-  - **Rank error, not value error.** `-V` must report "P99 returned value at true rank 0.985–0.995" rather than "P99 within ±5% of true value." Less intuitive for SRE users.
-  - **Path A per-key overhead.** At ε=0.01, ~3 KB per key × ~10⁵ keys = ~300 MB sketch state for high-cardinality runs. Smaller than today's raw arrays for keys with large N, but *larger* for keys with N < ~400. Net memory win depends on the key-N distribution.
-  - **No published Perl implementation.** Port effort required; KLL's randomized variant carries the seeding-discipline burden.
-  - **Path C2 round-trip**: numeric value → bin index via #189 R2 adds a step that bin-derived options short-circuit.
-- **Open questions**: Whether rank-error reporting is acceptable for ltl's user base. Whether the per-key state overhead at small N degrades total memory more than today. Seeding discipline implementation cost.
-- **R2.3 gating implication**: Small-N gate per partition (per-key, per-bucket) — fall back to exact mode below the cross-over point where KLL state exceeds raw-array size. Cross-over is roughly N < 400 for ε=0.01.
-- **R4 accuracy-bound implication**: ε (rank error) reported per quantile uniformly. To translate to value error for `-V` would require either an additional empirical calibration step or a published distribution-specific result that ltl does not have.
-- **State budget implication**: ~3 KB per partition for ε=0.01. Tunable via ε.
+Once R4's cumulative-count walk locates the bin containing rank `q · N`, what value does R4 return?
 
-##### Option 2 — DDSketch across all four paths
+| Strategy | What it returns | Max relative error (`buckets_per_decade=8`) | Trade-off |
+|---|---|---|---|
+| (a) Bin lower boundary | `boundary[i]` | Bin width (~33%) | Simplest; coarse. |
+| (b) Bin midpoint | `(boundary[i] + boundary[i+1]) / 2` | Half bin width (~17%) | Trivial math; no use of in-bin rank. |
+| (c) Linear-in-value | `lower + (rank_in_bin / bin_count) · (upper − lower)` | Distribution-dependent | Better on roughly-uniform-in-value data. |
+| (d) Linear-in-log | `lower · (upper/lower)^(rank_in_bin / bin_count)` | Distribution-dependent | Better on roughly-uniform-in-log data (the natural assumption for log-spaced bins fed heavy-tailed data). |
 
-- **What it does**: DDSketch (log-spaced bin counters with rate 1+α) replaces all four paths' raw arrays. #189 R4 implemented over DDSketch state. Because DDSketch *is* a bin-counter structure, this option opens the door to **partial structural unification with #34's bin counters** (see Option 5 for the variant that pushes this further).
-- **What it gains**:
-  - **Value-relative-error guarantee**: every quantile within α of true value, uniformly. Matches SRE latency-reporting expectations directly — `-V` reports "P99.9 within ±1% of true P99.9 value" cleanly.
-  - Deterministic — no seeding discipline.
-  - Compact state (O((1/α) log(max/min))).
-  - Constant-time update (closed-form log-spaced index).
-  - **Structurally similar to #34's bin counters** — the data structure is the same family even if the partition is parameterized differently.
-- **What it costs**:
-  - State proportional to log(max/min). For ltl's duration range (μs to hours), this is bounded but not negligible (~1500 bins at α=0.01).
-  - **Two partition shapes coexist** if #34's heatmap partition does not match DDSketch's α-parameterized partition. The unification is structural-similarity, not identity. See Option 5.
-  - **No published Perl implementation.** Port effort required, though simpler than KLL (deterministic, closed-form bin assignment).
-  - Path A per-key overhead similar to KLL — ~10 KB per key × many keys.
-- **Open questions**: Whether #34's heatmap partition can be configured DDSketch-compatible without compromising rendering. Per-key memory at high-cardinality runs.
-- **R2.3 gating implication**: Small-N gate per partition. Cross-over higher than KLL because state is larger.
-- **R4 accuracy-bound implication**: α relative error reported per quantile uniformly. Reporting form is the most user-friendly of the bounded options.
-- **State budget implication**: ~10 KB per partition for α=0.01 over typical duration range. Tunable via α.
+**Recommendation framing**: (d) matches the partition's geometry and ltl's primary use case (heavy-tailed latency). (b) is the fall-through when in-bin rank is unavailable or when the bin contains very few samples. (a) and (c) are listed for completeness; neither has a strong case in ltl's regime.
 
-##### Option 3 — t-digest across all four paths
+**D4-trigger**: if the decision conversation cannot decide between (b), (c), (d) from D1's analysis alone, prototype on a heavy-tailed access log (D2 cross-reference identifies candidates) and compare per-quantile error against exact-mode output. Bounded scope.
 
-- **What it does**: t-digest replaces all four paths' raw arrays.
-- **What it gains**:
-  - Best **empirical** tail-quantile accuracy on heavy-tailed data — the regime ltl's primary use case lives in. Reported relative errors at P99/P99.9 typically <1%.
-  - Smallest sketch state of all bounded-state options (~5–20 KB serialized).
-  - Deterministic for fixed input order.
-- **What it costs**:
-  - **No worst-case theoretical bound.** R4 must commit to empirical accuracy (either from Dunning's published numbers or from D4 measurement on ltl data). Less defensible in `-V` than KLL/DDSketch.
-  - **P50 is the *worst* quantile.** t-digest's centroid clustering is densest at the tails; the median has the widest centroid. Phase 3's bar-graph P50 marker would have wider error than P99.
-  - **Sensitive to input order** (though deterministic per fixed order). Re-sorting input would change the output — not a problem for R6 as written but constrains future ordering optimizations.
-  - **Coexists with #34's bin counters** — no unification.
-  - **No published Perl implementation.**
-- **Open questions**: Whether empirical-only accuracy bound is acceptable in `-V`. Whether P50's wider error matters operationally. Perl port complexity.
-- **R2.3 gating implication**: Small-N gate per partition; t-digest degrades gracefully to near-exact at small N.
-- **R4 accuracy-bound implication**: Empirical, per-quantile (with tail quantiles tighter than median). Source is Dunning's paper plus optional D4 ltl-specific confirmation.
-- **State budget implication**: ~5–20 KB per partition at δ=100. Tunable via δ.
+##### Decision 2 — `buckets_per_decade` default for the per-message percentile path
 
-##### Option 4 — Bin-derived interpolation with free partition (no #34 constraint)
+The existing histogram default is 8 (~14% midpoint error). For Path A's SRE-grade tail-percentile reporting, the natural choice is higher.
 
-- **What it does**: #189 R4 is implemented as bin-derived interpolation over #34's existing bin counters. The partition shape for each consumer is whatever #34 already chose for rendering — heatmap uses `-hmw` bins, histogram uses `calculate_histogram_bucket_count` bins. Path A uses a new per-`(category, log_key)` bin store with a partition shape Phase 2 chooses (likely shared global log-spaced).
-- **What it gains**:
-  - **Maximum architectural harmonization.** One data structure (bin counters) serves rendering and percentile derivation. No independent estimator state. #189 R4 is one function.
-  - **Native fit for Path C2** — bin index is the output form already; no numeric-to-bin round-trip needed (#189 R4-bis returns bin index directly).
-  - Deterministic by construction.
-  - Zero per-update cost beyond bin counter increment.
-  - Constant-time per-finalize per quantile (linear scan over bins, B = 30–60).
-- **What it costs**:
-  - **No published accuracy bound.** Accuracy is partition-dependent; R4's bound must be derived from ltl's partition shapes empirically (D4 trigger likely).
-  - **Tail accuracy degrades with bin width at the high end.** For log-spaced partitions with B = 30 covering 6 orders of magnitude, the highest bin has ~50% relative width. P99.9 / P99.99 within this bin returns the bin midpoint — error up to ±25%. Acceptability depends on R4's tolerance.
-  - **Path A per-key partition shape question is unresolved.** One global partition risks underutilization (most keys cover a narrow sub-range); per-key partitions create a circular dependency at parse time.
-  - **Small-N step function.** When N < B, bins are sparsely populated; interpolation between empty bins produces discontinuous output.
-- **Open questions**: Path A partition shape (the single largest open question). Tail accuracy at heavy tails. Small-N fallback strategy.
-- **R2.3 gating implication**: Same small-N gate concern, but the cross-over is different — bin-derived has *zero* additional state, so the cross-over is governed by accuracy degradation at small N rather than memory crossover.
-- **R4 accuracy-bound implication**: Empirical, per-quantile, partition-dependent. Source is empirical measurement on ltl data.
-- **State budget implication**: Zero beyond #34's bin counters. Tunable via B (bin count).
+| `buckets_per_decade` | Bins per partition at 5 decades | Bytes per partition (8 B/counter) | Bound (interpolated) |
+|---|---|---|---|
+| 8 (existing default) | 40 | 320 B | ~7% |
+| 16 | 80 | 640 B | ~3.5% |
+| 32 | 160 | 1280 B | ~1.8% |
 
-##### Option 5 — Bin-derived interpolation with DDSketch-compatible partition
+At 10⁵ keys, the total counter store is ~32 MB / 64 MB / 128 MB respectively — all small compared to today's array storage on multi-GB runs. Memory is not the binding constraint; the choice is between "tight enough for SRE work" and "tighter than needed."
 
-- **What it does**: Like Option 4, but the partition shape is constrained to be DDSketch-compatible (log-spaced with rate 1+α). This requires either reshaping #34's heatmap partition (which may compromise rendering) or running a parallel DDSketch-shape partition for percentile derivation only. The Path A partition is DDSketch-shaped by Phase 2 choice.
-- **What it gains**:
-  - All of Option 4's gains: harmonization, native Path C2 fit, determinism, zero update cost, zero additional state when partitions match.
-  - **Plus DDSketch's published relative-error guarantee α**, transferred to bin-derived interpolation. R4 commits to a theoretical bound, not an empirical one.
-  - Native fit for Path C2 with a published bound.
-- **What it costs**:
-  - **Conditional on partition compatibility.** If #34's heatmap rendering cannot use a DDSketch-shaped partition (heatmap `-hmw` width is user-configurable and α is fixed by the accuracy target — they may collide), this option degrades to "parallel partitions" — one for rendering, one for percentiles. The unification advantage shrinks.
-  - **Inherits DDSketch's partition cost** at large value ranges (state grows with log(max/min)).
-  - **Path A partition shape question still partially open** — DDSketch-shape resolves the *shape* question (log-spaced with α) but not the *parameter* question (what α serves SRE latency reporting acceptably).
-- **Open questions**: Whether #34's heatmap/histogram partitions can be configured DDSketch-compatible without compromising rendering aesthetics. Whether a parallel DDSketch-shape partition for percentiles (when rendering partitions don't match) is acceptable harmonization-wise.
-- **R2.3 gating implication**: Same as Option 2 (DDSketch). Cross-over governed by DDSketch state size vs. raw arrays.
-- **R4 accuracy-bound implication**: α relative error per quantile, theoretical, transferred from DDSketch literature.
-- **State budget implication**: Zero beyond bin counters if partitions match; ~DDSketch state per consumer if they don't.
+**Recommendation framing**: 16 is the natural starting point. The decision conversation may choose to inherit `-hgbpd` (consumer-controlled), or to introduce a separate `--percentile-buckets-per-decade` knob for Path A.
 
-##### Option 6 — GK across all four paths
+**D4-trigger**: none. This is a defaulting decision with bounded memory implications at all options.
 
-- **What it does**: GK sketch replaces all four paths' raw arrays.
-- **What it gains**:
-  - Deterministic with no seeding required (no randomness at all).
-  - Worst-case rank-error bound.
-  - Foundational, well-studied — fewest open questions in the literature.
-- **What it costs**:
-  - **O(log(εN)) state grows with N.** Worse than KLL/DDSketch at large N — exactly the regime Phase 2 cares about.
-  - Same coexistence-with-bin-counters cost as KLL/DDSketch/t-digest.
-  - Same Path C2 round-trip cost.
-  - Rank error rather than value error in `-V`.
-  - **No published Perl implementation.**
-- **Open questions**: Few — GK is well-characterized. The main question is whether its memory overhead at scale is acceptable when KLL achieves the same accuracy without the log(εN) growth.
-- **R2.3 gating implication**: Same small-N gate. Cross-over at higher N than KLL because state is larger.
-- **R4 accuracy-bound implication**: ε rank error per quantile, theoretical worst-case.
-- **State budget implication**: O((1/ε) log(εN)) per partition. Tunable via ε but cannot escape the log(N) growth.
+##### Decision 3 — Tail-bin fall-through behavior
 
-##### Option 7 — Hybrid: bin-derived for C1/C2, sketch for A/B
+At high `buckets_per_decade`, the highest bins may contain very few samples even at high N. When R4's cumulative walk lands in a target bin where the in-bin count is below some threshold (e.g., < 3), interpolation strategies (c)/(d) become noise.
 
-- **What it does**: Path C1 (histogram-mode global) and Path C2 (heatmap markers) use bin-derived interpolation over their existing bin counters. Path A (per-message) and Path B (per-time-bucket) use a sketch (KLL, DDSketch, or t-digest — the choice further parameterizes this option).
-- **What it gains**:
-  - **C1 and C2 unify with #34's bin counters** — the natural-fit cases get harmonization without compromise. C2's bin-index output form is native. C1 reuses histogram bin counters at zero extra state.
-  - **A and B get a sketch's published bound** (if KLL or DDSketch) where partition-shape questions are hardest (Path A per-key, Path B per-bucket with variable N).
-  - Resolves the Path A partition-shape open question by sidestepping it — sketches do not require a partition.
-- **What it costs**:
-  - **Two algorithms in production.** #189 R4 must have two implementations (or one polymorphic implementation) — increases code surface.
-  - **R7 `-V` reporting carries two `algorithm` values** depending on which consumer is being reported. More complex observability.
-  - **Two accuracy-bound forms in `-V`** if the sketch uses rank error and bin-derived uses value error.
-  - Inherits sketch state cost for A and B.
-- **Open questions**: Which specific sketch fills the A/B slot (KLL vs. DDSketch vs. t-digest is itself a sub-decision). Whether two-algorithm observability is acceptable.
-- **R2.3 gating implication**: Gating is per-path. C1 and C2 gates are bin-derived's gates; A and B gates are the sketch's gates.
-- **R4 accuracy-bound implication**: Bound differs across paths. Path C1 / C2 commit to bin-derived's empirical (or DDSketch-derived if Option 5's partition matches) bound; Path A / B commit to the sketch's bound.
-- **State budget implication**: Zero additional for C1/C2; sketch state per partition for A/B.
+| Approach | Behavior |
+|---|---|
+| Always interpolate | Use chosen strategy regardless of in-bin count. Simplest. |
+| Threshold fall-through | If in-bin count < T (e.g., T=3), fall through to bin midpoint. Tunable. |
+| Per-quantile signaling | Always interpolate, but also report `tail_sample_count_warning` in `-V` Layer 2 (per R7) when the in-bin count is low. |
 
-##### Option 8 — Hybrid: bin-derived for B/C1/C2, sketch for A only
+**Recommendation framing**: the third approach (always interpolate + signal) is the most honest and avoids hidden mode-switches. Aligns with R7's `tail_sample_count_warning` already specified. Threshold fall-through can be added later if signaling-only proves operationally noisy.
 
-- **What it does**: Path B (per-time-bucket) joins C1 and C2 in using bin-derived interpolation — Phase 3 reads heatmap's bin counters when heatmap is active, or populates its own per-bucket bin store when heatmap is not. Only Path A (per-message) uses a sketch.
-- **What it gains**:
-  - Same C1/C2 harmonization as Option 7, plus **Path B's natural fit with heatmap's bin counters** (audit identifies this explicitly). Three of four paths converge on one structure.
-  - Path A — the path with the hardest partition-shape question — still gets a sketch's published bound.
-  - **The cleanest mapping to the audit's findings.** R12 explicitly identified Path B's heatmap-bin-counter source as the natural Phase 3 substrate.
-- **What it costs**:
-  - Still two algorithms in production (same code-surface cost as Option 7).
-  - Path B at small per-bucket N inherits bin-derived's small-N step-function behavior — needs a per-bucket exact-mode fallback in the gate.
-- **Open questions**: Same sketch sub-choice as Option 7. Path B small-N fallback threshold.
-- **R2.3 gating implication**: Path B gates are bin-derived's (small-N → exact). Path A gates are the sketch's.
-- **R4 accuracy-bound implication**: Three paths share bin-derived's bound; Path A commits to the sketch's bound.
-- **State budget implication**: Zero additional for B/C1/C2; sketch state per partition for A only.
+**D4-trigger**: none. The signaling approach has no measurement cost; threshold tuning if added is a Phase 2-time decision.
 
-#### D3 memo — options comparison matrix
+##### Decision 4 — Out-of-range tally handling
 
-Each cell is a one-line characterization. Read columns to compare options against a single criterion; read rows to see an option's full profile.
+`#34` R5/R6 produces overflow counts at the low and high ends of the partition (values outside `[min, max]` when the partition was sized before those values were seen — possible under widening strategies for Path A). `#189` R4 must specify what to do with them.
 
-| Criterion | Opt 1: KLL | Opt 2: DDSketch | Opt 3: t-digest | Opt 4: Bin-derived (free partition) | Opt 5: Bin-derived (DDSketch partition) | Opt 6: GK | Opt 7: Hybrid bin-derived C1/C2 + sketch A/B | Opt 8: Hybrid bin-derived B/C1/C2 + sketch A |
-|---|---|---|---|---|---|---|---|---|
-| Accuracy guarantee form | Rank error, theoretical | Value-relative error, theoretical | Value-relative error, empirical only | Value error, empirical only | Value-relative error, theoretical (inherits DDSketch) | Rank error, theoretical | Mixed (depends on sketch chosen) | Mixed (depends on sketch chosen) |
-| Tail (P99.9 / P99.99) accuracy | Uniform with bulk | Uniform with bulk | Strongest empirically | Bin-width dependent | Uniform (inherits DDSketch) | Uniform with bulk | C1/C2 bin-width dependent; A/B per sketch | B/C1/C2 bin-width dependent; A per sketch |
-| Median (P50) accuracy | Uniform | Uniform | Weakest empirically (centroid widest at median) | Bin-width dependent | Uniform | Uniform | Mixed | Mixed |
-| Harmonization with #34 | None — coexists | Partial — structurally similar | None — coexists | **Maximum** — same structure | **Maximum** if partitions match; partial otherwise | None — coexists | C1/C2 maximum; A/B none | B/C1/C2 maximum; A none |
-| Native Path C2 (bin-index) fit | No — round-trip required | No — round-trip required | No — round-trip required | **Yes** — short-circuit via R4-bis | **Yes** — short-circuit via R4-bis | No — round-trip required | **Yes** for C2 | **Yes** for C2 |
-| Memory state per partition | ~3 KB (ε=0.01) | ~10 KB (α=0.01, typical range) | ~5–20 KB (δ=100) | **Zero** beyond #34's counters | **Zero** if partitions match; ~DDSketch state otherwise | O((1/ε) log εN) — grows with N | A/B per sketch; C1/C2 zero | A per sketch; B/C1/C2 zero |
-| Path A per-key memory at 10⁵ keys | ~300 MB | ~1 GB | ~1.5 GB (worst) | Depends on partition shape; ~50 MB if global B=60 | ~1 GB (DDSketch parameterization) | Worst — grows with N per key | ~300 MB or per chosen sketch | ~300 MB or per chosen sketch |
-| Determinism (R6) | Seeded randomness — discipline required | Deterministic | Deterministic per fixed order | Deterministic | Deterministic | Deterministic | Deterministic if sketch is | Deterministic if sketch is |
-| `-V` reporting form | Rank error — operationally awkward | Value-relative — operationally clean | Empirical — needs source caveat | Empirical — needs source caveat | Value-relative — operationally clean | Rank error — operationally awkward | Mixed — two forms in one section | Mixed — two forms in one section |
-| Code surface (#189 R4 implementations) | 1 | 1 | 1 | 1 | 1 | 1 | 2 | 2 |
-| Perl implementation effort | High (randomized + seeding) | Medium (deterministic + closed-form) | Medium (deterministic, merging logic) | Low (linear scan + interpolation) | Low (same as Opt 4 + α-parameterized partition) | Medium (deterministic, tuple maintenance) | Medium + Low | Medium + Low |
-| Open questions remaining (D4-trigger candidates) | 3 (per-key state, rank-vs-value, seed) | 2 (#34 partition compat, per-key state) | 3 (empirical bound, P50 acceptability, port cost) | 4 (Path A partition shape, tail at heavy tails, small-N, R4 source) | 3 (partition compat, per-consumer cost, parameter α) | 1 (vs KLL preference) | A/B sketch sub-choice + harmonization tradeoff | Sketch sub-choice + Path B small-N |
-| Path A partition-shape question | N/A (sketch) | N/A (sketch) | N/A (sketch) | **Open — biggest unresolved Phase 1 question** | Open but constrained to α-parameter | N/A (sketch) | Sidestepped (Path A is sketch) | Sidestepped (Path A is sketch) |
-| Future-extensibility to new consumers (Phases 4, 5) | Each new consumer adds a sketch instance | Each new consumer adds a DDSketch instance | Each new consumer adds a t-digest | New consumer reads existing or new bin counters | New consumer adopts DDSketch partition | Each new consumer adds GK state | Architectural mixing locks in | Architectural mixing locks in |
+| Approach | Behavior |
+|---|---|
+| Fold into edge bins | Treat low-overflow as if it landed at `boundary[0]`; high-overflow as if at `boundary[B]`. R4 inflates the edge-bin counts before its walk. |
+| Separate populations | R4 reports out-of-range counts separately in `-V` and excludes them from quantile derivation. |
 
-#### D3 memo — decisions the user must make
+**Recommendation framing**: fold into edge bins is the SRE-honest default — out-of-range values *did* happen; treating them as edge-bin values preserves the percentile semantics. The "separate populations" approach is only useful if the partition is wrong (a Phase 2 implementation bug to detect, not a user-facing concern).
 
-Phase 2 implementation cannot begin until these are resolved. The decision conversation that follows D3 produces the binding values.
+**D4-trigger**: none.
 
-1. **Algorithm-family choice.** Between Family 1 (independent sketches with bounds — Options 1, 2, 6), Family 2 (sketch without bound — Option 3), Family 3 (bin-derived — Options 4, 5), or a Family 1+3 hybrid (Options 7, 8). The remaining sub-decisions cascade from this.
-2. **R4 reporting form.** Rank error, value-relative error, or value-absolute error. KLL/GK report rank; DDSketch/HdrHistogram-style and bin-derived report value. The choice constrains which options are viable: if value error is required, KLL and GK exit the running.
-3. **Acceptable per-quantile accuracy bound (R4 values).** The bound to commit to in `-V`. Affects sketch parameter (ε / α / δ) and partition resolution (B). The bound may differ across quantiles (P99.9 may be looser than P50); D3 records that and asks for explicit values.
-4. **Path A partition-shape decision (if bin-derived is chosen for Path A).** One global partition, per-key partitions, or per-`category` partitions. This is the single largest unresolved partition-shape question; if no clean answer emerges from the decision conversation, this becomes a D4 trigger.
-5. **#34 partition-compatibility decision (if Option 5 is chosen).** Whether #34's heatmap/histogram bin counters are constrained to DDSketch-compatible shapes, accepting any rendering-aesthetic compromise that introduces. Coordinates with #34's spec.
-6. **Whether a user-facing precision preference is introduced (R10 `user_forced_exact`).** A CLI flag (e.g., `--exact-percentiles`) that overrides the gate. Default value (auto vs. force-exact) is part of this decision.
-7. **R2.3 gating-criteria thresholds.** The specific values for index pre-seed, tier, file size, line count, memory headroom, per-partition N, etc. Each chosen algorithm has different cross-over points; the decision conversation produces them.
-8. **State-budget configuration.** The chosen sketch parameter (ε / α / δ) or the chosen bin count B. These set the state-budget value reported in R7 `-V` Layer 2.
-9. **Whether to trigger D4.** For each option's open questions, the decision conversation determines whether literature analysis is sufficient or whether prototype measurement is needed before committing. The seven open questions D1 surfaced are the candidate triggers; the conversation picks zero or more.
-10. **Phase 2 default activation policy.** R9 Phase 2 says "no automatic activation without explicit user opt-in until validated; activation policy defined by D3." The decision conversation determines: ships as opt-in only, ships with auto-activation only when all gates pass, or some intermediate.
+##### Decision 5 — Path A partition lifecycle when per-key `min`/`max` is discovered online
 
-#### D3 memo — D4 trigger conditions
+Heatmap and histogram finalize their partitions *after* the parse (`calculate_histogram_buckets` at `ltl:4908`), using global `min`/`max`. For Path A's per-`(category, log_key)` partitions, the partition must be sized from per-key `min`/`max` — which are tracked online (`ltl:5369-5371`) but only complete at end of parse.
 
-D4 is conditional. Per D1's open questions, the conversation may trigger D4 if any of the following are unresolved after the decision conversation:
+| Approach | Behavior | Memory cost | CPU cost |
+|---|---|---|---|
+| (a) Two-pass | First pass discovers per-key `min`/`max`; second pass accumulates counters. | Same as existing per-key min/max — already tracked. | 2× parse cost. Heavy. |
+| (b) Widen-and-rescale | First value seen for a key seeds a default-width partition; values outside trigger a partition rebuild (re-bin existing counts). | Slightly elevated transient memory during rebuild. | Amortized small if rebuilds are rare. |
+| (c) Fixed global partition | All keys share one log-spaced partition over the global value range (e.g., 1ms – 1h). | Lowest. | Lowest. |
+| (d) Defer until end-of-pass + cache durations | Same as today's `durations` array — defeats the feature. | Same as today. | Same as today. |
 
-- **Path A partition shape** (Options 4, 5) — if no clean literature-grounded answer emerges, prototype on `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` and `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log` to characterize per-key value-range distributions.
-- **Tail accuracy at heavy tails** (Options 4, 5; relevant to Options 1, 2, 6 in different form) — if the bound the user wants to commit to is not directly supported by published literature, prototype to confirm.
-- **Perl-implementation cost** (any sketch option) — if there is doubt about per-update cost dominating parse-loop throughput, prototype the sketch in Perl against a graduated-size series of access logs.
-- **Per-key state cost at high-cardinality runs** (Options 1, 2, 3, 7, 8) — `logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log` is the stress case, though it lacks duration values; the question is partition memory, not values, so it can be repurposed.
+**Recommendation framing**: (c) is by far the simplest, and is what the existing heatmap/histogram code already does (one partition per metric, sized from global `min`/`max`). The trade-off is that Path A's per-key value ranges are subsets of the global range; for a key whose values all sit in a narrow sub-range, most of its bins will be empty (wasted memory) but the populated bins still produce accurate percentiles. Memory waste is bounded — B integers per key, ~640 B at `buckets_per_decade=16`. (b) is the next-simplest if (c) proves wasteful in practice. (a) is the fallback if neither suffices. (d) is rejected.
 
-D4's scope is bounded by whichever subset of these the conversation flags.
+**D4-trigger**: if the decision conversation chooses between (b) and (c) based on suspected memory waste, prototype on a high-cardinality log (D2 identifies `HundredsOfThousandsOfUniqueErrors.log` as the stress case, but it lacks duration values — substitute the Tomcat access logs with the existing 286K-unique-key consolidation prototype as the value source). Bounded scope.
+
+##### Decision 6 — R2.3 gating-criteria thresholds (when does approximate mode fire)
+
+The dual-mode gate (R2) needs concrete thresholds. The criteria are:
+
+- **Small-N opt-out per key.** Below some N, sorting the array is cheaper than building+walking counters. Where is the cross-over? At B=80 (`buckets_per_decade=16`), counter store ≈ raw array at N=80. Below N=80, exact mode is cheaper.
+- **Index pre-seed (R2.1).** Inherited from #179 — fail if no index.
+- **Tier match (R2.2).** Inherited from #179.
+- **User override.** A CLI flag (e.g., `--exact-percentiles`) for users who want to force exact regardless of input scale.
+- **Total memory headroom.** Optional — if available memory is tight, fall back to exact (which the existing code already manages incrementally).
+
+**Recommendation framing**: ship Phase 2 with small-N opt-out (cross-over at N ≈ B), index pre-seed, tier match. Defer memory-headroom gating unless user feedback indicates need. CLI override is part of the decision (decision item 7 below).
+
+**D4-trigger**: none. Cross-over is calculable from B and counter element size; the other gates are pre-existing.
+
+#### D3 memo — additional decisions surfaced for the conversation
+
+Beyond the six analytical decisions above, the decision conversation must resolve four practical questions before Phase 2 implementation begins:
+
+7. **Whether to introduce a user-facing precision preference.** A `--exact-percentiles` flag (and possibly `--approximate-percentiles` as the opposite) for users who want to override the automatic gate. Default-on or default-auto.
+8. **`-V` reporting verbosity.** Layer 2's `accuracy_estimate` block per quantile is specified in R7. The decision conversation confirms format details (numeric vs. symbolic bound, per-quantile vs. global).
+9. **Phase 2 default activation policy.** R9 Phase 2 says "ships with default gating (no automatic activation without explicit user opt-in until validated)." The decision conversation confirms whether Phase 2 ships as opt-in only, or with auto-activation once D2-equivalent harness validates the accuracy bound.
+10. **Whether any decision triggers D4.** From decisions 1, 2, 5 above. The conversation explicitly picks zero or more.
 
 #### D3 memo — what D3 does *not* do
 
 This memo is decision-support, not decision. It does not:
 
-- Recommend an option.
-- Lock R4 values.
-- Lock R2.3 thresholds.
-- Lock the state budget.
+- Lock the in-bin interpolation strategy.
+- Lock `buckets_per_decade` for Path A.
+- Lock the gating thresholds.
 - Commit to D4 work.
 
-All of those are decided in the conversation that consumes this memo. The memo's job is to make that conversation possible without the participants having to re-derive the analysis.
+All of those are decided in the conversation that consumes this memo. The memo's job is to make that conversation possible without the participants having to re-derive D1's analysis.
 
 ### D4 — Prototype (conditional)
 
-D4 is **conditional**. It is produced only if D3's analysis identifies open questions that cannot be answered from literature alone and that materially affect the decision. The scope of D4 is bounded by those specific open questions — it is not a flat "implement and measure all candidates" exercise.
+D4 is **conditional**. It is produced only if a D3 decision (Decision 1, 2, or 5 per the memo) cannot be resolved from D1's analysis alone and the decision conversation flags it as needing measurement. The scope of D4 is bounded by the specific decision being measured — it is not a flat "exercise the substrate" prototype.
 
-When D4 is triggered, it produces a working prototype in `prototype/187-percentile-sketch.pl` (or similar) that:
+When D4 is triggered, it produces a working prototype in `prototype/187-percentile-binderived.pl` (or similar) that:
 
-- Implements only the algorithm(s) the open questions concern.
-- Runs against the D2 cross-referenced log files relevant to the open questions.
-- Produces measurement output (per-quantile error, state size, CPU cost, etc.) appropriate to the question being answered.
-- Is runnable independently of ltl proper so the algorithm can be exercised without touching production code.
-- For bin-derived interpolation, includes a mock of the #189 primitive contract so the algorithm can be exercised standalone.
+- Implements the bin-counter primitive plus the in-bin interpolation strategies under question.
+- Runs against the D2 cross-referenced log files relevant to the open decision.
+- Produces measurement output (per-quantile error against exact-mode reference, state size, CPU cost) appropriate to the decision being resolved.
+- Is runnable independently of ltl proper so the primitive can be exercised without touching production code.
+- Mocks `#189` R1–R4 sufficiently to exercise the decision under question.
 
-D4's output feeds back into D3, which is updated to reflect the resolved questions. The user-and-Claude decision conversation then proceeds against the updated D3.
+D4's output feeds back into D3, which is updated to reflect the resolved decision. The user-and-Claude decision conversation then proceeds against the updated D3.
 
-If D3's analysis resolves all material questions from literature alone, D4 is not produced and Phase 1 concludes at D3.
+If D3's analysis resolves all decisions from literature alone, D4 is not produced and Phase 1 concludes at D3.
 
 ### D5 — Production gate
 
