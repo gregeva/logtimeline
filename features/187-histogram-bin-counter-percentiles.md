@@ -372,6 +372,210 @@ The study presents *options and trade-offs*, not a preferred answer. The decisio
 - **Harmonization implication** — if this algorithm were chosen for all four paths, what does ltl gain or lose architecturally? If it were chosen for only some paths, which combinations make sense and what is the cost of running two algorithms?
 - **Open questions** — what about this candidate cannot be answered from literature alone, and would require measurement (D4) to resolve?
 
+#### D1 study — use-case demand profile
+
+Drawn from the R12 audit (above). The demands a percentile primitive must satisfy across the four paths:
+
+| Demand | Path A (summary-table per-message) | Path B (per-time-bucket) | Path C1 (histogram-mode global) | Path C2 (heatmap markers) |
+|---|---|---|---|---|
+| Percentile set | 7-value: P1, P50, P75, P90, P95, P99, P99.9 | 7-value: P1, P50, P75, P90, P95, P99, P99.9 | **10-value**: P1, P10, P25, P50, P75, P90, P95, P99, P99.9, **P99.99** | 4-marker: P50, P95, P99, P99.9 |
+| Output form | Numeric value (rendered as duration) | Numeric value (rendered inline on bar row) | Numeric value (legend + x-axis ticks) | **Bin index** (column position on heatmap row) |
+| Partition shape | Per-`(category, log_key)` — many independent partitions, one per distinct log key | Per-`time_bucket` — one partition per visible row | Single global partition per metric | Per-`time_bucket` — one partition per heatmap row (same partition as #34's bin counters) |
+| N regime | Highly variable: many keys with N=1–10; some keys with N=10⁴–10⁶ on heavy-traffic endpoints | Variable: typically 10²–10⁴ per bucket at default bucket size; can drop to <10 at narrow `-b` or low-traffic windows | Single large N: typically 10⁵–10⁷ for the full dataset | Same as Path B (per-time-bucket) |
+| Update pattern | Streaming during parse loop; finalize per-key after parse | Streaming during parse loop; finalize per-bucket after parse | Streaming during parse loop; finalize once | Streaming during parse loop; finalize per-bucket after parse |
+| Tail-quantile importance | High (P99.9 is operationally critical for SRE latency) | High (P99 / P99.9 markers shown alongside time-bucket bar) | Very high (P99.99 included — extreme tail) | High (P99.9 marker shown on every heatmap row) |
+| Memory pressure sensitivity | **Highest** — many keys × value array is the dominant summary-path memory consumer on multi-GB runs | Moderate — bucket count ~hundreds; per-bucket array can be large | Moderate — single partition but full-dataset N | Already addressed by #34's bin counters; percentile derivation must not reintroduce raw arrays |
+| Determinism requirement | Byte-identical across runs (R6) | Byte-identical across runs (R6) | Byte-identical across runs (R6) | Bin-index stability across runs (R6, plus R11 byte-identical when exact mode runs) |
+
+**Cross-cutting demands** (not path-specific):
+
+- **Per-quantile accuracy bound (R4)**: the bound is reported in `-V` per quantile and may differ across quantiles. P99.9 may have a wider bound than P50.
+- **Degenerate inputs (R5)**: zero, one, or all-same values must produce correct output without crashing.
+- **Wide percentile set support**: any chosen primitive must handle all percentiles required by any consumer; the 10-value set from Path C1 is the worst case.
+- **Out-of-range tallies (#34 R5/R6)**: under bin-counter mode, values below the partition's low edge or above its high edge are counted but not placed in interior bins. The percentile primitive must either consume these tallies or the consumer must fold them into edge bins. This is a primitive-design question, not an algorithm-choice question — recorded as input to #189 R4, not to D3.
+- **State independence**: if the chosen algorithm carries estimator state separate from the counter store (sketches do; bin-derived interpolation does not), that state must be freeable per key independently of the counter store.
+
+#### D1 study — candidate characterizations
+
+The five spec-listed candidates plus four adjacent candidates that the literature review surfaces as relevant: DDSketch (relative-error sketch), HdrHistogram (industry-standard latency histogram), P-square (single-pass online quantile estimator), and reservoir sampling (uniform random sample then exact).
+
+Where the literature supplies quantitative characteristics they are stated; where it does not, the entry says so explicitly. Behavior on heavy-tailed data — the dominant regime for ltl's primary use case — is called out where the literature characterizes it.
+
+##### Candidate 1 — t-digest (Dunning & Ertl)
+
+**Source**: Dunning, *"The t-digest: Efficient estimates of distributions"* (2019, Software Impacts). Open-source reference implementations in Java, C++, Go, Python.
+
+- **Accuracy guarantee**: No worst-case theoretical bound on rank or relative error. Strong *empirical* tail-quantile accuracy: relative error at P99 and P99.9 is typically <1% and improves at the tails (centroid clustering is denser near 0 and 1). At median (P50) the relative error is the *worst* of any quantile in a t-digest — opposite of most sketches.
+- **Memory profile**: O(δ) state where δ is the compression parameter. Default δ=100 → ~5–20 KB serialized state. State is the centroid array, size bounded by δ but loosely (centroids merge dynamically). Asymptotically independent of N. At very small N (<100 typical for Path B narrow buckets or Path A single-occurrence keys), state is bounded by N rather than δ — degenerates gracefully.
+- **CPU profile**: Per-update O(log δ) amortized (binary search to find the host centroid, occasional merge). Per-finalize O(δ) to interpolate at requested quantiles. In Perl, the binary-search and merge overhead is the practical bottleneck — no published Perl benchmark exists, but t-digest in interpreted languages typically runs 5–20× slower per update than in JIT-compiled languages.
+- **Determinism**: Deterministic for fixed-order input. **Sensitive to input order** — different ingestion orders of the same multiset produce different (but similar-accuracy) digests because centroid merge decisions depend on arrival order. ltl's parse order is deterministic per file, so this does not break R6, but it does mean t-digest from a re-sorted input would not be byte-identical.
+- **Fit against Path A**: Good. 7-quantile demand met; numeric output; per-`(category, log_key)` partition works (one digest per key). Memory at small N degenerates gracefully. Heavy-traffic keys (N=10⁶) get the benefit of bounded state.
+- **Fit against Path B**: Acceptable. Bounded state per bucket is a memory win at scale. Small-N buckets (<100) revert to near-exact behavior. Tail accuracy is the strong suit, which matches the operational importance of P99/P99.9 on time-bucket rows.
+- **Fit against Path C1**: Acceptable. 10-quantile demand including P99.99 — t-digest's tail bias actually *helps* here, and large single-partition N is the regime t-digest is most optimized for.
+- **Fit against Path C2**: Acceptable. Numeric output mapped to bin index via #189 R2 is a clean round-trip. Bin-index stability depends on the relationship between the t-digest's internal centroids and the heatmap partition's bin boundaries — open question.
+- **Harmonization implication**: One algorithm for all four paths is feasible. Single primitive in #189 R4. Trade-off: t-digest does *not* share data structure with #34's bin counters — the digest is independent estimator state. So bin counters and t-digest coexist rather than unify. This is a missed harmonization opportunity relative to bin-derived interpolation but does not preclude its use.
+- **Open questions**:
+  - No worst-case theoretical bound means R4 must be set empirically against ltl's distributions, not derived from theory. D3 must decide whether to lock R4 on published empirical numbers (Dunning's paper reports specific datasets) or to mandate D4 measurement.
+  - Perl-implementation cost on streaming updates is not characterized in the literature. If Phase 2 lands and t-digest updates dominate parse-loop CPU, that's a regression.
+  - Bin-index stability for Path C2 across runs with the same input is open: t-digest is order-deterministic for fixed input, so the stability should hold, but no published characterization exists.
+
+##### Candidate 2 — KLL sketch (Karnin, Lang, Liberty)
+
+**Source**: Karnin, Lang, Liberty, *"Optimal Quantile Approximation in Streams"* (FOCS 2016). Reference implementations in Apache DataSketches (Java) and various ports.
+
+- **Accuracy guarantee**: **Theoretical worst-case bound**: rank error ≤ ε with probability ≥ 1−δ for randomized variant; deterministic variant exists with weaker constant. Error is in *rank space* (quantile rank), not value space. ε=0.01 means the returned value's true rank is within 1% of the requested rank. Critically, KLL's rank error is *uniform* across quantiles — same bound at P50 and P99.9, unlike t-digest's tail bias.
+- **Memory profile**: O((1/ε) · log log (1/δ)) bytes (randomized) or O((1/ε) · log(εN)) (deterministic). At ε=0.01, randomized variant is ~3 KB; deterministic variant grows logarithmically with N. Asymptotically optimal — published results prove KLL is within a constant factor of the information-theoretic lower bound.
+- **CPU profile**: Per-update O(log log (1/δ)) amortized (randomized). Per-finalize O((1/ε) log(1/ε)). Update cost is essentially constant in practice.
+- **Determinism**: **Randomized variant requires a seed.** With a fixed seed, deterministic for fixed input. Deterministic variant has no randomness but pays more memory. For R6, the randomized variant must seed reproducibly (e.g., from file hash or input checksum) — this is a non-trivial implementation discipline question.
+- **Fit against Path A**: Good. 7-quantile demand met with uniform accuracy. Memory at small N (<100): KLL of size O(1/ε) is still ~3 KB even for N=10, which is overhead relative to storing the array. Below some N threshold, exact mode is cheaper.
+- **Fit against Path B**: Good for moderate-N buckets. Same small-N overhead concern as Path A. Uniform rank error matches Path B's tail-importance well — P99.9 accuracy is no worse than P50.
+- **Fit against Path C1**: Very good. Uniform rank error and asymptotic optimality at large N. 10-quantile demand met without tail-specific concerns.
+- **Fit against Path C2**: Good. Numeric output mapped to bin index via #189 R2. Rank-error semantics mean bin-index stability is a function of how rank error translates to value error in heavy-tailed distributions — open question.
+- **Harmonization implication**: One algorithm for all four paths feasible. KLL state coexists with #34's bin counters rather than unifying with them. Same trade-off as t-digest: clean primitive but no structural unification with the bin-counter substrate.
+- **Open questions**:
+  - Whether the rank-error bound is useful to ltl users as reported in `-V`. Rank error is mathematically rigorous but operationally awkward: "P99 returned a value at true rank 0.985–0.995" is harder to reason about than "P99 returned a value within ±5% of the true P99 value." D3 must decide which reporting form R4 commits to and whether KLL's rank guarantee can be translated to value error for ltl's distributions.
+  - Seeding discipline for the randomized variant under R6.
+  - Small-N threshold below which exact mode is cheaper than KLL state.
+
+##### Candidate 3 — Greenwald-Khanna (GK)
+
+**Source**: Greenwald & Khanna, *"Space-efficient online computation of quantile summaries"* (SIGMOD 2001). Foundational sketch; many implementations exist.
+
+- **Accuracy guarantee**: **Theoretical worst-case rank-error bound** of ε. Deterministic — no randomness. Uniform across quantiles like KLL.
+- **Memory profile**: O((1/ε) · log(εN)) tuples. At ε=0.01 and N=10⁶, that's ~1400 tuples (each tuple is 3 numbers) ≈ 30–60 KB. Grows with N (logarithmically), unlike KLL or t-digest. This is GK's main weakness.
+- **CPU profile**: Per-update O(log(1/ε) + log log(εN)) amortized. Per-finalize O(1/ε).
+- **Determinism**: Fully deterministic. R6 satisfied trivially.
+- **Fit against Path A**: Acceptable. Worse memory than KLL at the same accuracy because of the log(εN) factor. For heavy-traffic keys with N=10⁶, GK is ~10× larger than KLL.
+- **Fit against Path B**: Acceptable. Same trade-off — moderate-N buckets carry an O(log) memory tax that KLL avoids.
+- **Fit against Path C1**: Acceptable. Full-dataset N (10⁵–10⁷) is exactly where GK's log(εN) factor bites hardest.
+- **Fit against Path C2**: Acceptable. Same numeric-to-bin-index round-trip as the others.
+- **Harmonization implication**: Same as KLL — independent estimator state, coexists with bin counters rather than unifying. GK is the *least* memory-efficient of the sketch options at large N, which matters because Phase 2 is the primary memory-pressure motivation for this entire feature.
+- **Open questions**:
+  - Whether GK's deterministic guarantee (no seed discipline needed) is worth the extra memory relative to KLL. Some implementations argue yes for systems where reproducibility-by-default is operationally important.
+  - GK is older and well-understood; few open questions in the literature.
+
+##### Candidate 4 — q-digest
+
+**Source**: Shrivastava et al., *"Medians and beyond: new aggregation techniques for sensor networks"* (SenSys 2004). Tree-based deterministic quantile sketch.
+
+- **Accuracy guarantee**: Theoretical worst-case bound on rank error ε, with state proportional to 1/ε. Designed for sensor-network aggregation (mergeable across nodes), not specifically for heavy-tailed streams.
+- **Memory profile**: O((1/ε) log U) where U is the universe size (the range of possible values). For ltl, U is the range of duration values — milliseconds from 0 to some hours-scale upper bound, so log U ≈ 20–25. State size grows with the *value range*, not with N.
+- **CPU profile**: Per-update O(log U) for tree traversal. Per-finalize O(state size).
+- **Determinism**: Fully deterministic.
+- **Fit against Path A**: Marginal. The log U factor means q-digest is heavier per partition than KLL or t-digest at comparable accuracy. Many partitions (per `log_key`) compound this cost.
+- **Fit against Path B**: Marginal. Same per-partition cost as Path A applied per bucket.
+- **Fit against Path C1**: Acceptable. Single partition amortizes the log U cost.
+- **Fit against Path C2**: Acceptable.
+- **Harmonization implication**: Independent estimator state like KLL/GK/t-digest. q-digest's mergeability is a feature ltl does not currently exploit (no distributed aggregation) — so the main advantage of the algorithm is unused.
+- **Open questions**:
+  - Whether q-digest's mergeability matters for any future Phase (5+) consumer (e.g., aggregating multiple `ltl` runs). If not, q-digest is dominated by KLL on every dimension.
+
+##### Candidate 5 — Bin-derived interpolation over histogram bin counters
+
+**Source**: No single canonical paper — the approach is classical (histogram-based quantile estimation) but appears in the literature primarily as a *component* of other algorithms (e.g., HdrHistogram, DDSketch) rather than as a named technique in its own right. The form proposed here is: given a partition with bin counters (the structure #34 produces and #189 R1–R3 manages), find the bin containing rank ⌈q·N⌉ and interpolate linearly within the bin.
+
+- **Accuracy guarantee**: **No probabilistic bound** — accuracy is fully determined by partition shape. Two bounds apply:
+  1. **Worst-case per-quantile value error**: ≤ width of the bin containing the target rank. For a logarithmic partition with base b and num_buckets B, the bin width at the high end of the range is `(max/min)^(1/B) · v` for a value v near the high end — i.e., **relative error bounded by (b−1)** where b is the log base.
+  2. **Best-case (uniform within bin)**: interpolation is exact if values within a bin are uniformly distributed; degrades to bin-width error in the worst case.
+  Heavy-tailed data within a log-spaced bin is approximately log-uniform within the bin if the partition matches the distribution's scale, so the practical error is closer to the best-case than the worst-case for ltl's regime.
+- **Memory profile**: **Zero estimator state beyond the bin counters themselves.** The bin counters are already required by #34 for heatmap/histogram rendering — percentile derivation reuses them at no additional cost. This is the dominant architectural advantage.
+- **CPU profile**: Per-update is whatever #189 R2 (bin assignment) costs — typically O(log B) binary search or O(1) closed-form for log-spaced partitions. **No additional per-update cost beyond bin counter increment.** Per-finalize: O(B) linear scan to find the bin containing rank ⌈q·N⌉, plus O(1) interpolation. Per ten quantiles (Path C1's demand), O(B · 10) — but B is typically 30–60 for ltl's heatmap partitions, so this is trivial.
+- **Determinism**: Fully deterministic. Output is a function of bin counters only.
+- **Fit against Path A**: **Question of partition shape.** Path A needs per-`(category, log_key)` percentiles. If each log_key carries its own bin counter store, the per-key memory is B integers (~B × 8 bytes ≈ 500 bytes per key for B=60). For 10⁵ distinct keys, this is ~50 MB of counter storage — comparable to or worse than the current raw arrays for low-N keys, but **bounded** rather than growing with values per key. For high-traffic keys (N=10⁶), this is a massive memory win. Accuracy depends on whether the partition's bin boundaries are appropriate for the per-key value range — open question whether one global partition serves all keys or each key needs an adaptive partition.
+- **Fit against Path B**: **Natural fit.** Path B is per-`time_bucket`; #34's heatmap already produces a counter store keyed by `time_bucket`. The audit explicitly identifies this as the natural source. Accuracy is governed by the heatmap's partition shape — same partition for heatmap rendering and percentile derivation means rendering and percentile values are mutually consistent by construction.
+- **Fit against Path C1**: **Natural fit.** Histogram's bin counters are the partition; percentile derivation reads them directly. 10-quantile demand (including P99.99) hits the partition's high-end resolution — the highest bin may not have enough sub-bin resolution for P99.99 if N is small or the partition tops out. Open question whether out-of-range overflow tallies (#34 R5/R6) need special handling at the extreme tail.
+- **Fit against Path C2**: **Natural fit, and uniquely so.** Path C2 stores bin indices, not values. Bin-derived interpolation returns a value that is then mapped *back* to a bin index — but the algorithm already knows the bin during its scan, so a variant of the primitive (#189 R4-bis) returns the bin index directly without value round-trip. This is the only candidate that natively produces Path C2's output form.
+- **Harmonization implication**: **Maximum.** All four paths read the same primitive against the same counter substrate. No independent estimator state. #189 R4 is one function call, not four. The bin-counter store is already required for #34's heatmap/histogram rendering, so percentile derivation is a side benefit at zero memory overhead.
+- **Open questions**:
+  - **Per-key partition shape for Path A.** The single biggest unresolved question. If Path A uses one global partition, accuracy on per-key value ranges that fall in a narrow sub-range of the global partition degrades sharply (all values land in 2–3 bins). If Path A uses per-key partitions, the partition itself must be determined adaptively from per-key data — circular dependency at parse time. D3 must address this; if no clean answer exists from literature, it is a D4 trigger candidate.
+  - **Tail accuracy at P99.9 / P99.99 for heavy-tailed distributions.** Bin-derived interpolation's worst-case error scales with bin width at the tail bin. Log-spaced partitions have wider bins at the high end (by design — that's where the resolution savings come from). For very heavy tails, the highest bin may span 2–10× in value, meaning P99.9 has potentially that level of relative error. Whether this is acceptable for SRE latency reporting is a D3 decision that depends on R4's tolerance.
+  - **Small-N behavior.** When a partition has more bins than values (Path B narrow buckets, Path A single-occurrence keys), interpolation between sparsely-populated bins produces step-function outputs. The audit already notes this as a Path A/B concern; bin-derived interpolation must either fall back to exact-mode behavior at small N or accept the step-function output.
+  - **Out-of-range tallies.** #34 R5/R6 produce overflow counts at the low and high ends. The percentile primitive must either consume these (and treat them as values at the partition edge) or the consumer must fold them into edge bins. This is a primitive-design question for #189 R4, not an algorithm-choice question for D3.
+
+##### Adjacent candidate A — DDSketch (Datadog)
+
+**Source**: Masson, Rim, Lee, *"DDSketch: A Fast and Fully-Mergeable Quantile Sketch with Relative-Error Guarantees"* (VLDB 2019). Surfaced because: it is the modern relative-error-guaranteed sketch, designed for the latency-distribution use case ltl primarily serves.
+
+- **Accuracy guarantee**: **Theoretical worst-case bound** of α relative error in *value space* (not rank space) — uniform across quantiles. For α=0.01, every quantile returned is within 1% of the true value. This is the strongest guarantee form for ltl's use case, where users reason in milliseconds, not ranks.
+- **Memory profile**: O((1/α) log(max/min)) bins. For α=0.01 and a duration range from 1ms to 1 hour (max/min = 3.6×10⁶), state is ~1500 bins ≈ 10–20 KB. State grows with the *log of value range*, not with N.
+- **CPU profile**: Per-update O(1) (constant-time bin assignment via a closed-form log-spaced index). Per-finalize O(state size).
+- **Determinism**: Fully deterministic.
+- **Fit against Path A**: Good — relative-error guarantee is exactly what SRE latency reporting wants. Per-key partitions where each key only sees a narrow value range are inefficient (state proportional to value range, not data range), but bounded.
+- **Fit against Path B**: Good. Mergeability is a feature (different time buckets' sketches could be combined for derived aggregations).
+- **Fit against Path C1**: Good. Relative-error guarantee at all 10 quantiles.
+- **Fit against Path C2**: Good. Numeric output to bin index.
+- **Harmonization implication**: **Structurally similar to bin-derived interpolation** — DDSketch *is* essentially a partitioned counter store with a published relative-error guarantee. The partition shape is fixed (log-spaced with rate 1+α) rather than free, but the data structure is the same family as #34's bin counters. This raises a follow-up question for D3: could #34's bin counters be *configured* as DDSketch-compatible partitions, giving the relative-error guarantee without an independent estimator? If yes, this merges with the "Bin-derived interpolation" candidate above with a published bound. If no (e.g., because heatmap rendering needs a different bin count than DDSketch's α implies), they remain distinct.
+- **Open questions**:
+  - Whether #34's partition shape is compatible with DDSketch's α-parameterized partition.
+  - Whether ltl's value range (min/max) is bounded enough to keep state small — DDSketch can blow up if max/min is extreme.
+
+##### Adjacent candidate B — HdrHistogram
+
+**Source**: Tene, *HdrHistogram: A High Dynamic Range Histogram* (open-source, ~2010s). Industry standard in JVM-language latency reporting. Surfaced because: it is the de facto latency-histogram structure in the JVM ecosystem and is specifically designed for the SRE-latency use case.
+
+- **Accuracy guarantee**: Configurable precision; typically 3 significant digits → ~0.1% relative error in value space. Like DDSketch, value-space relative error rather than rank error.
+- **Memory profile**: Fixed-size by configuration: ~tens of KB for a 3-significant-digit histogram covering nanoseconds to hours. Does not grow with N.
+- **CPU profile**: O(1) update (closed-form bin assignment).
+- **Determinism**: Fully deterministic.
+- **Fit against all paths**: Structurally identical to bin-derived interpolation with a fixed, opinionated partition shape (log-spaced subdivided into linear sub-bins). Tail accuracy is excellent — designed for it. Harmonization opportunity same as DDSketch: if #34's bin counters can be configured HdrHistogram-style, the published bound transfers.
+- **Open questions**:
+  - HdrHistogram has no canonical Perl implementation. Reference implementations are JVM and C. Whether porting cost is acceptable, or whether the partition logic alone can be embedded in #189, is open.
+  - Whether HdrHistogram's fixed partition strategy is too rigid for ltl's variable bucket-count consumers (heatmap `-hmw`, histogram `calculate_histogram_bucket_count`).
+
+##### Adjacent candidate C — P-square (Jain & Chlamtac)
+
+**Source**: Jain & Chlamtac, *"The P² algorithm for dynamic calculation of quantiles and histograms without storing observations"* (CACM 1985). Surfaced because: classical single-pass online estimator with O(1) state, occasionally cited as a baseline.
+
+- **Accuracy guarantee**: No worst-case bound. Empirically accurate at moderate quantiles, **poor at extreme tails** (P99.9, P99.99) — known limitation in the literature.
+- **Memory profile**: O(1) — five marker positions. State is negligible.
+- **CPU profile**: O(1) per update.
+- **Determinism**: Deterministic for fixed input order.
+- **Fit against all paths**: **Poor for ltl's use case.** Tail-quantile accuracy is the dominant requirement; P-square's known weakness is exactly there. Listed for completeness but not seriously competitive against any of the above.
+- **Open questions**: None worth pursuing — the literature already establishes P-square as inappropriate for tail-quantile-critical workloads.
+
+##### Adjacent candidate D — Reservoir sampling + exact
+
+**Source**: Vitter, *"Random sampling with a reservoir"* (TOMS 1985). Surfaced because: it offers a simple form of bounded state — store a uniform random sample of size K, compute exact percentiles on the sample.
+
+- **Accuracy guarantee**: Statistical, not worst-case. Standard error scales as O(1/√K). For K=1000, ~3% standard error at any quantile. Tail quantiles (P99.9) require larger K to have meaningful resolution — at K=1000, only ~1 sample lands above the true P99.9, so the estimate is extremely noisy.
+- **Memory profile**: O(K) — fixed.
+- **CPU profile**: O(1) per update (with the standard skip-step optimization).
+- **Determinism**: **Randomized.** Requires reproducible seeding; for R6 the seed must be derived from input deterministically.
+- **Fit against all paths**: **Acceptable for low-tail-importance use cases only.** Path C2's P99.9 marker would be too noisy to render reliably; Path A's P99.9 would not meet SRE latency-reporting standards. Listed for completeness; not competitive at tail quantiles.
+- **Open questions**: None — the statistical-noise floor at low K is well-characterized, and at high K the memory advantage disappears.
+
+#### D1 study — synthesis across candidates
+
+The candidates fall into three architectural families, and D3's options reduce to choosing among the families:
+
+**Family 1 — Independent sketches with published bounds.** KLL, GK, q-digest, DDSketch. Estimator state separate from #34's bin counters. Trade-off: published accuracy bounds (a benefit for R4's reporting requirement) at the cost of running two data structures (counters for #34's rendering, sketch for percentiles). KLL and DDSketch are the strongest members — KLL for rank-space rigor with smallest memory, DDSketch for value-space relative-error guarantee.
+
+**Family 2 — Independent sketches without published bounds.** t-digest, P-square. t-digest has strong empirical tail accuracy on heavy-tailed data but no theoretical bound; P-square is dominated. The trade-off is identical to Family 1 except R4 must commit to empirical (not theoretical) accuracy.
+
+**Family 3 — Bin-derived interpolation.** Reuses #34's bin counters as the sole data structure. Trade-offs: zero additional state, maximum architectural harmonization, **and** if the partition shape is chosen to be DDSketch-compatible or HdrHistogram-compatible, transfers their published bounds. The risk concentrates in two places: (a) Path A's per-key partition shape question (the single largest open question of Phase 1), and (b) tail-quantile accuracy at very heavy tails when the highest bin is wide.
+
+**Cross-family observations:**
+
+- **The bin-derived family is the only one with native fit for Path C2** (bin-index output form). Other families require numeric-to-bin-index round-trip via #189 R2; bin-derived can short-circuit it (#189 R4-bis).
+- **The bin-derived family is the only one that eliminates an independent state structure.** All other families coexist with #34's counters rather than unify with them.
+- **The bin-derived family inherits its accuracy from the partition shape.** If the partition is "free" (data-driven, chosen for rendering aesthetics), the accuracy guarantee is empirical and partition-dependent. If the partition is "constrained" (e.g., DDSketch's log-spaced with parameter α), a published bound transfers but the partition is no longer free.
+- **For Paths A and B at small N**, all candidates degrade. The natural fallback in all families is exact mode (R2.3 gate) — which means the small-N concern is a *gating-criteria* question (D3's R2.3 design) rather than an algorithm-choice question per se.
+- **Determinism (R6)**: KLL randomized variant and reservoir sampling require seed discipline. All other candidates (including KLL deterministic variant) are deterministic for fixed input. Bin-derived interpolation is the simplest determinism story.
+
+#### D1 study — open questions surfaced for D3 / D4
+
+Questions the literature cannot resolve on its own, ordered by how directly they affect the algorithm-choice decision:
+
+1. **Path A partition shape for bin-derived interpolation.** Does ltl use one global partition, per-key adaptive partitions, or some hybrid? This question may have a satisfying literature-grounded answer (e.g., "DDSketch-style log-spaced fixed partition is good enough"), or may require D4 measurement on ltl's heavy-traffic-key value ranges.
+2. **Whether #34's bin-counter partition can be made DDSketch/HdrHistogram-compatible.** If yes, Family 3 inherits a published bound and the architectural-harmonization advantage. If no, Family 3's accuracy bound for R4 must be derived from ltl's data empirically (D4 trigger).
+3. **Tail accuracy threshold for SRE latency reporting.** What relative-error bound at P99.9 is acceptable for the use case? This is a *user/product* question that D3 must surface for the decision conversation — it bounds which candidates qualify.
+4. **R4 reporting unit.** Rank error (KLL/GK), value-relative error (DDSketch/HdrHistogram/t-digest empirical), or value-absolute error (bin-derived raw). The reporting form affects which family's guarantee is most useful in `-V`.
+5. **Perl-implementation cost.** No published benchmarks for any of these algorithms in Perl. If the chosen algorithm's update cost dominates parse-loop throughput, Phase 2 ships a regression. D4 trigger if a candidate is otherwise preferred but its Perl cost is uncharacterized.
+6. **Small-N gating threshold.** Below what N should the run/key/bucket revert to exact mode? This is an R2.3 design question. Each candidate has a different cross-over point.
+7. **Bin-index stability for Path C2 across runs.** Bin-derived interpolation is trivially stable (deterministic function of counters). Other families' stability depends on the numeric-to-bin-index round-trip's sensitivity to small numeric perturbations in the percentile estimate. May be a non-issue (all families are deterministic) but warrants confirmation.
+
+These open questions are the input to D3's decision-support memo and to any D4 prototype that D3 triggers.
+
 ### D2 — Representative-dataset cross-reference
 
 The representative data already exists in the `logs/` tree (see `docs/test-logs.md`). D2 is a cross-reference, not a curation effort — its job is to identify which existing log files exercise which use-case regime, so D1's analysis and any later D4 measurement have a known correspondence between dataset and use case.
