@@ -188,38 +188,80 @@ When an eligibility gap traces to one of those features, it is filed against the
 
 ## Percentile-path harmonization audit
 
-The audit is part of Phase 0's deliverables (R12). At the requirements level, it identifies the percentile-computing paths and their migration targets.
+The audit is part of Phase 0's deliverables (R12). It identifies the percentile-computing paths in `ltl` today, their migration targets, and the compatibility constraints those migrations place on #189's primitive design.
 
-### Path A — Summary-table per-message latency percentiles
+**Status: complete.** The audit was performed jointly with #34 R12 against `release/0.14.5` HEAD. The full per-site catalogue (line-precise, with primitive mappings and data-structure references) lives in `features/189-histogram-bin-counter-primitives.md` § **Audit findings** § "Summary-table per-message latency percentile consumer", § "Per-time-bucket duration percentile consumer", and § "Histogram-mode global percentile consumer". This section summarizes the percentile-specific findings and the migration targets per phase.
 
-- **Today's data structure**: per-metric per-message value arrays (`%percentile_values{$metric}` or equivalent — exact name to be confirmed during audit).
-- **Today's computation**: sort the array, index by rank for each target quantile.
-- **Migration target**: Phase 2. Approximate mode replaces the array with either a sketch (algorithm TBD per D3) or bin-derived interpolation over histogram bin counters per metric (R8).
-- **Compatibility constraints on #189**: must support per-metric global histogram bin counters (no time-bucket dimension); must provide percentile interpolation parameterized by target quantile.
+### Path A — Summary-table per-message latency percentiles (Phase 2 target)
 
-### Path B — Per-time-bucket duration percentile statistics
+- **Today's data structure**: `log_messages{$category}{$log_key}{durations}` — a per-message duration array, pushed during the parse loop at `ltl:4591`.
+- **Today's computation**: `calculate_all_statistics` (`ltl:5178`) aggregates per `log_key`, delegating to `calculate_statistics` (`ltl:5488`) which sorts and indexes by integer rank (`int($n * fraction)`).
+- **Percentiles emitted**: P1, P50, P75, P90, P95, P99, P99.9 (`ltl:5374–5379`); rendered in the summary table at `ltl:7900–7916`.
+- **Migration target (Phase 2)**: replace the raw `durations` array with a histogram bin-counter store keyed by `(category, log_key)` per #189 R3. Replace the sort-and-index core of `calculate_statistics` with #189 R4 invocations against the per-message counter store. Algorithm (sketch vs. bin-derived interpolation) is decided by D3.
+- **Compatibility constraints on #189**:
+  - R3 must accept `key = (category, log_key)` (or `key = ()` per active aggregator if the aggregation happens before counter update — implementer's choice).
+  - R4 must support the seven percentiles listed above with an accuracy contract sufficient for SRE latency reporting; specifics in D3.
+  - R4 must handle the "single-message" degenerate case gracefully (very small count per `log_key` is common for one-off log messages).
+- **#34 R15 verified**: this raw array is structurally separate from `%heatmap_raw` and `%histogram_values` (distinct keys, distinct lifetimes, distinct allocation sites). The #34 implementation does not entangle with this consumer.
 
-- **Today's data structure**: derived from `%log_stats{$time_bucket}` or equivalent — the per-time-bucket statistical summaries that surface alongside the bar graph (min/max/avg/stddev/percentile band coloring).
-- **Today's computation**: per-time-bucket sort-and-index across the values in that bucket (or equivalent derivation).
-- **Migration target**: Phase 3. Approximate mode reads the same histogram bin counters #34 already accumulates per `(time_bucket, bin_index)` and runs bin-derived interpolation per time bucket.
-- **Compatibility constraints on #189**: per-time-bucket percentile interpolation must compose with the heatmap counter shape (`(time_bucket, bin_index)`); accuracy bounds at small per-bucket N must be acceptable for the percentile-band rendering use case.
+### Path B — Per-time-bucket duration percentile statistics (Phase 3 target)
+
+- **Today's data structure**: `log_analysis{$bucket}{durations}` — a per-time-bucket duration array, pushed during the parse loop at `ltl:4634` **gated by `unless $heatmap_enabled`**. Freed inside `calculate_all_statistics` at `ltl:5213–5214` after aggregation.
+- **Today's computation**: same `calculate_statistics` engine (`ltl:5488`) as Path A, applied per time bucket. Outputs `log_stats{$bucket}{p1..p999}` at `ltl:5220, 5236–5242, 5273`.
+- **Percentiles emitted**: P1, P50, P75, P90, P95, P99, P99.9; rendered inline on the time-bucket bar row at `ltl:6843–6846`.
+- **Migration target (Phase 3)**: read #34's heatmap bin-counter store (keyed by `time_bucket`) directly via #189 R4 — no separate counter store needed when heatmap is active. When heatmap is **not** active, Phase 3 must populate its own per-`time_bucket` counter store (R3 with `key = time_bucket`) since no parallel structure exists.
+- **Compatibility constraints on #189**:
+  - R6 (independence of partitions across consumers) must allow Phase 3 to share the heatmap partition when bucket counts agree, or to compute its own partition when they differ.
+  - R4 must produce acceptable accuracy at small per-bucket N (many log files have time buckets with <100 entries); D3 must evaluate this regime explicitly.
+  - R3's per-key lifecycle (#189 R8) must support per-time-bucket counter freeing — Phase 3 can free a bucket's counter store once its row is rendered.
+- **Pre-existing entanglement noted**: the `unless $heatmap_enabled` gate at `ltl:4634` is a load-bearing condition today (heatmap takes ownership of duration values when active). Under bin-counter mode this gate becomes natural rather than incidental — the heatmap counter store **is** the natural source. The gate may be removable when Phase 3 lands. This is recorded for resolution at Phase 3 implementation time, not at audit.
 
 ### Path C — Other percentile-reporting code paths
 
-- **Today's data structures and computations**: to be enumerated during audit execution.
-- **Migration targets**: assigned during audit to Phase 4 (#51 coordination) or Phase 5 (future).
+Two additional paths were catalogued during the audit:
+
+#### C1 — Histogram-mode global percentiles (incidental Phase 2 consumer)
+
+- **Today's data structure**: `histogram_stats{$metric}{p1..p9999}` — computed inside `calculate_histogram_buckets` at `ltl:4926–4940` (base) and `ltl:4995–5004` (highlight) from sorted `histogram_values{$metric}` arrays in the same routine that builds the bin counters.
+- **Today's computation**: sort-and-index, identical pattern to Paths A/B but interleaved with R1+R2+R3 in raw-value mode.
+- **Percentiles emitted**: P1, P10, P25, P50, P75, P90, P95, P99, P99.9, P99.99 (ten values — wider set than Paths A/B). Rendered in the histogram legend via `select_histogram_percentiles` (`ltl:7375`) and `calculate_histogram_percentile_ticks` (`ltl:7430`).
+- **Migration target**: incidental Phase 2. When R4 lands, these can be derived from the bin counters #34 already populates — eliminating the raw-array sort at this site.
+- **Compatibility constraints on #189**: R4 must support all ten percentile values; otherwise the rendered legend regresses. The legend consumer (`select_histogram_percentiles`) needs no API change — it reads `histogram_stats{$metric}{p*}` regardless of how those values were derived.
+- **Coupling to #34**: because the raw-array sort and the bin-counter population happen in the same routine, #34's bin-counter mode and #187's Path C migration are best landed together (or #34 must keep the sort in bin-counter mode purely for `histogram_stats{p*}`, which defeats the memory win). The audit recommends Phase 2 absorb C1 as a side benefit.
+
+#### C2 — Heatmap percentile markers (open question for #34)
+
+- **Today's data structure**: `%heatmap_percentiles{$bucket} = { p50, p95, p99, p999 }` — stored as **bin indices, not values**. Derived at `ltl:4823–4834` by sorting `%heatmap_raw{$bucket}`, indexing P50/P95/P99/P99.9, then mapping each value to a bin via `find_heatmap_bucket`.
+- **Today's computation**: sort-and-index, then bin lookup. Output is a column position on the heatmap row, not a numeric percentile value.
+- **Migration target**: **unresolved**. Under #34's bin-counter mode `%heatmap_raw` is not allocated. Three resolutions are recorded in `features/34-histogram-bin-counter-mode.md` § Harmonization audit § "Open question — heatmap percentile markers under bin-counter mode" and in `features/189-histogram-bin-counter-primitives.md` § Audit findings § same.
+- **If resolved by R4 (option 1 in the open question)**: heatmap becomes a future consumer of R4, contradicting the current note in #189 R4 that says "this primitive is not consumed by #34." R4 would need to ship with a default accuracy contract acceptable to #34's implementation timing.
+- **The audit does not resolve this question**; it is recorded as a gate on #34's implementation step.
+
+### Currently no bin-derived percentile interpolation in `ltl`
+
+A finding worth recording: **none** of the four percentile paths today (A, B, C1, C2) uses bin-derived interpolation. All four use sort-and-index over raw arrays. This means #189 R4 is a **new abstraction**, not a refactor of an existing helper. The algorithm choice (D3) and the accuracy contract (R4 in this feature) are inputs to a primitive that has no precedent in the codebase.
 
 ### Forward-compatibility statement (consumer-side requirements for #189)
 
 For Phases 2–5 to consume the unified primitives without primitive-level redesign:
 
-- Bin-partition primitive accepts arbitrary `num_buckets` (per consumer).
-- Counter keying is parameterizable: no dimension (Path A), `time_bucket` (Path B), `time_bucket + highlight_subset` (Path C/#51), etc.
-- Percentile-interpolation primitive accepts a target quantile and a counter map, returns the interpolated value, and exposes its accuracy guarantee in a form that R4 / R7 can report.
-- The accuracy guarantee per quantile is parameterizable by partition shape (so per-bucket and global cases each have an applicable bound).
-- Memory lifecycle: estimator state and counter structures can be freed independently of the partition.
+- **R1 (partition)** accepts arbitrary `num_buckets` per consumer. Bucket-count sources today vary across consumers: CLI-fixed (heatmap, `-hmw`), data-driven (histogram, `calculate_histogram_bucket_count`), Phase-2-implementer-chosen (per-message percentile partition shape, decided by D3). R1 must support all.
+- **R3 (counter keying)** is parameterizable across all distinct shapes catalogued: `()` (Path A in some implementer choices, Path C1), `(category, log_key)` (Path A in other implementer choices), `time_bucket` (Path B, heatmap), `(time_bucket, highlight_subset)` (Path C in future / #51), and any compound key Phase 4 or Phase 5 introduces.
+- **R4 (percentile interpolation)** accepts a target quantile and a counter map, returns the interpolated value, exposes its accuracy guarantee in a form that #187 R4 / R7 can report. Must handle:
+  - Wide percentile sets: at minimum the ten-value set from Path C1 (P1, P10, P25, P50, P75, P90, P95, P99, P99.9, P99.99).
+  - Small-N degenerate inputs: Path B at narrow time buckets, Path A at single-occurrence log keys, Path C2 at sparse heatmap rows.
+  - Reporting alongside #34 R5 / R6 out-of-range tallies — overflow counts must be accessible to the interpolation primitive (or the consumer adjusts the partition to fold overflow into edge bins; R4 must specify which).
+- **Accuracy guarantee per quantile is parameterizable by partition shape.** Per-time-bucket and global partitions have different N regimes; D3 must produce a bound that applies to both.
+- **Memory lifecycle**: counter structures freeable per key independently of the partition; estimator state (if R4 uses any) freeable independently of the counter store.
 
 This list is the consumer-side input to #189's primitive design.
+
+### Cross-reference
+
+- Full per-site `ltl:line` catalogue with primitive mappings: `features/189-histogram-bin-counter-primitives.md` § Audit findings.
+- Per-feature consumer-side requirements (combined #34 + #187): `features/189-histogram-bin-counter-primitives.md` § Consumer-side requirements.
+- Cross-cutting constraints discovered during audit: `features/189-histogram-bin-counter-primitives.md` § Cross-cutting compatibility constraints discovered during audit.
+- Boundary with #34's heatmap and histogram consumers: `features/34-histogram-bin-counter-mode.md` § Harmonization audit (this feature ships the percentile-interpolation algorithm and progressive consumer migration; #34 ships the heatmap/histogram bin-counter substrate the percentile work consumes).
 
 ## Considerations for implementation
 

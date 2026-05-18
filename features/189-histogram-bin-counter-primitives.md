@@ -163,52 +163,181 @@ This feature provides the *helpers and data structures*; #34 and #187 are the *c
 
 ## Consumer-side requirements (received from #34 R12 and #187 R12)
 
-This section enumerates what each consumer needs the primitives to provide. It is the input to the implementation of this feature.
+This section enumerates what each consumer needs the primitives to provide. It is the binding input to the implementation of this feature. The catalogue of `ltl` call sites that ground these requirements lives in **Audit findings** below.
 
 ### From #34 (heatmap and histogram bin-counter mode)
 
-- Partition computation parameterized by `(min, max, num_buckets)` per consumer.
-- Bin assignment for per-line accumulation in the parsing hot path.
-- Counter update keyed by `time_bucket` (heatmap) or by `()` (histogram).
-- Out-of-range tallying per key (low and high).
-- Counter store enumeration for rendering and for `-V` Layer 2/3 reporting.
-- Lifecycle: partition persists for the run; counter stores per key are freeable.
+Heatmap and histogram are #189's first two production consumers. They consume R1 (partition), R2 (bin-assignment), R3 (counter-update) — but **not** R4 (percentile interpolation) directly. Empirical percentile derivation in both today (`%heatmap_percentiles` markers; `histogram_stats{p*}` values) is internal to those features and may continue to use raw-array sorting in raw-value mode; under histogram bin-counter mode the raw arrays are not allocated, so those derivations are either reformulated against R4 (heatmap percentile-marker open question — see **Audit findings** § "Open question — heatmap percentile markers under bin-counter mode") or dropped.
+
+| # | Need | Concrete shape |
+|---|---|---|
+| 1 | Partition computation parameterized by `(min, max, num_buckets)` per consumer | Heatmap: one partition per run (single metric per run; `num_buckets = $heatmap_width`, default 52, `-hmw`-tunable). Histogram: one partition per metric (`num_buckets` from `calculate_histogram_bucket_count` driven by `-hgbpd`/`-hgb`). Partition computed at **start of pass** when histogram bin-counter mode is eligible, from pre-seeded bounds (#34 R3). |
+| 2 | Bin assignment for per-line accumulation in the parsing hot path | Called inside the existing per-line loop in `read_and_process_logs`, **once per active metric per line**. Must be efficient enough that the per-line cost is no worse than today's `push` onto `%heatmap_raw` / `%histogram_values`. Today's two implementations (linear search `find_heatmap_bucket` at `ltl:4783`; binary search `find_histogram_bucket_index` at `ltl:4890`) confirm either algorithmic strategy is acceptable; #189 picks one. |
+| 3 | Counter update with two distinct key shapes | Heatmap: `key = time_bucket`. Histogram: `key = ()` (no key beyond the implicit metric scope). Both must coexist in the same run because R10 makes them co-eligible. |
+| 4 | Out-of-range tally per key, low and high | New behavior. Today's `find_heatmap_bucket` (`ltl:4783`) silently clamps to last in-range bin; `find_histogram_bucket_index` (`ltl:4890`) similarly returns an in-range index. #189 R2 introduces explicit sentinels; this is **not a refactor of existing logic** — it is new contract surface that #34 R5 / R6 (out-of-range counters + single end-of-run warning) and #179's drift detection both depend on. |
+| 5 | Counter-store enumeration | For each consumer's rendering driver (heatmap: `print_heatmap_row` `ltl:6378`, `get_heatmap_column_header` `ltl:6265`, `print_heatmap_footer_scale` `ltl:6434`; histogram: `print_histograms` `ltl:6890` and its helpers `ltl:7071–7559`) and for the `-V` Layer 2 / 3 reporting (#34 R9). Must support iteration over `(key, bin_index, count)` triples plus the per-key overflow tallies. |
+| 6 | Lifecycle | Partition persists for the run. Counter stores per key (heatmap: per time bucket; histogram: single store per metric) are independently freeable once rendering for that key completes — required for #187 Phase 3's per-time-bucket percentile counters, harmless for #34's own consumers. |
 
 ### From #187 (dual-mode percentiles)
 
-- All of the above (since approximate mode using bin-derived interpolation reads counters #34 already populates).
-- Percentile interpolation per quantile, parameterized by the chosen accuracy contract.
-- Accuracy-estimate descriptor returned alongside each interpolated value.
-- Counter-store keying flexibility for Phase 2 (`()`), Phase 3 (`time_bucket`), Phase 4 (`(time_bucket, highlight_subset)` or analogous).
+#187 is the load-bearing consumer of R4 (percentile interpolation). It progressively migrates four percentile-computing paths catalogued in #187's `## Percentile-path harmonization audit`. Each phase adds a consumer to the primitive without changing the primitive contract — that is the test of whether R3's keying parameterization and R4's accuracy contract are sufficient.
+
+| # | Need | Concrete shape |
+|---|---|---|
+| 1 | All of #34's needs (1–6 above) | Approximate mode reads counters #34 has already populated (#187 R8 / R13). The shared substrate means #187 cannot ship without #34's primitives in place — though R4 itself ships only after #187's algorithm choice (D3) lands. |
+| 2 | Percentile interpolation per quantile, parameterized by the chosen accuracy contract | Algorithm and accuracy bound are chosen in #187 D1–D3 (algorithm research deliverable). This audit identifies the consumer call sites but does **not** specify the algorithm. Each call site below identifies a `(partition, counter_map, target_quantile) → value` invocation. |
+| 3 | Accuracy-estimate descriptor returned alongside each interpolated value | Form (theoretical bound, empirical bound, or both) decided in #187 D3 and surfaced in #187's `-V` `accuracy_estimate` block (#187 R7). |
+| 4 | Counter-store keying flexibility for all phases | Phase 2 (summary-table per-message latency, `ltl:5374–5379` consumer): `key = ()`. Phase 3 (per-time-bucket duration percentiles, `ltl:5220–5273` consumer): `key = time_bucket`. Phase 4 (highlight-subset percentiles, future / #51): `key = (time_bucket, highlight_subset)` or analogous compound. R3's parameterization must accept all three shapes without primitive-level change. |
+| 5 | Migration target identification | Phase 2 target: `log_messages{$category}{$log_key}{durations}` raw array (allocated `ltl:4591`). Phase 3 target: `log_analysis{$bucket}{durations}` raw array (allocated `ltl:4634`, guarded `unless $heatmap_enabled`). Phase 4 target: highlight subset raw collections (today partially shaped by `histogram_values_hl`, `heatmap_raw_hl`; final shape determined when Phase 4 lands). Note that the Phase 3 raw array is **not allocated when heatmap is active** — heatmap takes ownership of duration values for its own raw-value mode — which is a pre-existing entanglement R8 ("Coupling to histogram bin counters" in #187) already anticipates. |
+| 6 | Histogram-mode global percentile reformulation (incidental Phase 2 consumer) | `calculate_histogram_buckets` (`ltl:4908`) today derives `histogram_stats{p*}` from raw arrays (`ltl:4926–4940`, `ltl:4995–5004` for highlight) in addition to populating bin counters. Once R4 lands, these percentile values may be derived from the bin counters directly — eliminating the raw-value sort at this site too. This is a side benefit of R4, not a separate phase; it lands whenever it is convenient inside the Phase 2 migration. |
 
 ## Audit findings (from #34 R12 / #187 R12)
 
-This section is the receiving end of the audits performed in #34 and #187. Initial scaffolding; populated during implementation.
+This section is the receiving end of the audits performed in `features/34-histogram-bin-counter-mode.md` § Harmonization audit and `features/187-histogram-bin-counter-percentiles.md` § Percentile-path harmonization audit. The catalogue below is the single source of truth; the sibling feature files cross-reference here.
+
+All `ltl:line` references are against `release/0.14.5` HEAD at the time the audit landed. Subsequent refactors may shift line numbers; the subroutine names and global-variable identifiers are the stable anchors.
 
 ### Existing helpers to be unified or replaced
 
-Catalogue produced by the audit:
+#### Heatmap consumer
 
-- Heatmap bin-partition computation site(s) — to be enumerated.
-- Heatmap per-value bin-assignment site(s) — to be enumerated.
-- Heatmap counter increment site(s) — to be enumerated.
-- Histogram bin-partition computation site(s) — to be enumerated.
-- Histogram per-value bin-assignment site(s) — to be enumerated.
-- Histogram counter increment site(s) — to be enumerated.
-- Summary-table latency percentile array allocation site(s) — to be enumerated (this is a non-histogram-bin-counter today; the audit captures it so the migration target is clear).
-- Per-time-bucket duration percentile derivation site(s) — to be enumerated.
+| Site | `ltl` location | What it does | Primitive | Reads / writes | Key shape |
+|---|---|---|---|---|---|
+| `find_heatmap_bucket` | `ltl:4783–4789` | Linear search over `@heatmap_boundaries` to return bin index in `[0, num_buckets-1]`. Silently clamps out-of-range values to last bin. | R2 (bin-assignment) | Reads `@heatmap_boundaries`. | — |
+| `calculate_heatmap_buckets` | `ltl:4791–4865` | End-of-pass: computes `@heatmap_boundaries` via logarithmic formula from `$heatmap_min` / `$heatmap_max`; sorts each `%heatmap_raw{$bucket}` to derive percentile markers; iterates each raw value and increments `%heatmap_data`; frees `%heatmap_raw`. | R1 (partition) + R2 (bin-assignment, via `find_heatmap_bucket`) + R3 (counter-update) + empirical-percentile derivation | Reads `$heatmap_min`, `$heatmap_max`, `$heatmap_width`, `%heatmap_raw`, `%heatmap_raw_hl`. Writes `@heatmap_boundaries`, `%heatmap_data`, `%heatmap_data_hl`, `%heatmap_percentiles`, `$heatmap_max_density`. Frees `%heatmap_raw` / `%heatmap_raw_hl` after binning (`ltl:4855–4856`). | `time_bucket` |
+| Live observation in parse loop | `ltl:4689–4690` | Per-line update of `$heatmap_min` / `$heatmap_max` from each parsed value. Continues to run under #34 R7 (drift detection). | Min/max capture — outside R1–R4, but feeds R1 in raw-value mode. | Writes `$heatmap_min`, `$heatmap_max`. | — |
+| Pre-seed load | `ltl:710–729` (`preseed_heatmap_bounds`) | When index pre-seed available, set `$heatmap_min` / `$heatmap_max` from `$index_aggregated{${metric}_min/max}` before parsing starts. Feeds R1 in histogram bin-counter mode. | Min/max sourcing for R1. | Writes `$heatmap_min`, `$heatmap_max` (from #179 globals). | — |
+| Counter increment | `ltl:4839, 4850` (inside `calculate_heatmap_buckets`) | `$heatmap_data{$bucket}{$range_index}++`. Highlighted analog: `$heatmap_data_hl{$bucket}{$range_index}++`. | R3 (counter-update). | Writes `%heatmap_data`, `%heatmap_data_hl`, `$heatmap_max_density`. | `time_bucket` |
+| `print_heatmap_row` | `ltl:6378–6432` | Per-time-bucket rendering: iterates bin indices, reads `%heatmap_data{$bucket}{$i}`, applies logarithmic color scale against `$heatmap_max_density`, overlays percentile markers from `%heatmap_percentiles`. | Rendering driver (consumes R3 output + percentile markers). | Reads `%heatmap_data`, `%heatmap_data_hl`, `%heatmap_percentiles`, `$heatmap_max_density`, `$heatmap_width`. | — |
+| `get_heatmap_column_header` | `ltl:6265–6370` | Column header labels at 0% / 25% / 50% / 75% / 100% positions using `@heatmap_boundaries`. | Rendering driver (consumes R1 output). | Reads `@heatmap_boundaries`, `$heatmap_width`, `$heatmap_min`, `$heatmap_max`, `$heatmap_metric`. | — |
+| `print_heatmap_footer_scale` | `ltl:6434–6540` | Bottom scale line with boundary values at percentage positions. | Rendering driver (consumes R1 output). | Reads `@heatmap_boundaries`, `$heatmap_width`, `$heatmap_max`, `$heatmap_metric`. | — |
+| `format_heatmap_value` | `ltl:6242–6263` | Boundary-value formatter (time / bytes / number) for header and footer rendering. | Rendering helper. | Reads `$heatmap_metric`, UDM config. | — |
 
-For each site, the audit records: what it does today, which primitive it maps to under this feature, and what code-level changes the consumer requires when adopting the primitive.
+Heatmap data structures declared at `ltl:247–260`: `$heatmap_metric`, `$heatmap_width`, `%heatmap_data`, `%heatmap_data_hl`, `%heatmap_raw`, `%heatmap_raw_hl`, `@heatmap_boundaries`, `$heatmap_min`, `$heatmap_max`, `$heatmap_max_density`, `%heatmap_percentiles`.
 
-### Compatibility constraints discovered during audit
+**Constraints discovered (heatmap):**
 
-Constraints that the primitives must satisfy, identified by the audit:
+- **Partition is global, not per-metric.** `@heatmap_boundaries` is a single array because heatmap renders one metric per run (selected by `-hm <metric>`). The R1 primitive must support a partition that is owned by the consumer; #189 does not impose a per-metric registry.
+- **Bucket count is CLI-driven.** `$heatmap_width` (default 52, `-hmw`-tunable). Source is consumer-owned (R7).
+- **Counter key is `time_bucket`.** Per-time-bucket counter freeing is in scope for #187 Phase 3.
+- **Out-of-range handling today is silent clamp.** `find_heatmap_bucket` (`ltl:4783`) returns no out-of-range index; values above the max boundary fall through the loop and the caller's fallback applies last bin. The R2 contract introduces explicit sentinels — new behavior, not a refactor.
+- **Partition-computation timing must move from end-of-pass to start-of-pass when histogram bin-counter mode is eligible.** Today `calculate_heatmap_buckets` runs at `ltl:8283` after the read pass. Under bin-counter mode, partition must exist before line-by-line accumulation begins so `find_heatmap_bucket` (or its R2 equivalent) can be called per line.
+- **Empirical percentile markers depend on the raw-value array.** `%heatmap_percentiles{$bucket}` (populated `ltl:4829–4834`) is derived by sorting `%heatmap_raw{$bucket}` and indexing P50/P95/P99/P99.9 — then mapped through `find_heatmap_bucket` to bin indices for rendering. Under bin-counter mode, the raw array is not allocated; the markers must come from somewhere else. See **Open question — heatmap percentile markers under bin-counter mode** below.
 
-- Heatmap and histogram have independent bucket counts (#34 R11).
-- Heatmap counter store is keyed per time bucket; per-bucket counter freeing is in scope.
-- Per-time-bucket percentile derivation (future) consumes the heatmap counter store via the same primitives, not via a parallel structure.
+#### Histogram consumer
 
-Additional constraints are added as the audit lands.
+| Site | `ltl` location | What it does | Primitive | Reads / writes | Key shape |
+|---|---|---|---|---|---|
+| `handle_histogram_option` | `ltl:3487–3529` | Parses `-hg[:metrics]`; sets `$histogram_enabled` and `%histogram_metrics`. | Configuration. | Writes `$histogram_enabled`, `%histogram_metrics`. | — |
+| Raw value collection (parse loop) | `ltl:4700–4727` | Per-line, per-metric: `push @{$histogram_values{$metric}}, $value` (and `_hl` variant if highlighted). Gated by `$histogram_enabled` and `%histogram_metrics`. | Counter-update site **in raw-value mode** (will replace with R3 in bin-counter mode). | Reads `$duration`, `$bytes`, `$count`, `%udm_values`, `$category_bucket`. Writes `%histogram_values`, `%histogram_values_hl`. | — (per-metric only) |
+| `calculate_histogram_bucket_count` | `ltl:4869–4887` | Determines `num_buckets` from observed `(min, max)` via `decades * histogram_buckets_per_decade`, clamped to ≥5. `-hgb` override bypasses. | R1 input (bucket-count derivation). | Reads `$histogram_bucket_override`, `$histogram_buckets_per_decade`. Returns `($bucket_count, $decades)`. | — |
+| `find_histogram_bucket_index` | `ltl:4890–4905` | Binary search over per-metric boundary array; returns bin index. No out-of-range sentinel (always in-range result). | R2 (bin-assignment). | Reads `@$boundaries_ref`. | — |
+| `calculate_histogram_buckets` | `ltl:4908–5043` | End-of-pass orchestrator: per metric, sort raw values, compute percentiles into `histogram_stats{$metric}`, derive `(min, max, num_buckets)`, populate `@{$histogram_boundaries{$metric}}` via logarithmic formula (`ltl:4962–4966`), iterate values and increment `@{$histogram_buckets{$metric}}[bucket_idx]` (`ltl:4973–4974`), free `%histogram_values{$metric}` (`ltl:4978`). Repeats analogously for highlight subset (`ltl:4984–5015`) reusing the same boundaries. | R1 (partition) + R2 (bin-assignment, via `find_histogram_bucket_index`) + R3 (counter-update) + empirical-percentile derivation | Reads `%histogram_values`, `%histogram_values_hl`. Writes `%histogram_boundaries`, `%histogram_buckets`, `%histogram_buckets_hl`, `%histogram_stats`, `%histogram_stats_hl`. Frees `%histogram_values{$metric}` and `%histogram_values_hl{$metric}` after binning. | — (per-metric only) |
+| `calculate_histogram_layout` | `ltl:5048–5176` | Side-by-side layout dimensions for active metrics (those with non-zero count); width / height / centering. | Rendering driver (layout). | Reads `%histogram_stats`, terminal dimensions, `-hgw`/`-hgh`. | — |
+| `print_histograms` | `ltl:6890–7068` | Top-level rendering driver. Calls layout, display-bucket scaling, y-tick / x-label calculation, percentile selection, per-row rendering, axis / legend rendering. | Rendering driver (consumes R1 + R3 output). | Reads `%histogram_buckets`, `%histogram_stats`, `%histogram_boundaries`, highlight variants. | — |
+| `calculate_histogram_display_buckets` | `ltl:7071–7102` | Scales `@{$histogram_buckets{$metric}}` to display column count (expand or compress). | Rendering driver (display scaling). | — | — |
+| `calculate_histogram_y_ticks` | `ltl:7105–7152` | Height-dependent Y-axis tick positions. | Rendering driver (ticks). | — | — |
+| `calculate_histogram_x_labels` | `ltl:7155–7217` | Logarithmic X-axis label positions, formatted via `format_heatmap_value`. | Rendering driver (labels). | Reads `$boundaries_ref` for the metric. | — |
+| `render_histogram_row` | `ltl:7220–7358` | Per-row bar rendering with partial-block glyphs, highlight stacking, gridlines. | Rendering driver (glyphs). | — | — |
+| `select_histogram_percentiles` | `ltl:7375–7425` | Width-aware selection of which percentile values from `histogram_stats{$metric}` to show in the legend and axis. **Not a percentile computation; consumes already-computed values.** | Rendering driver (selection). | Reads `%histogram_stats`. | — |
+| `calculate_histogram_percentile_ticks` | `ltl:7430–7451` | Maps selected percentile values to logarithmic X-axis column positions. | Rendering driver (positioning). | — | — |
+| `render_histogram_x_axis`, `render_histogram_x_labels`, `render_histogram_legend` | `ltl:7454–7559` | Axis frame, axis labels, percentile legend (with optional highlight legend). | Rendering driver (composition). | — | — |
+
+Histogram data structures declared at `ltl:286–328`: `$histogram_buckets_per_decade` (default 8), `$histogram_bucket_override`, `%histogram_values`, `%histogram_values_hl`, `%histogram_boundaries`, `%histogram_buckets`, `%histogram_buckets_hl`, `%histogram_stats`, `%histogram_stats_hl`. Option globals declared during parse: `$histogram_enabled`, `%histogram_metrics`, `$histogram_width_percent`, `$histogram_width_explicit`, `$histogram_height`, `$histogram_height_explicit`.
+
+**Constraints discovered (histogram):**
+
+- **Partition is per-metric, not global.** `%histogram_boundaries{$metric}` — one partition per active metric. R1 is invoked once per `(consumer, metric)` pair, even when consumers happen to share metric names.
+- **Bucket count is data-driven, not CLI-fixed.** Today's `calculate_histogram_bucket_count` derives `num_buckets` from observed `(min, max)`. Under bin-counter mode, the same formula runs against **pre-seeded** `(min, max)` from #179 — same logic, different timing.
+- **Counter key is `()`.** Histogram aggregates globally per metric; no per-time-bucket dimension. Distinct from heatmap.
+- **Out-of-range handling today is silent (in-range only).** `find_histogram_bucket_index` (`ltl:4890`) returns an index always within `[0, num_buckets-1]` by binary-search construction; values outside `(min, max)` would have been adjusted to the inside before the call. Under bin-counter mode the partition is fixed up front, so values **can** fall outside; the R2 sentinel contract is required.
+- **Highlight subset shares the base partition.** `%histogram_buckets_hl{$metric}` uses the same `%histogram_boundaries{$metric}` array (`ltl:5009`). Under bin-counter mode this remains correct: the highlight is a tally over the same value space, partitioned identically.
+- **Empirical percentiles in `histogram_stats` depend on the raw-value array.** Stats `p1..p9999` (`ltl:4930–4939`) are sort-and-index over the raw value array. Under bin-counter mode the raw array is not allocated; either the percentiles in `histogram_stats` migrate to R4-derived (Phase 2 / R12 work in #187), or they are deferred until #187 lands. **#34 itself does not need to resolve this** — histogram percentile *values* are not part of the rendered bin counts and are not regressed by removing the raw array, as long as the consumer of `histogram_stats{p*}` (the legend, via `select_histogram_percentiles` at `ltl:7375`) is also updated. This is a real consumer-side requirement on #189 R4, recorded as a constraint on the rollout sequence, not a blocker.
+
+#### Summary-table per-message latency percentile consumer (#187 Phase 2 target)
+
+| Site | `ltl` location | What it does | Primitive | Reads / writes | Key shape |
+|---|---|---|---|---|---|
+| Raw collection | `ltl:4591` | `push @{$log_messages{$category}{$log_key}{durations}}, $duration` during parse loop. | Counter-update site **in exact mode** (will become R3 in approximate mode). | Writes `log_messages{}{}{durations}`. | `()` per `(category, message_key)` |
+| `calculate_all_statistics` | `ltl:5178–5471` | Per-message aggregator; collects durations across buckets per `log_key`. | Orchestrator. | Reads `log_messages{}{}{durations}`. Writes per-message percentile scalars. | — |
+| `calculate_statistics` | `ltl:5488–5527` | Core percentile engine: `sort { $a <=> $b }` + integer index lookup (`int($n * fraction)`). | Exact percentile (sort-and-index). | Reads array. Returns `(min, mean, max, p1, p50, p75, p90, p95, p99, p999, std_dev, cv)`. | — |
+| Output | `ltl:5374–5379` | `$log_messages{$category}{$log_key}{p50}`, `{p99}`, `{p999}`. | Storage. | Writes `log_messages{}{}{p*}`. | — |
+| Rendering | `ltl:7900–7916` | Summary table reads `log_messages{$grouping}{$key}{p50}`, `{p99}`, `{p999}`; formats and prints. | Rendering driver. | Reads `log_messages{}{}{p*}`. | — |
+
+**Constraints discovered (summary-table per-message):**
+
+- **`log_messages{...}{durations}` is the raw-array migration target for #187 Phase 2.** Under approximate mode it becomes a histogram bin-counter store keyed by `(category, log_key)` and indexed by bin.
+- **Key shape is `()` per message** in #189 R3 terms — each `(category, log_key)` pair has its own counter store.
+- **`calculate_statistics` (`ltl:5488`) is the algorithm boundary.** Exact mode keeps it; approximate mode replaces its sort-and-index core with R4 invocations against the per-message counter store.
+- **Percentiles emitted: P1, P50, P75, P90, P95, P99, P99.9.** R4 must support all seven (or however many #187 R3 finalizes).
+- **#34 R15 confirmed:** `log_messages{...}{durations}` is structurally separate from `%heatmap_raw` and `%histogram_values`. The three families have distinct keys, distinct lifetimes, and distinct allocation sites. #34's data structures do not entangle with this consumer.
+
+#### Per-time-bucket duration percentile consumer (#187 Phase 3 target)
+
+| Site | `ltl` location | What it does | Primitive | Reads / writes | Key shape |
+|---|---|---|---|---|---|
+| Raw collection | `ltl:4634` | `push @{$log_analysis{$bucket}{durations}}, $duration unless $heatmap_enabled`. | Counter-update site **in exact mode**. | Writes `log_analysis{$bucket}{durations}`. | `time_bucket` |
+| Aggregation in `calculate_all_statistics` | `ltl:5206` | `push @{$aggregated_data->{durations}}, @{$log_analysis{$bucket}{durations}}` for each bucket. | Aggregator. | Reads `log_analysis{$bucket}{durations}`. Frees same (`ltl:5213–5214`). | `time_bucket` |
+| `calculate_statistics` (per bucket) | `ltl:5488` | Same engine as per-message path — sort-and-index. | Exact percentile. | — | — |
+| Output | `ltl:5220, 5236–5242, 5273` | `log_stats{$bucket}{p1}`, `{p50}`, `{p75}`, `{p90}`, `{p95}`, `{p99}`, `{p999}`. | Storage. | Writes `log_stats{$bucket}{p*}`. | `time_bucket` |
+| Rendering | `ltl:6843–6846` | Time-bucket bar row: `$log_stats{$bucket}{p50}`, `{p95}`, `{p99}`, `{p999}` formatted inline. | Rendering driver. | Reads `log_stats{}{p*}`. | — |
+
+**Constraints discovered (per-time-bucket):**
+
+- **Raw array is gated `unless $heatmap_enabled`** (`ltl:4634`). When heatmap is active, the per-time-bucket duration percentile is suppressed because the heatmap's per-time-bucket distribution carries equivalent visual information. This entanglement is a pre-existing condition that #187 R8 ("Coupling to histogram bin counters") anticipates: under bin-counter mode, the heatmap counter store **is** the natural source for per-time-bucket percentile derivation via R4, and the `log_analysis{$bucket}{durations}` array becomes unnecessary. The gate may need re-evaluation when #187 Phase 3 lands.
+- **Key shape is `time_bucket`** — identical to heatmap. #187 Phase 3 can reuse the heatmap counter store (per #189 R6 independence allows the partition to differ if bucket counts differ, but R3 allows the same counter store to be addressed by both consumers if their partitions agree).
+- **Same percentile set as per-message (P1, P50, P75, P90, P95, P99, P99.9)** — R4 contract is uniform.
+
+#### Histogram-mode global percentile consumer (incidental Phase 2 target)
+
+| Site | `ltl` location | What it does | Primitive | Reads / writes | Key shape |
+|---|---|---|---|---|---|
+| Inside `calculate_histogram_buckets` | `ltl:4926–4940` | Computes `histogram_stats{$metric}{p1..p9999}` from sorted raw values **alongside** the bin-counter population in the same routine. | Exact percentile (sort-and-index), interleaved with R1+R2+R3 in raw-value mode. | Reads `%histogram_values`. Writes `%histogram_stats`. | — |
+| Highlight variant | `ltl:4995–5004` | Same, against `%histogram_values_hl`. | — | — | — |
+| Consumer | `ltl:7375–7425` (`select_histogram_percentiles`) | Renders selected percentile values on the legend. | Rendering driver. | Reads `%histogram_stats`. | — |
+
+**Constraints discovered (histogram-mode global percentile):**
+
+- **Today this path is entangled with the bin-counter population** — both happen in the same routine, against the same raw arrays, in two different sort-and-index passes (one for percentiles at `ltl:4926`, one for binning at `ltl:4972`).
+- **Under bin-counter mode the raw arrays don't exist**, so this path must either disappear (drop legend percentile values) or migrate to R4 (interpolate from the bin counters that are present). Migration to R4 is the natural answer, and it lands when #187's algorithm choice is in place — i.e., as a side benefit of Phase 2.
+- **Percentile set: P1, P10, P25, P50, P75, P90, P95, P99, P99.9, P99.99** — wider than the summary-table set; R4 must support all ten.
+
+#### Heatmap percentile-marker consumer (open question for #34)
+
+| Site | `ltl` location | What it does | Primitive | Reads / writes | Key shape |
+|---|---|---|---|---|---|
+| Inside `calculate_heatmap_buckets` | `ltl:4818, 4823–4834` | Sorts `%heatmap_raw{$bucket}`, derives P50/P95/P99/P99.9 values via index lookup, maps each value to a bin index via `find_heatmap_bucket`, stores in `%heatmap_percentiles{$bucket}` as bin indices. | Exact percentile derivation + bin lookup. Markers stored as bin indices, not values. | Reads `%heatmap_raw`. Writes `%heatmap_percentiles`. | `time_bucket` |
+| Consumer | `ltl:6378–6432` (`print_heatmap_row`) | Overlays `|` markers at the recorded bin indices for each rendered row. | Rendering driver. | Reads `%heatmap_percentiles`. | — |
+
+**Constraints discovered (heatmap percentile-marker) — see open question below.**
+
+### Open question — heatmap percentile markers under bin-counter mode
+
+**Status: unresolved at audit close; recorded as an open design question for #34's implementation step (delivery sequence step 4).**
+
+Under raw-value mode, heatmap percentile markers are derived from `%heatmap_raw{$bucket}` (the per-bucket raw-value array) before that array is freed. Under histogram bin-counter mode (#34 R4), `%heatmap_raw` is **never allocated** — per-line values increment counters directly. So the marker derivation has no source.
+
+Three resolutions are conceivable:
+
+1. **Markers move to R4 (bin-derived interpolation).** Heatmap becomes a future consumer of `#189 R4`. This contradicts the current note in #189 R4 ("This primitive is not consumed by #34") but is the cleanest fit: the markers are positions on a logarithmic axis already partitioned identically to the data. The only friction is delivery sequencing: #34 ships before #187's algorithm choice (D3) lands, so R4 would need to ship with a default algorithm and accuracy bound that #34's implementation accepts.
+2. **Markers are dropped in bin-counter mode.** The rendered heatmap row loses its P50/P95/P99/P99.9 markers. Behavior is no longer byte-identical under #34 R8 (render equivalence) — this resolution is incompatible with R8 and is recorded as non-viable unless R8 is amended.
+3. **A second light-weight percentile tracker runs alongside the bin counter.** A streaming approximate percentile (e.g., t-digest) is maintained in addition to the bin counter, just for the markers. This adds a new primitive contract and is in tension with the audit's goal of harmonization; recorded as a non-preferred fallback.
+
+The audit does not resolve this. The resolution is gated on either #187 D3 landing early enough for option 1, or on a documented amendment to #34 R8 for option 2. **#34's implementation step must surface this before coding begins.**
+
+### Cross-cutting compatibility constraints discovered during audit
+
+These constraints apply across all consumers and are the hard inputs to #189's primitive design.
+
+- **Independent partitions per consumer** (#34 R11). Heatmap has one partition (single metric per run); histogram has one partition per metric; summary-table per-message percentiles (Phase 2) need one partition per `(category, log_key)`; per-time-bucket percentiles (Phase 3) can share the heatmap partition when bucket counts agree. R1's primitive return value is owned by the caller — no global registry.
+- **Parameterizable counter keying** (#189 R3). Five distinct key shapes catalogued today / anticipated: `time_bucket` (heatmap, Phase 3), `()` (histogram, Phase 2, histogram-mode global percentile), `(category, log_key)` (Phase 2 per-message), `(time_bucket, highlight_subset)` (Phase 4). R3 must accept all without primitive-level change.
+- **Partition-computation timing flexibility.** Today every partition is computed at end-of-pass after min/max observation. Under bin-counter mode every partition is computed at start-of-pass from pre-seeded bounds. R1 is pure and timing-agnostic; the timing decision lives in the consumer's eligibility gate (#34 R2 for heatmap/histogram; #187 R2 for percentiles).
+- **Min/max source flexibility.** Today min/max are observed live during parse (`ltl:4689–4690` for heatmap; aggregated implicitly during sort in histogram). Under bin-counter mode they come from #179's pre-seed. Both must remain available during a run because #34 R7 mandates live capture continues even under bin-counter mode (for drift detection).
+- **Out-of-range sentinels are new contract.** Today's bin-assignment functions (`find_heatmap_bucket` `ltl:4783`, `find_histogram_bucket_index` `ltl:4890`) silently produce in-range indices. R2's sentinel contract is required by #34 R5/R6 and by #179 drift detection. This is **not** a refactor of existing logic — it is new behavior the primitive introduces.
+- **Two bin-assignment algorithms in use today (linear vs. binary search).** `find_heatmap_bucket` is linear (`ltl:4785–4789`); `find_histogram_bucket_index` is binary (`ltl:4895–4903`). R2 picks one (or supports both). Recorded as a #189 implementation decision, not resolved by the audit. Either choice satisfies R2's correctness contract.
+- **Memory lifecycle: counter stores must be per-key freeable** (#189 R8). Heatmap counters per `time_bucket` can be freed after rendering. Phase 3 percentile counters similarly. Histogram counters persist for the run (no per-key freeing needed). Phase 2 per-message counters persist until the summary table is rendered. R8 must accommodate all three lifecycles.
+- **The `histogram_stats` percentile values (`ltl:4926–4940`) are sort-derived from raw arrays and live alongside the bin counters in the same routine.** Under bin-counter mode the raw arrays are absent. This means a single implementation choice — keep the sort, drop the sort, or replace with R4 — affects both `histogram_stats{p*}` legend output and the `histogram_buckets` mechanism. The audit identifies this as the strongest argument for #34 and #187 Phase 2 to ship together (or for histogram to defer bin-counter mode until R4 ships).
+- **Pre-existing entanglement between heatmap and per-time-bucket duration percentiles.** `log_analysis{$bucket}{durations}` is gated `unless $heatmap_enabled` (`ltl:4634`). Heatmap takes ownership of duration values when active; per-time-bucket percentiles are suppressed. Under bin-counter mode, heatmap's counters become the natural source for per-time-bucket percentiles via R4. The audit confirms the entanglement is in scope for #187 Phase 3 to resolve, not for #34 to patch.
 
 ## Edge cases
 
