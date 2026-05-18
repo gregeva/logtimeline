@@ -32,7 +32,7 @@ This feature is one of three co-developed issues (#34, #187, #189). The work is 
 | Step | Work | Owner | Why this position | Status of this file |
 |---|---|---|---|---|
 | 1 | **Audit** — catalogue existing helpers (heatmap, histogram, summary-table percentile paths); produce consumer-side primitive requirements | **#34 R12** + **#187 R12**; outputs land in **#189** *Audit findings* and *Consumer-side requirements* sections | Both #189's primitive design and this feature's algorithm research need to know what shapes the primitives must support. Without this first, primitives risk being designed for two consumers and reworked later. | **This file owns part of this step (R12); corresponds to R9 Phase 0** |
-| 2 | **Research + prototype** — algorithm comparative study, accuracy report, recommendation memo, prototype | **#187 D1–D5** | Algorithm choice (sketch vs. bin-derived interpolation) determines what #189's percentile-interpolation primitive must do. Performed after audit but before #189 implementation so #189 isn't built blind. | **This file's research deliverables; corresponds to R9 Phase 1** |
+| 2 | **Research** — literature-grounded comparative study against the audited use cases; decision-support memo presenting options and trade-offs; prototype only if specific open questions warrant measurement | **#187 D1–D5 (D4 conditional)** | Algorithm choice (sketch vs. bin-derived interpolation, or a hybrid) determines what #189's percentile-interpolation primitive must do. Performed after audit but before #189 implementation so #189 isn't built blind. | **This file's research deliverables; corresponds to R9 Phase 1** |
 | 3 | **Deliver #189** — implement unified primitives | **#189** | Now informed by both the audit (step 1) and the algorithm choice (step 2). | Consumed by this file at step 5 |
 | 4 | **Deliver #34 implementation** — heatmap and histogram consume #189's primitives, **including R4** | **#34** | First production consumer of #189. Consumes **R1–R4**: per the #34 R12 audit resolution, heatmap percentile markers and histogram percentile indicators both derive from R4 under bin-counter mode. This means #34 step 4 also gates on **this feature's D3** (algorithm choice), since D3 fixes what R4 does. | **D3 (algorithm choice) is now consumed at step 4, not just step 5** |
 | 5 | **Deliver #187 Phase 2** — summary-table per-message percentiles consume #189's primitives | **#187 Phase 2** | Second R4 consumer. Verifies R4's keying flexibility for a different consumer shape (per-`(category, log_key)`). | **This file's primary implementation step; corresponds to R9 Phase 2** |
@@ -123,7 +123,7 @@ Approximate mode is introduced **progressively** across ltl's percentile consume
 The phases are:
 
 - **Phase 0 — Foundation (this feature's spec work).** Audit existing percentile-computing paths (R12). Establish the dual-mode contract, the gating pattern, the `-V` observability contract, the multi-phase plan itself. Lock in the consumer-side requirements that #189's primitives must satisfy. **Output**: this feature file + the audit deliverable; the consumer-side primitive requirements landing in `features/189-histogram-bin-counter-primitives.md`. **No code changes yet.**
-- **Phase 1 — Research and prototype (D1–D5).** Comparative algorithm study, accuracy report, recommendation memo, prototype. Production implementation gated on these.
+- **Phase 1 — Research (D1–D5; D4 conditional).** Literature-grounded comparative study of candidate algorithms against the use-case demands the R12 audit identified; cross-reference of existing log files to use-case regimes; decision-support memo presenting options and trade-offs for the user to decide from; prototype only if D3 surfaces open questions that literature alone cannot resolve. Production implementation gated on the decision conversation that follows D3.
 - **Phase 2 — Summary-table per-message latency percentiles (the target this feature addresses directly).** Implement dual-mode for the summary-table percentiles per R1–R8. Validate against D2 datasets. Ship with default gating (no automatic activation without explicit user opt-in until validated; activation policy defined by D3).
 - **Phase 3 — Time-bucketed duration percentiles** (the per-time-bucket percentile statistics that heatmap rendering uses implicitly today): migrate to bin-derived interpolation over the histogram bin counters already accumulated for heatmap. Validate that R4 holds at the per-time-bucket granularity (smaller N per bucket → potentially wider accuracy bound; revalidate in D2-equivalent harness scoped per-bucket).
 - **Phase 4 — Highlight-data percentiles** (if and when #51 lands): apply dual-mode to highlight-subset percentiles. Coordinate with #51.
@@ -265,7 +265,7 @@ This list is the consumer-side input to #189's primitive design.
 
 ## Considerations for implementation
 
-The spec is intentionally agnostic about the mechanisms below. Each must be addressed during prototype and implementation; the choice of mechanism is the implementer's, informed by research outcomes (D1–D5).
+The spec is intentionally agnostic about the mechanisms below. Each must be addressed during research, the decision conversation, and implementation; the choice of mechanism is decided through Phase 1's decision-support process (D3), informed by D1's literature-grounded analysis and D4 only when triggered.
 
 - **Algorithm choice** is a research output (D3). Candidate algorithms are enumerated in **Research deliverables**; the implementer may extend the candidate set if literature review surfaces relevant alternatives. The choice must be one of: a sketch (t-digest / KLL / GK / q-digest), bin-derived interpolation over histogram bin counters, or a hybrid.
 - **Memory behavior across modes.** The approximate-mode estimator state (sketch or counter-derived) replaces the exact-mode value array. Mixed-mode behavior is well-defined per R13; lifecycle composes with #23 Phase 2's named-stage memory model.
@@ -293,7 +293,7 @@ The spec is intentionally agnostic about the mechanisms below. Each must be addr
 
 - [ ] R1–R13 hold across the representative-dataset set (D2).
 - [ ] Phase 0 deliverables complete: this feature file, the audit (R12), the consumer-side primitive requirements landed in `features/189-histogram-bin-counter-primitives.md`.
-- [ ] Phase 1 research deliverables (D1–D5) complete before Phase 2 implementation.
+- [ ] Phase 1 research deliverables (D1, D2, D3, and D4 if triggered) complete, and the decision conversation that follows D3 has produced the binding values for algorithm choice, accuracy bound, and gating thresholds, before Phase 2 implementation.
 - [ ] For every input in the D2 set, each required quantile from approximate mode falls within the D3 accuracy bound around the exact value.
 - [ ] When approximate mode runs, R3–R8 hold; `state_budget_bytes` in `-V` matches actual estimator memory; `data_source` correctly identifies sketch vs. histogram bin counters.
 - [ ] When exact mode runs for any reason (R10), output satisfies R11 (byte-identical to pre-feature).
@@ -344,61 +344,87 @@ The harness is part of this feature's deliverable.
 
 Production implementation does not commence until the following deliverables are complete and recorded. The deliverables are requirements on the *work*, not prescriptions of the *mechanism*.
 
-### D1 — Comparative algorithm study
+### D1 — Comparative algorithm study (literature-grounded)
 
-Evaluate the following candidate algorithms against the D2 dataset set:
+D1 is a literature-grounded comparative study, not an empirical bake-off. Its purpose is to characterize each candidate algorithm against the use-case demands the R12 audit identified (Paths A, B, C1, C2), so the trade-offs are visible and a decision can be made. No measurement is performed at this stage; measurement is conditional on D4 (see below).
+
+**Candidate algorithms** — the following list is a starting point; literature review may surface additional candidates and those are included if relevant:
 
 - **t-digest** — Dunning's structure; recognized for tail-quantile accuracy in heavy-tailed data.
 - **KLL sketch** — deterministic-error succinct quantile sketch.
 - **Greenwald-Khanna (GK)** — classic deterministic quantile sketch.
 - **q-digest** — tree-based deterministic quantile sketch.
-- **Bin-derived interpolation over histogram bin counters** — compute percentiles by interpolating within the histogram bin counters produced by #34 via the primitives from #189. Strongly preferred for architectural harmonization; the comparative study determines whether its accuracy is sufficient.
+- **Bin-derived interpolation over histogram bin counters** — compute percentiles by interpolating within the histogram bin counters produced by #34 via the primitives from #189.
 
-For each algorithm and each dataset:
+The study presents *options and trade-offs*, not a preferred answer. The decision is made by the user against D3's synthesis, not by D1 implicitly.
 
-- Per-quantile absolute error (raw-value units).
-- Per-quantile relative error (percent of exact value).
-- 95% confidence intervals over multiple sub-samples.
-- Estimator state size.
-- Per-update CPU cost.
-- Per-finalize CPU cost.
-- Determinism characteristic.
+**For each candidate, the study characterizes:**
 
-### D2 — Representative-dataset set
+- **Accuracy guarantee** — quantitative where the literature supplies it (e.g., published worst-case quantile-rank error bounds, asymptotic behavior at tail quantiles); qualitative where it does not (e.g., known behavior on heavy-tailed data, sensitivity to ordering).
+- **Memory profile** — quantitative where the literature supplies it (asymptotic state size as a function of compression parameter and N); qualitative for behavior at the small-N regime relevant to Path B and Path A's single-occurrence log keys.
+- **CPU profile** — quantitative where the literature supplies it (asymptotic per-update and per-finalize cost); qualitative for Perl-implementation implications where relevant.
+- **Determinism** — does the algorithm produce identical output for identical input; if randomized, what seeding discipline is required.
+- **Fit against each audited use case** — for each of Paths A, B, C1, C2:
+  - Does the algorithm meet the use case's percentile-set demand (7-value set for A/B, 10-value set for C1, 4-marker set for C2)?
+  - Does its N-regime behavior match the use case (per-`log_key` N for A, per-`time_bucket` N for B, full-dataset N for C1, per-`time_bucket` N for C2)?
+  - Does its output form match the use case (numeric value for A/B/C1, bin-index for C2 via #189 R2 round-trip)?
+  - Where is the algorithm a poor fit, and why?
+- **Harmonization implication** — if this algorithm were chosen for all four paths, what does ltl gain or lose architecturally? If it were chosen for only some paths, which combinations make sense and what is the cost of running two algorithms?
+- **Open questions** — what about this candidate cannot be answered from literature alone, and would require measurement (D4) to resolve?
 
-Curate a representative dataset set for accuracy evaluation. Must include:
+### D2 — Representative-dataset cross-reference
 
-- A heavy-tailed access log (Tomcat / Apache style).
-- A ThingWorx mixed-traffic log.
-- A high-cardinality DEBUG-heavy log.
-- A small-N case (a few hundred values).
-- A degenerate case (all-same values).
-- A pathological case relevant to ltl users (selection determined during research; e.g., a log with extreme outliers).
-- Per-time-bucket sub-samples (for Phase 3 readiness — bin-derived interpolation must be validated at the smaller N typical per time bucket).
+The representative data already exists in the `logs/` tree (see `docs/test-logs.md`). D2 is a cross-reference, not a curation effort — its job is to identify which existing log files exercise which use-case regime, so D1's analysis and any later D4 measurement have a known correspondence between dataset and use case.
 
-### D3 — Recommendation memo
+D2 records, for each of the following regimes, the existing log file(s) that exercise it:
 
-A written recommendation:
+- Heavy-tailed access log (Tomcat / Apache style).
+- ThingWorx mixed-traffic log.
+- High-cardinality DEBUG-heavy log.
+- Small-N case (a few hundred values per `log_key` or per `time_bucket`).
+- Degenerate cases (all-same values, single value, zero matched values) — may be reproduced from existing logs via filters, no new files needed.
+- Any pathological case relevant to ltl users (extreme outliers, etc.), drawn from existing logs.
+- Per-time-bucket sub-samples for Phase 3 readiness — identifying which existing logs naturally produce small N per time bucket.
 
-- The algorithm (or algorithms, if a hybrid is recommended) ltl ships.
-- The accuracy bound (R4) the implementation commits to, per quantile.
-- The input criteria for R2.3 (the gating thresholds), with explicit values.
-- Whether and how a user-facing precision preference is introduced (the mechanism, the default).
-- The state-budget configuration.
-- Rationale connecting the recommendation to D1 + D2.
+If a regime is not covered by an existing log file, D2 records the gap explicitly rather than fabricating data; the gap becomes a research input that D1 and D3 weigh.
 
-### D4 — Prototype
+### D3 — Decision-support memo
 
-A working prototype in `prototype/187-percentile-sketch.pl` (or similar). The prototype:
+D3 is the central deliverable of Phase 1. It synthesizes D1 (and the D2 cross-reference) into a written memo whose purpose is to put the user in a position to decide which algorithm (or combination of algorithms) ltl ships. The memo presents *options with trade-offs*, not a pre-committed recommendation.
 
-- Implements the recommended algorithm(s).
-- Runs against the D2 datasets and produces D1-style output reproducibly.
-- Is runnable independently of ltl proper so algorithm changes can be validated without touching production code.
-- For bin-derived interpolation, the prototype must include a mock of the #189 primitive contract so the algorithm can be exercised standalone.
+For each viable option (single-algorithm and hybrid combinations that survive D1's analysis), D3 documents:
+
+- **What this option does** — the algorithm(s) involved, and how each one maps to Paths A, B, C1, C2.
+- **What it gains** — the accuracy guarantees, memory profile, harmonization benefits, and operational simplifications relative to status quo.
+- **What it costs** — the accuracy compromises, memory or CPU costs, implementation complexity, and any use cases that are served sub-optimally.
+- **Open questions** — what remains unresolved from literature alone; what would need D4 measurement to confirm or refute.
+- **Implication for the gating criteria (R2.3)** — what input criteria the option requires the run-start gate to evaluate, and qualitative thresholds where the literature supports them.
+- **Implication for the accuracy bound (R4)** — what per-quantile bound this option could commit to, and the source of that bound (theoretical guarantee, expected empirical confirmation, etc.).
+- **Implication for state budget** — what the option's state size would be, parameterized appropriately.
+
+The memo concludes with a structured comparison (e.g., a matrix across options vs. evaluation criteria) and an explicit list of the *decisions the user must make* to move from Phase 1 to Phase 2 — the algorithm choice, the accuracy bound, the gating thresholds, whether a user-facing precision preference is introduced, and whether any open questions warrant D4 (see below) before deciding.
+
+D3 does **not** lock the implementation. The decision conversation between user and Claude is what locks it; D3 is the input to that conversation.
+
+### D4 — Prototype (conditional)
+
+D4 is **conditional**. It is produced only if D3's analysis identifies open questions that cannot be answered from literature alone and that materially affect the decision. The scope of D4 is bounded by those specific open questions — it is not a flat "implement and measure all candidates" exercise.
+
+When D4 is triggered, it produces a working prototype in `prototype/187-percentile-sketch.pl` (or similar) that:
+
+- Implements only the algorithm(s) the open questions concern.
+- Runs against the D2 cross-referenced log files relevant to the open questions.
+- Produces measurement output (per-quantile error, state size, CPU cost, etc.) appropriate to the question being answered.
+- Is runnable independently of ltl proper so the algorithm can be exercised without touching production code.
+- For bin-derived interpolation, includes a mock of the #189 primitive contract so the algorithm can be exercised standalone.
+
+D4's output feeds back into D3, which is updated to reflect the resolved questions. The user-and-Claude decision conversation then proceeds against the updated D3.
+
+If D3's analysis resolves all material questions from literature alone, D4 is not produced and Phase 1 concludes at D3.
 
 ### D5 — Production gate
 
-Production implementation references D1–D4 as prerequisites and treats their outputs as the binding values for R4, R7's `accuracy_estimate`, and the R2.3 / R10 gating criteria.
+Production implementation references D1, D2, D3, and (when produced) D4 as prerequisites, and treats the decision-conversation outcome that follows D3 as the binding values for R4, R7's `accuracy_estimate`, and the R2.3 / R10 gating criteria. D4 is a prerequisite only when it has been triggered per its conditional clause.
 
 ## Related issues
 
