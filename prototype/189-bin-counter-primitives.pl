@@ -531,9 +531,18 @@ sub emit_telemetry {
     if ($opt{'exact-percentiles'}) {
         print "opt_out_notice: --exact-percentiles is set; all migrated consumers reverted to pre-#187 sort-based computation. This flag is deprecated and will be removed in a future release.\n";
     }
-    my $precision_label = (defined $opt{'percentile-precision'})
-        ? $opt{'percentile-precision'}
-        : ($precision_source eq 'default' ? 5 : '?');
+    # Per #187 Decision 8 (refined by #195 Bucket A5): render literal "n/a" when
+    # -pbpd resolved to a non-tier value (no matching LEVEL in Decision 2's
+    # locked tier table). The literal string "n/a" is part of Decision 8's
+    # locked stability contract for this field.
+    my $precision_label;
+    if (defined $opt{'percentile-precision'}) {
+        $precision_label = $opt{'percentile-precision'};
+    } elsif ($precision_source eq 'default') {
+        $precision_label = 5;
+    } else {
+        $precision_label = 'n/a';
+    }
     my $not_in_effect = $opt{'exact-percentiles'} ? '; not in effect this run' : '';
     print "percentile_precision: $precision_label ($precision_source$not_in_effect)\n";
     print "buckets_per_decade: $opt{bpd} ($precision_source$not_in_effect)\n";

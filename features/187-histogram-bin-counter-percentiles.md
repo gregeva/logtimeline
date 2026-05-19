@@ -1169,7 +1169,7 @@ The mapping is part of the locked feature contract; changes to the table require
 
 Non-binding guidance — the contract above is what must hold; the specifics below are starting points #189 may refine.
 
-- **Memory footprint at locked default**: 265 bins per partition over 5 decades; ~2.1 KB per partition at 8 B/counter; ~212 MB total across 10⁵ keys (Path A scale).
+- **Memory footprint at locked default**: 265 bins per partition over 5 decades; ~2.1 KB per partition at 8 B/counter; ~212 MB total across 10⁵ keys (Path A scale). **Measured overhead** (prototype evidence, PR #194; `prototype/189-bin-counter-primitives-validation-report.md` § V2 Part A): on real Tomcat data at 51,469 partitions, actual per-partition cost under Perl is 2,381 B (vs. the theoretical 2,136 B floor), and projected total at 10⁵ partitions is 227 MB (+12.3% over the 212 MB guidance). The delta is Perl hash-and-scalar overhead vs. the theoretical `(B+2) × 8` byte counter array; the closed-form R2 path assumption holds. Analysts comparing observed `counter_memory_bytes` in `-V` output against this guidance should expect the small positive offset.
 - **Memory at other levels** (informational, for sizing tests):
   - L1 (bpd=4): 160 B/partition; ~16 MB at 10⁵ keys.
   - L2 (bpd=8): 320 B/partition; ~32 MB.
@@ -1449,7 +1449,7 @@ The section's primary purpose is **testability and AI-agent debugging**. Field n
 
 - `opt_out_active: yes | no` — whether `--exact-percentiles` is set this run (Decision 7).
 - `opt_out_notice: <message>` — present only when `opt_out_active: yes`. The line carries the deprecation-notice content (the stderr emission per Decision 7 is the human-facing notice; this line is the testable assertion that the deprecation surfaced in `-V`).
-- `percentile_precision: <LEVEL> (<source>)` — the resolved tier from Decision 2's `--percentile-precision` semantics, with source annotation (`default`, `--percentile-precision N`, `--percentile-precision N; overridden` when `-pbpd` also specified). When `opt_out_active: yes`, append `; not in effect this run` to the source annotation.
+- `percentile_precision: <LEVEL> (<source>)` — the resolved tier from Decision 2's `--percentile-precision` semantics, with source annotation (`default`, `--percentile-precision N`, `--percentile-precision N; overridden` when `-pbpd` also specified). When `opt_out_active: yes`, append `; not in effect this run` to the source annotation. When `-pbpd N` is the active source and `N` does not correspond to any of the nine LEVELs in Decision 2's locked tier table, render as `percentile_precision: n/a (-pbpd N specified)`. The literal string `n/a` is part of the locked stability contract for this field; alternative renderings require a new locked-decision entry.
 - `buckets_per_decade: <N> (<source>)` — the resolved numeric bpd value with source annotation (`default`, `-pbpd N`, `--percentile-precision N`, `-pbpd N; --percentile-precision N overridden`). When `opt_out_active: yes`, append `; not in effect this run` to the source annotation.
 
 **Per-consumer blocks** (one block per consumer catalogued in R12; ordered as below):

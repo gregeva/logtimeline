@@ -119,6 +119,10 @@ The primitive must:
 - Be efficient enough to invoke per-line in the parsing hot path. The exact algorithm (binary search, direct logarithmic computation) is implementation-defined.
 - Be pure given a fixed partition state.
 
+**Implementation guidance (non-binding) — closed-form is the recommended R2 algorithm.** Prototype evidence (PR #194; `prototype/189-bin-counter-primitives-validation-report.md` § V2 Part B) measured three R2 candidates against a 67 MB Tomcat file at 51,469 partitions: closed-form (`floor(B · log(v/min) / log(max/min))`), binary search over a stored boundary array, and linear search over the same array. Closed-form was 3.31× faster than linear, 2.46× faster than binary, with 4.75× lower memory (no boundary array stored per partition). V1 cross-checked all three against 857,480 real observations with zero disagreement on bin index. The recommended R2 implementation for #189 production is closed-form; binary and linear search remain conforming alternatives and the contract makes no exclusion.
+
+**Implementation guidance (non-binding) — boundary materialization is on-demand, not stored.** The closed-form R2 implementation does not require a stored boundary array; `boundary[i] = min · (max/min)^(i/B)` can be computed on demand whenever R4 or rendering code needs a specific boundary value. The prototype measured that storing the array per partition adds ~4.75× memory at locked default bpd=53 (51,469 partitions: 117 MB closed-form vs. 555 MB with boundary arrays). For consumers running at Path A scale (10⁵+ partitions), the recommended implementation materializes boundaries inline at the call site rather than persistently per partition. Decision 2's memory projection (~212 MB at 10⁵ partitions) assumes the closed-form path; choosing a boundary-array-requiring R2 implementation invalidates that projection.
+
 ### R3 — Counter-update primitive (parameterized keying)
 
 The counter-update primitive, given `(counter_store, key, bin_index_or_overflow_sentinel)`, increments the appropriate counter. The `key` shape is **parameterized per consumer**, supporting all keying shapes catalogued in #187 R12:
@@ -185,6 +189,8 @@ The primitive must:
 - Maintain the underflow and overflow counters per `(partition, key)` distinct from the in-range bin counters.
 - Include both in `total_N` for R4's rank computation.
 - Expose them to consumers for the per-consumer audit aggregates (`partitions_with_overflow_count`, `partitions_with_underflow_count` per #187 Decision 8).
+
+**Audit semantics — per-quantile, not per-partition.** The `out_of_range_bounded` audit code is determined per-quantile by R4 at the moment of invocation, based on whether the target rank for that specific quantile lands in the underflow counter, an in-range bin, or the overflow counter. A partition with `partitions_with_overflow_count > 0` may still report `audit = none` for some quantiles (those whose target rank lands in an in-range bin). Per #187 Decision 4, the overflow/underflow counter's share of total N determines which quantiles fire: a quantile q lands in overflow only when `ceil(q · total_N) > (total_N − overflow_count)`; symmetric for underflow. The prototype's V3 (`prototype/189-bin-counter-primitives-validation-report.md` § V3) validated this empirically — a partition with overflow=3 in 1003 total observations reported `audit = none` at q=0.01 because the target rank landed in the in-range region. Consumer tests must not assert `audit = high` for every quantile of any partition where `overflow > 0`.
 
 ### R7 — Independence of partitions across consumers (and across keys within a consumer)
 
