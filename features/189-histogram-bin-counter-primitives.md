@@ -323,7 +323,7 @@ The audit catalogue below uses the original Path-A/B/C terminology from earlier 
 | `print_heatmap_footer_scale` | `ltl:6434–6540` | Bottom scale line with boundary values at percentage positions. | Rendering driver (consumes R1 output). | Reads `@heatmap_boundaries`, `$heatmap_width`, `$heatmap_max`, `$heatmap_metric`. | — |
 | `format_heatmap_value` | `ltl:6242–6263` | Boundary-value formatter (time / bytes / number) for header and footer rendering. | Rendering helper. | Reads `$heatmap_metric`, UDM config. | — |
 
-Heatmap data structures declared at `ltl:247–260`: `$heatmap_metric`, `$heatmap_width`, `%heatmap_data`, `%heatmap_data_hl`, `%heatmap_raw`, `%heatmap_raw_hl`, `@heatmap_boundaries`, `$heatmap_min`, `$heatmap_max`, `$heatmap_max_density`, `%heatmap_percentiles`.
+Heatmap data structures declared at `ltl:246–260`: `$heatmap_metric`, `$heatmap_width`, `%heatmap_data`, `%heatmap_data_hl`, `%heatmap_raw`, `%heatmap_raw_hl`, `@heatmap_boundaries`, `$heatmap_min`, `$heatmap_max`, `$heatmap_max_density`, `%heatmap_percentiles`.
 
 **Constraints discovered (heatmap):**
 
@@ -353,7 +353,7 @@ Heatmap data structures declared at `ltl:247–260`: `$heatmap_metric`, `$heatma
 | `calculate_histogram_percentile_ticks` | `ltl:7430–7451` | Maps selected percentile values to logarithmic X-axis column positions. | Rendering driver (positioning). | — | — |
 | `render_histogram_x_axis`, `render_histogram_x_labels`, `render_histogram_legend` | `ltl:7454–7559` | Axis frame, axis labels, percentile legend (with optional highlight legend). | Rendering driver (composition). | — | — |
 
-Histogram data structures declared at `ltl:286–328`: `$histogram_buckets_per_decade` (default 8), `$histogram_bucket_override`, `%histogram_values`, `%histogram_values_hl`, `%histogram_boundaries`, `%histogram_buckets`, `%histogram_buckets_hl`, `%histogram_stats`, `%histogram_stats_hl`. Option globals declared during parse: `$histogram_enabled`, `%histogram_metrics`, `$histogram_width_percent`, `$histogram_width_explicit`, `$histogram_height`, `$histogram_height_explicit`.
+Histogram data structures declared at `ltl:285–331`: `$histogram_buckets_per_decade` (default 8), `$histogram_bucket_override`, `%histogram_values`, `%histogram_values_hl`, `%histogram_boundaries`, `%histogram_buckets`, `%histogram_buckets_hl`, `%histogram_stats`, `%histogram_stats_hl`. Option globals declared during parse: `$histogram_enabled`, `%histogram_metrics`, `$histogram_width_percent`, `$histogram_width_explicit`, `$histogram_height`, `$histogram_height_explicit`.
 
 **Constraints discovered (histogram):**
 
