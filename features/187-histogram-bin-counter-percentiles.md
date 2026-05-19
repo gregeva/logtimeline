@@ -350,6 +350,47 @@ The harness is part of this feature's deliverable.
 
 Production implementation does not commence until the following deliverables are complete and recorded. The deliverables are requirements on the *work*, not prescriptions of the *mechanism*.
 
+### Research conduct — mandatory before resuming this work
+
+This was scoped as a research-heavy task. A prior pass through D1/D3 reasoned from first principles and produced invented options for the decision conversation rather than anchoring on established industry practice. That work is not trustworthy and the decisions captured in **Locked decisions from research** must be treated as *provisional* until re-grounded against the literature catalogued below. When this task is resumed, the following protocol is mandatory and non-negotiable.
+
+#### Required sources for grounding
+
+For every decision currently in D3 and every new decision surfaced, the work must consult — at minimum — the following industry-standard references. None of these may be skipped on the basis of "I can reason this out" or "the answer is obvious."
+
+| Source | Why it matters |
+|---|---|
+| **HdrHistogram** — Gil Tene's reference implementation, FAQ, and accompanying papers. The Java/C source defines `lowestEquivalentValue`, `highestEquivalentValue`, `medianEquivalentValue`, `valueAtPercentile`, and `getValueAtPercentile` with documented conventions. | The substrate ltl already names "HdrHistogram approach" in its code comments. Decisions about in-bin reporting, sub-bucket precision, value-equivalence semantics, and percentile-recovery rules are settled practice here. |
+| **Prometheus client library + `histogram_quantile()` (PromQL)** — the documented linear-interpolation rule, `+Inf` bucket handling, and the rules for what `histogram_quantile()` returns when a quantile lands in or above the `+Inf` bucket. The Prometheus documentation explicitly addresses the case the user raised. | The `+Inf` semantics — count contributes to denominator, no value reportable when target rank lands above the last deterministic bin — is the canonical answer to Decision 4 and is shaped by years of operational practice. |
+| **OpenTelemetry exponential histogram specification** — `Scale`, `ZeroCount`, positive/negative buckets, exemplars, collapse and merge semantics. | The modern (2022+) standardization of log-spaced bin counters; published with rationale for every design choice including precision parameter selection and overflow handling. |
+| **DDSketch** — Masson, Rim, Lee (VLDB 2019). The paper proves a value-relative-error guarantee for a log-spaced partition with rate `1+α` and documents the partition's mathematical relationship to `buckets_per_decade`. | The accuracy contract this feature commits to in R4 should be grounded in DDSketch's published bound — α relative error in value space — which transfers directly to the substrate ltl uses. |
+| **OpenMetrics specification** — the formal metric exposition standard that subsumes Prometheus histograms, including the explicit rules for cumulative-count semantics and the `+Inf` bucket. | The canonical statement of histogram-metric conventions. |
+| **Gil Tene's writings on coordinated omission, percentile starvation, and "we are not who we measure"** — published talks and the HdrHistogram FAQ on when P99.9 and P99.99 are meaningful vs. manufactured. | The "sample-count starvation" framing in D1 must be grounded in Tene's published guidance, not invented locally. |
+| **Apache DataSketches** (KLL, REQ, theta-sketch documentation) — only where genuinely relevant to comparative substrate analysis. | KLL is *not* the substrate ltl ships, but DataSketches' documentation of in-bin reporting and rank-error vs. value-error semantics is a useful reference for how the substrate's accuracy contract should be exposed. |
+
+#### Conduct rules
+
+1. **No first-principles reasoning before consulting the sources.** If a decision concerns "how does R4 turn a target rank into a returned value," the work first reads HdrHistogram's `valueAtPercentile` and Prometheus's `histogram_quantile()` source and documentation. The decision options presented are then derived from what those references do, with citations.
+
+2. **Each decision option presented must cite at least one industry source.** "(d) Linear-in-log within the bin" is not an acceptable option entry. "(d) Linear-in-log within the bin, as Prometheus `histogram_quantile()` documents and implements (citation: <Prometheus docs URL or source file>)" is acceptable.
+
+3. **Where ltl's case genuinely differs from the industry-standard case, the divergence is documented explicitly.** The default position is "do what HdrHistogram / Prometheus / OTel do unless there is a stated reason ltl cannot."
+
+4. **The decision conversation does not present invented options.** If a candidate answer to a decision cannot be sourced from at least one of the references above, it is not presented. The user is not asked to choose between "what HdrHistogram does" and "an option Claude made up."
+
+5. **Each locked decision records its grounding.** The **Locked decisions from research** section records, for each decision, the industry-standard reference(s) the decision is grounded in. A decision that cannot record this is not locked.
+
+#### Resumption protocol
+
+When this task is picked up next:
+
+1. Spawn a research agent (or take equivalent time) to read the references above and produce a grounding document covering at least the six analytical decisions in D3 (in-bin interpolation, `buckets_per_decade` default, fall-through threshold, out-of-range handling, partition lifecycle, gating thresholds) plus the practical decisions (7-10).
+2. The grounding document records, per decision, what the industry-standard practice is, with citations.
+3. The current locked decisions in **Locked decisions from research** are re-evaluated against that document. A decision that aligns with industry practice is re-locked with citation. A decision that diverges is re-opened, with the divergence justified or the decision reversed.
+4. Only after step 3 does the decision conversation continue (for any decisions that remain genuinely open after grounding).
+
+The user has explicitly stated they should not be presented with invented options. The conduct rules above exist to prevent that.
+
 ### D1 — Extension study (literature-grounded)
 
 D1 characterizes the **HdrHistogram-style log-spaced bin-counter substrate** (the substrate already shipped in `-hm` and `-hg`) against the four percentile-computing use cases catalogued in R12, identifies what the existing implementations already answer, and isolates the questions that extending the substrate to those use cases leaves open. It is literature-grounded; measurement is conditional on D4 (see below).
@@ -523,11 +564,13 @@ D3 is the central deliverable of Phase 1. It synthesizes D1's analysis into a me
 
 D3 does **not** lock the implementation. The decision conversation between user and Claude is what locks it; D3 is the input to that conversation.
 
+> **Status as of 2026-05-19: NEEDS GROUNDING.** The current contents of D3 (decision options, recommendations, the three provisionally-locked decisions) were produced through first-principles reasoning that did not consult industry-standard references. Per **Research conduct — mandatory before resuming this work** above, D3 must be rebuilt against cited sources (HdrHistogram, Prometheus `histogram_quantile`, OpenTelemetry exponential histograms, DDSketch, OpenMetrics, Gil Tene's published guidance) before the decision conversation continues. The decision *list* below (Decisions 1–6, plus practical decisions 7–10) is the correct scope; the *content* of each entry must be re-derived from cited industry practice.
+
 #### D3 memo — the six decisions
 
 For each open question from D1, D3 presents the candidate answers with their consequences, the dependencies between decisions, and the D4-trigger condition that fires if literature is insufficient to choose.
 
-##### Decision 1 — In-bin interpolation strategy for `#189` R4
+##### Decision 1 — In-bin interpolation strategy for `#189` R4 — **PROVISIONAL (needs grounding re-pass per Research conduct rules)**
 
 Once R4's cumulative-count walk locates the bin containing rank `q · N`, what value does R4 return?
 
@@ -538,39 +581,80 @@ Once R4's cumulative-count walk locates the bin containing rank `q · N`, what v
 | (c) Linear-in-value | `lower + (rank_in_bin / bin_count) · (upper − lower)` | Distribution-dependent | Better on roughly-uniform-in-value data. |
 | (d) Linear-in-log | `lower · (upper/lower)^(rank_in_bin / bin_count)` | Distribution-dependent | Better on roughly-uniform-in-log data (the natural assumption for log-spaced bins fed heavy-tailed data). |
 
-**Recommendation framing**: (d) matches the partition's geometry and ltl's primary use case (heavy-tailed latency). (b) is the fall-through when in-bin rank is unavailable or when the bin contains very few samples. (a) and (c) are listed for completeness; neither has a strong case in ltl's regime.
+**Decision**: **(d) Linear-in-log interpolation as the default, with fall-through to (b) bin midpoint when the target bin's sample count is below the threshold set by Decision 3.**
 
-**D4-trigger**: if the decision conversation cannot decide between (b), (c), (d) from D1's analysis alone, prototype on a heavy-tailed access log (D2 cross-reference identifies candidates) and compare per-quantile error against exact-mode output. Bounded scope.
+**Why**:
+- (d) matches the partition's log-spaced geometry — bins are geometric, so interpolation should be geometric.
+- When the target bin holds many samples (high-volume keys, the regime where P99/P99.9 is operationally meaningful), (d) gives the most accurate answer.
+- When the target bin holds 1–3 samples (low-volume keys, narrow time buckets), the in-bin rank is itself noisy; (b) midpoint is more honest than pretending to interpolate against meaningless rank. The fall-through threshold lives in Decision 3.
+- (c) is operationally indistinguishable from (d) on narrow bins but doesn't match the partition's geometry on principle. Rejected.
+- (a) is dominated by (b). Rejected.
 
-##### Decision 2 — `buckets_per_decade` default for the per-message percentile path
+See **Locked decisions from research** § Decision 1 for the binding form.
 
-The existing histogram default is 8 (~14% midpoint error). For Path A's SRE-grade tail-percentile reporting, the natural choice is higher.
+**D4-trigger**: none. Decision settled from D1's analysis.
 
-| `buckets_per_decade` | Bins per partition at 5 decades | Bytes per partition (8 B/counter) | Bound (interpolated) |
-|---|---|---|---|
-| 8 (existing default) | 40 | 320 B | ~7% |
-| 16 | 80 | 640 B | ~3.5% |
-| 32 | 160 | 1280 B | ~1.8% |
+##### Decision 2 — `buckets_per_decade` default for the per-message percentile path — **PROVISIONAL (needs grounding re-pass per Research conduct rules)**
 
-At 10⁵ keys, the total counter store is ~32 MB / 64 MB / 128 MB respectively — all small compared to today's array storage on multi-GB runs. Memory is not the binding constraint; the choice is between "tight enough for SRE work" and "tighter than needed."
+The existing histogram default is 8 (~14% midpoint error, ~7% interpolated). For Path A's SRE-grade tail-percentile reporting, the natural choice is higher.
 
-**Recommendation framing**: 16 is the natural starting point. The decision conversation may choose to inherit `-hgbpd` (consumer-controlled), or to introduce a separate `--percentile-buckets-per-decade` knob for Path A.
+| `buckets_per_decade` | Bins per partition at 5 decades | Bytes per partition (8 B/counter) | Total at 10⁵ keys | Per-quantile error (interpolated) |
+|---|---|---|---|---|
+| 8 (existing histogram default) | 40 | 320 B | ~32 MB | ~7% |
+| 16 | 80 | 640 B | ~64 MB | ~3.5% |
+| 32 | 160 | 1280 B | ~128 MB | ~1.8% |
 
-**D4-trigger**: none. This is a defaulting decision with bounded memory implications at all options.
+Memory is not the binding constraint at any choice — all three are small compared to today's array storage on multi-GB runs. The trade-off is "tight enough for SRE single-point reporting" vs. "tight enough for run-to-run regression comparison."
 
-##### Decision 3 — Tail-bin fall-through behavior
+**Decision**:
+- **Default `buckets_per_decade = 16`** for the per-message percentile path (Path A under approximate mode).
+- **New CLI flag `--percentile-buckets-per-decade N`** (short form `-pbpd`) — independent of the existing `-hgbpd` which continues to govern the histogram path. The two knobs are independent: users can tune visualization (`-hgbpd`) and SRE-grade percentile reporting (`-pbpd`) separately.
 
-At high `buckets_per_decade`, the highest bins may contain very few samples even at high N. When R4's cumulative walk lands in a target bin where the in-bin count is below some threshold (e.g., < 3), interpolation strategies (c)/(d) become noise.
+**Why**:
+- 16 gives ~3.5% per-quantile error, well inside SRE tolerances for both single-point reporting (P99: 4.2s ± 0.15s) and run-to-run comparison (distinguishes 5% real regression from bin noise).
+- 64 MB total at 10⁵ keys is trivial against the hundreds-of-MB-to-GB raw-array storage being replaced.
+- Independent CLI knob: the histogram path's precision is driven by terminal aesthetics; the percentile path's precision is driven by SRE decision-making. Different concerns, different defaults likely. Coupling them through `-hgbpd` would force compromise.
+- 32 (`~1.8%` error) is available via `-pbpd 32` for benchmark runs where users want tighter precision.
+- 8 (`~7%` error) is available via `-pbpd 8` for users who want the lightest memory footprint.
 
-| Approach | Behavior |
+See **Locked decisions from research** § Decision 2 for the binding form.
+
+**D4-trigger**: none. Decision settled from D1's analysis.
+
+**Implementation note**: per CLAUDE.md, adding a CLI flag requires updating `print_help()` in `ltl` and the options reference in `README.md`. The `-pbpd` flag joins the existing precision-control family (`-hgbpd`).
+
+##### Decision 3 — Fall-through threshold when the uniform-in-log assumption becomes unreliable — **PROVISIONAL (needs grounding re-pass per Research conduct rules)**
+
+The linear-in-log formula locked in Decision 1 imagines that the values inside a bin are uniformly distributed on a log scale, and returns the value at the requested fractional position within that imagined population. Concretely, for a bin spanning `[lower, upper)` with counter value `bin_count`, when the cumulative walk identifies `rank_in_bin` within this bin, the formula returns `lower · (upper/lower) ^ (rank_in_bin / bin_count)`.
+
+The counter value tells R4 how finely to subdivide the bin's range: counter = 100 means 100 possible in-bin positions; counter = 3 means 3 positions; counter = 1 means a single position.
+
+The question is: **at what counter value does the uniform-in-log assumption stop being a reliable approximation, and we should ignore the in-bin rank and return the geometric midpoint of the bin instead?**
+
+This is *not* a "sparse samples are noisy" concern (we don't have samples — we have a counter). It is a question about how much we trust the formula's modeling assumption when the bin is sparsely populated. With 100 in-bin counts, the assumption "values are roughly uniform on log scale across this narrow bin range" is usually fine and the formula's answer is meaningful. With 1–2 in-bin counts, the assumption is asserted but unverifiable; the rank-within-bin division can only resolve a handful of discrete positions, and returning the geometric midpoint is a more defensible answer.
+
+| Threshold T (fall through to midpoint if `bin_count < T`) | Effect |
 |---|---|
-| Always interpolate | Use chosen strategy regardless of in-bin count. Simplest. |
-| Threshold fall-through | If in-bin count < T (e.g., T=3), fall through to bin midpoint. Tunable. |
-| Per-quantile signaling | Always interpolate, but also report `tail_sample_count_warning` in `-V` Layer 2 (per R7) when the in-bin count is low. |
+| 1 — always interpolate | Trusts the formula even with a single sample in the bin (the formula returns a single value, the bin's upper-edge-adjusted point). |
+| 3 — mild | Interpolate when bin holds at least 3 counts. Below that, return midpoint. |
+| 5 — moderate (locked) | Interpolate when bin holds at least 5 counts. Below that, return midpoint. |
+| 10 — conservative | Interpolate only when bin is well-populated. Many low-volume keys fall through to midpoint. |
 
-**Recommendation framing**: the third approach (always interpolate + signal) is the most honest and avoids hidden mode-switches. Aligns with R7's `tail_sample_count_warning` already specified. Threshold fall-through can be added later if signaling-only proves operationally noisy.
+**Decision**: **Fall-through threshold T = 5.** When the target bin's counter is `≥ 5`, R4 uses the linear-in-log formula from Decision 1. When the counter is `< 5`, R4 returns the geometric midpoint of the bin (`sqrt(lower · upper)`).
 
-**D4-trigger**: none. The signaling approach has no measurement cost; threshold tuning if added is a Phase 2-time decision.
+**Why**:
+- 5 is the level at which the uniform-in-log assumption is meaningful enough to act on. Below 5, the assumption is asserted across so little data that the formula's answer is closer to "manufactured precision" than to a defensible estimate.
+- 5 is constant (independent of `buckets_per_decade`). An adaptive threshold (e.g., scaling with bpd) is cleverer but harder to explain in `-V` and harder for users to reason about.
+- 3 is defensible but slightly too aggressive — at 3 counts, the in-bin rank can only resolve 3 positions, which is approximately the same resolution as the geometric midpoint already provides for this bin.
+- 10 is too conservative — gives up the in-bin position for too many real cases (a moderately-populated bin with 7–9 counts has a meaningful in-bin position).
+
+**`-V` reporting**: when R4 falls through to midpoint for a quantile because of this threshold, `-V` Layer 2 reports it via `tail_sample_count_warning: yes` for that quantile. This is the per-quantile warning specified in R7. The warning informs the user that the answer is the bin midpoint rather than an interpolated value; it does not invalidate the answer, since the bin-resolution bound (~3.5% at `buckets_per_decade=16`) still applies.
+
+A separate, more severe condition — the *total partition count* being too low to support the target rank at all (e.g., P99.9 of a 50-sample partition) — is reported as `tail_sample_count_starved: yes`. This indicates that the rank itself is not meaningfully supported by the data, not just that the bin is sparse. The two warnings are distinct and may both fire for a single quantile.
+
+See **Locked decisions from research** § Decision 3 for the binding form.
+
+**D4-trigger**: none. Threshold settled from D1's analysis. The constant is tunable in Phase 2 if empirical observation indicates a need; the conceptual approach (counter-based threshold + midpoint fall-through + two-level `-V` warning) is fixed here.
 
 ##### Decision 4 — Out-of-range tally handling
 
@@ -665,8 +749,60 @@ Production implementation references D1, D2, D3, and (when produced) D4 as prere
 - **#180** — named pipeline stages.
 - **#46** — index file (closed; foundation that #179 reads back).
 
+## Locked decisions from research
+
+This section records the binding values produced by the decision conversation that consumes D3. Each entry is a single decision, locked, with a one-line rationale. Phase 2 implementation references this section as authoritative.
+
+> **Status as of 2026-05-19: PROVISIONAL.** The three decisions recorded below were locked through a decision conversation that did not consult industry-standard references (HdrHistogram, Prometheus, OpenTelemetry exponential histograms, DDSketch). Per **Research conduct — mandatory before resuming this work** above, these decisions must be re-grounded against the catalogued references before they can be treated as binding. The conceptual direction may well survive grounding (linear-in-log interpolation, for instance, is what Prometheus's `histogram_quantile()` documents); the specific values and rationale must be re-derived from cited sources. **Do not implement against these decisions until the grounding pass has completed.**
+
+### Decision 1 — In-bin interpolation strategy
+
+**Locked**: (d) Linear-in-log within the target bin as the default, with fall-through to (b) bin midpoint when the target bin's in-bin sample count falls below the threshold set by Decision 3.
+
+Formal form:
+
+```
+R4(partition, counter_map, q):
+  total_N = sum of counter_map
+  target_rank = ceil(q * total_N)
+  walk counter_map to find bin_i containing target_rank
+  rank_in_bin = target_rank - (cumulative count before bin_i)
+  bin_count = counter_map[bin_i]
+  lower = partition.boundary[bin_i]
+  upper = partition.boundary[bin_i + 1]
+
+  if bin_count >= 5:                      # threshold T=5 from Decision 3
+    return lower * (upper / lower) ** (rank_in_bin / bin_count)
+  else:
+    return sqrt(lower * upper)            # geometric midpoint (log-spaced bins)
+```
+
+Rationale: linear-in-log matches the partition's log-spaced geometry, giving best accuracy when the target bin is densely populated; midpoint is the honest fall-back when in-bin rank is itself noisy. The fall-through threshold is decided separately in Decision 3 to keep the two concerns independent.
+
+### Decision 2 — `buckets_per_decade` default for Path A and CLI knob
+
+**Locked**:
+- **Default `buckets_per_decade = 16`** for the per-message percentile path (Path A under approximate mode). Gives ~3.5% per-quantile error from bin resolution; 80 bins per partition over 5 decades; ~640 bytes per partition.
+- **New CLI flag `--percentile-buckets-per-decade N`**, short form `-pbpd`. Independent of the existing `-hgbpd`. Default `16`. Valid range: 4 ≤ N ≤ 64 (lower bound prevents degenerate accuracy; upper bound is a sanity cap, can be raised later if needed).
+
+Rationale: 16 hits the sweet spot for SRE-grade tail-percentile reporting — tight enough for single-point accuracy (P99: 4.2s ± 0.15s) and run-to-run regression detection (distinguishes 5% real change from bin noise), with trivial memory cost. Independent CLI knob decouples visualization precision (`-hgbpd`, driven by terminal aesthetics) from percentile precision (`-pbpd`, driven by SRE decision-making).
+
+Implementation: `-pbpd` must be added to `print_help()` in `ltl` and the options reference in `README.md` per CLAUDE.md.
+
+### Decision 3 — Fall-through threshold for the uniform-in-log assumption
+
+**Locked**: Fall-through threshold **T = 5**. When R4's target bin has counter value `bin_count < 5`, R4 returns the geometric midpoint `sqrt(lower · upper)` instead of the linear-in-log interpolation from Decision 1. When `bin_count ≥ 5`, R4 uses the linear-in-log formula.
+
+**`-V` reporting**: two distinct per-quantile warnings on `-V` Layer 2:
+- `tail_sample_count_warning: yes` — fires when R4 fell through to midpoint for this quantile because `bin_count < 5`. Informational: bin-resolution bound still applies, but the answer is the bin midpoint rather than an interpolated point.
+- `tail_sample_count_starved: yes` — fires when the partition's *total* count is too low to meaningfully support the target rank (e.g., requesting P99.9 of a 50-count partition). Severe: the rank itself is unsupported by the data, independent of bin resolution.
+
+Both warnings may fire for the same quantile.
+
+Rationale: the threshold of 5 is the level at which the linear-in-log formula's underlying assumption (values are uniformly distributed on a log scale within the bin) is meaningful enough to act on. Below 5, the in-bin rank divides into so few discrete positions that returning the bin midpoint is a more defensible answer than manufacturing in-bin precision the data cannot justify. Constant rather than adaptive — easier to communicate in `-V` and reason about. The two-level warning is the honest signal: low bin count is informational; low partition count is a real data-quality flag the user needs to see.
+
 ## Spec stability
 
-The behavior contract (R1–R14, R9 multi-phase plan, edge cases, `-V` format) is intended to be stable across implementation. The research deliverables (D1–D5) are expected to grow as research lands; their outputs become the bound values for R4, R7, R10. When that happens, a **Locked decisions from research** subsection records the values.
+The behavior contract (R1–R14, R9 multi-phase plan, edge cases, `-V` format) is intended to be stable across implementation. The research deliverables (D1–D5) are expected to grow as research lands; their outputs become the bound values for R4, R7, R10. **Locked decisions from research** records those values as the decision conversation closes them.
 
 Phase boundaries in R9 are part of the spec contract. Crossing a phase boundary requires explicit revalidation against the accuracy bound for the new consumer.
