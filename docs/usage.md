@@ -175,6 +175,51 @@ ltl -so max access.log
 ltl -so occurrences -sa access.log
 ```
 
+### Percentile mode
+
+ltl computes latency percentiles for the summary table, CSV output, per-time-bucket statistics, heatmap markers, and histogram indicators. Under the unified percentile contract (issue [#187](https://github.com/gregeva/logtimeline/issues/187)), these consumers share a single bin-counter substrate with log-spaced bin geometry and HdrHistogram-style auto-resize. Bin precision is tunable; the locked default (53 buckets per decade, ~1.3% precision) matches OpenTelemetry's Scale-4 analog and is appropriate for the vast majority of analyses.
+
+When this matters: at the default precision, percentile values like P50 / P99 are within ~1.3% of their true sort-based values. Increasing precision reduces binning error proportionally at the cost of memory per partition (~2.1 KB per partition at default precision; scales linearly with bpd).
+
+| Option | Description |
+|--------|-------------|
+| `-pp, --percentile-precision <N>` | Precision tier 1..9 (default: 5). See tier table below. |
+| `-pbpd, --percentile-buckets-per-decade <N>` | Buckets per decade directly (default: 53; valid 4..616). Overrides `--percentile-precision` when both supplied. |
+| `-ep, --exact-percentiles` | Revert all migrated consumers to exact sort-based percentile computation. Deprecated; intended as a safety net during the migration. |
+
+**Precision tier table** (`--percentile-precision N` → buckets-per-decade):
+
+| N | bpd | Worst-case binning error |
+|---|-----|--------------------------|
+| 1 | 4   | ~14%                     |
+| 2 | 8   | ~7%                      |
+| 3 | 16  | ~3.5%                    |
+| 4 | 32  | ~1.8%                    |
+| 5 | 53  | ~1.1% (default)          |
+| 6 | 80  | ~0.7%                    |
+| 7 | 115 | ~0.5%                    |
+| 8 | 256 | ~0.2%                    |
+| 9 | 616 | ~0.09%                   |
+
+Use `-V` to inspect the active settings. The `=== PERCENTILE MODE ===` section reports the resolved precision, the source annotation (default, flag, or override), per-consumer state, and per-quantile audit codes (`out_of_range_bounded: pN=none|low|high`).
+
+```bash
+# Default precision (5 / 53 bpd)
+ltl access.log
+
+# Higher precision tier for tight outlier analysis
+ltl -pp 7 access.log
+
+# Direct buckets-per-decade override
+ltl -pbpd 100 access.log
+
+# Inspect the resolved settings
+ltl -V access.log | grep -A 5 'PERCENTILE MODE'
+
+# Opt out to exact (sort-based) percentiles for byte-exact comparison
+ltl -ep access.log
+```
+
 ### Heatmap
 
 Heatmap mode replaces the per-bucket latency statistics with a color-intensity visualization showing how values are distributed within each time bucket. Where percentile statistics reduce a distribution to a handful of numbers, the heatmap reveals its full shape — bimodal distributions (cache hits vs. misses), shifting modes over time, outlier clustering, and long tails all become visually apparent. Each cell represents a value range, with color intensity proportional to the number of entries falling within that range. Logarithmic bucket boundaries provide resolution across the full range of values, from sub-millisecond to multi-second durations.
@@ -202,6 +247,7 @@ Histograms show the overall distribution shape of a metric across the entire tim
 | `-hg, --histogram [metric]` | Show an overall distribution histogram after the bar graph (`duration`, `bytes`, or `count`) |
 | `-hgw, --histogram-width <N>` | Histogram width as percentage of terminal (default: 95) |
 | `-hgh, --histogram-height <N>` | Histogram height in rows (default: 8) |
+| `-hgbpd, --histogram-buckets-per-decade <N>` | Histogram buckets per decade (default: 8) |
 
 ```bash
 # Show duration and bytes histograms side by side

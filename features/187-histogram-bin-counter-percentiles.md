@@ -1132,7 +1132,7 @@ Non-binding guidance for #189's implementation — the contract above is what mu
 
 2. **Tiered lever** (user-friendly day-to-day analyst use):
    - Long form: `--percentile-precision LEVEL`
-   - No short form.
+   - Short form: `-pp LEVEL` (added 2026-05-19 per project requirement that every CLI option exposes both short and long forms; supersedes the prior "no short form" lock).
    - Valid range: **1 ≤ LEVEL ≤ 9**.
    - Default: LEVEL 5 (maps to bpd = 53).
    - Internally maps to `buckets_per_decade` per the locked table below.
@@ -1377,7 +1377,7 @@ ltl exposes a global user-facing opt-out flag that reverts all migrated consumer
 
 **Flag**:
 - Long form: `--exact-percentiles`
-- No short form.
+- Short form: `-ep` (added 2026-05-19 per project requirement that every CLI option exposes both short and long forms; supersedes the prior "no short form" lock).
 - Boolean flag (no argument).
 - Default: not set (unified path runs for all migrated consumers).
 

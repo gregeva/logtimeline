@@ -1398,7 +1398,7 @@ sub print_help {
 
     # Description column starts at this position; adapt to terminal width
     my $opt_col   = 4;    # indent for option text
-    my $desc_col  = 47;   # column where descriptions begin
+    my $desc_col  = 52;   # column where descriptions begin (bumped from 47 to 52 in PR #189-3 to accommodate longer long-form option names like --histogram-buckets-per-decade and --percentile-buckets-per-decade per the project requirement that every option exposes both short and long forms; tied to $short_col below — when $short_col grows by N, $desc_col must grow by N)
     my $wrap_width = ($terminal_width && $terminal_width > 80) ? $terminal_width : 80;
 
     # Word-wrap a description string to fit between $desc_col and $wrap_width
@@ -1425,7 +1425,7 @@ sub print_help {
     };
 
     # Format an option line: option text left-aligned, description word-wrapped
-    my $short_col = 7;  # width allocated for short option (e.g. "-bs,  " or "-osum,")
+    my $short_col = 8;  # width allocated for short option text (including trailing comma). Bumped from 7 to 8 in PR #189-3 to accommodate "-hgbpd," (7 chars including comma) without forcing the long-form column one position right of every other row's long-form column. Also requires bumping $desc_col by the same amount.
     my $opt = sub {
         my ($flags, $desc) = @_;
         my $formatted;
@@ -1575,6 +1575,14 @@ sub print_help {
     $out .= $opt->("-hg,  --histogram [metric]",    "Show an overall distribution histogram after the bar graph (duration, bytes, or count)");
     $out .= $opt->("-hgw, --histogram-width <N>",   "Histogram width as percentage of terminal (default: 95)");
     $out .= $opt->("-hgh, --histogram-height <N>",  "Histogram height in rows (default: 8)");
+    $out .= $opt->("-hgbpd, --histogram-buckets-per-decade <N>", "Histogram buckets per decade (default: 8; 4=~10%, 8=~5%, 16=~2.5%, 32=~1% precision)");
+    $out .= $opt->("-hgb,  --histogram-buckets <N>",             "Override total histogram bucket count (default: 0 = auto-calculate from buckets-per-decade)");
+
+    # Percentile mode (Issue #189)
+    $out .= $subheading->("Percentile mode");
+    $out .= $opt->("-pp,   --percentile-precision <N>",            "Set percentile binning precision tier 1..9 (default: 5 = ~1.3%; 1=~10%, 9=~0.1%). Affects migrated consumers; see docs/usage.md");
+    $out .= $opt->("-pbpd, --percentile-buckets-per-decade <N>",   "Set percentile buckets-per-decade directly (default: 53; valid 4..616). Overrides --percentile-precision when both supplied");
+    $out .= $opt->("-ep,   --exact-percentiles",                   "Disable unified percentile mode; revert to exact sort-based computation (deprecated; -V shows opt_out_active: yes)");
 
     # User-Defined Metrics
     $out .= $subheading->("User-Defined Metrics");
@@ -3943,11 +3951,11 @@ sub adapt_to_command_line_options {
         'histogram|hg:s' => \&handle_histogram_option,
         'histogram-width|hgw=i' => sub { $histogram_width_percent = $_[1]; $histogram_width_explicit = 1; },
         'histogram-height|hgh=i' => sub { $histogram_height = $_[1]; $histogram_height_explicit = 1; },
-        'hgbpd=i' => \$histogram_buckets_per_decade,
-        'hgb=i' => \$histogram_bucket_override,
-        'pbpd=i' => \$percentile_buckets_per_decade,
-        'percentile-precision=i' => \$percentile_precision_level,
-        'exact-percentiles' => \$exact_percentiles_optout,
+        'hgbpd|histogram-buckets-per-decade=i' => \$histogram_buckets_per_decade,
+        'hgb|histogram-buckets=i' => \$histogram_bucket_override,
+        'pbpd|percentile-buckets-per-decade=i' => \$percentile_buckets_per_decade,
+        'pp|percentile-precision=i' => \$percentile_precision_level,
+        'ep|exact-percentiles' => \$exact_percentiles_optout,
         'terminal-width|tw=i' => \$terminal_width,
         'no-auto-hide|nah' => \$no_auto_hide,
         'debug-layout' => \$debug_layout,
