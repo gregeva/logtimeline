@@ -286,6 +286,21 @@ my $histogram_legend_spacing = 1;             # Vertical gap between histogram a
 my $histogram_buckets_per_decade = 8;         # Default: ~5% precision (4=10%, 8=5%, 16=2.5%, 32=1%)
 my $histogram_bucket_override = 0;            # If > 0, use this exact bucket count instead of calculating
 
+# Percentile-mode bin-counter primitives (Issue #189). Universal
+# buckets-per-decade for the unified percentile contract, distinct from
+# $histogram_buckets_per_decade (above; histogram-only, default 8). The two
+# flags coexist with documented precedence per:
+#   features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket C § C7 (option 1)
+# Default values are locked at:
+#   features/187-histogram-bin-counter-percentiles.md § Decision 2 (bpd=53)
+#   features/187-histogram-bin-counter-percentiles.md § Decision 5 (seed_decades=5)
+#   features/187-histogram-bin-counter-percentiles.md § Decision 7 (--exact-percentiles opt-out)
+my $percentile_buckets_per_decade  = 53;      # ~1.3% precision; tier 5 in the locked precision table
+my $percentile_precision_level     = undef;   # 1..9 tier; resolves to a bpd via the locked precision table
+my $percentile_precision_source    = 'default';  # 'default' | '-pbpd N' | '--percentile-precision N' | '-pbpd N; --percentile-precision N overridden'
+my $exact_percentiles_optout       = 0;       # when set, migrated consumers revert to calculate_statistics
+my $percentile_seed_decades        = 5;       # partition seeds at 5 decades centered on first value
+
 # Histogram data collection (hash-based for dynamic metrics)
 my %histogram_values = (
     duration => [],
@@ -484,6 +499,257 @@ foreach my $key (keys %colors) {
 }
 
 ## SUBS ##
+
+# ============================================================================
+# HISTOGRAM BIN-COUNTER PRIMITIVES (R1-R6 per Issue #189)
+# ============================================================================
+# Authoritative references (file paths, not loose IDs):
+#   Requirements list (R1-R12):
+#     features/189-histogram-bin-counter-primitives.md § Requirements
+#   Locked contract decisions (D1, D2, D4, D5, D7, D8, D10):
+#     features/187-histogram-bin-counter-percentiles.md § Locked decisions from research
+#   Implementation-readiness audit (Buckets A/B/C, recommended PR partition):
+#     features/189-bin-counter-primitives-implementation-readiness-audit.md
+#   Empirical validation of the contract on real D2 data:
+#     prototype/189-bin-counter-primitives-validation-report.md
+#
+# Design choices baked in here (each cites the file/section that locks it):
+#   R1  partition_new() — lazy 5-decade geometric seed centered on the first
+#       observed value. Locked at:
+#         features/187-histogram-bin-counter-percentiles.md § Decision 5
+#   R1  partition_extend() — HdrHistogram doubling-rebin when a value falls
+#       outside [min, max]; existing counts remapped via geometric-midpoint
+#       projection into the new geometry. Locked at:
+#         features/187-histogram-bin-counter-percentiles.md § Decision 5
+#   R2  bin_assign() — closed-form only: int(B * log(v/min) / log(max/min)).
+#       Algorithm choice locked at:
+#         features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket A § A1
+#       Evidence: 3.31x faster than linear, 2.46x faster than binary, 4.75x
+#       lower memory at 51,469 partitions (closed-form does not need a stored
+#       boundary array). See:
+#         prototype/189-bin-counter-primitives-validation-report.md § V2 Part B
+#   R3  counter_update() — consumer-defined keying; the $store hashref is
+#       keyed by a caller-formed string and supports every keying shape
+#       enumerated in:
+#         features/187-histogram-bin-counter-percentiles.md § R12 (consumer catalogue)
+#   R4  percentile() — Prometheus HistogramQuantile in-bucket interpolation,
+#       formula locked verbatim against promql/quantile.go lines 331-353 at:
+#         features/187-histogram-bin-counter-percentiles.md § Decision 1
+#       Per-quantile audit semantics ('none' / 'low' / 'high' decided at the
+#       moment of R4 invocation, not from partition state) locked at:
+#         features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket A § A3
+#   R6  Per-partition overflow / underflow counter slots. Both contribute to
+#       total_N for R4's rank calculation. Locked at:
+#         features/187-histogram-bin-counter-percentiles.md § Decision 4
+#
+# Boundary materialization: boundary[i] is computed on demand via
+# bin_boundary() — no per-partition boundary array stored. Locked at:
+#   features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket A § A2
+# This keeps the Path A memory projection of ~212 MB at 10^5 partitions in:
+#   features/187-histogram-bin-counter-percentiles.md § Decision 2
+#
+# Scope of this PR (PR #189-1 of three): primitives + CLI flag parsing only.
+# No consumer is migrated; baseline regression must remain byte-identical.
+# PR partition rationale is in:
+#   features/189-bin-counter-primitives-implementation-readiness-audit.md § Recommended PR-sized scope partition
+
+sub bin_boundary {
+    # Compute boundary[i] = min * (max/min)^(i/B) for partition $p.
+    # Cheaper than 2 multiplies + 1 exp on modern hardware; called by R4
+    # (twice per percentile invocation) and by partition_extend's count
+    # remap. Not called per-observation — R2 uses log()/log_ratio directly.
+    my ($p, $i) = @_;
+    return $p->{min} * exp($p->{log_ratio} * $i / $p->{bin_count});
+}
+
+sub partition_new {
+    # R1: lazily construct a partition seeded around $v0.
+    # Seed: min = v0 / sqrt(10^seed_decades), max = v0 * sqrt(10^seed_decades).
+    # bin_count = bpd * seed_decades, integer-truncated. Locked at:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 5
+    my ($v0, $bpd, $seed_decades) = @_;
+    my $half_span = sqrt(10 ** $seed_decades);
+    my $min       = $v0 / $half_span;
+    my $max       = $v0 * $half_span;
+    my $bin_count = int($bpd * $seed_decades);
+    return {
+        min       => $min,
+        max       => $max,
+        bpd       => $bpd,
+        decades   => $seed_decades,
+        bin_count => $bin_count,
+        log_ratio => log($max / $min),  # cached for closed-form bin_assign
+        rebins    => 0,
+    };
+}
+
+sub partition_extend {
+    # R1: HdrHistogram doubling-rebin so $value falls inside [min, max].
+    # When $value > max, multiply max by 10^(decades/2) until it contains
+    # $value; symmetric for $value < min. After extension, remap existing
+    # bin counts via geometric-midpoint projection into the new geometry
+    # (index-monotonic in the extension direction — counts cluster on a
+    # contiguous range of new indices, no scatter). Locked at:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 5
+    #
+    # Returns the new bins arrayref; the caller is expected to swap it in.
+    my ($p, $value, $old_bins_ref) = @_;
+    my $double_factor = 10 ** ($p->{decades} / 2);
+    my ($new_min, $new_max) = ($p->{min}, $p->{max});
+    while ($value > $new_max || $value < $new_min) {
+        if ($value > $new_max) {
+            $new_max *= $double_factor;
+        } else {
+            $new_min /= $double_factor;
+        }
+    }
+    # Re-derive bin_count from the new span so per-decade resolution is preserved.
+    my $new_decades   = log($new_max / $new_min) / log(10);
+    my $new_bin_count = int($p->{bpd} * $new_decades);
+    $new_bin_count = $p->{bin_count} if $new_bin_count < $p->{bin_count};
+
+    my $new_log_ratio = log($new_max / $new_min);
+    my @new_bins;
+    for my $old_i (0 .. $p->{bin_count} - 1) {
+        my $count = $old_bins_ref->[$old_i];
+        next unless defined $count && $count > 0;
+        my $lower    = bin_boundary($p, $old_i);
+        my $upper    = bin_boundary($p, $old_i + 1);
+        my $midpoint = sqrt($lower * $upper);  # geometric midpoint
+        my $new_i    = int($new_bin_count * log($midpoint / $new_min) / $new_log_ratio);
+        $new_i = 0                  if $new_i < 0;
+        $new_i = $new_bin_count - 1 if $new_i >= $new_bin_count;
+        $new_bins[$new_i] = ($new_bins[$new_i] // 0) + $count;
+    }
+
+    $p->{min}       = $new_min;
+    $p->{max}       = $new_max;
+    $p->{bin_count} = $new_bin_count;
+    $p->{log_ratio} = $new_log_ratio;
+    $p->{rebins}++;
+
+    return \@new_bins;
+}
+
+sub bin_assign {
+    # R2: closed-form bin index. Returns:
+    #   ('IN',        $i)     value in [min, max]
+    #   ('UNDERFLOW', undef)  value < min
+    #   ('OVERFLOW',  undef)  value > max
+    # The caller decides whether to extend the partition or increment an
+    # over/underflow counter. counter_update() composes those choices per
+    # the auto-resize lifecycle.
+    my ($p, $v) = @_;
+    return ('UNDERFLOW', undef) if $v < $p->{min};
+    return ('OVERFLOW',  undef) if $v > $p->{max};
+    my $i = int($p->{bin_count} * log($v / $p->{min}) / $p->{log_ratio});
+    $i = $p->{bin_count} - 1 if $i >= $p->{bin_count};
+    $i = 0                   if $i < 0;
+    return ('IN', $i);
+}
+
+sub counter_update {
+    # R3 + R6: increment the counter for ($store, $key, $value).
+    # $store is a hashref; $key is a caller-formed string (the caller composes
+    # the key from whatever shape its consumer needs — (category, log_key),
+    # time_bucket, '', etc. — joined with "\x1f" by convention). Lazy partition
+    # construction on first observation per the auto-resize lifecycle locked at:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 5
+    # Out-of-range triggers extend; if the extended partition still can't
+    # contain the value (only reachable when a future growth cap is added —
+    # none today), the over/underflow counter increments per:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 4
+    my ($store, $key, $value) = @_;
+    my $entry = $store->{$key};
+    if (!$entry) {
+        $entry = $store->{$key} = {
+            partition => partition_new($value, $percentile_buckets_per_decade, $percentile_seed_decades),
+            bins      => [],
+            overflow  => 0,
+            underflow => 0,
+        };
+    }
+
+    my ($where, $idx) = bin_assign($entry->{partition}, $value);
+    if ($where eq 'IN') {
+        $entry->{bins}->[$idx] = ($entry->{bins}->[$idx] // 0) + 1;
+        return;
+    }
+
+    # Out of range: extend the partition, remap existing counts, re-assign.
+    my $new_bins = partition_extend($entry->{partition}, $value, $entry->{bins});
+    $entry->{bins} = $new_bins;
+    my ($w2, $i2) = bin_assign($entry->{partition}, $value);
+    if ($w2 eq 'IN') {
+        $entry->{bins}->[$i2] = ($entry->{bins}->[$i2] // 0) + 1;
+    } elsif ($w2 eq 'OVERFLOW') {
+        $entry->{overflow}++;
+    } else {
+        $entry->{underflow}++;
+    }
+}
+
+sub percentile {
+    # R4: Prometheus HistogramQuantile in-bucket interpolation. Formula and
+    # rank convention locked verbatim against promql/quantile.go at:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 1
+    #
+    # 1. total_N = sum(bins) + underflow + overflow
+    # 2. target_rank = ceil(q * total_N)
+    # 3. Walk: underflow -> in-range bins low-to-high -> overflow
+    # 4. If target_rank lands in underflow: return boundary[0],          audit='low'
+    #    If target_rank lands in overflow:  return boundary[bin_count],  audit='high'
+    #    Otherwise: rank_in_bin = target_rank - (cum - c);
+    #               fraction    = rank_in_bin / c;
+    #               value       = lower * (upper/lower)^fraction;        audit='none'
+    #
+    # Per-quantile audit semantics: a partition with overflow > 0 may still
+    # report audit='none' for some quantiles — the audit is decided by where
+    # the target rank lands, not by partition state. Locked at:
+    #   features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket A § A3
+    #
+    # Returns (undef, 'none') for empty counter maps. Caller should not invoke
+    # in that state, but the contract is defined.
+    my ($entry, $q) = @_;
+    my $p    = $entry->{partition};
+    my $bins = $entry->{bins};
+    my $under = $entry->{underflow} // 0;
+    my $over  = $entry->{overflow}  // 0;
+
+    my $in_total = 0;
+    $in_total += ($_ // 0) for @$bins;
+    my $total_N = $under + $in_total + $over;
+    return (undef, 'none') if $total_N == 0;
+
+    my $target_rank = POSIX::ceil($q * $total_N);
+    $target_rank = 1       if $target_rank < 1;
+    $target_rank = $total_N if $target_rank > $total_N;
+
+    my $cum = 0;
+    if ($under > 0) {
+        $cum += $under;
+        return (bin_boundary($p, 0), 'low') if $target_rank <= $cum;
+    }
+    for my $i (0 .. $p->{bin_count} - 1) {
+        my $c = $bins->[$i] // 0;
+        next if $c == 0;
+        $cum += $c;
+        if ($target_rank <= $cum) {
+            my $lower       = bin_boundary($p, $i);
+            my $upper       = bin_boundary($p, $i + 1);
+            my $rank_in_bin = $target_rank - ($cum - $c);
+            my $fraction    = $rank_in_bin / $c;
+            my $value       = $lower * (($upper / $lower) ** $fraction);
+            return ($value, 'none');
+        }
+    }
+    # Must be in overflow.
+    return (bin_boundary($p, $p->{bin_count}), 'high');
+}
+
+# ============================================================================
+# END HISTOGRAM BIN-COUNTER PRIMITIVES
+# ============================================================================
 
 # Index file subroutines (Issue #46)
 
@@ -3608,6 +3874,9 @@ sub adapt_to_command_line_options {
         'histogram-height|hgh=i' => sub { $histogram_height = $_[1]; $histogram_height_explicit = 1; },
         'hgbpd=i' => \$histogram_buckets_per_decade,
         'hgb=i' => \$histogram_bucket_override,
+        'pbpd=i' => \$percentile_buckets_per_decade,
+        'percentile-precision=i' => \$percentile_precision_level,
+        'exact-percentiles' => \$exact_percentiles_optout,
         'terminal-width|tw=i' => \$terminal_width,
         'no-auto-hide|nah' => \$no_auto_hide,
         'debug-layout' => \$debug_layout,
@@ -3684,6 +3953,32 @@ sub adapt_to_command_line_options {
             warn "Invalid histogram width percent: $histogram_width_percent. Using default (95).\n";
             $histogram_width_percent = 95;
         }
+    }
+
+    # Percentile-mode precision resolution (Issue #189). Resolves the bpd to
+    # use for the unified percentile contract from the CLI flags. The flag
+    # interaction (-pbpd wins over --percentile-precision; the level-to-bpd
+    # tier table; the 4..616 range) is locked at:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 2
+    # Flags are parsed here but not yet consumed — the first consumer
+    # migration is the first reader of these globals.
+    if (defined $percentile_precision_level && $percentile_buckets_per_decade == 53) {
+        my %level_to_bpd = (1=>4, 2=>8, 3=>16, 4=>32, 5=>53, 6=>80, 7=>115, 8=>256, 9=>616);
+        if (!exists $level_to_bpd{$percentile_precision_level}) {
+            warn "Invalid --percentile-precision: $percentile_precision_level (must be 1..9). Using default (5).\n";
+            $percentile_precision_level = 5;
+        }
+        $percentile_buckets_per_decade = $level_to_bpd{$percentile_precision_level};
+        $percentile_precision_source   = "--percentile-precision $percentile_precision_level";
+    } elsif ($percentile_buckets_per_decade != 53) {
+        $percentile_precision_source = defined $percentile_precision_level
+            ? "-pbpd $percentile_buckets_per_decade; --percentile-precision $percentile_precision_level overridden"
+            : "-pbpd $percentile_buckets_per_decade";
+    }
+    if ($percentile_buckets_per_decade < 4 || $percentile_buckets_per_decade > 616) {
+        warn "Invalid -pbpd: $percentile_buckets_per_decade (must be 4..616). Using default (53).\n";
+        $percentile_buckets_per_decade = 53;
+        $percentile_precision_source   = 'default';
     }
 
     # Duration unit option validation (Issue #17)
