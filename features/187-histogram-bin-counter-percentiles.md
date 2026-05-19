@@ -1736,17 +1736,15 @@ The unified primitive contract locked in this file dissolves or reshapes scope i
 - R4-bis (heatmap markers consume R4) stays; consumes Decision 1's locked formula.
 - Validation surface is baseline-regression against shipped heatmap/histogram output. Display-output stability is the acceptance criterion.
 
-### #179 — Index pre-seed
+### #179 — Index pre-seed (CLOSED 2026-05-10)
 
-**Previous framing**: index read-back at start-up to provide global `[min, max]` for partition sizing; gates approximate mode via R2.1.
+**Status**: closed and shipped. The index read-back capability exists in the codebase per #179's acceptance criteria. It is not being changed or reopened by #187.
 
-**Reframed**: index is no longer load-bearing for partition sizing under Decision 5's auto-resize lock. #179's remaining scope is whatever drift-correction and tier-correctness concerns survive without the lifecycle gating role.
+**Relationship to #187's contract**: under Decision 5's auto-resize lifecycle, partitions adapt online to whatever values they observe; no upfront `[min, max]` is required from the index for partition sizing. The portion of #179's shipped work that pre-seeds heatmap/histogram boundary structures from cached index data therefore becomes **redundant** for any consumer that adopts the unified contract — those consumers do not need the pre-seed; they construct partitions lazily on first observation.
 
-**Scope changes needed in #179**:
-- Drop the "partition pre-seed" role from the spec.
-- Re-evaluate what drift-correction concerns persist. Drift in the underlying data distribution between runs is still real, but its consequences for the unified contract are different: with auto-resize, partitions adapt to each run's data independently; cross-run consistency is now an *analyst* concern, not a *system* concern.
-- Re-evaluate tier-correctness concerns for filtered runs. These persist but are audit/observability concerns rather than mode-gating concerns.
-- The scope of #179 likely shrinks substantially. The user may consider whether #179 should remain a separate issue or be folded into a smaller observability ticket.
+**Redundant ≠ broken**. The shipped index read-back, freshness check, drift detection, and end-of-run refresh remain correct for what they were designed to do. They are simply no longer load-bearing for the consumers that migrate to the unified contract. The implementation tickets that perform those consumer migrations may, at their discretion, leave the pre-seed code in place (no harm — the partition is auto-resized after construction regardless of the seed), bypass it for unified-path consumers (cleanest separation), or remove the pre-seed feed entirely if no remaining consumer needs it. That's a migration-ticket choice, not an action #187 imposes.
+
+**No action required from #187 against #179.** #179 is referenced in #187's `-V` audit field (`index_used: yes|no` per the existing observability), and any tier-correctness or drift-correction audit value that the index provides is independent of the unified contract. The index file (#46) and its read-back (#179) continue to exist as ltl features; they simply no longer participate in partition lifecycle decisions for unified-contract consumers.
 
 ### #189 — Unified primitives
 
