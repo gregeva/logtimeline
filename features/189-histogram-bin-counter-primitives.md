@@ -2,17 +2,23 @@
 
 ## Overview
 
-Histogram bin counters — the data structures and accumulation logic introduced by #34 — are the substrate for multiple ltl consumers: heatmap rendering, histogram rendering, and (progressively, per #187) per-message and per-time-bucket latency percentile calculation. Today the helper functions that compute bin partitions, assign values to bins, increment counters, and (for percentiles) interpolate quantiles are duplicated and inconsistent across the heatmap and histogram paths, and absent for percentiles.
+This feature implements the **unified primitive contract** locked in #187 (`features/187-histogram-bin-counter-percentiles.md`). The primitives are the helpers and data structures that every percentile-and-histogram consumer in ltl uses to build bin partitions, assign values to bins, increment counters, and interpolate percentile values. #187 produced the architectural research and locked the contract; #189 is the implementation ticket that turns the contract into runnable Perl code.
 
-This feature establishes a **unified set of histogram bin-counter primitives** that all current and future consumers share. The primitives are designed once, harmonized with the existing bin-count and bin-size determination logic (which is in place today and is not changing), and made available to:
+The primitives serve every consumer catalogued in #187 R12:
 
-- Heatmap rendering (per `(time_bucket, bin_index)`).
-- Histogram rendering (per `(metric, bin_index)`).
-- Summary-table per-message latency percentile calculation (per `(metric, bin_index)`, future consumer; today's array-based exact path migrates per #187's multi-phase rollout).
-- Per-time-bucket duration percentile statistics (per `(time_bucket, bin_index)`, future consumer per #187 Phase 3).
-- Highlight-subset percentiles (per `(time_bucket, bin_index, highlight_subset)` or analogous, future consumer per #187 Phase 4 / #51).
+| `-V` consumer name | Purpose | Locked in #187 Decision 8 |
+|---|---|---|
+| `summary_table` | Per-message latency percentiles for the summary table | ✓ |
+| `csv_output` | Same percentiles via `-o` CSV writer | ✓ |
+| `time_bucket_stats` | Per-time-bucket duration percentile statistics row | ✓ |
+| `heatmap_markers` | P50/P95/P99/P99.9 column-position markers on heatmap rows | ✓ |
+| `heatmap_cells` | Heatmap cell colors themselves | ✓ |
+| `histogram_view` | Histogram-mode global percentile indicators | ✓ |
+| `histogram_bins` | Histogram-mode bin counts (bar heights) | ✓ |
+| Future highlight-subset consumer | Per-`(time_bucket, highlight_subset)` percentiles | Phase 4 |
+| Any future percentile-or-histogram consumer | Inherits the contract by construction | Phase 5 |
 
-The primitives must support **independent partitions per consumer** (heatmap and histogram have different bucket counts and visual widths today — this is not changing) while sharing the underlying partition-computation, bin-assignment, counter-update, and percentile-interpolation logic.
+The primitives support **independent partitions per consumer** (heatmap, histogram, per-message, per-time-bucket all hold their own partitions) while sharing partition-computation, bin-assignment, counter-update, and percentile-interpolation logic. The contract is what's the same; the keying and rendering are what consumers choose.
 
 ## GitHub Issue
 
@@ -20,192 +26,280 @@ The primitives must support **independent partitions per consumer** (heatmap and
 
 ## Motivation
 
-Without harmonized primitives, the consumers will ship divergent implementations of the same conceptual operations. The cost compounds at every phase of the multi-phase percentile rollout (#187 R9). Each new consumer would either fork the partition/assignment/counter code from an existing consumer (accumulating drift) or reimplement it (accumulating bugs).
+Without unified primitives, every consumer ships divergent implementations of the same conceptual operations. Issues #34 (heatmap/histogram bin counters), #187 (percentile calculation), and future consumers each would either fork the partition/assignment/counter code (accumulating drift) or reimplement it (accumulating bugs). #189 prevents both by being the single home for the helper functions.
 
-Designing the primitives once, with full knowledge of all current and future consumers, also forces an explicit decision about which dimensions of the counter keying are parameterizable versus fixed. That decision is hard to retrofit once consumers are shipped.
-
-#34 lists the harmonization audit as a Phase 0 deliverable (R12). #187 lists the consumer-side primitive requirements as a Phase 0 deliverable (R12). This feature is the *receiving* end of both — the audit findings and consumer-side requirements land here as the binding primitive contract.
+#187 produced the architectural research and locked the contract. #189 implements it. The two issues are bound together: #189 has no design discretion that is not already settled by #187's locked decisions; #189's role is to translate the contract into correct, efficient Perl code, validated empirically.
 
 ## Delivery sequence
 
-This feature is one of three co-developed issues (#34, #187, #189). The work is performed in parallel against the `release/0.14.5` branch, with each issue's feature branches merging back periodically. The ordering below is the *delivery* sequence — when each step's output is required to be complete — not a strict serial work order.
+This feature is one of three co-developed issues (#34, #187, #189), now joined by the per-consumer migration tickets that consume #189's primitives.
 
-| Step | Work | Owner | Why this position | Status of this file |
-|---|---|---|---|---|
-| 1 | **Audit** — catalogue existing helpers (heatmap, histogram, summary-table percentile paths); produce consumer-side primitive requirements | **#34 R12** + **#187 R12**; outputs land in **this file's** *Audit findings* and *Consumer-side requirements* sections | Both this feature's primitive design and #187's algorithm research need to know what shapes the primitives must support. Without this first, primitives risk being designed for two consumers and reworked later. | **This file is the receiving end of step 1; populates its own *Audit findings* and *Consumer-side requirements* sections from the audit outputs** |
-| 2 | **Research + prototype** — algorithm comparative study, accuracy report, recommendation memo, prototype | **#187 D1–D5** | Algorithm choice (sketch vs. bin-derived interpolation) determines what this feature's percentile-interpolation primitive (R4) must do. Performed after audit but before this feature's implementation so it isn't built blind. | This file's R4 is informed by step 2's output |
-| 3 | **Deliver #189** — implement unified primitives | **#189** | Now informed by both the audit (step 1) and the algorithm choice (step 2). | **This file's implementation step** |
-| 4 | **Deliver #34 implementation** — heatmap and histogram consume this feature's primitives, including R4 for percentile markers and indicators | **#34** | First production consumer of this feature. Consumes **all four primitives R1–R4**: heatmap percentile row markers and histogram percentile legend / x-axis indicators both derive from R4 under bin-counter mode (per the R12 audit resolution). #34 verifies R1–R4 in production before #187 Phase 2 builds further on top. | This feature's R4 and R10 (no regression) are both verified at step 4 |
-| 5 | **Deliver #187 Phase 2** — summary-table per-message percentiles consume this feature's primitives | **#187 Phase 2** | Second R4 consumer. Verifies that R4's keying flexibility (R3) and accuracy contract (R4) compose for a different consumer shape (per-message rather than per-time-bucket or per-metric). | This feature's R6 (independence) and R8 (lifecycle) are further verified at step 5 |
-| 6+ | **#187 Phases 3–5** — progressively land more consumers (per-time-bucket, highlight-data, future) | **#187 Phases 3–5** | Each phase verifies this feature's primitives don't need to change to accept the new consumer. | This feature's R6 (independence) and R8 (lifecycle) are verified incrementally at each later phase |
+| Step | Work | Owner | Why this position |
+|---|---|---|---|
+| 1 | **Audit + Research** — catalogue every consumer (#187 R12), produce literature-grounded research, lock the unified primitive contract via the decision conversation | **#187** | Output is the unified contract in `features/187-histogram-bin-counter-percentiles.md` (D1, D2, D3 decision-support memo, all locked decisions). |
+| 2 | **Prototype validation** (the five mandatory aspects from #187 Decision 10) | **#189 — this issue's first step** | Hard prerequisite for production code. Validates the locked architecture against real D2 data before committing to production implementation. See *Prototype validation* below. |
+| 3 | **Implement unified primitives** per the locked contract | **#189 — this issue's production step** | Build R1 (partition with auto-resize), R2 (assignment), R3 (counter update with parameterized keying), R4 (percentile interpolation using the locked Prometheus formula), R5/R6 (overflow/underflow counters). |
+| 4 | **Consumer migrations begin** — heatmap/histogram (owned by #34's implementation ticket); summary-table + CSV output (per-message migration ticket); etc. | **Each consumer's own implementation ticket** | Consumers replace their pre-migration code with #189-primitive calls per the locked contract. Each migration is the responsibility of the owning ticket; #189 does not ship migrations. |
 
 ### Parallelism
 
-Steps 1 and 2 may proceed in parallel once the audit has produced enough consumer-side requirements for the research to evaluate bin-derived interpolation against. Step 3 (this feature's implementation) cannot complete until step 2 lands the algorithm choice; R4 specifically is gated on step 2. The partition / assignment / counter primitives (R1–R3) can be designed and implemented from the audit alone, in parallel with research, and can be merged ahead of R4 for internal prototyping — but **the three-issue delivery converges at step 4**: #34 step 4 requires R1–R4 together (per the R12 audit resolution, R4 is consumed by heatmap percentile markers and histogram percentile indicators), and #187 Phase 2 (step 5) also requires R4. There is no longer a useful "ship #34 before R4 lands" intermediate state.
+Steps 1 and 2 are sequential (the contract must be locked before the prototype is built). Step 3 (production implementation) is sequential after step 2 (Decision 10's hard-prerequisite rule). Step 4 (consumer migrations) gates on step 3 completing.
 
 ### Integration
 
-All work lands on feature branches merged into `release/0.14.5` periodically. The release branch is the integration point until the three co-developed issues are individually complete, at which point `release/0.14.5` ships per the standard release process (CLAUDE.md).
+All work lands on feature branches per CLAUDE.md's release process. Specific release-branch integration is the implementation ticket's call, not the contract's.
 
 ## Terminology
 
-The data structures and helpers in this feature are uniformly named **histogram bin counters**, **bin partitions**, **bin assignment**, and **percentile interpolation**. The qualifier "histogram" denotes the kind of partition (logarithmic histogram-style bins) and distinguishes the substrate from other counter-style structures in ltl.
+This feature uses the terminology locked in #187:
+
+- **Unified primitive contract** — the set of locked decisions in `features/187-histogram-bin-counter-percentiles.md` (F1, D1, D1A, D2, D3, D4, D5, D7, D8, D10). #189 implements this contract.
+- **Histogram bin counters** — the underlying data structure (log-spaced bin geometry, counter per bin, no retention of raw values).
+- **Consumer** — a code path that needs percentile values or histogram bin counts. See R12 catalogue above.
+- **Partition** — one instance of the bin counter structure with its own `[min, max]` boundaries, owned by one consumer for one keying dimension.
+- **Auto-resize** — the partition lifecycle locked in #187 Decision 5.
+
+#189 introduces no new terminology beyond what #187 locked.
+
+## Prototype validation (mandatory prerequisite per #187 Decision 10)
+
+Before #189 begins production implementation of the primitives, **the locked architecture must be validated empirically through prototyping**. Per #187 Decision 10, the five mandatory validation aspects are:
+
+1. **In-bin interpolation formula behavior on real data.** Exercise the locked Prometheus formula (`returned_value = exp(log(lower) + (log(upper) − log(lower)) · fraction)`) against representative D2 log files. Validate that the Perl implementation matches the math and that the accuracy contract holds on real distributions. Cover edge cases (single-bin partitions, `bin_count = 1`, `lower = upper`).
+
+2. **Auto-resize partition lifecycle on per-key fan-out at scale.** Exercise the HdrHistogram-style auto-resize behavior with realistic per-`(category, log_key)` fan-out (tens to hundreds of thousands of partitions). Measure rebin event counts per partition, per-key memory consumption, total counter-store memory, and confirm that actual memory matches the projected ~212 MB at 10⁵ keys at locked default 53 bpd. Validate that the amortized O(N) rebin cost claim holds on real per-key value-range distributions. Closes #187 grounding-doc gap 8 (per-key fan-out unaddressed in literature).
+
+3. **Initial partition seeding heuristic and overflow/underflow handling on edge-case data.** Validate the locked seed (partition opens at 5 decades centered on the first value seen) produces p99 rebin counts in the expected 0–2 range on real latency data. Construct pathological D2 inputs (extreme outliers, very narrow distributions, mixed scale regimes) and confirm the locked `out_of_range_bounded: high|low|none` audit field fires correctly per quantile and that R4 returns the correct boundary value.
+
+4. **End-to-end `-V` output sample for downstream comparison.** Produce a real `=== PERCENTILE MODE ===` verbose output block (per #187 Decision 8's locked format) from the prototype running against real log files. Exercise enough scenarios (default precision, `--percentile-precision` override, `-pbpd` override, flag conflict, overflow audit firing, opt-out active) to cover the locked format surface.
+
+5. **Calculation accuracy compared to the array-of-values approach currently in use.** Direct comparison between the prototype's unified-contract output and ltl's existing `calculate_statistics` retained-array sort-and-index approach (`ltl:5488`). For every required percentile per consumer (per #187 R3) across D2 datasets, confirm the unified output sits within the bin-resolution bound (per #187 R4) of today's exact output.
+
+**Hard prerequisite contract** (locked in #187 Decision 10):
+- #189 production implementation does not begin until all five aspects have been validated, results documented, and lessons identified.
+- If prototype validation surfaces a result that contradicts a locked #187 decision (e.g., real-world rebin rates are pathologically high under the locked seed heuristic), a follow-up issue is filed against #187 to record the contract revision and re-lock the affected decision. #189 does not silently diverge from the contract.
+
+**#189 owns**: where the prototype lives (e.g., `prototype/189-*.pl`), how it's structured (single script with `--scenario` subcommands, per-aspect scripts, etc.), how the results are documented, and whether the prototype code becomes the basis for production code or is discarded after lessons are extracted.
+
+The `prototype/96-fuzzy-consolidation.pl` work is the precedent for this pattern. Issue #96 used a standalone prototype to validate algorithmic choices against real D2 data before its production consolidation code was written; lessons from the prototype shaped the production implementation directly. #189 follows the same pattern for #187's contract.
 
 ## Requirements
 
-### R1 — Bin-partition primitive
+The requirements below define the **contract surface** that #189's primitive implementations must satisfy. Each requirement either restates a #187-locked decision (referenced explicitly) or specifies #189-internal contract surface for the primitives.
 
-A primitive that, given `(min, max, num_buckets)`, returns a stable bin-boundary array of length `num_buckets + 1`. The formula is the existing logarithmic `min * (max/min)^(i/num_buckets)` (unchanged from today; in place and not modified by this feature).
+### R1 — Bin-partition primitive (lazy lifecycle per #187 Decision 5)
+
+The bin-partition primitive constructs and manages a partition object. Per #187 Decision 5, the partition lifecycle is **HdrHistogram-style auto-resize**:
+
+- Partition is constructed **lazily on first observation** for a given consumer-key pair. Construction is not invoked at start-of-run.
+- Initial sizing: when the first value `v_0` for a partition is observed, the partition opens with `min` and `max` set to a default span centered geometrically on `v_0`. Per #187 Decision 5 implementation guidance: `min = v_0 / sqrt(10^decades_default)`, `max = v_0 · sqrt(10^decades_default)`, where `decades_default = 5` (matches ltl's existing heatmap/histogram convention).
+- Bin count per partition: per #187 Decision 2, the resolved `buckets_per_decade` (default 53; tunable via `--percentile-precision 1..9` or `-pbpd N`) multiplied by the partition's decades. At locked default, a partition has ~265 bins.
+- Boundary geometry: log-spaced, `boundary[i] = min · (max/min)^(i/B)` where B is the bin count. Same formula as the existing heatmap/histogram code (`ltl:4961-4966`).
+- Rebin growth: when a subsequently-observed value falls outside `[min, max]`, the partition extends via **HdrHistogram-convention doubling**. Per #187 Decision 5 implementation guidance: if a value exceeds `max`, extend so the new `max` is at least `current_max · 10^(decades_default / 2)`; symmetric for values below `min`. Existing counts retain their indices (the boundary geometry is index-monotonic in the extension direction).
 
 The primitive must:
 
-- Accept arbitrary positive `num_buckets`. Heatmap and histogram pass their own (already-computed) bucket counts.
-- Validate inputs and surface a recognized failure condition for degenerate cases (`min == max`, `min <= 0`).
-- Return a partition object that downstream primitives consume; the object's shape (array, opaque handle, etc.) is implementation-defined provided the contract holds.
-- Be pure: same inputs always produce the same partition.
+- Accept the resolved `buckets_per_decade` value (locked per #187 Decision 2's source-annotated value: default, `-pbpd N`, or `--percentile-precision N`).
+- Maintain the partition's `min`, `max`, and bin-count as observable state for the consumer.
+- Track rebin events on the partition for the `-V` telemetry per #187 Decision 5 (see R9 below).
+- Be deterministic: same observation sequence produces the same partition state.
 
 ### R2 — Bin-assignment primitive
 
-A primitive that, given `(partition, value)`, returns either:
+The bin-assignment primitive, given `(partition, value)`, returns either:
 
 - A bin index in `[0, num_buckets - 1]` for in-range values.
-- An out-of-range sentinel (low or high) for values outside `[min, max]`.
+- An out-of-range sentinel (low or high) for values outside the partition's current `[min, max]`.
+
+Out-of-range values trigger the rebin behavior (R1) — the partition extends so the value can be placed in an in-range bin. Out-of-range sentinels are only returned when the partition's current `[min, max]` is the result of an explicit decision not to extend further (an implementation-defined cap on partition growth, if any) — in that case, the value contributes to the overflow or underflow counter per #187 Decision 4 (see R6 below).
 
 The primitive must:
 
-- Produce the same bin index that today's post-hoc tally produces for the same partition (no off-by-one at boundary edges). This is the load-bearing correctness requirement that makes #34 R8 (render equivalence) achievable.
-- Be efficient enough to invoke per-line in the parsing hot path. The exact algorithm (binary search, direct logarithmic computation, etc.) is implementation-defined.
-- Be pure.
+- Produce the same bin index that the locked log-spaced boundary computation produces for any value inside `[min, max]`.
+- Be efficient enough to invoke per-line in the parsing hot path. The exact algorithm (binary search, direct logarithmic computation) is implementation-defined.
+- Be pure given a fixed partition state.
 
 ### R3 — Counter-update primitive (parameterized keying)
 
-A primitive that, given `(counter_store, key, bin_index_or_overflow)`, increments the appropriate counter. The `key` shape is **parameterized per consumer**:
+The counter-update primitive, given `(counter_store, key, bin_index_or_overflow_sentinel)`, increments the appropriate counter. The `key` shape is **parameterized per consumer**, supporting all keying shapes catalogued in #187 R12:
 
-- Heatmap: `key = time_bucket`.
-- Histogram: `key = ()` (no key beyond the implied metric).
-- Per-message latency percentile (future, #187 Phase 2): `key = ()`.
-- Per-time-bucket percentile (future, #187 Phase 3): `key = time_bucket`.
-- Highlight-subset (future, #187 Phase 4 / #51): `key = (time_bucket, highlight_subset)` or analogous.
+| Consumer (#187 Decision 8 locked name) | Key shape |
+|---|---|
+| `summary_table` | `(category, log_key)` |
+| `csv_output` | shares with `summary_table` |
+| `time_bucket_stats` | `time_bucket` |
+| `heatmap_markers` | `time_bucket` |
+| `heatmap_cells` | `time_bucket` |
+| `histogram_view` | `()` (single global partition per metric) |
+| `histogram_bins` | `()` (single global partition per metric) |
+| Future highlight-subset | `(time_bucket, highlight_subset)` or analogous |
 
 The primitive must:
 
-- Not assume any specific key shape. Consumers define their key.
-- Maintain separate counters for in-range bin indices and for low/high overflow per key.
+- Not assume any specific key shape. Consumers define their key when they invoke R3.
+- Maintain separate counters per key for in-range bin indices, plus the overflow and underflow counters per #187 Decision 4 (see R6).
 - Allow the counter store for a key to be looked up, enumerated, and freed independently of other keys' stores (R8 lifecycle requirement).
+- Lazily construct the partition for a new key on its first observation (R1 lifecycle).
 
-The counter-store shape (hash of hashes, dense array, etc.) is implementation-defined. The contract is the operation, not the structure.
+The counter-store shape (hash of hashes, dense array, etc.) is implementation-defined. The contract is the operation, not the data structure.
 
-### R4 — Percentile-interpolation primitive
+### R4 — Percentile-interpolation primitive (locked formula per #187 Decision 1)
 
-A primitive that, given `(partition, counter_map_for_a_single_key, target_quantile)`, returns an interpolated value for that quantile.
+The percentile-interpolation primitive, given `(partition, counter_map_for_a_single_key, target_quantile)`, returns a value for that quantile using the **Prometheus native-exponential `HistogramQuantile` in-bucket interpolation formula** locked in #187 Decision 1.
+
+The algorithm (locked verbatim in #187 Decision 1 against `promql/quantile.go` lines 331–353):
+
+1. Compute `total_N = sum of counter map` (including the overflow and underflow counters per #187 Decision 4).
+2. Compute `target_rank = ceil(target_quantile · total_N)`.
+3. Walk the counter map (low to high: underflow, then in-range bins by index, then overflow) to locate the position containing `target_rank`.
+4. If `target_rank` lies in the underflow counter, return `partition.boundary[0]` (per #187 Decision 4). If it lies in the overflow counter, return `partition.boundary[B]` (per #187 Decision 4). The audit-field value for this quantile is `low` or `high` respectively.
+5. Otherwise compute `rank_in_bin = target_rank − (cumulative count up to but not including the located bin)` and `fraction = rank_in_bin / counter_map[located_bin]`.
+6. Return `exp(log(lower) + (log(upper) − log(lower)) · fraction)` where `lower = partition.boundary[located_bin]` and `upper = partition.boundary[located_bin + 1]`. The audit-field value for this quantile is `none`.
 
 The primitive must:
 
-- Accept any partition produced by R1 and any counter map produced by R3 invocations against the same partition.
-- Return values that satisfy #187's accuracy bound (R4 in #187, locked by D3 in #187) for the partition shapes used by **all** R4 consumers (see consumer list below).
-- Expose its accuracy guarantee in a form that #187's `-V` `accuracy_estimate` block can report. The form (theoretical bound, empirical bound, both) is decided in #187's D3.
-- Handle degenerate inputs gracefully (zero counters → returns `-`; single non-zero counter → returns the bin's representative value; all counts in one bin → returns the bin's representative value).
-- Be deterministic per R5.
-- Support the union of percentile sets required by R4's consumers (catalogued below): minimally P1, P10, P25, P50, P75, P90, P95, P99, P99.9, P99.99 — the histogram percentile-indicator set is the widest.
+- Be deterministic.
+- Compute correctly for any positive `bin_count` (including `bin_count = 1`, which yields `fraction = 1.0` and returns `upper` — matches HdrHistogram's per-bin convention).
+- Support any quantile in `(0, 1)`. Consumers select which percentiles they emit per #187 R3 (e.g., `summary_table` emits P1, P50, P75, P90, P95, P99, P999; `histogram_view` emits the wider ten-value set).
+- Report per-quantile `out_of_range_bounded: high | low | none` to the consumer alongside the returned value (so the consumer can populate the locked `-V` audit field per #187 Decision 8).
 
-**R4 consumers** (revised per the #34 R12 audit resolution; supersedes the earlier note that R4 was not consumed by #34):
-
-| Consumer | Feature | Purpose | Percentile set |
-|---|---|---|---|
-| Heatmap row markers | #34 | Per-time-bucket P50/P95/P99/P99.9 overlay positions. R4 returns numeric values; the consumer maps each value back to a bin index via R2 for storage in `%heatmap_percentiles{$bucket}`. | P50, P95, P99, P99.9 |
-| Histogram percentile indicators | #34 | Per-metric P1…P99.99 numeric values shown in the legend and positioned as x-axis tick marks. R4 returns numeric values stored directly in `%histogram_stats{$metric}{p*}`; downstream rendering is unchanged. | P1, P10, P25, P50, P75, P90, P95, P99, P99.9, P99.99 |
-| Summary-table per-message percentiles | #187 Phase 2 | Per-`(category, log_key)` latency percentiles for the message summary table. | P1, P50, P75, P90, P95, P99, P99.9 |
-| Per-time-bucket duration percentiles | #187 Phase 3 | Per-time-bucket latency percentiles for the bar-graph row stats. | P1, P50, P75, P90, P95, P99, P99.9 |
-| Highlight-subset percentiles | #187 Phase 4 / #51 | Per-`(time_bucket, highlight_subset)` (or analogous) percentiles. | TBD per #51 |
-
-Defining R4 here ensures #34 and #187 do not invent parallel partitions, and ensures the percentile-derivation story is uniform across heatmap, histogram, and the future per-message / per-time-bucket / highlight-subset consumers.
+**Special cases from Prometheus source that do not apply to ltl** (recorded for completeness):
+- ltl's substrate is positive-only duration data; no negative-bucket mirroring is needed.
+- ltl's substrate is purely log-spaced; the custom-bucket / zero-spanning-bucket linear-interpolation fallback in `promql/quantile.go` does not apply.
 
 ### R5 — Determinism
 
-All primitives are deterministic. For randomized internal optimizations (if any), state is reproducibly seeded. The consumer's caller sees identical outputs for identical inputs across runs.
+All primitives are deterministic. For a given observation sequence and partition state, the partition object (R1), bin assignments (R2), counter updates (R3), and percentile values (R4) are identical across runs. No randomization is used in any primitive.
 
-### R6 — Independence of partitions across consumers
+### R6 — Overflow and underflow counters (per #187 Decision 4)
 
-The primitives are designed so that each consumer holds its own partition object (R1 return value). Two consumers sharing the same metric but different `num_buckets` (heatmap and histogram are exactly this case) hold two separate partitions. The primitives do not impose a single shared partition.
+Per #187 Decision 4, each partition maintains two extra counter slots beyond the in-range bins:
 
-This is not a "future option"; it is a hard requirement. #34 R11 mandates that heatmap and histogram have independent partitions because their bucket counts and visual widths are independently configured. The primitives must accommodate that today.
+- **Underflow counter**: tallies values where `0 < value < partition.min` (positive values below the partition's current low boundary, where the partition's growth cap — if any — has not extended further).
+- **Overflow counter**: tallies values where `value > partition.max` (values above the partition's current high boundary, where the partition's growth cap — if any — has not extended further).
 
-### R7 — Compatibility with existing bin-count and bin-size determination
+Under #187 Decision 5's auto-resize lifecycle, overflow and underflow are expected to be rare in practice — the partition extends to contain observed values. The counters function as a safety net for extreme cases (e.g., a single outlier value beyond what the doubling-rebin extends to in a reasonable number of rebins).
 
-ltl today has working logic that determines the bucket count for heatmap (from `-hmw` and related) and for histogram (from `-hgw` and related), and that drives the visual representation. This feature must not change that logic. The primitive in R1 *consumes* a bucket count; it does not compute it.
+The primitive must:
 
-When future consumers (per #187 Phases 2–5) need a bucket count, they either (a) consume an existing consumer's bucket count (e.g., Phase 3 per-time-bucket percentiles consume the heatmap bucket count by sharing the partition object) or (b) compute their own via consumer-specific logic outside this feature. This feature does not introduce a global default bucket count.
+- Maintain the underflow and overflow counters per `(partition, key)` distinct from the in-range bin counters.
+- Include both in `total_N` for R4's rank computation.
+- Expose them to consumers for the per-consumer audit aggregates (`partitions_with_overflow_count`, `partitions_with_underflow_count` per #187 Decision 8).
+
+### R7 — Independence of partitions across consumers (and across keys within a consumer)
+
+The primitives are designed so that each `(consumer, key)` pair holds its own partition object. Two consumers sharing the same metric but different keying shapes (e.g., `summary_table` keyed by `(category, log_key)` and `histogram_view` keyed by `()`) hold separate partitions even on the same underlying data. Within a consumer, two keys (e.g., two distinct `time_bucket` values for `heatmap_cells`) hold separate partitions.
+
+This is a hard requirement, not an option:
+
+- Heatmap and histogram have independently configured display widths (`-hmw`, `-hgw`) and therefore historically had different bin counts. Under the unified contract, both consumers run at the same locked `buckets_per_decade` (per #187 Decision 2), so their partition geometry is consistent — but they remain separate partitions because they have different keying.
+- Per-key partitions in `summary_table` adapt independently to each log_key's value range.
+- Per-time-bucket partitions in `heatmap_cells` adapt independently to each time bucket's value range.
+
+The primitives impose no global registry of partitions.
 
 ### R8 — Memory lifecycle
 
-The primitives expose a lifecycle that allows:
+The primitives expose a lifecycle that supports the consumer migration tickets' memory-management needs:
 
-- A partition object to persist across an entire run.
-- Counter stores keyed by any value (per R3) to be freed when their key's processing completes — e.g., a heatmap counter store for `time_bucket=T` can be freed once that time bucket is rendered and no longer needed.
-- The percentile-interpolation primitive (R4) does not retain state between invocations; it derives its result from inputs only.
-- Composability with #23 Phase 2's named-stage memory model: counter stores can be freed at the `finalize` stage's per-bucket lifecycle point.
+- A partition object persists for the consumer's lifetime (typically the run).
+- Counter stores per key are independently freeable. The implementation tickets may free per-key counter stores after the data has been used (e.g., after a time bucket's row has been rendered).
+- The R4 primitive does not retain state between invocations; it derives its result from inputs only.
+- Composability with #23 Phase 2's named-stage memory model: counter stores can be freed at the `finalize` stage's per-bucket lifecycle point if/when that work lands.
 
-### R9 — `-V` observability surface
+Auto-resize (R1) reallocates the counter storage when the partition extends. The implementation may choose in-place reallocation or copy-on-resize; per #187 Decision 5 implementation guidance, in-place avoids per-rebin allocation churn.
 
-The primitives themselves do not produce `-V` output (consumers do). But the primitives expose enough state for consumers to populate their own `-V` sections accurately:
+### R9 — Telemetry surface for `-V` output (per #187 Decision 8)
 
-- Partition objects expose their `min`, `max`, `num_buckets`, and boundary array.
-- Counter stores expose totals, per-key per-bin counts, and overflow counts.
-- The percentile-interpolation primitive returns the interpolated value alongside an accuracy-estimate descriptor.
+The primitives expose telemetry signals that consumers populate into the locked `=== PERCENTILE MODE ===` `-V` section per #187 Decision 8. The primitives themselves do not produce `-V` output; they make the data available.
 
-The exact API surface (method names, return shapes) is implementation-defined provided #34's `=== HISTOGRAM BIN COUNTER MODE ===` and #187's `=== PERCENTILE MODE ===` sections can be populated correctly.
+The primitives must expose:
 
-### R10 — No regression in current consumers
+- Per-partition `min`, `max`, `bin_count`, and counter-store memory footprint — for the `bin_count` and `state_budget_bytes` fields in `-V` per consumer block.
+- Aggregate rebin event count per consumer (sum of rebin events across all partitions for that consumer) — for `total_rebin_events` field.
+- Per-partition rebin-event-count distribution across the partition population — for `rebins_per_partition: p50=N p95=N p99=N max=N` field. Per #187 Decision 5, this distribution is the empirical-tuning surface for the seed heuristic.
+- Per-partition high-water-mark bin count — for `max_partition_bins` field.
+- Per-partition overflow and underflow counter values — for `partitions_with_overflow_count` and `partitions_with_underflow_count` aggregates.
+- Per-quantile R4 return state (whether the value came from interpolation or from an overflow/underflow boundary) — for `out_of_range_bounded: high|low|none` per quantile.
 
-When #34 and (future) #187 ship, the primitives must enable byte-identical output to today's implementation for the matching-bounds, exact-mode cases (#34 R14 and #187 R11). The primitives' correctness is verified through consumer-level regression rather than through standalone primitive tests alone — the contract is that consumers using the primitives produce the same output they would produce without them when configured to match today.
+#189 picks the exact data structures and API names that surface this telemetry; #187 Decision 8 locks the consumer-visible field names that consumers emit using this data.
+
+### R10 — Pre-migration code path coexistence (per #187 R11 / R11a)
+
+#189's primitives coexist with the pre-migration code paths during the phased rollout of consumer migrations. Specifically:
+
+- A consumer that has not yet migrated continues to use its pre-migration code path (e.g., `calculate_statistics` at `ltl:5488` for `summary_table`); it does not invoke #189 primitives.
+- A consumer that has migrated uses #189 primitives unconditionally for the unified path.
+- A migrated consumer with `--exact-percentiles` opt-out (per #187 Decision 7) reverts to its pre-migration code path for that run.
+
+This is per the consumer's discretion (not the primitive's): #189 does not implement a mode-switch within the primitives. The primitives run unconditionally when invoked by a migrated consumer on the unified path.
 
 ### R11 — Boundaries with other features
 
-This feature does not own:
+This feature owns the **primitive implementations** that satisfy #187's unified contract.
 
-- The eligibility gate for histogram bin-counter mode (#34 R2) — owned by #34.
-- The dual-mode percentile selection and accuracy contract (#187 R2 / R4) — owned by #187.
-- The index read-back primitive that supplies pre-seeded bounds (#179) — closed; consumed indirectly via #34 / #187.
-- Specific algorithm choice for percentile interpolation (#187 D3) — owned by #187 research.
+This feature does NOT own:
 
-This feature provides the *helpers and data structures*; #34 and #187 are the *consumers*.
+- The unified contract itself (locked decisions, R12 audit, consumer-name strings, `-V` format) — owned by **#187**. #189 implements; #187 specifies.
+- Consumer migrations onto the primitives — each consumer's migration is owned by its **own implementation ticket** (e.g., the per-message migration for `summary_table` and `csv_output`; #34's implementation ticket for heatmap/histogram).
+- Index read-back (#179, closed) — no longer load-bearing for partition sizing under the auto-resize lifecycle; see #187's Downstream implications for related issues for the relationship.
+- Highlight subsets (#51) — Phase 4 consumer, owned by its own implementation ticket.
+- Activation policy, default-on vs. default-off, release cadence, deprecation timing — implementation-ticket concerns per #187 Decision 9's dissolution.
 
-## Consumer-side requirements (received from #34 R12 and #187 R12)
+The contract authoritative reference is `features/187-histogram-bin-counter-percentiles.md` § *Locked decisions from research*.
 
-This section enumerates what each consumer needs the primitives to provide. It is the binding input to the implementation of this feature. The catalogue of `ltl` call sites that ground these requirements lives in **Audit findings** below.
+## Consumer-side requirements (per #187 R12)
 
-### From #34 (heatmap and histogram bin-counter mode)
+This section enumerates what each consumer of #189's primitives needs. The consumer-name strings (`summary_table`, `csv_output`, `time_bucket_stats`, `heatmap_markers`, `heatmap_cells`, `histogram_view`, `histogram_bins`) and the consumer catalogue are locked in #187 R12 and #187 Decision 8. The mapping between consumer names and ltl call sites lives in the **Audit findings** section below.
 
-Heatmap and histogram are #189's first two production consumers. They consume **R1 (partition), R2 (bin-assignment), R3 (counter-update), and R4 (percentile interpolation)** — the R12 audit's resolution established that both consumers depend on R4 under bin-counter mode for percentile-marker (heatmap) and percentile-indicator (histogram) derivation. Under raw-value mode, percentile derivation continues to use sort-and-index over the raw arrays as today.
+All consumers consume **R1–R4 of #189 plus R6 (overflow/underflow counters)** uniformly per the unified contract. Differences between consumers are in keying (R3) and percentile-set selection (R4), not in algorithmic behavior.
 
-| # | Need | Concrete shape |
-|---|---|---|
-| 1 | Partition computation parameterized by `(min, max, num_buckets)` per consumer | Heatmap: one partition per run (single metric per run; `num_buckets = $heatmap_width`, default 52, `-hmw`-tunable). Histogram: one partition per metric (`num_buckets` from `calculate_histogram_bucket_count` driven by `-hgbpd`/`-hgb`). Partition computed at **start of pass** when histogram bin-counter mode is eligible, from pre-seeded bounds (#34 R3). |
-| 2 | Bin assignment for per-line accumulation in the parsing hot path | Called inside the existing per-line loop in `read_and_process_logs`, **once per active metric per line**. Must be efficient enough that the per-line cost is no worse than today's `push` onto `%heatmap_raw` / `%histogram_values`. Today's two implementations (linear search `find_heatmap_bucket` at `ltl:4783`; binary search `find_histogram_bucket_index` at `ltl:4890`) confirm either algorithmic strategy is acceptable; #189 picks one. Also used by the heatmap consumer of R4 at end of pass to map R4's numeric return value back to a bin index for storage in `%heatmap_percentiles`. |
-| 3 | Counter update with two distinct key shapes | Heatmap: `key = time_bucket`. Histogram: `key = ()` (no key beyond the implicit metric scope). Both must coexist in the same run because R10 makes them co-eligible. |
-| 4 | Out-of-range tally per key, low and high | New behavior. Today's `find_heatmap_bucket` (`ltl:4783`) silently clamps to last in-range bin; `find_histogram_bucket_index` (`ltl:4890`) similarly returns an in-range index. #189 R2 introduces explicit sentinels; this is **not a refactor of existing logic** — it is new contract surface that #34 R5 / R6 (out-of-range counters + single end-of-run warning) and #179's drift detection both depend on. |
-| 5 | Counter-store enumeration | For each consumer's rendering driver (heatmap: `print_heatmap_row` `ltl:6378`, `get_heatmap_column_header` `ltl:6265`, `print_heatmap_footer_scale` `ltl:6434`; histogram: `print_histograms` `ltl:6890` and its helpers `ltl:7071–7559`) and for the `-V` Layer 2 / 3 reporting (#34 R9). Must support iteration over `(key, bin_index, count)` triples plus the per-key overflow tallies. |
-| 6 | Lifecycle | Partition persists for the run. Counter stores per key (heatmap: per time bucket; histogram: single store per metric) are independently freeable once rendering for that key completes — required for #187 Phase 3's per-time-bucket percentile counters, harmless for #34's own consumers. |
-| 7 | **Percentile interpolation (R4) for markers and indicators** | Per R12 audit resolution (#34 R4-bis). Heatmap: R4 invoked per time bucket against `%heatmap_data{$bucket}` for P50/P95/P99/P99.9; numeric return mapped back to a bin index via R2 for storage in `%heatmap_percentiles`. Histogram: R4 invoked per metric against `%histogram_buckets{$metric}` for the ten-value percentile set (P1, P10, P25, P50, P75, P90, P95, P99, P99.9, P99.99); numeric return stored directly in `%histogram_stats{$metric}{p*}`. R4 must satisfy its accuracy contract within #34 R8 (render equivalence) tolerance. |
+### Universal needs across all consumers
 
-### From #187 (dual-mode percentiles)
+- **R1 (partition with auto-resize)**: partitions are lazily constructed on first observation and adapt via doubling-rebin. Initial seed: 5 decades centered on the first observed value (per #187 Decision 5).
+- **R2 (bin assignment)**: efficient enough for per-line invocation in the parsing hot path. Linear search (`find_heatmap_bucket` at `ltl:4783`) and binary search (`find_histogram_bucket_index` at `ltl:4890`) both demonstrate adequate performance; #189 picks one.
+- **R3 (counter update with consumer-specific keying)**: see per-consumer keying table below.
+- **R4 (percentile interpolation per the locked Prometheus formula)**: returns numeric value plus the `out_of_range_bounded: high|low|none` audit value per quantile.
+- **R6 (overflow/underflow counters)**: separate counters per partition; both contribute to `total_N`; when target rank lands in either, R4 returns the corresponding boundary.
 
-#187 is the load-bearing consumer of R4 (percentile interpolation). It progressively migrates four percentile-computing paths catalogued in #187's `## Percentile-path harmonization audit`. Each phase adds a consumer to the primitive without changing the primitive contract — that is the test of whether R3's keying parameterization and R4's accuracy contract are sufficient.
+### Per-consumer keying and percentile sets
 
-| # | Need | Concrete shape |
-|---|---|---|
-| 1 | All of #34's needs (1–6 above) | Approximate mode reads counters #34 has already populated (#187 R8 / R13). The shared substrate means #187 cannot ship without #34's primitives in place — though R4 itself ships only after #187's algorithm choice (D3) lands. |
-| 2 | Percentile interpolation per quantile, parameterized by the chosen accuracy contract | Algorithm and accuracy bound are chosen in #187 D1–D3 (algorithm research deliverable). This audit identifies the consumer call sites but does **not** specify the algorithm. Each call site below identifies a `(partition, counter_map, target_quantile) → value` invocation. |
-| 3 | Accuracy-estimate descriptor returned alongside each interpolated value | Form (theoretical bound, empirical bound, or both) decided in #187 D3 and surfaced in #187's `-V` `accuracy_estimate` block (#187 R7). |
-| 4 | Counter-store keying flexibility for all phases | Phase 2 (summary-table per-message latency, `ltl:5374–5379` consumer): `key = ()`. Phase 3 (per-time-bucket duration percentiles, `ltl:5220–5273` consumer): `key = time_bucket`. Phase 4 (highlight-subset percentiles, future / #51): `key = (time_bucket, highlight_subset)` or analogous compound. R3's parameterization must accept all three shapes without primitive-level change. |
-| 5 | Migration target identification | Phase 2 target: `log_messages{$category}{$log_key}{durations}` raw array (allocated `ltl:4591`). Phase 3 target: `log_analysis{$bucket}{durations}` raw array (allocated `ltl:4634`, guarded `unless $heatmap_enabled`). Phase 4 target: highlight subset raw collections (today partially shaped by `histogram_values_hl`, `heatmap_raw_hl`; final shape determined when Phase 4 lands). Note that the Phase 3 raw array is **not allocated when heatmap is active** — heatmap takes ownership of duration values for its own raw-value mode — which is a pre-existing entanglement R8 ("Coupling to histogram bin counters" in #187) already anticipates. |
-| 6 | Histogram-mode global percentile reformulation (incidental Phase 2 consumer) | `calculate_histogram_buckets` (`ltl:4908`) today derives `histogram_stats{p*}` from raw arrays (`ltl:4926–4940`, `ltl:4995–5004` for highlight) in addition to populating bin counters. Once R4 lands, these percentile values may be derived from the bin counters directly — eliminating the raw-value sort at this site too. This is a side benefit of R4, not a separate phase; it lands whenever it is convenient inside the Phase 2 migration. |
+| Consumer (#187 Decision 8 name) | R3 keying | R4 percentiles emitted | Notes |
+|---|---|---|---|
+| `summary_table` | `(category, log_key)` | P1, P50, P75, P90, P95, P99, P999 | Path A in #187 R12; per-key partition fan-out scenario (gap 8 in industry literature). |
+| `csv_output` | shares `summary_table`'s partitions | same as `summary_table` | Path A' in #187 R12; downstream renderer of the same `%log_stats` values. R3's `shares_partitions_with: summary_table` mechanism. |
+| `time_bucket_stats` | `time_bucket` | P1, P50, P75, P90, P95, P99, P999 | Path B in #187 R12; per-bucket partition (one per time bucket). |
+| `heatmap_markers` | `time_bucket` | P50, P95, P99, P999 | Path C2 in #187 R12; R4 returns numeric value, consumer maps to display column via R2 for storage in `%heatmap_percentiles`. May share `time_bucket_stats` partitions per R7. |
+| `heatmap_cells` | `time_bucket` | (no percentiles; bin counts only via R3 enumeration) | Path C2-cells in #187 R12; per-bucket partition, re-projected onto display columns at render time. |
+| `histogram_view` | `()` (single global partition per metric) | P1, P10, P25, P50, P75, P90, P95, P99, P999, P9999 (widest set) | Path C1 in #187 R12; ten-value percentile set is the widest #189 R4 must support. |
+| `histogram_bins` | `()` (single global partition per metric) | (no percentiles; bin counts only via R3 enumeration) | Path C1-bins in #187 R12; same partition as `histogram_view` (consumer-shared). |
 
-## Audit findings (from #34 R12 / #187 R12)
+### Migration targets (informational; owned by per-consumer migration tickets)
 
-This section is the receiving end of the audits performed in `features/34-histogram-bin-counter-mode.md` § Harmonization audit and `features/187-histogram-bin-counter-percentiles.md` § Percentile-path harmonization audit. The catalogue below is the single source of truth; the sibling feature files cross-reference here.
+The pre-migration code paths each consumer migrates from are catalogued for context only. The migrations themselves are owned by the per-consumer implementation tickets, not by #189.
+
+- `summary_table` and `csv_output`: replace `log_messages{$category}{$log_key}{durations}` raw arrays (`ltl:4591`) and `calculate_statistics` sort-and-index (`ltl:5488`) with #189-primitive calls.
+- `time_bucket_stats`: replace `log_analysis{$bucket}{durations}` raw arrays (`ltl:4634`, gated `unless $heatmap_enabled`) with #189-primitive calls.
+- `heatmap_markers` and `heatmap_cells`: replace `%heatmap_raw` accumulation and end-of-parse binning in `calculate_heatmap_buckets` (`ltl:4791-4865`) with #189-primitive calls.
+- `histogram_view` and `histogram_bins`: replace `histogram_values{$metric}` raw arrays and end-of-parse binning in `calculate_histogram_buckets` (`ltl:4908`) with #189-primitive calls.
+
+## Audit findings — technical inventory of `ltl` call sites
+
+This section is the line-precise technical inventory underlying #187's R12 consumer audit. Where #187 R12 catalogues the *consumers* and their migration targets, this section catalogues the *specific helper functions, data structures, and call sites* in `ltl` that each consumer's migration must replace or interact with.
 
 All `ltl:line` references are against `release/0.14.5` HEAD at the time the audit landed. Subsequent refactors may shift line numbers; the subroutine names and global-variable identifiers are the stable anchors.
+
+The audit catalogue below uses the original Path-A/B/C terminology from earlier work (e.g., "Heatmap consumer", "Histogram consumer", "Summary-table per-message latency percentile consumer"). The mapping to #187 Decision 8's locked `-V` consumer-name strings is:
+
+| Audit-section heading | `-V` consumer-name string (locked in #187 Decision 8) |
+|---|---|
+| Heatmap consumer (cells) | `heatmap_cells` |
+| Heatmap consumer (percentile markers) | `heatmap_markers` |
+| Histogram consumer (bin counts) | `histogram_bins` |
+| Histogram consumer (global percentile indicators) | `histogram_view` |
+| Summary-table per-message latency percentile consumer | `summary_table` |
+| Summary-table per-message latency percentile consumer (CSV output) | `csv_output` (shares partitions with `summary_table`) |
+| Per-time-bucket duration percentile consumer | `time_bucket_stats` |
 
 ### Existing helpers to be unified or replaced
 
@@ -359,55 +453,73 @@ These constraints apply across all consumers and are the hard inputs to #189's p
 
 | Case | Required behavior |
 |---|---|
-| Partition requested with `min == max` | R1 returns a recognized failure condition; consumer reports `missing_bound` per its own contract. |
-| Partition requested with `min <= 0` | R1 returns a recognized failure condition (logarithmic boundaries undefined for non-positive `min`). |
-| Bin assignment for a value exactly equal to a boundary | The primitive returns a consistent bin index for boundary-equal values; the choice (lower or upper bin) is documented and unchanged from today's tally. R10 (no regression) is the test. |
-| Counter update for a key never seen before | R3 lazily initializes the counter store for that key. |
+| First value for a new `(consumer, key)` is observed | R1 lazily constructs the partition; partition opens with `min = v_0 / sqrt(10^5)` and `max = v_0 · sqrt(10^5)` per #187 Decision 5 implementation guidance. |
+| A subsequent value falls outside the current `[min, max]` | R1 extends the partition via HdrHistogram-convention doubling. Counts in existing bins retain their indices. Counted as a rebin event in R9 telemetry. |
+| A value falls outside the partition after doubling-rebin cap (if implementation imposes one) | R2 returns the appropriate overflow or underflow sentinel; R3 increments the corresponding R6 counter. R4 returns the partition boundary per #187 Decision 4 when target rank lands in this counter. |
+| Bin assignment for a value exactly equal to a boundary | R2 returns a deterministic bin index using the locked log-spaced boundary computation. The choice (lower or upper bin) is documented and consistent. |
+| Counter update for a key never seen before | R3 lazily initializes the counter store for that key, invoking R1 to construct the partition from the first value. |
 | Counter store free for a key while another key is still active | Independent per R8; freeing one does not affect another. |
-| Percentile interpolation requested for a counter map with all zeros | R4 returns a defined "no values" indicator that the consumer maps to `-`. |
-| Percentile interpolation requested for a counter map with a single non-zero bin | R4 returns the bin's representative value (e.g., geometric mean of bin boundaries); consumer behavior unaffected. |
-| Concurrent partition creation for the same `(min, max, num_buckets)` | Determinism (R5) means the resulting partitions are identical; sharing is implementation-defined. |
+| R4 invoked on a counter map with zero total count | R4 returns a defined "no values" indicator that the consumer maps to `-`. (Per #187 R5; should not be reached in practice because consumers check for empty data before invoking R4.) |
+| R4 invoked on a counter map with a single non-zero bin | The cumulative walk locates the single bin; `fraction = 1.0` (rank-in-bin = bin_count); the formula returns `upper`. Same result regardless of quantile. |
+| R4 invoked with `bin_count = 1` at the target rank | Standard formula: `fraction = 1.0`, returns `upper`. Matches HdrHistogram's per-bin convention (locked Decision 1). |
+| Concurrent partition state queries from rendering driver | R9 telemetry is consistent: rendering drivers see the partition state as of the moment they query it. No locking needed (single-threaded). |
 
 ## Acceptance criteria
 
-- [ ] R1–R10 hold.
-- [ ] Both #34 and #187 (Phase 2) consume the primitives without forking or duplicating.
-- [ ] The audit (from #34 R12 / #187 R12) is complete and landed in **Audit findings** above.
-- [ ] R7 holds: existing bin-count and bin-size determination logic is preserved unchanged.
-- [ ] R10 holds: consumer-level regression produces byte-identical output for matching-bounds exact-mode cases.
-- [ ] Each future consumer per #187 R9 Phases 2–5 can be added without primitive-level changes (verified incrementally as each phase lands).
-- [ ] All test scenarios in **Validation** pass.
+### Prototype phase (#187 Decision 10 hard prerequisite)
+
+- [ ] All five mandatory validation aspects from #187 Decision 10 are exercised against representative D2 datasets.
+- [ ] Results documented per #187 Decision 10's implementation guidance.
+- [ ] Lessons identified for #189's production implementation.
+- [ ] If any locked #187 decision is contradicted by prototype results, a follow-up issue is filed against #187 before #189 production work begins.
+
+### Production implementation phase
+
+- [ ] R1–R11 hold.
+- [ ] All primitive behavior matches the locked #187 contract: Decision 1's formula in R4; Decision 5's auto-resize lifecycle in R1; Decision 4's overflow/underflow handling in R6; Decision 2's resolved `buckets_per_decade` value drives R1's bin count.
+- [ ] The R9 telemetry surface provides every data point that #187 Decision 8 requires consumers to surface in `=== PERCENTILE MODE ===` output.
+- [ ] Primitive-level unit tests cover R1–R6 (see Validation below).
+- [ ] Cross-consumer composition tests demonstrate that R7 (partition independence) and R8 (lifecycle independence) hold when multiple consumers exercise the primitives simultaneously.
+- [ ] Per-consumer migration tickets can consume the primitives without forking, duplicating, or extending them beyond their locked contract.
 
 ## Validation
+
+### Prototype validation
+
+Per the *Prototype validation* section above (#187 Decision 10's hard prerequisite). The prototype validates the locked architecture against real D2 data; its output informs production implementation design.
 
 ### Primitive-level unit tests
 
 Each primitive has unit tests covering:
 
-- R1: partitions are correct for representative bound ranges; degenerate inputs are rejected with the documented failure condition.
-- R2: bin assignments match today's post-hoc tally for representative inputs; boundary-equal values are assigned consistently; out-of-range sentinels are returned for under/over.
-- R3: counter stores are correctly keyed; per-key independence is verified.
-- R4: interpolated values match the chosen algorithm's expected output for canonical inputs (counter maps generated from known distributions); accuracy descriptors are returned.
+- **R1**: partitions construct correctly on first observation; subsequent values extend via doubling-rebin; existing counts preserved through rebin; rebin events tallied in R9 telemetry.
+- **R2**: bin assignments match the locked log-spaced boundary computation; boundary-equal values are assigned consistently; out-of-range sentinels are returned when the partition's growth cap is reached.
+- **R3**: counter stores are correctly keyed across all #187 R12 keying shapes (per-`(category, log_key)`, per-`time_bucket`, `()` global, future compound shapes); per-key independence is verified.
+- **R4**: interpolated values match the locked Prometheus formula (Decision 1) for canonical inputs; the `out_of_range_bounded: high|low|none` audit value is correctly reported per quantile; `bin_count = 1` and single-bin edge cases produce the expected `upper` result.
+- **R5**: identical observation sequences produce identical primitive state across runs.
+- **R6**: overflow and underflow counters are correctly maintained and contribute to `total_N`; R4 returns the correct boundary when target rank lands in either.
 
 ### Consumer-level integration tests
 
-The primitives are exercised through #34 and #187's test suites. Passing those suites is the primary verification that the primitives behave correctly in production-shaped usage. R10 (no regression) is verified at this layer.
+The primitives are exercised through the per-consumer migration tickets' test suites. Passing those suites is the primary verification that the primitives behave correctly in production-shaped usage. R10 (pre-migration code path coexistence) is verified at this layer.
 
 ### Cross-consumer composition tests
 
-Tests that exercise multiple consumers sharing primitives in the same run (e.g., heatmap and histogram in #34, with #187 Phase 2 active over the same data) to verify that consumer independence (R6) and lifecycle independence (R8) hold under composition.
+Tests that exercise multiple consumers sharing primitives in the same run (e.g., `summary_table` keyed by `(category, log_key)` alongside `heatmap_cells` keyed by `time_bucket`) verify that consumer independence (R7) and lifecycle independence (R8) hold under composition.
 
 ## Related issues
 
-- **#34** — heatmap and histogram consumer (co-developed).
-- **#187** — percentile consumer (co-developed; multi-phase consumer per R9 in #187).
-- **#51** — future highlight-data consumer.
-- **#41** — heatmap-histogram alignment (R6 confirms partition independence; #41 must be compatible).
-- **#179** — index read-back (closed; indirectly supplies the bounds that R1 consumes).
-- **#23 Phase 2 (#59)** — adopts this feature's memory lifecycle model.
+- **#187** — owns the locked unified contract. Authoritative reference for all primitive behavior. #189 implements; #187 specifies.
+- **#34** — implementation ticket for heatmap and histogram consumer migrations (`heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`); consumes #189's primitives.
+- **#51** — future Phase 4 highlight-subset consumer.
+- **#41** — heatmap-histogram alignment; relationship to #189 captured in #187's Downstream implications section.
+- **#179** — index read-back (closed); no longer load-bearing for partition sizing under Decision 5's auto-resize lifecycle.
+- **#23 Phase 2 (#59)** — may adopt this feature's memory lifecycle model.
 - **#180** — named pipeline stages.
 - **#46** — index file (closed).
 
 ## Spec stability
 
-The primitive contract (R1–R11) is intended to be stable across the implementation cycle. The **Audit findings** and **Consumer-side requirements** sections grow as the audit completes and as future consumers (per #187 R9) land. New consumers may add new keying shapes to R3, but adding a keying shape is not a contract change — the parameterization in R3 is what enables them.
+The primitive contract (R1–R11) tracks the locked #187 unified contract. Changes to the locked contract in #187 cascade to #189's requirements; #189 does not lock decisions independently of #187. If prototype validation surfaces a need to revise a locked #187 decision, the revision is recorded in #187 first, then propagated to #189.
+
+The **Audit findings** section is the technical inventory of ltl call sites at the time of writing. Line numbers may shift with subsequent refactors; subroutine names and global-variable identifiers are the stable anchors. Adding a consumer to R12 (in #187) is not a contract change for #189; the parameterization in R3 already accommodates new keying shapes.
