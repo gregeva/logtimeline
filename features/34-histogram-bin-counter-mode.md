@@ -1,14 +1,17 @@
-# Feature: Histogram bin-counter accumulation for heatmap and histogram
+# Feature: Heatmap and histogram consumer migrations onto the unified primitive contract
 
 ## Overview
 
-Heatmap and histogram today retain every per-line metric value in memory (`%heatmap_raw{$time_bucket}` and `%histogram_values{$metric}`) so that bin boundaries can be computed from the observed min/max **after** the file is fully read. This feature introduces an alternative accumulation path in which per-bin integer counters — **histogram bin counters** — replace those per-line value structures when the bin boundaries can be known **before** the read pass begins.
+This feature is the **implementation ticket for the heatmap and histogram consumer migrations** onto the unified primitive contract locked in #187 (`features/187-histogram-bin-counter-percentiles.md`). The migrations transition four consumers from today's end-of-parse-from-retained-arrays pattern (in `calculate_heatmap_buckets` at `ltl:4791-4865` and `calculate_histogram_buckets` at `ltl:4908`) onto the unified contract, which uses #189's primitives:
 
-The condition that makes that possible is index read-back (#179): when a prior run's bounds are pre-seeded into in-memory state at start-up, ltl can compute logarithmic bin partitions up front and tally each parsed value directly into a histogram bin counter. No per-line values are retained.
+| `-V` consumer name (locked in #187 Decision 8) | What it covers | Current implementation |
+|---|---|---|
+| `heatmap_cells` | Heatmap cell colors | `%heatmap_raw` accumulation, end-of-parse partition derivation, end-of-parse binning |
+| `heatmap_markers` | P50/P95/P99/P999 column-position markers on heatmap rows | `%heatmap_percentiles` derived from `%heatmap_raw` sort |
+| `histogram_view` | Histogram-mode global percentile indicators (legend values, x-axis ticks) | `%histogram_stats{$metric}{p*}` derived from `%histogram_values` sort |
+| `histogram_bins` | Histogram-mode bin counts (bar heights) | `%histogram_buckets{$metric}` derived from end-of-parse binning |
 
-The feature is therefore a conditional gate: **histogram bin-counter mode** activates as a single all-or-nothing decision per run, evaluated against the filter context and index pre-seed availability. When eligible, both heatmap and histogram run in histogram bin-counter mode for the duration of that run. When ineligible, both run in raw-value mode unchanged.
-
-This feature also establishes the foundation-laying work for a broader harmonization of histogram bin-counter primitives across all of ltl's percentile-computing paths. Histogram bin counters are intended to serve heatmap rendering, histogram rendering, and (progressively, per #187) the summary-table per-message latency percentile calculation. The unified primitives are owned by #189 and co-developed with this feature; this feature provides the audit and consumer-side requirements.
+Under the unified contract, each of these consumers uses #189's primitives directly: partition with HdrHistogram-style auto-resize (per #187 Decision 5), bin assignment via log-spaced boundary computation, counter update with the consumer's keying, percentile interpolation via the locked Prometheus formula (per #187 Decision 1). The dual-mode "raw-value mode vs. bin-counter mode" framing that pre-dated #187's locked contract is **dissolved** — there is no runtime gate (per #187 Decision 6's dissolution). The consumer either runs the unified path (post-migration) or its pre-migration code path (pre-migration or under `--exact-percentiles` opt-out per #187 Decision 7).
 
 ## GitHub Issue
 
@@ -16,370 +19,260 @@ This feature also establishes the foundation-laying work for a broader harmoniza
 
 ## Motivation
 
-For multi-GB log analysis runs (chained daily files, long-window investigations), the raw-value arrays dominate peak memory. The bounds those arrays exist to discover are stable properties of the file (or filter selection) — once captured by the index, they do not need to be re-discovered on subsequent runs. With #179 reading them back at start-up, the raw-value retention has no remaining purpose for those runs.
+For multi-GB log analysis runs (chained daily files, long-window investigations), the raw-value arrays (`%heatmap_raw`, `%histogram_values`) dominate peak memory. The unified contract replaces them with bounded counter stores (~265 bins per partition at locked default 53 bpd × 5 decades), with per-key memory bounded by the per-key value range.
 
-A second motivation is architectural: the same histogram bin-counter primitives can serve multiple downstream consumers, including the per-message latency percentile calculation that #187 will progressively migrate. Designing the primitives once, with full understanding of all future consumers, avoids ad-hoc divergence and rework. That harmonization design lives in #189 and depends on the audit deliverable in this feature.
+Under #187's locked Decision 5 (auto-resize), the partition lifecycle is online — no precedent run or index pre-seed is required. A fresh `ltl` invocation on months of historical data gets the heatmap, histogram, and the rest in a single pass, in memory-safe form. This is the realistic operational pattern for ltl's user base.
+
+Display geometry is unchanged by the migration: the heatmap column count, color scheme, and percentile-marker positions all stay the same; the histogram column count, bar layout, and legend stay the same. Internal precision improves because Decision 2's locked default (53 bpd) is higher than today's shipped 8 bpd default for the heatmap and histogram features — percentile markers and bin counts become *more* accurate. Per-time-bucket re-projection of per-partition counts onto the display column grid is the render-time step that preserves display stability.
 
 ## Delivery sequence
 
-This feature is one of three co-developed issues (#34, #187, #189). The work is performed in parallel against the `release/0.14.5` branch, with each issue's feature branches merging back periodically. The ordering below is the *delivery* sequence — when each step's output is required to be complete — not a strict serial work order.
+This feature is the implementation ticket for the heatmap/histogram consumer migrations. It depends on #187's locked contract and #189's primitives.
 
-| Step | Work | Owner | Why this position | Status of this file |
-|---|---|---|---|---|
-| 1 | **Audit** — catalogue existing helpers (heatmap, histogram, summary-table percentile paths); produce consumer-side primitive requirements | **#34 R12** + **#187 R12**; outputs land in **#189** *Audit findings* and *Consumer-side requirements* sections | Both #189's primitive design and #187's algorithm research need to know what shapes the primitives must support. Without this first, primitives risk being designed for two consumers and reworked later. | **This file owns part of this step (R12)** |
-| 2 | **Research + prototype** — algorithm comparative study, accuracy report, recommendation memo, prototype | **#187 D1–D5** | Algorithm choice (sketch vs. bin-derived interpolation) determines what #189's percentile-interpolation primitive must do. Performed after audit but before #189 implementation so #189 isn't built blind. | No dependency from this file |
-| 3 | **Deliver #189** — implement unified primitives | **#189** | Now informed by both the audit (step 1) and the algorithm choice (step 2). | Consumed by this file at step 4 |
-| 4 | **Deliver #34 implementation** — heatmap and histogram consume #189's primitives, including R4 for percentile markers (heatmap) and indicators (histogram) | **#34** | First production consumer of #189. **Gates on full R1–R4** because heatmap percentile markers and histogram percentile indicators (legend values, x-axis ticks) both derive from R4 under bin-counter mode — see amendments to R3 / R4 / R8 and the R12 audit resolution. | **This file's implementation step** |
-| 5 | **Deliver #187 Phase 2** — summary-table percentiles consume #189's primitives | **#187 Phase 2** | Second consumer. | No dependency from this file |
-| 6+ | **#187 Phases 3–5** — progressively land more consumers (per-time-bucket, highlight-data, future) | **#187 Phases 3–5** | Each phase verifies #189's primitives don't need to change to accept the new consumer. | No dependency from this file |
+| Step | Work | Owner | Why this position |
+|---|---|---|---|
+| 1 | **Unified contract locked** — F1, D1, D1A, D2, D3, D4, D5, D7, D8, D10 | **#187** | Authoritative contract reference: `features/187-histogram-bin-counter-percentiles.md`. |
+| 2 | **Prototype validation** — five mandatory aspects per #187 Decision 10 | **#189 (prerequisite to its production work)** | Validates the locked architecture against real D2 data before any consumer migration begins. |
+| 3 | **Unified primitives implemented** — R1-R11 per `features/189-histogram-bin-counter-primitives.md` | **#189** | Provides the primitive helpers each consumer migration uses. |
+| 4 | **Heatmap and histogram consumer migrations** — `heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins` migrate onto #189's primitives | **#34 — this issue's production step** | The four consumers migrate together (per R9 grouping recommendation in #187 — they share code structure in `calculate_heatmap_buckets` and `calculate_histogram_buckets`). |
 
 ### Parallelism
 
-Steps 1 and 2 may proceed in parallel once the audit has produced enough consumer-side requirements for the research to evaluate bin-derived interpolation against. Step 3 (#189 implementation) cannot complete until step 2 lands the algorithm choice. Step 4 (this feature's implementation) cannot start until **#189 R1–R4 are all complete**, including the percentile-interpolation primitive (R4): the R12 audit established that heatmap percentile markers and histogram percentile indicators both derive from R4 under bin-counter mode. The earlier scaffolding plan that allowed R4 to land later (as a #187-only concern) is superseded by the R12 audit's resolution.
+Steps 1, 2, and 3 are sequential prerequisites. Step 4 (this feature's work) cannot begin until #189 has completed step 3.
 
 ### Integration
 
-All work lands on feature branches merged into `release/0.14.5` periodically. The release branch is the integration point until the three co-developed issues are individually complete, at which point `release/0.14.5` ships per the standard release process (CLAUDE.md).
+Work lands on feature branches per CLAUDE.md's release process. Specific release-branch integration is this implementation ticket's choice.
 
 ## Terminology
 
-Throughout this document, the consistent term for the data structures and the accumulation mode is **histogram bin counters** and **histogram bin-counter mode**. The bare phrase "bin counters" is not used; the qualifier "histogram" names the kind of bin partition (logarithmic histogram-style bins, as today) and distinguishes the approach from other counter-style structures elsewhere in ltl.
+This feature uses the terminology locked in #187:
+
+- **Unified primitive contract** — the locked decisions in `features/187-histogram-bin-counter-percentiles.md`. Authoritative for all behavior.
+- **Histogram bin counters** — the underlying data structure used by every consumer (#189 implements).
+- **Consumer** — a code path that needs percentile values or histogram bin counts. The four consumers in scope here are `heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`.
+- **Partition** — one instance of the bin counter structure with its own `[min, max]` boundaries, owned by one consumer for one keying dimension.
+- **Auto-resize** — the partition lifecycle locked in #187 Decision 5 (lazy construction, full-default-span seed centered on first value, HdrHistogram-convention doubling on rebin).
+- **Pre-migration path** — the consumer's current end-of-parse-from-retained-arrays code (in `calculate_heatmap_buckets`, `calculate_histogram_buckets`). Survives post-migration as the `--exact-percentiles` opt-out path per #187 Decision 7.
+- **Unified path** — the consumer's post-migration code, using #189's primitives.
+
+No new terminology introduced by #34.
 
 ## Requirements
 
-### R1 — Two accumulation modes for heatmap and histogram
+The requirements below define the **contract surface** that the heatmap and histogram consumer migrations must satisfy. Each requirement either restates a #187-locked decision or specifies migration-specific scope. The locked decisions in `features/187-histogram-bin-counter-percentiles.md` are authoritative.
 
-The system supports two accumulation paths for heatmap and histogram:
+### R1 — Four consumer migrations onto the unified contract
 
-- **Raw-value mode** — today's behavior, unchanged. Per-line values accumulate; bin partitions are derived at end of pass; rendering uses the resulting bins.
-- **Histogram bin-counter mode** — bin partitions are computed at start of run from pre-seeded bounds; per-line values increment a histogram bin counter directly during the read pass; no per-line value array is allocated.
+This feature migrates the following four consumers from their pre-migration code paths onto the unified primitive contract:
 
-The selected mode applies uniformly to both heatmap and histogram for a given run (see R10).
+1. **`heatmap_cells`** — heatmap cell colors. Pre-migration path: `%heatmap_raw{$bucket}` accumulation during the parse, `calculate_heatmap_buckets` at `ltl:4791-4865` at end of parse. Migration: per-`time_bucket` auto-resize partition via #189 R1, per-line bin assignment via #189 R2, per-line counter update via #189 R3, render-time re-projection of per-bucket partition counts onto the W-column display grid (`-hmw`, default 52).
+2. **`heatmap_markers`** — P50/P95/P99/P999 column-position markers on each heatmap row. Pre-migration path: sort `%heatmap_raw{$bucket}`, index by integer rank, map to bin index via `find_heatmap_bucket`, store in `%heatmap_percentiles`. Migration: per-`time_bucket` partition shared with `heatmap_cells` (or independent, per #189 R7); R4 invoked per time bucket for the four quantiles per #187 R3; R4's numeric return mapped to a display column position for storage in `%heatmap_percentiles`.
+3. **`histogram_view`** — histogram-mode global percentile indicators (legend values, x-axis tick positions). Pre-migration path: sort `%histogram_values{$metric}`, index by integer rank, store in `%histogram_stats{$metric}{p*}`. Migration: global per-metric auto-resize partition via #189 R1; R4 invoked per metric for the ten-value percentile set per #187 R3 (P1, P10, P25, P50, P75, P90, P95, P99, P999, P9999); numeric values stored directly in `%histogram_stats{$metric}{p*}`.
+4. **`histogram_bins`** — histogram-mode bin counts (bar heights). Pre-migration path: end-of-parse binning in `calculate_histogram_buckets` at `ltl:4908`. Migration: same global per-metric partition as `histogram_view` (consumer-shared per #189 R7); per-line bin assignment and counter update during the parse; render-time re-projection of partition counts onto display column grid.
 
-### R2 — Mode-selection gate (single, run-level)
+The four consumers migrate together per #187 R9's Phase 3 grouping recommendation (they share code structure in `calculate_heatmap_buckets` and `calculate_histogram_buckets`; splitting them across releases would leave the codebase in an inconsistent partial-migration state).
 
-A single eligibility decision is made per run, evaluated before the read pass begins. The run is eligible for histogram bin-counter mode iff all of the following hold:
+### R2 — No runtime mode-selection gate
 
-1. Index pre-seed is active for this run (`index_used: yes` per #179).
-2. The pre-seed tier matches filter context:
-   - Filtered run (any filter option is active that scopes the data set, e.g. `-dmin`, `-i`, `-e`, `-st`, `-et`) requires Tier-1 (`selection`) pre-seed for the active filter signature.
-   - Unfiltered run accepts Tier-2 (`file`) pre-seed.
-   Tier correctness is owed by #179. If a filtered run reaches this gate with only Tier-2 pre-seed, the run is ineligible (`reason: tier_mismatch`) and the gap is filed against #179 rather than patched at this layer.
-3. The bounds required by the active features are populated (non-placeholder) in the pre-seed:
-   - When `-hm <metric>` is active: `<metric>_min` and `<metric>_max` must be populated.
-   - When `-hg` is active: for each metric the histogram will render, the corresponding `min` / `max` must be populated.
-   - When both are active: the union of the above must be populated.
+Per #187 Decision 6's dissolution, there is **no runtime gate** between an "approximate path" and an "exact path" within a consumer. Post-migration, each of the four consumers runs the unified-contract path unconditionally on every run.
 
-When any criterion fails, raw-value mode runs for the whole run (R10).
+The pre-migration code path survives per-consumer:
+- During the migration's validation phase, as the regression-validation reference per #187 R11.
+- Post-validation, as the path engaged when the user opts out via `--exact-percentiles` (per #187 Decision 7).
 
-### R3 — Bin partition computation in histogram bin-counter mode
+R10 reports per-consumer which path is active for any given run.
 
-When eligible, each consumer's bin partition is computed once at start of run using the existing logarithmic formula `min * (max/min)^(i/num_buckets)` for `i in 0..num_buckets`. The formula, the per-consumer bucket-count determination, and the resulting bin semantics are unchanged from today (R11). Only the timing of computation moves earlier — from end-of-pass to start-of-pass.
+### R3 — Auto-resize partition lifecycle per #187 Decision 5
 
-The partition is then a stable input to the per-line accumulation in R4 (per-line) and to the end-of-pass percentile derivation in R4-bis below.
+Each consumer's partitions follow the locked auto-resize lifecycle:
 
-### R4 — Per-line accumulation in histogram bin-counter mode
+- Constructed lazily on first observation for the consumer's key (`time_bucket` for `heatmap_cells`/`heatmap_markers`; `()` global per metric for `histogram_view`/`histogram_bins`).
+- Seeded at 5 decades centered on the first observed value per #187 Decision 5 implementation guidance.
+- Extended via HdrHistogram-convention doubling when subsequent values fall outside `[min, max]`.
 
-During the existing single read pass, each parsed value for an active metric is assigned to a bin index against the pre-computed partition and the corresponding counter is incremented. No per-line value array is allocated for the metrics that drive heatmap or histogram rendering.
+Partition computation does *not* happen at start-of-run from external bounds. The unified contract is end-of-pass-from-retained-arrays-free *and* index-pre-seed-free.
 
-### R4-bis — Percentile-marker and percentile-indicator derivation under bin-counter mode
+### R4 — Per-line accumulation during parse
 
-The raw value arrays (`%heatmap_raw`, `%histogram_values`) that today's code sorts to compute percentile markers (heatmap row overlays `%heatmap_percentiles`) and percentile indicators (histogram legend values `%histogram_stats{$metric}{p*}` and x-axis tick positions) are not allocated under bin-counter mode. The R12 audit identified this as the open question on this feature's implementation. **Resolution: under bin-counter mode, both consumers derive percentile values from #189 R4 (the percentile-interpolation primitive), at end of pass, against the bin counters R4 (per-line) populated.**
+During the existing single read pass, each parsed value for an active metric (`-hm` or `-hg` requested) is assigned to a bin index against the consumer's auto-resize partition via #189 R2, and the corresponding counter is incremented via #189 R3. No per-line value array is allocated for the metrics that drive heatmap or histogram rendering — the pre-migration `%heatmap_raw` and `%histogram_values` data structures are eliminated under the unified path.
 
-Specifically:
+When a value falls outside the partition's current `[min, max]`, R3 triggers rebin (auto-resize per R3 of this feature, which delegates to #189's R1 lifecycle).
 
-- **Heatmap row markers** (P50, P95, P99, P99.9): per time bucket, invoke #189 R4 against `%heatmap_data{$bucket}` for each target quantile. Map the returned numeric value to a bin index via #189 R2 (or the heatmap consumer's equivalent). Store the bin index in `%heatmap_percentiles{$bucket}` as today. Rendering is unchanged downstream.
-- **Histogram legend values and x-axis tick positions** (P1, P10, P25, P50, P75, P90, P95, P99, P99.9, P99.99): per metric, invoke #189 R4 against `%histogram_buckets{$metric}` for each target quantile. Store the numeric value in `%histogram_stats{$metric}{p*}` as today. Rendering and tick positioning (via `calculate_histogram_percentile_ticks`) are unchanged downstream.
+### R5 — Render-time re-projection onto the display grid
 
-Accuracy implications:
+The display geometry of the heatmap and histogram is unchanged by the migration: the heatmap has W display columns (`-hmw`, default 52); the histogram has its display column count from existing CLI flags (`-hgw`, etc.).
 
-- The accuracy of these percentile values is bounded by #189 R4's accuracy contract (set by #187 D3). R8 (render equivalence) is satisfied to within R4's accuracy bound for both consumers.
-- The wider histogram percentile set (10 values, including P99.99) is supported by #189 R4. R4's percentile-set support requirement must cover both the heatmap set (4 values) and the histogram set (10 values).
+The internal partition has more bins than the display has columns (typically ~265 bins at locked default 53 bpd × 5 decades). The migrated rendering driver computes the W-column display boundaries from the partition's `[min, max]` and re-projects the partition's bin counts onto the W display columns at render time via an O(bin count) traversal per row. Cell colors and bar heights derive from the re-projected counts.
 
-Delivery implication:
+The same render-time re-projection is used by `heatmap_markers` and `histogram_view`: R4 returns a numeric value; the rendering driver re-projects that value onto a display column position (for `heatmap_markers`) or formats it directly (for `histogram_view`).
 
-- This feature's implementation step (delivery sequence step 4) gates on #189 R4 being available, in addition to R1–R3. Step 4 cannot begin until #187 D3 has fixed the algorithm choice and #189 has implemented R4 against it. The Delivery sequence table is updated accordingly.
+### R6 — Overflow and underflow per #187 Decision 4
 
-### R5 — Out-of-range handling
+Per #187 Decision 4, each partition maintains separate overflow and underflow counters distinct from the in-range bins. Under #187 Decision 5's auto-resize lifecycle, overflow and underflow are expected to be rare in practice — the partition extends to contain observed values. Decision 4's mechanisms function primarily as a safety net.
 
-Values falling outside the pre-seeded bounds are tallied into out-of-range counters:
+The migrated consumers do not require any feature-specific overflow handling beyond what #189 implements per #187 Decision 4.
 
-- Values below the pre-seeded `min` increment `out_of_range_low` (per metric for histogram; per metric per time bucket for heatmap).
-- Values above the pre-seeded `max` increment `out_of_range_high` analogously.
+### R7 — Telemetry surface for `-V` output per #187 Decision 8
 
-Out-of-range tallies must:
+Each migrated consumer produces a per-consumer block in the locked `=== PERCENTILE MODE ===` `-V` section per #187 Decision 8, with the locked consumer-name strings: `heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`.
 
-- Be reported in `-V` (see R8).
-- Propagate to #179's drift detection so the index entry is refreshed at end of run.
-- Not retroactively widen the bin partition during the current run. The rendered axis for the current run remains the pre-seeded one.
-- Trigger **exactly one stderr warning per run** when any out-of-range value is encountered (see R6). One warning per run, not per bucket and not per metric in separate lines.
+Each per-consumer block reports the contract-surface fields locked in #187 Decision 8: `path`, `partition_keying`, `partition_count`, `total_rebin_events`, `max_partition_bins`, `partitions_with_overflow_count`, `partitions_with_underflow_count`, `counter_memory_bytes`, `rebins_per_partition`, `percentiles_emitted`, `out_of_range_bounded`, `shares_partitions_with` (where applicable).
 
-### R6 — Single end-of-run warning when bounds were insufficient
+The exact field formats are locked in #187 Decision 8. This feature implements the consumer-specific population of those fields; it does not define new fields.
 
-When out-of-range values exist for any metric in a run that ran in histogram bin-counter mode, ltl emits a single warning to stderr summarizing the condition. The warning:
+### R8 — Display geometry preservation
 
-- Is emitted exactly once per run (not per bucket, not per value).
-- Names each metric and direction (low / high) that had any out-of-range values.
-- States plainly that the pre-seeded bounds did not cover the live data and that bin determination was therefore suboptimal for that run.
-- States that the index has been refreshed (per #179) and that re-running will produce correct bins.
+Display geometry (column counts, color scheme, bar layout, percentile-marker positions, legend layout, x-axis tick positions) is unchanged by the migration. Internal precision improves because Decision 2's locked default (53 bpd) is higher than today's shipped 8 bpd default — bin counts and percentile values become *more* accurate.
 
-The warning is a data-quality signal to the user, not a debug aid. Out-of-range counts (with per-time-bucket breakdown for heatmap) remain in `-V` as diagnostic detail.
+Implementation tickets must validate against the existing baseline-regression harness (`tests/baseline/`, per CLAUDE.md) to confirm display stability.
 
-### R7 — Live bound capture continues in histogram bin-counter mode
+### R9 — Heatmap and histogram have independent partitions per #189 R7
 
-The live `min` / `max` capture that #179 relies on for drift detection must continue running alongside histogram bin-counter accumulation. Only the per-line value array allocation is eliminated.
+Although both consumers operate on the same metric, they hold independent partitions:
 
-### R8 — Render equivalence
+- `heatmap_cells` and `heatmap_markers` may share partitions (same keying, same metric) — #189 R7 allows consumer sharing.
+- `histogram_view` and `histogram_bins` share their partition (same keying `()` global, same metric) per #189 R7.
+- The heatmap pair and the histogram pair hold separate partitions because they have different keying (`time_bucket` vs. `()` global).
 
-When pre-seeded bounds match observed live values exactly, rendered heatmap and histogram output in histogram bin-counter mode is equivalent to raw-value mode for the same input. "Equivalent" means:
+The partitions are independent in `[min, max]` as each per-time-bucket partition adapts to its own bucket's values.
 
-- **Bin counts and bar-graph rendering are byte-identical.** Same bin partition, same value-to-bin assignment, same counts per bin.
-- **Heatmap percentile markers and histogram percentile indicators are equivalent within #189 R4's accuracy bound** (set by #187 D3). Bin-counter mode derives these via R4 against the bin counters (per R4-bis); raw-value mode derives them by sorting the raw arrays. The two derivation paths are not byte-identical at the value level, but the rendered output (marker bin index for heatmap; numeric value displayed in histogram legend; column position for x-axis tick) is within R4's documented accuracy contract.
-- Any deviation between modes that exceeds R4's accuracy bound is a bug in R4 or its consumer, not an acceptable render difference.
+### R10 — Per-consumer `-V` path reporting
 
-When raw-value mode runs (any ineligible scenario), rendered output is byte-identical to today's pre-feature implementation.
+Each consumer's `path:` line in its `=== PERCENTILE MODE ===` block per #187 Decision 8 reports the active path for that consumer:
 
-The new scenario suite (see Validation) asserts the equivalence-within-accuracy-bound contract; the existing regression suite asserts the raw-value-mode byte-identity.
+- `unified` — consumer is on the migrated path.
+- `pre_migration` — consumer has not yet migrated, or this is a pre-migration validation run.
+- `user_opt_out` — `--exact-percentiles` is active per #187 Decision 7.
+- `feature_not_active` — the consumer's feature is not engaged in this run (`-hm` not requested for heatmap consumers; `-hg` not requested for histogram consumers; or no values matched).
 
-### R9 — `-V` observability of mode selection and out-of-range activity
+### R11 — Pre-migration code path preserved through phase validation per #187 R11
 
-A dedicated section in `-V` output, named `=== HISTOGRAM BIN COUNTER MODE ===`, reports:
+The pre-migration code paths (`calculate_heatmap_buckets`, `%heatmap_raw`, `find_heatmap_bucket`, `calculate_histogram_buckets`, `%histogram_values`, `find_histogram_bucket_index`, related globals) are preserved through this feature's validation phase per #187 R11.
 
-- **Layer 1 — Run-level summary**: `mode` (`histogram_bin_counter` | `raw_value` | `not_active`) and `reason` (see R10 reason codes). `not_active` applies when neither `-hm` nor `-hg` is requested.
-- **Layer 2 — Per-feature partition detail**: for each active feature, one block reporting `feature` (`heatmap` | `histogram`), the metric(s) being partitioned, `num_buckets`, `boundary_min`, `boundary_max`. When both features are active, both blocks appear with their independently computed partitions (R11).
-- **Layer 3 — Out-of-range report**: emitted whenever `mode: histogram_bin_counter`. Reports `out_of_range_low` and `out_of_range_high` per metric (totals). For heatmap, additionally reports per-time-bucket breakdown for any time bucket where out-of-range counts are non-zero.
-- **Layer 4 — Drift cross-reference**: a single line pointing to #179's drift section, since drift detail is owned there.
+During validation, the implementation ticket runs both paths against the D2 datasets and confirms:
+- Under `--exact-percentiles`, byte-identical pre-feature output per #187 R11a.
+- Under the unified path, per-quantile error within the bin-resolution bound per #187 R4 for every required quantile.
 
-The section name and all labels are part of the feature contract and stable across implementations.
+After phase validation passes, the pre-migration code is retained as the `--exact-percentiles` opt-out surface per #187 Decision 7. The decision of whether and when to retire the pre-migration code post-validation is the implementation ticket's call (per #187 Decision 9's dissolution).
 
-### R10 — All-or-nothing per run; co-eligibility of heatmap and histogram
+### R12 — Boundaries with other features
 
-The eligibility decision is **a single per-run decision**, not per-feature and not per-metric:
+This feature owns the **migration implementations** for `heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`.
 
-- If R2 succeeds, the run is in `mode: histogram_bin_counter`. Both heatmap and histogram (if requested) use histogram bin-counter accumulation.
-- If R2 fails, the run is in `mode: raw_value`. Both heatmap and histogram (if requested) use today's raw-value accumulation.
-
-There is no mixed-mode run. The rationale is that the source data and the filter context determine eligibility, not the individual feature: when the pre-seed is available and matches the filter context, all consumers of pre-seeded bounds benefit; when it is not, none can.
-
-Reason codes reported in `-V` Layer 1:
-
-- `histogram_bin_counter_eligible` — R2 succeeded; `mode: histogram_bin_counter`.
-- `no_index` — R2.1 failed.
-- `tier_mismatch` — R2.2 failed.
-- `missing_bound` — R2.3 failed (including degenerate `min == max` and non-positive values that make logarithmic partitions undefined).
-- `not_active` — neither `-hm` nor `-hg` requested.
-
-Additional reason codes may be introduced if a future requirement adds a new gate criterion. Each reason code must map to a single, testable cause and be observable from `-V` alone.
-
-### R11 — Heatmap and histogram have independent bin partitions
-
-Although heatmap and histogram are co-eligible (R10) and use the same accumulation approach (R3), they compute their bin partitions **independently**:
-
-- Heatmap and histogram each have their own bucket count (already determined today by their respective bucket-count determination logic). That logic is in place and is not changing in this feature.
-- Heatmap and histogram each have their own visual width configuration (the existing width-control properties), driving display rendering independently.
-- The bin partitions themselves are computed independently per consumer, even when both consume bounds for the same metric, because the bucket count drives different partition arrays.
-
-The shared piece is the *approach* and the *underlying primitive operations* (R12), not the partition arrays.
-
-### R12 — Harmonization audit and unified-primitives plan (foundation for #189)
-
-This feature includes a foundation-laying deliverable for #189 (unified histogram bin-counter primitives):
-
-- **Audit**: catalogue the existing helper functions touching bin-partition computation, per-value bin assignment, counter increment, and (where applicable) percentile derivation, across heatmap, histogram, and the summary-table per-message latency percentile path.
-- **Consumer-side requirements**: document what heatmap and histogram need from the unified primitives this feature consumes (#189 defines them).
-- **Forward-compatibility statement**: identify which aspects of the histogram bin-counter data structure must remain stable so the per-message latency percentile migration (per #187, multi-phase) can adopt the same primitives without primitive-level redesign.
-
-The audit and consumer-side requirements are written into this feature file (see **Harmonization audit** below) and into `features/189-histogram-bin-counter-primitives.md` (which captures the helper-function contract as its own spec).
-
-The harmonization is not optional and is not deferred to "implementation discretion." It is required because divergent ad-hoc implementations across heatmap, histogram, and the future per-message percentile path would accumulate technical debt at every phase of the multi-phase percentile rollout.
-
-### R13 — Memory behavior in histogram bin-counter mode
-
-When the run is in `mode: histogram_bin_counter`:
-
-- Heatmap per-metric memory must be bounded by `num_buckets × num_time_buckets`.
-- Histogram per-metric memory must be bounded by `num_buckets`.
-
-Constant per-bucket per-time-bucket overhead is acceptable; growth proportional to input size is not.
-
-### R14 — No regression in raw-value mode
-
-When the run is in `mode: raw_value` for any reason, behavior is byte-identical to the pre-feature implementation. The existing regression suite (`tests/validate-regression.sh`) must pass byte-identically.
-
-### R15 — Per-message latency percentile arrays unaffected by this feature
-
-The per-message latency percentile arrays used by the summary table (P1..P99.9) are a separate data structure from `%heatmap_raw` and `%histogram_values`. This feature must not alter their behavior in either direction.
-
-The eventual migration of those arrays to histogram bin counters is a multi-phase progressive rollout owned by #187, with #189 providing the shared primitives. This feature lays the foundation (R12) so that migration is possible without primitive-level redesign; it does not perform the migration.
-
-### R16 — Boundaries with other features (this feature does not own)
-
-- Highlight-data accumulation (`%heatmap_raw_hl` and equivalents) — owned by #51.
-- Per-message latency percentile dual-mode — owned by #187.
-- Unified histogram bin-counter primitives (helper functions, shared data structure contract) — owned by #189.
-- Index read-back, tier correctness, drift refresh — owned by #179.
-- Shared boundary-array unification between heatmap and histogram — owned by #41 (note: this feature's R11 confirms heatmap and histogram have *independent partition arrays*; whatever #41 unifies must be compatible with that independence).
-
-When an eligibility gap traces to one of those features, it is recorded and filed against the owning issue rather than patched here.
-
-## Harmonization audit
-
-The audit is part of this feature's deliverables (R12). It captures, at the requirements level, what helpers exist today and what the unified primitives in #189 must satisfy.
-
-**Status: complete.** The audit was performed jointly with #187 R12 against `release/0.14.5` HEAD. The full catalogue of `ltl` call sites, the per-consumer constraints, and the cross-cutting constraints live in `features/189-histogram-bin-counter-primitives.md` § **Audit findings** and § **Consumer-side requirements**. The percentile-path portion (sibling deliverable owed by #187 R12) lives in `features/187-histogram-bin-counter-percentiles.md` § **Percentile-path harmonization audit**.
-
-This section summarizes only what is specific to this feature's consumers (heatmap + histogram). The R12 audit's original open question — how heatmap percentile markers are derived under bin-counter mode when `%heatmap_raw` is not allocated — is **resolved** below; the same investigation revealed a symmetric concern for histogram percentile indicators, which is also resolved below.
-
-### Consumers catalogued for this feature
-
-- **Heatmap path**: bin-partition computation (`calculate_heatmap_buckets` `ltl:4791`), per-value bin-index assignment (`find_heatmap_bucket` `ltl:4783`), counter increment per `(time_bucket, bin_index)` (`ltl:4839`, `ltl:4850`), rendering drivers (`print_heatmap_row` `ltl:6378`, `get_heatmap_column_header` `ltl:6265`, `print_heatmap_footer_scale` `ltl:6434`, `format_heatmap_value` `ltl:6242`).
-- **Histogram path**: option handling (`handle_histogram_option` `ltl:3487`), bucket-count determination (`calculate_histogram_bucket_count` `ltl:4869`), bin-partition computation + bin-index assignment + counter increment (orchestrated in `calculate_histogram_buckets` `ltl:4908`, with bin-assignment in `find_histogram_bucket_index` `ltl:4890`), rendering drivers (`print_histograms` `ltl:6890` and its helpers `ltl:7071–7559`).
-
-Full per-site catalogue with line-precise references in `features/189-histogram-bin-counter-primitives.md` § Audit findings.
-
-### What heatmap and histogram need from #189's primitives
-
-From this feature's perspective as a consumer (full contract in #189 R1–R11):
-
-- **R1 partition computation**: `(min, max, num_buckets) → partition`. Heatmap passes `num_buckets = $heatmap_width` (default 52, `-hmw`-tunable). Histogram passes one call per active metric with `num_buckets` from the existing `calculate_histogram_bucket_count`. Partition must be computable at **start of pass** when bin-counter mode is eligible (R3 / R4 of this feature).
-- **R2 bin assignment**: `(partition, value) → bin_index | overflow_sentinel`. Per-line call in the parse hot path. Algorithm choice (linear vs. binary search — both shapes present today) is #189's discretion; either satisfies R2's correctness contract.
-- **R3 counter update** with two distinct key shapes: `time_bucket` (heatmap) and `()` (histogram). Both shapes coexist in the same run because R10 makes the two features co-eligible.
-- **Out-of-range tally per key, low and high**. This is **new behavior** — today's bin-assignment helpers silently clamp to in-range indices. #34 R5 / R6 (per-key overflow + single end-of-run warning) and #179's drift detection both depend on it.
-- **Counter-store enumeration** for the rendering drivers listed above and for `-V` Layer 2 / 3 reporting (R9).
-- **Counter store lifecycle**: per-time-bucket counter stores (heatmap) are freeable once that bucket renders; histogram's single per-metric store persists for the run.
-- **R4 percentile interpolation**: invoked at end of pass under bin-counter mode. Heatmap consumer invokes R4 per time bucket against `%heatmap_data{$bucket}` for P50/P95/P99/P99.9; maps the numeric return value back to a bin index via R2 for storage in `%heatmap_percentiles`. Histogram consumer invokes R4 per metric against `%histogram_buckets{$metric}` for the ten-value percentile set; stores the numeric return value directly in `%histogram_stats{$metric}{p*}`. See R4-bis and the Resolution section below.
-
-### Forward-compatibility implications for this feature
-
-The audit confirms:
-
-- **#34 R15 holds.** The per-message latency percentile arrays (`log_messages{$category}{$log_key}{durations}` allocated `ltl:4591`) are structurally separate from `%heatmap_raw` (`ltl:255`) and `%histogram_values` (`ltl:290`). Three distinct key shapes, three distinct lifetimes, three distinct allocation sites. This feature's data structures do not entangle with the #187 Phase 2 migration target.
-- **Heatmap percentile markers** today (`%heatmap_percentiles` populated at `ltl:4829–4834`) are stored as bin indices derived from a sort over `%heatmap_raw`. Under bin-counter mode they are derived from #189 R4 (see R4-bis above and the resolution below). They remain stored as bin indices for backward-compatible rendering.
-- **Histogram percentile indicators** (`%histogram_stats{p*}` populated `ltl:4926–4940`; consumed by the legend at `ltl:7375` and by x-axis tick positioning at `ltl:7430`) are sort-derived from raw arrays under raw-value mode. Under bin-counter mode they are derived from #189 R4 (see R4-bis above and the resolution below). Storage and downstream rendering are unchanged; only the derivation path changes.
-
-### Resolution — percentile markers and indicators under bin-counter mode
-
-The R12 audit identified an open question about how heatmap percentile markers (`%heatmap_percentiles`) would be derived when `%heatmap_raw` is not allocated. Further investigation surfaced a symmetric question about histogram percentile indicators (`%histogram_stats{$metric}{p*}` — used in the legend and in x-axis tick positioning) when `%histogram_values{$metric}` is not allocated.
-
-**Resolution (recorded here, captured in R4-bis above):**
-
-Both consumers — heatmap percentile markers and histogram percentile indicators — derive from **#189 R4 (the percentile-interpolation primitive)** at end of pass under bin-counter mode. The heatmap consumer maps R4's numeric return value back to a bin index via #189 R2 for storage in `%heatmap_percentiles`. The histogram consumer stores R4's numeric return value directly in `%histogram_stats{$metric}{p*}`; downstream legend rendering and x-axis tick positioning are unchanged.
-
-Why this resolution:
-
-- **Heatmap markers** could in principle be derived from a simpler cumulative-count walk over the bin counters (no R4 needed). However, **histogram indicators** require a numeric value — the legend prints "P50:42ms"; a bin index alone is insufficient — and the cleanest path for that is R4. Adopting R4 for both consumers harmonizes the percentile-derivation story across the two features, matching the harmonization intent of #189.
-- Alternatives considered and rejected:
-  - Dropping markers/indicators in bin-counter mode → breaks R8.
-  - Keeping `%histogram_values` allocated under bin-counter mode purely for the legend → defeats most of the memory win.
-  - Maintaining a separate streaming sketch alongside the bin counters → adds a new primitive contract in tension with #189's harmonization goal.
-  - For heatmap alone, the cumulative-count walk is viable. We accept the (small) cost of taking the R4 dependency for the heatmap as well, in exchange for a single uniform percentile-derivation story.
-
-Delivery-sequence consequence:
-
-- **Step 4 (this feature's implementation) gates on #189 R4** in addition to R1–R3. R4 in turn gates on #187 D3's algorithm choice. The Delivery sequence table is updated to reflect this. The earlier note in #189's Parallelism section that allowed R4 to land later than R1–R3 is superseded.
-- The three issues (#34, #187 Phase 2, #189) now converge to ship together rather than in the originally planned staggered sequence.
-
-R8 (Render equivalence) is amended to permit the within-R4-accuracy-bound deviation between raw-value mode and bin-counter mode (see R8 amendment above).
-
-#189's R4 requirement and its Consumer-side requirements section are updated to add #34 as an R4 consumer (previously the spec noted "this primitive is not consumed by #34").
+This feature does NOT own:
+
+- The unified contract itself (locked decisions, R12 audit, consumer-name strings, `-V` format) — owned by **#187**.
+- The primitive implementations (R1-R11 of `features/189-histogram-bin-counter-primitives.md`) — owned by **#189**.
+- Other consumer migrations (`summary_table`, `csv_output`, `time_bucket_stats`, future highlight subsets) — owned by their own implementation tickets.
+- Index read-back and any drift-correction concerns — owned by #179 (closed; no longer load-bearing for partition sizing under the auto-resize lifecycle).
+- Activation policy, default-on vs. default-off, release cadence — implementation-ticket concerns per #187 Decision 9's dissolution.
+
+The contract authoritative reference is `features/187-histogram-bin-counter-percentiles.md` § *Locked decisions from research*.
+
+## Code sites affected by the migration
+
+The pre-migration code paths that this feature's implementation replaces. Line references are against `release/0.14.5` HEAD; subroutine names and global-variable identifiers are the stable anchors. Full per-site catalogue with primitive mappings lives in `features/189-histogram-bin-counter-primitives.md` § *Audit findings*.
+
+### Heatmap code sites
+
+- **Bin-partition computation** — `calculate_heatmap_buckets` at `ltl:4791-4865`. Pre-migration: end-of-parse, from `$heatmap_min`/`$heatmap_max` aggregated during parse; writes `@heatmap_boundaries`. Migration: replaced by per-`time_bucket` auto-resize partition via #189 R1 invoked during the parse.
+- **Per-value bin-index assignment** — `find_heatmap_bucket` at `ltl:4783-4789`. Pre-migration: linear search over `@heatmap_boundaries`, silently clamps out-of-range to last bin. Migration: replaced by #189 R2 with explicit overflow/underflow sentinels per #187 Decision 4.
+- **Counter increment** — `ltl:4839`, `ltl:4850` inside `calculate_heatmap_buckets`. Pre-migration: writes `%heatmap_data{$bucket}{$range_index}++`. Migration: replaced by #189 R3 invoked during the parse, with `key = time_bucket`.
+- **Raw-value collection** — `%heatmap_raw{$bucket}` accumulated during parse (`ltl:255` declaration). Migration: eliminated entirely under the unified path; the parse loop calls #189 R3 directly instead of pushing values to the raw array.
+- **Percentile-marker derivation** — `ltl:4823-4834` inside `calculate_heatmap_buckets`. Pre-migration: sort `%heatmap_raw{$bucket}`, index by integer rank for P50/P95/P99/P999, map to bin via `find_heatmap_bucket`, store in `%heatmap_percentiles{$bucket}`. Migration: #189 R4 invoked per time bucket against the per-bucket partition; numeric return mapped to display column position; storage unchanged.
+- **Rendering drivers** — `print_heatmap_row` at `ltl:6378-6432`, `get_heatmap_column_header` at `ltl:6265-6370`, `print_heatmap_footer_scale` at `ltl:6434-6540`, `format_heatmap_value` at `ltl:6242-6263`. Migration: largely unchanged. The render-time re-projection of partition counts onto the W-column display grid (R5 of this feature) is a new step performed before or inside these existing drivers.
+- **Heatmap data structures** declared at `ltl:247-260`: `$heatmap_metric`, `$heatmap_width`, `%heatmap_data`, `%heatmap_data_hl`, `%heatmap_raw`, `%heatmap_raw_hl`, `@heatmap_boundaries`, `$heatmap_min`, `$heatmap_max`, `$heatmap_max_density`, `%heatmap_percentiles`. Migration touches all of these.
+
+### Histogram code sites
+
+- **Bucket-count determination** — `calculate_histogram_bucket_count` at `ltl:4869-4887`. Pre-migration: derives `num_buckets` from observed `(min, max)` via `decades * histogram_buckets_per_decade` (default 8). Migration: per #187 Decision 2, `buckets_per_decade` becomes the user-tunable lever (default locked at 53); this function's role shifts to consuming the resolved bpd value.
+- **Bin-partition computation** — `calculate_histogram_buckets` at `ltl:4908-5043`. Pre-migration: end-of-parse, sort `%histogram_values{$metric}`, derive `(min, max, num_buckets)`, populate `@{$histogram_boundaries{$metric}}`. Migration: replaced by global per-metric auto-resize partition via #189 R1 invoked during the parse.
+- **Per-value bin-index assignment** — `find_histogram_bucket_index` at `ltl:4890-4905`. Pre-migration: binary search over per-metric boundary array. Migration: replaced by #189 R2 with explicit overflow/underflow sentinels.
+- **Counter increment** — `ltl:4973-4974` inside `calculate_histogram_buckets`. Pre-migration: `@{$histogram_buckets{$metric}}[bucket_idx]++`. Migration: #189 R3 invoked during the parse with `key = ()` per metric.
+- **Raw-value collection** — `%histogram_values{$metric}` accumulated during parse at `ltl:4700-4727` (`ltl:286-328` declarations). Migration: eliminated under the unified path; parse loop calls #189 R3 directly.
+- **Percentile-indicator derivation** — `ltl:4926-4940` inside `calculate_histogram_buckets`. Pre-migration: sort `%histogram_values{$metric}`, index by integer rank for the ten-value set, store in `%histogram_stats{$metric}{p*}`. Migration: #189 R4 invoked per metric for the ten-value set; numeric values stored directly.
+- **Rendering drivers** — `print_histograms` at `ltl:6890-7068` and helpers at `ltl:7071-7559` (display scaling, y-tick / x-label calculation, percentile selection, per-row rendering, axis / legend rendering). Migration: largely unchanged. The render-time re-projection of partition counts onto display columns is a new step performed before or inside these existing drivers.
 
 ## Edge cases
 
 | Case | Required behavior |
 |---|---|
-| Neither `-hm` nor `-hg` requested | `mode: not_active`. No partition computed. No `-V` Layer 2 / 3. |
-| Pre-seeded `min == max` for any required metric | Eligibility fails (`reason: missing_bound`); raw-value mode runs and handles the degenerate case as today. |
-| Pre-seeded `min` is zero or negative for a duration/bytes metric | Logarithmic partitions undefined. Eligibility fails (`reason: missing_bound`). |
-| Pre-seeded bounds match live exactly | No out-of-range counts, no drift, no warning. Render identical to raw-value mode. |
-| Pre-seeded bounds wider than live | Bins at extremes empty; legitimate; render uses the wider axis. No out-of-range, no warning. |
-| Pre-seeded bounds narrower than live | Out-of-range counts accumulate; single stderr warning (R6); render uses pre-seeded axis; #179 refreshes; next run observes no out-of-range. |
-| `-hm count` requested, pre-seed has only `duration` bounds | Eligibility fails (`reason: missing_bound`); raw-value mode. |
-| Multi-file run, mixed pre-seed (one file fresh, one not) | #179's multi-file rule already blocks pre-seed; this feature observes `no_index`; raw-value mode. |
-| Multi-file run, all fresh, same tier | Per-file bounds aggregated per #179 (min-of-mins, max-of-maxes); partition arrays use aggregated values. |
-| Filter signature never seen before | No Tier-1 match; eligibility fails (`reason: tier_mismatch`); next run with same filters will be eligible. |
-| Stale or malformed `ltl-index.csv` | #179 produces no pre-seed; this feature observes `no_index`; raw-value mode. |
-| Out-of-range values in multiple metrics in one run | Single warning (R6) names all affected metrics and directions. |
-| Concurrent ltl processes | Inherited from #179; out of this feature's concern. |
+| Neither `-hm` nor `-hg` requested | All four consumers report `path: feature_not_active` in `-V`. No partitions constructed. |
+| First value for a new time bucket (heatmap) is observed | Per #189 R1 (Decision 5 lifecycle), partition is lazily constructed centered on the first value with 5-decade span. No upfront sizing required. |
+| First value for a new metric (histogram) is observed | Same lazy construction at first observation. |
+| Subsequent value falls outside the current partition `[min, max]` | Per #189 R1 / Decision 5, partition extends via HdrHistogram-convention doubling. Existing counts preserved. Rebin event tallied per Decision 5 telemetry. |
+| Value falls outside the partition after doubling cap (if any) | Increments overflow or underflow counter per #187 Decision 4. Per-quantile `out_of_range_bounded` audit field reflects this. |
+| All-same metric values | Single bin populated; partition operates correctly. Per #187 R5. |
+| Single observed value | Partition constructed with single observation; subsequent percentile queries return that value per #187 R5. |
+| Multi-file run | Each file's values feed the same per-`time_bucket` (heatmap) and per-metric (histogram) partitions. Auto-resize accommodates the combined range. No special multi-file handling required at this feature's layer. |
+| User specifies `-hmw <W1>` (heatmap display width) | Display has W1 columns. The internal partition has more bins than W1; render-time re-projection (R5) projects partition counts onto W1 columns. |
+| User specifies different `-hmw` and `-hgw` | Heatmap displays at W1 columns; histogram at W2 columns. Independent per #189 R7. Internal partitions are independent. |
+| `--exact-percentiles` is set | All four consumers report `path: user_opt_out` and run the pre-migration code paths per #187 Decision 7 and R11 of this feature. |
+| Concurrent ltl processes | Out of this feature's concern. |
 
 ## Acceptance criteria
 
-- [ ] R1–R15 hold across all supported configurations.
-- [ ] R10 (all-or-nothing per run) holds: no test produces a mixed-mode run.
-- [ ] R11 (independent partitions) holds: heatmap and histogram each have their own bucket count and width; partition arrays are independent.
-- [ ] When R2 succeeds, memory growth respects R13.
-- [ ] When R2 fails for any reason, behavior satisfies R14.
-- [ ] `-V` emits the section described in R9, with reason codes per R10, sufficient to distinguish every failure mode of R2.
-- [ ] Out-of-range counts (R5) propagate to #179's drift refresh; after refresh, the next run with the same input observes zero out-of-range counts.
-- [ ] The single end-of-run warning (R6) is emitted exactly once when out-of-range values exist; not emitted when none exist.
-- [ ] The harmonization audit (R12) is complete and committed; the consumer-side requirements appear in **Harmonization audit** above and in `features/189-histogram-bin-counter-primitives.md`.
-- [ ] Per-message latency percentile arrays are unaffected (R15).
-- [ ] All test scenarios in **Validation** pass.
-- [ ] `tests/validate-regression.sh` passes byte-identically against the pre-feature baseline.
-- [ ] Any eligibility gap traced to #179 is filed against #179, not patched here (R16).
+### Migration completeness
+
+- [ ] R1 holds: all four consumers (`heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`) have unified-path implementations.
+- [ ] R2 holds: no runtime mode-selection gate; each consumer runs either `unified`, `pre_migration`, `user_opt_out`, or `feature_not_active`.
+- [ ] R3 holds: partitions use #189 R1's auto-resize lifecycle.
+- [ ] R4 holds: per-line accumulation during parse via #189 R2 / R3; no raw-value arrays under the unified path.
+- [ ] R5 holds: display geometry preserved via render-time re-projection.
+- [ ] R6 holds: overflow/underflow per #187 Decision 4 implemented by #189; this feature consumes that mechanism.
+- [ ] R7 holds: `=== PERCENTILE MODE ===` section reports each consumer's block per #187 Decision 8.
+- [ ] R8 holds: display geometry unchanged; precision improvements documented in release notes.
+- [ ] R9 holds: heatmap and histogram have independent partitions per #189 R7.
+- [ ] R10 holds: per-consumer `path:` line reports correctly under all four states.
+- [ ] R11 holds: pre-migration code paths preserved as `--exact-percentiles` opt-out surface.
+- [ ] R12 holds: boundary responsibilities respected.
+
+### Validation phase
+
+- [ ] Under `--exact-percentiles`, all four consumers' output is byte-identical to the pre-feature implementation per #187 R11a.
+- [ ] Under the unified path, all four consumers' percentile values fall within the bin-resolution bound per #187 R4 around the pre-migration values, across the D2 dataset set.
+- [ ] `tests/baseline/` regression harness passes for the heatmap and histogram outputs.
+- [ ] `-V` `=== PERCENTILE MODE ===` output matches the locked format per #187 Decision 8 (consumer-name strings, field names, format).
 
 ## Validation
 
-Three layers, modelled after #179.
+This section defines the **validation scenarios** for the heatmap and histogram migrations. The validation harness lives in `tests/baseline/` per CLAUDE.md.
 
-### Existing regression suite
+### Contract-level scenarios from #187
 
-`tests/validate-regression.sh` — all existing tests must pass byte-identically. Validates R14 and confirms that histogram bin-counter mode does not alter rendered output when bounds are matched.
+The contract-level validation scenarios specified in #187 § Validation apply to this feature's consumers. They cover the locked `=== PERCENTILE MODE ===` format, per-consumer `path:` reporting, opt-out behavior, out-of-range bounded reporting, and accuracy comparison against the pre-migration output. The implementation ticket runs these scenarios against the four consumers in this feature's scope.
 
-### New scenario suite
+### Heatmap-specific validation
 
-A new test runner orchestrates `ltl-index.csv` state directly (mirroring #179's pattern), runs ltl with `-V`, and asserts against the `=== HISTOGRAM BIN COUNTER MODE ===` section.
+- **Display geometry stability**: visual diff between pre-migration heatmap output and unified-path output. The unified path has higher internal precision but the same W-column display grid. Cell colors and percentile-marker positions should match within the bin-resolution bound; large deviations indicate a bug in render-time re-projection.
+- **Per-time-bucket partition independence**: a workload where adjacent time buckets have wildly different value ranges should produce per-bucket partitions that adapt independently. Verifiable via `-V` per-consumer telemetry (`rebins_per_partition: max` should not unduly inflate).
+- **Heatmap-markers vs. heatmap-cells consistency**: P50/P95/P99/P999 markers should fall in display columns whose bin index is consistent with the cell-color distribution. Visual verification against representative D2 datasets.
 
-`<F>` denotes a test input file with known content. `<F1>`, `<F2>` denote two distinct files with known distinct values.
+### Histogram-specific validation
 
-| Scenario | Setup | Action | Assertions |
-|---|---|---|---|
-| `cold-no-index-heatmap` | No `ltl-index.csv`. | `ltl -hm duration <F> -V`. | `mode: raw_value`, `reason: no_index`. Render byte-identical to pre-feature. |
-| `cold-no-index-histogram` | No `ltl-index.csv`. | `ltl -hg <F> -V`. | `mode: raw_value`, `reason: no_index`. |
-| `cold-no-index-both` | No `ltl-index.csv`. | `ltl -hm duration -hg <F> -V`. | `mode: raw_value`, `reason: no_index`. Both features render byte-identical to pre-feature. |
-| `warm-unfiltered-eligible-heatmap` | Fresh file row, bounds populated. | `ltl -hm duration <F> -V`. | `mode: histogram_bin_counter`, `reason: histogram_bin_counter_eligible`. Heatmap partition block in Layer 2 with the row's `min` / `max`. Render identical to `cold-no-index-heatmap`. |
-| `warm-unfiltered-eligible-histogram` | Same file row, all metric bounds populated. | `ltl -hg <F> -V`. | `mode: histogram_bin_counter`. Histogram partition block in Layer 2 with one entry per metric. Render identical to cold. |
-| `warm-unfiltered-eligible-both` | Same file row. | `ltl -hm duration -hg <F> -V`. | `mode: histogram_bin_counter`. Both heatmap and histogram partition blocks present in Layer 2, with their respective `num_buckets` (independent per R11). |
-| `warm-filtered-tier1-eligible` | Fresh selection row for `(<F>, -dmin=50;)` with bounds covering live filtered range. | `ltl -hm duration -dmin=50 <F> -V`. | `mode: histogram_bin_counter`. Pre-seed values match the selection row. |
-| `warm-filtered-tier2-fallback` | Fresh file row only; no matching selection row. | `ltl -hm duration -dmin=50 <F> -V`. | `mode: raw_value`, `reason: tier_mismatch`. Render byte-identical to pre-feature. |
-| `missing-bound-heatmap` | File row with `duration_max=-`. | `ltl -hm duration <F> -V`. | `mode: raw_value`, `reason: missing_bound`. |
-| `missing-bound-histogram-one-metric` | File row, `duration` bounds populated, `bytes_max=-`. | `ltl -hg <F> -V`. | `mode: raw_value`, `reason: missing_bound` (R10 — all-or-nothing; histogram needs all its metrics' bounds). |
-| `missing-bound-mixed-features` | File row, `duration` bounds populated, `bytes_max=-`. | `ltl -hm duration -hg <F> -V`. | `mode: raw_value`, `reason: missing_bound` (R10 — all-or-nothing; histogram metric bound missing fails the whole run). |
-| `out-of-range-low` | File row with `duration_min=100` (live values 10–500). | `ltl -hm duration <F> -V`. | `mode: histogram_bin_counter`, `out_of_range_low > 0`, `out_of_range_high: 0`. Per-time-bucket breakdown present. Exactly one stderr warning naming `duration` and `low`. #179's `drift_detected: yes`. After re-run with refreshed index: `out_of_range_low: 0`, no warning. |
-| `out-of-range-high` | File row with `duration_max=200`. | `ltl -hm duration <F> -V`. | Symmetric: `out_of_range_high > 0`, single warning naming `duration` and `high`. |
-| `out-of-range-both-directions` | File row with `duration_min=100, duration_max=200`. | `ltl -hm duration <F> -V`. | Both `out_of_range_low > 0` and `out_of_range_high > 0`. Exactly one stderr warning naming `duration` with both `low` and `high`. |
-| `out-of-range-multi-metric` | `-hg` requested; live exceeds bounds for two metrics. | `ltl -hg <F> -V`. | Exactly one stderr warning naming both affected metrics with their directions. |
-| `multi-file-all-eligible` | Fresh file rows for `<F1>` and `<F2>`. | `ltl -hm duration <F1> <F2> -V`. | `mode: histogram_bin_counter`. Partition uses aggregated bounds per #179. |
-| `multi-file-mixed-eligibility` | `<F1>` fresh, `<F2>` stale mtime. | `ltl -hm duration <F1> <F2> -V`. | `mode: raw_value`, `reason: no_index` (inherited from #179's multi-file blocking rule). |
-| `boundary-exact-match` | File row with `min` / `max` matching live exactly. | `ltl -hm duration <F> -V`. | `mode: histogram_bin_counter`, no out-of-range, no drift, no warning. Render byte-identical to a raw-value re-run. |
-| `wider-than-live-bounds` | File row with bounds wider than live. | `ltl -hm duration <F> -V`. | `mode: histogram_bin_counter`, no out-of-range, no warning. Render uses the wider axis. |
-| `feature-not-active` | Fresh file row; no `-hm`, no `-hg`. | `ltl <F> -V`. | `mode: not_active`. No partition blocks. |
-| `degenerate-min-equals-max` | File row with `duration_min = duration_max`. | `ltl -hm duration <F> -V`. | `mode: raw_value`, `reason: missing_bound`. |
-| `independent-bucket-counts` | Fresh file row; `-hm` and `-hg` requested with different `num_buckets` settings. | `ltl -hm duration -hg -hmw <W1> -hgw <W2> <F> -V`. | `mode: histogram_bin_counter`. Layer 2 heatmap and histogram blocks report different `num_buckets` (R11). |
+- **Display geometry stability**: bin counts in the rendered histogram should match the pre-migration counts within the bin-resolution bound. Display column count is unchanged.
+- **Percentile indicator placement**: P1, P10, P25, P50, P75, P90, P95, P99, P999, P9999 indicators in the legend and on x-axis ticks should fall within the bin-resolution bound of the pre-migration values.
+- **Wide percentile set support**: confirm that `histogram_view` requests the ten-value set per R3 of this feature, and that #189 R4 handles all ten correctly.
 
-#### Assertion mechanics
+### Cross-consumer scenarios
 
-Tests parse the `=== HISTOGRAM BIN COUNTER MODE ===` section from `-V` output and assert keys against expected values. They also assert stderr content for out-of-range scenarios (R6 single-warning rule). Rendered bar-graph output is not asserted in this suite (that is the existing regression suite's job); the section and stderr are.
-
-### `-V` instrumentation as the validation surface
-
-The labels and structure defined in R9 and R10 are the test contract. Without that level of detail in `-V`, scenarios like `out-of-range-multi-metric` (which must assert *which* metrics were affected and *what direction*) are not assertable from rendered output alone.
+- **Both heatmap and histogram active simultaneously**: per #189 R7 (consumer independence), the two pairs of consumers (`heatmap_cells` + `heatmap_markers`; `histogram_view` + `histogram_bins`) hold independent partitions. Verifiable via `-V` per-consumer telemetry.
+- **Per-consumer opt-out**: confirm that `--exact-percentiles` applies to all four consumers uniformly per #187 Decision 7 (global scope).
 
 ## Related issues
 
-- **#179** — index read-back (provides pre-seed primitive; R2 depends on it).
-- **#187** — histogram bin-counter-based percentile calculation (sibling; consumes the same primitives; R15 keeps this feature out of percentile arrays).
-- **#189** — unified histogram bin-counter primitives (sibling; provides the helper-function contract; R12 deliverable feeds it).
-- **#51** — highlight-data accumulation (future consumer of the unified primitives).
-- **#41** — heatmap-histogram alignment (R11 confirms partition independence; #41 must be compatible).
-- **#23 Phase 2 (#59)** — core engine rewrite; the memory model defined by R10–R13 is intended to be inherited unchanged.
+- **#187** — owns the locked unified contract. Authoritative reference for all behavior. Spec at `features/187-histogram-bin-counter-percentiles.md`; industry grounding at `features/187-histogram-industry-grounding.md`.
+- **#189** — implements the unified primitives that this feature consumes. Spec at `features/189-histogram-bin-counter-primitives.md`.
+- **#51** — Phase 4 highlight-subset consumer migration. Coordinates with this feature insofar as `_hl` variant data structures (`%heatmap_raw_hl`, `%histogram_values_hl`) are touched.
+- **#41** — heatmap-histogram alignment. Largely satisfied by #187+#189; both consumers run the same primitive contract at the same precision.
+- **#179** — index read-back (closed); no longer load-bearing for partition sizing under the auto-resize lifecycle.
+- **#23 Phase 2 (#59)** — core engine rewrite; this feature's migration composes with whatever pipeline architecture #23 produces.
 - **#180** — named pipeline stages.
-- **#46** — index file (closed; foundation that #179 reads back).
+- **#46** — index file (closed).
 
 ## Spec stability
 
-This document is intended to be stable across the implementation cycle. Two categories of post-merge change are expected:
+The contract surface (R1-R12) tracks #187's locked unified contract. Changes to the locked contract in #187 cascade to this feature's requirements; this feature does not lock decisions independently of #187.
 
-1. Clarifications when an unspecified case is encountered during implementation (move from "unspecified" to "specified" in **Edge cases**).
-2. Updates when sibling features (#51, #187, #189, #41) land — at that point this doc may add a brief subsection per consumer recording what each reads from or composes with this feature's mode contract.
-
-The spec does not track implementation status, code locations, or commit history. Those live in commit messages and the issue itself.
+The **Code sites affected by the migration** section is the technical inventory at the time of writing. Line numbers may shift; subroutine names and global-variable identifiers are the stable anchors.
