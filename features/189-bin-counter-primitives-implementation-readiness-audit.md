@@ -92,53 +92,55 @@ The sweep confirms the spec's `Audit findings` section (`features/189-histogram-
 
 ## Bucket A — Spec refinements to `features/189-histogram-bin-counter-primitives.md`
 
-These edits land as commits on this branch. Each commit message references the prototype evidence that motivated the refinement.
+**Status: LANDED.** A1–A5 are present in the current spec files. A6 is deferred as #189 production's responsibility.
 
-### A1 — R2 algorithm recommendation: closed-form
+Each item below records what was landed and where it lives in the spec, so a re-audit can verify the landed text against the recommendation.
 
-**Today's spec (line 119):** *"Be efficient enough to invoke per-line in the parsing hot path. The exact algorithm (binary search, direct logarithmic computation) is implementation-defined."*
+### A1 — R2 algorithm recommendation: closed-form (LANDED at `features/189-...-primitives.md:122`)
 
-**Recommended edit:** keep the contract open ("implementation-defined") but add a paragraph immediately below referencing the prototype evidence and recommending closed-form. Specifically:
+**Pre-edit spec (line 119):** *"Be efficient enough to invoke per-line in the parsing hot path. The exact algorithm (binary search, direct logarithmic computation) is implementation-defined."* — preserved as the contract surface.
+
+**Landed addition (line 122):** keeps the contract open ("implementation-defined") and adds a paragraph immediately below referencing the prototype evidence and recommending closed-form. Specifically:
 
 > Prototype evidence (PR #194, `prototype/189-bin-counter-primitives-validation-report.md` § V2) measured three R2 candidates against a 67 MB Tomcat file (51,469 partitions): closed-form (`floor(B · log(v/min) / log(max/min))`), binary search over a stored boundary array, and linear search over the same array. Closed-form was 3.31× faster than linear, 2.46× faster than binary, with 4.75× lower memory (no boundary array stored per partition). V1's cross-check confirmed all three produce identical bin indices on 857,480 real observations. The recommended R2 implementation for #189 production is closed-form; binary and linear remain conforming alternatives.
 
 **Rationale:** the prototype settled the algorithm choice empirically. Without this addition, #189 production would have to re-derive the same analysis. With it, production starts from "closed-form unless you have a reason not to."
 
-### A2 — Boundary array materialization: on-demand, not stored
+### A2 — Boundary array materialization: on-demand, not stored (LANDED at `features/189-...-primitives.md:124`)
 
-**Today's spec:** ambiguous. R1 line 100 lists `min`, `max`, `bin-count` as observable state but doesn't say whether `boundary[i]` is materialized per partition or computed on demand. R4 line 156 says "where `lower = partition.boundary[located_bin]` and `upper = partition.boundary[located_bin + 1]`" — implying an array. R9 line 220 references `state_budget_bytes` per consumer but does not address the boundary-array cost.
+**Pre-edit spec:** ambiguous. R1 line 100 listed `min`, `max`, `bin-count` as observable state but didn't say whether `boundary[i]` is materialized per partition or computed on demand. R4 line 156 says "where `lower = partition.boundary[located_bin]` and `upper = partition.boundary[located_bin + 1]`" — implying an array. R9 line 220 referenced `state_budget_bytes` per consumer but did not address the boundary-array cost.
 
-**Recommended edit:** add an implementation-guidance note to R1 stating that the recommended implementation derives `boundary[i]` on demand from `min`, `max`, `B`, `i` using the locked log-spaced formula. Specifically:
+**Landed addition (line 124):** an implementation-guidance note to R2 stating that the recommended implementation derives `boundary[i]` on demand from `min`, `max`, `B`, `i` using the locked log-spaced formula. Specifically:
 
 > **Boundary materialization (implementation guidance, non-binding):** The closed-form R2 implementation does not require a stored boundary array — `boundary[i] = min · (max/min)^(i/B)` can be computed on demand whenever R4 or rendering code needs a specific boundary value. The prototype measured that storing the array per partition adds ~4.75× memory at locked default bpd=53 (51,469 partitions: 117 MB closed-form vs. 555 MB with boundary arrays). For consumers running at Path A scale (10⁵+ partitions), the recommended implementation materializes boundaries inline at the call site rather than persistently per partition.
 
 **Rationale:** Decision 2's projection of ~212 MB at 10⁵ partitions assumed closed-form (no boundary array). Without this clarification, an implementer who reads R1+R4 in isolation could choose binary search with stored boundaries and end up at ~1.1 GB at Path A scale, a 5× cost overrun against Decision 2's published guidance.
 
-### A3 — `out_of_range_bounded` audit semantics: explicit per-quantile
+### A3 — `out_of_range_bounded` audit semantics: explicit per-quantile (LANDED at `features/189-...-primitives.md:193`)
 
-**Today's spec (R6 line 187):** *"Expose them to consumers for the per-consumer audit aggregates (`partitions_with_overflow_count`, `partitions_with_underflow_count` per #187 Decision 8)."* — and Decision 8's locked format already shows per-quantile inline `out_of_range_bounded: p50=none p99=high`.
+**Pre-edit spec (R6 line 187):** *"Expose them to consumers for the per-consumer audit aggregates (`partitions_with_overflow_count`, `partitions_with_underflow_count` per #187 Decision 8)."* — and Decision 8's locked format already shows per-quantile inline `out_of_range_bounded: p50=none p99=high`.
 
-**Recommended edit:** add an explicit clarifying line to R6 stating that the audit code is per-quantile, derived at R4 invocation time from the rank's landing position, not a property of the partition itself. Specifically:
+**Landed addition (line 193):** an explicit clarifying paragraph in R6 stating that the audit code is per-quantile, derived at R4 invocation time from the rank's landing position, not a property of the partition itself. Specifically:
 
 > **Audit semantics (per-quantile, not per-partition):** The `out_of_range_bounded` audit code is determined per-quantile by R4 at the moment of invocation, based on whether the target rank for that specific quantile lands in the underflow counter, an in-range bin, or the overflow counter. A partition with `partitions_with_overflow_count > 0` may still report `audit = none` for some quantiles (those whose target rank lands in an in-range bin). Per #187 Decision 4, the overflow/underflow counter's share of total N determines which quantiles fire: a quantile q lands in overflow only when `ceil(q · total_N) > (total_N − overflow_count)`; symmetric for underflow.
 
 **Rationale:** the prototype's V3 Part B (`prototype/189-bin-counter-primitives-validation-report.md` § V3 *Surprises*) demonstrated that a partition with non-zero out-of-range counters reports `audit = none` for quantiles whose rank falls in the in-range region. Without this clarification, consumer tests would naturally assert "if `overflow > 0` then `audit = high` at every quantile of that partition" — which is incorrect and would produce false test failures.
 
-### A4 — Decision 2 memory projection: Perl-overhead footnote (edit to `features/187-histogram-bin-counter-percentiles.md`)
+### A4 — Decision 2 memory projection: Perl-overhead footnote (LANDED at `features/187-...-percentiles.md:1172`)
 
-**Today's spec (#187 § *Locked decisions from research* § Decision 2, line 1172):** *"Memory footprint at locked default: 265 bins per partition over 5 decades; ~2.1 KB per partition at 8 B/counter; ~212 MB total across 10⁵ keys (Path A scale)."*
+**Pre-edit spec (#187 § *Locked decisions from research* § Decision 2, line 1172):** *"Memory footprint at locked default: 265 bins per partition over 5 decades; ~2.1 KB per partition at 8 B/counter; ~212 MB total across 10⁵ keys (Path A scale)."*
 
-**Recommended edit:** add a footnote noting the Perl-overhead delta measured by the prototype. Specifically:
+**Landed addition (line 1172):** a footnote noting the Perl-overhead delta measured by the prototype. Specifically:
 
 > **Measured overhead** (prototype evidence, PR #194 § V2 Part A): on real Tomcat data at 51,469 partitions, actual per-partition cost under Perl is 2,381 B (vs. the theoretical 2,136 B floor), and projected total at 10⁵ partitions is 227 MB (+12.3% over the 212 MB guidance). The delta is Perl hash-and-scalar overhead vs. the theoretical `(B+2) × 8` byte counter array. Analysts comparing observed `counter_memory_bytes` in `-V` output against this guidance should expect the small positive offset.
 
 **Rationale:** Decision 2's projection is theoretical. The prototype measured the real cost on D2 data and found the small Perl-overhead delta. Users reading the spec and then comparing `-V` output to its projection should not be surprised by the +12.3% delta.
 
-### A5 — `percentile_precision` field rendering when `-pbpd` is non-tier
+### A5 — `percentile_precision` field rendering when `-pbpd` is non-tier (LANDED at `features/187-...-percentiles.md:1452`)
 
-**Today's spec (#187 Decision 8 line 1452-1453):** the spec shows examples like `percentile_precision: 4 (--percentile-precision 4; overridden)` and `percentile_precision: 5 (default)` but does not address the case where `-pbpd 100` is specified — 100 doesn't correspond to any of the nine LEVELs in the locked tier table.
+**Pre-edit spec (#187 Decision 8 line 1452-1453):** the spec showed examples like `percentile_precision: 4 (--percentile-precision 4; overridden)` and `percentile_precision: 5 (default)` but did not address the case where `-pbpd 100` is specified — 100 doesn't correspond to any of the nine LEVELs in the locked tier table.
 
-**Recommended edit:** add a clarifying line to Decision 8's `percentile_precision` field definition stating that when `-pbpd N` resolves to a non-tier value, the field renders as `percentile_precision: n/a (-pbpd N specified)` or similar. The exact format is at #189 production's discretion within the locked stability contract; document the convention chosen.
+**Landed addition (line 1452):** a clarifying clause in Decision 8's `percentile_precision` field definition stating that when `-pbpd N` resolves to a non-tier value, the field renders as `percentile_precision: n/a (-pbpd N specified)`. The literal string `n/a` is part of the locked stability contract for this field.
 
 **Rationale:** the prototype's V4 scenarios surfaced this small format question (`prototype/189-bin-counter-primitives-validation-report.md` § V4 *Findings* finding 2). It's not a contract gap — it's a small cosmetic question Decision 8 didn't anticipate. Calling it out in the spec lets #189 production pick a convention and not have to bikeshed it during implementation.
 
