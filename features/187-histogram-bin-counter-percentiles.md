@@ -144,7 +144,7 @@ The unified contract is deterministic for a given input. The Decision 1 formula 
 
 ### R7 — `-V` observability
 
-A dedicated `=== PERCENTILE MODE ===` section reports the unified contract's state. The full format, field names, consumer-name strings, and structural conventions are locked in *Locked decisions from research* § Decision 8. R7 is the requirements-section anchor; Decision 8 is authoritative.
+A dedicated `=== BIN-COUNTER MODE ===` section reports the unified contract's state. The full format, field names, consumer-name strings, and structural conventions are locked in *Locked decisions from research* § Decision 8. R7 is the requirements-section anchor; Decision 8 is authoritative.
 
 The contract surface includes (full detail in Decision 8):
 
@@ -153,12 +153,12 @@ The contract surface includes (full detail in Decision 8):
 - **Shared-partition consumers**: `shares_partitions_with:` short-form blocks.
 - **Section presence**: always emitted under `-V`; reports `consumers_active: none` when no consumer is computing.
 
-The section name (`=== PERCENTILE MODE ===`), all field names, and all consumer-name strings are part of the locked feature contract per Decision 8. Field-name changes require a new locked-decision entry.
+The section name (`=== BIN-COUNTER MODE ===`), all field names, and all consumer-name strings are part of the locked feature contract per Decision 8. Field-name changes require a new locked-decision entry.
 - **Rebin telemetry (per-consumer using the unified path)**: `total_rebin_events`, `rebins_per_key { p50, p95, p99, max }`, `max_partition_bins` (Decision 5 lock; intended to support empirical seed-heuristic tuning).
 - **Tier-correctness for filtered runs**: if a run includes a filter, `-V` reports the filter context so an analyst can audit whether the result is appropriate (R2.2 reframed as audit concern, not gate).
 - **Pre-migration consumers (any still running the sort-based path during phased migration)**: `n` (the value count consumed) and `sorted: yes` line, matching R11's byte-identical contract.
 
-Section name (`=== PERCENTILE MODE ===`) and the core field labels are part of the feature contract. Practical decision 8 settles cosmetic and verbosity details.
+Section name (`=== BIN-COUNTER MODE ===`) and the core field labels are part of the feature contract. Practical decision 8 settles cosmetic and verbosity details.
 
 ### R8 — Coupling to the unified primitive contract
 
@@ -455,7 +455,7 @@ This section defines the **contract-surface validation scenarios** that any cons
 
 ### Contract-level scenario suite
 
-Run ltl with `-V`, assert against the `=== PERCENTILE MODE ===` section. These scenarios validate the unified contract surface (R7, R10) independently of any specific consumer's migration progress.
+Run ltl with `-V`, assert against the `=== BIN-COUNTER MODE ===` section. These scenarios validate the unified contract surface (R7, R10) independently of any specific consumer's migration progress.
 
 | Scenario | Setup | Action | Assertions |
 |---|---|---|---|
@@ -703,7 +703,7 @@ D3 is the central deliverable of Phase 1. It synthesizes D1's analysis into a me
 
 D3 does **not** lock the implementation. The decision conversation between user and Claude is what locks it; D3 is the input to that conversation, and the locked entries live in *Locked decisions from research*.
 
-> **Status as of 2026-05-19: GROUNDED + F1, Decisions 1, 1A, 2, 3, 4, 5, 7, 8, 10 locked; Decisions 6, 9 DISSOLVED. All decision-conversation work complete.** The D3 content has been rebuilt from `features/187-histogram-industry-grounding.md` (industry-practice research pass) with primary-source citations. Locked: **F1** (design-philosophy framing: ltl as query-time analyzer, `buckets_per_decade` as the analyst's lever, rank-in-bin information used); **Decision 1** (R4 uses the Prometheus native-exponential in-bucket interpolation formula, verified verbatim against `promql/quantile.go` lines 331–353); **Decision 1A** (use rank-in-bin); **Decision 2** (`buckets_per_decade` default 53 / OTEP-149 Scale-4 analog; two CLI flags — numeric `-pbpd` and tiered `--percentile-precision 1..9`; valid range 4 ≤ N ≤ 616; `-pbpd` always wins on conflict); **Decision 3** (no per-bin sample-count guard in R4; no partition-level rank-support signal in `-V`; follows strict industry convention); **Decision 4** (Prometheus `+Inf` overflow convention adopted verbatim for high end; symmetric `-Inf`-equivalent underflow convention for low end; separate counters; overflow/underflow contribute to N; R4 returns `boundary[B]` or `boundary[0]` if target rank lands in overflow/underflow; per-quantile `-V` audit field `out_of_range_bounded: high|low|none`); **Decision 5** (HdrHistogram-style auto-resize per partition across all consumers; partition seeded with full-default-span centered on first value; HdrHistogram-convention doubling on rebin; no precedent run or #179 index dependency for partition sizing; per-partition rebin telemetry exposed in `-V` for empirical seed-heuristic tuning); **Decision 7** (visible `--exact-percentiles` flag with deprecation notice; global scope; available one release cycle past each consumer's migration validation per implementation-ticket choice; `-V` reports top-level banner AND per-consumer `user_opt_out` line per R10); **Decision 8** (`-V` `=== PERCENTILE MODE ===` section with run-level header + per-consumer blocks; locked consumer-name strings; field names and section/consumer/field naming all locked; format mirrors existing `=== INDEX READ-BACK ===` convention; primary purpose is testability and AI-agent debugging); **Decision 10** (prototype validation scope — five mandatory aspects #189 must validate empirically before production code begins: in-bin formula on real data, auto-resize lifecycle on per-key fan-out at scale, initial seed heuristic + overflow/underflow on edge cases, end-to-end `-V` output sample, calculation accuracy vs. current array-of-values approach; hard prerequisite for #189 production code). **Decision 6** dissolved — no runtime gate in the unified contract. **Decision 9** dissolved — activation policy and release-engineering decisions are out of scope for #187; they belong to the per-consumer implementation tickets that consume this contract.
+> **Status as of 2026-05-19: GROUNDED + F1, Decisions 1, 1A, 2, 3, 4, 5, 7, 8, 10 locked; Decisions 6, 9 DISSOLVED. All decision-conversation work complete.** The D3 content has been rebuilt from `features/187-histogram-industry-grounding.md` (industry-practice research pass) with primary-source citations. Locked: **F1** (design-philosophy framing: ltl as query-time analyzer, `buckets_per_decade` as the analyst's lever, rank-in-bin information used); **Decision 1** (R4 uses the Prometheus native-exponential in-bucket interpolation formula, verified verbatim against `promql/quantile.go` lines 331–353); **Decision 1A** (use rank-in-bin); **Decision 2** (`buckets_per_decade` default 53 / OTEP-149 Scale-4 analog; two CLI flags — numeric `-pbpd` and tiered `--percentile-precision 1..9`; valid range 4 ≤ N ≤ 616; `-pbpd` always wins on conflict); **Decision 3** (no per-bin sample-count guard in R4; no partition-level rank-support signal in `-V`; follows strict industry convention); **Decision 4** (Prometheus `+Inf` overflow convention adopted verbatim for high end; symmetric `-Inf`-equivalent underflow convention for low end; separate counters; overflow/underflow contribute to N; R4 returns `boundary[B]` or `boundary[0]` if target rank lands in overflow/underflow; per-quantile `-V` audit field `out_of_range_bounded: high|low|none`); **Decision 5** (HdrHistogram-style auto-resize per partition across all consumers; partition seeded with full-default-span centered on first value; HdrHistogram-convention doubling on rebin; no precedent run or #179 index dependency for partition sizing; per-partition rebin telemetry exposed in `-V` for empirical seed-heuristic tuning); **Decision 7** (visible `--exact-percentiles` flag with deprecation notice; global scope; available one release cycle past each consumer's migration validation per implementation-ticket choice; `-V` reports top-level banner AND per-consumer `user_opt_out` line per R10); **Decision 8** (`-V` `=== BIN-COUNTER MODE ===` section with run-level header + per-consumer blocks; locked consumer-name strings; field names and section/consumer/field naming all locked; format mirrors existing `=== INDEX READ-BACK ===` convention; primary purpose is testability and AI-agent debugging); **Decision 10** (prototype validation scope — five mandatory aspects #189 must validate empirically before production code begins: in-bin formula on real data, auto-resize lifecycle on per-key fan-out at scale, initial seed heuristic + overflow/underflow on edge cases, end-to-end `-V` output sample, calculation accuracy vs. current array-of-values approach; hard prerequisite for #189 production code). **Decision 6** dissolved — no runtime gate in the unified contract. **Decision 9** dissolved — activation policy and release-engineering decisions are out of scope for #187; they belong to the per-consumer implementation tickets that consume this contract.
 
 #### D3 memo — the six decisions
 
@@ -1002,7 +1002,7 @@ Whichever framing ltl picks, the decision conversation must record that the valu
 Beyond the six analytical decisions above, the decision conversation must resolve four practical questions before Phase 2 implementation begins. The literature consulted in `features/187-histogram-industry-grounding.md` does not document conventions for any of these (the libraries leave configuration, observability format, activation policy, and prototyping triggers to the consumer); they are recorded here as ltl-specific decisions, distinct from the analytical decisions 1–6 above.
 
 7. **User-facing opt-out from the unified path** — **LOCKED (2026-05-19)**: visible `--exact-percentiles` flag with deprecation notice on every invocation, global scope, available one release cycle past each consumer's R9 migration. `-V` reports both a top-level banner and the per-consumer `user_opt_out` line per R10. Full lock recorded in *Locked decisions from research* § Decision 7 below.
-8. **`-V` reporting verbosity and format** — **LOCKED (2026-05-19)**: `=== PERCENTILE MODE ===` section with run-level header + per-consumer blocks, mirroring the existing `=== INDEX READ-BACK ===` block convention in ltl. Consumer names lowercase-with-underscores; `out_of_range_bounded:` reported inline per-quantile (Option A). Full lock recorded in *Locked decisions from research* § Decision 8 below.
+8. **`-V` reporting verbosity and format** — **LOCKED (2026-05-19)**: `=== BIN-COUNTER MODE ===` section with run-level header + per-consumer blocks, mirroring the existing `=== INDEX READ-BACK ===` block convention in ltl. Consumer names lowercase-with-underscores; `out_of_range_bounded:` reported inline per-quantile (Option A). Full lock recorded in *Locked decisions from research* § Decision 8 below.
 9. **Phase 2 default activation policy** — **DISSOLVED (2026-05-19)**: this question is out of scope for #187, which is a research-and-architecture-foundation deliverable. Activation policy, shipping cadence, default-on-vs-default-off, and per-release ramp decisions belong to the per-consumer implementation tickets that consume this contract, not to #187. Full dissolution rationale recorded in *Locked decisions from research* § Decision 9 below.
 10. **Prototype validation scope — what #189 must validate before production code** — **LOCKED (2026-05-19)**: #187 specifies the aspects of the locked architecture that must be validated empirically through prototyping before #189 begins production implementation. Five aspects are in scope: (a) the in-bin interpolation formula's behavior on real data; (b) the auto-resize partition lifecycle's behavior on per-key fan-out at scale; (c) the initial partition seeding heuristic and overflow/underflow handling on edge-case data; (d) an end-to-end verbose output sample for downstream comparison; (e) calculation accuracy compared to the array-of-values approach currently in use. The prototype is a hard prerequisite for #189's production code; #189 owns where the prototype lives and how it's structured. Full lock recorded in *Locked decisions from research* § Decision 10 below.
 
@@ -1418,7 +1418,7 @@ Non-binding.
 - **CLI parsing convention**: `--exact-percentiles` is a boolean flag handled in the same family as ltl's existing CLI flags (per CLAUDE.md's existing CLI conventions). Consistent with how ltl handles other boolean flags like `--ms`, `--hg`, `-hm`.
 - **Banner format suggestion** (practical decision 8 finalizes): something like:
   ```
-  === PERCENTILE MODE ===
+  === BIN-COUNTER MODE ===
   WARNING: --exact-percentiles is active. Output reflects the pre-#187 sort-based
   computation path. This flag is deprecated and will be removed in a future release.
   See docs/usage.md for the unified-path defaults.
@@ -1431,16 +1431,18 @@ Non-binding.
   - `docs/usage.md` — analyst-facing explanation of when to use the flag, what it does, and the migration path (use Decision 2's precision lever, or use an older ltl release if the analyst genuinely needs byte-identical pre-feature output).
 - **Retirement mechanism**: when the flag is removed in a future release, the removal is itself a release-process item — bump the major or minor version per ltl's release conventions, document the removal in release notes, ensure the deprecation notice appeared in the prior release.
 
-### Decision 8 — `-V` reporting verbosity and format — **LOCKED (2026-05-19)**
+### Decision 8 — `-V` reporting verbosity and format — **LOCKED (2026-05-19); section name amended 2026-05-20**
+
+> **Amendment 2026-05-20 (#34 Phase 2)**: section name changed from `=== PERCENTILE MODE ===` to `=== BIN-COUNTER MODE ===`. The substrate is HdrHistogram-style histogram bin counters; percentiles are one of three derivations from it, alongside bin counts (`histogram_bins`) and cell colors (`heatmap_cells`), which are not percentiles. The original name described the output of one consumer family; the amended name describes the substrate the entire contract is built on. Function name in code amended from `emit_percentile_mode_verbose` to `emit_bin_counter_mode_verbose` for the same reason. The user-facing `--exact-percentiles` / `-ep` flag is unchanged — it correctly names the user's choice rather than the substrate. All field names, consumer-name strings, and per-consumer field-name lockings within Decision 8 remain in effect verbatim.
 
 #### Contract
 
-`-V` output for percentile and histogram bin-counter state lives in a dedicated section named `=== PERCENTILE MODE ===`. The section is **always present** under `-V`, regardless of which consumers are active; if no consumer is computing percentiles or bin counts in the current run, the section reports `consumers_active: none` after the run-level header.
+`-V` output for percentile and histogram bin-counter state lives in a dedicated section named `=== BIN-COUNTER MODE ===`. The section is **always present** under `-V`, regardless of which consumers are active; if no consumer is computing percentiles or bin counts in the current run, the section reports `consumers_active: none` after the run-level header.
 
 The section's primary purpose is **testability and AI-agent debugging**. Field names are stable across releases; cosmetic changes to formatting that affect field-name greps require a new locked-decision entry. Reader-friendliness is secondary to grep-stability and coverage of the research-locked observability signals.
 
 **Conventions** (matching ltl's existing `=== INDEX READ-BACK ===` block, `ltl:836`):
-- Section header: `=== PERCENTILE MODE ===`.
+- Section header: `=== BIN-COUNTER MODE ===`.
 - Top-level lines: `key: value` with lowercase-with-underscores keys.
 - Nested blocks: `block_opener: <name>` followed by two-space-indented `key: value` lines.
 - Inline multi-value lines: space-separated `key=value` pairs (used for the per-quantile `out_of_range_bounded:` audit, see below).
@@ -1510,7 +1512,7 @@ No per-consumer blocks in that case.
 Default run with all consumers migrated:
 
 ```
-=== PERCENTILE MODE ===
+=== BIN-COUNTER MODE ===
 opt_out_active: no
 percentile_precision: 5 (default)
 buckets_per_decade: 53 (default)
@@ -1553,7 +1555,7 @@ consumer: histogram_bins
 Opt-out active:
 
 ```
-=== PERCENTILE MODE ===
+=== BIN-COUNTER MODE ===
 opt_out_active: yes
 opt_out_notice: --exact-percentiles is set; all migrated consumers reverted to pre-#187 sort-based computation. This flag is deprecated and will be removed in a future release.
 percentile_precision: 5 (default; not in effect this run)
@@ -1571,7 +1573,7 @@ consumer: csv_output
 Precision override with conflict:
 
 ```
-=== PERCENTILE MODE ===
+=== BIN-COUNTER MODE ===
 opt_out_active: no
 percentile_precision: 4 (--percentile-precision 4; overridden)
 buckets_per_decade: 100 (-pbpd 100; --percentile-precision 4 overridden)
@@ -1599,7 +1601,7 @@ consumer: summary_table
 No consumers active:
 
 ```
-=== PERCENTILE MODE ===
+=== BIN-COUNTER MODE ===
 opt_out_active: no
 percentile_precision: 5 (default)
 buckets_per_decade: 53 (default)
@@ -1620,7 +1622,7 @@ consumers_active: none
 
 Non-binding.
 
-- **Section emission point**: emit the `=== PERCENTILE MODE ===` block at the appropriate point in `@verbose_output` so it appears in the standard `-V` output order alongside `=== INDEX READ-BACK ===` and `=== Verbose ===`. Exact ordering relative to those other sections is implementation discretion; tests should not depend on inter-section ordering.
+- **Section emission point**: emit the `=== BIN-COUNTER MODE ===` block at the appropriate point in `@verbose_output` so it appears in the standard `-V` output order alongside `=== INDEX READ-BACK ===` and `=== Verbose ===`. Exact ordering relative to those other sections is implementation discretion; tests should not depend on inter-section ordering.
 - **Per-consumer iteration order**: emit per-consumer blocks in the order listed in the locked consumer-name table. This is part of the contract — tests grep for consumer blocks in this order.
 - **Field-value formatting**:
   - Integer counts: bare decimal (`1247`, not `1,247`).
@@ -1687,7 +1689,7 @@ Before #189 begins production implementation of the unified primitive helpers, t
    - The locked seed (partition opens at 5 decades centered on the first value seen) must be validated against real latency data to confirm p99 rebin counts fall in the expected 0–2 range. Surface any keys that rebin pathologically; document if the seed needs tuning before #189's production implementation locks in the heuristic.
    - The Decision 4 overflow/underflow handling (separate counters at the partition boundaries; R4 returns `boundary[B]` or `boundary[0]` when target rank lands in overflow/underflow) must be exercised against pathological inputs constructed from D2 datasets — extreme outliers, very narrow distributions, mixed scale regimes. Confirm the `out_of_range_bounded: high|low|none` audit field per Decision 8 fires correctly per quantile, and document the hit rate in normal vs. pathological scenarios.
 
-4. **End-to-end `-V` output sample for downstream comparison.** The prototype must produce a real `=== PERCENTILE MODE ===` verbose output block, per the locked Decision 8 format, against real log files. The output sample becomes a reference for downstream work: implementation tickets compare their migrated consumers' actual output against this prototype output to spot deviations; tests can grep against known-good output. The sample must exercise enough scenarios (default precision, `--percentile-precision` override, `-pbpd` override, flag conflict, overflow audit firing, opt-out active) to cover the format's locked surface.
+4. **End-to-end `-V` output sample for downstream comparison.** The prototype must produce a real `=== BIN-COUNTER MODE ===` verbose output block, per the locked Decision 8 format, against real log files. The output sample becomes a reference for downstream work: implementation tickets compare their migrated consumers' actual output against this prototype output to spot deviations; tests can grep against known-good output. The sample must exercise enough scenarios (default precision, `--percentile-precision` override, `-pbpd` override, flag conflict, overflow audit firing, opt-out active) to cover the format's locked surface.
 
 5. **Calculation accuracy compared to the array-of-values approach currently in use.** Direct comparison between the unified contract's output (Decision 1 formula over auto-resize partitions per Decision 5) and ltl's *existing* `calculate_statistics` retained-array sort-and-index approach (`ltl:5488`). For every required percentile per consumer (per R3) across D2 datasets, the prototype must show that the unified output sits within the bin-resolution bound (per R4, ~1.1% midpoint error at locked default 53 bpd) of today's exact output. This is the operational accuracy validation — confirming that the locked architecture produces output users will accept as a quality improvement over the current implementation, not a regression.
 

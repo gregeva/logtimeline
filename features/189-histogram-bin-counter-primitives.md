@@ -71,7 +71,7 @@ Before #189 begins production implementation of the primitives, **the locked arc
 
 3. **Initial partition seeding heuristic and overflow/underflow handling on edge-case data.** Validate the locked seed (partition opens at 5 decades centered on the first value seen) produces p99 rebin counts in the expected 0–2 range on real latency data. Construct pathological D2 inputs (extreme outliers, very narrow distributions, mixed scale regimes) and confirm the locked `out_of_range_bounded: high|low|none` audit field fires correctly per quantile and that R4 returns the correct boundary value.
 
-4. **End-to-end `-V` output sample for downstream comparison.** Produce a real `=== PERCENTILE MODE ===` verbose output block (per #187 Decision 8's locked format) from the prototype running against real log files. Exercise enough scenarios (default precision, `--percentile-precision` override, `-pbpd` override, flag conflict, overflow audit firing, opt-out active) to cover the locked format surface.
+4. **End-to-end `-V` output sample for downstream comparison.** Produce a real `=== BIN-COUNTER MODE ===` verbose output block (per #187 Decision 8's locked format) from the prototype running against real log files. Exercise enough scenarios (default precision, `--percentile-precision` override, `-pbpd` override, flag conflict, overflow audit firing, opt-out active) to cover the locked format surface.
 
 5. **Calculation accuracy compared to the array-of-values approach currently in use.** Direct comparison between the prototype's unified-contract output and ltl's existing `calculate_statistics` retained-array sort-and-index approach (`ltl:5488`). For every required percentile per consumer (per #187 R3) across D2 datasets, confirm the unified output sits within the bin-resolution bound (per #187 R4) of today's exact output.
 
@@ -217,7 +217,7 @@ Auto-resize (R1) reallocates the counter storage when the partition extends. The
 
 ### R9 — Telemetry surface for `-V` output (per #187 Decision 8)
 
-The primitives expose telemetry signals that consumers populate into the locked `=== PERCENTILE MODE ===` `-V` section per #187 Decision 8. The primitives themselves do not produce `-V` output; they make the data available.
+The primitives expose telemetry signals that consumers populate into the locked `=== BIN-COUNTER MODE ===` `-V` section per #187 Decision 8. The primitives themselves do not produce `-V` output; they make the data available.
 
 The primitives must expose:
 
@@ -483,7 +483,7 @@ These constraints apply across all consumers and are the hard inputs to #189's p
 
 - [ ] R1–R11 hold.
 - [ ] All primitive behavior matches the locked #187 contract: Decision 1's formula in R4; Decision 5's auto-resize lifecycle in R1; Decision 4's overflow/underflow handling in R6; Decision 2's resolved `buckets_per_decade` value drives R1's bin count.
-- [ ] The R9 telemetry surface provides every data point that #187 Decision 8 requires consumers to surface in `=== PERCENTILE MODE ===` output.
+- [ ] The R9 telemetry surface provides every data point that #187 Decision 8 requires consumers to surface in `=== BIN-COUNTER MODE ===` output.
 - [ ] Primitive-level unit tests cover R1–R6 (see Validation below).
 - [ ] Cross-consumer composition tests demonstrate that R7 (partition independence) and R8 (lifecycle independence) hold when multiple consumers exercise the primitives simultaneously.
 - [ ] Per-consumer migration tickets can consume the primitives without forking, duplicating, or extending them beyond their locked contract.

@@ -1155,21 +1155,15 @@ sub emit_index_readback_verbose {
     }
 }
 
-# Issue #189 (PR #189-2): emit the `=== PERCENTILE MODE ===` section into
-# @verbose_output. Always emitted under -V per the locked stability contract.
-# Field names, consumer-name strings, and the three-value audit enum
-# (none|low|high) are locked at:
+# Section name, field names, consumer-name strings, and the three-value audit
+# enum (none|low|high) are locked at:
 #   features/187-histogram-bin-counter-percentiles.md § Decision 8
-# Tests assert grep-level stability of every field this sub emits; field-name
-# changes require a new locked-decision entry. Field values may evolve freely.
-#
-# In this PR (no consumer migrated yet) the section always reports
-# `consumers_active: none` after the run-level header. The first consumer
-# migration replaces that line with per-consumer blocks in the locked order.
-sub emit_percentile_mode_verbose {
+# Field-name changes require a new locked-decision entry. Field values may
+# evolve freely.
+sub emit_bin_counter_mode_verbose {
     return unless $verbose;
 
-    push @verbose_output, "=== PERCENTILE MODE ===";
+    push @verbose_output, "=== BIN-COUNTER MODE ===";
 
     # Run-level header — opt_out_active first per the locked example output.
     my $opt_out = $exact_percentiles_optout ? 'yes' : 'no';
@@ -1220,10 +1214,33 @@ sub emit_percentile_mode_verbose {
     push @verbose_output,
         "buckets_per_decade: $percentile_buckets_per_decade ($percentile_precision_source$not_in_effect)";
 
-    # PR #189-2 ships no migrated consumer; the section always terminates
-    # here. PR #189-3 onwards will replace this with per-consumer blocks
-    # emitted in the locked order from the consumer-name table.
-    push @verbose_output, "consumers_active: none";
+    my %feature_active = (
+        summary_table     => 1,
+        csv_output        => $write_messages_to_csv ? 1 : 0,
+        time_bucket_stats => ($print_durations && !$omit_durations
+                              && !$omit_stats && !$heatmap_enabled) ? 1 : 0,
+        heatmap_markers   => $heatmap_enabled ? 1 : 0,
+        heatmap_cells     => $heatmap_enabled ? 1 : 0,
+        histogram_view    => $histogram_enabled ? 1 : 0,
+        histogram_bins    => $histogram_enabled ? 1 : 0,
+    );
+
+    my @consumer_order = qw(
+        summary_table
+        csv_output
+        time_bucket_stats
+        heatmap_markers
+        heatmap_cells
+        histogram_view
+        histogram_bins
+    );
+
+    for my $consumer (@consumer_order) {
+        push @verbose_output, "";
+        push @verbose_output, "consumer: $consumer";
+        my $path = $feature_active{$consumer} ? 'pre_migration' : 'feature_not_active';
+        push @verbose_output, "  path: $path";
+    }
 }
 
 sub write_index_file {
@@ -8682,11 +8699,7 @@ $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + 
 detect_index_drift();
 emit_index_readback_verbose();
 
-# Issue #189 (PR #189-2): always emit the percentile-mode section under -V.
-# Ordering recommendation locked at:
-#   features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket C § C8
-# Tests assert per-block contents only, not inter-block ordering.
-emit_percentile_mode_verbose();
+emit_bin_counter_mode_verbose();
 
 print_verbose_output();
 

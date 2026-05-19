@@ -70,7 +70,7 @@ The sweep confirms the spec's `Audit findings` section (`features/189-histogram-
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ #189 production — primitive helpers in ltl                  │
-│   scope: R1-R6 helpers, =PERCENTILE MODE= -V block,         │
+│   scope: R1-R6 helpers, =BIN-COUNTER MODE= -V block,         │
 │   --percentile-precision / -pbpd / --exact-percentiles      │
 │   CLI flags, primitive-level unit tests, baseline           │
 │   harness scenarios. NO CONSUMER IS MIGRATED.               │
@@ -144,9 +144,9 @@ Each item below records what was landed and where it lives in the spec, so a re-
 
 **Rationale:** the prototype's V4 scenarios surfaced this small format question (`prototype/189-bin-counter-primitives-validation-report.md` § V4 *Findings* finding 2). It's not a contract gap — it's a small cosmetic question Decision 8 didn't anticipate. Calling it out in the spec lets #189 production pick a convention and not have to bikeshed it during implementation.
 
-### A6 (deferred) — Tests for `=== PERCENTILE MODE ===` section
+### A6 (deferred) — Tests for `=== BIN-COUNTER MODE ===` section
 
-`tests/baseline/` does not currently have a scenario asserting the `=== PERCENTILE MODE ===` block, but Decision 8's stability contract says "section name, all top-level field names, all consumer-name strings, and all per-consumer field names are part of the locked feature contract." Test coverage for this is a contract surface but is **#189 production's responsibility, not this audit's**. Recorded here so the production ticket knows test scaffolding for the new `-V` section is in scope. See `tests/validate-index-readback.sh` for the existing pattern.
+`tests/baseline/` does not currently have a scenario asserting the `=== BIN-COUNTER MODE ===` block, but Decision 8's stability contract says "section name, all top-level field names, all consumer-name strings, and all per-consumer field names are part of the locked feature contract." Test coverage for this is a contract surface but is **#189 production's responsibility, not this audit's**. Recorded here so the production ticket knows test scaffolding for the new `-V` section is in scope. See `tests/validate-index-readback.sh` for the existing pattern.
 
 ---
 
@@ -220,7 +220,7 @@ The unified contract eliminates four raw value arrays. Each migration ticket del
 
 **Anchor correction:** the audit's earlier draft referred to this function as `print_memory_breakdown`; no such function exists in `ltl`. The actual sub is `measure_memory_structures`.
 
-**Recommended change:** when each consumer migrates and its raw-array global is deleted, the corresponding `Devel::Size` line in `measure_memory_structures` is updated to track the new counter-store global (or removed if memory tracking is consolidated into the `counter_memory_bytes` field of `=== PERCENTILE MODE ===`). The `MEMORY_FINAL` block in `print_verbose_output` (`ltl:6578-6587`) is a **second** emission site — see new B14.
+**Recommended change:** when each consumer migrates and its raw-array global is deleted, the corresponding `Devel::Size` line in `measure_memory_structures` is updated to track the new counter-store global (or removed if memory tracking is consolidated into the `counter_memory_bytes` field of `=== BIN-COUNTER MODE ===`). The `MEMORY_FINAL` block in `print_verbose_output` (`ltl:6578-6587`) is a **second** emission site — see new B14.
 
 **Owning ticket:** each consumer migration touches the corresponding `Devel::Size` line.
 
@@ -228,7 +228,7 @@ The unified contract eliminates four raw value arrays. Each migration ticket del
 
 **Today:** `@verbose_output` is built up sequentially; `=== INDEX READ-BACK ===` (`ltl:836`) is one of **four** existing `=== ... ===` blocks in the verbose-output pipeline — see B17 for the full inventory.
 
-**Recommended change:** #189 production adds a `=== PERCENTILE MODE ===` block to `@verbose_output` at the appropriate point. Decision 8 line 1623 leaves the exact ordering relative to other `-V` sections at implementer discretion; tests should not depend on inter-section ordering.
+**Recommended change:** #189 production adds a `=== BIN-COUNTER MODE ===` block to `@verbose_output` at the appropriate point. Decision 8 line 1623 leaves the exact ordering relative to other `-V` sections at implementer discretion; tests should not depend on inter-section ordering.
 
 **Owning ticket:** #189 production.
 
@@ -236,9 +236,9 @@ The unified contract eliminates four raw value arrays. Each migration ticket del
 
 **Today:** `tests/validate-index-readback.sh` is the existing pattern for `-V`-section regression tests. `tests/validate-regression.sh` is the broader output-regression harness.
 
-**Recommended change:** #189 production adds `tests/validate-percentile-mode.sh` (or equivalent) following the `validate-index-readback.sh` pattern, asserting the `=== PERCENTILE MODE ===` block's run-level header and per-consumer block fields per Decision 8's locked stability contract. Each consumer migration adds its own baseline-regression scenarios per #187 R11.
+**Recommended change:** #189 production adds `tests/validate-percentile-mode.sh` (or equivalent) following the `validate-index-readback.sh` pattern, asserting the `=== BIN-COUNTER MODE ===` block's run-level header and per-consumer block fields per Decision 8's locked stability contract. Each consumer migration adds its own baseline-regression scenarios per #187 R11.
 
-**Owning tickets:** #189 production owns the new `=== PERCENTILE MODE ===` test scaffold; each consumer migration extends the baseline-regression harness for that consumer's user-visible output.
+**Owning tickets:** #189 production owns the new `=== BIN-COUNTER MODE ===` test scaffold; each consumer migration extends the baseline-regression harness for that consumer's user-visible output.
 
 ### B8 — `print_help()` (`ltl:1051`)
 
@@ -270,7 +270,7 @@ The unified contract eliminates four raw value arrays. Each migration ticket del
 
 **Today:** analyst-facing documentation, synced to the public wiki on each release. Heatmap options reference at `docs/usage.md:180+`; histogram options reference at `docs/usage.md:202+`. **`-hgbpd` is not documented in `docs/usage.md` today** (sweep confirmed: no `-hgbpd` references in the file) — a pre-existing gap that the migration can incidentally close by documenting the percentile-precision tier table alongside it.
 
-**Recommended change:** #189 production adds analyst-facing explanation of when to use the new flags (per Decision 2 line 1194 and Decision 7 line 1431). Specifically: the `--percentile-precision 1..9` tier table; how to read `=== PERCENTILE MODE ===` output; when to consider `--exact-percentiles` opt-out. The natural insertion point sits between the heatmap section and the histogram section, since percentile mode now applies to all consumers.
+**Recommended change:** #189 production adds analyst-facing explanation of when to use the new flags (per Decision 2 line 1194 and Decision 7 line 1431). Specifically: the `--percentile-precision 1..9` tier table; how to read `=== BIN-COUNTER MODE ===` output; when to consider `--exact-percentiles` opt-out. The natural insertion point sits between the heatmap section and the histogram section, since percentile mode now applies to all consumers.
 
 **Owning ticket:** #189 production.
 
@@ -307,7 +307,7 @@ The unified contract eliminates four raw value arrays. Each migration ticket del
 
 **Sweep finding:** the audit doc's B5 cites `print_memory_breakdown` (no such function — actual sub is `measure_memory_structures` at `ltl:3206`). It misses the second emission site at `ltl:6578-6587`. Two emission sites mean any rename or repurposing of `%log_analysis`/`%log_messages` under the unified contract must update both locations.
 
-**Recommended change:** production updates both `measure_memory_structures` (B5) and `print_verbose_output` (this row) when consumers migrate. Specifically: when `log_messages{}{}{durations}` becomes a counter store under Phase 2, `ltl:6579` continues to track `%log_messages` (which now holds the counter stores instead of raw arrays) — the line stays valid but the value drops by ~100×. Per-consumer counter memory is also tracked separately in the new `counter_memory_bytes` field of `=== PERCENTILE MODE ===`.
+**Recommended change:** production updates both `measure_memory_structures` (B5) and `print_verbose_output` (this row) when consumers migrate. Specifically: when `log_messages{}{}{durations}` becomes a counter store under Phase 2, `ltl:6579` continues to track `%log_messages` (which now holds the counter stores instead of raw arrays) — the line stays valid but the value drops by ~100×. Per-consumer counter memory is also tracked separately in the new `counter_memory_bytes` field of `=== BIN-COUNTER MODE ===`.
 
 **Owning ticket:** each consumer migration touches both Devel::Size emission sites.
 
@@ -355,9 +355,9 @@ This row is recorded to **flag the consolidation-flow interaction** for the Phas
 | `=== BENCHMARK DATA ===` | `ltl:6541` (`print` direct from `print_verbose_output`) | Benchmark TSV emission (closed with `=== END BENCHMARK DATA ===` at `ltl:6604`) |
 | `=== Consolidation Summary (Issue #96) ===` | `ltl:8116` (push to `@verbose_output`) | Fuzzy-message-consolidation telemetry |
 
-**Sweep finding:** the audit doc cites only `=== INDEX READ-BACK ===` (B6). Production must pick `=== PERCENTILE MODE ===`'s ordering relative to all four blocks, and must also pick whether to follow the `@verbose_output` push convention (used by 3 of 4) or the direct-print convention (used by `=== BENCHMARK DATA ===`). The push convention is the natural choice — the BENCHMARK DATA block uses direct print only because its TSV format is consumed by `tests/baseline/run-benchmark.sh` separately from the human-readable `-V` output.
+**Sweep finding:** the audit doc cites only `=== INDEX READ-BACK ===` (B6). Production must pick `=== BIN-COUNTER MODE ===`'s ordering relative to all four blocks, and must also pick whether to follow the `@verbose_output` push convention (used by 3 of 4) or the direct-print convention (used by `=== BENCHMARK DATA ===`). The push convention is the natural choice — the BENCHMARK DATA block uses direct print only because its TSV format is consumed by `tests/baseline/run-benchmark.sh` separately from the human-readable `-V` output.
 
-**Recommended change:** #189 production adds `=== PERCENTILE MODE ===` via the `@verbose_output` push convention, following the pattern at `ltl:836` and `ltl:8116`. The block sits naturally after `=== INDEX READ-BACK ===` (which describes the data substrate the partitions were built from) and before `=== Consolidation Summary ===` (which is end-of-pipeline telemetry). Tests must not assert inter-block ordering per Decision 8.
+**Recommended change:** #189 production adds `=== BIN-COUNTER MODE ===` via the `@verbose_output` push convention, following the pattern at `ltl:836` and `ltl:8116`. The block sits naturally after `=== INDEX READ-BACK ===` (which describes the data substrate the partitions were built from) and before `=== Consolidation Summary ===` (which is end-of-pipeline telemetry). Tests must not assert inter-block ordering per Decision 8.
 
 **Owning ticket:** #189 production. See new C8 for the explicit ordering decision.
 
@@ -398,7 +398,7 @@ The prototype gave evidence but didn't lock these — they're production concern
 
 **Recommendation (non-binding):** parse both flags during option parsing; resolve to `($bpd, $precision_source)` once, store on a global or pass through to partition construction explicitly. The prototype uses a global `$precision_source` string for the `-V` source annotation (`prototype/189-bin-counter-primitives.pl:79-91`); production might prefer a struct.
 
-### C4 — `=== PERCENTILE MODE ===` block wiring
+### C4 — `=== BIN-COUNTER MODE ===` block wiring
 
 **Question:** where does the block emission live? A new `print_percentile_mode()` sub called from the existing `-V` emission path? Inline in the main flow?
 
@@ -428,9 +428,9 @@ The prototype gave evidence but didn't lock these — they're production concern
 
 **Why this is Bucket C, not Bucket A:** Decision 2 locks the new flag's contract but does not address legacy flag interactions. The decision is genuinely #189-production's call.
 
-### C8 — `=== PERCENTILE MODE ===` block ordering vs. four existing blocks
+### C8 — `=== BIN-COUNTER MODE ===` block ordering vs. four existing blocks
 
-**Question:** per B17, there are four existing `=== ... ===` blocks in the verbose-output pipeline. Where does the new `=== PERCENTILE MODE ===` block go in the sequence?
+**Question:** per B17, there are four existing `=== ... ===` blocks in the verbose-output pipeline. Where does the new `=== BIN-COUNTER MODE ===` block go in the sequence?
 
 **Recommendation (non-binding):** insert after `=== INDEX READ-BACK ===` (which describes the data substrate the partitions were built from) and before `=== Consolidation Summary ===` (which is end-of-pipeline telemetry). Specifically: push to `@verbose_output` immediately after the existing push at `ltl:836+` and before the consolidation summary push at `ltl:8116`. Decision 8 line 1623 explicitly leaves inter-block ordering at production's discretion, so this is purely an ergonomic choice — but the recommendation tracks the data flow (substrate → percentile mode → consolidation) the analyst sees.
 
@@ -444,7 +444,7 @@ When #189 production is opened, the work decomposes naturally into the following
 
 1. **PR #189-1: Primitive helpers + CLI flag parsing (no `-V` output yet).** R1–R6 helpers landed in `ltl`. `--percentile-precision`, `-pbpd`, `--exact-percentiles` parsed but unused. Unit tests for R1–R6 against synthetic inputs. No consumer changes. Baseline regression passes byte-identically because nothing observable changes.
 
-2. **PR #189-2: `=== PERCENTILE MODE ===` `-V` block + `consumers_active: none` state.** The block emits per Decision 8 with `consumers_active: none` because no consumer is migrated. `tests/validate-percentile-mode.sh` asserts the block's run-level header and the no-consumer-active path. Baseline regression continues to pass byte-identically.
+2. **PR #189-2: `=== BIN-COUNTER MODE ===` `-V` block + `consumers_active: none` state.** The block emits per Decision 8 with `consumers_active: none` because no consumer is migrated. `tests/validate-percentile-mode.sh` asserts the block's run-level header and the no-consumer-active path. Baseline regression continues to pass byte-identically.
 
 3. **PR #189-3: `README.md`, `docs/usage.md`, `print_help()` updates.** Analyst-facing documentation lands. No code changes beyond `print_help()`. Wiki sync happens at next release.
 
@@ -460,7 +460,7 @@ For each downstream ticket, the full set of `ltl` code surfaces it touches per t
 
 ### #189 production
 
-- B5 (memory tracking in `measure_memory_structures` at `ltl:3206-3240` — new `counter_memory_bytes` field in `=== PERCENTILE MODE ===`)
+- B5 (memory tracking in `measure_memory_structures` at `ltl:3206-3240` — new `counter_memory_bytes` field in `=== BIN-COUNTER MODE ===`)
 - B6 (`=== INDEX READ-BACK ===` block coexistence — adds new block at appropriate point)
 - B7 (`tests/baseline/` — adds `tests/validate-percentile-mode.sh`)
 - B8 (`print_help()` — adds three new flags)
