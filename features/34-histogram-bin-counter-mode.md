@@ -115,7 +115,7 @@ The migrated consumers do not require any feature-specific overflow handling bey
 
 ### R7 — Telemetry surface for `-V` output per #187 Decision 8
 
-Each migrated consumer produces a per-consumer block in the locked `=== PERCENTILE MODE ===` `-V` section per #187 Decision 8, with the locked consumer-name strings: `heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`.
+Each migrated consumer produces a per-consumer block in the locked `=== BIN-COUNTER MODE ===` `-V` section per #187 Decision 8, with the locked consumer-name strings: `heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`.
 
 Each per-consumer block reports the contract-surface fields locked in #187 Decision 8: `path`, `partition_keying`, `partition_count`, `total_rebin_events`, `max_partition_bins`, `partitions_with_overflow_count`, `partitions_with_underflow_count`, `counter_memory_bytes`, `rebins_per_partition`, `percentiles_emitted`, `out_of_range_bounded`, `shares_partitions_with` (where applicable).
 
@@ -139,7 +139,7 @@ The partitions are independent in `[min, max]` as each per-time-bucket partition
 
 ### R10 — Per-consumer `-V` path reporting
 
-Each consumer's `path:` line in its `=== PERCENTILE MODE ===` block per #187 Decision 8 reports the active path for that consumer:
+Each consumer's `path:` line in its `=== BIN-COUNTER MODE ===` block per #187 Decision 8 reports the active path for that consumer:
 
 - `unified` — consumer is on the migrated path.
 - `pre_migration` — consumer has not yet migrated, or this is a pre-migration validation run.
@@ -221,7 +221,7 @@ The pre-migration code paths that this feature's implementation replaces. Line r
 - [ ] R4 holds: per-line accumulation during parse via #189 R2 / R3; no raw-value arrays under the unified path.
 - [ ] R5 holds: display geometry preserved via render-time re-projection.
 - [ ] R6 holds: overflow/underflow per #187 Decision 4 implemented by #189; this feature consumes that mechanism.
-- [ ] R7 holds: `=== PERCENTILE MODE ===` section reports each consumer's block per #187 Decision 8.
+- [ ] R7 holds: `=== BIN-COUNTER MODE ===` section reports each consumer's block per #187 Decision 8.
 - [ ] R8 holds: display geometry unchanged; precision improvements documented in release notes.
 - [ ] R9 holds: heatmap and histogram have independent partitions per #189 R7.
 - [ ] R10 holds: per-consumer `path:` line reports correctly under all four states.
@@ -233,7 +233,7 @@ The pre-migration code paths that this feature's implementation replaces. Line r
 - [ ] Under `--exact-percentiles`, all four consumers' output is byte-identical to the pre-feature implementation per #187 R11a.
 - [ ] Under the unified path, all four consumers' percentile values fall within the bin-resolution bound per #187 R4 around the pre-migration values, across the D2 dataset set.
 - [ ] `tests/baseline/` regression harness passes for the heatmap and histogram outputs.
-- [ ] `-V` `=== PERCENTILE MODE ===` output matches the locked format per #187 Decision 8 (consumer-name strings, field names, format).
+- [ ] `-V` `=== BIN-COUNTER MODE ===` output matches the locked format per #187 Decision 8 (consumer-name strings, field names, format).
 
 ## Validation
 
@@ -241,7 +241,7 @@ This section defines the **validation scenarios** for the heatmap and histogram 
 
 ### Contract-level scenarios from #187
 
-The contract-level validation scenarios specified in #187 § Validation apply to this feature's consumers. They cover the locked `=== PERCENTILE MODE ===` format, per-consumer `path:` reporting, opt-out behavior, out-of-range bounded reporting, and accuracy comparison against the pre-migration output. The implementation ticket runs these scenarios against the four consumers in this feature's scope.
+The contract-level validation scenarios specified in #187 § Validation apply to this feature's consumers. They cover the locked `=== BIN-COUNTER MODE ===` format, per-consumer `path:` reporting, opt-out behavior, out-of-range bounded reporting, and accuracy comparison against the pre-migration output. The implementation ticket runs these scenarios against the four consumers in this feature's scope.
 
 ### Heatmap-specific validation
 
