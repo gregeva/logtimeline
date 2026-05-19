@@ -617,10 +617,644 @@ else { die_usage("unknown --aspect $opt{aspect}"); }
 exit 0;
 
 # --- aspect stubs (filled in by subsequent commits) ---
-sub run_v1 { die "V1 not yet implemented\n"; }
-sub run_v2 { die "V2 not yet implemented\n"; }
-sub run_v3 { die "V3 not yet implemented\n"; }
-sub run_v4 { die "V4 not yet implemented\n"; }
+sub run_v1 {
+    print "=== V1: In-bin formula edge cases + R2 cross-check ===\n\n";
+
+    # -----------------------------------------------------------------------
+    # Part A: hand-computable edge cases for the Decision 1 formula.
+    # -----------------------------------------------------------------------
+    print "--- Part A: Formula edge cases ---\n";
+    my $passes = 0;
+    my $fails  = 0;
+    my $check  = sub {
+        my ($name, $actual, $expected, $tol) = @_;
+        $tol //= 1e-9;
+        my $ok = (defined $expected && defined $actual && abs($actual - $expected) <= $tol * (abs($expected) + 1));
+        printf "  [%s] %-60s actual=%-20s expected=%-20s\n",
+            ($ok ? 'OK  ' : 'FAIL'),
+            $name,
+            (defined $actual   ? sprintf('%.10g', $actual)   : 'undef'),
+            (defined $expected ? sprintf('%.10g', $expected) : 'undef');
+        $ok ? $passes++ : $fails++;
+    };
+
+    # Edge 1: bin_count=1 in the located bin -> fraction = 1.0 -> returns upper.
+    # Construct an entry whose only data is one observation in a single bin.
+    {
+        my $entry = {
+            partition => partition_new(100, $opt{bpd}, $opt{seed_decades}),
+            bins      => [],
+            overflow  => 0,
+            underflow => 0,
+        };
+        my ($where, $i) = bin_assign($entry->{partition}, 100, 'closed');
+        $entry->{bins}->[$i] = 1;
+        _ensure_boundaries($entry->{partition});
+        my $upper = $entry->{partition}->{boundaries}->[$i + 1];
+        for my $q (0.5, 0.99) {
+            my ($v, $audit) = percentile($entry, $q);
+            $check->("bin_count=1, q=$q -> returns upper", $v, $upper);
+            $check->("bin_count=1, q=$q -> audit=none",
+                ($audit eq 'none' ? 1 : 0), 1);
+        }
+    }
+
+    # Edge 2: lower=upper (degenerate single-value partition). Force by
+    # constructing a partition with v0=1, then collapse min=max=1 to simulate.
+    # Geometric form lower*(upper/lower)^fraction = 1*(1)^fraction = 1.
+    {
+        my $synth = {
+            min        => 1,
+            max        => 1,
+            bpd        => $opt{bpd},
+            decades    => 0.0,
+            bin_count  => 1,
+            log_ratio  => 1e-300,    # avoid div-by-zero; not used in this path
+            rebins     => 0,
+            max_rebins => undef,
+            boundaries => [1, 1],
+        };
+        my $entry = { partition => $synth, bins => [3], overflow => 0, underflow => 0 };
+        for my $q (0.1, 0.5, 0.9, 0.99) {
+            my ($v, $audit) = percentile($entry, $q);
+            $check->("lower=upper, q=$q -> returns 1", $v, 1);
+            $check->("lower=upper, q=$q -> audit=none",
+                ($audit eq 'none' ? 1 : 0), 1);
+        }
+    }
+
+    # Edge 3: single observation in a normal partition.
+    # Cumulative walk lands target_rank=1 in the single populated bin;
+    # fraction = 1/1 = 1.0 -> returns upper. Same logical case as Edge 1
+    # but exercised through counter_update.
+    {
+        my %store;
+        counter_update(\%store, 'single', 42);
+        my $entry = $store{single};
+        _ensure_boundaries($entry->{partition});
+        my ($where, $i) = bin_assign($entry->{partition}, 42, 'closed');
+        my $upper = $entry->{partition}->{boundaries}->[$i + 1];
+        my ($v, $audit) = percentile($entry, 0.5);
+        $check->("single observation, q=0.5 -> upper of bin containing v", $v, $upper);
+    }
+
+    # Edge 4: rank_in_bin = 0 -> fraction = 0 -> returns lower.
+    # Walk: cumulative count *includes* the bin's count when target_rank lands
+    # in it. To exercise fraction=0 we need target_rank to be the last element
+    # of the previous bin -- which the walk treats as still in the previous
+    # bin. So this is naturally hard to hit at fraction=0; Decision 1 uses
+    # `target_rank <= cumulative` so fraction = rank_in_bin/count is always
+    # in [1/count .. count/count]. fraction=0 is unreachable by construction.
+    # Record this as a property of the locked walk, not a missing edge case.
+    print "  [NOTE] Decision 1 walk uses target_rank<=cum so fraction in (0,1]; fraction=0 is unreachable.\n";
+
+    # Edge 5: zero-count partition -> R4 returns (undef, 'none').
+    {
+        my $entry = {
+            partition => partition_new(1, $opt{bpd}, $opt{seed_decades}),
+            bins      => [],
+            overflow  => 0,
+            underflow => 0,
+        };
+        my ($v, $audit) = percentile($entry, 0.5);
+        $check->("zero-count partition -> value=undef",
+            (defined $v ? 0 : 1), 1);
+    }
+
+    # Edge 6: all-overflow -> R4 returns boundary[B] and audit=high.
+    {
+        my $entry = {
+            partition => partition_new(1, $opt{bpd}, $opt{seed_decades}),
+            bins      => [],
+            overflow  => 5,
+            underflow => 0,
+        };
+        $entry->{partition}->{max_rebins} = 0; # ensure overflow stays in counter
+        _ensure_boundaries($entry->{partition});
+        my $top = $entry->{partition}->{boundaries}->[$entry->{partition}->{bin_count}];
+        my ($v, $audit) = percentile($entry, 0.9);
+        $check->("all-overflow -> value=boundary[B]", $v, $top);
+        $check->("all-overflow -> audit=high",
+            ($audit eq 'high' ? 1 : 0), 1);
+    }
+
+    # Edge 7: all-underflow -> R4 returns boundary[0] and audit=low.
+    {
+        my $entry = {
+            partition => partition_new(1, $opt{bpd}, $opt{seed_decades}),
+            bins      => [],
+            overflow  => 0,
+            underflow => 4,
+        };
+        $entry->{partition}->{max_rebins} = 0;
+        _ensure_boundaries($entry->{partition});
+        my $bot = $entry->{partition}->{boundaries}->[0];
+        my ($v, $audit) = percentile($entry, 0.1);
+        $check->("all-underflow -> value=boundary[0]", $v, $bot);
+        $check->("all-underflow -> audit=low",
+            ($audit eq 'low' ? 1 : 0), 1);
+    }
+
+    print "\nPart A summary: $passes passed, $fails failed.\n";
+    print "\n";
+
+    # -----------------------------------------------------------------------
+    # Part B: R2 cross-check on real data. Run all three R2 implementations on
+    # every observed value; log disagreements with (value, partition_min,
+    # partition_max, three indices).
+    # -----------------------------------------------------------------------
+    die_usage("--aspect v1 requires at least one --file") unless @{$opt{file}};
+
+    print "--- Part B: R2 cross-check on real data ---\n";
+    print "Comparing closed-form, binary search, linear search across all observed values.\n\n";
+
+    # Counter store built using closed-form (the contract-default impl). We
+    # then re-bin every observed value with all three R2 algorithms against
+    # each partition's current state and check agreement.
+    my %store;
+    my $observations = 0;
+    my $disagreements = 0;
+    my $disagreement_examples = 0;
+    my @sample_disagreements;
+
+    for my $file (@{$opt{file}}) {
+        iterate_durations($file, sub {
+            my ($cat, $key, $dur) = @_;
+            my $jk = "$cat\x1f$key";
+            counter_update(\%store, $jk, $dur);   # uses --r2-impl (default closed)
+
+            # Cross-check against the partition's CURRENT state (after any
+            # rebin from this observation).
+            my $p = $store{$jk}->{partition};
+            return unless $dur >= $p->{min} && $dur <= $p->{max};
+            $observations++;
+
+            my ($wc, $ic) = r2_closed($p, $dur);
+            my ($wb, $ib) = r2_binary($p, $dur);
+            my ($wl, $il) = r2_linear($p, $dur);
+
+            # All three must produce IN-range result and identical bin index.
+            if ($wc ne 'IN' || $wb ne 'IN' || $wl ne 'IN' ||
+                $ic != $ib || $ib != $il) {
+                $disagreements++;
+                if ($disagreement_examples < 10) {
+                    push @sample_disagreements, sprintf(
+                        "  value=%g  partition=[%g,%g] B=%d  closed=%s/%s  binary=%s/%s  linear=%s/%s\n",
+                        $dur, $p->{min}, $p->{max}, $p->{bin_count},
+                        $wc, (defined $ic ? $ic : '-'),
+                        $wb, (defined $ib ? $ib : '-'),
+                        $wl, (defined $il ? $il : '-')
+                    );
+                    $disagreement_examples++;
+                }
+            }
+        });
+    }
+
+    printf "observations_compared: %d\n", $observations;
+    printf "disagreements: %d (%.4f%%)\n", $disagreements,
+        ($observations > 0 ? 100 * $disagreements / $observations : 0);
+    if (@sample_disagreements) {
+        print "\nSample disagreements (up to 10):\n";
+        print for @sample_disagreements;
+    } else {
+        print "All three R2 implementations agreed on every observation.\n";
+    }
+}
+sub run_v2 {
+    die_usage("--aspect v2 requires at least one --file") unless @{$opt{file}};
+
+    print "=== V2: Per-key fan-out at scale + R2 algorithm benchmark ===\n\n";
+    if (!$have_devel_size && $opt{mem}) {
+        print "WARNING: --mem requested but Devel::Size not available; memory measurements skipped.\n\n";
+    }
+
+    # -----------------------------------------------------------------------
+    # Part A: per-key fan-out at scale -- contract behavior with the locked
+    # default R2 algorithm (closed-form). Measure rebin distribution, per-key
+    # memory, projected total at 10^5 keys.
+    # -----------------------------------------------------------------------
+    print "--- Part A: Per-key fan-out at scale (R2 algorithm: $opt{'r2-impl'}) ---\n";
+
+    my %store;
+    my $t0 = [gettimeofday];
+    my $lines = 0;
+    for my $file (@{$opt{file}}) {
+        $lines += iterate_durations($file, sub {
+            my ($cat, $key, $dur) = @_;
+            counter_update(\%store, "$cat\x1f$key", $dur);
+        });
+    }
+    my $elapsed = tv_interval($t0);
+
+    my $partition_count = scalar keys %store;
+    my @rebin_counts;
+    my $max_bins = 0;
+    my $overflow_partitions = 0;
+    my $underflow_partitions = 0;
+    for my $key (keys %store) {
+        my $e = $store{$key};
+        push @rebin_counts, $e->{partition}->{rebins};
+        $max_bins = $e->{partition}->{bin_count} if $e->{partition}->{bin_count} > $max_bins;
+        $overflow_partitions++  if ($e->{overflow}  // 0) > 0;
+        $underflow_partitions++ if ($e->{underflow} // 0) > 0;
+    }
+    my ($p50r, $p95r, $p99r, $maxr) = partition_dist(@rebin_counts);
+
+    printf "files: %s\n", join(", ", @{$opt{file}});
+    printf "lines_read: %d\n", $lines;
+    printf "elapsed_s: %.2f (parse + counter_update with R2=%s)\n", $elapsed, $opt{'r2-impl'};
+    printf "partition_count: %d\n", $partition_count;
+    printf "buckets_per_decade: %d\n", $opt{bpd};
+    printf "max_partition_bins: %d\n", $max_bins;
+    printf "total_rebin_events: %d\n", sum(@rebin_counts) // 0;
+    printf "rebins_per_partition: p50=%d p95=%d p99=%d max=%d\n",
+        $p50r, $p95r, $p99r, $maxr;
+    printf "partitions_with_overflow_count: %d\n",  $overflow_partitions;
+    printf "partitions_with_underflow_count: %d\n", $underflow_partitions;
+
+    my $mem_total = undef;
+    my $mem_per_key = undef;
+    if ($opt{mem} && $have_devel_size) {
+        $mem_total = total_size(\%store);
+        $mem_per_key = $partition_count > 0 ? $mem_total / $partition_count : 0;
+        printf "counter_memory_bytes: %d (%.2f MB)\n",
+            $mem_total, $mem_total / 1024 / 1024;
+        printf "per_partition_memory_bytes: %.0f\n", $mem_per_key;
+        # Project to 10^5 partitions.
+        my $projected_100k = $mem_per_key * 100000;
+        printf "projected_memory_at_1e5_partitions: %.0f bytes (%.0f MB)\n",
+            $projected_100k, $projected_100k / 1024 / 1024;
+        # #187 Decision 2 implementation guidance projects ~212 MB at 10^5 keys
+        # at default bpd=53. Compare.
+        if ($opt{bpd} == 53) {
+            my $delta_pct = 100 * ($projected_100k - 212e6) / 212e6;
+            printf "projection_vs_decision_2_guidance (~212 MB at 10^5 keys): %+.1f%%\n",
+                $delta_pct;
+        }
+    }
+    print "\n";
+
+    return unless $opt{'r2-bench'};
+
+    # -----------------------------------------------------------------------
+    # Part B: R2 algorithm benchmark. Run all three R2 implementations in
+    # sequence against the same input. Report wall-clock time per
+    # implementation and the memory delta attributable to the boundary array
+    # (closed-form doesn't need it; binary/linear do).
+    # -----------------------------------------------------------------------
+    print "--- Part B: R2 algorithm benchmark ---\n";
+    print "Each implementation processes the input from scratch with its own counter store.\n\n";
+
+    my @results;
+    for my $impl (qw(closed binary linear)) {
+        # Reset and re-run with this implementation.
+        my %bstore;
+        my $bt0 = [gettimeofday];
+        my $blines = 0;
+        for my $file (@{$opt{file}}) {
+            $blines += iterate_durations($file, sub {
+                my ($cat, $key, $dur) = @_;
+                counter_update(\%bstore, "$cat\x1f$key", $dur, $impl);
+            });
+        }
+        my $belapsed = tv_interval($bt0);
+        my $bmem = ($opt{mem} && $have_devel_size) ? total_size(\%bstore) : undef;
+
+        # For binary/linear: explicitly materialize boundary arrays for every
+        # partition (closed-form leaves them lazy). This makes the memory
+        # comparison apples-to-apples: production binary/linear would need
+        # them materialized for every observation.
+        if ($impl ne 'closed') {
+            for my $k (keys %bstore) {
+                _ensure_boundaries($bstore{$k}->{partition});
+            }
+            $bmem = ($opt{mem} && $have_devel_size) ? total_size(\%bstore) : undef;
+        }
+
+        push @results, {
+            impl    => $impl,
+            elapsed => $belapsed,
+            lines   => $blines,
+            keys    => scalar keys %bstore,
+            mem     => $bmem,
+        };
+    }
+
+    printf "%-10s %-12s %-12s %-18s %s\n",
+        'R2 algo', 'elapsed_s', 'lines/s', 'memory_MB', 'memory_per_key_B';
+    print  "-" x 75, "\n";
+    for my $r (@results) {
+        printf "%-10s %-12.2f %-12.0f %-18s %s\n",
+            $r->{impl},
+            $r->{elapsed},
+            $r->{lines} / ($r->{elapsed} || 1),
+            defined $r->{mem} ? sprintf('%.2f', $r->{mem} / 1024 / 1024) : '(no --mem)',
+            defined $r->{mem} ? sprintf('%.0f', $r->{mem} / ($r->{keys} || 1)) : '-';
+    }
+    print "\n";
+
+    # Speedup factors relative to linear.
+    my %by_impl = map { $_->{impl} => $_ } @results;
+    if ($by_impl{linear} && $by_impl{linear}->{elapsed} > 0) {
+        printf "Speedup vs linear: closed=%.2fx  binary=%.2fx\n",
+            $by_impl{linear}->{elapsed} / $by_impl{closed}->{elapsed},
+            $by_impl{linear}->{elapsed} / $by_impl{binary}->{elapsed};
+    }
+    if ($opt{mem} && $have_devel_size && $by_impl{closed} && $by_impl{closed}->{mem}) {
+        printf "Memory overhead vs closed (boundary array cost):\n";
+        printf "  binary: %+.2f MB  (%+.0f%%)\n",
+            ($by_impl{binary}->{mem} - $by_impl{closed}->{mem}) / 1024 / 1024,
+            100 * ($by_impl{binary}->{mem} - $by_impl{closed}->{mem}) / $by_impl{closed}->{mem};
+        printf "  linear: %+.2f MB  (%+.0f%%)\n",
+            ($by_impl{linear}->{mem} - $by_impl{closed}->{mem}) / 1024 / 1024,
+            100 * ($by_impl{linear}->{mem} - $by_impl{closed}->{mem}) / $by_impl{closed}->{mem};
+    }
+}
+sub run_v3 {
+    print "=== V3: Seeding heuristic + overflow/underflow audit ===\n\n";
+
+    # -----------------------------------------------------------------------
+    # Part A: seeding heuristic on real data. Decision 5 implementation
+    # guidance: with 5-decade seed centered on first value, p99 rebins should
+    # be in [0, 2] on typical latency data. V5 already showed this; V3 owns
+    # the measurement.
+    # -----------------------------------------------------------------------
+    die_usage("--aspect v3 requires at least one --file") unless @{$opt{file}};
+
+    print "--- Part A: Seed heuristic on real data ---\n";
+    print "Decision 5 guidance: p99 rebins should be in [0, 2] on typical latency data.\n\n";
+
+    my %store;
+    for my $file (@{$opt{file}}) {
+        iterate_durations($file, sub {
+            my ($cat, $key, $dur) = @_;
+            counter_update(\%store, "$cat\x1f$key", $dur);
+        });
+    }
+
+    my @rebin_counts;
+    my $partitions_with_rebins = 0;
+    for my $key (keys %store) {
+        my $r = $store{$key}->{partition}->{rebins};
+        push @rebin_counts, $r;
+        $partitions_with_rebins++ if $r > 0;
+    }
+    my ($p50, $p95, $p99, $maxr) = partition_dist(@rebin_counts);
+    my $total = sum(@rebin_counts) // 0;
+    printf "partitions_total: %d\n", scalar @rebin_counts;
+    printf "partitions_with_rebins: %d (%.4f%%)\n",
+        $partitions_with_rebins,
+        (@rebin_counts ? 100 * $partitions_with_rebins / scalar @rebin_counts : 0);
+    printf "total_rebin_events: %d\n", $total;
+    printf "rebins_per_partition: p50=%d p95=%d p99=%d max=%d\n",
+        $p50, $p95, $p99, $maxr;
+    my $heuristic_ok = ($p99 <= 2);
+    printf "Decision 5 healthy-seed signal (p99 <= 2): %s\n",
+        ($heuristic_ok ? 'PASS' : 'FAIL');
+    print "\n";
+
+    # -----------------------------------------------------------------------
+    # Part B: overflow/underflow audit on pathological inputs constructed in
+    # script. Each scenario uses --max-rebins to artificially cap growth so the
+    # overflow/underflow counters fire and `out_of_range_bounded` becomes a
+    # non-trivial enum value.
+    # -----------------------------------------------------------------------
+    print "--- Part B: Overflow/underflow audit on pathological inputs ---\n";
+    print "Each scenario constructs a partition, caps rebins at 0, then feeds\n";
+    print "values designed to fall outside the seeded partition.\n\n";
+
+    my @scenarios = (
+        {
+            name        => 'extreme high outlier (after warmup at v0=100)',
+            v0          => 100,                          # seeds [~0.32, ~31623]
+            outliers    => [ 1e6, 1e7, 1e8 ],            # all > max
+            expect_high => 1,
+            expect_low  => 0,
+            q           => 0.999,
+        },
+        {
+            name        => 'extreme low outlier (after warmup at v0=10000)',
+            v0          => 10000,                        # seeds [~31.6, ~3162277]
+            outliers    => [ 0.5, 0.1, 0.01 ],           # all < min and > 0
+            expect_high => 0,
+            expect_low  => 1,
+            q           => 0.01,
+        },
+        {
+            name        => 'mixed scale (after warmup at v0=1000)',
+            v0          => 1000,                                         # seeds [~3.16, ~316228]
+            # 50 underflow + 50 overflow against 1000 in-range observations.
+            # That's ~4.5% underflow share -- enough that q=0.01 lands in the
+            # underflow counter and q=0.999 lands in the overflow counter.
+            outliers    => [ (1e-3) x 50, (1e8) x 50 ],
+            expect_high => 1,
+            expect_low  => 1,
+            q           => 0.5,
+        },
+    );
+
+    my $pass = 0;
+    my $fail = 0;
+    for my $s (@scenarios) {
+        print "Scenario: $s->{name}\n";
+
+        # Seed partition at v0; cap rebins so subsequent out-of-range values
+        # land in the overflow/underflow counters.
+        my $p = partition_new($s->{v0}, $opt{bpd}, $opt{seed_decades});
+        $p->{max_rebins} = 0;
+        my $entry = {
+            partition => $p, bins => [], overflow => 0, underflow => 0,
+        };
+        # Warmup: 1000 normal observations clustered around v0 (lognormal-ish
+        # spread within the partition).
+        for (1..1000) {
+            my $j = $s->{v0} * (0.5 + rand);
+            my ($w, $i) = bin_assign($p, $j, 'closed');
+            $entry->{bins}->[$i] = ($entry->{bins}->[$i] // 0) + 1 if $w eq 'IN';
+        }
+        # Inject outliers; with max_rebins=0, partition_extend fails and the
+        # over/underflow counter is incremented.
+        for my $v (@{ $s->{outliers} }) {
+            my ($w, undef) = bin_assign($p, $v, 'closed');
+            my $new_bins = partition_extend($p, $v, $entry->{bins});
+            if (!defined $new_bins) {
+                if ($w eq 'OVERFLOW')  { $entry->{overflow}++;  }
+                if ($w eq 'UNDERFLOW') { $entry->{underflow}++; }
+            }
+        }
+
+        printf "  partition: min=%g max=%g B=%d\n",
+            $p->{min}, $p->{max}, $p->{bin_count};
+        printf "  in_range_observations: %d (sum of bins)\n",
+            sum(map { $_ // 0 } @{ $entry->{bins} }) // 0;
+        printf "  overflow_count: %d   underflow_count: %d\n",
+            $entry->{overflow}, $entry->{underflow};
+
+        # Verify R4 audit for the scenario's quantile.
+        my ($v, $audit) = percentile($entry, $s->{q});
+        printf "  R4 at q=%g: value=%g audit=%s\n",
+            $s->{q}, (defined $v ? $v : 'undef'), $audit // '(none)';
+
+        # Pass conditions: counters incremented as expected; aggregate audit
+        # surfaces non-`none` on at least one quantile when overflow/underflow
+        # non-zero.
+        my $counter_ok = (
+            ($s->{expect_high} ? $entry->{overflow}  > 0 : 1) &&
+            ($s->{expect_low}  ? $entry->{underflow} > 0 : 1)
+        );
+
+        # Check audit aggregate by running R4 at the extreme quantiles to see
+        # if `high`/`low` audit codes surface.
+        my %seen_audit;
+        for my $q (0.001, 0.5, 0.999) {
+            my (undef, $a) = percentile($entry, $q);
+            $seen_audit{$a // 'undef'}++;
+        }
+        my $audit_ok = (
+            ($s->{expect_high} ? ($seen_audit{high} // 0) > 0 : 1) &&
+            ($s->{expect_low}  ? ($seen_audit{low}  // 0) > 0 : 1)
+        );
+
+        if ($counter_ok && $audit_ok) {
+            print "  [PASS]\n\n";
+            $pass++;
+        } else {
+            printf "  [FAIL] counter_ok=%d audit_ok=%d  audit_seen={%s}\n\n",
+                $counter_ok, $audit_ok,
+                join(',', map { "$_=$seen_audit{$_}" } keys %seen_audit);
+            $fail++;
+        }
+    }
+
+    print "Part B summary: $pass passed, $fail failed.\n";
+}
+sub run_v4 {
+    die_usage("--aspect v4 requires at least one --file") unless @{$opt{file}};
+
+    # V4 captures the six locked Decision 8 scenarios. Rather than spawning
+    # subprocesses (which complicates argument handling and timing), V4
+    # explicitly re-runs the data-load + telemetry-emit loop with the
+    # appropriate flag state mutated in $opt{...} per scenario. Each scenario
+    # writes a labeled output block to stdout.
+    #
+    # The six scenarios from #187 Decision 10's V4 requirement:
+    #   1. Default precision
+    #   2. --percentile-precision N override
+    #   3. -pbpd N override
+    #   4. Both flags specified (-pbpd wins per Decision 2)
+    #   5. Overflow audit firing (--max-rebins 0)
+    #   6. --exact-percentiles opt-out
+    print "=== V4: -V output samples per Decision 8 format ===\n\n";
+    print "Six scenarios per #187 Decision 10 V4 requirement. Each block reproduces\n";
+    print "what would appear under `=== PERCENTILE MODE ===` in `ltl -V` output for a\n";
+    print "migrated `summary_table` consumer.\n\n";
+
+    # Saved state for restoration between scenarios.
+    my $saved_bpd                  = $opt{bpd};
+    my $saved_precision            = $opt{'percentile-precision'};
+    my $saved_pbpd                 = $opt{pbpd};
+    my $saved_exact                = $opt{'exact-percentiles'};
+    my $saved_max_rebins           = $opt{'max-rebins'};
+    my $saved_precision_source     = $precision_source;
+
+    my $banner = sub {
+        my ($n, $title) = @_;
+        print "\n", "#" x 78, "\n";
+        printf "# Scenario %d: %s\n", $n, $title;
+        print "#" x 78, "\n";
+    };
+
+    # Helper: load the file with the current $opt{...} state into a fresh store
+    # and emit the telemetry block.
+    my $run = sub {
+        my $store = {};
+        for my $file (@{$opt{file}}) {
+            iterate_durations($file, sub {
+                my ($cat, $key, $dur) = @_;
+                counter_update($store, "$cat\x1f$key", $dur);
+            });
+        }
+        emit_telemetry($store, consumer => 'summary_table',
+            keying => '(category, log_key)');
+    };
+
+    # --- 1. Default precision ---
+    $opt{bpd} = 53; $opt{'percentile-precision'} = undef; $opt{pbpd} = undef;
+    $precision_source = 'default';
+    $opt{'exact-percentiles'} = 0;
+    $opt{'max-rebins'} = undef;
+    $banner->(1, 'Default precision (no CLI overrides)');
+    $run->();
+
+    # --- 2. --percentile-precision N override ---
+    $opt{'percentile-precision'} = 7;
+    $opt{bpd} = 115;
+    $opt{pbpd} = undef;
+    $precision_source = '--percentile-precision 7';
+    $banner->(2, '--percentile-precision 7 (maps to bpd=115)');
+    $run->();
+
+    # --- 3. -pbpd N override ---
+    $opt{'percentile-precision'} = undef;
+    $opt{pbpd} = 100;
+    $opt{bpd} = 100;
+    $precision_source = '-pbpd 100';
+    $banner->(3, '-pbpd 100 (direct numeric override)');
+    $run->();
+
+    # --- 4. Both flags (conflict; -pbpd wins per Decision 2) ---
+    $opt{'percentile-precision'} = 4;
+    $opt{pbpd} = 100;
+    $opt{bpd} = 100;
+    $precision_source = '-pbpd 100; --percentile-precision 4 overridden';
+    $banner->(4, 'Flag conflict: -pbpd 100 + --percentile-precision 4');
+    $run->();
+
+    # --- 5. Overflow audit firing (--max-rebins 0 + pathological injection) ---
+    $opt{'percentile-precision'} = undef;
+    $opt{pbpd} = undef;
+    $opt{bpd} = 53;
+    $precision_source = 'default';
+    $opt{'max-rebins'} = 0;
+    $banner->(5, 'Overflow audit firing (synthetic --max-rebins 0 + outlier)');
+    {
+        # Custom load that injects outliers; standard iterate_durations doesn't
+        # produce overflow under Decision 5 auto-resize.
+        my $store = {};
+        my @injected_outliers;
+        for my $file (@{$opt{file}}) {
+            iterate_durations($file, sub {
+                my ($cat, $key, $dur) = @_;
+                counter_update($store, "$cat\x1f$key", $dur);
+            });
+        }
+        # Inject overflow values into a sample key.
+        my @sample_keys = keys %$store;
+        my $target = $sample_keys[0];
+        for (1..10) {
+            # Force overflow: directly increment counter.
+            $store->{$target}->{overflow}++;
+        }
+        emit_telemetry($store, consumer => 'summary_table',
+            keying => '(category, log_key)');
+    }
+    $opt{'max-rebins'} = undef;
+
+    # --- 6. --exact-percentiles opt-out ---
+    $opt{'exact-percentiles'} = 1;
+    $banner->(6, '--exact-percentiles opt-out (all migrated consumers revert)');
+    $run->();
+    $opt{'exact-percentiles'} = 0;
+
+    # Restore.
+    $opt{bpd}                   = $saved_bpd;
+    $opt{'percentile-precision'} = $saved_precision;
+    $opt{pbpd}                  = $saved_pbpd;
+    $opt{'exact-percentiles'}   = $saved_exact;
+    $opt{'max-rebins'}          = $saved_max_rebins;
+    $precision_source           = $saved_precision_source;
+}
 
 # ============================================================================
 # V5 — Accuracy vs calculate_statistics oracle
