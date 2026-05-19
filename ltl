@@ -1155,6 +1155,77 @@ sub emit_index_readback_verbose {
     }
 }
 
+# Issue #189 (PR #189-2): emit the `=== PERCENTILE MODE ===` section into
+# @verbose_output. Always emitted under -V per the locked stability contract.
+# Field names, consumer-name strings, and the three-value audit enum
+# (none|low|high) are locked at:
+#   features/187-histogram-bin-counter-percentiles.md § Decision 8
+# Tests assert grep-level stability of every field this sub emits; field-name
+# changes require a new locked-decision entry. Field values may evolve freely.
+#
+# In this PR (no consumer migrated yet) the section always reports
+# `consumers_active: none` after the run-level header. The first consumer
+# migration replaces that line with per-consumer blocks in the locked order.
+sub emit_percentile_mode_verbose {
+    return unless $verbose;
+
+    push @verbose_output, "=== PERCENTILE MODE ===";
+
+    # Run-level header — opt_out_active first per the locked example output.
+    my $opt_out = $exact_percentiles_optout ? 'yes' : 'no';
+    push @verbose_output, "opt_out_active: $opt_out";
+    if ($exact_percentiles_optout) {
+        push @verbose_output,
+            "opt_out_notice: --exact-percentiles is set; all migrated consumers reverted to pre-#187 sort-based computation. This flag is deprecated and will be removed in a future release.";
+    }
+
+    # Two fields, two annotation styles per the locked Decision 8 contract:
+    #
+    # `percentile_precision: <LEVEL> (<source>)` — reports the
+    # --percentile-precision side of the story. When --percentile-precision
+    # was specified (with or without -pbpd), <LEVEL> is the requested level
+    # (1..9) and <source> is "--percentile-precision N" or, when -pbpd also
+    # specified, "--percentile-precision N; overridden". When no
+    # --percentile-precision was specified, <LEVEL> falls back to the tier
+    # corresponding to the active bpd if any matches, or the literal "n/a"
+    # for non-tier bpd values (locked at audit A5).
+    #
+    # `buckets_per_decade: <N> (<source>)` — reports the active resolved bpd
+    # with the full conflict-annotated source ("default" | "-pbpd N" |
+    # "--percentile-precision N" | "-pbpd N; --percentile-precision M overridden").
+    #
+    # The two fields can carry different <source> strings; only the
+    # buckets_per_decade field's annotation tracks $percentile_precision_source
+    # verbatim from option parsing.
+    my %bpd_to_level = (4=>1, 8=>2, 16=>3, 32=>4, 53=>5, 80=>6, 115=>7, 256=>8, 616=>9);
+    my ($level_label, $level_source);
+    if (defined $percentile_precision_level) {
+        # User supplied --percentile-precision. Report it even when overridden.
+        $level_label  = $percentile_precision_level;
+        $level_source = $percentile_precision_source =~ /^-pbpd /
+            ? "--percentile-precision $percentile_precision_level; overridden"
+            : "--percentile-precision $percentile_precision_level";
+    } else {
+        $level_label  = exists $bpd_to_level{$percentile_buckets_per_decade}
+            ? $bpd_to_level{$percentile_buckets_per_decade}
+            : 'n/a';
+        $level_source = $percentile_precision_source;
+    }
+
+    # Suffix applied to both source annotations when opt-out is active.
+    my $not_in_effect = $exact_percentiles_optout ? '; not in effect this run' : '';
+
+    push @verbose_output,
+        "percentile_precision: $level_label ($level_source$not_in_effect)";
+    push @verbose_output,
+        "buckets_per_decade: $percentile_buckets_per_decade ($percentile_precision_source$not_in_effect)";
+
+    # PR #189-2 ships no migrated consumer; the section always terminates
+    # here. PR #189-3 onwards will replace this with per-consumer blocks
+    # emitted in the locked order from the consumer-name table.
+    push @verbose_output, "consumers_active: none";
+}
+
 sub write_index_file {
     my ($index_path, $temp_path, $use_absolute_paths) = locate_index_file();
 
@@ -8602,6 +8673,12 @@ $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + 
 # and emit the index read-back section into @verbose_output before flush.
 detect_index_drift();
 emit_index_readback_verbose();
+
+# Issue #189 (PR #189-2): always emit the percentile-mode section under -V.
+# Ordering recommendation locked at:
+#   features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket C § C8
+# Tests assert per-block contents only, not inter-block ordering.
+emit_percentile_mode_verbose();
 
 print_verbose_output();
 
