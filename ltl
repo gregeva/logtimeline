@@ -301,6 +301,16 @@ my $percentile_precision_source    = 'default';  # 'default' | '-pbpd N' | '--pe
 my $exact_percentiles_optout       = 0;       # when set, migrated consumers revert to calculate_statistics
 my $percentile_seed_decades        = 5;       # partition seeds at 5 decades centered on first value
 
+# Streaming-partition bpd for display-geometry-bound consumers (#201).
+# Higher than the F1 default (53) because F2/F3 partition counts are bounded
+# (~70 total across all heatmap time buckets + histogram metrics) and the
+# end-of-parse re-bin into a coarser display-anchored partition needs streaming
+# bpd this high to keep boundary-mismatch displacement below the ~11% per-row
+# visibility threshold of a 9-char-tall ASCII histogram. Empirically validated
+# by #201 V8 at 1.10% / 5.78% worst-case displacement on canonical datasets.
+my $heatmap_stream_bpd   = 616;
+my $histogram_stream_bpd = 616;
+
 # Histogram data collection (hash-based for dynamic metrics)
 my %histogram_values = (
     duration => [],
@@ -631,6 +641,47 @@ sub partition_extend {
     return \@new_bins;
 }
 
+sub partition_rebin {
+    # R12 (#201): re-bin a source partition's counts into a target partition
+    # with caller-specified [new_min, new_max] and new_bin_count.
+    # Geometric-midpoint projection per the fidelity invariant — each source
+    # bin's count goes entirely to one target bin (the one containing the
+    # source bin's geometric midpoint). No cross-bin mass splitting.
+    # Reuses the same remap algorithm as partition_extend (ltl:613-622),
+    # the only difference is the caller chooses target geometry instead of
+    # HdrHistogram doubling deriving it. Locked at:
+    #   features/189-histogram-bin-counter-primitives.md § R12
+    #   features/201-display-geometry-bound-consumers.md § Recommendation
+    my ($p, $src_bins, $new_min, $new_max, $new_bin_count) = @_;
+    my $new_log_ratio = log($new_max / $new_min);
+    my @new_bins;
+    for my $old_i (0 .. $p->{bin_count} - 1) {
+        my $count = $src_bins->[$old_i];
+        next unless defined $count && $count > 0;
+        my $lower    = bin_boundary($p, $old_i);
+        my $upper    = bin_boundary($p, $old_i + 1);
+        my $midpoint = sqrt($lower * $upper);
+        my $new_i    = int($new_bin_count * log($midpoint / $new_min) / $new_log_ratio);
+        $new_i = 0                  if $new_i < 0;
+        $new_i = $new_bin_count - 1 if $new_i >= $new_bin_count;
+        $new_bins[$new_i] = ($new_bins[$new_i] // 0) + $count;
+    }
+    # Zero-fill so the bins arrayref has exactly $new_bin_count elements.
+    for my $i (0 .. $new_bin_count - 1) {
+        $new_bins[$i] //= 0;
+    }
+    my $new_partition = {
+        min       => $new_min,
+        max       => $new_max,
+        bpd       => $p->{bpd},
+        decades   => log($new_max / $new_min) / log(10),
+        bin_count => $new_bin_count,
+        log_ratio => $new_log_ratio,
+        rebins    => 0,
+    };
+    return ($new_partition, \@new_bins);
+}
+
 sub bin_assign {
     # R2: closed-form bin index. Returns:
     #   ('IN',        $i)     value in [min, max]
@@ -659,11 +710,12 @@ sub counter_update {
     # contain the value (only reachable when a future growth cap is added —
     # none today), the over/underflow counter increments per:
     #   features/187-histogram-bin-counter-percentiles.md § Decision 4
-    my ($store, $key, $value) = @_;
+    my ($store, $key, $value, $bpd_override) = @_;
+    my $bpd = $bpd_override // $percentile_buckets_per_decade;
     my $entry = $store->{$key};
     if (!$entry) {
         $entry = $store->{$key} = {
-            partition => partition_new($value, $percentile_buckets_per_decade, $percentile_seed_decades),
+            partition => partition_new($value, $bpd, $percentile_seed_decades),
             bins      => [],
             overflow  => 0,
             underflow => 0,
