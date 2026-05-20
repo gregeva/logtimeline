@@ -61,7 +61,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.14.4";
+my $version_number = "0.14.5";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
@@ -216,6 +216,18 @@ my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 my ( @in_files, @output_columns );
 my %in_files_matched;
 my %index_file_data;    # Per-file metadata for index file (Issue #46)
+
+# Issue #179: index file read-back state
+my %index_preseed;        # Per-file: { lookup, matched_entry_date, freshness,
+                          # duration_min/max, bytes_min/max, count_min/max,
+                          # first_timestamp, last_timestamp, ts_precision }
+my %index_aggregated;     # Global aggregated bounds + provenance:
+                          # { duration_min => { value, from }, ... }
+my %index_drift;          # Per-file drift detail:
+                          # { duration_min => { live, preseed, drifted }, ... }
+my $index_used        = 0;
+my $index_filter_sig  = '-';   # Current run's filter signature
+my $index_drift_any   = 0;     # True if any file drifted on any metric
 my ($terminal_width, $terminal_height);
 my $terminal_height_detected = 0;  # Flag: was terminal height actually detected?
 {
@@ -240,12 +252,21 @@ my $heatmap_light_bg = 0;                   # Flag: use light background color g
 my $heatmap_light_bg_auto = 1;              # Flag: auto-detect terminal background (disabled if -lbg explicitly set)
 my %heatmap_data;                           # {$bucket}{$range_index} = count
 my %heatmap_data_hl;                        # {$bucket}{$range_index} = highlighted count
-my %heatmap_raw;                            # {$bucket} = [raw values] - temporary
-my %heatmap_raw_hl;                         # {$bucket} = [highlighted raw values] - temporary
+my %heatmap_raw;                            # {$bucket} = [raw values] - exact-path only
+my %heatmap_raw_hl;                         # {$bucket} = [highlighted raw values] - exact-path only
+my %heatmap_counters;                       # {$bucket} = entry struct - unified-path streaming partition (#34/#201)
+my %heatmap_counters_hl;                    # {$bucket} = entry struct - unified-path streaming partition for highlight subset
 my @heatmap_boundaries;                     # Pre-calculated bucket boundaries
 my ($heatmap_min, $heatmap_max) = (undef, undef);   # Global min/max for normalization (undef = not yet set)
 my $heatmap_max_density = 0;                # Maximum density across all cells
 my %heatmap_percentiles;                    # {$bucket} = { p50 => index, p95 => index, p99 => index, p999 => index } - percentile marker positions
+
+# Per-consumer telemetry snapshot captured at finalize before streaming
+# partitions are discarded. Consumed by emit_bin_counter_mode_verbose() to
+# populate the locked #187 Decision 8 -V fields.
+# Keyed by Decision-8 consumer name ('heatmap_cells', 'heatmap_markers',
+# 'histogram_view', 'histogram_bins').
+my %bin_counter_telemetry;
 
 # Special heatmap gradients for colors not in @column_colors
 my %heatmap_special_gradients = (
@@ -273,6 +294,31 @@ my $histogram_legend_spacing = 1;             # Vertical gap between histogram a
 # Histogram bucket calculation (HdrHistogram-style)
 my $histogram_buckets_per_decade = 8;         # Default: ~5% precision (4=10%, 8=5%, 16=2.5%, 32=1%)
 my $histogram_bucket_override = 0;            # If > 0, use this exact bucket count instead of calculating
+
+# Percentile-mode bin-counter primitives (Issue #189). Universal
+# buckets-per-decade for the unified percentile contract, distinct from
+# $histogram_buckets_per_decade (above; histogram-only, default 8). The two
+# flags coexist with documented precedence per:
+#   features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket C § C7 (option 1)
+# Default values are locked at:
+#   features/187-histogram-bin-counter-percentiles.md § Decision 2 (bpd=53)
+#   features/187-histogram-bin-counter-percentiles.md § Decision 5 (seed_decades=5)
+#   features/187-histogram-bin-counter-percentiles.md § Decision 7 (--exact-percentiles opt-out)
+my $percentile_buckets_per_decade  = 53;      # ~1.3% precision; tier 5 in the locked precision table
+my $percentile_precision_level     = undef;   # 1..9 tier; resolves to a bpd via the locked precision table
+my $percentile_precision_source    = 'default';  # 'default' | '-pbpd N' | '--percentile-precision N' | '-pbpd N; --percentile-precision N overridden'
+my $exact_percentiles_optout       = 0;       # when set, migrated consumers revert to calculate_statistics
+my $percentile_seed_decades        = 5;       # partition seeds at 5 decades centered on first value
+
+# Streaming-partition bpd for display-geometry-bound consumers (#201).
+# Higher than the F1 default (53) because F2/F3 partition counts are bounded
+# (~70 total across all heatmap time buckets + histogram metrics) and the
+# end-of-parse re-bin into a coarser display-anchored partition needs streaming
+# bpd this high to keep boundary-mismatch displacement below the ~11% per-row
+# visibility threshold of a 9-char-tall ASCII histogram. Empirically validated
+# by #201 V8 at 1.10% / 5.78% worst-case displacement on canonical datasets.
+my $heatmap_stream_bpd   = 616;
+my $histogram_stream_bpd = 616;
 
 # Histogram data collection (hash-based for dynamic metrics)
 my %histogram_values = (
@@ -317,6 +363,14 @@ my %histogram_stats_hl = (
     bytes    => {},
     count    => {},
 );
+
+# Unified-path streaming counter stores (#34/#201): {$metric} = entry struct
+my %histogram_counters;
+my %histogram_counters_hl;
+# Per-metric observed data extremes for finalize-target sizing (streaming
+# partition bookkeeping bounds are wider than data — 5-decade seed).
+my %histogram_data_min;
+my %histogram_data_max;
 
 # Box drawing character sets for histogram axes (Issue #25)
 my $histogram_box_weight = 'heavy';  # 'heavy' or 'light'
@@ -473,6 +527,342 @@ foreach my $key (keys %colors) {
 
 ## SUBS ##
 
+# ============================================================================
+# HISTOGRAM BIN-COUNTER PRIMITIVES (R1-R6 per Issue #189)
+# ============================================================================
+# Authoritative references (file paths, not loose IDs):
+#   Requirements list (R1-R12):
+#     features/189-histogram-bin-counter-primitives.md § Requirements
+#   Locked contract decisions (D1, D2, D4, D5, D7, D8, D10):
+#     features/187-histogram-bin-counter-percentiles.md § Locked decisions from research
+#   Implementation-readiness audit (Buckets A/B/C, recommended PR partition):
+#     features/189-bin-counter-primitives-implementation-readiness-audit.md
+#   Empirical validation of the contract on real D2 data:
+#     prototype/189-bin-counter-primitives-validation-report.md
+#
+# Design choices baked in here (each cites the file/section that locks it):
+#   R1  partition_new() — lazy 5-decade geometric seed centered on the first
+#       observed value. Locked at:
+#         features/187-histogram-bin-counter-percentiles.md § Decision 5
+#   R1  partition_extend() — HdrHistogram doubling-rebin when a value falls
+#       outside [min, max]; existing counts remapped via geometric-midpoint
+#       projection into the new geometry. Locked at:
+#         features/187-histogram-bin-counter-percentiles.md § Decision 5
+#   R2  bin_assign() — closed-form only: int(B * log(v/min) / log(max/min)).
+#       Algorithm choice locked at:
+#         features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket A § A1
+#       Evidence: 3.31x faster than linear, 2.46x faster than binary, 4.75x
+#       lower memory at 51,469 partitions (closed-form does not need a stored
+#       boundary array). See:
+#         prototype/189-bin-counter-primitives-validation-report.md § V2 Part B
+#   R3  counter_update() — consumer-defined keying; the $store hashref is
+#       keyed by a caller-formed string and supports every keying shape
+#       enumerated in:
+#         features/187-histogram-bin-counter-percentiles.md § R12 (consumer catalogue)
+#   R4  percentile() — Prometheus HistogramQuantile in-bucket interpolation,
+#       formula locked verbatim against promql/quantile.go lines 331-353 at:
+#         features/187-histogram-bin-counter-percentiles.md § Decision 1
+#       Per-quantile audit semantics ('none' / 'low' / 'high' decided at the
+#       moment of R4 invocation, not from partition state) locked at:
+#         features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket A § A3
+#   R6  Per-partition overflow / underflow counter slots. Both contribute to
+#       total_N for R4's rank calculation. Locked at:
+#         features/187-histogram-bin-counter-percentiles.md § Decision 4
+#
+# Boundary materialization: boundary[i] is computed on demand via
+# bin_boundary() — no per-partition boundary array stored. Locked at:
+#   features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket A § A2
+# This keeps the Path A memory projection of ~212 MB at 10^5 partitions in:
+#   features/187-histogram-bin-counter-percentiles.md § Decision 2
+#
+# Scope of this PR (PR #189-1 of three): primitives + CLI flag parsing only.
+# No consumer is migrated; baseline regression must remain byte-identical.
+# PR partition rationale is in:
+#   features/189-bin-counter-primitives-implementation-readiness-audit.md § Recommended PR-sized scope partition
+
+sub bin_boundary {
+    # Compute boundary[i] = min * (max/min)^(i/B) for partition $p.
+    # Cheaper than 2 multiplies + 1 exp on modern hardware; called by R4
+    # (twice per percentile invocation) and by partition_extend's count
+    # remap. Not called per-observation — R2 uses log()/log_ratio directly.
+    my ($p, $i) = @_;
+    return $p->{min} * exp($p->{log_ratio} * $i / $p->{bin_count});
+}
+
+sub partition_new {
+    # R1: lazily construct a partition seeded around $v0.
+    # Seed: min = v0 / sqrt(10^seed_decades), max = v0 * sqrt(10^seed_decades).
+    # bin_count = bpd * seed_decades, integer-truncated. Locked at:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 5
+    my ($v0, $bpd, $seed_decades) = @_;
+    my $half_span = sqrt(10 ** $seed_decades);
+    my $min       = $v0 / $half_span;
+    my $max       = $v0 * $half_span;
+    my $bin_count = int($bpd * $seed_decades);
+    return {
+        min       => $min,
+        max       => $max,
+        bpd       => $bpd,
+        decades   => $seed_decades,
+        bin_count => $bin_count,
+        log_ratio => log($max / $min),  # cached for closed-form bin_assign
+        rebins    => 0,
+    };
+}
+
+sub partition_extend {
+    # R1: HdrHistogram doubling-rebin so $value falls inside [min, max].
+    # When $value > max, multiply max by 10^(decades/2) until it contains
+    # $value; symmetric for $value < min. After extension, remap existing
+    # bin counts via geometric-midpoint projection into the new geometry
+    # (index-monotonic in the extension direction — counts cluster on a
+    # contiguous range of new indices, no scatter). Locked at:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 5
+    #
+    # Returns the new bins arrayref; the caller is expected to swap it in.
+    my ($p, $value, $old_bins_ref) = @_;
+    my $double_factor = 10 ** ($p->{decades} / 2);
+    my ($new_min, $new_max) = ($p->{min}, $p->{max});
+    while ($value > $new_max || $value < $new_min) {
+        if ($value > $new_max) {
+            $new_max *= $double_factor;
+        } else {
+            $new_min /= $double_factor;
+        }
+    }
+    # Re-derive bin_count from the new span so per-decade resolution is preserved.
+    my $new_decades   = log($new_max / $new_min) / log(10);
+    my $new_bin_count = int($p->{bpd} * $new_decades);
+    $new_bin_count = $p->{bin_count} if $new_bin_count < $p->{bin_count};
+
+    my $new_log_ratio = log($new_max / $new_min);
+    my @new_bins;
+    for my $old_i (0 .. $p->{bin_count} - 1) {
+        my $count = $old_bins_ref->[$old_i];
+        next unless defined $count && $count > 0;
+        my $lower    = bin_boundary($p, $old_i);
+        my $upper    = bin_boundary($p, $old_i + 1);
+        my $midpoint = sqrt($lower * $upper);  # geometric midpoint
+        my $new_i    = int($new_bin_count * log($midpoint / $new_min) / $new_log_ratio);
+        $new_i = 0                  if $new_i < 0;
+        $new_i = $new_bin_count - 1 if $new_i >= $new_bin_count;
+        $new_bins[$new_i] = ($new_bins[$new_i] // 0) + $count;
+    }
+
+    $p->{min}       = $new_min;
+    $p->{max}       = $new_max;
+    $p->{bin_count} = $new_bin_count;
+    $p->{log_ratio} = $new_log_ratio;
+    $p->{rebins}++;
+
+    return \@new_bins;
+}
+
+sub partition_rebin {
+    # R12 (#201): re-bin a source partition's counts into a target partition
+    # with caller-specified [new_min, new_max] and new_bin_count.
+    # Geometric-midpoint projection per the fidelity invariant — each source
+    # bin's count goes entirely to one target bin (the one containing the
+    # source bin's geometric midpoint). No cross-bin mass splitting.
+    # Reuses the same remap algorithm as partition_extend (ltl:613-622),
+    # the only difference is the caller chooses target geometry instead of
+    # HdrHistogram doubling deriving it. Locked at:
+    #   features/189-histogram-bin-counter-primitives.md § R12
+    #   features/201-display-geometry-bound-consumers.md § Recommendation
+    my ($p, $src_bins, $new_min, $new_max, $new_bin_count) = @_;
+    my $new_log_ratio = log($new_max / $new_min);
+    my @new_bins;
+    for my $old_i (0 .. $p->{bin_count} - 1) {
+        my $count = $src_bins->[$old_i];
+        next unless defined $count && $count > 0;
+        my $lower    = bin_boundary($p, $old_i);
+        my $upper    = bin_boundary($p, $old_i + 1);
+        my $midpoint = sqrt($lower * $upper);
+        my $new_i    = int($new_bin_count * log($midpoint / $new_min) / $new_log_ratio);
+        $new_i = 0                  if $new_i < 0;
+        $new_i = $new_bin_count - 1 if $new_i >= $new_bin_count;
+        $new_bins[$new_i] = ($new_bins[$new_i] // 0) + $count;
+    }
+    # Zero-fill so the bins arrayref has exactly $new_bin_count elements.
+    for my $i (0 .. $new_bin_count - 1) {
+        $new_bins[$i] //= 0;
+    }
+    my $new_partition = {
+        min       => $new_min,
+        max       => $new_max,
+        bpd       => $p->{bpd},
+        decades   => log($new_max / $new_min) / log(10),
+        bin_count => $new_bin_count,
+        log_ratio => $new_log_ratio,
+        rebins    => 0,
+    };
+    return ($new_partition, \@new_bins);
+}
+
+sub snapshot_counter_telemetry {
+    # Capture per-consumer telemetry from a streaming counter store before
+    # the store is discarded at finalize. Populates the locked #187 Decision 8
+    # -V fields read later by emit_bin_counter_mode_verbose().
+    my ($store) = @_;
+    my $n = scalar keys %$store;
+    my ($total_rebins, $max_bins, $with_over, $with_under, $over_sum, $under_sum) = (0, 0, 0, 0, 0, 0);
+    my @rebins;
+    for my $entry (values %$store) {
+        my $p = $entry->{partition};
+        $total_rebins += $p->{rebins};
+        push @rebins, $p->{rebins};
+        $max_bins = $p->{bin_count} if $p->{bin_count} > $max_bins;
+        my $o = $entry->{overflow}  // 0;
+        my $u = $entry->{underflow} // 0;
+        $with_over++  if $o > 0;
+        $with_under++ if $u > 0;
+        $over_sum    += $o;
+        $under_sum   += $u;
+    }
+    my @sorted = sort { $a <=> $b } @rebins;
+    my $p50 = @sorted ? $sorted[int(@sorted * 0.50)] : 0;
+    my $p95 = @sorted ? $sorted[int(@sorted * 0.95)] : 0;
+    my $p99 = @sorted ? $sorted[int(@sorted * 0.99)] : 0;
+    my $rmax = @sorted ? $sorted[-1] : 0;
+    require Devel::Size;
+    my $bytes = Devel::Size::total_size($store);
+    return {
+        partition_count                 => $n,
+        total_rebin_events              => $total_rebins,
+        max_partition_bins              => $max_bins,
+        partitions_with_overflow_count  => $with_over,
+        partitions_with_underflow_count => $with_under,
+        overflow_total                  => $over_sum,
+        underflow_total                 => $under_sum,
+        counter_memory_bytes            => $bytes,
+        rebins_p50                      => $p50,
+        rebins_p95                      => $p95,
+        rebins_p99                      => $p99,
+        rebins_max                      => $rmax,
+    };
+}
+
+sub bin_assign {
+    # R2: closed-form bin index. Returns:
+    #   ('IN',        $i)     value in [min, max]
+    #   ('UNDERFLOW', undef)  value < min
+    #   ('OVERFLOW',  undef)  value > max
+    # The caller decides whether to extend the partition or increment an
+    # over/underflow counter. counter_update() composes those choices per
+    # the auto-resize lifecycle.
+    my ($p, $v) = @_;
+    return ('UNDERFLOW', undef) if $v < $p->{min};
+    return ('OVERFLOW',  undef) if $v > $p->{max};
+    my $i = int($p->{bin_count} * log($v / $p->{min}) / $p->{log_ratio});
+    $i = $p->{bin_count} - 1 if $i >= $p->{bin_count};
+    $i = 0                   if $i < 0;
+    return ('IN', $i);
+}
+
+sub counter_update {
+    # R3 + R6: increment the counter for ($store, $key, $value).
+    # $store is a hashref; $key is a caller-formed string (the caller composes
+    # the key from whatever shape its consumer needs — (category, log_key),
+    # time_bucket, '', etc. — joined with "\x1f" by convention). Lazy partition
+    # construction on first observation per the auto-resize lifecycle locked at:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 5
+    # Out-of-range triggers extend; if the extended partition still can't
+    # contain the value (only reachable when a future growth cap is added —
+    # none today), the over/underflow counter increments per:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 4
+    my ($store, $key, $value, $bpd_override) = @_;
+    my $bpd = $bpd_override // $percentile_buckets_per_decade;
+    my $entry = $store->{$key};
+    if (!$entry) {
+        $entry = $store->{$key} = {
+            partition => partition_new($value, $bpd, $percentile_seed_decades),
+            bins      => [],
+            overflow  => 0,
+            underflow => 0,
+        };
+    }
+
+    my ($where, $idx) = bin_assign($entry->{partition}, $value);
+    if ($where eq 'IN') {
+        $entry->{bins}->[$idx] = ($entry->{bins}->[$idx] // 0) + 1;
+        return;
+    }
+
+    # Out of range: extend the partition, remap existing counts, re-assign.
+    my $new_bins = partition_extend($entry->{partition}, $value, $entry->{bins});
+    $entry->{bins} = $new_bins;
+    my ($w2, $i2) = bin_assign($entry->{partition}, $value);
+    if ($w2 eq 'IN') {
+        $entry->{bins}->[$i2] = ($entry->{bins}->[$i2] // 0) + 1;
+    } elsif ($w2 eq 'OVERFLOW') {
+        $entry->{overflow}++;
+    } else {
+        $entry->{underflow}++;
+    }
+}
+
+sub percentile {
+    # R4: Prometheus HistogramQuantile in-bucket interpolation. Formula and
+    # rank convention locked verbatim against promql/quantile.go at:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 1
+    #
+    # 1. total_N = sum(bins) + underflow + overflow
+    # 2. target_rank = ceil(q * total_N)
+    # 3. Walk: underflow -> in-range bins low-to-high -> overflow
+    # 4. If target_rank lands in underflow: return boundary[0],          audit='low'
+    #    If target_rank lands in overflow:  return boundary[bin_count],  audit='high'
+    #    Otherwise: rank_in_bin = target_rank - (cum - c);
+    #               fraction    = rank_in_bin / c;
+    #               value       = lower * (upper/lower)^fraction;        audit='none'
+    #
+    # Per-quantile audit semantics: a partition with overflow > 0 may still
+    # report audit='none' for some quantiles — the audit is decided by where
+    # the target rank lands, not by partition state. Locked at:
+    #   features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket A § A3
+    #
+    # Returns (undef, 'none') for empty counter maps. Caller should not invoke
+    # in that state, but the contract is defined.
+    my ($entry, $q) = @_;
+    my $p    = $entry->{partition};
+    my $bins = $entry->{bins};
+    my $under = $entry->{underflow} // 0;
+    my $over  = $entry->{overflow}  // 0;
+
+    my $in_total = 0;
+    $in_total += ($_ // 0) for @$bins;
+    my $total_N = $under + $in_total + $over;
+    return (undef, 'none') if $total_N == 0;
+
+    my $target_rank = POSIX::ceil($q * $total_N);
+    $target_rank = 1       if $target_rank < 1;
+    $target_rank = $total_N if $target_rank > $total_N;
+
+    my $cum = 0;
+    if ($under > 0) {
+        $cum += $under;
+        return (bin_boundary($p, 0), 'low') if $target_rank <= $cum;
+    }
+    for my $i (0 .. $p->{bin_count} - 1) {
+        my $c = $bins->[$i] // 0;
+        next if $c == 0;
+        $cum += $c;
+        if ($target_rank <= $cum) {
+            my $lower       = bin_boundary($p, $i);
+            my $upper       = bin_boundary($p, $i + 1);
+            my $rank_in_bin = $target_rank - ($cum - $c);
+            my $fraction    = $rank_in_bin / $c;
+            my $value       = $lower * (($upper / $lower) ** $fraction);
+            return ($value, 'none');
+        }
+    }
+    # Must be in overflow.
+    return (bin_boundary($p, $p->{bin_count}), 'high');
+}
+
+# ============================================================================
+# END HISTOGRAM BIN-COUNTER PRIMITIVES
+# ============================================================================
+
 # Index file subroutines (Issue #46)
 
 sub has_active_filters {
@@ -521,7 +911,7 @@ sub parse_iso_date_to_epoch {
     return eval { timegm($6, $5, $4, $3, $2 - 1, $1) };
 }
 
-sub write_index_file {
+sub locate_index_file {
     my $index_filename = 'ltl-index.csv';
     my $index_dir;
     my $use_absolute_paths = 0;
@@ -535,6 +925,509 @@ sub write_index_file {
 
     my $index_path = File::Spec->catfile($index_dir, $index_filename);
     my $temp_path  = File::Spec->catfile($index_dir, ".ltl-index.$$.tmp");
+
+    return ($index_path, $temp_path, $use_absolute_paths);
+}
+
+# Issue #179: Read existing ltl-index.csv at startup, perform tiered lookup
+# (Tier 1: selection entry matching current filter signature; Tier 2: file entry),
+# freshness-check via file_size + file_mtime, pre-seed bound state when all
+# input files match at the same tier and are fresh.
+sub read_index_file {
+    # Compute the current run's filter signature (matches write side).
+    $index_filter_sig = has_active_filters() ? serialize_filters() : '-';
+
+    my ($index_path) = locate_index_file();
+    return unless -f $index_path;
+
+    unless (-r $index_path) {
+        warn "ltl-index.csv exists but is unreadable; skipping read-back\n";
+        return;
+    }
+
+    my @index_columns = qw(
+        entry_type entry_date file_path file_size file_mtime
+        line_count match_count first_timestamp last_timestamp ts_precision
+        duration_count duration_min duration_max duration_avg
+        bytes_count bytes_min bytes_max bytes_avg
+        count_count count_min count_max count_avg
+        read_rate memory_used processing_time filters
+    );
+    my %col_idx;
+    for my $i (0..$#index_columns) { $col_idx{$index_columns[$i]} = $i; }
+
+    my $csv = Text::CSV->new({ binary => 1, eol => $/ });
+    my %file_entries;        # path => row hashref
+    my %selection_entries;   # "path\0filters" => row hashref
+
+    my $parse_ok = eval {
+        open my $fh, '<', $index_path or die "open: $!";
+        my $header_seen = 0;
+        while (my $row = $csv->getline($fh)) {
+            next unless @$row >= scalar(@index_columns);
+            if (!$header_seen && ($row->[0] // '') eq 'entry_type') {
+                $header_seen = 1;
+                next;
+            }
+            my %r;
+            for my $col (@index_columns) {
+                $r{$col} = $row->[$col_idx{$col}] // '';
+            }
+            if ($r{entry_type} eq 'file') {
+                $file_entries{$r{file_path}} = \%r;
+            } elsif ($r{entry_type} eq 'selection') {
+                my $key = $r{file_path} . "\0" . $r{filters};
+                $selection_entries{$key} = \%r;
+            }
+        }
+        # Distinguish clean EOF from a parse error mid-stream. Text::CSV
+        # always sets error_diag at end of loop; code 2012 is clean EOF.
+        # Any other code means a row failed to parse and rows after it
+        # were not seen — corrupts our trust in the whole file.
+        my @diag = $csv->error_diag;
+        my $code = $diag[0] // 0;
+        if ($code && $code != 2012) {
+            die "CSV parse error: " . ($diag[1] // 'unknown') . "\n";
+        }
+        close $fh;
+        1;
+    };
+    unless ($parse_ok) {
+        warn "ltl-index.csv malformed; skipping read-back ($@)";
+        # Discard any partial parse — spec §"Edge cases" requires no pre-seed.
+        %file_entries = ();
+        %selection_entries = ();
+        return;
+    }
+
+    # Per-file tiered lookup with freshness check.
+    my %tier_seen;     # tier name => 1, used to enforce same-tier rule
+    for my $in_file (@in_files) {
+        my @stat = stat($in_file);
+        unless (@stat) {
+            $index_preseed{$in_file} = {
+                lookup => 'none', matched_entry_date => '-', freshness => 'no_entry',
+            };
+            $tier_seen{none} = 1;
+            next;
+        }
+        my $on_disk_size  = $stat[7];
+        my $on_disk_mtime = strftime("%Y-%m-%dT%H:%M:%S", gmtime($stat[9]));
+
+        my $file_row = $file_entries{$in_file};
+        my $file_fresh = 0;
+        if ($file_row) {
+            my $size_match  = ($file_row->{file_size}  eq "$on_disk_size");
+            my $mtime_match = ($file_row->{file_mtime} eq $on_disk_mtime);
+            $file_fresh = $size_match && $mtime_match;
+        }
+
+        # Tier 1: selection entry for current filter signature, with fresh companion file row.
+        my $sel_key = $in_file . "\0" . $index_filter_sig;
+        my $sel_row = $selection_entries{$sel_key};
+        if ($sel_row && $file_fresh) {
+            $index_preseed{$in_file} = _preseed_from_row($sel_row, $file_row, 'tier_1_selection');
+            $tier_seen{tier_1_selection} = 1;
+            next;
+        }
+
+        # Tier 2: file row, fresh.
+        if ($file_row && $file_fresh) {
+            $index_preseed{$in_file} = _preseed_from_row($file_row, $file_row, 'tier_2_file');
+            $tier_seen{tier_2_file} = 1;
+            next;
+        }
+
+        # No usable entry: classify the freshness result for diagnostics.
+        my $freshness = 'no_entry';
+        if ($file_row) {
+            if ($file_row->{file_size} ne "$on_disk_size") {
+                $freshness = 'stale_size';
+            } elsif ($file_row->{file_mtime} ne $on_disk_mtime) {
+                $freshness = 'stale_mtime';
+            }
+        }
+        $index_preseed{$in_file} = {
+            lookup => 'none', matched_entry_date => '-', freshness => $freshness,
+        };
+        $tier_seen{none} = 1;
+    }
+
+    # Multi-file rule: pre-seed activates only when every input file matched
+    # at the same tier (Tier 1 or Tier 2) AND all matches are fresh.
+    my @tiers = keys %tier_seen;
+    if (@tiers != 1 || $tiers[0] eq 'none') {
+        return;   # mixed or any unmatched -> no aggregated pre-seed
+    }
+    my $active_tier = $tiers[0];
+
+    # Build aggregated bounds with provenance.
+    for my $metric (qw(duration_min duration_max bytes_min bytes_max count_min count_max
+                       first_timestamp last_timestamp)) {
+        my $best;
+        my $best_from;
+        for my $file (@in_files) {
+            my $v = $index_preseed{$file}{$metric};
+            next unless defined $v && $v ne '-' && $v ne '';
+            if (!defined $best) {
+                $best = $v; $best_from = $file; next;
+            }
+            if ($metric =~ /_min$|^first_/) {
+                if (_lt($v, $best)) { $best = $v; $best_from = $file; }
+            } else {
+                if (_gt($v, $best)) { $best = $v; $best_from = $file; }
+            }
+        }
+        if (defined $best) {
+            $index_aggregated{$metric} = { value => $best, from => $best_from };
+        }
+    }
+
+    # Copy heatmap-relevant scalar bounds into the live globals so the
+    # parse pass starts with a non-undef baseline. Pre-seed corresponds
+    # to whichever metric -hm uses; if heatmap is disabled, this is a
+    # no-op since the read pass and calculate_heatmap_buckets() are gated
+    # by $heatmap_enabled.
+    my $hm_metric_col;
+    if ($heatmap_enabled) {
+        if    ($heatmap_metric eq 'duration') { $hm_metric_col = 'duration'; }
+        elsif ($heatmap_metric eq 'bytes')    { $hm_metric_col = 'bytes';    }
+        elsif ($heatmap_metric eq 'count')    { $hm_metric_col = 'count';    }
+        # UDM heatmap metrics are not in the index schema; skip.
+    }
+    if ($hm_metric_col
+        && defined $index_aggregated{"${hm_metric_col}_min"}
+        && defined $index_aggregated{"${hm_metric_col}_max"}) {
+        $heatmap_min = $index_aggregated{"${hm_metric_col}_min"}{value} + 0;
+        $heatmap_max = $index_aggregated{"${hm_metric_col}_max"}{value} + 0;
+    }
+
+    $index_used = 1;
+    return;
+}
+
+# Helper: build a per-file pre-seed record from a matched row (selection or file).
+# $bound_row is the row whose bounds we use. $file_row is always the companion
+# file row (used for ts_precision since selection rows have '-' there).
+sub _preseed_from_row {
+    my ($bound_row, $file_row, $tier_name) = @_;
+    my %p = (
+        lookup             => $tier_name,
+        matched_entry_date => $bound_row->{entry_date} // '-',
+        freshness          => 'fresh',
+    );
+    for my $col (qw(duration_min duration_max bytes_min bytes_max count_min count_max
+                    first_timestamp last_timestamp)) {
+        my $v = $bound_row->{$col};
+        $p{$col} = (defined $v && $v ne '' && $v ne '-') ? $v : undef;
+    }
+    # ts_precision lives only on the file row.
+    my $tp = $file_row->{ts_precision};
+    $p{ts_precision} = (defined $tp && $tp ne '' && $tp ne '-') ? $tp : undef;
+    return \%p;
+}
+
+# Numeric/timestamp comparators that handle ISO timestamps and bare numbers.
+sub _lt {
+    my ($a, $b) = @_;
+    return ($a lt $b) if $a =~ /^\d{4}-\d{2}-\d{2}T/;
+    return ($a + 0) < ($b + 0);
+}
+sub _gt {
+    my ($a, $b) = @_;
+    return ($a gt $b) if $a =~ /^\d{4}-\d{2}-\d{2}T/;
+    return ($a + 0) > ($b + 0);
+}
+
+# Issue #179: After parse pass completes, compare live captured values
+# against pre-seeded bounds. Per spec §5.5: filtered run uses live sel_*
+# values; unfiltered run uses live whole-file values (which equal sel_*
+# when no filter is active, since the sel_* accumulators run on every
+# matched line in that case). Observation only — refresh happens via
+# the existing write_index_file() side-effect that overwrites both
+# file and selection entries from %index_file_data at end of run.
+sub detect_index_drift {
+    return unless $index_used;
+
+    my $unfiltered = ($index_filter_sig eq '-');
+
+    # Map metric name -> (live source key in %index_file_data, comparison direction)
+    # Direction: 'min' (drift if live < preseed) or 'max' (drift if live > preseed)
+    # Timestamps: 'min' for first_timestamp (drift if live earlier), 'max' for last_timestamp.
+    my @metrics = (
+        [ duration_min   => $unfiltered ? 'duration_min'   : 'sel_duration_min',   'min' ],
+        [ duration_max   => $unfiltered ? 'duration_max'   : 'sel_duration_max',   'max' ],
+        [ bytes_min      => $unfiltered ? 'bytes_min'      : 'sel_bytes_min',      'min' ],
+        [ bytes_max      => $unfiltered ? 'bytes_max'      : 'sel_bytes_max',      'max' ],
+        [ count_min      => $unfiltered ? 'count_min'      : 'sel_count_min',      'min' ],
+        [ count_max      => $unfiltered ? 'count_max'      : 'sel_count_max',      'max' ],
+        [ first_timestamp => $unfiltered ? 'first_timestamp' : 'sel_first_timestamp', 'min' ],
+        [ last_timestamp  => $unfiltered ? 'last_timestamp'  : 'sel_last_timestamp',  'max' ],
+    );
+
+    for my $file (@in_files) {
+        my $pre = $index_preseed{$file} or next;
+        next if $pre->{lookup} eq 'none';
+
+        my $live = $index_file_data{$file} or next;
+
+        for my $m (@metrics) {
+            my ($metric, $live_key, $direction) = @$m;
+            my $preseed_v = $pre->{$metric};
+            next unless defined $preseed_v && $preseed_v ne '' && $preseed_v ne '-';
+
+            my $live_v = $live->{$live_key};
+            next unless defined $live_v;
+
+            # Format timestamps to match preseed ISO representation.
+            my $live_v_fmt = $live_v;
+            if ($metric eq 'first_timestamp' || $metric eq 'last_timestamp') {
+                $live_v_fmt = format_epoch_iso($live_v);
+                next if !defined $live_v_fmt || $live_v_fmt eq '-';
+            }
+
+            my $drifted = 0;
+            if ($direction eq 'min') {
+                $drifted = 1 if _lt($live_v_fmt, $preseed_v);
+            } else {
+                $drifted = 1 if _gt($live_v_fmt, $preseed_v);
+            }
+
+            $index_drift{$file}{$metric} = {
+                live    => $live_v_fmt,
+                preseed => $preseed_v,
+                drifted => $drifted,
+            };
+            $index_drift_any = 1 if $drifted;
+        }
+    }
+    return;
+}
+
+# Issue #179: Emit the dedicated `=== INDEX READ-BACK ===` section
+# into @verbose_output. Always emitted under -V; the index_used line
+# inside the section is the diagnostic, not the section's presence.
+# Format is the contract from features/179-index-read-back.md §"-V verbose output".
+sub emit_index_readback_verbose {
+    return unless $verbose;
+
+    push @verbose_output, "=== INDEX READ-BACK ===";
+    push @verbose_output, "index_used: " . ($index_used ? "yes" : "no");
+    push @verbose_output, "index_filter_signature: $index_filter_sig";
+
+    # Per-file lookup blocks (always emitted under -V, in input order).
+    for my $file (@in_files) {
+        my $pre = $index_preseed{$file} || {
+            lookup => 'none', matched_entry_date => '-', freshness => 'no_entry',
+        };
+        push @verbose_output, "file: $file";
+        push @verbose_output, "  lookup: $pre->{lookup}";
+        push @verbose_output, "  matched_entry_date: " . ($pre->{matched_entry_date} // '-');
+        push @verbose_output, "  freshness: $pre->{freshness}";
+        for my $col (qw(duration_min duration_max bytes_min bytes_max
+                        count_min count_max first_timestamp last_timestamp)) {
+            my $v = $pre->{$col};
+            push @verbose_output, sprintf("  preseed_%s: %s", $col,
+                (defined $v && $v ne '') ? $v : '-');
+        }
+    }
+
+    # Aggregated bounds + drift, only when pre-seed is active.
+    if ($index_used) {
+        push @verbose_output, "aggregated_preseed:";
+        for my $col (qw(duration_min duration_max bytes_min bytes_max
+                        count_min count_max first_timestamp last_timestamp)) {
+            my $a = $index_aggregated{$col};
+            if ($a) {
+                push @verbose_output, sprintf("  %s: %s (from %s)", $col, $a->{value}, $a->{from});
+            } else {
+                push @verbose_output, sprintf("  %s: -", $col);
+            }
+        }
+
+        push @verbose_output, "drift_detected: " . ($index_drift_any ? "yes" : "no");
+        if ($index_drift_any) {
+            for my $file (sort keys %index_drift) {
+                my $fd = $index_drift{$file};
+                next unless grep { $_ && $_->{drifted} } values %$fd;
+                push @verbose_output, "drift_file: $file";
+                for my $metric (qw(duration_min duration_max bytes_min bytes_max
+                                   count_min count_max first_timestamp last_timestamp)) {
+                    my $d = $fd->{$metric} or next;
+                    push @verbose_output, sprintf(
+                        "  %s: live=%s preseed=%s drifted=%s",
+                        $metric,
+                        (defined $d->{live}    && $d->{live}    ne '') ? $d->{live}    : '-',
+                        (defined $d->{preseed} && $d->{preseed} ne '') ? $d->{preseed} : '-',
+                        $d->{drifted} ? 'yes' : 'no'
+                    );
+                }
+            }
+        }
+    }
+}
+
+# Section name, field names, consumer-name strings, and the three-value audit
+# enum (none|low|high) are locked at:
+#   features/187-histogram-bin-counter-percentiles.md § Decision 8
+# Field-name changes require a new locked-decision entry. Field values may
+# evolve freely.
+sub emit_bin_counter_mode_verbose {
+    return unless $verbose;
+
+    push @verbose_output, "=== BIN-COUNTER MODE ===";
+
+    # Run-level header — opt_out_active first per the locked example output.
+    my $opt_out = $exact_percentiles_optout ? 'yes' : 'no';
+    push @verbose_output, "opt_out_active: $opt_out";
+    if ($exact_percentiles_optout) {
+        push @verbose_output,
+            "opt_out_notice: --exact-percentiles is set; all migrated consumers reverted to pre-#187 sort-based computation. This flag is deprecated and will be removed in a future release.";
+    }
+
+    # Two fields, two annotation styles per the locked Decision 8 contract:
+    #
+    # `percentile_precision: <LEVEL> (<source>)` — reports the
+    # --percentile-precision side of the story. When --percentile-precision
+    # was specified (with or without -pbpd), <LEVEL> is the requested level
+    # (1..9) and <source> is "--percentile-precision N" or, when -pbpd also
+    # specified, "--percentile-precision N; overridden". When no
+    # --percentile-precision was specified, <LEVEL> falls back to the tier
+    # corresponding to the active bpd if any matches, or the literal "n/a"
+    # for non-tier bpd values (locked at audit A5).
+    #
+    # `buckets_per_decade: <N> (<source>)` — reports the active resolved bpd
+    # with the full conflict-annotated source ("default" | "-pbpd N" |
+    # "--percentile-precision N" | "-pbpd N; --percentile-precision M overridden").
+    #
+    # The two fields can carry different <source> strings; only the
+    # buckets_per_decade field's annotation tracks $percentile_precision_source
+    # verbatim from option parsing.
+    my %bpd_to_level = (4=>1, 8=>2, 16=>3, 32=>4, 53=>5, 80=>6, 115=>7, 256=>8, 616=>9);
+    my ($level_label, $level_source);
+    if (defined $percentile_precision_level) {
+        # User supplied --percentile-precision. Report it even when overridden.
+        $level_label  = $percentile_precision_level;
+        $level_source = $percentile_precision_source =~ /^-pbpd /
+            ? "--percentile-precision $percentile_precision_level; overridden"
+            : "--percentile-precision $percentile_precision_level";
+    } else {
+        $level_label  = exists $bpd_to_level{$percentile_buckets_per_decade}
+            ? $bpd_to_level{$percentile_buckets_per_decade}
+            : 'n/a';
+        $level_source = $percentile_precision_source;
+    }
+
+    # Suffix applied to both source annotations when opt-out is active.
+    my $not_in_effect = $exact_percentiles_optout ? '; not in effect this run' : '';
+
+    push @verbose_output,
+        "percentile_precision: $level_label ($level_source$not_in_effect)";
+    push @verbose_output,
+        "buckets_per_decade: $percentile_buckets_per_decade ($percentile_precision_source$not_in_effect)";
+
+    my %feature_active = (
+        summary_table     => 1,
+        csv_output        => $write_messages_to_csv ? 1 : 0,
+        time_bucket_stats => ($print_durations && !$omit_durations
+                              && !$omit_stats && !$heatmap_enabled) ? 1 : 0,
+        heatmap_markers   => $heatmap_enabled ? 1 : 0,
+        heatmap_cells     => $heatmap_enabled ? 1 : 0,
+        histogram_view    => $histogram_enabled ? 1 : 0,
+        histogram_bins    => $histogram_enabled ? 1 : 0,
+    );
+
+    my @consumer_order = qw(
+        summary_table
+        csv_output
+        time_bucket_stats
+        heatmap_markers
+        heatmap_cells
+        histogram_view
+        histogram_bins
+    );
+
+    # Consumers migrated to the unified path under #34. The other three
+    # (summary_table, csv_output, time_bucket_stats) are owned by separate
+    # F1 migration tickets and remain on the pre-migration path.
+    my %migrated = map { $_ => 1 } qw(heatmap_cells heatmap_markers histogram_view histogram_bins);
+
+    # Shared-partition topology per #189 R7 / Decision 8 shares_partitions_with.
+    my %shares_with = (
+        heatmap_markers => 'heatmap_cells',
+        histogram_bins  => 'histogram_view',
+    );
+
+    # Per-consumer percentile sets (R3 of #34, locked in #187 Decision 8).
+    my %percentile_set = (
+        heatmap_markers => [qw(p50 p95 p99 p999)],
+        histogram_view  => [qw(p1 p10 p25 p50 p75 p90 p95 p99 p999 p9999)],
+    );
+
+    # Per-consumer partition keying (Decision 8 field).
+    my %partition_keying = (
+        heatmap_cells   => 'time_bucket',
+        heatmap_markers => 'time_bucket',
+        histogram_view  => 'metric_global',
+        histogram_bins  => 'metric_global',
+    );
+
+    for my $consumer (@consumer_order) {
+        push @verbose_output, "";
+        push @verbose_output, "consumer: $consumer";
+
+        if (!$feature_active{$consumer}) {
+            push @verbose_output, "  path: feature_not_active";
+            next;
+        }
+
+        if (!$migrated{$consumer}) {
+            push @verbose_output, "  path: pre_migration";
+            next;
+        }
+
+        if ($exact_percentiles_optout) {
+            push @verbose_output, "  path: user_opt_out";
+            next;
+        }
+
+        push @verbose_output, "  path: unified";
+
+        # Downstream consumer of a shared partition emits a short block.
+        if (my $upstream = $shares_with{$consumer}) {
+            push @verbose_output, "  shares_partitions_with: $upstream";
+            if (my $pset = $percentile_set{$consumer}) {
+                push @verbose_output, "  percentiles_emitted: " . join(' ', @$pset);
+                # out_of_range_bounded reported as 'none' across all quantiles
+                # at default bpd=616 (V8 empirical: no overflow seen on
+                # canonical datasets; safety net per Decision 4).
+                push @verbose_output, "  out_of_range_bounded: " .
+                    join(' ', map { "$_=none" } @$pset);
+            }
+            next;
+        }
+
+        my $t = $bin_counter_telemetry{$consumer} // {};
+        push @verbose_output, "  partition_keying: $partition_keying{$consumer}";
+        push @verbose_output, "  partition_count: "                 . ($t->{partition_count}                 // 0);
+        push @verbose_output, "  total_rebin_events: "              . ($t->{total_rebin_events}              // 0);
+        push @verbose_output, "  max_partition_bins: "              . ($t->{max_partition_bins}              // 0);
+        push @verbose_output, "  partitions_with_overflow_count: "  . ($t->{partitions_with_overflow_count}  // 0);
+        push @verbose_output, "  partitions_with_underflow_count: " . ($t->{partitions_with_underflow_count} // 0);
+        push @verbose_output, "  counter_memory_bytes: "            . ($t->{counter_memory_bytes}            // 0);
+        push @verbose_output, sprintf("  rebins_per_partition: p50=%d p95=%d p99=%d max=%d",
+            $t->{rebins_p50} // 0, $t->{rebins_p95} // 0,
+            $t->{rebins_p99} // 0, $t->{rebins_max} // 0);
+        if (my $pset = $percentile_set{$consumer}) {
+            push @verbose_output, "  percentiles_emitted: " . join(' ', @$pset);
+            push @verbose_output, "  out_of_range_bounded: " .
+                join(' ', map { "$_=none" } @$pset);
+        }
+    }
+}
+
+sub write_index_file {
+    my ($index_path, $temp_path, $use_absolute_paths) = locate_index_file();
 
     my @index_columns = qw(
         entry_type entry_date file_path file_size file_mtime
@@ -705,7 +1598,7 @@ sub print_help {
 
     # Description column starts at this position; adapt to terminal width
     my $opt_col   = 4;    # indent for option text
-    my $desc_col  = 47;   # column where descriptions begin
+    my $desc_col  = 52;   # column where descriptions begin (bumped from 47 to 52 in PR #189-3 to accommodate longer long-form option names like --histogram-buckets-per-decade and --percentile-buckets-per-decade per the project requirement that every option exposes both short and long forms; tied to $short_col below — when $short_col grows by N, $desc_col must grow by N)
     my $wrap_width = ($terminal_width && $terminal_width > 80) ? $terminal_width : 80;
 
     # Word-wrap a description string to fit between $desc_col and $wrap_width
@@ -732,7 +1625,7 @@ sub print_help {
     };
 
     # Format an option line: option text left-aligned, description word-wrapped
-    my $short_col = 7;  # width allocated for short option (e.g. "-bs,  " or "-osum,")
+    my $short_col = 8;  # width allocated for short option text (including trailing comma). Bumped from 7 to 8 in PR #189-3 to accommodate "-hgbpd," (7 chars including comma) without forcing the long-form column one position right of every other row's long-form column. Also requires bumping $desc_col by the same amount.
     my $opt = sub {
         my ($flags, $desc) = @_;
         my $formatted;
@@ -882,6 +1775,14 @@ sub print_help {
     $out .= $opt->("-hg,  --histogram [metric]",    "Show an overall distribution histogram after the bar graph (duration, bytes, or count)");
     $out .= $opt->("-hgw, --histogram-width <N>",   "Histogram width as percentage of terminal (default: 95)");
     $out .= $opt->("-hgh, --histogram-height <N>",  "Histogram height in rows (default: 8)");
+    $out .= $opt->("-hgbpd, --histogram-buckets-per-decade <N>", "Histogram buckets per decade (default: 8; 4=~10%, 8=~5%, 16=~2.5%, 32=~1% precision)");
+    $out .= $opt->("-hgb,  --histogram-buckets <N>",             "Override total histogram bucket count (default: 0 = auto-calculate from buckets-per-decade)");
+
+    # Percentile mode (Issue #189)
+    $out .= $subheading->("Percentile mode");
+    $out .= $opt->("-pp,   --percentile-precision <N>",            "Set percentile binning precision tier 1..9 (default: 5 = ~1.3%; 1=~10%, 9=~0.1%). Affects migrated consumers; see docs/usage.md");
+    $out .= $opt->("-pbpd, --percentile-buckets-per-decade <N>",   "Set percentile buckets-per-decade directly (default: 53; valid 4..616). Overrides --percentile-precision when both supplied");
+    $out .= $opt->("-ep,   --exact-percentiles",                   "Disable unified percentile mode; revert to exact sort-based computation (deprecated; -V shows opt_out_active: yes)");
 
     # User-Defined Metrics
     $out .= $subheading->("User-Defined Metrics");
@@ -2873,7 +3774,11 @@ sub measure_memory_structures {
         heatmap_data_hl        => Devel::Size::total_size(\%heatmap_data_hl),
         heatmap_raw            => Devel::Size::total_size(\%heatmap_raw),
         heatmap_raw_hl         => Devel::Size::total_size(\%heatmap_raw_hl),
+        heatmap_counters       => Devel::Size::total_size(\%heatmap_counters),
+        heatmap_counters_hl    => Devel::Size::total_size(\%heatmap_counters_hl),
         histogram_values       => Devel::Size::total_size(\%histogram_values),
+        histogram_counters     => Devel::Size::total_size(\%histogram_counters),
+        histogram_counters_hl  => Devel::Size::total_size(\%histogram_counters_hl),
         consolidation_clusters => Devel::Size::total_size(\%consolidation_clusters),
         consolidation_patterns => Devel::Size::total_size(\%consolidation_patterns),
         consolidation_key_message => Devel::Size::total_size(\%consolidation_key_message),
@@ -3250,8 +4155,11 @@ sub adapt_to_command_line_options {
         'histogram|hg:s' => \&handle_histogram_option,
         'histogram-width|hgw=i' => sub { $histogram_width_percent = $_[1]; $histogram_width_explicit = 1; },
         'histogram-height|hgh=i' => sub { $histogram_height = $_[1]; $histogram_height_explicit = 1; },
-        'hgbpd=i' => \$histogram_buckets_per_decade,
-        'hgb=i' => \$histogram_bucket_override,
+        'hgbpd|histogram-buckets-per-decade=i' => \$histogram_buckets_per_decade,
+        'hgb|histogram-buckets=i' => \$histogram_bucket_override,
+        'pbpd|percentile-buckets-per-decade=i' => \$percentile_buckets_per_decade,
+        'pp|percentile-precision=i' => \$percentile_precision_level,
+        'ep|exact-percentiles' => \$exact_percentiles_optout,
         'terminal-width|tw=i' => \$terminal_width,
         'no-auto-hide|nah' => \$no_auto_hide,
         'debug-layout' => \$debug_layout,
@@ -3328,6 +4236,32 @@ sub adapt_to_command_line_options {
             warn "Invalid histogram width percent: $histogram_width_percent. Using default (95).\n";
             $histogram_width_percent = 95;
         }
+    }
+
+    # Percentile-mode precision resolution (Issue #189). Resolves the bpd to
+    # use for the unified percentile contract from the CLI flags. The flag
+    # interaction (-pbpd wins over --percentile-precision; the level-to-bpd
+    # tier table; the 4..616 range) is locked at:
+    #   features/187-histogram-bin-counter-percentiles.md § Decision 2
+    # Flags are parsed here but not yet consumed — the first consumer
+    # migration is the first reader of these globals.
+    if (defined $percentile_precision_level && $percentile_buckets_per_decade == 53) {
+        my %level_to_bpd = (1=>4, 2=>8, 3=>16, 4=>32, 5=>53, 6=>80, 7=>115, 8=>256, 9=>616);
+        if (!exists $level_to_bpd{$percentile_precision_level}) {
+            warn "Invalid --percentile-precision: $percentile_precision_level (must be 1..9). Using default (5).\n";
+            $percentile_precision_level = 5;
+        }
+        $percentile_buckets_per_decade = $level_to_bpd{$percentile_precision_level};
+        $percentile_precision_source   = "--percentile-precision $percentile_precision_level";
+    } elsif ($percentile_buckets_per_decade != 53) {
+        $percentile_precision_source = defined $percentile_precision_level
+            ? "-pbpd $percentile_buckets_per_decade; --percentile-precision $percentile_precision_level overridden"
+            : "-pbpd $percentile_buckets_per_decade";
+    }
+    if ($percentile_buckets_per_decade < 4 || $percentile_buckets_per_decade > 616) {
+        warn "Invalid -pbpd: $percentile_buckets_per_decade (must be 4..616). Using default (53).\n";
+        $percentile_buckets_per_decade = 53;
+        $percentile_precision_source   = 'default';
     }
 
     # Duration unit option validation (Issue #17)
@@ -4328,14 +5262,22 @@ sub read_and_process_logs {
                         }
 
                         if (defined $heatmap_value && $heatmap_value > 0) {
-                            # Track global min/max for boundary calculation
+                            # Track global min/max for the display-anchored
+                            # boundary calculation at finalize. Tracked under
+                            # both paths since the unified path's streaming
+                            # partition bounds are wider than observed data.
                             # Note: Using !defined for initial state check since 0 can be a valid value
                             $heatmap_min = $heatmap_value if !defined $heatmap_min || $heatmap_value < $heatmap_min;
                             $heatmap_max = $heatmap_value if !defined $heatmap_max || $heatmap_value > $heatmap_max;
 
-                            # Store raw values for later bucketing (after min/max known)
-                            push @{$heatmap_raw{$bucket}}, $heatmap_value;
-                            push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $category_bucket =~ /-HL$/;
+                            if ($exact_percentiles_optout) {
+                                push @{$heatmap_raw{$bucket}}, $heatmap_value;
+                                push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $category_bucket =~ /-HL$/;
+                            } else {
+                                counter_update(\%heatmap_counters, $bucket, $heatmap_value, $heatmap_stream_bpd);
+                                counter_update(\%heatmap_counters_hl, $bucket, $heatmap_value, $heatmap_stream_bpd)
+                                    if $category_bucket =~ /-HL$/;
+                            }
                         }
                     }
 
@@ -4344,28 +5286,60 @@ sub read_and_process_logs {
                     if ($histogram_enabled) {
                         my $is_highlighted = ($category_bucket =~ /-HL$/);
 
-                        # Collect duration values if requested (or if no specific metrics requested)
-                        if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$omit_durations) {
-                            push @{$histogram_values{duration}}, $duration;
-                            push @{$histogram_values_hl{duration}}, $duration if $is_highlighted;
-                        }
-                        # Collect bytes values if requested
-                        if ((!%histogram_metrics || $histogram_metrics{bytes}) && defined $bytes && $bytes > 0 && !$omit_bytes) {
-                            push @{$histogram_values{bytes}}, $bytes;
-                            push @{$histogram_values_hl{bytes}}, $bytes if $is_highlighted;
-                        }
-                        # Collect count values if requested
-                        if ((!%histogram_metrics || $histogram_metrics{count}) && defined $count && $count > 0 && !$omit_count) {
-                            push @{$histogram_values{count}}, $count;
-                            push @{$histogram_values_hl{count}}, $count if $is_highlighted;
-                        }
-                        # Collect UDM values if requested (or if all metrics requested via bare -hg)
-                        for my $udm_cfg (@histogram_udm_configs) {
-                            my $name = $udm_cfg->{name};
-                            if ((!%histogram_metrics || $histogram_metrics{$name}) &&
-                                defined $udm_values{$name} && $udm_values{$name} > 0) {
-                                push @{$histogram_values{$name}}, $udm_values{$name};
-                                push @{$histogram_values_hl{$name}}, $udm_values{$name} if $is_highlighted;
+                        if ($exact_percentiles_optout) {
+                            if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$omit_durations) {
+                                push @{$histogram_values{duration}}, $duration;
+                                push @{$histogram_values_hl{duration}}, $duration if $is_highlighted;
+                            }
+                            if ((!%histogram_metrics || $histogram_metrics{bytes}) && defined $bytes && $bytes > 0 && !$omit_bytes) {
+                                push @{$histogram_values{bytes}}, $bytes;
+                                push @{$histogram_values_hl{bytes}}, $bytes if $is_highlighted;
+                            }
+                            if ((!%histogram_metrics || $histogram_metrics{count}) && defined $count && $count > 0 && !$omit_count) {
+                                push @{$histogram_values{count}}, $count;
+                                push @{$histogram_values_hl{count}}, $count if $is_highlighted;
+                            }
+                            for my $udm_cfg (@histogram_udm_configs) {
+                                my $name = $udm_cfg->{name};
+                                if ((!%histogram_metrics || $histogram_metrics{$name}) &&
+                                    defined $udm_values{$name} && $udm_values{$name} > 0) {
+                                    push @{$histogram_values{$name}}, $udm_values{$name};
+                                    push @{$histogram_values_hl{$name}}, $udm_values{$name} if $is_highlighted;
+                                }
+                            }
+                        } else {
+                            # F3 streaming with bpd=616 per #201. Per-metric
+                            # observed extents tracked separately for finalize
+                            # target sizing (partition bookkeeping bounds are
+                            # 5-decade seed, wider than observed data).
+                            if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$omit_durations) {
+                                counter_update(\%histogram_counters, 'duration', $duration, $histogram_stream_bpd);
+                                counter_update(\%histogram_counters_hl, 'duration', $duration, $histogram_stream_bpd) if $is_highlighted;
+                                $histogram_data_min{duration} = $duration if !defined $histogram_data_min{duration} || $duration < $histogram_data_min{duration};
+                                $histogram_data_max{duration} = $duration if !defined $histogram_data_max{duration} || $duration > $histogram_data_max{duration};
+                            }
+                            if ((!%histogram_metrics || $histogram_metrics{bytes}) && defined $bytes && $bytes > 0 && !$omit_bytes) {
+                                counter_update(\%histogram_counters, 'bytes', $bytes, $histogram_stream_bpd);
+                                counter_update(\%histogram_counters_hl, 'bytes', $bytes, $histogram_stream_bpd) if $is_highlighted;
+                                $histogram_data_min{bytes} = $bytes if !defined $histogram_data_min{bytes} || $bytes < $histogram_data_min{bytes};
+                                $histogram_data_max{bytes} = $bytes if !defined $histogram_data_max{bytes} || $bytes > $histogram_data_max{bytes};
+                            }
+                            if ((!%histogram_metrics || $histogram_metrics{count}) && defined $count && $count > 0 && !$omit_count) {
+                                counter_update(\%histogram_counters, 'count', $count, $histogram_stream_bpd);
+                                counter_update(\%histogram_counters_hl, 'count', $count, $histogram_stream_bpd) if $is_highlighted;
+                                $histogram_data_min{count} = $count if !defined $histogram_data_min{count} || $count < $histogram_data_min{count};
+                                $histogram_data_max{count} = $count if !defined $histogram_data_max{count} || $count > $histogram_data_max{count};
+                            }
+                            for my $udm_cfg (@histogram_udm_configs) {
+                                my $name = $udm_cfg->{name};
+                                if ((!%histogram_metrics || $histogram_metrics{$name}) &&
+                                    defined $udm_values{$name} && $udm_values{$name} > 0) {
+                                    my $v = $udm_values{$name};
+                                    counter_update(\%histogram_counters, $name, $v, $histogram_stream_bpd);
+                                    counter_update(\%histogram_counters_hl, $name, $v, $histogram_stream_bpd) if $is_highlighted;
+                                    $histogram_data_min{$name} = $v if !defined $histogram_data_min{$name} || $v < $histogram_data_min{$name};
+                                    $histogram_data_max{$name} = $v if !defined $histogram_data_max{$name} || $v > $histogram_data_max{$name};
+                                }
                             }
                         }
                     }
@@ -4434,6 +5408,12 @@ sub find_heatmap_bucket {
 
 sub calculate_heatmap_buckets {
     return unless $heatmap_enabled;
+    return $exact_percentiles_optout
+        ? calculate_heatmap_buckets_exact()
+        : finalize_heatmap_unified();
+}
+
+sub calculate_heatmap_buckets_exact {
     return unless defined $heatmap_min && defined $heatmap_max && $heatmap_max > $heatmap_min && $heatmap_max > 0;
 
     print "\rCalculating heatmap buckets...";
@@ -4508,6 +5488,104 @@ sub calculate_heatmap_buckets {
     return;
 }
 
+sub finalize_heatmap_unified {
+    # F2 finalize per #201: re-bin each streaming partition (bpd=616) into
+    # a display-anchored target partition with bin_count = $heatmap_width.
+    # Boundaries log-spaced over observed [$heatmap_min, $heatmap_max].
+    # Render code reads %heatmap_data, %heatmap_data_hl, %heatmap_percentiles,
+    # @heatmap_boundaries unchanged.
+    return unless defined $heatmap_min && defined $heatmap_max && $heatmap_max > $heatmap_min && $heatmap_max > 0;
+    return unless %heatmap_counters;
+
+    # Capture telemetry before streaming partitions are discarded.
+    # heatmap_cells and heatmap_markers share streaming partitions per
+    # #189 R7 / #187 Decision 8 shares_partitions_with.
+    $bin_counter_telemetry{heatmap_cells}   = snapshot_counter_telemetry(\%heatmap_counters);
+    $bin_counter_telemetry{heatmap_markers} = $bin_counter_telemetry{heatmap_cells};
+
+    print "\rCalculating heatmap buckets...";
+
+    my $W = $heatmap_width;
+    my $effective_min = $heatmap_min > 0 ? $heatmap_min : 1;
+    my $effective_max = $heatmap_max;
+
+    # Display boundaries derived from finalized partition geometry.
+    @heatmap_boundaries = ();
+    my $ratio = $effective_max / $effective_min;
+    for my $i (0 .. $W) {
+        $heatmap_boundaries[$i] = $effective_min * ($ratio ** ($i / $W));
+    }
+
+    foreach my $bucket (keys %heatmap_counters) {
+        my $src = $heatmap_counters{$bucket};
+        my ($final_p, $final_bins) = partition_rebin(
+            $src->{partition}, $src->{bins},
+            $effective_min, $effective_max, $W,
+        );
+
+        # Fold streaming over/underflow into the edge bins (per #189 R12
+        # implementation note — preserves Decision 4 audit semantics).
+        $final_bins->[0]      += $src->{underflow} // 0;
+        $final_bins->[$W - 1] += $src->{overflow}  // 0;
+
+        my $final_entry = {
+            partition => $final_p,
+            bins      => $final_bins,
+            underflow => 0,
+            overflow  => 0,
+        };
+
+        # heatmap_cells: bin counts directly drive cell colors.
+        for my $i (0 .. $W - 1) {
+            my $c = $final_bins->[$i];
+            next if $c == 0;
+            $heatmap_data{$bucket}{$i} = $c;
+            $heatmap_max_density = $c if $c > $heatmap_max_density;
+        }
+
+        # heatmap_markers: R4 (percentile) invoked against the FINALIZED
+        # partition per #34 R5 / features/34-*.md line 120. Numeric value
+        # mapped to display column via find_heatmap_bucket (which reads
+        # @heatmap_boundaries, just populated above).
+        my %markers;
+        for my $pair (['p50', 0.50], ['p95', 0.95], ['p99', 0.99], ['p999', 0.999]) {
+            my ($name, $q) = @$pair;
+            my ($v) = percentile($final_entry, $q);
+            $markers{$name} = find_heatmap_bucket($v, $W) if defined $v;
+        }
+        $heatmap_percentiles{$bucket} = \%markers if %markers;
+
+        # Discard streaming partition now that finalize is done.
+        delete $heatmap_counters{$bucket};
+    }
+
+    # Highlight subset: parallel partitions, same display grid.
+    foreach my $bucket (keys %heatmap_counters_hl) {
+        my $src = $heatmap_counters_hl{$bucket};
+        my ($final_p_hl, $final_bins_hl) = partition_rebin(
+            $src->{partition}, $src->{bins},
+            $effective_min, $effective_max, $W,
+        );
+        $final_bins_hl->[0]      += $src->{underflow} // 0;
+        $final_bins_hl->[$W - 1] += $src->{overflow}  // 0;
+
+        for my $i (0 .. $W - 1) {
+            my $c = $final_bins_hl->[$i];
+            next if $c == 0;
+            $heatmap_data_hl{$bucket}{$i} = $c;
+        }
+
+        delete $heatmap_counters_hl{$bucket};
+    }
+
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Calculating heatmap buckets completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Calculating heatmap buckets completed." ) );
+    }
+
+    return;
+}
+
 # Calculate bucket count based on data range (HdrHistogram approach) - Issue #25
 # Bucket count scales with dynamic range: decades × buckets_per_decade
 sub calculate_histogram_bucket_count {
@@ -4551,7 +5629,12 @@ sub find_histogram_bucket_index {
 # Calculate histogram buckets for all collected metrics - Issue #25
 sub calculate_histogram_buckets {
     return unless $histogram_enabled;
+    return $exact_percentiles_optout
+        ? calculate_histogram_buckets_exact()
+        : finalize_histogram_unified();
+}
 
+sub calculate_histogram_buckets_exact {
     print "Calculating histogram statistics...";
 
     my @metrics_with_data = ();
@@ -4665,6 +5748,156 @@ sub calculate_histogram_buckets {
     }
 
     # Verbose output for bucket calculation (Issue #25, #56)
+    if ($verbose && @metrics_with_data) {
+        push @verbose_output, "";
+        push @verbose_output, "Histogram bucket calculation:";
+        for my $metric (@metrics_with_data) {
+            my $stats = $histogram_stats{$metric};
+            my $min_fmt = format_heatmap_value($stats->{min}, $metric);
+            my $max_fmt = format_heatmap_value($stats->{max}, $metric);
+            push @verbose_output, sprintf("  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d",
+                   ucfirst($metric) . ":",
+                   $stats->{count},
+                   $min_fmt,
+                   $max_fmt,
+                   $stats->{decades},
+                   $histogram_buckets_per_decade,
+                   $stats->{bucket_count});
+        }
+        push @verbose_output, "";
+    }
+
+    return;
+}
+
+sub finalize_histogram_unified {
+    # F3 finalize per #201: re-bin each streaming partition (bpd=616) into
+    # a target partition with bin_count = int(decades × $histogram_buckets_per_decade).
+    # The target shape MATCHES what calculate_histogram_buckets computed today,
+    # so calculate_histogram_display_buckets (ltl:7600+) applies unchanged and
+    # the shipped stretched-bar rendering is preserved exactly.
+    return unless %histogram_counters;
+
+    # Capture telemetry before streaming partitions are discarded.
+    # histogram_view and histogram_bins share streaming partitions.
+    $bin_counter_telemetry{histogram_view} = snapshot_counter_telemetry(\%histogram_counters);
+    $bin_counter_telemetry{histogram_bins} = $bin_counter_telemetry{histogram_view};
+
+    print "Calculating histogram statistics...";
+
+    my @metrics_with_data;
+
+    for my $metric (qw(duration bytes count), map { $_->{name} } @histogram_udm_configs) {
+        my $src = $histogram_counters{$metric};
+        next unless $src;
+
+        # Total sample count across in-range bins + over/underflow.
+        my $n = 0;
+        $n += ($_ // 0) for @{$src->{bins}};
+        $n += ($src->{overflow} // 0) + ($src->{underflow} // 0);
+        next if $n == 0;
+
+        push @metrics_with_data, $metric;
+
+        # Observed data extents (tracked separately during streaming —
+        # partition bookkeeping bounds are wider due to 5-decade seed +
+        # doubling rebins).
+        my $min = $histogram_data_min{$metric};
+        my $max = $histogram_data_max{$metric};
+        if (!defined $min || !defined $max) {
+            # Should not happen if $n > 0, but guard anyway.
+            $min //= $src->{partition}{min};
+            $max //= $src->{partition}{max};
+        }
+        if ($min == $max) {
+            $min = $min * 0.9 if $min > 0;
+            $max = $max * 1.1 if $max > 0;
+            $min = 0.1 if $min <= 0;
+            $max = 1   if $min == $max;
+        }
+        $min = 0.1 if $min <= 0;
+
+        # Target shape = shipped histogram shape, via the existing helper.
+        my ($bucket_count, $decades) = calculate_histogram_bucket_count($min, $max);
+
+        my ($final_p, $final_bins) = partition_rebin(
+            $src->{partition}, $src->{bins},
+            $min, $max, $bucket_count,
+        );
+        $final_bins->[0]                 += $src->{underflow} // 0;
+        $final_bins->[$bucket_count - 1] += $src->{overflow}  // 0;
+
+        my $final_entry = {
+            partition => $final_p,
+            bins      => $final_bins,
+            underflow => 0,
+            overflow  => 0,
+        };
+
+        # histogram_view: R4 (percentile) invoked against the FINALIZED
+        # partition per #34 R5 / features/34-*.md line 120.
+        my %stats = (count => $n, min => $min, max => $max,
+                     bucket_count => $bucket_count, decades => $decades);
+        for my $pair (['p1',0.01], ['p10',0.10], ['p25',0.25], ['p50',0.50],
+                      ['p75',0.75], ['p90',0.90], ['p95',0.95], ['p99',0.99],
+                      ['p999',0.999], ['p9999',0.9999]) {
+            my ($name, $q) = @$pair;
+            my ($v) = percentile($final_entry, $q);
+            $stats{$name} = $v;
+        }
+        $histogram_stats{$metric} = \%stats;
+
+        # histogram_bins: bar heights come directly from finalized bins.
+        @{$histogram_boundaries{$metric}} =
+            map { bin_boundary($final_p, $_) } 0 .. $bucket_count;
+        @{$histogram_buckets{$metric}} = @$final_bins;
+
+        # Discard streaming partition now that finalize is done.
+        delete $histogram_counters{$metric};
+
+        # Highlight subset: parallel partition, project onto SAME finalized
+        # geometry so bars overlay column-for-column.
+        my $src_hl = $histogram_counters_hl{$metric};
+        if (defined $highlight_regex && $src_hl) {
+            my $n_hl = 0;
+            $n_hl += ($_ // 0) for @{$src_hl->{bins}};
+            $n_hl += ($src_hl->{overflow} // 0) + ($src_hl->{underflow} // 0);
+
+            if ($n_hl > 0) {
+                my ($final_p_hl, $final_bins_hl) = partition_rebin(
+                    $src_hl->{partition}, $src_hl->{bins},
+                    $min, $max, $bucket_count,
+                );
+                $final_bins_hl->[0]                 += $src_hl->{underflow} // 0;
+                $final_bins_hl->[$bucket_count - 1] += $src_hl->{overflow}  // 0;
+
+                my $final_entry_hl = {
+                    partition => $final_p_hl,
+                    bins      => $final_bins_hl,
+                    underflow => 0,
+                    overflow  => 0,
+                };
+
+                my %stats_hl = (count => $n_hl, min => $min, max => $max);
+                for my $pair (['p1',0.01], ['p10',0.10], ['p25',0.25], ['p50',0.50],
+                              ['p75',0.75], ['p90',0.90], ['p95',0.95], ['p99',0.99],
+                              ['p999',0.999], ['p9999',0.9999]) {
+                    my ($name, $q) = @$pair;
+                    my ($v) = percentile($final_entry_hl, $q);
+                    $stats_hl{$name} = $v;
+                }
+                $histogram_stats_hl{$metric} = \%stats_hl;
+                @{$histogram_buckets_hl{$metric}} = @$final_bins_hl;
+            }
+            delete $histogram_counters_hl{$metric};
+        }
+    }
+
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Calculating histogram statistics completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Calculating histogram statistics completed." ) );
+    }
+
     if ($verbose && @metrics_with_data) {
         push @verbose_output, "";
         push @verbose_output, "Histogram bucket calculation:";
@@ -6584,6 +7817,10 @@ sub print_histograms {
         # Calculate X-axis labels
         my $x_labels = calculate_histogram_x_labels($boundaries, $bar_width, $metric);
 
+        # Issue #185: precompute the percentile set shared by the legend and the axis ticks
+        my ($selected_pcts, $pct_separator) = select_histogram_percentiles($stats, $bar_width, $metric);
+        my $percentile_cols = calculate_histogram_percentile_ticks($selected_pcts, $boundaries, $bar_width);
+
         $metric_data{$metric} = {
             display_buckets    => \@display_buckets,
             display_buckets_hl => \@display_buckets_hl,
@@ -6593,6 +7830,9 @@ sub print_histograms {
             boundaries         => $boundaries,
             stats              => $stats,
             stats_hl           => $stats_hl,
+            selected_pcts      => $selected_pcts,
+            pct_separator      => $pct_separator,
+            percentile_cols    => $percentile_cols,
         };
     }
 
@@ -6652,7 +7892,7 @@ sub print_histograms {
     for my $i (0 .. $#metrics) {
         my $metric = $metrics[$i];
         my $data = $metric_data{$metric};
-        my $xaxis_str = render_histogram_x_axis($bar_width, $data->{x_labels}, \%box);
+        my $xaxis_str = render_histogram_x_axis($bar_width, $data->{x_labels}, \%box, $data->{percentile_cols});
         $xaxis_line .= $xaxis_str;
         $xaxis_line .= " " x $gap if $i < $#metrics;
     }
@@ -6677,7 +7917,7 @@ sub print_histograms {
     for my $i (0 .. $#metrics) {
         my $metric = $metrics[$i];
         my $data = $metric_data{$metric};
-        my ($legend_str, $legend_str_hl) = render_histogram_legend($metric, $data->{stats}, $data->{stats_hl}, $bar_width, $single_width);
+        my ($legend_str, $legend_str_hl) = render_histogram_legend($metric, $data->{selected_pcts}, $data->{pct_separator}, $data->{stats_hl}, $bar_width, $single_width);
         $legend_line .= $legend_str;
         $legend_line .= " " x $gap if $i < $#metrics;
         if (defined $legend_str_hl) {
@@ -7006,17 +8246,110 @@ sub get_histogram_y_tick_chars {
     return ($box->{t_right}, $box->{t_left});
 }
 
+# Issue #185: Select percentiles to show in legend, ordered by SRE priority then sorted ascending.
+# Shared between render_histogram_legend and the x-axis tick computation so both are
+# guaranteed to use the same set — orphaned ticks (no matching legend entry) would be confusing.
+sub select_histogram_percentiles {
+    my ($stats, $bar_width, $metric) = @_;
+
+    my @percentile_priority = (
+        { key => 'p50',   label => 'P50',    sort_order => 50 },
+        { key => 'p99',   label => 'P99',    sort_order => 99 },
+        { key => 'p999',  label => 'P99.9',  sort_order => 99.9 },
+        { key => 'p95',   label => 'P95',    sort_order => 95 },
+        { key => 'p90',   label => 'P90',    sort_order => 90 },
+        { key => 'p75',   label => 'P75',    sort_order => 75 },
+        { key => 'p9999', label => 'P99.99', sort_order => 99.99 },
+        { key => 'p25',   label => 'P25',    sort_order => 25 },
+        { key => 'p10',   label => 'P10',    sort_order => 10 },
+        { key => 'p1',    label => 'P1',     sort_order => 1 },
+    );
+
+    my $separator = "   ";
+    my @all_entries;
+    for my $pct (@percentile_priority) {
+        my $value     = $stats->{$pct->{key}};
+        my $value_str = format_heatmap_value($value, $metric);
+        my $entry_str = $pct->{label} . ": " . $value_str;
+        push @all_entries, {
+            key        => $pct->{key},
+            label      => $pct->{label},
+            sort_order => $pct->{sort_order},
+            value      => $value,
+            str        => $entry_str,
+            len        => length($entry_str),
+        };
+    }
+
+    my $max_entries = 0;
+    my $total_len   = 0;
+    for my $i (0 .. $#all_entries) {
+        my $needed = $all_entries[$i]{len};
+        $needed += length($separator) if $i > 0;
+        if ($total_len + $needed <= $bar_width) {
+            $total_len += $needed;
+            $max_entries = $i + 1;
+        } else {
+            last;
+        }
+    }
+
+    return ([], $separator) unless $max_entries > 0;
+
+    my @selected = @all_entries[0 .. $max_entries - 1];
+    @selected = sort { $a->{sort_order} <=> $b->{sort_order} } @selected;
+    return (\@selected, $separator);
+}
+
+# Issue #185: Map each selected percentile to a column index on the log-scaled x-axis.
+# Uses the same logarithmic mapping as calculate_histogram_x_labels() to stay aligned
+# with bucket boundaries and labels.
+sub calculate_histogram_percentile_ticks {
+    my ($selected, $boundaries_ref, $bar_width) = @_;
+
+    my %cols;
+    return \%cols unless $selected && @$selected;
+
+    my $min_val = $boundaries_ref->[0];
+    my $max_val = $boundaries_ref->[-1];
+    return \%cols if !defined $min_val || !defined $max_val || $min_val <= 0 || $max_val <= $min_val;
+
+    my $log_range = log($max_val / $min_val);
+    for my $entry (@$selected) {
+        my $value = $entry->{value};
+        next unless defined $value && $value > 0;
+        my $pos = log($value / $min_val) / $log_range;
+        $pos = 0 if $pos < 0;
+        $pos = 1 if $pos > 1;
+        my $col = int($pos * ($bar_width - 1));
+        $cols{$col} = 1;
+    }
+    return \%cols;
+}
+
 # Render X-axis line
 sub render_histogram_x_axis {
-    my ($bar_width, $x_labels, $box) = @_;
+    my ($bar_width, $x_labels, $box, $percentile_cols) = @_;
 
     my %tick_positions = map { $_->{col} => 1 } @$x_labels;
+    $percentile_cols ||= {};
 
     # Left side: "     0 " + corner (6 chars + space = 7 to match Y-axis labels)
     my $result = sprintf("%6s ", "0") . $box->{corner_bl};
 
+    # Issue #185: tick chars (┴/┻ and ┼/╋) match the colour of the rest of the
+    # axis frame (┗ ━ ┳ ┛). Those characters are emitted without any ANSI
+    # wrapping, so the ticks are emitted the same way — whatever colour the
+    # terminal renders the axis line in, the ticks render identically.
     for my $col (0 .. $bar_width - 1) {
-        if (exists $tick_positions{$col}) {
+        my $is_bucket = exists $tick_positions{$col};
+        my $is_pct    = exists $percentile_cols->{$col};
+
+        if ($is_bucket && $is_pct) {
+            $result .= $box->{cross};
+        } elsif ($is_pct) {
+            $result .= $box->{t_up};
+        } elsif ($is_bucket) {
             $result .= $box->{t_down};
         } else {
             $result .= $box->{h_line};
@@ -7049,59 +8382,14 @@ sub render_histogram_x_labels {
 
 # Render legend with percentiles (Issue #42: supports highlight stats)
 # Returns ($legend_line, $legend_line_hl) where $legend_line_hl is undef if no highlight data
+# Issue #185: $selected (precomputed by select_histogram_percentiles) is used so the legend
+# and the x-axis ticks are guaranteed identical.
 sub render_histogram_legend {
-    my ($metric, $stats, $stats_hl, $bar_width, $single_width) = @_;
+    my ($metric, $selected, $separator, $stats_hl, $bar_width, $single_width) = @_;
 
-    # Priority order for percentile selection (SRE best practices)
-    my @percentile_priority = (
-        { key => 'p50',   label => 'P50',    sort_order => 50 },
-        { key => 'p99',   label => 'P99',    sort_order => 99 },
-        { key => 'p999',  label => 'P99.9',  sort_order => 99.9 },
-        { key => 'p95',   label => 'P95',    sort_order => 95 },
-        { key => 'p90',   label => 'P90',    sort_order => 90 },
-        { key => 'p75',   label => 'P75',    sort_order => 75 },
-        { key => 'p9999', label => 'P99.99', sort_order => 99.99 },
-        { key => 'p25',   label => 'P25',    sort_order => 25 },
-        { key => 'p10',   label => 'P10',    sort_order => 10 },
-        { key => 'p1',    label => 'P1',     sort_order => 1 },
-    );
+    return (" " x $single_width, undef) unless $selected && @$selected;
 
-    my $separator = "   ";
-    my $available_width = $bar_width;
-
-    # Build all entry strings for main stats
-    my @all_entries;
-    for my $pct (@percentile_priority) {
-        my $value_str = format_heatmap_value($stats->{$pct->{key}}, $metric);
-        my $entry_str = $pct->{label} . ": " . $value_str;
-        push @all_entries, {
-            sort_order => $pct->{sort_order},
-            str        => $entry_str,
-            len        => length($entry_str),
-        };
-    }
-
-    # Find max entries that fit
-    my $max_entries = 0;
-    my $total_len = 0;
-    for my $i (0 .. $#all_entries) {
-        my $needed = $all_entries[$i]{len};
-        $needed += length($separator) if $i > 0;
-        if ($total_len + $needed <= $available_width) {
-            $total_len += $needed;
-            $max_entries = $i + 1;
-        } else {
-            last;
-        }
-    }
-
-    return (" " x $single_width, undef) unless $max_entries > 0;
-
-    # Take first N items by priority, sort for display
-    my @selected = @all_entries[0 .. $max_entries - 1];
-    @selected = sort { $a->{sort_order} <=> $b->{sort_order} } @selected;
-
-    my $legend_line = join($separator, map { $_->{str} } @selected);
+    my $legend_line = join($separator, map { $_->{str} } @$selected);
 
     # Center within single_width, apply base metric color
     my $left_margin = 8;
@@ -7114,26 +8402,19 @@ sub render_histogram_legend {
     my $visual_len = $legend_padding + length($legend_line);
     $result .= " " x ($single_width - $visual_len) if $visual_len < $single_width;
 
-    # Issue #42: Build highlight legend line if highlight stats exist
+    # Issue #42: Build highlight legend line if highlight stats exist.
+    # Same percentile selection as main legend (sort_order/key from $selected) so the two
+    # rows align column-for-column.
     my $result_hl = undef;
     if (defined $stats_hl && defined $stats_hl->{count} && $stats_hl->{count} > 0) {
         my $highlight_color = $histogram_highlight_colors{$metric};
 
-        # Build highlight entry strings using same percentiles
-        my @all_entries_hl;
-        for my $pct (@percentile_priority) {
-            my $value_str = format_heatmap_value($stats_hl->{$pct->{key}}, $metric);
-            my $entry_str = $pct->{label} . ": " . $value_str;
-            push @all_entries_hl, {
-                sort_order => $pct->{sort_order},
-                str        => $entry_str,
-                len        => length($entry_str),
-            };
+        my @selected_hl;
+        for my $entry (@$selected) {
+            my $value_str = format_heatmap_value($stats_hl->{$entry->{key}}, $metric);
+            my $entry_str = $entry->{label} . ": " . $value_str;
+            push @selected_hl, { str => $entry_str };
         }
-
-        # Use same number of entries as main legend for alignment
-        my @selected_hl = @all_entries_hl[0 .. $max_entries - 1];
-        @selected_hl = sort { $a->{sort_order} <=> $b->{sort_order} } @selected_hl;
 
         my $legend_line_hl = join($separator, map { $_->{str} } @selected_hl);
 
@@ -7680,6 +8961,9 @@ print_title();
 adapt_to_command_line_options();
 adapt_to_terminal_settings();
 
+# Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
+read_index_file();
+
 # READ AND PROCESS LOGS #
 $start_time = [gettimeofday];
 read_and_process_logs();
@@ -7895,6 +9179,13 @@ $end_time = [gettimeofday];
 $elapsed_normalize_data = tv_interval($start_time, $end_time);
 
 $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_heatmap_statistics + $elapsed_histogram_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
+
+# Issue #179: Compare live captured values against pre-seeded bounds (drift)
+# and emit the index read-back section into @verbose_output before flush.
+detect_index_drift();
+emit_index_readback_verbose();
+
+emit_bin_counter_mode_verbose();
 
 print_verbose_output();
 

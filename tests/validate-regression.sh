@@ -81,8 +81,14 @@ for w in 160 200; do
 done
 
 # --- Heatmap modes at width 160 ---
+# --exact-percentiles pins these to the sort-and-index path so the reference
+# stays byte-stable. The unified bin-counter path (#34/#201) is approximate
+# within bin-resolution bound (well below visibility threshold per #201 V8)
+# but not byte-identical, which would make this layout/rendering regression
+# suite fragile to precision tweaks. Layout coverage is what we want here;
+# bin-counter accuracy is covered by tests/validate-percentile-mode.sh.
 for mode in duration bytes count; do
-    run_test "heatmap-${mode}-w160" "$LTL" $COMMON --terminal-width 160 -hm "$mode" "$SCRIPT_LOG"
+    run_test "heatmap-${mode}-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm "$mode" "$SCRIPT_LOG"
 done
 
 # --- Omit flags at width 160 ---
@@ -95,7 +101,7 @@ run_test "omit-ov-or-w160" "$LTL" $COMMON --terminal-width 160 -ov -or "$ACCESS_
 run_test "autohide-w80" "$LTL" $COMMON --terminal-width 80 "$ACCESS_LOG"
 run_test "autohide-w100" "$LTL" $COMMON --terminal-width 100 "$ACCESS_LOG"
 run_test "noautohide-w80" "$LTL" $COMMON --terminal-width 80 --no-auto-hide "$ACCESS_LOG"
-run_test "autohide-hm-w120" "$LTL" $COMMON --terminal-width 120 -hm duration "$SCRIPT_LOG"
+run_test "autohide-hm-w120" "$LTL" $COMMON --exact-percentiles --terminal-width 120 -hm duration "$SCRIPT_LOG"
 
 # --- Millisecond precision ---
 run_test "ms-w160" "$LTL" $COMMON --terminal-width 160 -ms -bs 1000 -st 00:00 -et 00:05 "$ACCESS_LOG"

@@ -3,6 +3,9 @@ _Inline/
 tests/profile/samples/
 logs/
 
+# Runtime artifact (Issue #46 / #179)
+ltl-index.csv
+
 # Local Claude Code state — never commit
 .claude/
 .claude.local/

@@ -175,6 +175,39 @@ ltl -so max access.log
 ltl -so occurrences -sa access.log
 ```
 
+### Percentile mode
+
+ltl computes latency percentiles for the summary table, CSV output, per-time-bucket statistics, heatmap markers, and histogram indicators. Under the unified percentile contract (issue [#187](https://github.com/gregeva/logtimeline/issues/187)), these consumers share a single bin-counter substrate with log-spaced bin geometry and HdrHistogram-style auto-resize. Bin precision is tunable; the locked default (53 buckets per decade, ~1.3% precision) matches OpenTelemetry's Scale-4 analog and is appropriate for the vast majority of analyses.
+
+When this matters: at the default precision, percentile values like P50 / P99 are within ~1.3% of their true sort-based values. Increasing precision reduces binning error proportionally at the cost of memory per partition (~2.1 KB per partition at default precision; scales linearly with bpd).
+
+| Option | Description |
+|--------|-------------|
+| `-pp, --percentile-precision <N>` | Precision tier 1..9 (default: 5). Higher tiers give tighter percentile values at the cost of more memory per partition. |
+| `-pbpd, --percentile-buckets-per-decade <N>` | Buckets per decade directly (default: 53; valid 4..616). Overrides `--percentile-precision` when both supplied. |
+| `-ep, --exact-percentiles` | Revert to exact sort-based percentile computation. Deprecated; safety net retained from the bin-counter migration. |
+
+**Precision (`-pp` / `-pbpd`).** The default (tier 5 / 53 bpd) is appropriate for the vast majority of analyses — percentile values land very close to their true sort-based values. Raise it (tier 6–9, or `-pbpd` values up to 616) when you need tighter precision on tail percentiles (P99.9, P99.99) or when comparing two runs whose true percentiles differ by very small amounts; lower it (tier 1–4) to trade percentile precision for less memory on per-message percentile computation (summary table, CSV output), which fans out to one partition per unique message and so scales with message diversity. The histogram and heatmap consumers are unaffected — they use their own internal precision tuned for display rendering and ignore this knob.
+
+Use `-V` to inspect the active settings. The `=== BIN-COUNTER MODE ===` section reports the resolved precision, the source annotation (default, flag, or override), per-consumer state, and per-quantile audit codes (`out_of_range_bounded: pN=none|low|high`).
+
+```bash
+# Default precision (5 / 53 bpd)
+ltl access.log
+
+# Higher precision tier for tight outlier analysis
+ltl -pp 7 access.log
+
+# Direct buckets-per-decade override
+ltl -pbpd 100 access.log
+
+# Inspect the resolved settings
+ltl -V access.log | grep -A 5 'BIN-COUNTER MODE'
+
+# Opt out to exact (sort-based) percentiles for byte-exact comparison
+ltl -ep access.log
+```
+
 ### Heatmap
 
 Heatmap mode replaces the per-bucket latency statistics with a color-intensity visualization showing how values are distributed within each time bucket. Where percentile statistics reduce a distribution to a handful of numbers, the heatmap reveals its full shape — bimodal distributions (cache hits vs. misses), shifting modes over time, outlier clustering, and long tails all become visually apparent. Each cell represents a value range, with color intensity proportional to the number of entries falling within that range. Logarithmic bucket boundaries provide resolution across the full range of values, from sub-millisecond to multi-second durations.
@@ -202,6 +235,9 @@ Histograms show the overall distribution shape of a metric across the entire tim
 | `-hg, --histogram [metric]` | Show an overall distribution histogram after the bar graph (`duration`, `bytes`, or `count`) |
 | `-hgw, --histogram-width <N>` | Histogram width as percentage of terminal (default: 95) |
 | `-hgh, --histogram-height <N>` | Histogram height in rows (default: 8) |
+| `-hgbpd, --histogram-buckets-per-decade <N>` | Bar resolution: bars per order-of-magnitude of value range (default: 8) |
+
+**Bar resolution (`-hgbpd`).** The default of 8 gives roughly the bar density of the legacy histogram and is suitable for most analyses. Raise it (16, 32, 53) when the default's bars look too wide to distinguish distinct modes in the data — each step gives narrower, more numerous bars and a more detailed distribution shape, at the cost of proportionally more memory during analysis. Values above 53 rarely add visible detail at typical histogram heights.
 
 ```bash
 # Show duration and bytes histograms side by side
@@ -210,6 +246,8 @@ ltl -hg duration,bytes access.log
 ltl -hg duration -hgh 15 access.log
 # All available metric histograms
 ltl -hg access.log
+# Higher bar resolution to distinguish closely-spaced modes
+ltl -hg duration -hgbpd 16 access.log
 ```
 
 ### User-Defined Metrics
