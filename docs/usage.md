@@ -201,7 +201,7 @@ When this matters: at the default precision, percentile values like P50 / P99 ar
 | 8 | 256 | ~0.2%                    |
 | 9 | 616 | ~0.09%                   |
 
-Use `-V` to inspect the active settings. The `=== PERCENTILE MODE ===` section reports the resolved precision, the source annotation (default, flag, or override), per-consumer state, and per-quantile audit codes (`out_of_range_bounded: pN=none|low|high`).
+Use `-V` to inspect the active settings. The `=== BIN-COUNTER MODE ===` section reports the resolved precision, the source annotation (default, flag, or override), per-consumer state, and per-quantile audit codes (`out_of_range_bounded: pN=none|low|high`).
 
 ```bash
 # Default precision (5 / 53 bpd)
@@ -214,7 +214,7 @@ ltl -pp 7 access.log
 ltl -pbpd 100 access.log
 
 # Inspect the resolved settings
-ltl -V access.log | grep -A 5 'PERCENTILE MODE'
+ltl -V access.log | grep -A 5 'BIN-COUNTER MODE'
 
 # Opt out to exact (sort-based) percentiles for byte-exact comparison
 ltl -ep access.log
