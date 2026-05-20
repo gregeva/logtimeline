@@ -99,13 +99,27 @@ During the existing single read pass, each parsed value for an active metric (`-
 
 When a value falls outside the partition's current `[min, max]`, R3 triggers rebin (auto-resize per R3 of this feature, which delegates to #189's R1 lifecycle).
 
-### R5 — Render-time re-projection onto the display grid
+### R5 — Finalize re-bin into display-bound partition (revised 2026-05-20 via #201)
 
-The display geometry of the heatmap and histogram is unchanged by the migration: the heatmap has W display columns (`-hmw`, default 52); the histogram has its display column count from existing CLI flags (`-hgw`, etc.).
+**Original R5 statement** (paraphrased): the migrated rendering driver computes display boundaries from the streaming partition's `[min, max]` and re-projects the partition's bin counts onto the display columns at render time.
 
-The internal partition has more bins than the display has columns (typically ~265 bins at locked default 53 bpd × 5 decades). The migrated rendering driver computes the W-column display boundaries from the partition's `[min, max]` and re-projects the partition's bin counts onto the W display columns at render time via an O(bin count) traversal per row. Cell colors and bar heights derive from the re-projected counts.
+**Revised contract:** the migration adopts a **two-stage stream → finalize re-bin** lifecycle per #187 Decision 5's per-family scope clarification (added 2026-05-20 via #201):
 
-The same render-time re-projection is used by `heatmap_markers` and `histogram_view`: R4 returns a numeric value; the rendering driver re-projects that value onto a display column position (for `heatmap_markers`) or formats it directly (for `histogram_view`).
+1. **Streaming phase (during parse).** Each consumer maintains a streaming auto-resize partition keyed per #187 Decision 5 (per-`time_bucket` for `heatmap_cells`/`heatmap_markers`; per-metric global for `histogram_view`/`histogram_bins`). The streaming partition uses #189's primitives as-built (`partition_new` with locked defaults `bpd=53`, `seed_decades=5`; `counter_update` with auto-resize). No raw-value retention.
+
+2. **Finalize phase (end-of-parse, before render).** Each streaming partition is re-binned via `partition_rebin` (#189 R12, added by #201) into a **display-bound partition** with:
+   - `bin_count = display_width` (`$heatmap_width` for F2; `$bar_area_width` for F3, knowable at end-of-parse after active-metric count `n` is determined).
+   - Boundaries log-spaced over `[d_min, d_max]` (observed data extents, same anchor pre-migration code uses).
+
+3. **Render phase.** Cell colors (F2) and bar heights (F3) are read directly from the finalized partition's bin counts. **No projection step at render time.**
+
+**Why the revision.** The original R5 contract assumed render-time projection from the streaming partition to the display grid could be performed faithfully. Investigation #201 § Phase 3 evidence catalogue documented that the four projection strategies attempted during Phase 3 (midpoint-only, distributive remap with `bpd=53`, with `bpd=8`, etc.) all failed at the visual fidelity bar — because the streaming partition's `[min, max]` is anchored around `v_0` (seed) and grown by doubling, while the display is anchored to `[d_min, d_max]`. This range-anchor mismatch (Dimension B in #201's framing) is unrecoverable at render time.
+
+The revision moves the partition-to-display reconciliation from render time (where the streaming partition's anchoring is fixed) to end-of-parse (where extents are known and a fresh partition can be constructed with display-anchored boundaries). The geometric-midpoint re-bin in `partition_rebin` is mass-conserving (each source bin's count goes entirely into one target bin) — empirically validated at 100% mass retention, 100% peak retention, 0-column X-offset on the canonical 148 MB Tomcat dataset (V6/V7 in `prototype/189-bin-counter-primitives.pl`; report at `prototype/201-projection-comparison-report.md`).
+
+**`heatmap_markers` and `histogram_view` percentile indicators.** Under the revised R5, these are derived by invoking #189 R4 (percentile) against the **finalized** partition, not the streaming one. The numeric percentile value lands directly on a display column boundary because the finalized partition's geometry matches the display.
+
+**Algorithmic continuity.** `partition_rebin` reuses the existing geometric-midpoint remap loop from `partition_extend` (`ltl:613–622`). The streaming partition continues to use #189 R1–R6 unchanged. F1 consumers (`summary_table`, `csv_output`, `time_bucket_stats`) are unaffected by the R5 revision; they use the auto-resize lifecycle without a finalize re-bin step per #187 Decision 5 F1 contract.
 
 ### R6 — Overflow and underflow per #187 Decision 4
 
@@ -121,11 +135,26 @@ Each per-consumer block reports the contract-surface fields locked in #187 Decis
 
 The exact field formats are locked in #187 Decision 8. This feature implements the consumer-specific population of those fields; it does not define new fields.
 
-### R8 — Display geometry preservation
+### R8 — Display geometry preservation (revised 2026-05-20 via #201)
 
-Display geometry (column counts, color scheme, bar layout, percentile-marker positions, legend layout, x-axis tick positions) is unchanged by the migration. Internal precision improves because Decision 2's locked default (53 bpd) is higher than today's shipped 8 bpd default — bin counts and percentile values become *more* accurate.
+**For F2 (heatmap):** Display geometry — `$heatmap_width` (column count), color scheme, percentile-marker positions, legend layout — is unchanged by the migration. The finalized partition (per the revised R5) has `bin_count = $heatmap_width` with boundaries derived from observed `[d_min, d_max]`, matching the shipped `calculate_heatmap_buckets` output structurally. Cell colors derive from finalized partition counts; markers from R4 invoked against the finalized partition.
 
-Implementation tickets must validate against the existing baseline-regression harness (`tests/baseline/`, per CLAUDE.md) to confirm display stability.
+Empirical validation (V6 in `prototype/189-bin-counter-primitives.pl` against the canonical 148 MB Tomcat dataset): 100% mass retention, 100% peak retention, 0-column peak X-offset. Algebraic worst-case X-offset at locked defaults is ≤1 column.
+
+**For F3 (histogram):** Two-part contract:
+
+- **Data fidelity (locked).** Bin counts, percentile-tick positions, and bar heights are accurate per the finalized partition. Mass is conserved exactly; peak counts and positions match shipped pre-migration output. Internal precision improves because Decision 2's locked default (53 bpd, used for the streaming partition) is higher than today's shipped 8 bpd default — values feeding the finalize re-bin are more precise.
+
+- **Bar-width rendering convention (UX decision, deferred).** Shipped F3 renders "wide bars" by duplicating each partition bucket's count across `cols_per_bucket = $bar_area_width / partition_bin_count` adjacent display columns (`calculate_histogram_display_buckets` at `ltl:7462–7493`). This is a non-mass-conserving rendering convention — V7 on the canonical dataset shows the shipped display sum is ~2.86× the true raw count. Under the revised R5, the finalized partition is mass-conserving (`bin_count = $bar_area_width`, each column shows the true count for that bin). The migration must pick between:
+  - **Narrow-spikes rendering** (preferred for data fidelity): one column per finalized bin; bars appear thin.
+  - **Wide-bars rendering preserved**: add an explicit bar-widening render step that duplicates the finalized partition's counts across `cols_per_bucket` adjacent display columns. The finalized partition is constructed at a coarser `bin_count = int($bar_area_width / desired_bar_width)` so the bar-widening step has columns to duplicate into.
+  - **Adaptive rendering** matching shipped expand/compress branches.
+
+  This UX choice is deferred to the histogram migration ticket (a follow-on to #34 Phase 3) per `features/201-display-geometry-bound-consumers.md` § Open question. The revised R5 contract is compatible with all three choices.
+
+Implementation tickets must validate against the existing baseline-regression harness (`tests/baseline/`, per CLAUDE.md) to confirm:
+- F2: byte-equivalent display output within the 1-column X-offset algebraic bound.
+- F3: data-fidelity preservation; visual bar-width acceptance per the histogram migration ticket's UX choice.
 
 ### R9 — Heatmap and histogram have independent partitions per #189 R7
 

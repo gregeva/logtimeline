@@ -336,15 +336,15 @@ Two additional paths were catalogued during the audit:
 
 - **Today's data structure**: `%heatmap_percentiles{$bucket} = { p50, p95, p99, p999 }` — stored as **bin indices, not values**. Derived at `ltl:4823–4834` by sorting `%heatmap_raw{$bucket}`, indexing P50/P95/P99/P99.9, then mapping each value to a bin via `find_heatmap_bucket`.
 - **Today's computation**: sort-and-index, then bin lookup. Output is a column position on the heatmap row, not a numeric percentile value.
-- **Migration target (R9 Phase 3)**: derived from #189 R4 invoked per time bucket against the per-bucket auto-resize partition (Decision 5). The numeric return value from R4 is re-projected onto the heatmap's display column grid at render time. Full resolution recorded in `features/34-histogram-bin-counter-mode.md` § Resolution and § R4-bis.
-- **Symmetric resolution for the histogram consumer**: histogram percentile indicators (`%histogram_stats{$metric}{p*}`, used by legend and x-axis ticks) likewise derive from #189 R4 against the global auto-resize partition (Decision 5); numeric value stored directly.
+- **Migration target (R9 Phase 3) — superseded 2026-05-20 via #201**: streaming auto-resize partition during parse → end-of-parse finalize re-bin into display-bound partition (`bin_count = $heatmap_width`, boundaries from `[d_min, d_max]`). R4 invoked against the finalized partition. Render reads finalized partition directly — no render-time re-projection. See `features/201-display-geometry-bound-consumers.md` § Recommendation.
+- **Symmetric resolution for the histogram consumer — superseded 2026-05-20 via #201**: same two-stage stream → finalize-rebin pattern, with `bin_count = $bar_area_width` at finalize (knowable after active-metric count `n` is determined). Numeric percentile value derived from the finalized partition via R4.
 
 #### C2-cells — Heatmap cells themselves (R9 Phase 3 target; cell colors)
 
 - **Today's data structure**: `%heatmap_raw{$bucket}` — per-time-bucket raw value array, accumulated during the parse. End-of-parse `calculate_histogram_buckets`-area logic computes global `[min, max]`, derives the W-column display boundaries, then bins each per-bucket value to color the cells.
 - **Today's computation**: full retention of per-bucket raw values for the duration of the parse; end-of-parse global partition derivation and per-cell counting.
-- **Migration target (R9 Phase 3)**: per-bucket auto-resize partitions during the parse per Decision 5. Each per-bucket partition has its own boundaries (per-bucket auto-resize). At render time, the heatmap derives the W-column display boundaries from the global `[min, max]` (cheap: trivial reduction across per-bucket partition extents) and re-projects each per-bucket partition's counts onto the W display columns via an O(bin count) traversal per row. Cell colors come from the re-projected counts.
-- **Compatibility constraints on #189**: R1 must support per-bucket independent partitions with auto-resize; R3 supports per-`time_bucket` keying (already in the contract); R4 unchanged. The re-projection step is at the consumer (heatmap rendering code), not in the primitive.
+- **Migration target (R9 Phase 3) — superseded 2026-05-20 via #201**: streaming auto-resize partition per `time_bucket` during the parse (using the unmodified F1 #189 primitives). At end-of-parse, each per-`time_bucket` partition is **re-binned via geometric-midpoint projection** into a display-bound partition with `bin_count = $heatmap_width` and boundaries log-spaced over the global `[d_min, d_max]`. The heatmap reads finalized partitions directly per row — no render-time re-projection. See `features/201-display-geometry-bound-consumers.md` § Recommendation for the locked F2 contract and `prototype/201-projection-comparison-report.md` for empirical validation.
+- **Compatibility constraints on #189**: R1 unchanged; R3 supports per-`time_bucket` keying (already in the contract); R4 unchanged. The finalize re-bin step is a new caller-side composition that reuses `partition_extend`'s remap loop at `ltl:613-622` — see `features/189-histogram-bin-counter-primitives.md` for the optional `partition_rebin` wrapper.
 - **Display geometry unchanged**: W columns, color scheme, layout all preserved. Internal precision improves because Decision 2's locked default (53 bpd) is higher than today's shipped 8 bpd default for the heatmap partition.
 
 #### C1 (revised) — Histogram-mode global percentiles (R9 Phase 2 or 3 target)
@@ -355,7 +355,7 @@ Two additional paths were catalogued during the audit:
 
 - **Today's data structure**: `histogram_values{$metric}` — global per-metric raw value array, accumulated during the parse. End-of-parse `calculate_histogram_buckets` (`ltl:4908`) computes global `[min, max]`, derives boundaries, bins each value, frees the array.
 - **Today's computation**: sort-and-index for percentile derivation interleaved with bin counting. Memory cost is full retention of all observed values for the duration of the parse.
-- **Migration target (R9 Phase 2 or 3, timing decided per implementation risk)**: a single global auto-resize partition per metric, populated during the parse per Decision 5. At render time, the histogram view derives display column boundaries from the partition's final `[min, max]` (or matches a user-specified `-hg*` range if present) and re-projects the partition's counts onto the display columns via an O(bin count) traversal.
+- **Migration target (R9 Phase 2 or 3, timing decided per implementation risk) — superseded 2026-05-20 via #201**: streaming auto-resize partition per metric (using the unmodified F1 #189 primitives). At end-of-parse, after `n` (active-metric count) and `$bar_area_width` are known, the streaming partition is **re-binned via geometric-midpoint projection** into a display-bound partition with `bin_count = $bar_area_width` and boundaries log-spaced over `[d_min, d_max]`. Histogram bar rendering reads finalized partition directly. Note: shipped F3 today renders "wide bars" by duplicating partition counts across display columns — preservation of that convention is a UX decision deferred to the histogram migration ticket. See `features/201-display-geometry-bound-consumers.md` § Open question.
 - **Compatibility constraints on #189**: R1 must support a single global auto-resize partition with per-metric keying; R3 supports `key = ()` per metric; R4 unchanged. Display geometry handled by the consumer.
 - **Display geometry unchanged**: column count, layout, percentile-tick rendering all preserved. Internal precision improves because Decision 2's locked default (53 bpd) is higher than today's shipped 8 bpd histogram default.
 
@@ -1240,11 +1240,21 @@ Non-binding — the contract above is what must hold.
 - **Auditability**: when R4 returns a boundary value due to overflow or underflow, the consumer (or R4 itself) must record this for the `-V` audit field. Implementation may pass back a `(value, bounded_flag)` tuple from R4 or have R4 set a per-quantile result field — implementer's choice.
 - **No special handling for `total_N = 0`** at R4 invocation (R5 edge case `zero matched values` prevents this from being reached).
 
-### Decision 5 — Partition lifecycle (unified contract for all consumers) — **LOCKED (2026-05-19)**
+### Decision 5 — Partition lifecycle (per consumer family) — **LOCKED (2026-05-19); per-family scope clarified 2026-05-20 via #201**
 
-#### Contract
+#### Scope clarification (added 2026-05-20)
 
-ltl adopts **HdrHistogram-style auto-resize as the partition lifecycle for every consumer of the unified primitive contract**. Each partition (per-`(category, log_key)` for the summary table and CSV output; per-`time_bucket` for the heatmap cells, markers, and per-time-bucket statistics; per-metric global for the histogram view; whatever keying future consumers introduce):
+When Decision 5 was first locked (2026-05-19), the "every consumer of the unified primitive contract" phrasing reflected the framing then in scope: per-key fan-out percentile calculation. The keying enumeration immediately after (per-`(category, log_key)`, per-`time_bucket`, per-metric global) presupposed different consumer needs without writing them down.
+
+Investigation #201 surfaced that display-geometry-bound consumers (heatmap, histogram) have lifecycle needs the original Decision 5 framing did not address. Per-consumer differentiation was always intended; this scope clarification writes it down. Decision 5's contract for **per-key fan-out, precision-bound consumers** (F1 in the #201 taxonomy) is unchanged. Display-geometry-bound consumers (F2 heatmap, F3 histogram) follow the streaming + finalize-rebin lifecycle locked in #201 § Recommendation, which composes the same #189 primitives with a finalize-time re-bin step.
+
+See `features/201-display-geometry-bound-consumers.md` for the full investigation, fidelity bounds, and prototype evidence.
+
+#### Contract — F1 (per-key fan-out, precision-bound)
+
+Applies to: `summary_table`, `csv_output`, `time_bucket_stats`, and any future per-key fan-out percentile consumer whose bins serve as internal precision (never rendered directly).
+
+ltl adopts **HdrHistogram-style auto-resize as the partition lifecycle** for F1 consumers of the unified primitive contract. Each partition (per-`(category, log_key)` for the summary table and CSV output; per-`time_bucket` for time-bucket statistics; whatever keying future F1 consumers introduce):
 
 - Is constructed lazily on first observation for that key.
 - Has its initial `[min, max]` range derived from the first value, sized at the locked default span (ltl's existing 5-decade convention per `ltl:4908`-area code), centered geometrically on the first value.
@@ -1252,7 +1262,37 @@ ltl adopts **HdrHistogram-style auto-resize as the partition lifecycle for every
 - Preserves existing bin counts across rebin events (the boundary geometry is index-monotonic in the extension direction; rebin appends bins at the affected end with zero counts).
 - Has amortized O(N) total rebin cost across all values (HdrHistogram's amortized guarantee).
 
-The lock applies uniformly across all consumers catalogued in R12.
+The lock applies uniformly across F1 consumers catalogued in R12. F2 (heatmap) and F3 (histogram) follow the streaming + finalize-rebin lifecycle below.
+
+#### Contract — F2/F3 (display-geometry-bound consumers) — added 2026-05-20 via #201
+
+Applies to: `heatmap_cells`, `heatmap_markers` (F2, per-`time_bucket` keying); `histogram_view`, `histogram_bins` (F3, per-metric global keying).
+
+ltl adopts a **two-stage stream → finalize-rebin lifecycle** for display-geometry-bound consumers. Each partition:
+
+- Is constructed lazily on first observation per the same #189 primitive surface (`partition_new` with locked defaults `bpd=53`, `seed_decades=5`) — streaming phase.
+- Accumulates counts via `counter_update` with auto-resize during the parse — bounded memory throughout, no raw-value retention.
+- At end-of-parse, is **re-binned into a display-bound partition** via geometric-midpoint projection (the same remap loop used by `partition_extend`). The display-bound partition has:
+  - `bin_count = display_width` (for F2: `$heatmap_width`; for F3: `$bar_area_width`, knowable at end-of-parse after active-metric count `n` is determined).
+  - Boundaries log-spaced over `[d_min, d_max]` (observed data extents — the same anchor ltl's pre-migration code uses).
+- Display reads the finalized partition directly — no projection step at render time. (For F3, an optional bar-widening render step preserving the shipped "wide bars" visual is a follow-on UX decision in the histogram migration ticket; see `features/201-*.md` § Open question.)
+
+The streaming partition is discarded after re-bin; only the finalized partition is retained for display.
+
+**Why this lifecycle (not F1's auto-resize at display time):**
+1. Display column count is a hard constraint (`$heatmap_width = -hmw`; `$bar_area_width` derived from terminal width and active-metric count). Auto-resize cannot guarantee partition geometry matches display geometry at the moment display happens.
+2. The Phase 3 investigation (`features/201-*.md` § Phase 3 evidence catalogue) empirically demonstrated that render-time projection from an auto-resize partition to a display grid introduces fidelity loss bounded by the partition-vs-display range mismatch (Dimension B in #201's framing). The finalize re-bin avoids that mismatch by reconstructing the partition with display-anchored boundaries.
+3. F2 (heatmap) has no projection step in shipped code (partition geometry IS display geometry). The finalize re-bin preserves this invariant by reconstructing a display-geometry partition before render. F1's auto-resize at display time would *introduce* a projection step, breaking the F2 invariant.
+4. F3 (histogram) Dimension C ($bar_area_width unknown until end-of-parse) is resolved structurally — the finalize step has all inputs available at the moment it runs.
+
+**Why the same #189 primitives:**
+The geometric-midpoint re-bin already exists at `ltl:613–622` (`partition_extend`'s remap loop). F2/F3 finalize re-bin reuses it via a new wrapper (`partition_rebin($src_partition, $src_bins, $new_min, $new_max, $new_bin_count)`) — see `features/189-histogram-bin-counter-primitives.md`. F1's auto-resize lifecycle is unchanged; the new wrapper composes existing pieces.
+
+**Empirical validation:** Prototype V6 (heatmap) and V7 (histogram) on the canonical 148 MB Tomcat dataset showed 100% mass retention, 100% peak retention, and 0-column peak X-offset. Algebraic worst-case X-offset bound at locked defaults is ≤1 column. Full evidence at `prototype/201-projection-comparison-report.md`.
+
+**Source of the F2/F3 contract**: `features/201-display-geometry-bound-consumers.md` § Recommendation, locked 2026-05-20.
+
+#### F1 contract continued — Why this lifecycle (not fixed global partition)
 
 **Why this lifecycle (not fixed global partition)**:
 

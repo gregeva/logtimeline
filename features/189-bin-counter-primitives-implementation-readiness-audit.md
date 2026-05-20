@@ -438,6 +438,60 @@ The prototype gave evidence but didn't lock these — they're production concern
 
 ---
 
+## Bucket D — Per-consumer binning-need analysis (added 2026-05-20 via #201)
+
+**Status: METHODOLOGY GAP ACKNOWLEDGED.** This bucket records a category of requirement-analysis the original audit (Buckets A/B/C) did not surface, and which subsequently required investigation #201 to address. It is documented here for completeness and to inform future audits.
+
+### What this audit did not surface
+
+The original audit (Buckets A–C, locked 2026-05-19) catalogued #189's spec surface (A), `ltl` code call sites (B), and production-owed implementation decisions (C). It did **not** catalogue the **per-consumer binning needs** — specifically, the architectural question of whether all consumers can share the same partition lifecycle, or whether consumers with different display/precision requirements need different lifecycles.
+
+The unstated assumption was that #187 Decision 5's auto-resize lifecycle applied uniformly across the entire R12 consumer enumeration. Investigation #201 surfaced that this assumption was wrong: display-geometry-bound consumers (heatmap, histogram — F2 and F3 in the #201 taxonomy) have lifecycle needs the auto-resize-during-parse pattern cannot satisfy directly. See `features/201-display-geometry-bound-consumers.md` § Phase 3 evidence catalogue and § Recommendation.
+
+### Why the gap occurred
+
+Three contributing factors:
+
+1. **Industry-grounding bias.** The literature consulted for #187 (HdrHistogram, Prometheus, OpenTelemetry, DDSketch) all targets per-key-fan-out percentile calculation. None of those libraries serves a display-geometry-bound consumer (a histogram bar chart whose bin count = display column count). The literature's silence on the question made it easy to assume the question didn't exist.
+
+2. **Consumer audit framing.** The R12 audit (in #187) enumerated consumers by name and keying but did not classify them by **what their bins are for** (internal precision vs. directly-rendered display columns). The audit answered "who consumes the primitive" but not "what shape do their bins need."
+
+3. **Pre-migration state asymmetry.** F1 consumers (`summary_table`, `csv_output`) have no bin counters today — they sort raw values and index by integer rank. F2 (heatmap) and F3 (histogram) have bin counters today, but they're constructed end-of-parse from `[d_min, d_max]` not seeded around `v_0`. The pre-migration asymmetry was visible in the audit (Bucket B B1–B4 catalogues `find_heatmap_bucket` and `find_histogram_bucket_index`) but the implication — that these are different *kinds* of bin counter — was not drawn out.
+
+### What a binning-need analysis would have surfaced (had it been done in #195)
+
+A per-consumer binning-need table along these lines:
+
+| Consumer | Bin count source | Bin range source | Display projection at render? |
+|---|---|---|---|
+| `summary_table` | Internal precision (whatever #189 picks) | Auto-resize from `v_0` | No — bins serve percentile derivation only |
+| `csv_output` | Internal precision | Auto-resize from `v_0` | No — same as above |
+| `time_bucket_stats` | Internal precision | Auto-resize from `v_0` | No — bins serve percentile derivation only |
+| `heatmap_cells` | `$heatmap_width` (CLI `-hmw`, default 52) | `[d_min, d_max]` (observed extents) | **Today: no, partition = display.** Under naive auto-resize: would require render-time projection. |
+| `heatmap_markers` | Same as heatmap_cells | Same | Same |
+| `histogram_view` | `$bar_area_width` (derived from terminal + active-metric `n`) | `[d_min, d_max]` | **Today: yes (linear-index expand/compress in `calculate_histogram_display_buckets`).** Under naive auto-resize: would require *different* render-time projection. |
+| `histogram_bins` | Same as histogram_view | Same | Same |
+
+The first three rows are F1 (auto-resize fits). Rows 4–5 are F2 (display-direct, no projection today). Rows 6–7 are F3 (single-partition, existing linear-index projection today). The three families have different binning needs.
+
+### What this audit DOES catalogue (correctly)
+
+Buckets A–C remain accurate for their stated scope. The primitives themselves (#189 R1–R6 as-built) are unchanged by #201; F1 consumers continue to use them as-built. The audit's call-site catalogues for F2/F3 (Bucket B B1, B2) remain accurate for what those call sites do today; #201's recommendation extends the migration path (streaming + finalize re-bin) without changing the call-site catalogue.
+
+### What #201 added
+
+Specifically:
+
+- **#189 R12** — `partition_rebin` wrapper (composes the existing remap loop at `ltl:613-622`; no new mathematical primitive surface).
+- **#187 Decision 5 scope clarification** — per-family lifecycle distinction (F1 uses auto-resize as written; F2/F3 use streaming + finalize re-bin).
+- **`features/201-*.md`** — investigation home doc with full reasoning, fidelity bounds, and prototype evidence.
+
+### Methodology lesson for future audits
+
+When auditing a primitive contract for migration readiness, also audit **per-consumer binning needs**: what is the bin count source, what is the bin range source, and what (if any) display projection happens between partition and render. Consumers whose bins are directly rendered as display columns have lifecycle needs that auto-resize-during-parse may not satisfy. The audit framing should classify consumers by *what their bins are for*, not just by *who consumes the primitive*.
+
+---
+
 ## Recommended PR-sized scope partition for #189 production
 
 When #189 production is opened, the work decomposes naturally into the following PR-sized chunks (recommendation, non-binding):
