@@ -271,7 +271,7 @@ The pre-migration code paths that this feature's implementation replaces. Line r
 
 - [x] Under `--exact-percentiles`, all four consumers' output is byte-identical to the pre-feature implementation per #187 R11a (validated on 148MB Tomcat).
 - [x] Under the unified path, all four consumers' percentile values fall within the bin-resolution bound per #187 R4 / #201 V8 evidence (worst-case 1.10% / 5.78% per-bucket displacement, below ~11% visibility threshold).
-- [ ] `tests/baseline/` regression harness — `heatmap-duration-w160` reference will need to be re-captured or re-keyed against `--exact-percentiles`; the unified path is approximate within bin-resolution bound but not byte-identical to the exact-path reference.
+- [x] `tests/validate-regression.sh` passes 19/19 — heatmap regression tests re-keyed against `--exact-percentiles` (PR #206) to keep them byte-stable across future precision tweaks; bin-counter accuracy is independently covered by `tests/validate-percentile-mode.sh`.
 - [x] `-V` `=== BIN-COUNTER MODE ===` output matches the locked format per #187 Decision 8 (all four path codes exercised, locked field names emitted, shares_partitions_with topology correct).
 
 ## Progress
