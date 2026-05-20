@@ -49,7 +49,6 @@ use Devel::Size qw(total_size);
 # Proc::ProcessTable is loaded conditionally in get_memory_usage() based on platform
 # On Windows, Win32::API calls K32GetProcessMemoryInfo directly (kernel32.dll)
 use List::Util qw(min max);
-use Cwd qw(abs_path);
 use File::Spec;
 use Text::CSV;
 use Text::CSV_PP;
@@ -7418,14 +7417,13 @@ sub print_verbose_output {
     print "=== BENCHMARK DATA ===\n";
     print "version\t$version_number\n";
 
-    # File metadata
+    # File metadata — preserve the paths as provided by the caller so baseline
+    # TSVs are portable across contributors / machines (issue #209).
     my $total_file_size = 0;
-    my @abs_paths;
     for my $f (@files_processed) {
         $total_file_size += (-s $f) // 0;
-        push @abs_paths, abs_path($f);
     }
-    print "FILES\t" . join(';', @abs_paths) . "\t$total_file_size\n";
+    print "FILES\t" . join(';', @files_processed) . "\t$total_file_size\n";
 
     print "lines_read\t$total_lines_read\n";
     print "lines_included\t$total_lines_included\n";

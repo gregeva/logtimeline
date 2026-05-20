@@ -17,9 +17,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$SCRIPT_DIR/../.."
 LTL="$SCRIPT_DIR/../../ltl"
 RESULTS_DIR="$SCRIPT_DIR/results"
-LOGS_DIR="$SCRIPT_DIR/../../logs"
+# Run from repo root so file args expand to repo-relative paths (issue #209).
+# ltl records whatever paths it was given in the FILES rows of the TSV, so
+# this is what makes baselines portable across contributors / machines.
+cd "$REPO_ROOT" || exit 1
+LOGS_DIR="logs"
 
 # Default label is timestamp
 LABEL="$(date +%Y%m%d-%H%M%S)"
