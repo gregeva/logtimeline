@@ -247,7 +247,9 @@ Histograms show the overall distribution shape of a metric across the entire tim
 | `-hg, --histogram [metric]` | Show an overall distribution histogram after the bar graph (`duration`, `bytes`, or `count`) |
 | `-hgw, --histogram-width <N>` | Histogram width as percentage of terminal (default: 95) |
 | `-hgh, --histogram-height <N>` | Histogram height in rows (default: 8) |
-| `-hgbpd, --histogram-buckets-per-decade <N>` | Histogram buckets per decade (default: 8) |
+| `-hgbpd, --histogram-buckets-per-decade <N>` | Bar resolution: bars per order-of-magnitude of value range (default: 8) |
+
+**Bar resolution (`-hgbpd`).** The default of 8 gives roughly the bar density of the legacy histogram and is suitable for most analyses. Raise it (16, 32, 53) when the default's bars look too wide to distinguish distinct modes in the data — each step gives narrower, more numerous bars and a more detailed distribution shape, at the cost of proportionally more memory during analysis. Values above 53 rarely add visible detail at typical histogram heights.
 
 ```bash
 # Show duration and bytes histograms side by side
@@ -256,6 +258,8 @@ ltl -hg duration,bytes access.log
 ltl -hg duration -hgh 15 access.log
 # All available metric histograms
 ltl -hg access.log
+# Higher bar resolution to distinguish closely-spaced modes
+ltl -hg duration -hgbpd 16 access.log
 ```
 
 ### User-Defined Metrics
