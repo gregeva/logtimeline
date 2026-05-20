@@ -73,9 +73,14 @@ for w in 160 200; do
 done
 
 # --- Heatmap modes at width 160 ---
+# --exact-percentiles pins these captures to the sort-and-index path. The
+# unified bin-counter path (#34/#201) is approximate within bin-resolution
+# bound and would make the reference fragile to precision tweaks. Layout
+# coverage is what we want; bin-counter accuracy is covered by
+# tests/validate-percentile-mode.sh.
 echo "Heatmap modes at width 160:"
 for mode in duration bytes count; do
-    run_test "heatmap-${mode}-w160" "$LTL" $COMMON --terminal-width 160 -hm "$mode" "$SCRIPT_LOG"
+    run_test "heatmap-${mode}-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm "$mode" "$SCRIPT_LOG"
 done
 
 # --- Omit flags at width 160 ---
@@ -90,7 +95,7 @@ echo "Auto-hide at narrow widths:"
 run_test "autohide-w80" "$LTL" $COMMON --terminal-width 80 "$ACCESS_LOG"
 run_test "autohide-w100" "$LTL" $COMMON --terminal-width 100 "$ACCESS_LOG"
 run_test "noautohide-w80" "$LTL" $COMMON --terminal-width 80 --no-auto-hide "$ACCESS_LOG"
-run_test "autohide-hm-w120" "$LTL" $COMMON --terminal-width 120 -hm duration "$SCRIPT_LOG"
+run_test "autohide-hm-w120" "$LTL" $COMMON --exact-percentiles --terminal-width 120 -hm duration "$SCRIPT_LOG"
 
 # --- Millisecond precision with constrained time range ---
 echo "Millisecond precision at width 160:"
