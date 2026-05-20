@@ -1,4 +1,12 @@
 
+> Both baselines are now captured on the same machine (`/Users/geva/...`).
+> The previous version of this report compared v0.14.4 std-tier rows captured
+> on this machine against XL-tier rows preserved from a different machine,
+> which created phantom 23–46× regressions on the consolidate-XL scenarios.
+> Issue #213 has the diagnosis; PR #214 re-captured the 14 v0.14.4 XL rows on
+> this machine. The numbers below reflect actual v0.14.4 → v0.14.5 code
+> deltas, not hardware variance.
+
 ## Benchmark Comparison
 
   Baseline:    v0.14.4 (v0.14.4, 49 test cases)
@@ -13,8 +21,8 @@
 | 3. | multi-day-application-logs | -0.4% | -0.3% | -5.6% | -0.2% | +0.7% | -2.9% | -5.6% |
 | 4. | multi-day-custom-logs | -3.4% | -4.6% | -6.6% | -1.1% | -0.6% | -2.5% | -8.1% |
 | 5. | single-day-access-log | +0.2% | -1.6% | -5.2% | +0.9% | -2.7% | -3.1% | -22.4% |
-| 6. | month-single-server-access-logs | +1.7% | +1.4% | +81.6% | -0.7% | +1.4% | -6.1% | +40.6% |
-| 7. | month-many-servers-access-logs | +3.2% | +2.6% | +179.0% | +0.5% | -0.0% | -4.7% | +99.4% |
+| 6. | month-single-server-access-logs | -0.6% | -0.3% | -4.7% | -7.3% | -5.6% | -14.1% | -34.8% |
+| 7. | month-many-servers-access-logs | -3.2% | -5.7% | -2.4% | -5.4% | -29.3% | -15.6% | -34.6% |
 
 ### Memory Delta (RSS Peak)
 
@@ -25,8 +33,8 @@
 | 3. | multi-day-application-logs | +0.4% | +0.6% | -3.0% | +4.0% | +1.2% | +2.1% | +0.4% |
 | 4. | multi-day-custom-logs | -2.2% | -0.1% | +0.8% | -13.0% | -17.7% | -28.6% | -21.0% |
 | 5. | single-day-access-log | -0.9% | -0.1% | -0.3% | -25.1% | -46.4% | -58.7% | -49.2% |
-| 6. | month-single-server-access-logs | -0.6% | +2.8% | +0.5% | -21.4% | -33.3% | -47.4% | -59.9% |
-| 7. | month-many-servers-access-logs | -6.9% | -0.9% | +5.8% | -24.7% | -40.6% | -47.2% | -68.5% |
+| 6. | month-single-server-access-logs | -0.7% | +0.0% | -1.0% | -21.5% | -35.0% | -48.6% | -60.1% |
+| 7. | month-many-servers-access-logs | -0.0% | +18.1% | -0.7% | -22.1% | +1.6% | -30.0% | -65.8% |
 
 ### Summary
 
@@ -174,60 +182,60 @@
 | single-day-application-log-standard | MEMORY/rss_peak | 33.4 MB | 35.3 MB | +1.9 MB | 5.8% | REGRESS |
 | month-single-server-access-logs-standard | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-standard | TIMING/total | 1.8 min | 1.8 min | +1.9 s | 1.7% | REGRESS |
-| month-single-server-access-logs-standard | MEMORY/rss_peak | 2.7 GB | 2.7 GB | -16.7 MB | -0.6% | IMPROVE |
+| month-single-server-access-logs-standard | TIMING/total | 1.9 min | 1.8 min | -675 ms | -0.6% | IMPROVE |
+| month-single-server-access-logs-standard | MEMORY/rss_peak | 2.7 GB | 2.7 GB | -19.8 MB | -0.7% | IMPROVE |
 | month-single-server-access-logs-top25 | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-top25 | TIMING/total | 1.8 min | 1.9 min | +1.6 s | 1.4% | REGRESS |
-| month-single-server-access-logs-top25 | MEMORY/rss_peak | 2.6 GB | 2.7 GB | +74.3 MB | 2.8% | REGRESS |
+| month-single-server-access-logs-top25 | TIMING/total | 1.9 min | 1.9 min | -330 ms | -0.3% | IMPROVE |
+| month-single-server-access-logs-top25 | MEMORY/rss_peak | 2.7 GB | 2.7 GB | +864 KB | 0.0% | REGRESS |
 | month-single-server-access-logs-top25-consolidate | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-top25-consolidate | TIMING/total | 2.4 min | 4.3 min | +1.9 min | 81.6% | REGRESS |
-| month-single-server-access-logs-top25-consolidate | MEMORY/rss_peak | 1.7 GB | 1.7 GB | +7.8 MB | 0.5% | REGRESS |
+| month-single-server-access-logs-top25-consolidate | TIMING/total | 4.5 min | 4.3 min | -12.7 s | -4.7% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | MEMORY/rss_peak | 1.7 GB | 1.7 GB | -18 MB | -1.0% | IMPROVE |
 | month-single-server-access-logs-heatmap | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap | TIMING/total | 2 min | 2.0 min | -817 ms | -0.7% | IMPROVE |
-| month-single-server-access-logs-heatmap | MEMORY/rss_peak | 2.7 GB | 2.2 GB | -602 MB | -21.4% | IMPROVE |
+| month-single-server-access-logs-heatmap | TIMING/total | 2.1 min | 2.0 min | -9.4 s | -7.3% | IMPROVE |
+| month-single-server-access-logs-heatmap | MEMORY/rss_peak | 2.7 GB | 2.2 GB | -604.3 MB | -21.5% | IMPROVE |
 | month-single-server-access-logs-histogram | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-histogram | TIMING/total | 2.3 min | 2.3 min | +1.9 s | 1.4% | REGRESS |
-| month-single-server-access-logs-histogram | MEMORY/rss_peak | 4 GB | 2.7 GB | -1.3 GB | -33.3% | IMPROVE |
+| month-single-server-access-logs-histogram | TIMING/total | 2.5 min | 2.3 min | -8.3 s | -5.6% | IMPROVE |
+| month-single-server-access-logs-histogram | MEMORY/rss_peak | 4.1 GB | 2.7 GB | -1.5 GB | -35.0% | IMPROVE |
 | month-single-server-access-logs-heatmap-histogram | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram | TIMING/total | 2.5 min | 2.3 min | -9 s | -6.1% | IMPROVE |
-| month-single-server-access-logs-heatmap-histogram | MEMORY/rss_peak | 4.1 GB | 2.2 GB | -1.9 GB | -47.4% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram | TIMING/total | 2.7 min | 2.3 min | -22.9 s | -14.1% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram | MEMORY/rss_peak | 4.2 GB | 2.2 GB | -2 GB | -48.6% | IMPROVE |
 | month-single-server-access-logs-heatmap-histogram-consolidate | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/total | 3 min | 4.2 min | +1.2 min | 40.6% | REGRESS |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/rss_peak | 3.2 GB | 1.3 GB | -1.9 GB | -59.9% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/total | 6.5 min | 4.2 min | -2.3 min | -34.8% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/rss_peak | 3.3 GB | 1.3 GB | -2.0 GB | -60.1% | IMPROVE |
 | month-many-servers-access-logs-standard | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-standard | TIMING/total | 9.0 min | 9.2 min | +17.0 s | 3.2% | REGRESS |
-| month-many-servers-access-logs-standard | MEMORY/rss_peak | 13.2 GB | 12.3 GB | -937.3 MB | -6.9% | IMPROVE |
+| month-many-servers-access-logs-standard | TIMING/total | 9.6 min | 9.2 min | -18.4 s | -3.2% | IMPROVE |
+| month-many-servers-access-logs-standard | MEMORY/rss_peak | 12.3 GB | 12.3 GB | -160 KB | -0.0% | IMPROVE |
 | month-many-servers-access-logs-top25 | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-top25 | TIMING/total | 9 min | 9.3 min | +14.3 s | 2.6% | REGRESS |
-| month-many-servers-access-logs-top25 | MEMORY/rss_peak | 13.2 GB | 13 GB | -118.5 MB | -0.9% | IMPROVE |
+| month-many-servers-access-logs-top25 | TIMING/total | 9.8 min | 9.3 min | -33.9 s | -5.7% | IMPROVE |
+| month-many-servers-access-logs-top25 | MEMORY/rss_peak | 11 GB | 13 GB | +2.0 GB | 18.1% | REGRESS |
 | month-many-servers-access-logs-top25-consolidate | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-top25-consolidate | TIMING/total | 10.9 min | 30.4 min | +19.5 min | 179.0% | REGRESS |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/rss_peak | 6.8 GB | 7.2 GB | +404.8 MB | 5.8% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | TIMING/total | 31.2 min | 30.4 min | -45.3 s | -2.4% | IMPROVE |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/rss_peak | 7.3 GB | 7.2 GB | -50.5 MB | -0.7% | IMPROVE |
 | month-many-servers-access-logs-heatmap | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-heatmap | TIMING/total | 9.9 min | 10.0 min | +3.0 s | 0.5% | REGRESS |
-| month-many-servers-access-logs-heatmap | MEMORY/rss_peak | 13.3 GB | 10 GB | -3.3 GB | -24.7% | IMPROVE |
+| month-many-servers-access-logs-heatmap | TIMING/total | 10.5 min | 10.0 min | -33.8 s | -5.4% | IMPROVE |
+| month-many-servers-access-logs-heatmap | MEMORY/rss_peak | 12.9 GB | 10 GB | -2.8 GB | -22.1% | IMPROVE |
 | month-many-servers-access-logs-histogram | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-histogram | TIMING/total | 11.4 min | 11.4 min | -302 ms | -0.0% | IMPROVE |
-| month-many-servers-access-logs-histogram | MEMORY/rss_peak | 20.5 GB | 12.2 GB | -8.3 GB | -40.6% | IMPROVE |
+| month-many-servers-access-logs-histogram | TIMING/total | 16.2 min | 11.4 min | -4.7 min | -29.3% | IMPROVE |
+| month-many-servers-access-logs-histogram | MEMORY/rss_peak | 12 GB | 12.2 GB | +193.9 MB | 1.6% | REGRESS |
 | month-many-servers-access-logs-heatmap-histogram | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram | TIMING/total | 12.3 min | 11.7 min | -34.9 s | -4.7% | IMPROVE |
-| month-many-servers-access-logs-heatmap-histogram | MEMORY/rss_peak | 19.3 GB | 10.2 GB | -9.1 GB | -47.2% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram | TIMING/total | 13.9 min | 11.7 min | -2.2 min | -15.6% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram | MEMORY/rss_peak | 14.6 GB | 10.2 GB | -4.4 GB | -30.0% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/total | 14.3 min | 28.4 min | +14.2 min | 99.4% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/rss_peak | 15.6 GB | 4.9 GB | -10.7 GB | -68.5% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/total | 43.4 min | 28.4 min | -15 min | -34.6% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/rss_peak | 14.3 GB | 4.9 GB | -9.4 GB | -65.8% | IMPROVE |
 
 ### Detailed
 
@@ -1828,14 +1836,18 @@
 | single-day-application-log-standard | CONFIG/bucket_size_seconds | 3600.00 | 3600.00 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-standard | TIMING/read_files | 1.7 min | 1.7 min | +1.6 s | 1.5% | REGRESS |
-| month-single-server-access-logs-standard | TIMING/calculate_statistics | 5.4 s | 5.7 s | +302 ms | 5.6% | REGRESS |
+| month-single-server-access-logs-standard | TIMING/read_files | 1.8 min | 1.7 min | -580 ms | -0.5% | IMPROVE |
+| month-single-server-access-logs-standard | TIMING/calculate_statistics | 5.8 s | 5.7 s | -96 ms | -1.6% | IMPROVE |
 | month-single-server-access-logs-standard | TIMING/normalize_data | 2 ms | 3 ms | +1 ms | 50.0% | REGRESS |
-| month-single-server-access-logs-standard | TIMING/total | 1.8 min | 1.8 min | +1.9 s | 1.7% | REGRESS |
-| month-single-server-access-logs-standard | MEMORY/rss_peak | 2.7 GB | 2.7 GB | -16.7 MB | -0.6% | IMPROVE |
+| month-single-server-access-logs-standard | TIMING/total | 1.9 min | 1.8 min | -675 ms | -0.6% | IMPROVE |
+| month-single-server-access-logs-standard | MEMORY/rss_peak | 2.7 GB | 2.7 GB | -19.8 MB | -0.7% | IMPROVE |
 | month-single-server-access-logs-standard | MEMORY/consolidation_clusters | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/consolidation_key_message | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-standard | MEMORY/consolidation_key_trigrams | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-standard | MEMORY/consolidation_key_trigrams_norm | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-standard | MEMORY/consolidation_ngram_index | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/consolidation_patterns | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-standard | MEMORY/consolidation_posting_size | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/consolidation_unmatched | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/heatmap_data | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
@@ -1843,37 +1855,44 @@
 | month-single-server-access-logs-standard | MEMORY/heatmap_raw_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/histogram_values | 576 B | 576 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/log_analysis | 567.3 MB | 567.3 MB | 0 B | 0.0% |  |
-| month-single-server-access-logs-standard | MEMORY/log_messages | 1.6 GB | 1.6 GB | 0 B | 0.0% |  |
-| month-single-server-access-logs-standard | MEMORY/log_occurrences | 36.6 KB | 36.8 KB | +192 B | 0.5% | REGRESS |
+| month-single-server-access-logs-standard | MEMORY/log_messages | 1.6 GB | 1.6 GB | -1.8 MB | -0.1% | IMPROVE |
+| month-single-server-access-logs-standard | MEMORY/log_occurrences | 36.8 KB | 36.8 KB | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/log_sessions | 2.2 MB | 2.2 MB | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/log_stats | 60.0 KB | 60.0 KB | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY/udm_last_value | 120 B | 120 B | 0 B | 0.0% |  |
-| month-single-server-access-logs-standard | MEMORY_FINAL/log_messages | 1730917915 | 1730917915 | 0 | 0.0% |  |
+| month-single-server-access-logs-standard | MEMORY_FINAL/log_messages | 1732830683 | 1730917915 | -1912768 | -0.1% | IMPROVE |
 | month-single-server-access-logs-standard | MEMORY_FINAL/log_analysis | 13010 | 13010 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY_FINAL/consolidation_clusters | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY_FINAL/consolidation_patterns | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY_FINAL/consolidation_key_message | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | MEMORY_FINAL/consolidation_unmatched | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-standard | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-standard | MEMORY_FINAL/consolidation_key_trigrams | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-standard | MEMORY_FINAL/consolidation_key_trigrams_norm | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | COUNTS/log_messages_entries | 1212275 | 1212275 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-single-server-access-logs-standard | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-single-server-access-logs-standard | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-single-server-access-logs-standard | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-top25 | TIMING/read_files | 1.7 min | 1.8 min | +1.3 s | 1.2% | REGRESS |
-| month-single-server-access-logs-top25 | TIMING/calculate_statistics | 5.6 s | 5.9 s | +271 ms | 4.8% | REGRESS |
+| month-single-server-access-logs-top25 | TIMING/read_files | 1.7 min | 1.8 min | +469 ms | 0.4% | REGRESS |
+| month-single-server-access-logs-top25 | TIMING/calculate_statistics | 6.7 s | 5.9 s | -798 ms | -11.9% | IMPROVE |
 | month-single-server-access-logs-top25 | TIMING/normalize_data | 2 ms | 2 ms | 0 ms | 0.0% |  |
-| month-single-server-access-logs-top25 | TIMING/total | 1.8 min | 1.9 min | +1.6 s | 1.4% | REGRESS |
-| month-single-server-access-logs-top25 | MEMORY/rss_peak | 2.6 GB | 2.7 GB | +74.3 MB | 2.8% | REGRESS |
+| month-single-server-access-logs-top25 | TIMING/total | 1.9 min | 1.9 min | -330 ms | -0.3% | IMPROVE |
+| month-single-server-access-logs-top25 | MEMORY/rss_peak | 2.7 GB | 2.7 GB | +864 KB | 0.0% | REGRESS |
 | month-single-server-access-logs-top25 | MEMORY/consolidation_clusters | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY/consolidation_key_message | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-top25 | MEMORY/consolidation_key_trigrams | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-top25 | MEMORY/consolidation_key_trigrams_norm | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-top25 | MEMORY/consolidation_ngram_index | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY/consolidation_patterns | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-top25 | MEMORY/consolidation_posting_size | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY/consolidation_unmatched | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY/heatmap_data | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
@@ -1881,79 +1900,93 @@
 | month-single-server-access-logs-top25 | MEMORY/heatmap_raw_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY/histogram_values | 576 B | 576 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY/log_analysis | 567.3 MB | 567.3 MB | 0 B | 0.0% |  |
-| month-single-server-access-logs-top25 | MEMORY/log_messages | 1.5 GB | 1.6 GB | +72.2 MB | 4.6% | REGRESS |
+| month-single-server-access-logs-top25 | MEMORY/log_messages | 1.6 GB | 1.6 GB | -1.8 MB | -0.1% | IMPROVE |
 | month-single-server-access-logs-top25 | MEMORY/log_occurrences | 36.8 KB | 36.6 KB | -192 B | -0.5% | IMPROVE |
 | month-single-server-access-logs-top25 | MEMORY/log_sessions | 2.2 MB | 2.2 MB | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY/log_stats | 60.0 KB | 60.0 KB | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY/udm_last_value | 120 B | 120 B | 0 B | 0.0% |  |
-| month-single-server-access-logs-top25 | MEMORY_FINAL/log_messages | 1655260931 | 1730932163 | 75671232 | 4.6% | REGRESS |
+| month-single-server-access-logs-top25 | MEMORY_FINAL/log_messages | 1732844931 | 1730932163 | -1912768 | -0.1% | IMPROVE |
 | month-single-server-access-logs-top25 | MEMORY_FINAL/log_analysis | 13010 | 13010 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY_FINAL/consolidation_clusters | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY_FINAL/consolidation_patterns | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY_FINAL/consolidation_key_message | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | MEMORY_FINAL/consolidation_unmatched | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-top25 | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-top25 | MEMORY_FINAL/consolidation_key_trigrams | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-top25 | MEMORY_FINAL/consolidation_key_trigrams_norm | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | COUNTS/log_messages_entries | 1212275 | 1212275 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-single-server-access-logs-top25 | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-single-server-access-logs-top25 | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25 | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-top25-consolidate | TIMING/read_files | 2.1 min | 2.4 min | +13.3 s | 10.3% | REGRESS |
-| month-single-server-access-logs-top25-consolidate | TIMING/group_similar | 4.5 s | 1.8 min | +1.7 min | 2260.3% | REGRESS |
-| month-single-server-access-logs-top25-consolidate | TIMING/calculate_statistics | 7.8 s | 8.6 s | +864 ms | 11.1% | REGRESS |
+| month-single-server-access-logs-top25-consolidate | TIMING/read_files | 2.5 min | 2.4 min | -6.3 s | -4.3% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | TIMING/group_similar | 1.9 min | 1.8 min | -5.7 s | -5.1% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | TIMING/calculate_statistics | 9.3 s | 8.6 s | -702 ms | -7.5% | IMPROVE |
 | month-single-server-access-logs-top25-consolidate | TIMING/normalize_data | 3 ms | 3 ms | 0 ms | 0.0% |  |
-| month-single-server-access-logs-top25-consolidate | TIMING/total | 2.4 min | 4.3 min | +1.9 min | 81.6% | REGRESS |
-| month-single-server-access-logs-top25-consolidate | MEMORY/rss_peak | 1.7 GB | 1.7 GB | +7.8 MB | 0.5% | REGRESS |
-| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_clusters | 507.7 MB | 506.7 MB | -1 MB | -0.2% | IMPROVE |
-| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_key_message | 149.4 KB | 2.5 MB | +2.3 MB | 1590.0% | REGRESS |
-| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_patterns | 257.2 KB | 294 KB | +36.8 KB | 14.3% | REGRESS |
-| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_unmatched | 198.5 KB | 1.6 MB | +1.4 MB | 700.3% | REGRESS |
+| month-single-server-access-logs-top25-consolidate | TIMING/total | 4.5 min | 4.3 min | -12.7 s | -4.7% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | MEMORY/rss_peak | 1.7 GB | 1.7 GB | -18 MB | -1.0% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_clusters | 506.6 MB | 506.7 MB | +119.2 KB | 0.0% | REGRESS |
+| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_key_message | 2.5 MB | 2.5 MB | -4.9 KB | -0.2% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_key_trigrams | 36.8 MB | 36.8 MB | -512 B | -0.0% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_key_trigrams_norm | 29.4 MB | 25.9 MB | -3.6 MB | -12.1% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_ngram_index | 36.0 MB | 36.0 MB | +9 KB | 0.0% | REGRESS |
+| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_patterns | 289.2 KB | 294 KB | +4.8 KB | 1.7% | REGRESS |
+| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_posting_size | 973.6 KB | 973.6 KB | 0 B | 0.0% |  |
+| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_unmatched | 1.6 MB | 1.6 MB | -2.5 KB | -0.2% | IMPROVE |
 | month-single-server-access-logs-top25-consolidate | MEMORY/heatmap_data | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | MEMORY/heatmap_raw | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | MEMORY/heatmap_raw_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | MEMORY/histogram_values | 576 B | 576 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | MEMORY/log_analysis | 567.4 MB | 567.4 MB | 0 B | 0.0% |  |
-| month-single-server-access-logs-top25-consolidate | MEMORY/log_messages | 568.1 MB | 567.8 MB | -350.1 KB | -0.1% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | MEMORY/log_messages | 565.9 MB | 567.8 MB | +1.8 MB | 0.3% | REGRESS |
 | month-single-server-access-logs-top25-consolidate | MEMORY/log_occurrences | 36.6 KB | 36.8 KB | +192 B | 0.5% | REGRESS |
 | month-single-server-access-logs-top25-consolidate | MEMORY/log_sessions | 2.2 MB | 2.2 MB | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | MEMORY/log_stats | 60.0 KB | 60.0 KB | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | MEMORY/udm_last_value | 120 B | 120 B | 0 B | 0.0% |  |
-| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/log_messages | 595725141 | 595366646 | -358495 | -0.1% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/log_messages | 593429939 | 595366646 | 1936707 | 0.3% | REGRESS |
 | month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/log_analysis | 13010 | 13010 | 0 | 0.0% |  |
-| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_clusters | 532412788 | 531314378 | -1098410 | -0.2% | IMPROVE |
-| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_patterns | 263383 | 262231 | -1152 | -0.4% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_clusters | 531192355 | 531314378 | 122023 | 0.0% | REGRESS |
+| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_patterns | 257127 | 262231 | 5104 | 2.0% | REGRESS |
 | month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_key_message | 131128 | 131128 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_unmatched | 424 | 424 | 0 | 0.0% |  |
-| month-single-server-access-logs-top25-consolidate | COUNTS/log_messages_entries | 1306 | 1315 | 9 | 0.7% | REGRESS |
+| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_key_trigrams | 65592 | 65592 | 0 | 0.0% |  |
+| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_key_trigrams_norm | 65592 | 65592 | 0 | 0.0% |  |
+| month-single-server-access-logs-top25-consolidate | COUNTS/log_messages_entries | 1319 | 1315 | -4 | -0.3% | IMPROVE |
 | month-single-server-access-logs-top25-consolidate | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-single-server-access-logs-top25-consolidate | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-single-server-access-logs-top25-consolidate | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-single-server-access-logs-top25-consolidate | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap | TIMING/read_files | 1.8 min | 2.0 min | +11.9 s | 11.3% | REGRESS |
-| month-single-server-access-logs-heatmap | TIMING/calculate_statistics | 2.1 s | 2.2 s | +112 ms | 5.3% | REGRESS |
-| month-single-server-access-logs-heatmap | TIMING/heatmap_statistics | 12.9 s | 66 ms | -12.8 s | -99.5% | IMPROVE |
-| month-single-server-access-logs-heatmap | TIMING/normalize_data | 2 ms | 3 ms | +1 ms | 50.0% | REGRESS |
-| month-single-server-access-logs-heatmap | TIMING/total | 2 min | 2.0 min | -817 ms | -0.7% | IMPROVE |
-| month-single-server-access-logs-heatmap | MEMORY/rss_peak | 2.7 GB | 2.2 GB | -602 MB | -21.4% | IMPROVE |
+| month-single-server-access-logs-heatmap | TIMING/read_files | 1.9 min | 2.0 min | +5.3 s | 4.7% | REGRESS |
+| month-single-server-access-logs-heatmap | TIMING/calculate_statistics | 3.2 s | 2.2 s | -991 ms | -30.8% | IMPROVE |
+| month-single-server-access-logs-heatmap | TIMING/heatmap_statistics | 13.8 s | 66 ms | -13.7 s | -99.5% | IMPROVE |
+| month-single-server-access-logs-heatmap | TIMING/normalize_data | 3 ms | 3 ms | 0 ms | 0.0% |  |
+| month-single-server-access-logs-heatmap | TIMING/total | 2.1 min | 2.0 min | -9.4 s | -7.3% | IMPROVE |
+| month-single-server-access-logs-heatmap | MEMORY/rss_peak | 2.7 GB | 2.2 GB | -604.3 MB | -21.5% | IMPROVE |
 | month-single-server-access-logs-heatmap | MEMORY/consolidation_clusters | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap | MEMORY/consolidation_key_message | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap | MEMORY/consolidation_key_trigrams | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap | MEMORY/consolidation_key_trigrams_norm | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap | MEMORY/consolidation_ngram_index | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap | MEMORY/consolidation_patterns | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap | MEMORY/consolidation_posting_size | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap | MEMORY/consolidation_unmatched | 120 B | 120 B | 0 B | 0.0% |  |
-| month-single-server-access-logs-heatmap | MEMORY/heatmap_data | 77.9 KB | 80.6 KB | +2.7 KB | 3.5% | REGRESS |
+| month-single-server-access-logs-heatmap | MEMORY/heatmap_data | 77.4 KB | 80.6 KB | +3.2 KB | 4.2% | REGRESS |
 | month-single-server-access-logs-heatmap | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap | MEMORY/heatmap_raw | 563.6 MB | 120 B | -563.6 MB | -100.0% | IMPROVE |
 | month-single-server-access-logs-heatmap | MEMORY/heatmap_raw_hl | 120 B | 120 B | 0 B | 0.0% |  |
@@ -1961,7 +1994,7 @@
 | month-single-server-access-logs-heatmap | MEMORY/log_analysis | 15.7 KB | 15.7 KB | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap | MEMORY/log_messages | 1.6 GB | 1.6 GB | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap | MEMORY/log_occurrences | 36.8 KB | 36.8 KB | 0 B | 0.0% |  |
-| month-single-server-access-logs-heatmap | MEMORY/log_sessions | 2.2 MB | 2.2 MB | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap | MEMORY/log_sessions | 2.2 MB | 2.2 MB | +128 B | 0.0% | REGRESS |
 | month-single-server-access-logs-heatmap | MEMORY/log_stats | 54.1 KB | 54.1 KB | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
@@ -1972,25 +2005,32 @@
 | month-single-server-access-logs-heatmap | MEMORY_FINAL/consolidation_patterns | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | MEMORY_FINAL/consolidation_key_message | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | MEMORY_FINAL/consolidation_unmatched | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-heatmap | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-heatmap | MEMORY_FINAL/consolidation_key_trigrams | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-heatmap | MEMORY_FINAL/consolidation_key_trigrams_norm | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | COUNTS/log_messages_entries | 1212275 | 1212275 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-single-server-access-logs-heatmap | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-histogram | TIMING/read_files | 1.8 min | 2.2 min | +25 s | 23.2% | REGRESS |
-| month-single-server-access-logs-histogram | TIMING/calculate_statistics | 6 s | 5.8 s | -181 ms | -3.0% | IMPROVE |
-| month-single-server-access-logs-histogram | TIMING/histogram_statistics | 22.9 s | 7 ms | -22.9 s | -100.0% | IMPROVE |
+| month-single-server-access-logs-histogram | TIMING/read_files | 1.9 min | 2.2 min | +17.3 s | 14.9% | REGRESS |
+| month-single-server-access-logs-histogram | TIMING/calculate_statistics | 6.9 s | 5.8 s | -1 s | -14.9% | IMPROVE |
+| month-single-server-access-logs-histogram | TIMING/histogram_statistics | 24.5 s | 7 ms | -24.5 s | -100.0% | IMPROVE |
 | month-single-server-access-logs-histogram | TIMING/normalize_data | 3 ms | 2 ms | -1 ms | -33.3% | IMPROVE |
-| month-single-server-access-logs-histogram | TIMING/total | 2.3 min | 2.3 min | +1.9 s | 1.4% | REGRESS |
-| month-single-server-access-logs-histogram | MEMORY/rss_peak | 4 GB | 2.7 GB | -1.3 GB | -33.3% | IMPROVE |
+| month-single-server-access-logs-histogram | TIMING/total | 2.5 min | 2.3 min | -8.3 s | -5.6% | IMPROVE |
+| month-single-server-access-logs-histogram | MEMORY/rss_peak | 4.1 GB | 2.7 GB | -1.5 GB | -35.0% | IMPROVE |
 | month-single-server-access-logs-histogram | MEMORY/consolidation_clusters | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-histogram | MEMORY/consolidation_key_message | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-histogram | MEMORY/consolidation_key_trigrams | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-histogram | MEMORY/consolidation_key_trigrams_norm | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-histogram | MEMORY/consolidation_ngram_index | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-histogram | MEMORY/consolidation_patterns | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-histogram | MEMORY/consolidation_posting_size | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-histogram | MEMORY/consolidation_unmatched | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-histogram | MEMORY/heatmap_data | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-histogram | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
@@ -2011,105 +2051,126 @@
 | month-single-server-access-logs-histogram | MEMORY_FINAL/consolidation_patterns | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | MEMORY_FINAL/consolidation_key_message | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | MEMORY_FINAL/consolidation_unmatched | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-histogram | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-histogram | MEMORY_FINAL/consolidation_key_trigrams | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-histogram | MEMORY_FINAL/consolidation_key_trigrams_norm | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | COUNTS/log_messages_entries | 1212275 | 1212275 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-single-server-access-logs-histogram | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-single-server-access-logs-histogram | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-single-server-access-logs-histogram | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram | TIMING/read_files | 1.8 min | 2.3 min | +27.1 s | 24.6% | REGRESS |
-| month-single-server-access-logs-heatmap-histogram | TIMING/calculate_statistics | 2.3 s | 2.2 s | -35 ms | -1.5% | IMPROVE |
-| month-single-server-access-logs-heatmap-histogram | TIMING/heatmap_statistics | 13.3 s | 66 ms | -13.3 s | -99.5% | IMPROVE |
-| month-single-server-access-logs-heatmap-histogram | TIMING/histogram_statistics | 22.8 s | 7 ms | -22.8 s | -100.0% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram | TIMING/read_files | 2 min | 2.3 min | +16.5 s | 13.7% | REGRESS |
+| month-single-server-access-logs-heatmap-histogram | TIMING/calculate_statistics | 2.6 s | 2.2 s | -331 ms | -12.9% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram | TIMING/heatmap_statistics | 14.5 s | 66 ms | -14.4 s | -99.5% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram | TIMING/histogram_statistics | 24.7 s | 7 ms | -24.7 s | -100.0% | IMPROVE |
 | month-single-server-access-logs-heatmap-histogram | TIMING/normalize_data | 3 ms | 2 ms | -1 ms | -33.3% | IMPROVE |
-| month-single-server-access-logs-heatmap-histogram | TIMING/total | 2.5 min | 2.3 min | -9 s | -6.1% | IMPROVE |
-| month-single-server-access-logs-heatmap-histogram | MEMORY/rss_peak | 4.1 GB | 2.2 GB | -1.9 GB | -47.4% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram | TIMING/total | 2.7 min | 2.3 min | -22.9 s | -14.1% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram | MEMORY/rss_peak | 4.2 GB | 2.2 GB | -2 GB | -48.6% | IMPROVE |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_clusters | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_key_message | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_key_trigrams | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_key_trigrams_norm | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_ngram_index | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_patterns | 120 B | 120 B | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_posting_size | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_unmatched | 120 B | 120 B | 0 B | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram | MEMORY/heatmap_data | 78.4 KB | 81.1 KB | +2.7 KB | 3.5% | REGRESS |
+| month-single-server-access-logs-heatmap-histogram | MEMORY/heatmap_data | 77.9 KB | 81.1 KB | +3.2 KB | 4.2% | REGRESS |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/heatmap_raw | 563.6 MB | 120 B | -563.6 MB | -100.0% | IMPROVE |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/heatmap_raw_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/histogram_values | 1.1 GB | 576 B | -1.1 GB | -100.0% | IMPROVE |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/log_analysis | 15.7 KB | 15.7 KB | 0 B | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram | MEMORY/log_messages | 1.6 GB | 1.6 GB | -1.8 MB | -0.1% | IMPROVE |
-| month-single-server-access-logs-heatmap-histogram | MEMORY/log_occurrences | 36.6 KB | 36.6 KB | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram | MEMORY/log_messages | 1.6 GB | 1.6 GB | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram | MEMORY/log_occurrences | 36.8 KB | 36.6 KB | -192 B | -0.5% | IMPROVE |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/log_sessions | 2.2 MB | 2.2 MB | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/log_stats | 54.1 KB | 54.1 KB | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/udm_last_value | 120 B | 120 B | 0 B | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/log_messages | 1732830635 | 1730917867 | -1912768 | -0.1% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/log_messages | 1730917867 | 1730917867 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/log_analysis | 13010 | 13010 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_clusters | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_patterns | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_key_message | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_unmatched | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_key_trigrams | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_key_trigrams_norm | 120 | 120 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | COUNTS/log_messages_entries | 1212275 | 1212275 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | lines_read | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | lines_included | 7,749,167 | 7,749,167 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/read_files | 2.3 min | 2.9 min | +35.5 s | 26.1% | REGRESS |
-| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/group_similar | 4.5 s | 1.3 min | +1.2 min | 1663.9% | REGRESS |
-| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/calculate_statistics | 3.1 s | 3.1 s | -13 ms | -0.4% | IMPROVE |
-| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/heatmap_statistics | 14.2 s | 63 ms | -14.1 s | -99.6% | IMPROVE |
-| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/histogram_statistics | 23.0 s | 13 ms | -23.0 s | -99.9% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/read_files | 2.8 min | 2.9 min | +1.7 s | 1.0% | REGRESS |
+| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/group_similar | 2.9 min | 1.3 min | -1.6 min | -54.7% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/calculate_statistics | 3.6 s | 3.1 s | -545 ms | -15.0% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/heatmap_statistics | 15.6 s | 63 ms | -15.6 s | -99.6% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/histogram_statistics | 25.5 s | 13 ms | -25.4 s | -99.9% | IMPROVE |
 | month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/normalize_data | 3 ms | 3 ms | 0 ms | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/total | 3 min | 4.2 min | +1.2 min | 40.6% | REGRESS |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/rss_peak | 3.2 GB | 1.3 GB | -1.9 GB | -59.9% | IMPROVE |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_clusters | 503.6 MB | 506.9 MB | +3.3 MB | 0.7% | REGRESS |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_message | 149.4 KB | 2.5 MB | +2.3 MB | 1588.5% | REGRESS |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_patterns | 252.4 KB | 287.7 KB | +35.3 KB | 14.0% | REGRESS |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_unmatched | 198.5 KB | 1.5 MB | +1.4 MB | 699.6% | REGRESS |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_data | 77.9 KB | 82.6 KB | +4.7 KB | 6.1% | REGRESS |
+| month-single-server-access-logs-heatmap-histogram-consolidate | TIMING/total | 6.5 min | 4.2 min | -2.3 min | -34.8% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/rss_peak | 3.3 GB | 1.3 GB | -2.0 GB | -60.1% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_clusters | 507.7 MB | 506.9 MB | -814.2 KB | -0.2% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_message | 2.5 MB | 2.5 MB | -2.3 KB | -0.1% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_trigrams | 36.7 MB | 36.7 MB | +512 B | 0.0% | REGRESS |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_trigrams_norm | 29.4 MB | 29.4 MB | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_ngram_index | 36.0 MB | 36.0 MB | +1 KB | 0.0% | REGRESS |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_patterns | 295 KB | 287.7 KB | -7.3 KB | -2.5% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_posting_size | 973.6 KB | 973.6 KB | 0 B | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_unmatched | 1.6 MB | 1.5 MB | -1.2 KB | -0.1% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_data | 76.9 KB | 82.6 KB | +5.7 KB | 7.5% | REGRESS |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_raw | 563.7 MB | 120 B | -563.7 MB | -100.0% | IMPROVE |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_raw_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/histogram_values | 1.1 GB | 576 B | -1.1 GB | -100.0% | IMPROVE |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/log_analysis | 15.7 KB | 15.7 KB | 0 B | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/log_messages | 566.2 MB | 568.6 MB | +2.4 MB | 0.4% | REGRESS |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/log_occurrences | 36.6 KB | 36.8 KB | +192 B | 0.5% | REGRESS |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/log_messages | 566.3 MB | 568.6 MB | +2.3 MB | 0.4% | REGRESS |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/log_occurrences | 36.8 KB | 36.8 KB | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/log_sessions | 2.2 MB | 2.2 MB | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/log_stats | 54.1 KB | 54.1 KB | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/udm_last_value | 120 B | 120 B | 0 B | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/log_messages | 593711105 | 596188946 | 2477841 | 0.4% | REGRESS |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/log_messages | 593801746 | 596188946 | 2387200 | 0.4% | REGRESS |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/log_analysis | 13010 | 13010 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_clusters | 528061739 | 531514381 | 3452642 | 0.7% | REGRESS |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_patterns | 258445 | 257101 | -1344 | -0.5% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_clusters | 532348102 | 531514381 | -833721 | -0.2% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_patterns | 262226 | 257101 | -5125 | -2.0% | IMPROVE |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_key_message | 131128 | 131128 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_unmatched | 424 | 424 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram-consolidate | COUNTS/log_messages_entries | 1307 | 1320 | 13 | 1.0% | REGRESS |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_unmatched | 296 | 424 | 128 | 43.2% | REGRESS |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_key_trigrams | 65592 | 65592 | 0 | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_key_trigrams_norm | 65592 | 65592 | 0 | 0.0% |  |
+| month-single-server-access-logs-heatmap-histogram-consolidate | COUNTS/log_messages_entries | 1300 | 1320 | 20 | 1.5% | REGRESS |
 | month-single-server-access-logs-heatmap-histogram-consolidate | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-single-server-access-logs-heatmap-histogram-consolidate | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-single-server-access-logs-heatmap-histogram-consolidate | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-single-server-access-logs-heatmap-histogram-consolidate | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-standard | TIMING/read_files | 8.4 min | 8.7 min | +13.6 s | 2.7% | REGRESS |
-| month-many-servers-access-logs-standard | TIMING/calculate_statistics | 31.9 s | 35.3 s | +3.4 s | 10.7% | REGRESS |
+| month-many-servers-access-logs-standard | TIMING/read_files | 9.0 min | 8.7 min | -18.8 s | -3.5% | IMPROVE |
+| month-many-servers-access-logs-standard | TIMING/calculate_statistics | 34.9 s | 35.3 s | +458 ms | 1.3% | REGRESS |
 | month-many-servers-access-logs-standard | TIMING/normalize_data | 3 ms | 4 ms | +1 ms | 33.3% | REGRESS |
-| month-many-servers-access-logs-standard | TIMING/total | 9.0 min | 9.2 min | +17.0 s | 3.2% | REGRESS |
-| month-many-servers-access-logs-standard | MEMORY/rss_peak | 13.2 GB | 12.3 GB | -937.3 MB | -6.9% | IMPROVE |
+| month-many-servers-access-logs-standard | TIMING/total | 9.6 min | 9.2 min | -18.4 s | -3.2% | IMPROVE |
+| month-many-servers-access-logs-standard | MEMORY/rss_peak | 12.3 GB | 12.3 GB | -160 KB | -0.0% | IMPROVE |
 | month-many-servers-access-logs-standard | MEMORY/consolidation_clusters | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-standard | MEMORY/consolidation_key_message | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-standard | MEMORY/consolidation_key_trigrams | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-standard | MEMORY/consolidation_key_trigrams_norm | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-standard | MEMORY/consolidation_ngram_index | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-standard | MEMORY/consolidation_patterns | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-standard | MEMORY/consolidation_posting_size | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-standard | MEMORY/consolidation_unmatched | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-standard | MEMORY/heatmap_data | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-standard | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
@@ -2119,7 +2180,7 @@
 | month-many-servers-access-logs-standard | MEMORY/log_analysis | 2.9 GB | 2.9 GB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-standard | MEMORY/log_messages | 8.3 GB | 8.0 GB | -377.6 MB | -4.4% | IMPROVE |
 | month-many-servers-access-logs-standard | MEMORY/log_occurrences | 42.1 KB | 42.1 KB | 0 B | 0.0% |  |
-| month-many-servers-access-logs-standard | MEMORY/log_sessions | 14.9 MB | 14.9 MB | 0 B | 0.0% |  |
+| month-many-servers-access-logs-standard | MEMORY/log_sessions | 14.9 MB | 14.9 MB | +32 KB | 0.2% | REGRESS |
 | month-many-servers-access-logs-standard | MEMORY/log_stats | 60.1 KB | 60.1 KB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-standard | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-standard | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
@@ -2130,24 +2191,31 @@
 | month-many-servers-access-logs-standard | MEMORY_FINAL/consolidation_patterns | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | MEMORY_FINAL/consolidation_key_message | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | MEMORY_FINAL/consolidation_unmatched | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-standard | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-standard | MEMORY_FINAL/consolidation_key_trigrams | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-standard | MEMORY_FINAL/consolidation_key_trigrams_norm | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | COUNTS/log_messages_entries | 6187253 | 6187253 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-many-servers-access-logs-standard | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-many-servers-access-logs-standard | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-many-servers-access-logs-standard | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-top25 | TIMING/read_files | 8.5 min | 8.7 min | +12 s | 2.4% | REGRESS |
-| month-many-servers-access-logs-top25 | TIMING/calculate_statistics | 33.6 s | 35.9 s | +2.3 s | 6.8% | REGRESS |
-| month-many-servers-access-logs-top25 | TIMING/normalize_data | 3 ms | 3 ms | 0 ms | 0.0% |  |
-| month-many-servers-access-logs-top25 | TIMING/total | 9 min | 9.3 min | +14.3 s | 2.6% | REGRESS |
-| month-many-servers-access-logs-top25 | MEMORY/rss_peak | 13.2 GB | 13 GB | -118.5 MB | -0.9% | IMPROVE |
+| month-many-servers-access-logs-top25 | TIMING/read_files | 9.0 min | 8.7 min | -19.3 s | -3.6% | IMPROVE |
+| month-many-servers-access-logs-top25 | TIMING/calculate_statistics | 50.5 s | 35.9 s | -14.6 s | -28.9% | IMPROVE |
+| month-many-servers-access-logs-top25 | TIMING/normalize_data | 7 ms | 3 ms | -4 ms | -57.1% | IMPROVE |
+| month-many-servers-access-logs-top25 | TIMING/total | 9.8 min | 9.3 min | -33.9 s | -5.7% | IMPROVE |
+| month-many-servers-access-logs-top25 | MEMORY/rss_peak | 11 GB | 13 GB | +2.0 GB | 18.1% | REGRESS |
 | month-many-servers-access-logs-top25 | MEMORY/consolidation_clusters | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/consolidation_key_message | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-top25 | MEMORY/consolidation_key_trigrams | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-top25 | MEMORY/consolidation_key_trigrams_norm | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-top25 | MEMORY/consolidation_ngram_index | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/consolidation_patterns | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-top25 | MEMORY/consolidation_posting_size | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/consolidation_unmatched | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/heatmap_data | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
@@ -2155,156 +2223,185 @@
 | month-many-servers-access-logs-top25 | MEMORY/heatmap_raw_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/histogram_values | 576 B | 576 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/log_analysis | 2.9 GB | 2.9 GB | 0 B | 0.0% |  |
-| month-many-servers-access-logs-top25 | MEMORY/log_messages | 8.3 GB | 8.3 GB | +9.4 MB | 0.1% | REGRESS |
-| month-many-servers-access-logs-top25 | MEMORY/log_occurrences | 43.8 KB | 42.1 KB | -1.8 KB | -4.0% | IMPROVE |
+| month-many-servers-access-logs-top25 | MEMORY/log_messages | 8.3 GB | 8.3 GB | 0 B | 0.0% |  |
+| month-many-servers-access-logs-top25 | MEMORY/log_occurrences | 42.1 KB | 42.1 KB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/log_sessions | 14.9 MB | 14.9 MB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/log_stats | 60.1 KB | 60.1 KB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY/udm_last_value | 120 B | 120 B | 0 B | 0.0% |  |
-| month-many-servers-access-logs-top25 | MEMORY_FINAL/log_messages | 8941409678 | 8951257422 | 9847744 | 0.1% | REGRESS |
+| month-many-servers-access-logs-top25 | MEMORY_FINAL/log_messages | 8951257422 | 8951257422 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY_FINAL/log_analysis | 13010 | 13010 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY_FINAL/consolidation_clusters | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY_FINAL/consolidation_patterns | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY_FINAL/consolidation_key_message | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | MEMORY_FINAL/consolidation_unmatched | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-top25 | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-top25 | MEMORY_FINAL/consolidation_key_trigrams | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-top25 | MEMORY_FINAL/consolidation_key_trigrams_norm | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | COUNTS/log_messages_entries | 6187253 | 6187253 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-many-servers-access-logs-top25 | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-many-servers-access-logs-top25 | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25 | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-top25-consolidate | TIMING/read_files | 9.8 min | 11.3 min | +1.5 min | 15.1% | REGRESS |
-| month-many-servers-access-logs-top25-consolidate | TIMING/group_similar | 24.0 s | 18.4 min | +18.0 min | 4497.6% | REGRESS |
-| month-many-servers-access-logs-top25-consolidate | TIMING/calculate_statistics | 41.2 s | 45.0 s | +3.7 s | 9.1% | REGRESS |
-| month-many-servers-access-logs-top25-consolidate | TIMING/normalize_data | 3 ms | 4 ms | +1 ms | 33.3% | REGRESS |
-| month-many-servers-access-logs-top25-consolidate | TIMING/total | 10.9 min | 30.4 min | +19.5 min | 179.0% | REGRESS |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/rss_peak | 6.8 GB | 7.2 GB | +404.8 MB | 5.8% | REGRESS |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_clusters | 2.7 GB | 2.7 GB | +6.1 MB | 0.2% | REGRESS |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_key_message | 144.1 KB | 2.4 MB | +2.3 MB | 1638.2% | REGRESS |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_patterns | 532.8 KB | 528.3 KB | -4.4 KB | -0.8% | IMPROVE |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_unmatched | 276.4 KB | 1.7 MB | +1.4 MB | 526.3% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | TIMING/read_files | 11.8 min | 11.3 min | -27.8 s | -3.9% | IMPROVE |
+| month-many-servers-access-logs-top25-consolidate | TIMING/group_similar | 18.6 min | 18.4 min | -16.5 s | -1.5% | IMPROVE |
+| month-many-servers-access-logs-top25-consolidate | TIMING/calculate_statistics | 46 s | 45.0 s | -1.1 s | -2.3% | IMPROVE |
+| month-many-servers-access-logs-top25-consolidate | TIMING/normalize_data | 4 ms | 4 ms | 0 ms | 0.0% |  |
+| month-many-servers-access-logs-top25-consolidate | TIMING/total | 31.2 min | 30.4 min | -45.3 s | -2.4% | IMPROVE |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/rss_peak | 7.3 GB | 7.2 GB | -50.5 MB | -0.7% | IMPROVE |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_clusters | 2.6 GB | 2.7 GB | +9.7 MB | 0.4% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_key_message | 2.4 MB | 2.4 MB | +20.4 KB | 0.8% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_key_trigrams | 36.8 MB | 36.8 MB | +1.5 KB | 0.0% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_key_trigrams_norm | 25.5 MB | 29.2 MB | +3.8 MB | 14.8% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_ngram_index | 36.1 MB | 36.1 MB | +384 B | 0.0% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_patterns | 518.0 KB | 528.3 KB | +10.3 KB | 2.0% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_posting_size | 1.2 MB | 1.2 MB | 0 B | 0.0% |  |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_unmatched | 1.7 MB | 1.7 MB | +12.0 KB | 0.7% | REGRESS |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/heatmap_data | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/heatmap_raw | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/heatmap_raw_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/histogram_values | 576 B | 576 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/log_analysis | 2.9 GB | 2.9 GB | 0 B | 0.0% |  |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/log_messages | 2.9 GB | 2.9 GB | +340.2 KB | 0.0% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/log_messages | 2.9 GB | 2.9 GB | -1.5 MB | -0.0% | IMPROVE |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/log_occurrences | 42.1 KB | 42.1 KB | 0 B | 0.0% |  |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/log_sessions | 14.9 MB | 14.9 MB | +32 KB | 0.2% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY/log_sessions | 14.9 MB | 14.9 MB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/log_stats | 60.1 KB | 60.1 KB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/udm_last_value | 120 B | 120 B | 0 B | 0.0% |  |
-| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/log_messages | 3095534057 | 3095882470 | 348413 | 0.0% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/log_messages | 3097415057 | 3095882470 | -1532587 | -0.0% | IMPROVE |
 | month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/log_analysis | 13010 | 13010 | 0 | 0.0% |  |
-| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_clusters | 2848854331 | 2855254748 | 6400417 | 0.2% | REGRESS |
-| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_patterns | 545553 | 541000 | -4553 | -0.8% | IMPROVE |
+| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_clusters | 2845092503 | 2855254748 | 10162245 | 0.4% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_patterns | 529500 | 541000 | 11500 | 2.2% | REGRESS |
 | month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_key_message | 131128 | 131128 | 0 | 0.0% |  |
-| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_unmatched | 424 | 424 | 0 | 0.0% |  |
-| month-many-servers-access-logs-top25-consolidate | COUNTS/log_messages_entries | 2560 | 2561 | 1 | 0.0% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_unmatched | 296 | 424 | 128 | 43.2% | REGRESS |
+| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_key_trigrams | 65592 | 65592 | 0 | 0.0% |  |
+| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_key_trigrams_norm | 65592 | 65592 | 0 | 0.0% |  |
+| month-many-servers-access-logs-top25-consolidate | COUNTS/log_messages_entries | 2501 | 2561 | 60 | 2.4% | REGRESS |
 | month-many-servers-access-logs-top25-consolidate | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-many-servers-access-logs-top25-consolidate | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-many-servers-access-logs-top25-consolidate | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-many-servers-access-logs-top25-consolidate | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-heatmap | TIMING/read_files | 8.6 min | 9.7 min | +1.1 min | 12.7% | REGRESS |
-| month-many-servers-access-logs-heatmap | TIMING/calculate_statistics | 12.4 s | 13.3 s | +869 ms | 7.0% | REGRESS |
+| month-many-servers-access-logs-heatmap | TIMING/read_files | 9.1 min | 9.7 min | +36 s | 6.6% | REGRESS |
+| month-many-servers-access-logs-heatmap | TIMING/calculate_statistics | 14.6 s | 13.3 s | -1.2 s | -8.6% | IMPROVE |
 | month-many-servers-access-logs-heatmap | TIMING/heatmap_statistics | 1.1 min | 85 ms | -1.1 min | -99.9% | IMPROVE |
-| month-many-servers-access-logs-heatmap | TIMING/normalize_data | 3 ms | 3 ms | 0 ms | 0.0% |  |
-| month-many-servers-access-logs-heatmap | TIMING/total | 9.9 min | 10.0 min | +3.0 s | 0.5% | REGRESS |
-| month-many-servers-access-logs-heatmap | MEMORY/rss_peak | 13.3 GB | 10 GB | -3.3 GB | -24.7% | IMPROVE |
+| month-many-servers-access-logs-heatmap | TIMING/normalize_data | 4 ms | 3 ms | -1 ms | -25.0% | IMPROVE |
+| month-many-servers-access-logs-heatmap | TIMING/total | 10.5 min | 10.0 min | -33.8 s | -5.4% | IMPROVE |
+| month-many-servers-access-logs-heatmap | MEMORY/rss_peak | 12.9 GB | 10 GB | -2.8 GB | -22.1% | IMPROVE |
 | month-many-servers-access-logs-heatmap | MEMORY/consolidation_clusters | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY/consolidation_key_message | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap | MEMORY/consolidation_key_trigrams | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap | MEMORY/consolidation_key_trigrams_norm | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap | MEMORY/consolidation_ngram_index | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY/consolidation_patterns | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap | MEMORY/consolidation_posting_size | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY/consolidation_unmatched | 120 B | 120 B | 0 B | 0.0% |  |
-| month-many-servers-access-logs-heatmap | MEMORY/heatmap_data | 76.8 KB | 81.1 KB | +4.3 KB | 5.6% | REGRESS |
+| month-many-servers-access-logs-heatmap | MEMORY/heatmap_data | 74.8 KB | 81.1 KB | +6.3 KB | 8.4% | REGRESS |
 | month-many-servers-access-logs-heatmap | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY/heatmap_raw | 2.9 GB | 120 B | -2.9 GB | -100.0% | IMPROVE |
 | month-many-servers-access-logs-heatmap | MEMORY/heatmap_raw_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY/histogram_values | 576 B | 576 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY/log_analysis | 15.7 KB | 15.7 KB | 0 B | 0.0% |  |
-| month-many-servers-access-logs-heatmap | MEMORY/log_messages | 8.3 GB | 8.3 GB | +4.6 MB | 0.1% | REGRESS |
-| month-many-servers-access-logs-heatmap | MEMORY/log_occurrences | 42.1 KB | 43.8 KB | +1.8 KB | 4.2% | REGRESS |
+| month-many-servers-access-logs-heatmap | MEMORY/log_messages | 8.0 GB | 8.3 GB | +372.8 MB | 4.6% | REGRESS |
+| month-many-servers-access-logs-heatmap | MEMORY/log_occurrences | 43.8 KB | 43.8 KB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY/log_sessions | 14.9 MB | 14.9 MB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY/log_stats | 54.1 KB | 54.1 KB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY/udm_last_value | 120 B | 120 B | 0 B | 0.0% |  |
-| month-many-servers-access-logs-heatmap | MEMORY_FINAL/log_messages | 8941395470 | 8946183838 | 4788368 | 0.1% | REGRESS |
+| month-many-servers-access-logs-heatmap | MEMORY_FINAL/log_messages | 8555259662 | 8946183838 | 390924176 | 4.6% | REGRESS |
 | month-many-servers-access-logs-heatmap | MEMORY_FINAL/log_analysis | 13010 | 13010 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY_FINAL/consolidation_clusters | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY_FINAL/consolidation_patterns | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY_FINAL/consolidation_key_message | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | MEMORY_FINAL/consolidation_unmatched | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-heatmap | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-heatmap | MEMORY_FINAL/consolidation_key_trigrams | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-heatmap | MEMORY_FINAL/consolidation_key_trigrams_norm | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | COUNTS/log_messages_entries | 6187253 | 6187253 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-many-servers-access-logs-heatmap | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-many-servers-access-logs-heatmap | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-histogram | TIMING/read_files | 8.9 min | 10.8 min | +1.9 min | 21.4% | REGRESS |
-| month-many-servers-access-logs-histogram | TIMING/calculate_statistics | 35.0 s | 37.2 s | +2.2 s | 6.2% | REGRESS |
-| month-many-servers-access-logs-histogram | TIMING/histogram_statistics | 1.9 min | 11 ms | -1.9 min | -100.0% | IMPROVE |
-| month-many-servers-access-logs-histogram | TIMING/normalize_data | 3 ms | 3 ms | 0 ms | 0.0% |  |
-| month-many-servers-access-logs-histogram | TIMING/total | 11.4 min | 11.4 min | -302 ms | -0.0% | IMPROVE |
-| month-many-servers-access-logs-histogram | MEMORY/rss_peak | 20.5 GB | 12.2 GB | -8.3 GB | -40.6% | IMPROVE |
+| month-many-servers-access-logs-histogram | TIMING/read_files | 9.5 min | 10.8 min | +1.3 min | 14.1% | REGRESS |
+| month-many-servers-access-logs-histogram | TIMING/initialize_buckets | 1 ms | 0 us | -1 ms | -100.0% | IMPROVE |
+| month-many-servers-access-logs-histogram | TIMING/calculate_statistics | 1.1 min | 37.2 s | -26.2 s | -41.4% | IMPROVE |
+| month-many-servers-access-logs-histogram | TIMING/histogram_statistics | 5.6 min | 11 ms | -5.6 min | -100.0% | IMPROVE |
+| month-many-servers-access-logs-histogram | TIMING/normalize_data | 6 ms | 3 ms | -3 ms | -50.0% | IMPROVE |
+| month-many-servers-access-logs-histogram | TIMING/total | 16.2 min | 11.4 min | -4.7 min | -29.3% | IMPROVE |
+| month-many-servers-access-logs-histogram | MEMORY/rss_peak | 12 GB | 12.2 GB | +193.9 MB | 1.6% | REGRESS |
 | month-many-servers-access-logs-histogram | MEMORY/consolidation_clusters | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY/consolidation_key_message | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-histogram | MEMORY/consolidation_key_trigrams | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-histogram | MEMORY/consolidation_key_trigrams_norm | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-histogram | MEMORY/consolidation_ngram_index | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY/consolidation_patterns | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-histogram | MEMORY/consolidation_posting_size | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY/consolidation_unmatched | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY/heatmap_data | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY/heatmap_raw | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY/heatmap_raw_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY/histogram_values | 5.4 GB | 576 B | -5.4 GB | -100.0% | IMPROVE |
-| month-many-servers-access-logs-histogram | MEMORY/log_analysis | 2.9 GB | 2.9 GB | +2.6 MB | 0.1% | REGRESS |
-| month-many-servers-access-logs-histogram | MEMORY/log_messages | 8.3 GB | 8.3 GB | +1.8 MB | 0.0% | REGRESS |
+| month-many-servers-access-logs-histogram | MEMORY/log_analysis | 2.9 GB | 2.9 GB | +2.8 MB | 0.1% | REGRESS |
+| month-many-servers-access-logs-histogram | MEMORY/log_messages | 8.3 GB | 8.3 GB | +704.0 KB | 0.0% | REGRESS |
 | month-many-servers-access-logs-histogram | MEMORY/log_occurrences | 42.1 KB | 42.1 KB | 0 B | 0.0% |  |
-| month-many-servers-access-logs-histogram | MEMORY/log_sessions | 14.9 MB | 14.9 MB | -128 B | -0.0% | IMPROVE |
+| month-many-servers-access-logs-histogram | MEMORY/log_sessions | 14.9 MB | 14.9 MB | +31.9 KB | 0.2% | REGRESS |
 | month-many-servers-access-logs-histogram | MEMORY/log_stats | 60.1 KB | 60.1 KB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY/udm_last_value | 120 B | 120 B | 0 B | 0.0% |  |
-| month-many-servers-access-logs-histogram | MEMORY_FINAL/log_messages | 8949303382 | 8951243238 | 1939856 | 0.0% | REGRESS |
+| month-many-servers-access-logs-histogram | MEMORY_FINAL/log_messages | 8950522350 | 8951243238 | 720888 | 0.0% | REGRESS |
 | month-many-servers-access-logs-histogram | MEMORY_FINAL/log_analysis | 13010 | 13010 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY_FINAL/consolidation_clusters | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY_FINAL/consolidation_patterns | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY_FINAL/consolidation_key_message | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | MEMORY_FINAL/consolidation_unmatched | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-histogram | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-histogram | MEMORY_FINAL/consolidation_key_trigrams | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-histogram | MEMORY_FINAL/consolidation_key_trigrams_norm | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | COUNTS/log_messages_entries | 6187253 | 6187253 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-many-servers-access-logs-histogram | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-many-servers-access-logs-histogram | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-many-servers-access-logs-histogram | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram | TIMING/read_files | 9 min | 11.5 min | +2.4 min | 27.0% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram | TIMING/calculate_statistics | 12.9 s | 14.3 s | +1.3 s | 10.4% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram | TIMING/heatmap_statistics | 1.1 min | 86 ms | -1.1 min | -99.9% | IMPROVE |
-| month-many-servers-access-logs-heatmap-histogram | TIMING/histogram_statistics | 2.0 min | 11 ms | -2.0 min | -100.0% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram | TIMING/read_files | 9.6 min | 11.5 min | +1.8 min | 19.0% | REGRESS |
+| month-many-servers-access-logs-heatmap-histogram | TIMING/calculate_statistics | 19.9 s | 14.3 s | -5.7 s | -28.4% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram | TIMING/heatmap_statistics | 1.2 min | 86 ms | -1.2 min | -99.9% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram | TIMING/histogram_statistics | 2.7 min | 11 ms | -2.7 min | -100.0% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram | TIMING/normalize_data | 4 ms | 4 ms | 0 ms | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram | TIMING/total | 12.3 min | 11.7 min | -34.9 s | -4.7% | IMPROVE |
-| month-many-servers-access-logs-heatmap-histogram | MEMORY/rss_peak | 19.3 GB | 10.2 GB | -9.1 GB | -47.2% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram | TIMING/total | 13.9 min | 11.7 min | -2.2 min | -15.6% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram | MEMORY/rss_peak | 14.6 GB | 10.2 GB | -4.4 GB | -30.0% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_clusters | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_key_message | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_key_trigrams | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_key_trigrams_norm | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_ngram_index | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_patterns | 120 B | 120 B | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_posting_size | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_unmatched | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/heatmap_data | 76.8 KB | 81.1 KB | +4.3 KB | 5.6% | REGRESS |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
@@ -2313,64 +2410,74 @@
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/histogram_values | 5.4 GB | 576 B | -5.4 GB | -100.0% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/log_analysis | 15.7 KB | 15.7 KB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/log_messages | 8.3 GB | 8.3 GB | -13.5 MB | -0.2% | IMPROVE |
-| month-many-servers-access-logs-heatmap-histogram | MEMORY/log_occurrences | 42.1 KB | 42.1 KB | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram | MEMORY/log_occurrences | 43.8 KB | 42.1 KB | -1.8 KB | -4.0% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/log_sessions | 14.9 MB | 14.9 MB | -32 KB | -0.2% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/log_stats | 54.1 KB | 54.1 KB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/udm_last_value | 120 B | 120 B | 0 B | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/log_messages | 8950522326 | 8936336094 | -14186232 | -0.2% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/log_messages | 8950528878 | 8936336094 | -14192784 | -0.2% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/log_analysis | 13010 | 13010 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_clusters | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_patterns | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_key_message | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_unmatched | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_key_trigrams | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_key_trigrams_norm | 120 | 120 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | COUNTS/log_messages_entries | 6187253 | 6187253 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | lines_read | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | lines_included | 38,672,504 | 38,672,504 | 0 | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/read_files | 10.4 min | 14.1 min | +3.7 min | 35.2% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/group_similar | 26.7 s | 14 min | +13.6 min | 3049.7% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/calculate_statistics | 18.1 s | 17.8 s | -329 ms | -1.8% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/read_files | 12.4 min | 14.1 min | +1.7 min | 13.5% | REGRESS |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/group_similar | 27.4 min | 14 min | -13.4 min | -48.9% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/calculate_statistics | 18.7 s | 17.8 s | -952 ms | -5.1% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/heatmap_statistics | 1.2 min | 78 ms | -1.2 min | -99.9% | IMPROVE |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/histogram_statistics | 1.9 min | 12 ms | -1.9 min | -100.0% | IMPROVE |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/normalize_data | 3 ms | 4 ms | +1 ms | 33.3% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/total | 14.3 min | 28.4 min | +14.2 min | 99.4% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/rss_peak | 15.6 GB | 4.9 GB | -10.7 GB | -68.5% | IMPROVE |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_clusters | 2.6 GB | 2.7 GB | +26.7 MB | 1.0% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_message | 144.1 KB | 2.5 MB | +2.3 MB | 1650.1% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_patterns | 518.8 KB | 530.2 KB | +11.4 KB | 2.2% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_unmatched | 276.4 KB | 1.7 MB | +1.4 MB | 530.0% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_data | 76.3 KB | 80.1 KB | +3.8 KB | 5.0% | REGRESS |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/histogram_statistics | 2 min | 12 ms | -2 min | -100.0% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/normalize_data | 4 ms | 4 ms | 0 ms | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | TIMING/total | 43.4 min | 28.4 min | -15 min | -34.6% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/rss_peak | 14.3 GB | 4.9 GB | -9.4 GB | -65.8% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_clusters | 2.6 GB | 2.7 GB | +27.8 MB | 1.0% | REGRESS |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_message | 2.5 MB | 2.5 MB | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_trigrams | 36.8 MB | 36.8 MB | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_trigrams_norm | 29.5 MB | 25.6 MB | -3.9 MB | -13.3% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_ngram_index | 36.1 MB | 36.1 MB | -9.8 KB | -0.0% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_patterns | 530.6 KB | 530.2 KB | -389 B | -0.1% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_posting_size | 1.2 MB | 1.2 MB | 0 B | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_unmatched | 1.7 MB | 1.7 MB | +112 B | 0.0% | REGRESS |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_data | 76.8 KB | 80.1 KB | +3.3 KB | 4.3% | REGRESS |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_data_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_raw | 2.9 GB | 120 B | -2.9 GB | -100.0% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_raw_hl | 120 B | 120 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/histogram_values | 5.4 GB | 576 B | -5.4 GB | -100.0% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/log_analysis | 15.7 KB | 15.7 KB | 0 B | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/log_messages | 2.9 GB | 2.9 GB | -12.5 MB | -0.4% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/log_messages | 2.9 GB | 2.9 GB | -3.9 MB | -0.1% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/log_occurrences | 42.1 KB | 42.1 KB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/log_sessions | 14.9 MB | 14.9 MB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/log_stats | 54.1 KB | 54.1 KB | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/log_threadpools | 232 B | 232 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/threadpool_activity | 762 B | 762 B | 0 B | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/udm_last_value | 120 B | 120 B | 0 B | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/log_messages | 3102243618 | 3089147575 | -13096043 | -0.4% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/log_messages | 3093262484 | 3089147575 | -4114909 | -0.1% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/log_analysis | 13010 | 13010 | 0 | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_clusters | 2834607088 | 2862631914 | 28024826 | 1.0% | REGRESS |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_patterns | 531209 | 542916 | 11707 | 2.2% | REGRESS |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_clusters | 2833493657 | 2862631914 | 29138257 | 1.0% | REGRESS |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_patterns | 543305 | 542916 | -389 | -0.1% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_key_message | 131128 | 131128 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_unmatched | 424 | 424 | 0 | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | COUNTS/log_messages_entries | 2517 | 2542 | 25 | 1.0% | REGRESS |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_ngram_index | 120 | 120 | 0 | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_key_trigrams | 65592 | 65592 | 0 | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_key_trigrams_norm | 65592 | 65592 | 0 | 0.0% |  |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | COUNTS/log_messages_entries | 2547 | 2542 | -5 | -0.2% | IMPROVE |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | COUNTS/log_occurrences_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | COUNTS/log_stats_entries | 28 | 28 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | CONFIG/terminal_width | 200 | 200 | 0 | 0.0% |  |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | CONFIG/terminal_height | 52 | 24 | -28 | -53.8% | IMPROVE |
+| month-many-servers-access-logs-heatmap-histogram-consolidate | CONFIG/terminal_height | 24 | 24 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | CONFIG/max_log_message_length | 200 | 200 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | CONFIG/time_bucket_size | 1440 | 1440 | 0 | 0.0% |  |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | CONFIG/bucket_size_seconds | 86400.00 | 86400.00 | 0 | 0.0% |  |
@@ -2514,158 +2621,60 @@
 | single-day-access-log-heatmap-histogram-consolidate | MEMORY/heatmap_counters_hl | N/A | 232 B | N/A | N/A | ? |
 | single-day-access-log-heatmap-histogram-consolidate | MEMORY/histogram_counters | N/A | 105.6 KB | N/A | N/A | ? |
 | single-day-access-log-heatmap-histogram-consolidate | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-standard | MEMORY/consolidation_key_trigrams | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-standard | MEMORY/consolidation_key_trigrams_norm | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-standard | MEMORY/consolidation_ngram_index | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-standard | MEMORY/consolidation_posting_size | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-standard | MEMORY/heatmap_counters | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-standard | MEMORY/heatmap_counters_hl | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-standard | MEMORY/histogram_counters | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-standard | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-standard | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-standard | MEMORY_FINAL/consolidation_key_trigrams | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-standard | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-top25 | MEMORY/consolidation_key_trigrams | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-top25 | MEMORY/consolidation_key_trigrams_norm | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-top25 | MEMORY/consolidation_ngram_index | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-top25 | MEMORY/consolidation_posting_size | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-top25 | MEMORY/heatmap_counters | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-top25 | MEMORY/heatmap_counters_hl | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-top25 | MEMORY/histogram_counters | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-top25 | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-top25 | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-top25 | MEMORY_FINAL/consolidation_key_trigrams | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-top25 | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_key_trigrams | N/A | 36.8 MB | N/A | N/A | ? |
-| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_key_trigrams_norm | N/A | 25.9 MB | N/A | N/A | ? |
-| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_ngram_index | N/A | 36.0 MB | N/A | N/A | ? |
-| month-single-server-access-logs-top25-consolidate | MEMORY/consolidation_posting_size | N/A | 973.6 KB | N/A | N/A | ? |
 | month-single-server-access-logs-top25-consolidate | MEMORY/heatmap_counters | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-top25-consolidate | MEMORY/heatmap_counters_hl | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-top25-consolidate | MEMORY/histogram_counters | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-top25-consolidate | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_key_trigrams | N/A | 65592 | N/A | N/A | ? |
-| month-single-server-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 65592 | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap | MEMORY/consolidation_key_trigrams | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap | MEMORY/consolidation_key_trigrams_norm | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap | MEMORY/consolidation_ngram_index | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap | MEMORY/consolidation_posting_size | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap | MEMORY/heatmap_counters | N/A | 2.4 MB | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap | MEMORY/heatmap_counters_hl | N/A | 232 B | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap | MEMORY/histogram_counters | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap | MEMORY_FINAL/consolidation_key_trigrams | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-histogram | MEMORY/consolidation_key_trigrams | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-histogram | MEMORY/consolidation_key_trigrams_norm | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-histogram | MEMORY/consolidation_ngram_index | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-histogram | MEMORY/consolidation_posting_size | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-histogram | MEMORY/heatmap_counters | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-histogram | MEMORY/heatmap_counters_hl | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-histogram | MEMORY/histogram_counters | N/A | 295.6 KB | N/A | N/A | ? |
 | month-single-server-access-logs-histogram | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-histogram | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-histogram | MEMORY_FINAL/consolidation_key_trigrams | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-histogram | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_key_trigrams | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_key_trigrams_norm | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_ngram_index | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram | MEMORY/consolidation_posting_size | N/A | 120 B | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/heatmap_counters | N/A | 2.4 MB | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/heatmap_counters_hl | N/A | 232 B | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/histogram_counters | N/A | 295.6 KB | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap-histogram | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_key_trigrams | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_trigrams | N/A | 36.7 MB | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_trigrams_norm | N/A | 29.4 MB | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_ngram_index | N/A | 36.0 MB | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_posting_size | N/A | 973.6 KB | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_counters | N/A | 2.4 MB | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_counters_hl | N/A | 232 B | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/histogram_counters | N/A | 295.6 KB | N/A | N/A | ? |
 | month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_key_trigrams | N/A | 65592 | N/A | N/A | ? |
-| month-single-server-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 65592 | N/A | N/A | ? |
-| month-many-servers-access-logs-standard | MEMORY/consolidation_key_trigrams | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-standard | MEMORY/consolidation_key_trigrams_norm | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-standard | MEMORY/consolidation_ngram_index | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-standard | MEMORY/consolidation_posting_size | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-standard | MEMORY/heatmap_counters | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-standard | MEMORY/heatmap_counters_hl | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-standard | MEMORY/histogram_counters | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-standard | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-standard | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-standard | MEMORY_FINAL/consolidation_key_trigrams | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-standard | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-top25 | MEMORY/consolidation_key_trigrams | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-top25 | MEMORY/consolidation_key_trigrams_norm | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-top25 | MEMORY/consolidation_ngram_index | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-top25 | MEMORY/consolidation_posting_size | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-top25 | MEMORY/heatmap_counters | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-top25 | MEMORY/heatmap_counters_hl | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-top25 | MEMORY/histogram_counters | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-top25 | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-top25 | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-top25 | MEMORY_FINAL/consolidation_key_trigrams | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-top25 | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_key_trigrams | N/A | 36.8 MB | N/A | N/A | ? |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_key_trigrams_norm | N/A | 29.2 MB | N/A | N/A | ? |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_ngram_index | N/A | 36.1 MB | N/A | N/A | ? |
-| month-many-servers-access-logs-top25-consolidate | MEMORY/consolidation_posting_size | N/A | 1.2 MB | N/A | N/A | ? |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/heatmap_counters | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/heatmap_counters_hl | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/histogram_counters | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-top25-consolidate | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_key_trigrams | N/A | 65592 | N/A | N/A | ? |
-| month-many-servers-access-logs-top25-consolidate | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 65592 | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap | MEMORY/consolidation_key_trigrams | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap | MEMORY/consolidation_key_trigrams_norm | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap | MEMORY/consolidation_ngram_index | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap | MEMORY/consolidation_posting_size | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap | MEMORY/heatmap_counters | N/A | 2.7 MB | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap | MEMORY/heatmap_counters_hl | N/A | 232 B | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap | MEMORY/histogram_counters | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap | MEMORY_FINAL/consolidation_key_trigrams | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-histogram | MEMORY/consolidation_key_trigrams | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-histogram | MEMORY/consolidation_key_trigrams_norm | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-histogram | MEMORY/consolidation_ngram_index | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-histogram | MEMORY/consolidation_posting_size | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-histogram | MEMORY/heatmap_counters | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-histogram | MEMORY/heatmap_counters_hl | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-histogram | MEMORY/histogram_counters | N/A | 307.4 KB | N/A | N/A | ? |
 | month-many-servers-access-logs-histogram | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-histogram | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-histogram | MEMORY_FINAL/consolidation_key_trigrams | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-histogram | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_key_trigrams | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_key_trigrams_norm | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_ngram_index | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram | MEMORY/consolidation_posting_size | N/A | 120 B | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/heatmap_counters | N/A | 2.7 MB | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/heatmap_counters_hl | N/A | 232 B | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/histogram_counters | N/A | 307.4 KB | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap-histogram | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_key_trigrams | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_trigrams | N/A | 36.8 MB | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_key_trigrams_norm | N/A | 25.6 MB | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_ngram_index | N/A | 36.1 MB | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/consolidation_posting_size | N/A | 1.2 MB | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_counters | N/A | 2.7 MB | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/heatmap_counters_hl | N/A | 232 B | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/histogram_counters | N/A | 307.4 KB | N/A | N/A | ? |
 | month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY/histogram_counters_hl | N/A | 120 B | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_ngram_index | N/A | 120 | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_key_trigrams | N/A | 65592 | N/A | N/A | ? |
-| month-many-servers-access-logs-heatmap-histogram-consolidate | MEMORY_FINAL/consolidation_key_trigrams_norm | N/A | 65592 | N/A | N/A | ? |
 
