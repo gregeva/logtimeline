@@ -252,8 +252,10 @@ my $heatmap_light_bg = 0;                   # Flag: use light background color g
 my $heatmap_light_bg_auto = 1;              # Flag: auto-detect terminal background (disabled if -lbg explicitly set)
 my %heatmap_data;                           # {$bucket}{$range_index} = count
 my %heatmap_data_hl;                        # {$bucket}{$range_index} = highlighted count
-my %heatmap_raw;                            # {$bucket} = [raw values] - temporary
-my %heatmap_raw_hl;                         # {$bucket} = [highlighted raw values] - temporary
+my %heatmap_raw;                            # {$bucket} = [raw values] - exact-path only
+my %heatmap_raw_hl;                         # {$bucket} = [highlighted raw values] - exact-path only
+my %heatmap_counters;                       # {$bucket} = entry struct - unified-path streaming partition (#34/#201)
+my %heatmap_counters_hl;                    # {$bucket} = entry struct - unified-path streaming partition for highlight subset
 my @heatmap_boundaries;                     # Pre-calculated bucket boundaries
 my ($heatmap_min, $heatmap_max) = (undef, undef);   # Global min/max for normalization (undef = not yet set)
 my $heatmap_max_density = 0;                # Maximum density across all cells
@@ -5127,14 +5129,22 @@ sub read_and_process_logs {
                         }
 
                         if (defined $heatmap_value && $heatmap_value > 0) {
-                            # Track global min/max for boundary calculation
+                            # Track global min/max for the display-anchored
+                            # boundary calculation at finalize. Tracked under
+                            # both paths since the unified path's streaming
+                            # partition bounds are wider than observed data.
                             # Note: Using !defined for initial state check since 0 can be a valid value
                             $heatmap_min = $heatmap_value if !defined $heatmap_min || $heatmap_value < $heatmap_min;
                             $heatmap_max = $heatmap_value if !defined $heatmap_max || $heatmap_value > $heatmap_max;
 
-                            # Store raw values for later bucketing (after min/max known)
-                            push @{$heatmap_raw{$bucket}}, $heatmap_value;
-                            push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $category_bucket =~ /-HL$/;
+                            if ($exact_percentiles_optout) {
+                                push @{$heatmap_raw{$bucket}}, $heatmap_value;
+                                push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $category_bucket =~ /-HL$/;
+                            } else {
+                                counter_update(\%heatmap_counters, $bucket, $heatmap_value, $heatmap_stream_bpd);
+                                counter_update(\%heatmap_counters_hl, $bucket, $heatmap_value, $heatmap_stream_bpd)
+                                    if $category_bucket =~ /-HL$/;
+                            }
                         }
                     }
 
@@ -5233,6 +5243,12 @@ sub find_heatmap_bucket {
 
 sub calculate_heatmap_buckets {
     return unless $heatmap_enabled;
+    return $exact_percentiles_optout
+        ? calculate_heatmap_buckets_exact()
+        : finalize_heatmap_unified();
+}
+
+sub calculate_heatmap_buckets_exact {
     return unless defined $heatmap_min && defined $heatmap_max && $heatmap_max > $heatmap_min && $heatmap_max > 0;
 
     print "\rCalculating heatmap buckets...";
@@ -5297,6 +5313,98 @@ sub calculate_heatmap_buckets {
         # Free memory
         delete $heatmap_raw{$bucket};
         delete $heatmap_raw_hl{$bucket};
+    }
+
+    unless ($disable_progress) {
+        print "\r$colors{'bright-green'}Calculating heatmap buckets completed.$colors{'NC'}";
+        print " " x ( $terminal_width - length( "Calculating heatmap buckets completed." ) );
+    }
+
+    return;
+}
+
+sub finalize_heatmap_unified {
+    # F2 finalize per #201: re-bin each streaming partition (bpd=616) into
+    # a display-anchored target partition with bin_count = $heatmap_width.
+    # Boundaries log-spaced over observed [$heatmap_min, $heatmap_max].
+    # Render code reads %heatmap_data, %heatmap_data_hl, %heatmap_percentiles,
+    # @heatmap_boundaries unchanged.
+    return unless defined $heatmap_min && defined $heatmap_max && $heatmap_max > $heatmap_min && $heatmap_max > 0;
+    return unless %heatmap_counters;
+
+    print "\rCalculating heatmap buckets...";
+
+    my $W = $heatmap_width;
+    my $effective_min = $heatmap_min > 0 ? $heatmap_min : 1;
+    my $effective_max = $heatmap_max;
+
+    # Display boundaries derived from finalized partition geometry.
+    @heatmap_boundaries = ();
+    my $ratio = $effective_max / $effective_min;
+    for my $i (0 .. $W) {
+        $heatmap_boundaries[$i] = $effective_min * ($ratio ** ($i / $W));
+    }
+
+    foreach my $bucket (keys %heatmap_counters) {
+        my $src = $heatmap_counters{$bucket};
+        my ($final_p, $final_bins) = partition_rebin(
+            $src->{partition}, $src->{bins},
+            $effective_min, $effective_max, $W,
+        );
+
+        # Fold streaming over/underflow into the edge bins (per #189 R12
+        # implementation note — preserves Decision 4 audit semantics).
+        $final_bins->[0]      += $src->{underflow} // 0;
+        $final_bins->[$W - 1] += $src->{overflow}  // 0;
+
+        my $final_entry = {
+            partition => $final_p,
+            bins      => $final_bins,
+            underflow => 0,
+            overflow  => 0,
+        };
+
+        # heatmap_cells: bin counts directly drive cell colors.
+        for my $i (0 .. $W - 1) {
+            my $c = $final_bins->[$i];
+            next if $c == 0;
+            $heatmap_data{$bucket}{$i} = $c;
+            $heatmap_max_density = $c if $c > $heatmap_max_density;
+        }
+
+        # heatmap_markers: R4 (percentile) invoked against the FINALIZED
+        # partition per #34 R5 / features/34-*.md line 120. Numeric value
+        # mapped to display column via find_heatmap_bucket (which reads
+        # @heatmap_boundaries, just populated above).
+        my %markers;
+        for my $pair (['p50', 0.50], ['p95', 0.95], ['p99', 0.99], ['p999', 0.999]) {
+            my ($name, $q) = @$pair;
+            my ($v) = percentile($final_entry, $q);
+            $markers{$name} = find_heatmap_bucket($v, $W) if defined $v;
+        }
+        $heatmap_percentiles{$bucket} = \%markers if %markers;
+
+        # Discard streaming partition now that finalize is done.
+        delete $heatmap_counters{$bucket};
+    }
+
+    # Highlight subset: parallel partitions, same display grid.
+    foreach my $bucket (keys %heatmap_counters_hl) {
+        my $src = $heatmap_counters_hl{$bucket};
+        my ($final_p_hl, $final_bins_hl) = partition_rebin(
+            $src->{partition}, $src->{bins},
+            $effective_min, $effective_max, $W,
+        );
+        $final_bins_hl->[0]      += $src->{underflow} // 0;
+        $final_bins_hl->[$W - 1] += $src->{overflow}  // 0;
+
+        for my $i (0 .. $W - 1) {
+            my $c = $final_bins_hl->[$i];
+            next if $c == 0;
+            $heatmap_data_hl{$bucket}{$i} = $c;
+        }
+
+        delete $heatmap_counters_hl{$bucket};
     }
 
     unless ($disable_progress) {
