@@ -183,23 +183,11 @@ When this matters: at the default precision, percentile values like P50 / P99 ar
 
 | Option | Description |
 |--------|-------------|
-| `-pp, --percentile-precision <N>` | Precision tier 1..9 (default: 5). See tier table below. |
+| `-pp, --percentile-precision <N>` | Precision tier 1..9 (default: 5). Higher tiers give tighter percentile values at the cost of more memory per partition. |
 | `-pbpd, --percentile-buckets-per-decade <N>` | Buckets per decade directly (default: 53; valid 4..616). Overrides `--percentile-precision` when both supplied. |
-| `-ep, --exact-percentiles` | Revert all migrated consumers to exact sort-based percentile computation. Deprecated; intended as a safety net during the migration. |
+| `-ep, --exact-percentiles` | Revert to exact sort-based percentile computation. Deprecated; safety net retained from the bin-counter migration. |
 
-**Precision tier table** (`--percentile-precision N` → buckets-per-decade):
-
-| N | bpd | Worst-case binning error |
-|---|-----|--------------------------|
-| 1 | 4   | ~14%                     |
-| 2 | 8   | ~7%                      |
-| 3 | 16  | ~3.5%                    |
-| 4 | 32  | ~1.8%                    |
-| 5 | 53  | ~1.1% (default)          |
-| 6 | 80  | ~0.7%                    |
-| 7 | 115 | ~0.5%                    |
-| 8 | 256 | ~0.2%                    |
-| 9 | 616 | ~0.09%                   |
+**Precision (`-pp` / `-pbpd`).** The default (tier 5 / 53 bpd) is appropriate for the vast majority of analyses — percentile values land very close to their true sort-based values. Raise it (tier 6–9, or `-pbpd` values up to 616) when you need tighter precision on tail percentiles (P99.9, P99.99) or when comparing two runs whose true percentiles differ by very small amounts; lower it (tier 1–4) to trade percentile precision for less memory on per-message percentile computation (summary table, CSV output), which fans out to one partition per unique message and so scales with message diversity. The histogram and heatmap consumers are unaffected — they use their own internal precision tuned for display rendering and ignore this knob.
 
 Use `-V` to inspect the active settings. The `=== BIN-COUNTER MODE ===` section reports the resolved precision, the source annotation (default, flag, or override), per-consumer state, and per-quantile audit codes (`out_of_range_bounded: pN=none|low|high`).
 
