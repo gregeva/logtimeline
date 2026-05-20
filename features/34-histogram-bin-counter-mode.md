@@ -254,25 +254,43 @@ The pre-migration code paths that this feature's implementation replaces. Line r
 
 ### Migration completeness
 
-- [ ] R1 holds: all four consumers (`heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`) have unified-path implementations.
-- [ ] R2 holds: no runtime mode-selection gate; each consumer runs either `unified`, `pre_migration`, `user_opt_out`, or `feature_not_active`.
-- [ ] R3 holds: partitions use #189 R1's auto-resize lifecycle.
-- [ ] R4 holds: per-line accumulation during parse via #189 R2 / R3; no raw-value arrays under the unified path.
-- [ ] R5 holds: display geometry preserved via render-time re-projection.
-- [ ] R6 holds: overflow/underflow per #187 Decision 4 implemented by #189; this feature consumes that mechanism.
-- [ ] R7 holds: `=== BIN-COUNTER MODE ===` section reports each consumer's block per #187 Decision 8.
-- [ ] R8 holds: display geometry unchanged; precision improvements documented in release notes.
-- [ ] R9 holds: heatmap and histogram have independent partitions per #189 R7.
-- [ ] R10 holds: per-consumer `path:` line reports correctly under all four states.
-- [ ] R11 holds: pre-migration code paths preserved as `--exact-percentiles` opt-out surface.
-- [ ] R12 holds: boundary responsibilities respected.
+- [x] R1 holds: all four consumers (`heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`) have unified-path implementations.
+- [x] R2 holds: no runtime mode-selection gate; each consumer runs either `unified`, `pre_migration`, `user_opt_out`, or `feature_not_active`.
+- [x] R3 holds: partitions use #189 R1's auto-resize lifecycle for streaming; finalize re-bins into display-anchored target partition via #189 R12 per #201.
+- [x] R4 holds: per-line accumulation during parse via #189 R2 / R3; no raw-value arrays under the unified path.
+- [x] R5 holds (revised): two-stage stream + finalize re-bin per #201; geometric-midpoint projection only (fidelity invariant).
+- [x] R6 holds: overflow/underflow per #187 Decision 4 folded into finalized partition's edge bins.
+- [x] R7 holds: `=== BIN-COUNTER MODE ===` section reports each consumer's block per #187 Decision 8 with telemetry snapshot captured at finalize.
+- [x] R8 holds (revised): display geometry unchanged; precision improvements via bpd=616 streaming + finalize re-bin to legacy partition shape.
+- [x] R9 holds: heatmap and histogram have independent counter stores; per-family stream bpd constants (`$heatmap_stream_bpd`, `$histogram_stream_bpd`).
+- [x] R10 holds: per-consumer `path:` line reports correctly under all four states.
+- [x] R11 holds: pre-migration code preserved verbatim as `calculate_heatmap_buckets_exact` and `calculate_histogram_buckets_exact`; dispatched via `--exact-percentiles`.
+- [x] R12 holds: boundary responsibilities respected (this ticket consumes #189 R12 `partition_rebin`).
 
 ### Validation phase
 
-- [ ] Under `--exact-percentiles`, all four consumers' output is byte-identical to the pre-feature implementation per #187 R11a.
-- [ ] Under the unified path, all four consumers' percentile values fall within the bin-resolution bound per #187 R4 around the pre-migration values, across the D2 dataset set.
-- [ ] `tests/baseline/` regression harness passes for the heatmap and histogram outputs.
-- [ ] `-V` `=== BIN-COUNTER MODE ===` output matches the locked format per #187 Decision 8 (consumer-name strings, field names, format).
+- [x] Under `--exact-percentiles`, all four consumers' output is byte-identical to the pre-feature implementation per #187 R11a (validated on 148MB Tomcat).
+- [x] Under the unified path, all four consumers' percentile values fall within the bin-resolution bound per #187 R4 / #201 V8 evidence (worst-case 1.10% / 5.78% per-bucket displacement, below ~11% visibility threshold).
+- [ ] `tests/baseline/` regression harness — `heatmap-duration-w160` reference will need to be re-captured or re-keyed against `--exact-percentiles`; the unified path is approximate within bin-resolution bound but not byte-identical to the exact-path reference.
+- [x] `-V` `=== BIN-COUNTER MODE ===` output matches the locked format per #187 Decision 8 (all four path codes exercised, locked field names emitted, shares_partitions_with topology correct).
+
+## Progress
+
+Phase 1 (branch creation) and Phase 2 (`-V` rename + per-consumer scaffolding) merged via PR #202 (commit `f02af43`).
+
+Phase 3 (consumer migrations) re-attempted under the post-#201 architecture after the original projection-based approach was rejected by #201's V8 empirical investigation. Implementation lands as a single PR with five commits:
+- Commit 1: primitive amendments (`counter_update` bpd parameter, `partition_rebin` wrapper, `$heatmap_stream_bpd` / `$histogram_stream_bpd = 616` constants).
+- Commit 2: F2 heatmap migration (`heatmap_cells` + `heatmap_markers`).
+- Commit 3: F3 histogram migration (`histogram_view` + `histogram_bins`).
+- Commit 4: `-V` real partition state via `%bin_counter_telemetry` snapshot at finalize.
+- Commit 5: this doc update + release notes.
+
+Validation on the canonical 148MB Tomcat log:
+- `--exact-percentiles` output byte-identical to HEAD (pre-migration code preserved).
+- Unified path renders bars byte-identical to exact path; percentile values within ~1.3% (bin-resolution bound).
+- HEATMAP STATISTICS: ~580 ms → ~5 ms (~120× faster).
+- Peak memory drops by ~40 MiB (`heatmap_raw` + `histogram_values` eliminated; replaced by ~2 MiB total of streaming partitions discarded after finalize).
+- Fidelity invariant honored: spike-trough multi-modal structure preserved exactly.
 
 ## Validation
 
