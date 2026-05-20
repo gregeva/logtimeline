@@ -107,11 +107,11 @@ When a value falls outside the partition's current `[min, max]`, R3 triggers reb
 
 1. **Streaming phase (during parse).** Each consumer maintains a streaming auto-resize partition keyed per #187 Decision 5 (per-`time_bucket` for `heatmap_cells`/`heatmap_markers`; per-metric global for `histogram_view`/`histogram_bins`). The streaming partition uses #189's primitives as-built (`partition_new` with locked defaults `bpd=53`, `seed_decades=5`; `counter_update` with auto-resize). No raw-value retention.
 
-2. **Finalize phase (end-of-parse, before render).** Each streaming partition is re-binned via `partition_rebin` (#189 R12, added by #201) into a **display-bound partition** with:
-   - `bin_count = display_width` (`$heatmap_width` for F2; `$bar_area_width` for F3, knowable at end-of-parse after active-metric count `n` is determined).
-   - Boundaries log-spaced over `[d_min, d_max]` (observed data extents, same anchor pre-migration code uses).
+2. **Finalize phase (end-of-parse, before render).** Each streaming partition is re-binned via `partition_rebin` (#189 R12, added by #201) into a target partition. Streaming `bpd = 616` (Level 9, HdrHistogram 3-sig-digit reference per #187 Decision 2 tier table). Target shape is consumer-specific:
+   - **F2 (heatmap)**: `bin_count = $heatmap_width` (default 52 via `-hmw`); boundaries log-spaced over `[$heatmap_min, $heatmap_max]` (the observed extents anchor heatmap uses today at `ltl:5184`).
+   - **F3 (histogram)**: `bin_count = int(decades × histogram_buckets_per_decade)` (the existing `-hgbpd`, default 8); boundaries log-spaced over `[d_min, d_max]`. This is **the same target partition shape ltl computes today**.
 
-3. **Render phase.** Cell colors (F2) and bar heights (F3) are read directly from the finalized partition's bin counts. **No projection step at render time.**
+3. **Render phase.** Heatmap (F2): cell colors are read directly from the finalized partition's bin counts — no projection step. Histogram (F3): bar heights are produced by applying ltl's existing `calculate_histogram_display_buckets` (`ltl:7462`) **unchanged** to the finalized partition — preserves the shipped stretched-bar rendering. UX follow-on for narrower-bar rendering is tracked in #204.
 
 **Why the revision.** The original R5 contract assumed render-time projection from the streaming partition to the display grid could be performed faithfully. Investigation #201 § Phase 3 evidence catalogue documented that the four projection strategies attempted during Phase 3 (midpoint-only, distributive remap with `bpd=53`, with `bpd=8`, etc.) all failed at the visual fidelity bar — because the streaming partition's `[min, max]` is anchored around `v_0` (seed) and grown by doubling, while the display is anchored to `[d_min, d_max]`. This range-anchor mismatch (Dimension B in #201's framing) is unrecoverable at render time.
 
@@ -156,20 +156,15 @@ The exact field formats are locked in #187 Decision 8. This feature implements t
 
 Empirical validation (V6 in `prototype/189-bin-counter-primitives.pl` against the canonical 148 MB Tomcat dataset): 100% mass retention, 100% peak retention, 0-column peak X-offset. Algebraic worst-case X-offset at locked defaults is ≤1 column.
 
-**For F3 (histogram):** Two-part contract:
+**For F3 (histogram):** Display geometry — `$bar_area_width`, bar layout, percentile-tick positions, legend — is unchanged by the migration. The finalize re-bin produces a target partition with the same shape ltl computes today (`int(decades × histogram_buckets_per_decade)` buckets, log-spaced over `[d_min, d_max]`), and the shipped `calculate_histogram_display_buckets` projection (`ltl:7462`) is applied unchanged. The shipped stretched-bar rendering convention is preserved exactly.
 
-- **Data fidelity (locked).** Bin counts, percentile-tick positions, and bar heights are accurate per the finalized partition. Mass is conserved exactly; peak counts and positions match shipped pre-migration output. Internal precision improves because Decision 2's locked default (53 bpd, used for the streaming partition) is higher than today's shipped 8 bpd default — values feeding the finalize re-bin are more precise.
-
-- **Bar-width rendering convention (UX decision, deferred).** Shipped F3 renders "wide bars" by duplicating each partition bucket's count across `cols_per_bucket = $bar_area_width / partition_bin_count` adjacent display columns (`calculate_histogram_display_buckets` at `ltl:7462–7493`). This is a non-mass-conserving rendering convention — V7 on the canonical dataset shows the shipped display sum is ~2.86× the true raw count. Under the revised R5, the finalized partition is mass-conserving (`bin_count = $bar_area_width`, each column shows the true count for that bin). The migration must pick between:
-  - **Narrow-spikes rendering** (preferred for data fidelity): one column per finalized bin; bars appear thin.
-  - **Wide-bars rendering preserved**: add an explicit bar-widening render step that duplicates the finalized partition's counts across `cols_per_bucket` adjacent display columns. The finalized partition is constructed at a coarser `bin_count = int($bar_area_width / desired_bar_width)` so the bar-widening step has columns to duplicate into.
-  - **Adaptive rendering** matching shipped expand/compress branches.
-
-  This UX choice is deferred to the histogram migration ticket (a follow-on to #34 Phase 3) per `features/201-display-geometry-bound-consumers.md` § Open question. The revised R5 contract is compatible with all three choices.
+Internal precision improves because the streaming partition runs at locked bpd=616 (Level 9, HdrHistogram 3-sig-digit reference). At that bpd the finalize re-bin's per-bucket displacement is below the visibility threshold of a 9-character-tall ASCII histogram on both canonical datasets (V8 sweep evidence: 1.10% on your file, 5.78% on 148MB file — both well under the ~11% threshold for one character row of visible difference).
 
 Implementation tickets must validate against the existing baseline-regression harness (`tests/baseline/`, per CLAUDE.md) to confirm:
 - F2: byte-equivalent display output within the 1-column X-offset algebraic bound.
-- F3: data-fidelity preservation; visual bar-width acceptance per the histogram migration ticket's UX choice.
+- F3: visible histogram structure (spike-trough patterns, multi-modal peaks) preserved per V8 evidence. Per-bucket displacement at locked bpd=616 is below visual threshold; the spike-trough-spike pattern of legacy renders is reproduced exactly.
+
+A UX follow-on (#204) tests higher-resolution narrower-bar histogram rendering after this migration lands. That investigation is independent of the primitive contract locked here.
 
 ### R9 — Heatmap and histogram have independent partitions per #189 R7
 

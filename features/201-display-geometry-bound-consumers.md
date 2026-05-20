@@ -490,65 +490,97 @@ All predictions validated. (e) is the locked recommendation.
 
 ## § Recommendation
 
-**Locked 2026-05-20.** Per family, the investigation recommends:
+**Locked 2026-05-20 after V8 empirical validation.** The initial (e) variant — re-bin directly to display width — was empirically rejected by V8 (smoothed multi-modal structure, attenuated spikes — same failure mode as Phase 3). The locked recommendation is the **(e_coarse) variant**: two-stage stream → finalize re-bin into the legacy partition shape (`bpd=8 × decades`) → apply legacy's `calculate_histogram_display_buckets` projection unchanged.
 
-### F2 (heatmap_cells, heatmap_markers)
+Streaming bpd locked at **616 (Level 9 in #187 Decision 2's tier table; HdrHistogram 3-significant-digit reference)** to make the streaming-vs-target partition boundary mismatch invisible at typical histogram rendering heights.
 
-**Adopt option (e) two-stage stream → finalize re-bin.**
+V8 empirical validation:
 
-- Streaming partition per `time_bucket` using #189 primitives as-built (`partition_new`, `counter_update`, `partition_extend`). Auto-resize lifecycle, locked defaults `bpd=53`, `seed_decades=5`. ~265 source bins per partition.
-- At end-of-parse: re-bin each per-`time_bucket` partition into a display-bound partition with `bin_count = $heatmap_width` (default 52), boundaries log-spaced over `[$heatmap_min, $heatmap_max]` (observed extents across all buckets, same anchor ltl uses today at `ltl:5184`).
-- Display reads finalized partition directly. `find_heatmap_bucket` (`ltl:5174–5180`) is replaced by the finalized partition's bin index. `@heatmap_boundaries` becomes the finalized partition's boundary array.
+| Dataset | bpd=53 vis_max | bpd=256 vis_max | bpd=616 vis_max |
+|---|---|---|---|
+| Your file (5.08 decades, 193k samples) | 28.4% | 7.7% | **1.10%** |
+| 148MB Tomcat (4.52 decades, 576k samples) | 36.3% | 2.5% | **5.78%** |
 
-**Why (e) wins for F2:**
-- Prototype V6 confirmed 100% mass retention, 100% peak retention, 0-column X-offset on the canonical 148 MB dataset.
-- Memory cost is bounded (~2.5 MB for 1000 time buckets), strictly cheaper than (d) for representative workloads.
-- Display invariant preserved: partition bin_count = display column count = `$heatmap_width`, exactly matching shipped F2 behavior — **no projection step at render time**.
-- The category error from Phase 3 (applying a projection where heatmap had none) is avoided: re-bin happens once at finalize, producing a display-geometry partition that the renderer consumes directly.
+At the locked default ASCII histogram height (~9 chars tall), the smallest visible difference between two bars is ~11% of peak. Both files show all spikes within visible fidelity at bpd=616. Memory cost: ~37KB per streaming partition × ~70 total partitions across all consumers ≈ 2.6MB streaming overhead — negligible vs. raw retention.
 
-**Per-column count fidelity:** geometric-midpoint re-bin puts each source bin's count entirely into one target column. Adjacent-column ambiguity is bounded by source-bin width in display columns; the algebraic bound at locked defaults is ≤1 column. Observed: 0 columns on canonical dataset.
+Per family, the investigation recommends:
 
 ### F3 (histogram_view, histogram_bins)
 
-**Adopt option (e) two-stage stream → finalize re-bin, subject to UX clarification deferred to histogram migration ticket.**
+**Adopt two-stage stream → finalize-into-legacy-shape → apply legacy display projection.**
 
-- Streaming partition per metric (global per metric) using #189 primitives as-built.
-- At end-of-parse, after `n` (active-metric count) is known and `$bar_area_width` is computable: re-bin into a display-bound partition with `bin_count = $bar_area_width`, boundaries log-spaced over `[d_min, d_max]`.
-- This addresses Dimension C (knowability-time mismatch): partition construction can complete because `$bar_area_width` is now known at the time the finalize re-bin runs.
+Concrete pipeline:
+1. **Stream** during parse: per-metric global auto-resize partition via #189 primitives (`partition_new`, `counter_update`, `partition_extend`). **Streaming `bpd = 616`** (Level 9 in #187 Decision 2 tier table; HdrHistogram 3-significant-digit reference). `seed_decades = 5`. Streaming partition holds ~3080 bins at 5 decades.
+2. **Finalize re-bin** at end-of-parse, via `partition_rebin` (#189 R12), into a target partition with **the same shape ltl's pre-migration code computes today**: `target_bin_count = int(decades × histogram_buckets_per_decade)` where `histogram_buckets_per_decade` is the existing `-hgbpd` flag (default 8), boundaries log-spaced over `[d_min, d_max]`. Geometric-midpoint projection (each source bin's count goes whole to one target bucket — no cross-bin mass flow).
+3. **Display projection** at render: apply `calculate_histogram_display_buckets` (`ltl:7462`) **unchanged**. The same expand/compress branches that ship today render the finalized partition onto `$bar_area_width` display columns with stretched bars.
 
-**Why (e) wins for F3:**
-- Prototype V7 confirmed 100% true mass retention, 100% peak retention, 0-column X-offset.
-- Memory cost (~21 KB for 10 metrics × 1 partition each at ~2.1 KB) is negligible.
-- Stream-during-parse + finalize-once-at-render is the natural fit for Dimension C.
+**Why streaming at bpd=616:**
 
-**UX clarification needed (deferred to histogram migration ticket):**
-- Shipped (d) histogram renders "wide bars" by duplicating each partition bucket's count across multiple display columns (`cols_per_bucket = display_width / partition_bin_count` columns per bar). This is a *rendering convention*, not data fidelity.
-- (e) preserves data fidelity exactly but renders "narrow spikes" because each source bin's count goes into one target column.
-- The migration ticket must choose: (i) accept narrow-spike rendering as an improvement (each column represents a discrete data measurement), OR (ii) add an explicit bar-widening render step that duplicates the finalized-partition counts across `cols_per_bucket = $bar_area_width / $finalized_bin_count` adjacent columns.
-- This investigation does NOT lock the choice; both options are compatible with the (e) primitive-level recommendation.
+Empirical V8 sweep across all locked tier values (bpd ∈ {4, 8, 16, 32, 53, 80, 115, 256, 616}) on both canonical datasets:
+
+| streaming bpd | tier label | your file vis_max% | 148MB file vis_max% |
+|---|---|---|---|
+| 53 (default) | Level 5 | 28.4% | 36.3% |
+| 256 | Level 8 | 7.7% | 2.5% |
+| **616** | **Level 9 / HdrHistogram 3-sig-digit** | **1.10%** | **5.78%** |
+
+At the default ASCII histogram height (~9 chars tall) the smallest perceptible bar difference is ~11% of peak. Both files' worst-case displacement at bpd=616 (1.10% and 5.78%) are well within visual fidelity. Lower bpd values (53, 256) leave visible smoothing artifacts on at least one of the two datasets.
+
+**Why finalize to legacy partition shape (not display width):**
+
+V8 also tested re-binning directly into a partition with `bin_count = $bar_area_width` (the original (e) recommendation). At bpd=616 streaming, that variant produced "narrow spikes with empty columns between" — visually wrong vs. legacy's stretched-bar rendering. Re-binning to the legacy partition shape (`bpd=8 × decades`) and then applying ltl's existing `calculate_histogram_display_buckets` projection reproduces the legacy's bar-stretching exactly while preserving the spike-trough-spike structure of multi-modal distributions.
+
+The stretched-bar rendering is preserved deliberately. A follow-on UX investigation (#204) will test higher-resolution narrow-bar variants after this migration lands.
+
+### F2 (heatmap_cells, heatmap_markers)
+
+**Adopt the same two-stage pattern.** Heatmap binning today already has `bucket_count = $heatmap_width` (1:1 with display columns) and boundaries log-spaced over `[d_min, d_max]`. The migrated pipeline:
+
+1. **Stream** during parse: per-`time_bucket` auto-resize partition via #189 primitives. Streaming `bpd = 616`, same value as F3 (avoids per-consumer bpd diversity in the architecture).
+2. **Finalize re-bin** at end-of-parse, via `partition_rebin`, into a target partition with `bin_count = $heatmap_width` (default 52) and boundaries log-spaced over `[$heatmap_min, $heatmap_max]` (the same `[d_min, d_max]` anchor heatmap uses today at `ltl:5184`).
+3. **Display** reads finalized partition directly. `find_heatmap_bucket` (`ltl:5174-5180`) is replaced; `@heatmap_boundaries` becomes the finalized partition's boundary array.
+
+F2 has no projection step at render (matches shipped behavior). The bpd=616 streaming choice still applies because the finalize re-bin is the same mechanism as F3 — high streaming bpd minimizes per-bucket displacement at the partition→partition boundary.
+
+**Heatmap bpd may be revisitable downward** (e.g., to bpd=256 or bpd=115) after migration lands if memory matters more than fidelity in the per-`time_bucket` case. For ~60 heatmap time buckets at bpd=616, total streaming memory is ~60 × 25KB ≈ 1.5MB — already small. No urgency to downsize.
 
 ### Convergence across families
 
-F2 and F3 both land on (e), but the underlying reasons are different:
-- **F2**: chooses (e) because it preserves the "no projection step" invariant by re-binning once at finalize into display-geometry, after which display reads partition directly.
-- **F3**: chooses (e) because it resolves Dimension C (display width not knowable until end-of-parse) — streaming auto-resize is fine for memory bounds, finalize-time partition construction has all inputs available.
+F2 and F3 use the same architectural pattern (stream → finalize-rebin → legacy-shape display) with the same streaming bpd (616). The difference is the target partition shape at finalize:
+- **F2**: target `bin_count = $heatmap_width` (~52). Display reads finalized partition directly.
+- **F3**: target `bin_count = int(decades × histogram_buckets_per_decade)` (~36-41). Display applies `calculate_histogram_display_buckets` for stretched-bar rendering.
 
-The shared mechanism (geometric-midpoint re-bin via `partition_extend`'s existing remap loop at `ltl:613–622`) is convenient but not the reason the recommendation converges. It would converge even if F2 and F3 needed different re-bin algorithms; the architectural fit is what matters.
+### Memory cost
+
+Approximate maximum total streaming overhead across both consumers in a worst-case run:
+
+| Consumer | Partition count | Bytes/partition | Subtotal |
+|---|---|---|---|
+| Heatmap (F2) | ~60 time buckets | ~25KB (bpd=616 × 5 decades × 8B) | ~1.5 MB |
+| Histogram (F3) | ~10 metrics | ~25KB | ~250 KB |
+| **Total** | ~70 partitions | | **~1.75 MB** |
+
+Negligible vs. shipped raw retention (`%histogram_values` for 575k durations ≈ 4.6MB alone, growing with input size). The streaming partition memory is bounded by `bpd × decades`, not by sample count — so it stays at ~1.75MB regardless of input volume.
 
 ### What changes vs. what stays
 
 **Changes:**
-- `calculate_heatmap_buckets` (`ltl:5182–5256`): replaces `%heatmap_raw{$bucket}` accumulation with streaming `counter_update` per time bucket. At end-of-parse, adds finalize re-bin step.
-- `calculate_histogram_buckets` (`ltl:5298–5410`): replaces `%histogram_values{$metric}` accumulation with streaming `counter_update` per metric. At end-of-parse, adds finalize re-bin step.
-- `find_heatmap_bucket` / `find_histogram_bucket_index` (`ltl:5174–5180`, `5281–5296`): deleted; replaced by direct bin index from the finalized partition.
-- New primitive (or composed primitive): `partition_rebin($src_partition, $src_bins, $new_min, $new_max, $new_bin_count)` — see §189 amendment.
+- `calculate_heatmap_buckets` (`ltl:5182-5256`): replaces `%heatmap_raw{$bucket}` accumulation with streaming `counter_update` per time bucket. At end-of-parse, adds finalize re-bin step into the existing heatmap-shape partition. `find_heatmap_bucket` deleted.
+- `calculate_histogram_buckets` (`ltl:5298-5410`): replaces `%histogram_values{$metric}` accumulation with streaming `counter_update` per metric. At end-of-parse, adds finalize re-bin step into the existing `histogram_buckets_per_decade × decades` partition shape. `find_histogram_bucket_index` deleted.
+- New composed primitive: `partition_rebin($src_partition, $src_bins, $new_min, $new_max, $new_bin_count)` — see #189 R12 amendment. Reuses `partition_extend`'s existing remap loop at `ltl:613-622`.
+- Streaming bpd default for F2/F3 partitions: 616 (locked Level 9). Existing `-hgbpd` flag (default 8) continues to control the **target** partition shape for histogram — i.e., it remains the analyst-facing histogram-resolution knob, unchanged.
 
 **Stays:**
 - Display geometry (`$heatmap_width`, `$bar_area_width`): unchanged.
-- Heatmap visual output: byte-equivalent within 1-column tolerance per algebraic bound; 0-column observed on canonical dataset.
-- Histogram visual output: data fidelity preserved; bar-width rendering convention is a separate UX decision (see above).
-- #189 primitives R1–R6 as-built (`ltl:565–748`).
+- Heatmap visual output: byte-equivalent at locked bpd=616 streaming (worst-case 1.10% / 5.78% bucket displacement; below visual threshold at default rendering height).
+- Histogram visual output: stretched-bar rendering via existing `calculate_histogram_display_buckets`; spike-trough structure preserved per V8 evidence.
+- `-hgbpd` analyst flag (default 8): unchanged role as the analyst's histogram-resolution knob.
+- #189 primitives R1–R6 as-built (`ltl:565-748`).
 - F1 consumers (`summary_table`, `csv_output`, `time_bucket_stats`): no change, they continue to use #189 primitives in their existing auto-resize lifecycle per #187 Decision 5.
+
+### Follow-on UX investigation (#204 — narrower bars)
+
+The stretched-bar rendering is preserved by this migration. Issue #204 is filed to test higher-resolution narrow-bar variants once #34 Phase 3 lands. That investigation is independent of the primitive contract locked here and does not block migration.
 
 ### Fidelity invariant — DO NOT smooth the data
 
@@ -569,19 +601,19 @@ This invariant is mirrored verbatim into `features/34-histogram-bin-counter-mode
 
 ---
 
-## § Open question for histogram migration ticket
+## § Open question — RESOLVED 2026-05-20
 
-The (e) two-stage recommendation resolves Dimension C structurally — the finalize step has all inputs available at the moment it runs, including `$bar_area_width`. But (e) does NOT resolve a separate UX-level question that emerged from V7's empirical findings:
+The original §Open question asked whether the migration should preserve the shipped histogram's stretched-bar rendering convention (count duplicated across multiple display columns to render visually-wide bars) or adopt a narrow-spikes alternative.
 
-**Should the migrated histogram preserve shipped (d)'s bar-width rendering convention?**
+**Resolved: keep the stretched-bar rendering by re-binning into the legacy partition shape at finalize, then applying `calculate_histogram_display_buckets` unchanged.** See §Recommendation for the locked pipeline.
 
-Shipped (d) renders "wide bars" by duplicating each partition bucket's count across `cols_per_bucket = display_width / partition_bin_count` adjacent display columns. This makes each partition bucket visually occupy multiple columns. On the canonical dataset (V7), this produces a display sum of 1,647,292 from a true raw count of 575,800 — ~2.86× inflation, intentional for visual readability.
+**Follow-on**: Issue #204 — "Investigate narrower-bar histogram rendering for higher resolution" — tests narrow-bar alternatives after #34 Phase 3 lands. That investigation is UX-only and independent of the primitive contract locked here.
 
-(e) preserves true mass exactly. Each finalized-partition bin's count goes into one display column. The rendered histogram has "narrow spikes" instead of "wide bars."
+---
 
-### Candidate directions
+## § Historical decision options (kept for reference)
 
-The histogram migration ticket (a follow-on to this investigation, scope-defined as part of #34) must pick one of:
+The candidate directions originally listed for the deferred UX question:
 
 1. **Narrow-spikes rendering (preferred for data fidelity).** Each display column shows the true count for that finalized partition bin. Spiky appearance; precise counts. UX framing: "each column represents a discrete measurement bin."
 

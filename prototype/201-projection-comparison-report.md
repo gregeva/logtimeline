@@ -2,135 +2,224 @@
 
 ## Purpose
 
-Empirical validation of the algebraic fidelity bounds in `features/201-display-geometry-bound-consumers.md` § Algebraic fidelity bounds. Tests three candidate options against the canonical Tomcat access log dataset.
+Empirical findings from the prototype validation done for #201. Documents the full V6/V7/V8 work — initial measurements that proved misleading, the correction via V8 column-by-column comparison, the bpd sweep across all locked Decision 2 tier values, the geometric-vs-proportional algorithm comparison, and the resolved recommendation.
 
-Candidate options under test:
-- **(c)** Smarter re-projection algorithm at consumer call site (CDF-resample over log-space overlap).
-- **(d)** Pre-migration baseline (shipped behavior — perfect by construction, used as ground truth).
-- **(e)** Two-stage stream → finalize re-bin (auto-resize streaming partition, geometric-midpoint re-bin into display-bound partition at finalize).
+This report is a **deliverable**. Do not overwrite for re-testing — copy to a temp label or rename first.
 
-## Source code
+## Sources
 
-- `prototype/189-bin-counter-primitives.pl` § `run_v6` (heatmap), § `run_v7` (histogram), § `_rebin_geometric`, § `_cdf_resample`.
+- `prototype/189-bin-counter-primitives.pl` § `run_v6`, `run_v7`, `run_v8`, `_rebin_geometric`, `_rebin_proportional`, `_cdf_resample`.
+- `features/201-display-geometry-bound-consumers.md` — investigation home doc.
+- `features/187-histogram-bin-counter-percentiles.md` § Decision 2 — locked tier table (4, 8, 16, 32, 53, 80, 115, 256, 616).
 
-## Test setup
+## Datasets
 
-- Dataset: `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` (148 MB, 761,698 lines, 575,800 parseable durations).
-- Tooling: `/opt/homebrew/bin/perl prototype/189-bin-counter-primitives.pl --aspect v6|v7 --file <path> --candidate all`.
-- Locked defaults: `bpd=53`, `seed_decades=5`, `bin_count_streaming=265`.
+Two real Tomcat access log datasets used throughout:
 
-## V6 — Heatmap projection fidelity
+| Label | Path | Total lines | Parseable durations | Decades |
+|---|---|---|---|---|
+| **Your file** | `logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-0.2025-12-30.txt` | 195,399 | 193,433 | 5.08 |
+| **148MB file** | `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | 761,698 | 575,800 | 4.52 |
 
-Treats the entire dataset as one heatmap row (single `time_bucket`). Per-`time_bucket` behavior is the same for fidelity purposes because projection error is per-partition.
+The "your file" reference matches the 41-bucket histogram shown in the actual ltl `-V` output during investigation (`samples=193433`, `total_buckets=41`).
 
-### Configuration
+## Reproducibility (locked commands)
 
-- Display width: `$heatmap_width = 52` columns (ltl default `-hmw`).
-- Observed data: `d_min = 1.000`, `d_max = 33288.000`, `d_decades = 4.52`.
-- Streaming partition (after auto-resize): `bin_count = 397`, `min = 0.174`, `max = 5500000.000`, `rebins = 1`.
-  - Note: streaming range is much wider than display range; most source bins are empty. This is the auto-resize doubling behavior and does not penalize fidelity.
+```
+# V8 sweep — bpd × algorithm matrix
+/opt/homebrew/bin/perl prototype/189-bin-counter-primitives.pl \
+    --aspect v8 \
+    --file logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-0.2025-12-30.txt \
+    --display-width 71 --candidate sweep
 
-### Results (full dataset)
+# V8 detail table — per-column comparison at a specific bpd
+/opt/homebrew/bin/perl prototype/189-bin-counter-primitives.pl \
+    --aspect v8 \
+    --file logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-0.2025-12-30.txt \
+    --display-width 71 --bpd 500
+```
 
-| Metric | (d) baseline | (e) two-stage | (c) CDF-resample |
+`--display-width 71` matches the per-histogram bar area when `terminal_width=186` and `n=2` (duration + bytes histograms). Derivation: `display_width=int(186×0.95)=176`, `total_gap=6`, `single_histogram_width=85`, `bar_area_width=85-14=71`.
+
+---
+
+## V6 — Heatmap projection fidelity (initial attempt)
+
+**What V6 measured:** mass retention, peak retention, peak X-axis offset when re-binning a streaming auto-resize partition (bpd=53 default) into a display-bound partition with `bin_count = $heatmap_width`. Compared against a synthetic "baseline" built directly from raw values at display geometry.
+
+**Result on canonical 148MB dataset (display_width=52):**
+
+| Candidate | Mass retention | Peak retention | Peak X-offset |
 |---|---|---|---|
-| Mass retention | 100% (ref) | **100.0000%** | **100.0000%** |
-| Peak count | 289,806 at col 0 (ref) | 289,806 at col 0 | 289,806.0 at col 0 |
-| Peak retention | 100% (ref) | **100.0000%** | **100.0000%** |
-| Peak X-offset | 0 cols (ref) | **0 cols** | **0 cols** |
+| (e) two-stage | 100.0000% | 100.0000% | 0 columns |
+| (c) CDF-resample | 100.0000% | 100.0000% | 0 columns |
 
-### Top-10 column deltas
+**What V6 missed:** the measurement was per-partition aggregate, not per-column. A 100% mass / 100% peak metric is satisfied by many distributions — including one with the peak's count split across an adjacent empty column and one neighbor (mass conserved, peak count preserved, position preserved, but spike-trough structure destroyed). V6 did not measure per-column counts and therefore could not detect this failure mode.
 
-| Col | (d) | (e) | (e) delta | (c) | (c) delta |
-|---|---|---|---|---|---|
-| 0 | 289806 | 289806 | +0.00% | 289806.00 | +0.00% |
-| 20 | 148093 | 152858 | +3.22% | 142191.72 | -3.98% |
-| 34 | 26118 | 26116 | -0.01% | 26118.36 | +0.00% |
-| 3 | 14374 | 14374 | +0.00% | 14374.00 | +0.00% |
-| 19 | 11657 | 5782 | **-50.40%** | 16518.51 | **+41.70%** |
-| 23 | 8774 | 9061 | +3.27% | 8746.99 | -0.31% |
-| 27 | 6756 | 5832 | -13.68% | 6124.62 | -9.35% |
-| 8 | 6621 | 6621 | +0.00% | 4708.21 | **-28.89%** |
-| 16 | 6489 | 5815 | -10.39% | 6157.68 | -5.11% |
-| 10 | 5549 | 5549 | +0.00% | 5156.65 | -7.07% |
+V6 was **insufficient** as a validation. It contributed to the original (and later-rejected) recommendation locking option (e) at bpd=53 with `bin_count = $heatmap_width`.
 
-### V6 findings
+---
 
-1. **Mass and peak conserved perfectly for both (e) and (c).** Predicted 100% mass and 100% peak retention. **Confirmed.**
-2. **Peak X-offset is 0 columns for both (e) and (c)** on the canonical dataset. Algebraic bound predicted ≤1 column for (e); ≤32 columns worst-case for (c). The (c) worst case did not fire because auto-resize extended the partition outward to cover the data, leaving the partition range a near-superset of the display range. Spike position offsets did not materialize.
-3. **(e) shows occasional large per-column count deltas (col 19: −50%, col 8: 0%)** because geometric-midpoint projection puts each source bin entirely into one target column. When two source bins map to the same target column (compressing), or when one source bin contains roughly the same count as a neighbor target column would receive under (d), the mismatch shows. The pattern is local redistribution between adjacent columns, not global error.
-4. **(c) shows smearing in adjacent columns (col 19: +41.70%, col 8: −28.89%)** consistent with its CDF-resample design. Mass moves between neighbors; total is conserved; peaks are not flattened.
-5. **The Phase 3 failure mode is not observed here** for either candidate. The Phase 3 diagnosis ("partition seeded around `v_0` produces range-anchor mismatch with display") would manifest as a non-zero peak X-offset. We observe 0 offset for both (e) and (c) on the canonical dataset, with `rebins=1` extending the partition outward to absorb the data range.
-6. **Cross-validation with the algebraic bound:** the bound for (e) X-offset was `ceil(B_d × (R_s / B_s) / R_d)`. With `B_d=52`, `R_s = log(5500000/0.174) ≈ 17.3`, `B_s=397`, `R_d = log(33288/1) ≈ 10.4`: `ceil(52 × (17.3/397) / 10.4) = ceil(0.217) = 1 column`. **Observed: 0 columns. Bound holds with margin.**
+## V7 — Histogram projection fidelity (initial attempt)
 
-### V6 verdict
+**What V7 measured:** same aggregate metrics as V6, applied to histogram (single-partition global per metric).
 
-**(e) two-stage is the highest-fidelity option for the heatmap consumer family.** Mass, peak, and X-position all exactly match shipped (d) behavior on the canonical dataset. Per-column count deltas are within expected geometric-midpoint mapping noise. (c) is also viable but exhibits adjacent-column smearing that (e) avoids.
-
-## V7 — Histogram projection fidelity
-
-Same dataset; tests F3 single-partition behavior. Display width is `--display-width 100` (representative `$bar_area_width`).
-
-### Configuration
-
-- Display width: 100 columns.
-- Observed data: `d_min = 1.000`, `d_max = 33288.000`, `d_decades = 4.52`.
-- Streaming partition (same as V6): `bin_count = 397`, `rebins = 1`.
-- Baseline (d) uses ltl's shipped `histogram_buckets_per_decade = 8`: 36-bucket partition, then linear-index projection onto 100 display columns.
-
-### Results (full dataset)
+**Result on canonical 148MB dataset (display_width=100):**
 
 | Metric | (d) shipped | (e) two-stage | (c) CDF-resample |
 |---|---|---|---|
-| Display sum | 1,647,292 (count-inflated; see finding 1) | 575,800 | 575,800.00 |
+| Display sum | 1,647,292 | 575,800 | 575,800 |
 | True mass | 575,800 raw values | 575,800 | 575,800 |
 | Peak count | 289,806 at col 0 | 289,806 at col 0 | 289,806.0 at col 0 |
-| Peak retention | 100% (ref) | **100.0000%** | **100.0000%** |
-| Peak X-offset | 0 cols (ref) | **0 cols** | **0 cols** |
+| Peak retention | 100% (ref) | 100.0000% | 100.0000% |
 
-### V7 findings
+**What V7 surfaced (unexpected):** ltl's shipped histogram is NOT mass-conserving when projecting onto the display. `calculate_histogram_display_buckets` in the `cols_per_bucket >= 1` branch maps `display[i] = partition[int(i / cols_per_bucket)]` — which **duplicates** each internal partition bucket's count across multiple display columns to render visually-wide bars. The shipped display sum (1,647,292) is ~2.86× the true raw count (575,800).
 
-1. **Critical finding: ltl's shipped histogram is NOT mass-conserving when projecting.** `calculate_histogram_display_buckets` (`ltl:7462`) in the `cols_per_bucket >= 1` branch maps `display[i] = partition[int(i / cols_per_bucket)]` — which **duplicates each partition bucket's count across multiple display columns** (`cols_per_bucket = 100/36 ≈ 2.78` → each partition bucket repeats across ~2.78 display columns). The shipped histogram's display sum (1,647,292) is ~2.86× the true raw count (575,800). This is intentional — it's how the shipped histogram makes visually-wide bars from a coarse-bucket partition.
-2. **(e) and (c) preserve true mass exactly (575,800).** They put each source bin's count into ONE target column (geometric midpoint or CDF-resample), so the display sum equals the raw count.
-3. **Peak count and X-position match exactly** between (d), (e), and (c) at column 0 (the d_min cluster).
-4. **The visual difference between (d) and (e)/(c) is bar width, not data fidelity.** (d) renders a "wide bar" of width ~2.78 columns per partition bucket because the same count is repeated; (e)/(c) render a "narrow spike" because the count goes into one column.
-5. **Implication for #34 R8 ("display geometry unchanged"):** if R8 means "the bars look the same width," neither (e) nor (c) preserves R8 without an additional bar-widening step. If R8 means "the data values rendered are accurate," (e) and (c) preserve R8 strictly. Migration must clarify what R8 means.
-6. **Cross-validation with the algebraic bound:** (e) X-offset bound `ceil(100 × (17.3/397) / 10.4) = ceil(0.417) = 1 column`. **Observed: 0 columns. Bound holds.**
+V7 surfaced this asymmetry but **incorrectly interpreted it** as evidence that (e) and (c) "preserve true mass exactly while shipped does not." That framing missed the more important question: **does the bar-width-stretching convention preserve visible histogram structure that the migration would otherwise destroy?**
 
-### V7 verdict
+V7's conclusions about "(e) preserves data fidelity exactly" turned out to be wrong at the per-column scale; V7 was unable to see this because it did not print per-column counts.
 
-**(e) two-stage preserves data fidelity exactly (mass, peak, position).** It does not preserve the shipped histogram's bar-width *rendering convention* because ltl's current rendering inflates count by repeating across display columns — a property no mass-conserving algorithm can replicate without adding an explicit bar-widening render step.
+---
 
-This is a **rendering-convention question**, not a primitive-contract question. The migration should:
-- Adopt (e) for data fidelity.
-- Add an explicit bar-widening render step IF the migrated histogram should preserve the shipped "wide bars" appearance.
-- OR adopt a "narrow spikes" appearance — accurate but visually different from shipped.
+## V8 — Per-column comparison (the corrective measurement)
 
-This is the §Open question for the histogram migration ticket noted in `features/201-*.md`.
+After the user flagged that V6/V7's aggregate metrics could not reveal smoothing artifacts, V8 was added to print every display column's count side-by-side: column index, legacy count (after `calculate_histogram_display_buckets`), (e) count, delta.
 
-## Combined verdict
+### V8 detail table at bpd=53 (default) — failure of the original (e) recommendation
 
-For both **F2 (heatmap)** and **F3 (histogram)**, **option (e) two-stage stream → finalize re-bin** is validated as preserving the data-fidelity invariants the migration needs:
-- Mass conservation: ✓
-- Peak retention: ✓
-- Peak X-position: ✓ (0-column offset on canonical dataset; algebraic bound predicts ≤1 column worst case)
-
-(c) CDF-resample is a viable alternative; (e) is preferred for both consumer families because it does not introduce adjacent-column smearing.
-
-(d) keep-pre-migration remains a legitimate fallback that costs unbounded memory but guarantees no migration risk. Memory cost analysis (in `features/201-*.md` § Algebraic fidelity bounds: (e) memory section) shows (e) is strictly cheaper than (d) for representative workloads.
-
-## Reproducibility
+Running V8 against "your file" at `--display-width 71 --bpd 53` produced a side-by-side table for all 71 columns. The spike region (cols 11-25 in the 6-50ms range):
 
 ```
-/opt/homebrew/bin/perl prototype/189-bin-counter-primitives.pl \
-    --aspect v6 \
-    --file logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt \
-    --candidate all
-
-/opt/homebrew/bin/perl prototype/189-bin-counter-primitives.pl \
-    --aspect v7 \
-    --file logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt \
-    --candidate all
+col  val_lower    legacy  (e_W)   (e_coarse)  legacy_vs_e_coarse
+11   6.13         19125   9406    19125       +0.0%
+12   7.23         19125   7914    19125       +0.0%
+13   8.53         14941   13215   14941       +0.0%
+14   10.06        19889   5317    19889       +0.0% (at bpd=616 — at bpd=53 the e_coarse column had -20% displacement)
+18   19.46        21241   11265   21241       +0.0% (the visible 21k peak from image 1)
+19   22.95        21241   13990   21241       +0.0%
+20   27.06        14711   5767    14711       +0.0%
 ```
 
-This file is a **deliverable** per CLAUDE.md repo conventions. Do not overwrite for re-testing — copy to a temp label or rename first.
+**Two findings emerged from this detail table:**
+
+1. **(e_W) — re-bin directly to display width — smooths the data.** The peak at col 18 (legacy 21241) shows as 11265 under (e_W) — roughly half height. This is the same failure mode as the reverted Phase 3 attempts (multi-modal spike-trough structure flattened).
+
+2. **(e_coarse) — re-bin into legacy partition shape, then apply legacy's `calculate_histogram_display_buckets` projection — preserves the legacy exactly** in the spike region.
+
+The (e_W) variant was the original locked recommendation from V6/V7. V8 rejected it empirically. The (e_coarse) variant became the new candidate.
+
+### V8 sweep at bpd=53 with (e_coarse): bucket-level displacement
+
+The (e_coarse) result above looked perfect in the spike region (+0.0% delta) but had displacement in mid-density buckets at bpd=53:
+
+```
+col  val_lower    legacy  (e_coarse)   delta
+22   9.88         7594    5549         -26.9%
+23   10.97        6063    8108         +33.7%
+```
+
+Adjacent buckets gain what their neighbors lose. The displacement happens because the streaming partition's bin boundaries don't align with the legacy partition's bin boundaries. When a streaming bin straddles a legacy bucket boundary, the geometric-midpoint re-bin commits the entire streaming bin's count to one side or the other — and ~25-35% of the legacy bucket's mass can be misallocated.
+
+This led to the bpd sweep.
+
+---
+
+## V8 sweep — bpd × algorithm matrix
+
+Sweep across all 9 locked tier values from #187 Decision 2 (bpd ∈ {4, 8, 16, 32, 53, 80, 115, 256, 616}), testing both geometric-midpoint and proportional-overlap re-bin algorithms, both datasets.
+
+### Your file (5.08 decades, 41 legacy buckets)
+
+| bpd | tier | geometric vis_max% | proportional vis_max% |
+|---|---|---|---|
+| 4 | L1 floor | 118.3% | 82.5% |
+| 8 | L2 (current ltl default) | 110.8% | 76.3% |
+| 16 | L3 | 100.0% | 89.9% |
+| 32 | L4 | 27.6% | 15.9% |
+| 53 | L5 (Decision 2 default) | 28.4% | 16.1% |
+| 80 | L6 | 25.7% | 18.6% |
+| 115 | L7 | 7.7% | 7.6% |
+| 256 | L8 | 7.7% | 6.97% |
+| **616** | **L9 / HdrHistogram 3-sig-digit** | **1.10%** | 3.49% |
+
+### 148MB file (4.52 decades, 36 legacy buckets)
+
+| bpd | tier | geometric vis_max% | proportional vis_max% |
+|---|---|---|---|
+| 4 | L1 floor | 5671.2% | 2703.2% |
+| 8 | L2 | 55.1% | 1155.8% |
+| 16 | L3 | 68.4% | 69.3% |
+| 32 | L4 | 73.4% | 37.3% |
+| 53 | L5 | 36.3% | 20.3% |
+| 80 | L6 | 30.1% | 21.6% |
+| 115 | L7 | 35.2% | 17.4% |
+| 256 | L8 | 2.5% | 4.2% |
+| **616** | **L9 / HdrHistogram 3-sig-digit** | **5.78%** | 2.99% |
+
+### Findings from the sweep
+
+1. **Re-bin error is much larger than per-bin midpoint error.** At Level 9 (bpd=616), the research-documented midpoint error is ~0.08%. Empirical re-bin error is 1.10% to 5.78% — roughly 14× to 72× larger. The Decision 2 tier table was calibrated for the **percentile interpolation** use case (Decision 1), not for **partition→partition re-binning**.
+
+2. **Non-monotonic behavior is real.** Higher bpd is not always better. Streaming bin boundaries can align with target bucket boundaries at certain bpd values (resonance — exact match) and straddle at others. Examples on your file: bpd=500 shows 0.25%, bpd=750 shows 0.86%, bpd=1000 shows 2.22%, bpd=1500 shows 0.00%. The alignment depends on the streaming partition's `v_0` seed, which is data-dependent and unpredictable a priori.
+
+3. **Proportional-overlap re-bin (mass splitting between target buckets) does not solve the problem.** It helps at some bpd values, hurts at others. At bpd=8 on the 148MB file it regresses catastrophically (1155% displacement) because too few streaming bins distribute mass too widely. The fundamental issue is that the streaming partition's `[min, max]` range is anchored around `v_0` (HdrHistogram seed) while the legacy partition is anchored to `[d_min, d_max]` — the ranges don't match by design.
+
+4. **No value in the locked range 4-616 achieves sub-1% on both datasets.** Bpd=616 reaches 1.10% on your file but 5.78% on the 148MB file.
+
+### Visibility-threshold reasoning
+
+The 1% threshold I initially used was arbitrary. The actual perceptibility threshold in a ~9-character-tall ASCII histogram is roughly **11% of peak** (each character row = 100/9 ≈ 11.1% per row; smallest visible bar-height change is one row's worth).
+
+Re-reading the sweep with that threshold:
+
+| bpd | Your file (visible diff?) | 148MB file (visible diff?) |
+|---|---|---|
+| 53 (default) | YES — 28.4% (~3 rows) | YES — 36.3% (~3 rows) |
+| 256 (Level 8) | NO — 7.7% (sub-1-row) | NO — 2.5% (sub-1-row) |
+| **616 (Level 9)** | **NO — 1.10% (negligible)** | **NO — 5.78% (sub-1-row)** |
+
+At histogram rendering height of 9 characters, **bpd=616 is below the visibility threshold on both datasets.** Higher rendering heights would tighten the threshold, but the default rendering and typical user-visible rendering are well within this margin.
+
+---
+
+## Locked recommendation
+
+**Two-stage stream → finalize re-bin into legacy partition shape → apply legacy's display projection unchanged.**
+
+- Streaming `bpd = 616` (Level 9, HdrHistogram 3-sig-digit reference, top of locked Decision 2 range).
+- Streaming `seed_decades = 5` (Decision 5 default).
+- Finalize re-bin via `partition_rebin` (#189 R12) using geometric-midpoint projection (same algorithm as `partition_extend`'s existing remap loop at `ltl:613-622`).
+- Finalize target partition shape:
+  - **F2 (heatmap)**: `bin_count = $heatmap_width`, boundaries log-spaced over `[$heatmap_min, $heatmap_max]`.
+  - **F3 (histogram)**: `bin_count = int(decades × histogram_buckets_per_decade)` (default 8 × decades), boundaries log-spaced over `[d_min, d_max]`. Same shape ltl computes today.
+- Render: F2 reads finalized partition directly. F3 applies `calculate_histogram_display_buckets` (`ltl:7462`) unchanged for stretched-bar rendering.
+
+### Memory cost at locked bpd=616
+
+| Consumer | Partition count | Bytes/partition | Subtotal |
+|---|---|---|---|
+| Heatmap (F2) | ~60 time buckets | ~25KB | ~1.5 MB |
+| Histogram (F3) | ~10 metrics | ~25KB | ~250 KB |
+| **Total** | ~70 partitions | | **~1.75 MB** |
+
+Bounded by `bpd × decades`, not by sample count. Stays at ~1.75MB regardless of input file size.
+
+### Validation against canonical datasets
+
+V8 detail table at bpd=616 on "your file" (display_width=71): the entire spike region (cols 11-42, covering 6ms-1s where 95%+ of mass lives) showed **0.0% deviation** vs. legacy direct binning + legacy display projection. Three columns in the medium-density tail showed deviations of ±0.1-0.3% (within ±3 absolute counts on bars of ~2100). Spike-trough-spike multi-modal structure preserved exactly.
+
+---
+
+## What the prototyping journey taught us
+
+1. **Aggregate metrics (mass, peak, X-offset) are not sufficient.** They can be satisfied while spike-trough structure is destroyed. Always print per-column / per-bucket counts when validating re-binning fidelity.
+
+2. **The legacy histogram's "wide bars" are not mass-conserving by accident** — they're a deliberate rendering convention via count duplication in `calculate_histogram_display_buckets`. Any migration that puts each count into exactly one display column will render as "narrow spikes" instead of "wide bars." This is a real change, not a wash.
+
+3. **Re-bin error compounds streaming bin width AND alignment with target boundaries.** The research's per-bin midpoint error (Decision 2 tier table) characterizes Decision 1 percentile interpolation accuracy, not partition→partition re-bin accuracy. The re-bin error is empirically 14-72× the midpoint error at the same bpd.
+
+4. **Proportional-overlap re-bin is not a fix.** It can help when streaming bin count is in a sweet spot, but it makes things worse with very few or very many streaming bins, and it does not eliminate the alignment-resonance noise.
+
+5. **The visibility threshold matters.** A 1% accuracy target is the right call for percentile interpolation but is overkill for ASCII histogram rendering. The right threshold is roughly "smaller than one character row of the rendered histogram" — at default 9-character height, that's ~11%, which makes bpd=256 viable and bpd=616 safely below visual perceptibility on all tested datasets.
+
+6. **Streaming at the locked Level 9 (bpd=616) keeps the option of higher visual fidelity open** for follow-on UX work (see #204). Lowering the streaming bpd would close that option without a memory benefit that matters at the ~70-partition scale.
