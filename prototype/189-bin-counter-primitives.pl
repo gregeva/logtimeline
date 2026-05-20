@@ -45,6 +45,8 @@ my %opt = (
     pbpd                => undef,
     'max-keys'          => undef,        # V2 safety cap
     'max-lines'         => undef,
+    'display-width'     => undef,        # V6/V7: display column count (default per-aspect)
+    'candidate'         => 'all',        # V6/V7: which option to test (c, d, e, all)
 );
 
 GetOptions(\%opt,
@@ -52,6 +54,7 @@ GetOptions(\%opt,
     'quantiles=s', 'r2-impl=s', 'r2-cross-check!', 'r2-bench!',
     'max-rebins=i', 'min-N=i', 'mem!', 'exact-percentiles!',
     'percentile-precision=i', 'pbpd=i', 'max-keys=i', 'max-lines=i',
+    'display-width=i', 'candidate=s',
     'help|h',
 ) or die_usage("bad options");
 
@@ -61,7 +64,7 @@ sub die_usage {
     my $msg = shift;
     print STDERR "ERROR: $msg\n\n" if defined $msg;
     print STDERR <<'EOF';
-Usage: prototype/189-bin-counter-primitives.pl --aspect v1|v2|v3|v4|v5|all
+Usage: prototype/189-bin-counter-primitives.pl --aspect v1|v2|v3|v4|v5|v6|v7|all
                                                 --file PATH [--file PATH ...]
                                                 [--bpd N] [--seed-decades N]
                                                 [--quantiles q1,q2,...]
@@ -72,6 +75,8 @@ Usage: prototype/189-bin-counter-primitives.pl --aspect v1|v2|v3|v4|v5|all
                                                 [--percentile-precision N]
                                                 [--pbpd N]
                                                 [--max-keys N] [--max-lines N]
+                                                [--display-width N]   (V6 default 52, V7 default 100)
+                                                [--candidate c|d|e|all]  (V6/V7 candidate)
 EOF
     exit 2;
 }
@@ -620,7 +625,10 @@ elsif ($aspect eq 'v1')  { run_v1(); }
 elsif ($aspect eq 'v3')  { run_v3(); }
 elsif ($aspect eq 'v2')  { run_v2(); }
 elsif ($aspect eq 'v4')  { run_v4(); }
-elsif ($aspect eq 'all') { run_v5(); run_v1(); run_v3(); run_v2(); run_v4(); }
+elsif ($aspect eq 'v6')  { run_v6(); }
+elsif ($aspect eq 'v7')  { run_v7(); }
+elsif ($aspect eq 'v8')  { run_v8(); }
+elsif ($aspect eq 'all') { run_v5(); run_v1(); run_v3(); run_v2(); run_v4(); run_v6(); run_v7(); run_v8(); }
 else { die_usage("unknown --aspect $opt{aspect}"); }
 
 exit 0;
@@ -1379,4 +1387,774 @@ sub run_v5 {
 
     # Emit telemetry block (Decision 8 format).
     emit_telemetry(\%counter, consumer => 'summary_table', keying => '(category, log_key)');
+}
+
+# ============================================================================
+# V6 — Heatmap projection fidelity (issue #201)
+# ============================================================================
+#
+# Tests three candidate options for the F2 (heatmap) consumer family against
+# the canonical Tomcat access log dataset:
+#
+#   (c) Smarter projection: stream into auto-resize partition, project to
+#       display grid at render time using CDF-resample.
+#   (d) Pre-migration baseline: retain raw values, build display-bound
+#       partition at end-of-parse. This is what ships today.
+#   (e) Two-stage: stream into auto-resize partition, then at finalize re-bin
+#       into a display-bound partition with bin_count = display_width and
+#       boundaries from observed [d_min, d_max]. Display reads finalized
+#       partition directly.
+#
+# For each candidate, measure against (d) as ground truth:
+#   - Y-axis retention: peak_count(candidate) / peak_count(d)
+#   - X-axis offset: |peak_display_col(candidate) - peak_display_col(d)|
+#   - Mass conservation: sum(candidate) / sum(d) should be 1.0
+#
+# Maps to § Algebraic fidelity bounds in features/201-*.md.
+
+sub run_v6 {
+    die_usage("--aspect v6 requires at least one --file") unless @{$opt{file}};
+    my $W = $opt{'display-width'} // 52;   # heatmap default --hmw
+
+    my $candidate = lc $opt{candidate};
+    my %do = (c => 0, d => 1, e => 0);  # always need (d) as baseline
+    if    ($candidate eq 'all') { $do{c} = 1; $do{e} = 1; }
+    elsif ($candidate eq 'c')   { $do{c} = 1; }
+    elsif ($candidate eq 'd')   { }
+    elsif ($candidate eq 'e')   { $do{e} = 1; }
+    else { die_usage("--candidate must be c, d, e, or all"); }
+
+    # Single-partition simulation: treat the entire dataset as one heatmap row
+    # (one time_bucket). Per-time_bucket behavior is the same for fidelity
+    # purposes — projection error is per-partition.
+
+    my @raw;            # for (d) baseline AND comparison ground truth
+    my $stream_entry;   # streaming auto-resize partition for (c) and (e)
+    my %store = ();
+
+    my $start = [gettimeofday];
+    my $total_lines = 0;
+    for my $file (@{$opt{file}}) {
+        my $n = iterate_durations($file, sub {
+            my (undef, undef, $dur) = @_;
+            push @raw, $dur;
+            counter_update(\%store, 'heatmap', $dur);
+        });
+        $total_lines += $n;
+    }
+    $stream_entry = $store{'heatmap'};
+    my $elapsed = tv_interval($start);
+
+    # Compute display range [d_min, d_max] from observed extents (the heatmap's
+    # own anchor in shipped code at ltl:5184).
+    my $d_min = $raw[0];
+    my $d_max = $raw[0];
+    for my $v (@raw) { $d_min = $v if $v < $d_min; $d_max = $v if $v > $d_max; }
+    $d_min = 1 if $d_min <= 0;
+
+    print "=== V6: Heatmap projection fidelity (issue #201) ===\n";
+    printf "files: %s\n", join(", ", @{$opt{file}});
+    printf "total_lines: %d  raw_values_kept: %d\n", $total_lines, scalar(@raw);
+    printf "elapsed_s: %.2f\n", $elapsed;
+    printf "display_width (\$heatmap_width): %d\n", $W;
+    printf "d_min: %.3f  d_max: %.3f  d_decades: %.2f\n",
+        $d_min, $d_max, (log($d_max) - log($d_min)) / log(10);
+    printf "stream partition: bin_count=%d min=%.3f max=%.3f rebins=%d\n",
+        $stream_entry->{partition}{bin_count},
+        $stream_entry->{partition}{min},
+        $stream_entry->{partition}{max},
+        $stream_entry->{partition}{rebins};
+    printf "buckets_per_decade: %d ($precision_source)\n", $opt{bpd};
+    print "\n";
+
+    # --- (d) baseline: build display-bound partition from raw values ---
+    my @display_d = (0) x $W;
+    my $log_ratio_d = log($d_max / $d_min);
+    for my $v (@raw) {
+        my $i = int($W * log($v / $d_min) / $log_ratio_d);
+        $i = $W - 1 if $i >= $W;
+        $i = 0     if $i < 0;
+        $display_d[$i]++;
+    }
+    my ($peak_d, $peak_col_d) = _peak(\@display_d);
+    my $sum_d = sum(@display_d);
+
+    print "Baseline (d): pre-migration retention\n";
+    printf "  sum: %d  peak: %d at col %d\n", $sum_d, $peak_d, $peak_col_d;
+    print "\n";
+
+    # --- (e) two-stage: re-bin streaming partition into display-bound ---
+    if ($do{e}) {
+        my $p_src   = $stream_entry->{partition};
+        my $bins_src = $stream_entry->{bins};
+        my @display_e = _rebin_geometric($p_src, $bins_src, $d_min, $d_max, $W);
+        # Underflow/overflow from streaming partition can also be distributed
+        # to first/last bin per Decision 4 semantics.
+        $display_e[0]     += $stream_entry->{underflow} // 0;
+        $display_e[$W-1] += $stream_entry->{overflow}   // 0;
+        my ($peak_e, $peak_col_e) = _peak(\@display_e);
+        my $sum_e = sum(@display_e);
+
+        print "Candidate (e): two-stage stream -> finalize re-bin\n";
+        printf "  sum: %d (mass_retention: %.4f%%)\n",
+            $sum_e, 100 * $sum_e / $sum_d;
+        printf "  peak: %d at col %d (peak_retention: %.4f%%; col_offset: %d)\n",
+            $peak_e, $peak_col_e,
+            100 * $peak_e / $peak_d, abs($peak_col_e - $peak_col_d);
+        _print_top_columns(\@display_d, \@display_e, $W, 'd', 'e');
+        print "\n";
+    }
+
+    # --- (c) smarter projection: CDF-resample streaming partition at render ---
+    if ($do{c}) {
+        my $p_src   = $stream_entry->{partition};
+        my $bins_src = $stream_entry->{bins};
+        my @display_c = _cdf_resample($p_src, $bins_src, $d_min, $d_max, $W);
+        $display_c[0]     += $stream_entry->{underflow} // 0;
+        $display_c[$W-1] += $stream_entry->{overflow}   // 0;
+        my ($peak_c, $peak_col_c) = _peak(\@display_c);
+        my $sum_c = sum(@display_c);
+
+        print "Candidate (c): CDF-resample at render time\n";
+        printf "  sum: %.0f (mass_retention: %.4f%%)\n",
+            $sum_c, 100 * $sum_c / $sum_d;
+        printf "  peak: %.1f at col %d (peak_retention: %.4f%%; col_offset: %d)\n",
+            $peak_c, $peak_col_c,
+            100 * $peak_c / $peak_d, abs($peak_col_c - $peak_col_d);
+        _print_top_columns(\@display_d, \@display_c, $W, 'd', 'c');
+        print "\n";
+    }
+
+    return;
+}
+
+# ============================================================================
+# V7 — Histogram projection fidelity (issue #201)
+# ============================================================================
+#
+# Same candidate set as V6, but tests the F3 (histogram) consumer family.
+# Display width is variable in shipped code (depends on terminal + active
+# metric count); the prototype tests at a configurable --display-width.
+#
+# F3 today (ltl:5298–5410 + 7462–7493) builds a data-driven partition at
+# end-of-parse (bucket_count = decades * 8 by default) and projects onto
+# display at render via linear-index mapping. This (d) baseline is therefore
+# slightly different from F2's (d): partition bins != display columns even
+# at baseline, but projection works because both ranges = [d_min, d_max].
+
+sub run_v7 {
+    die_usage("--aspect v7 requires at least one --file") unless @{$opt{file}};
+    my $W = $opt{'display-width'} // 100;  # histogram typical bar width
+
+    my $candidate = lc $opt{candidate};
+    my %do = (c => 0, d => 1, e => 0);
+    if    ($candidate eq 'all') { $do{c} = 1; $do{e} = 1; }
+    elsif ($candidate eq 'c')   { $do{c} = 1; }
+    elsif ($candidate eq 'd')   { }
+    elsif ($candidate eq 'e')   { $do{e} = 1; }
+    else { die_usage("--candidate must be c, d, e, or all"); }
+
+    # Single global partition (matches F3's per-metric global keying).
+    my @raw;
+    my %store = ();
+
+    my $start = [gettimeofday];
+    my $total_lines = 0;
+    for my $file (@{$opt{file}}) {
+        my $n = iterate_durations($file, sub {
+            my (undef, undef, $dur) = @_;
+            push @raw, $dur;
+            counter_update(\%store, 'histogram', $dur);
+        });
+        $total_lines += $n;
+    }
+    my $stream_entry = $store{'histogram'};
+    my $elapsed = tv_interval($start);
+
+    my $d_min = $raw[0];
+    my $d_max = $raw[0];
+    for my $v (@raw) { $d_min = $v if $v < $d_min; $d_max = $v if $v > $d_max; }
+    $d_min = 1 if $d_min <= 0;
+    my $d_decades = (log($d_max) - log($d_min)) / log(10);
+
+    print "=== V7: Histogram projection fidelity (issue #201) ===\n";
+    printf "files: %s\n", join(", ", @{$opt{file}});
+    printf "total_lines: %d  raw_values_kept: %d\n", $total_lines, scalar(@raw);
+    printf "elapsed_s: %.2f\n", $elapsed;
+    printf "display_width (\$bar_area_width): %d\n", $W;
+    printf "d_min: %.3f  d_max: %.3f  d_decades: %.2f\n", $d_min, $d_max, $d_decades;
+    printf "stream partition: bin_count=%d min=%.3f max=%.3f rebins=%d\n",
+        $stream_entry->{partition}{bin_count},
+        $stream_entry->{partition}{min},
+        $stream_entry->{partition}{max},
+        $stream_entry->{partition}{rebins};
+    printf "buckets_per_decade: %d ($precision_source)\n", $opt{bpd};
+    print "\n";
+
+    # --- (d) baseline: ltl's current histogram behavior ---
+    # Partition: bucket_count = decades * 8 (default), boundaries [d_min, d_max].
+    # Then calculate_histogram_display_buckets projects linear-index onto W.
+    my $hgbpd = 8;  # ltl default histogram_buckets_per_decade
+    my $bucket_count = int($d_decades * $hgbpd + 0.5);
+    $bucket_count = 5 if $bucket_count < 5;
+    my @partition_d = (0) x $bucket_count;
+    my $log_ratio_d = log($d_max / $d_min);
+    for my $v (@raw) {
+        my $i = int($bucket_count * log($v / $d_min) / $log_ratio_d);
+        $i = $bucket_count - 1 if $i >= $bucket_count;
+        $i = 0 if $i < 0;
+        $partition_d[$i]++;
+    }
+    # Linear-index projection (ltl:7462's calculate_histogram_display_buckets).
+    my @display_d;
+    my $cols_per_bucket = $W / $bucket_count;
+    if ($cols_per_bucket >= 1) {
+        for my $i (0 .. $W - 1) {
+            my $bi = int($i / $cols_per_bucket);
+            $bi = $bucket_count - 1 if $bi >= $bucket_count;
+            push @display_d, $partition_d[$bi];
+        }
+    } else {
+        my $bpc = $bucket_count / $W;
+        for my $i (0 .. $W - 1) {
+            my $sb = int($i * $bpc);
+            my $eb = int(($i + 1) * $bpc) - 1;
+            $eb = $bucket_count - 1 if $eb >= $bucket_count;
+            my $s = 0;
+            $s += $partition_d[$_] for $sb .. $eb;
+            push @display_d, $s;
+        }
+    }
+    my ($peak_d, $peak_col_d) = _peak(\@display_d);
+    my $sum_d = sum(@display_d);
+
+    print "Baseline (d): ltl shipped histogram (partition bpd=$hgbpd, linear-index projection)\n";
+    printf "  partition bin_count: %d\n", $bucket_count;
+    printf "  display sum: %d  peak: %d at col %d\n",
+        $sum_d, $peak_d, $peak_col_d;
+    print "\n";
+
+    # --- (e) two-stage: re-bin streaming partition into display-bound partition ---
+    if ($do{e}) {
+        my $p_src    = $stream_entry->{partition};
+        my $bins_src = $stream_entry->{bins};
+        my @display_e = _rebin_geometric($p_src, $bins_src, $d_min, $d_max, $W);
+        $display_e[0]     += $stream_entry->{underflow} // 0;
+        $display_e[$W-1] += $stream_entry->{overflow}   // 0;
+        my ($peak_e, $peak_col_e) = _peak(\@display_e);
+        my $sum_e = sum(@display_e);
+
+        print "Candidate (e): two-stage stream -> finalize re-bin\n";
+        printf "  sum: %d (mass_retention vs d: %.4f%%)\n",
+            $sum_e, 100 * $sum_e / $sum_d;
+        printf "  peak: %d at col %d (peak_retention vs d: %.4f%%; col_offset: %d)\n",
+            $peak_e, $peak_col_e,
+            100 * $peak_e / $peak_d, abs($peak_col_e - $peak_col_d);
+        _print_top_columns(\@display_d, \@display_e, $W, 'd', 'e');
+        print "\n";
+    }
+
+    # --- (c) CDF-resample at render time ---
+    if ($do{c}) {
+        my $p_src    = $stream_entry->{partition};
+        my $bins_src = $stream_entry->{bins};
+        my @display_c = _cdf_resample($p_src, $bins_src, $d_min, $d_max, $W);
+        $display_c[0]     += $stream_entry->{underflow} // 0;
+        $display_c[$W-1] += $stream_entry->{overflow}   // 0;
+        my ($peak_c, $peak_col_c) = _peak(\@display_c);
+        my $sum_c = sum(@display_c);
+
+        print "Candidate (c): CDF-resample at render time\n";
+        printf "  sum: %.0f (mass_retention vs d: %.4f%%)\n",
+            $sum_c, 100 * $sum_c / $sum_d;
+        printf "  peak: %.1f at col %d (peak_retention vs d: %.4f%%; col_offset: %d)\n",
+            $peak_c, $peak_col_c,
+            100 * $peak_c / $peak_d, abs($peak_col_c - $peak_col_d);
+        _print_top_columns(\@display_d, \@display_c, $W, 'd', 'c');
+        print "\n";
+    }
+
+    return;
+}
+
+# ============================================================================
+# V6/V7 helpers
+# ============================================================================
+
+# _peak(\@arr) -> (peak_value, peak_index)
+sub _peak {
+    my ($arr) = @_;
+    my $peak = 0;
+    my $peak_i = 0;
+    for my $i (0 .. $#$arr) {
+        if (($arr->[$i] // 0) > $peak) {
+            $peak = $arr->[$i];
+            $peak_i = $i;
+        }
+    }
+    return ($peak, $peak_i);
+}
+
+# _rebin_geometric($src_partition, $src_bins, $d_min, $d_max, $W)
+# Re-bin source partition counts into a target partition with bin_count=W and
+# boundaries log-spaced over [d_min, d_max]. Uses geometric-midpoint projection
+# (same logic as partition_extend at ltl:613-622). Each source bin's count goes
+# entirely into one target column (the one containing the source bin's
+# geometric midpoint). This is candidate (e)'s mechanism.
+sub _rebin_geometric {
+    my ($p, $src_bins, $d_min, $d_max, $W) = @_;
+    my @target = (0) x $W;
+    my $log_ratio_target = log($d_max / $d_min);
+    for my $i (0 .. $p->{bin_count} - 1) {
+        my $count = $src_bins->[$i];
+        next unless defined $count && $count > 0;
+        my $lower = $p->{min} * exp($p->{log_ratio} * $i / $p->{bin_count});
+        my $upper = $p->{min} * exp($p->{log_ratio} * ($i + 1) / $p->{bin_count});
+        my $mid   = sqrt($lower * $upper);
+        # Target column for mid. Clamp source bins outside [d_min, d_max] to
+        # the nearest target end (analog of partition overflow/underflow under
+        # the finalize re-bin).
+        if ($mid < $d_min)   { $target[0]      += $count; next; }
+        if ($mid >= $d_max)  { $target[$W - 1] += $count; next; }
+        my $col = int($W * log($mid / $d_min) / $log_ratio_target);
+        $col = $W - 1 if $col >= $W;
+        $col = 0     if $col < 0;
+        $target[$col] += $count;
+    }
+    return @target;
+}
+
+# _rebin_proportional($src_partition, $src_bins, $d_min, $d_max, $W)
+# Re-bin source partition counts into a target partition with bin_count=W and
+# boundaries log-spaced over [d_min, d_max]. Mass-splitting: each source bin's
+# count is distributed across the target buckets it overlaps, proportional to
+# log-space overlap. At partition->partition stage with stable target
+# boundaries this is alignment-insensitive (no resonance with source bpd).
+sub _rebin_proportional {
+    my ($p, $src_bins, $d_min, $d_max, $W) = @_;
+    my @target = (0) x $W;
+    my $log_d_min  = log($d_min);
+    my $log_d_max  = log($d_max);
+    my $log_range  = $log_d_max - $log_d_min;
+    my $log_p_min  = log($p->{min});
+    my $p_log_step = $p->{log_ratio} / $p->{bin_count};
+
+    for my $i (0 .. $p->{bin_count} - 1) {
+        my $count = $src_bins->[$i];
+        next unless defined $count && $count > 0;
+        my $log_lower = $log_p_min + $p_log_step * $i;
+        my $log_upper = $log_p_min + $p_log_step * ($i + 1);
+        if ($log_upper <= $log_d_min) { $target[0]      += $count; next; }
+        if ($log_lower >= $log_d_max) { $target[$W - 1] += $count; next; }
+        my $clip_lower = $log_lower < $log_d_min ? $log_d_min : $log_lower;
+        my $clip_upper = $log_upper > $log_d_max ? $log_d_max : $log_upper;
+        my $clipped_range = $clip_upper - $clip_lower;
+        next if $clipped_range <= 0;
+        my $col_lo = int($W * ($clip_lower - $log_d_min) / $log_range);
+        my $col_hi = int($W * ($clip_upper - $log_d_min) / $log_range);
+        $col_lo = 0      if $col_lo < 0;
+        $col_hi = $W - 1 if $col_hi >= $W;
+        if ($col_lo == $col_hi) {
+            $target[$col_lo] += $count;
+            next;
+        }
+        for my $c ($col_lo .. $col_hi) {
+            my $col_log_lower = $log_d_min + $log_range * $c / $W;
+            my $col_log_upper = $log_d_min + $log_range * ($c + 1) / $W;
+            my $ov_lower = $clip_lower > $col_log_lower ? $clip_lower : $col_log_lower;
+            my $ov_upper = $clip_upper < $col_log_upper ? $clip_upper : $col_log_upper;
+            my $overlap = $ov_upper - $ov_lower;
+            next if $overlap <= 0;
+            $target[$c] += $count * ($overlap / $clipped_range);
+        }
+    }
+    return @target;
+}
+
+# _cdf_resample($src_partition, $src_bins, $d_min, $d_max, $W)
+# Treat source partition as a CDF; redistribute counts onto W display columns
+# proportional to log-space overlap. This is candidate (c)'s mechanism.
+# Counts can split across multiple display columns (smearing). Mass-preserving
+# within precision of the source bin geometry.
+sub _cdf_resample {
+    my ($p, $src_bins, $d_min, $d_max, $W) = @_;
+    my @target = (0) x $W;
+    my $log_d_min = log($d_min);
+    my $log_d_max = log($d_max);
+    my $log_range = $log_d_max - $log_d_min;
+
+    for my $i (0 .. $p->{bin_count} - 1) {
+        my $count = $src_bins->[$i];
+        next unless defined $count && $count > 0;
+        my $log_lower = log($p->{min}) + $p->{log_ratio} * $i / $p->{bin_count};
+        my $log_upper = log($p->{min}) + $p->{log_ratio} * ($i + 1) / $p->{bin_count};
+        # Skip source bin entirely outside [d_min, d_max].
+        if ($log_upper <= $log_d_min) { $target[0]      += $count; next; }
+        if ($log_lower >= $log_d_max) { $target[$W - 1] += $count; next; }
+        # Clip to display range.
+        my $clip_lower = $log_lower < $log_d_min ? $log_d_min : $log_lower;
+        my $clip_upper = $log_upper > $log_d_max ? $log_d_max : $log_upper;
+        my $clipped_range = $clip_upper - $clip_lower;
+        next if $clipped_range <= 0;
+        # Find first and last target columns this source bin overlaps.
+        my $col_lo = int($W * ($clip_lower - $log_d_min) / $log_range);
+        my $col_hi = int($W * ($clip_upper - $log_d_min) / $log_range);
+        $col_lo = 0      if $col_lo < 0;
+        $col_hi = $W - 1 if $col_hi >= $W;
+        if ($col_lo == $col_hi) {
+            $target[$col_lo] += $count;
+            next;
+        }
+        # Distribute proportionally to log-space overlap with each target column.
+        for my $c ($col_lo .. $col_hi) {
+            my $col_log_lower = $log_d_min + $log_range * $c / $W;
+            my $col_log_upper = $log_d_min + $log_range * ($c + 1) / $W;
+            my $ov_lower = $clip_lower > $col_log_lower ? $clip_lower : $col_log_lower;
+            my $ov_upper = $clip_upper < $col_log_upper ? $clip_upper : $col_log_upper;
+            my $overlap = $ov_upper - $ov_lower;
+            next if $overlap <= 0;
+            $target[$c] += $count * ($overlap / $clipped_range);
+        }
+    }
+    return @target;
+}
+
+# _print_top_columns(\@baseline, \@candidate, $W, $b_name, $c_name)
+# Print up to top-10 columns by baseline count plus the peak column of each
+# series, so the reader can see where mass landed.
+sub _print_top_columns {
+    my ($base, $cand, $W, $bn, $cn) = @_;
+    my @ranked = sort { ($base->[$b] // 0) <=> ($base->[$a] // 0) } 0 .. $W - 1;
+    my $K = $W > 10 ? 10 : $W;
+    printf "  Top-%d columns by %s:\n", $K, $bn;
+    printf "  %-8s %-12s %-12s %-10s\n", 'col', $bn, $cn, 'delta';
+    for my $j (0 .. $K - 1) {
+        my $c = $ranked[$j];
+        my $bv = $base->[$c] // 0;
+        my $cv = $cand->[$c] // 0;
+        my $delta = $bv > 0 ? sprintf("%+.2f%%", 100 * ($cv - $bv) / $bv) : 'n/a';
+        printf "  %-8d %-12.0f %-12.2f %s\n", $c, $bv, $cv, $delta;
+    }
+}
+
+# ============================================================================
+# V8 — End-to-end bin-count comparison: legacy vs. (e) (issue #201)
+# ============================================================================
+#
+# The point of this aspect is to verify empirically — not algebraically —
+# whether option (e) two-stage stream→finalize preserves the legacy
+# histogram's bucket-to-bucket count variance (multi-modal spike-trough
+# structure). The original V7 only compared peaks and totals; V8 prints
+# every display column's count side-by-side so the spike-trough pattern
+# can be observed directly in the numbers.
+#
+# Legacy pipeline (matches ltl release/0.14.5):
+#   parse -> retain raw values per metric
+#   end-of-parse:
+#     bucket_count = int(decades * 8 + 0.5), min 5
+#     boundaries log-spaced over [d_min, d_max]
+#     each value -> exactly one bucket via find_histogram_bucket_index
+#     calculate_histogram_display_buckets projects partition onto
+#       $bar_area_width via expand (each bucket -> N display cols, copied)
+#       or compress (sum adjacent buckets into each display col).
+#
+# (e) pipeline:
+#   parse -> streaming counter_update (auto-resize partition, bpd=53,
+#            seed_decades=5).
+#   end-of-parse:
+#     finalize re-bin via geometric-midpoint into partition with
+#       bin_count = $bar_area_width and boundaries log-spaced over
+#       [d_min, d_max].
+#
+# Output: col-by-col table, legacy_count, e_count, delta. Look for:
+#   - Do high values in legacy appear at the same columns in (e)?
+#   - Do troughs (low-value cols between two high-value cols) preserve?
+#   - Is (e) uniformly lower at peaks AND uniformly higher at troughs?
+#     (That would indicate smoothing.)
+
+sub run_v8 {
+    die_usage("--aspect v8 requires at least one --file") unless @{$opt{file}};
+    my $W = $opt{'display-width'} // 100;
+
+    # Sweep mode: when --candidate is "sweep", iterate over bpd values and
+    # report worst-case bucket displacement for each (no per-column table).
+    # Otherwise the previous detailed table prints (using $opt{bpd}).
+    my $sweep_mode = (lc($opt{candidate} // '') eq 'sweep');
+
+    # First parse: retain raw values once, used by all bpd iterations as well
+    # as legacy reproduction. The streaming partition (bpd-dependent) is built
+    # separately per bpd in sweep mode.
+    my @raw;
+    my $start = [gettimeofday];
+    my $total_lines = 0;
+    for my $file (@{$opt{file}}) {
+        my $n = iterate_durations($file, sub {
+            my (undef, undef, $dur) = @_;
+            push @raw, $dur;
+        });
+        $total_lines += $n;
+    }
+    my $parse_elapsed = tv_interval($start);
+
+    # Build streaming partition at the chosen bpd. In non-sweep mode this is
+    # $opt{bpd}; in sweep mode we'll rebuild per-iteration below.
+    my $build_stream = sub {
+        my ($bpd) = @_;
+        my %store = ();
+        my $saved_bpd = $opt{bpd};
+        $opt{bpd} = $bpd;
+        for my $v (@raw) {
+            counter_update(\%store, 'histogram', $v);
+        }
+        $opt{bpd} = $saved_bpd;
+        return $store{'histogram'};
+    };
+
+    my $stream_entry = $build_stream->($opt{bpd});
+    my $elapsed = $parse_elapsed;
+
+    my $d_min = $raw[0];
+    my $d_max = $raw[0];
+    for my $v (@raw) { $d_min = $v if $v < $d_min; $d_max = $v if $v > $d_max; }
+    $d_min = 1 if $d_min <= 0;
+    my $d_decades = (log($d_max) - log($d_min)) / log(10);
+
+    # === Sweep mode: report bucket-displacement at multiple bpd values ===
+    if ($sweep_mode) {
+        my $d_min_sw = $raw[0];
+        my $d_max_sw = $raw[0];
+        for my $v (@raw) {
+            $d_min_sw = $v if $v < $d_min_sw;
+            $d_max_sw = $v if $v > $d_max_sw;
+        }
+        $d_min_sw = 1 if $d_min_sw <= 0;
+        my $d_dec_sw = (log($d_max_sw) - log($d_min_sw)) / log(10);
+        my $hgbpd_sw = 8;
+        my $bc_sw = int($d_dec_sw * $hgbpd_sw + 0.5);
+        $bc_sw = 5 if $bc_sw < 5;
+
+        # Build true legacy partition (one-pass direct binning) once.
+        my @legacy_partition_sw = (0) x $bc_sw;
+        my $log_ratio_sw = log($d_max_sw / $d_min_sw);
+        for my $v (@raw) {
+            my $i = int($bc_sw * log($v / $d_min_sw) / $log_ratio_sw);
+            $i = $bc_sw - 1 if $i >= $bc_sw;
+            $i = 0 if $i < 0;
+            $legacy_partition_sw[$i]++;
+        }
+
+        print "=== V8 SWEEP: bucket-displacement vs streaming bpd (issue #201) ===\n";
+        printf "files: %s\n", join(", ", @{$opt{file}});
+        printf "total_lines: %d  raw_values: %d  parse_s: %.2f\n",
+            $total_lines, scalar(@raw), $parse_elapsed;
+        printf "d_min: %.3f  d_max: %.3f  d_decades: %.2f\n",
+            $d_min_sw, $d_max_sw, $d_dec_sw;
+        printf "legacy partition: %d buckets (bpd=%d, log-spaced over [d_min, d_max])\n",
+            $bc_sw, $hgbpd_sw;
+        print "\n";
+        printf "%-6s  %-10s  %-10s  %-12s  %-12s  %-12s  %-12s\n",
+            'bpd', 'stream_bins', 'algo', 'vis_max_%', 'vis_mean_%', 'vis_p95_%', 'mass_drift_%';
+        print "-" x 100, "\n";
+
+        # All nine locked LEVEL -> bpd values from #187 Decision 2 tier table.
+        # Plus a few above-range probes to characterize the resonance/error
+        # behavior past the locked ceiling (616).
+        # Precompute peak + visible threshold for displacement metrics.
+        my $legacy_total = 0;
+        my $peak = 0;
+        for my $i (0 .. $bc_sw - 1) {
+            $peak = $legacy_partition_sw[$i] if $legacy_partition_sw[$i] > $peak;
+            $legacy_total += $legacy_partition_sw[$i];
+        }
+        my $visible_threshold = $peak * 0.005;  # 0.5% of peak
+
+        my %algos = (
+            'geometric'    => \&_rebin_geometric,
+            'proportional' => \&_rebin_proportional,
+        );
+
+        for my $bpd_test (4, 8, 16, 32, 53, 80, 115, 256, 616) {
+            my $entry = $build_stream->($bpd_test);
+            my $stream_bins = $entry->{partition}{bin_count};
+
+            for my $algo_name (qw(geometric proportional)) {
+                my @rebin = $algos{$algo_name}->(
+                    $entry->{partition},
+                    $entry->{bins},
+                    $d_min_sw, $d_max_sw, $bc_sw,
+                );
+                $rebin[0]         += $entry->{underflow} // 0;
+                $rebin[$bc_sw-1]  += $entry->{overflow}  // 0;
+
+                my @disp_visible;
+                my $rebin_total = 0;
+                for my $i (0 .. $bc_sw - 1) {
+                    my $lv = $legacy_partition_sw[$i];
+                    my $rv = $rebin[$i];
+                    $rebin_total += $rv;
+                    if ($lv > 0 && $lv >= $visible_threshold) {
+                        push @disp_visible, abs($rv - $lv) / $lv * 100;
+                    }
+                }
+                my @sdv = sort { $a <=> $b } @disp_visible;
+                my $max_dv  = @sdv ? $sdv[-1] : 0;
+                my $mean_dv = @sdv ? (sum(@sdv) / scalar(@sdv)) : 0;
+                my $p95_dv  = @sdv ? $sdv[int(0.95 * $#sdv)] : 0;
+                my $mass_drift = $legacy_total > 0
+                    ? abs($rebin_total - $legacy_total) / $legacy_total * 100
+                    : 0;
+
+                printf "%-6d  %-10d  %-10s  %-12.4f  %-12.4f  %-12.4f  %-12.4f\n",
+                    $bpd_test, $stream_bins, $algo_name,
+                    $max_dv, $mean_dv, $p95_dv, $mass_drift;
+            }
+        }
+        print "\n";
+        printf "max_disp_%% = worst case over all 41 buckets (incl sparse tail).\n";
+        printf "vis_max_%% = worst case over visible buckets (>= 0.5%% of peak count).\n";
+        printf "Acceptance threshold: vis_max_%% <= 1.0%% means streaming bpd is sufficient\n";
+        printf "  to make re-bin error invisible vs direct legacy binning.\n";
+        return;
+    }
+
+    print "=== V8: End-to-end bin-count comparison legacy vs (e) (issue #201) ===\n";
+    printf "files: %s\n", join(", ", @{$opt{file}});
+    printf "total_lines: %d  raw_values_kept: %d\n", $total_lines, scalar(@raw);
+    printf "elapsed_s: %.2f\n", $elapsed;
+    printf "display_width: %d\n", $W;
+    printf "d_min: %.3f  d_max: %.3f  d_decades: %.2f\n", $d_min, $d_max, $d_decades;
+    printf "streaming partition: bin_count=%d min=%.3f max=%.3f rebins=%d (bpd=%d)\n",
+        $stream_entry->{partition}{bin_count},
+        $stream_entry->{partition}{min},
+        $stream_entry->{partition}{max},
+        $stream_entry->{partition}{rebins},
+        $opt{bpd};
+    print "\n";
+
+    # === Legacy pipeline ===
+    # Match ltl:5260-5278 calculate_histogram_bucket_count + ltl:5298-5410.
+    my $hgbpd = 8;
+    my $bucket_count = int($d_decades * $hgbpd + 0.5);
+    $bucket_count = 5 if $bucket_count < 5;
+    my @partition_legacy = (0) x $bucket_count;
+    my $log_ratio_legacy = log($d_max / $d_min);
+    for my $v (@raw) {
+        my $i = int($bucket_count * log($v / $d_min) / $log_ratio_legacy);
+        $i = $bucket_count - 1 if $i >= $bucket_count;
+        $i = 0 if $i < 0;
+        $partition_legacy[$i]++;
+    }
+    # Project legacy partition onto W cols (calculate_histogram_display_buckets).
+    my @legacy_display;
+    my $cols_per_bucket = $W / $bucket_count;
+    if ($cols_per_bucket >= 1) {
+        for my $i (0 .. $W - 1) {
+            my $bi = int($i / $cols_per_bucket);
+            $bi = $bucket_count - 1 if $bi >= $bucket_count;
+            push @legacy_display, $partition_legacy[$bi];
+        }
+    } else {
+        my $bpc = $bucket_count / $W;
+        for my $i (0 .. $W - 1) {
+            my $sb = int($i * $bpc);
+            my $eb = int(($i + 1) * $bpc) - 1;
+            $eb = $bucket_count - 1 if $eb >= $bucket_count;
+            my $s = 0;
+            $s += $partition_legacy[$_] for $sb .. $eb;
+            push @legacy_display, $s;
+        }
+    }
+    printf "legacy partition bin_count: %d  cols_per_bucket: %.4f\n",
+        $bucket_count, $cols_per_bucket;
+
+    # === (e) pipeline — variant 1: finalize bin_count = W ===
+    # Streaming partition already populated. Finalize geometric-midpoint
+    # re-bin into [d_min, d_max] x W (one display col per finalized bin).
+    my @e_display = _rebin_geometric(
+        $stream_entry->{partition},
+        $stream_entry->{bins},
+        $d_min, $d_max, $W,
+    );
+    $e_display[0]     += $stream_entry->{underflow} // 0;
+    $e_display[$W-1] += $stream_entry->{overflow}   // 0;
+
+    # === (e') pipeline — variant 2: finalize bin_count = legacy_bucket_count,
+    # then project onto W via legacy's calculate_histogram_display_buckets.
+    # Matches the legacy's two-stage shape exactly: source -> coarse partition
+    # -> wide-bar display projection.
+    my @e2_partition = _rebin_geometric(
+        $stream_entry->{partition},
+        $stream_entry->{bins},
+        $d_min, $d_max, $bucket_count,
+    );
+    $e2_partition[0]              += $stream_entry->{underflow} // 0;
+    $e2_partition[$bucket_count-1] += $stream_entry->{overflow}  // 0;
+    # Apply legacy's display projection (duplication or aggregation).
+    my @e2_display;
+    if ($cols_per_bucket >= 1) {
+        for my $i (0 .. $W - 1) {
+            my $bi = int($i / $cols_per_bucket);
+            $bi = $bucket_count - 1 if $bi >= $bucket_count;
+            push @e2_display, $e2_partition[$bi];
+        }
+    } else {
+        my $bpc = $bucket_count / $W;
+        for my $i (0 .. $W - 1) {
+            my $sb = int($i * $bpc);
+            my $eb = int(($i + 1) * $bpc) - 1;
+            $eb = $bucket_count - 1 if $eb >= $bucket_count;
+            my $s = 0;
+            $s += $e2_partition[$_] for $sb .. $eb;
+            push @e2_display, $s;
+        }
+    }
+
+    print "\n";
+    printf "%-5s  %-12s  %-12s  %-12s  %-12s  %s\n",
+        'col', 'val_lower', 'legacy', '(e_W)', '(e_coarse)', 'legacy_vs_e_coarse';
+    print  "-" x 90, "\n";
+    my $log_ratio_d = log($d_max / $d_min);
+    for my $i (0 .. $W - 1) {
+        my $lower = $d_min * exp($log_ratio_d * $i / $W);
+        my $bv = $legacy_display[$i];
+        my $cv = $e_display[$i];
+        my $c2 = $e2_display[$i];
+        my $delta_str;
+        if ($bv == 0 && $c2 == 0) {
+            $delta_str = '   .';
+        } elsif ($bv == 0) {
+            $delta_str = '+inf%';
+        } else {
+            $delta_str = sprintf("%+.1f%%", 100 * ($c2 - $bv) / $bv);
+        }
+        printf "%-5d  %-12.2f  %-12.0f  %-12.2f  %-12.2f  %s\n",
+            $i, $lower, $bv, $cv, $c2, $delta_str;
+    }
+    print "\n";
+
+    # Spike-trough check: for each interior column, classify whether legacy
+    # shows a local peak (> both neighbors) or trough (< both neighbors) and
+    # whether (e) agrees.
+    my ($peaks_match, $peaks_mismatch, $troughs_match, $troughs_mismatch) = (0,0,0,0);
+    for my $i (1 .. $W - 2) {
+        my ($l, $r) = ($legacy_display[$i-1], $legacy_display[$i+1]);
+        my $c = $legacy_display[$i];
+        my $is_peak_legacy   = ($c > $l && $c > $r);
+        my $is_trough_legacy = ($c < $l && $c < $r);
+        next unless $is_peak_legacy || $is_trough_legacy;
+        my ($el, $er, $ec) = ($e_display[$i-1], $e_display[$i+1], $e_display[$i]);
+        my $is_peak_e   = ($ec > $el && $ec > $er);
+        my $is_trough_e = ($ec < $el && $ec < $er);
+        if ($is_peak_legacy)   { $is_peak_e   ? $peaks_match++   : $peaks_mismatch++; }
+        if ($is_trough_legacy) { $is_trough_e ? $troughs_match++ : $troughs_mismatch++; }
+    }
+    print  "Spike/trough preservation:\n";
+    printf "  legacy peaks   preserved by (e): %d / %d\n",
+        $peaks_match, $peaks_match + $peaks_mismatch;
+    printf "  legacy troughs preserved by (e): %d / %d\n",
+        $troughs_match, $troughs_match + $troughs_mismatch;
+    printf "  smoothing indicator: %d peaks lowered + %d troughs raised = %d total smoothing events\n",
+        $peaks_mismatch, $troughs_mismatch, $peaks_mismatch + $troughs_mismatch;
+
+    return;
 }

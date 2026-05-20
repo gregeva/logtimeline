@@ -254,6 +254,82 @@ This feature does NOT own:
 
 The contract authoritative reference is `features/187-histogram-bin-counter-percentiles.md` § *Locked decisions from research*.
 
+### R12 — Finalize re-bin wrapper for display-geometry-bound consumers (added 2026-05-20 via #201)
+
+Added by investigation #201 to support F2 (heatmap) and F3 (histogram) consumer families per the per-family Decision 5 scope clarification.
+
+#### Contract
+
+`partition_rebin($src_partition, $src_bins, $new_min, $new_max, $new_bin_count)` — re-bin a source partition's counts into a target partition with explicit `[$new_min, $new_max]` and `$new_bin_count`. Returns the target partition object and its bins array (count vector of length `$new_bin_count`).
+
+Algorithm: geometric-midpoint projection — for each source bin with positive count, compute its geometric midpoint via `sqrt(lower × upper)`, locate the target bin containing that midpoint via the standard closed-form bin assignment (`int(new_bin_count × log(mid / new_min) / log(new_max / new_min))`), and assign the source bin's count to that target bin in full. Source bins whose midpoint falls outside `[$new_min, $new_max]` are assigned to the nearest target end (or, if the consumer requires it, accumulated into separate overflow/underflow counters per #187 Decision 4).
+
+#### Why a new wrapper instead of new primitive surface
+
+`partition_extend` (R1 implementation, `ltl:586–631`) already implements geometric-midpoint projection in its remap loop at `ltl:613–622`. `partition_rebin` is the same loop extracted into a caller-driven wrapper that:
+
+- Accepts arbitrary `[$new_min, $new_max]` and `$new_bin_count` (instead of computing them from doubling).
+- Returns a freshly constructed target partition (instead of mutating the source).
+
+The algorithm is identical; the difference is in *who* chooses the target geometry. `partition_extend` uses HdrHistogram-convention doubling; `partition_rebin` uses caller-supplied display geometry. **No new mathematical primitive surface.**
+
+#### Composition pattern for F2/F3
+
+```
+# During parse: streaming auto-resize partition per consumer key.
+# F2/F3 streaming bpd is locked at 616 (Level 9 per #187 Decision 2 tier
+# table; HdrHistogram 3-significant-digit reference) — ONLY for F2 (heatmap)
+# and F3 (histogram) because their partition counts are bounded (~70 total).
+# F1 consumers (summary_table, csv_output, time_bucket_stats) MUST continue
+# using Decision 2 default (bpd=53) — F1 has unbounded partition counts
+# (one per (category, log_key)) and bpd=616 would multiply memory by ~12x
+# per partition (gigabytes of overhead on typical workloads).
+counter_update(\%store, $key, $value);   # R1 + R2 + R3
+
+# At end-of-parse: finalize re-bin into target partition.
+my $entry = $store{$key};
+my ($finalized_p, $finalized_bins) = partition_rebin(
+    $entry->{partition},
+    $entry->{bins},
+    $d_min, $d_max,
+    $target_bin_count,   # F2: $heatmap_width
+                         # F3: int(decades * histogram_buckets_per_decade)
+);
+# $finalized_p has bin_count = $target_bin_count, boundaries log-spaced over
+# [d_min, d_max]. $finalized_bins is the count vector. Underflow and overflow
+# from the streaming partition can be folded into $finalized_bins[0] and
+# [$target_bin_count - 1] respectively, or kept separate per consumer choice.
+
+# Display rendering:
+#   F2: read $finalized_bins directly (partition geometry IS display geometry).
+#   F3: apply calculate_histogram_display_buckets($finalized_bins, $bar_area_width)
+#       unchanged. The shipped stretched-bar projection at ltl:7462 handles
+#       the partition->display step.
+```
+
+#### Invariants preserved
+
+- **Mass conservation.** Sum of counts in `$finalized_bins` equals sum of counts in `$src_bins` plus optional source-side overflow/underflow folded in. Empirically validated on canonical Tomcat datasets via V6/V7/V8 in `prototype/189-bin-counter-primitives.pl`.
+- **Peak preservation.** A spike entirely contained within one source bin lands entirely in one target bin (the one containing the source bin's midpoint). Empirically validated at 100% peak retention.
+- **Per-bucket displacement bounded below visibility threshold at streaming bpd=616.** V8 sweep results on canonical datasets show worst-case visible-bucket displacement of 1.10% (your file) and 5.78% (148MB file) — both well below the ~11% per-character-row threshold of a 9-character-tall ASCII histogram. See `prototype/201-projection-comparison-report.md` for the full sweep across all 9 locked tier values and both geometric-midpoint and proportional-overlap algorithms.
+- **Determinism.** Geometric-midpoint projection is deterministic in the source partition and target geometry.
+
+#### Source basis
+
+- The remap loop at `ltl:613–622` and its lineage to HdrHistogram's `AbstractHistogram.java` resize path.
+- Empirical fidelity validation at `prototype/201-projection-comparison-report.md` (V6/V7 initial aggregate measurements, V8 per-column comparison and bpd sweep).
+- Architectural rationale at `features/201-display-geometry-bound-consumers.md` § Recommendation.
+
+#### Implementation note
+
+`partition_rebin` can be a thin function or inlined at F2/F3 consumer call sites. Whether to expose it as a callable subroutine or as a documented pattern is an implementation choice for the production ticket. The behavior described above is the contract; the API shape is open.
+
+#### Boundary with R1's auto-resize
+
+R1's auto-resize lifecycle is **unchanged** by R12. F1 consumers (`summary_table`, `csv_output`, `time_bucket_stats`) continue to use the auto-resize lifecycle without a finalize re-bin step — bins are internal precision, never rendered as display columns, so display geometry is irrelevant for F1.
+
+R12 applies only to F2 and F3 consumers per the Decision 5 per-family scope clarification.
+
 ## Consumer-side requirements (per #187 R12)
 
 This section enumerates what each consumer of #189's primitives needs. The consumer-name strings (`summary_table`, `csv_output`, `time_bucket_stats`, `heatmap_markers`, `heatmap_cells`, `histogram_view`, `histogram_bins`) and the consumer catalogue are locked in #187 R12 and #187 Decision 8. The mapping between consumer names and ltl call sites lives in the **Audit findings** section below.
