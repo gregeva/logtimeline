@@ -121,6 +121,21 @@ The revision moves the partition-to-display reconciliation from render time (whe
 
 **Algorithmic continuity.** `partition_rebin` reuses the existing geometric-midpoint remap loop from `partition_extend` (`ltl:613–622`). The streaming partition continues to use #189 R1–R6 unchanged. F1 consumers (`summary_table`, `csv_output`, `time_bucket_stats`) are unaffected by the R5 revision; they use the auto-resize lifecycle without a finalize re-bin step per #187 Decision 5 F1 contract.
 
+#### R5 fidelity invariant — DO NOT smooth the data
+
+**The migration must not visually flatten the histogram.** The legacy histogram (shipped `release/0.14.5`) preserves real bucket-to-bucket count variance because each value lands in exactly one bucket (`find_histogram_bucket_index` at `ltl:5281`). Multi-modal structure in the data — multiple latency populations producing distinct spikes — renders as distinct spikes. This is a feature, not noise.
+
+A reverted Phase 3 attempt used **distributive remap** (splitting each source bin's mass proportionally across overlapping display columns by log-space overlap). This averages mass with neighbors, which **lowered spike heights** in the rendered histogram (peak 21k → 19k on the canonical Tomcat dataset) and **smoothed visible multi-modal structure into a single mode**. That is the failure mode #201 was opened to investigate; the locked recommendation (option (e), geometric-midpoint projection) was chosen specifically to avoid it.
+
+The fidelity invariant for #34 Phase 3 implementations is:
+
+- **No cross-bin mass splitting at any stage.** Streaming auto-resize partition (during parse), finalize re-bin (end-of-parse), and render must all assign each source count to exactly one target bin. No source bin's count may contribute fractionally to multiple targets.
+- **Geometric-midpoint projection only** for the finalize re-bin (`partition_rebin` per #189 R12). The midpoint of each source bin's log-space interval (`sqrt(lower × upper)`) determines the single target bin that receives its entire count.
+- **Visual validation against the legacy** is mandatory. A migrated histogram that looks smoother than the legacy on the canonical Tomcat dataset (`logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt`) has reintroduced cross-bin mass flow somewhere and must be fixed before merge. Use `tests/baseline/` regression scenarios; image-diff at minimum.
+- **Memory savings are not worth fidelity loss.** The point of the migration is bounded memory cost (eliminating `%histogram_values{$metric}` retention) *without* changing the visual output. If a candidate implementation reduces memory but smooths the histogram, the candidate is wrong — find and remove the cross-bin mass flow, do not accept the smoothing as a trade.
+
+Search vocabulary for #34 reviewers: any code that splits a source bin's count, distributes mass proportionally, computes log-space overlap weights between source and target bins, or contains the words "distributive," "smear," "split," "interpolate" applied to bin counts (not percentile values) is suspect and must be justified against this invariant.
+
 ### R6 — Overflow and underflow per #187 Decision 4
 
 Per #187 Decision 4, each partition maintains separate overflow and underflow counters distinct from the in-range bins. Under #187 Decision 5's auto-resize lifecycle, overflow and underflow are expected to be rare in practice — the partition extends to contain observed values. Decision 4's mechanisms function primarily as a safety net.

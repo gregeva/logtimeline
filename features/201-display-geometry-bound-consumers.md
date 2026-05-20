@@ -550,6 +550,23 @@ The shared mechanism (geometric-midpoint re-bin via `partition_extend`'s existin
 - #189 primitives R1–R6 as-built (`ltl:565–748`).
 - F1 consumers (`summary_table`, `csv_output`, `time_bucket_stats`): no change, they continue to use #189 primitives in their existing auto-resize lifecycle per #187 Decision 5.
 
+### Fidelity invariant — DO NOT smooth the data
+
+The legacy histogram (shipped `release/0.14.5`) preserves real bucket-to-bucket count variance because each value lands in exactly one bucket. Multi-modal structure in the data — distinct latency populations producing distinct spikes — renders as distinct spikes. This is a feature, not noise.
+
+A reverted Phase 3 attempt used **distributive remap** (splitting each source bin's mass proportionally across overlapping display columns by log-space overlap). This averages mass with neighbors, lowering spike heights (peak 21k → 19k on canonical Tomcat) and **smoothing visible multi-modal structure into a single mode**. That is the failure mode #201 was opened to investigate. Option (e) — the locked recommendation — was chosen *because* its geometric-midpoint projection avoids any cross-bin mass flow.
+
+**For #34 Phase 3 implementations, the fidelity invariant is:**
+
+- **No cross-bin mass splitting at any stage.** Each source count goes to exactly one target bin in streaming, finalize, and render. No fractional contributions.
+- **Geometric-midpoint projection only** for finalize re-bin (`partition_rebin` per #189 R12).
+- **Visual validation against the legacy is mandatory** before merge. If the migrated histogram looks smoother than the legacy on the canonical Tomcat dataset, cross-bin mass flow has been reintroduced — find and remove it.
+- **Memory savings are not worth fidelity loss.** The migration's purpose is bounded memory cost without changing visual output. Smoothing is a regression, not a trade.
+
+Search vocabulary for #34 code review: any code that splits a source bin's count, distributes mass proportionally, computes log-space overlap weights between source and target bins, or applies "distributive," "smear," "split," or "interpolate" to bin counts (not percentile values) is suspect and must be justified against this invariant.
+
+This invariant is mirrored verbatim into `features/34-histogram-bin-counter-mode.md` § R5 so #34 implementers see it at the migration ticket.
+
 ---
 
 ## § Open question for histogram migration ticket
