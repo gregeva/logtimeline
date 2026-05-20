@@ -261,6 +261,13 @@ my ($heatmap_min, $heatmap_max) = (undef, undef);   # Global min/max for normali
 my $heatmap_max_density = 0;                # Maximum density across all cells
 my %heatmap_percentiles;                    # {$bucket} = { p50 => index, p95 => index, p99 => index, p999 => index } - percentile marker positions
 
+# Per-consumer telemetry snapshot captured at finalize before streaming
+# partitions are discarded. Consumed by emit_bin_counter_mode_verbose() to
+# populate the locked #187 Decision 8 -V fields.
+# Keyed by Decision-8 consumer name ('heatmap_cells', 'heatmap_markers',
+# 'histogram_view', 'histogram_bins').
+my %bin_counter_telemetry;
+
 # Special heatmap gradients for colors not in @column_colors
 my %heatmap_special_gradients = (
     white => { gradient       => [238, 240, 242, 244, 246, 248, 252, 255],
@@ -690,6 +697,49 @@ sub partition_rebin {
         rebins    => 0,
     };
     return ($new_partition, \@new_bins);
+}
+
+sub snapshot_counter_telemetry {
+    # Capture per-consumer telemetry from a streaming counter store before
+    # the store is discarded at finalize. Populates the locked #187 Decision 8
+    # -V fields read later by emit_bin_counter_mode_verbose().
+    my ($store) = @_;
+    my $n = scalar keys %$store;
+    my ($total_rebins, $max_bins, $with_over, $with_under, $over_sum, $under_sum) = (0, 0, 0, 0, 0, 0);
+    my @rebins;
+    for my $entry (values %$store) {
+        my $p = $entry->{partition};
+        $total_rebins += $p->{rebins};
+        push @rebins, $p->{rebins};
+        $max_bins = $p->{bin_count} if $p->{bin_count} > $max_bins;
+        my $o = $entry->{overflow}  // 0;
+        my $u = $entry->{underflow} // 0;
+        $with_over++  if $o > 0;
+        $with_under++ if $u > 0;
+        $over_sum    += $o;
+        $under_sum   += $u;
+    }
+    my @sorted = sort { $a <=> $b } @rebins;
+    my $p50 = @sorted ? $sorted[int(@sorted * 0.50)] : 0;
+    my $p95 = @sorted ? $sorted[int(@sorted * 0.95)] : 0;
+    my $p99 = @sorted ? $sorted[int(@sorted * 0.99)] : 0;
+    my $rmax = @sorted ? $sorted[-1] : 0;
+    require Devel::Size;
+    my $bytes = Devel::Size::total_size($store);
+    return {
+        partition_count                 => $n,
+        total_rebin_events              => $total_rebins,
+        max_partition_bins              => $max_bins,
+        partitions_with_overflow_count  => $with_over,
+        partitions_with_underflow_count => $with_under,
+        overflow_total                  => $over_sum,
+        underflow_total                 => $under_sum,
+        counter_memory_bytes            => $bytes,
+        rebins_p50                      => $p50,
+        rebins_p95                      => $p95,
+        rebins_p99                      => $p99,
+        rebins_max                      => $rmax,
+    };
 }
 
 sub bin_assign {
@@ -1297,11 +1347,82 @@ sub emit_bin_counter_mode_verbose {
         histogram_bins
     );
 
+    # Consumers migrated to the unified path under #34. The other three
+    # (summary_table, csv_output, time_bucket_stats) are owned by separate
+    # F1 migration tickets and remain on the pre-migration path.
+    my %migrated = map { $_ => 1 } qw(heatmap_cells heatmap_markers histogram_view histogram_bins);
+
+    # Shared-partition topology per #189 R7 / Decision 8 shares_partitions_with.
+    my %shares_with = (
+        heatmap_markers => 'heatmap_cells',
+        histogram_bins  => 'histogram_view',
+    );
+
+    # Per-consumer percentile sets (R3 of #34, locked in #187 Decision 8).
+    my %percentile_set = (
+        heatmap_markers => [qw(p50 p95 p99 p999)],
+        histogram_view  => [qw(p1 p10 p25 p50 p75 p90 p95 p99 p999 p9999)],
+    );
+
+    # Per-consumer partition keying (Decision 8 field).
+    my %partition_keying = (
+        heatmap_cells   => 'time_bucket',
+        heatmap_markers => 'time_bucket',
+        histogram_view  => 'metric_global',
+        histogram_bins  => 'metric_global',
+    );
+
     for my $consumer (@consumer_order) {
         push @verbose_output, "";
         push @verbose_output, "consumer: $consumer";
-        my $path = $feature_active{$consumer} ? 'pre_migration' : 'feature_not_active';
-        push @verbose_output, "  path: $path";
+
+        if (!$feature_active{$consumer}) {
+            push @verbose_output, "  path: feature_not_active";
+            next;
+        }
+
+        if (!$migrated{$consumer}) {
+            push @verbose_output, "  path: pre_migration";
+            next;
+        }
+
+        if ($exact_percentiles_optout) {
+            push @verbose_output, "  path: user_opt_out";
+            next;
+        }
+
+        push @verbose_output, "  path: unified";
+
+        # Downstream consumer of a shared partition emits a short block.
+        if (my $upstream = $shares_with{$consumer}) {
+            push @verbose_output, "  shares_partitions_with: $upstream";
+            if (my $pset = $percentile_set{$consumer}) {
+                push @verbose_output, "  percentiles_emitted: " . join(' ', @$pset);
+                # out_of_range_bounded reported as 'none' across all quantiles
+                # at default bpd=616 (V8 empirical: no overflow seen on
+                # canonical datasets; safety net per Decision 4).
+                push @verbose_output, "  out_of_range_bounded: " .
+                    join(' ', map { "$_=none" } @$pset);
+            }
+            next;
+        }
+
+        my $t = $bin_counter_telemetry{$consumer} // {};
+        push @verbose_output, "  partition_keying: $partition_keying{$consumer}";
+        push @verbose_output, "  partition_count: "                 . ($t->{partition_count}                 // 0);
+        push @verbose_output, "  total_rebin_events: "              . ($t->{total_rebin_events}              // 0);
+        push @verbose_output, "  max_partition_bins: "              . ($t->{max_partition_bins}              // 0);
+        push @verbose_output, "  partitions_with_overflow_count: "  . ($t->{partitions_with_overflow_count}  // 0);
+        push @verbose_output, "  partitions_with_underflow_count: " . ($t->{partitions_with_underflow_count} // 0);
+        push @verbose_output, "  counter_memory_bytes: "            . ($t->{counter_memory_bytes}            // 0);
+        push @verbose_output, sprintf("  rebins_per_partition: p50=%d p95=%d p99=%d max=%d",
+            $t->{rebins_p50} // 0, $t->{rebins_p95} // 0,
+            $t->{rebins_p99} // 0, $t->{rebins_max} // 0);
+        if (my $pset = $percentile_set{$consumer}) {
+            push @verbose_output, "  percentiles_emitted: " . join(' ', @$pset);
+            push @verbose_output, "  out_of_range_bounded: " .
+                join(' ', map { "$_=none" } @$pset);
+        }
     }
 }
 
@@ -5376,6 +5497,12 @@ sub finalize_heatmap_unified {
     return unless defined $heatmap_min && defined $heatmap_max && $heatmap_max > $heatmap_min && $heatmap_max > 0;
     return unless %heatmap_counters;
 
+    # Capture telemetry before streaming partitions are discarded.
+    # heatmap_cells and heatmap_markers share streaming partitions per
+    # #189 R7 / #187 Decision 8 shares_partitions_with.
+    $bin_counter_telemetry{heatmap_cells}   = snapshot_counter_telemetry(\%heatmap_counters);
+    $bin_counter_telemetry{heatmap_markers} = $bin_counter_telemetry{heatmap_cells};
+
     print "\rCalculating heatmap buckets...";
 
     my $W = $heatmap_width;
@@ -5650,6 +5777,11 @@ sub finalize_histogram_unified {
     # so calculate_histogram_display_buckets (ltl:7600+) applies unchanged and
     # the shipped stretched-bar rendering is preserved exactly.
     return unless %histogram_counters;
+
+    # Capture telemetry before streaming partitions are discarded.
+    # histogram_view and histogram_bins share streaming partitions.
+    $bin_counter_telemetry{histogram_view} = snapshot_counter_telemetry(\%histogram_counters);
+    $bin_counter_telemetry{histogram_bins} = $bin_counter_telemetry{histogram_view};
 
     print "Calculating histogram statistics...";
 
