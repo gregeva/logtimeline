@@ -278,9 +278,12 @@ The algorithm is identical; the difference is in *who* chooses the target geomet
 ```
 # During parse: streaming auto-resize partition per consumer key.
 # F2/F3 streaming bpd is locked at 616 (Level 9 per #187 Decision 2 tier
-# table; HdrHistogram 3-significant-digit reference) to keep finalize re-bin
-# error below visual fidelity. F1 consumers continue using Decision 2 default
-# (bpd=53) per the F1 lifecycle.
+# table; HdrHistogram 3-significant-digit reference) — ONLY for F2 (heatmap)
+# and F3 (histogram) because their partition counts are bounded (~70 total).
+# F1 consumers (summary_table, csv_output, time_bucket_stats) MUST continue
+# using Decision 2 default (bpd=53) — F1 has unbounded partition counts
+# (one per (category, log_key)) and bpd=616 would multiply memory by ~12x
+# per partition (gigabytes of overhead on typical workloads).
 counter_update(\%store, $key, $value);   # R1 + R2 + R3
 
 # At end-of-parse: finalize re-bin into target partition.

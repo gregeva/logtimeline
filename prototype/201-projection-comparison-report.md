@@ -186,7 +186,9 @@ At histogram rendering height of 9 characters, **bpd=616 is below the visibility
 
 **Two-stage stream → finalize re-bin into legacy partition shape → apply legacy's display projection unchanged.**
 
-- Streaming `bpd = 616` (Level 9, HdrHistogram 3-sig-digit reference, top of locked Decision 2 range).
+**Scope: F2 (heatmap) and F3 (histogram) only.** F1 consumers (summary_table, csv_output, time_bucket_stats) are unaffected — they continue using Decision 2's default bpd=53. The bpd=616 streaming default below applies ONLY to display-geometry-bound consumers because their partition counts are bounded (~70 total). F1 partition counts are unbounded (one per `(category, log_key)`), and applying bpd=616 to F1 would multiply per-partition memory by ~12× — gigabytes of overhead on typical workloads.
+
+- Streaming `bpd = 616` (Level 9, HdrHistogram 3-sig-digit reference, top of locked Decision 2 range) — **F2/F3 only**.
 - Streaming `seed_decades = 5` (Decision 5 default).
 - Finalize re-bin via `partition_rebin` (#189 R12) using geometric-midpoint projection (same algorithm as `partition_extend`'s existing remap loop at `ltl:613-622`).
 - Finalize target partition shape:
@@ -194,15 +196,17 @@ At histogram rendering height of 9 characters, **bpd=616 is below the visibility
   - **F3 (histogram)**: `bin_count = int(decades × histogram_buckets_per_decade)` (default 8 × decades), boundaries log-spaced over `[d_min, d_max]`. Same shape ltl computes today.
 - Render: F2 reads finalized partition directly. F3 applies `calculate_histogram_display_buckets` (`ltl:7462`) unchanged for stretched-bar rendering.
 
-### Memory cost at locked bpd=616
+### Memory cost at locked bpd=616 (F2/F3 only)
 
 | Consumer | Partition count | Bytes/partition | Subtotal |
 |---|---|---|---|
 | Heatmap (F2) | ~60 time buckets | ~25KB | ~1.5 MB |
 | Histogram (F3) | ~10 metrics | ~25KB | ~250 KB |
-| **Total** | ~70 partitions | | **~1.75 MB** |
+| **Total F2/F3** | ~70 partitions | | **~1.75 MB** |
 
 Bounded by `bpd × decades`, not by sample count. Stays at ~1.75MB regardless of input file size.
+
+**F1 consumers are NOT included in this table** — they continue using Decision 2 default (bpd=53), one partition per `(category, log_key)`. F1 memory is governed by Decision 2's existing analysis at ~2.5GB worst case for L9 (which is why L9 was always the analyst's opt-in lever for F1, never the default). The F2/F3 locked bpd=616 is decoupled from the F1 Decision 2 default; the two systems use the same primitives but different bpd settings tuned for their respective partition-count regimes.
 
 ### Validation against canonical datasets
 

@@ -492,7 +492,19 @@ All predictions validated. (e) is the locked recommendation.
 
 **Locked 2026-05-20 after V8 empirical validation.** The initial (e) variant — re-bin directly to display width — was empirically rejected by V8 (smoothed multi-modal structure, attenuated spikes — same failure mode as Phase 3). The locked recommendation is the **(e_coarse) variant**: two-stage stream → finalize re-bin into the legacy partition shape (`bpd=8 × decades`) → apply legacy's `calculate_histogram_display_buckets` projection unchanged.
 
-Streaming bpd locked at **616 (Level 9 in #187 Decision 2's tier table; HdrHistogram 3-significant-digit reference)** to make the streaming-vs-target partition boundary mismatch invisible at typical histogram rendering heights.
+### Per-family bpd contract (READ THIS FIRST)
+
+**The bpd=616 streaming default below applies ONLY to F2 (heatmap_cells, heatmap_markers) and F3 (histogram_view, histogram_bins).** It is a **finalize-re-bin-fidelity knob** for display-geometry-bound consumers, NOT a universal default.
+
+| Family | Streaming bpd | Reason |
+|---|---|---|
+| **F1** (`summary_table`, `csv_output`, `time_bucket_stats`) | **Decision 2 default (53), tunable via `--percentile-precision`** | Per-key fan-out: millions of partitions possible (one per `(category, log_key)`). Higher bpd would multiply memory by ~12× per partition. F1 has no finalize re-bin; bpd serves percentile interpolation accuracy only (per Decision 1). UNCHANGED by #201. |
+| **F2** (heatmap) | **616** | ~60 partitions total (per `time_bucket`). High bpd makes finalize re-bin fidelity invisible. Memory cost ~1.5MB total. |
+| **F3** (histogram) | **616** | ~10 partitions total (per metric). Same reasoning as F2. Memory cost ~250KB total. |
+
+**The F2/F3 streaming bpd is bounded by the number of partitions × 25KB.** F1 cannot use bpd=616 because the partition count is unbounded (one per unique `(category, log_key)`), which would produce gigabytes of streaming memory.
+
+Streaming bpd locked at **616 for F2/F3 only** (Level 9 in #187 Decision 2's tier table; HdrHistogram 3-significant-digit reference) to make the streaming-vs-target partition boundary mismatch invisible at typical histogram rendering heights.
 
 V8 empirical validation:
 
@@ -501,7 +513,7 @@ V8 empirical validation:
 | Your file (5.08 decades, 193k samples) | 28.4% | 7.7% | **1.10%** |
 | 148MB Tomcat (4.52 decades, 576k samples) | 36.3% | 2.5% | **5.78%** |
 
-At the locked default ASCII histogram height (~9 chars tall), the smallest visible difference between two bars is ~11% of peak. Both files show all spikes within visible fidelity at bpd=616. Memory cost: ~37KB per streaming partition × ~70 total partitions across all consumers ≈ 2.6MB streaming overhead — negligible vs. raw retention.
+At the locked default ASCII histogram height (~9 chars tall), the smallest visible difference between two bars is ~11% of peak. Both files show all spikes within visible fidelity at bpd=616. Memory cost (F2 + F3 only — F1 unchanged): ~25KB per streaming partition × ~70 total F2/F3 partitions ≈ 1.75MB streaming overhead — negligible vs. raw retention.
 
 Per family, the investigation recommends:
 
