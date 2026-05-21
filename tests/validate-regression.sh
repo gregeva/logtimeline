@@ -12,6 +12,10 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 REF_DIR="${1:-$SCRIPT_DIR/reference-output}"
 TMP_DIR=$(mktemp -d)
+# Cleanup is unconditional — if the script aborts mid-run (under set -e),
+# the explicit `rm -rf` at the end never runs. Per tests/HARNESS-DESIGN.md,
+# harnesses must not leave temp artifacts behind.
+trap 'rm -rf "$TMP_DIR"' EXIT
 
 # Common options: suppress progress, summary table, and limit top messages
 COMMON="--disable-progress -osum -n 1"
@@ -42,6 +46,7 @@ run_test() {
     shift
     local reffile="$REF_DIR/$name.txt"
     local tmpfile="$TMP_DIR/$name.txt"
+    local stderrfile="$TMP_DIR/$name.stderr"
 
     if [[ ! -f "$reffile" ]]; then
         echo "  SKIP  $name (no reference file)"
@@ -49,14 +54,38 @@ run_test() {
         return
     fi
 
-    "$@" 2>/dev/null | strip_nondeterministic > "$tmpfile"
+    # Run ltl, capturing stdout to tmpfile (after filtering) and stderr
+    # separately. Per tests/HARNESS-DESIGN.md, we DO NOT swallow stderr —
+    # a silent failure here would produce an empty tmpfile that diffs
+    # against an empty reffile and falsely PASSes.
+    set +e
+    "$@" 2>"$stderrfile" | strip_nondeterministic > "$tmpfile"
+    local pipe_status=("${PIPESTATUS[@]}")
+    set -e
+
+    if [[ "${pipe_status[0]}" -ne 0 ]]; then
+        echo "  FAIL  $name :: ltl exited ${pipe_status[0]}; stderr:" >&2
+        sed 's/^/        /' "$stderrfile" >&2
+        fail=$((fail + 1))
+        return
+    fi
+    if [[ ! -s "$tmpfile" ]]; then
+        echo "  FAIL  $name :: captured output is empty (regression target produced nothing); stderr:" >&2
+        sed 's/^/        /' "$stderrfile" >&2
+        fail=$((fail + 1))
+        return
+    fi
 
     if diff -q "$reffile" "$tmpfile" > /dev/null 2>&1; then
         echo "  PASS  $name"
         pass=$((pass + 1))
     else
         echo "  FAIL  $name"
-        diff --unified=3 "$reffile" "$tmpfile" | head -30
+        # diff returns 1 on differences (intentional); pipefail would propagate
+        # that and abort the harness before printing the Results summary.
+        # Per tests/HARNESS-DESIGN.md, intentional non-zero exits in a
+        # diagnostic pipeline must be neutralized so the harness can complete.
+        { diff --unified=3 "$reffile" "$tmpfile" || true; } | head -30
         echo "  ..."
         fail=$((fail + 1))
     fi
@@ -108,9 +137,7 @@ run_test "ms-w160" "$LTL" $COMMON --terminal-width 160 -ms -bs 1000 -st 00:00 -e
 
 echo ""
 echo "Results: $pass passed, $fail failed, $skip skipped"
-
-# Cleanup
-rm -rf "$TMP_DIR"
+# TMP_DIR cleanup handled by EXIT trap at top of script
 
 if [[ $fail -gt 0 ]]; then
     echo "REGRESSION DETECTED"

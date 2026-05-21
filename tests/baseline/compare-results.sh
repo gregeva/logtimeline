@@ -74,15 +74,29 @@ if [[ ! -f "$CURRENT" ]]; then
 fi
 
 # --- Header: extract run metadata ---
+# Per tests/HARNESS-DESIGN.md, awk extractions against required anchors must
+# not silently succeed with empty/zero values. A benchmark TSV with no
+# `version` row or no `TIMING\ttotal\t...` rows is malformed; comparing it
+# would silently produce a meaningless report.
 print_header() {
     local file="$1"
     local label="$2"
 
     local version
     version=$(awk -F'\t' '$3 == "version" { v=$4 } END { print v }' "$file")
+    if [[ -z "$version" ]]; then
+        echo "ERROR: $file has no 'version' row; cannot compare benchmark TSVs without it" >&2
+        echo "       Expected anchor: column 3 == \"version\"" >&2
+        exit 1
+    fi
 
     local test_count
     test_count=$(awk -F'\t' 'NR > 1 && $3 == "TIMING" && $4 == "total" { n++ } END { print n+0 }' "$file")
+    if [[ "$test_count" -eq 0 ]]; then
+        echo "ERROR: $file has no 'TIMING/total' rows; benchmark TSV contains no test data" >&2
+        echo "       Expected anchor: column 3 == \"TIMING\" AND column 4 == \"total\"" >&2
+        exit 1
+    fi
 
     local filename
     filename=$(basename "$file" .tsv)
