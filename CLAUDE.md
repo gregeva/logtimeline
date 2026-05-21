@@ -14,6 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 4. **Small steps with confirmation.** Present one idea or change at a time. Wait for confirmation before proceeding.
 5. **No unsolicited implementation.** Do not write production code until explicitly asked.
 6. **Dialog over monologue.** Keep responses concise. If writing more than a few paragraphs, stop and ask a clarifying question instead.
+7. **Do exactly what was asked — no more.** Treat every instruction as literal scope, not as a hint toward a larger goal. "Commit" means commit, not commit+push+PR. "Push" means push, not push+open-PR. "Create the branch" means create the branch, not branch+commit+push. "File the issue" means file the issue, not file+cross-link+update-related. When the next step seems obvious, ask — don't take it. The user is the architect; inferring "what they really wanted" is overreach, even when the inference is correct.
 
 ### Anti-patterns to Avoid
 
@@ -21,6 +22,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Making architectural decisions independently then defending them
 - Lengthy explanations when a question would suffice
 - Trying to solve everything in one pass instead of iterating
+- Extending an instruction past its literal scope (e.g., committing → also pushing → also opening a PR when only "commit" was asked)
+- Treating "the natural next step" as implicit permission. The natural next step is for the user to direct, not for Claude to take.
+- Acting on the inferred larger goal when only a specific narrow step was requested. If the user asks for step 3 of a 10-step plan, do step 3 and stop — even if step 4 looks trivial.
 
 ### Continuous Improvement
 
