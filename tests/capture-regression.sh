@@ -41,12 +41,42 @@ strip_nondeterministic() {
 mkdir -p "$REF_DIR"
 
 count=0
+# Transient stderr captures live in a temp directory and are cleaned up
+# unconditionally on exit. They MUST NOT be written into the deliverable
+# reference-output directory.
+STDERR_DIR=$(mktemp -d)
+trap 'rm -rf "$STDERR_DIR"' EXIT
+
 run_test() {
     local name="$1"
     shift
     local outfile="$REF_DIR/$name.txt"
+    local stderrfile="$STDERR_DIR/$name.stderr"
     echo "  Capturing: $name"
-    "$@" 2>/dev/null | strip_nondeterministic > "$outfile"
+
+    # Run ltl, capturing stdout to outfile (after filtering) and stderr to
+    # a temp file. Per tests/HARNESS-DESIGN.md, we do not swallow stderr —
+    # a silent failure of the captured tool would otherwise produce an
+    # empty reference file that downstream regression tests accept as
+    # authoritative. On failure we print stderr inline and abort; on success
+    # the temp file is discarded with the rest of $STDERR_DIR.
+    set +e
+    "$@" 2>"$stderrfile" | strip_nondeterministic > "$outfile"
+    local pipe_status=("${PIPESTATUS[@]}")
+    set -e
+
+    if [[ "${pipe_status[0]}" -ne 0 ]]; then
+        echo "  FAIL  $name :: ltl exited ${pipe_status[0]}; stderr:" >&2
+        sed 's/^/        /' "$stderrfile" >&2
+        rm -f "$outfile"
+        exit 1
+    fi
+    if [[ ! -s "$outfile" ]]; then
+        echo "  FAIL  $name :: captured reference is empty (anchor or output disappeared); stderr:" >&2
+        sed 's/^/        /' "$stderrfile" >&2
+        rm -f "$outfile"
+        exit 1
+    fi
     count=$((count + 1))
 }
 

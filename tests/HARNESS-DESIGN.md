@@ -107,6 +107,236 @@ The reason this rule exists is twofold:
 - A renamed or removed section produces no matches in the harness. Without this rule, the harness exits 0, the CI is green, and the rename ships undetected.
 - An anchor-not-found failure carries different diagnostic information from a wrong-value failure. Surfacing them as the same outcome (non-zero exit, named scenario) lets the reader act on whichever one matches reality.
 
+### Specific traps to recognize and avoid
+
+The rule above is the principle. These are the concrete failure modes that have surfaced in this repository and the patterns a harness author must use to avoid each.
+
+#### Trap 1: `set -e` plus `2>/dev/null` suppression
+
+```bash
+# WRONG — silent failure
+"$@" 2>/dev/null | strip_nondeterministic > "$outfile"
+```
+
+If the captured command fails or crashes, stderr is discarded and the script has no diagnostic to report. The `>` redirect succeeds (writing an empty file), the pipeline returns 0, and downstream code consumes the empty file as authoritative.
+
+```bash
+# RIGHT — preserve stderr, check exit code, check non-empty result
+set +e
+"$@" 2>"$stderrfile" | strip_nondeterministic > "$outfile"
+local pipe_status=("${PIPESTATUS[@]}")
+set -e
+if [[ "${pipe_status[0]}" -ne 0 ]]; then
+    echo "FAIL: command exited ${pipe_status[0]}; stderr:" >&2
+    sed 's/^/    /' "$stderrfile" >&2
+    exit 1
+fi
+if [[ ! -s "$outfile" ]]; then
+    echo "FAIL: captured output is empty" >&2
+    exit 1
+fi
+```
+
+Use `${PIPESTATUS[@]}` to check the first command in a pipeline, not the last. Without it, `set -o pipefail` is required to catch upstream failures in a `cmd | filter` chain.
+
+#### Trap 2: `|| true` / `|| echo "fallback"` swallowing failures
+
+```bash
+# WRONG — error becomes silent success
+local lines_read=$(grep "^lines_read" "$file" | awk '{print $2}' || true)
+```
+
+`|| true` was the right tool somewhere else (where you genuinely want to continue with a default), but in an assertion context it turns a missing anchor into an empty string the script then carries forward as if it were a real value.
+
+```bash
+# RIGHT — separate concerns; check the extracted value explicitly
+local lines_read
+lines_read=$(grep "^lines_read" "$file" | awk '{print $2}')
+if [[ -z "$lines_read" ]]; then
+    echo "FAIL: missing anchor 'lines_read' in $file" >&2
+    exit 1
+fi
+```
+
+`|| echo "?"` is acceptable only in *display* contexts (e.g., a status line that says "rss=? MB" when measurement failed), never in assertion contexts.
+
+#### Trap 3: Empty `sed` range output is ambiguous
+
+```bash
+# AMBIGUOUS — empty result could be "section empty" or "start anchor missing"
+local body
+body=$(sed -n '/^=== name ===/,/^=== END name ===/p' "$file")
+```
+
+When `/^=== name ===/` is not found, `sed -n` prints nothing. The consuming code cannot distinguish "section was emitted but its body is empty" from "section header is missing entirely" — those have completely different remediations.
+
+```bash
+# RIGHT — check the start anchor was present before consuming the body
+if ! grep -qE '^=== name ===$' "$file"; then
+    echo "FAIL: missing section header '=== name ===' in $file" >&2
+    exit 1
+fi
+local body
+body=$(sed -n '/^=== name ===/,/^=== END name ===/p' "$file")
+```
+
+Or grep-then-strip rather than range-extract: `grep -A 9999 '^=== name ===' "$file"` followed by separate validation of the end marker.
+
+#### Trap 4: `awk END` runs even on no matching rows
+
+```bash
+# WRONG — prints empty string when anchor missing; downstream proceeds
+local version
+version=$(awk -F'\t' '$3 == "version" { v=$4 } END { print v }' "$file")
+```
+
+`awk`'s `END` block executes regardless of whether any rows matched. An undefined variable prints as empty string. The caller gets `""` rather than an error.
+
+```bash
+# RIGHT — check the extracted value before using it
+local version
+version=$(awk -F'\t' '$3 == "version" { v=$4 } END { print v }' "$file")
+if [[ -z "$version" ]]; then
+    echo "FAIL: missing 'version' anchor in $file" >&2
+    echo "      Expected: column 3 == \"version\"" >&2
+    exit 1
+fi
+```
+
+Or push the validation into awk (`END { if (v == "") exit 1; print v }`) and check awk's exit code — but the bash-side check above is clearer to a future reader.
+
+#### Trap 5: `grep -c` returning zero looks like a successful count
+
+```bash
+# AMBIGUOUS — zero is a valid grep -c result, not necessarily an error
+local count
+count=$(grep -c '^selection,' "$file")
+```
+
+`grep -c` prints `0` for no matches. The exit code is non-zero on no-match (unless `-c` with `-q` is suppressing it, depending on grep version), but the captured value looks fine. Downstream comparisons proceed against zero.
+
+```bash
+# RIGHT — separate "is the anchor present" from "how many rows match"
+if ! grep -q '^selection,' "$file"; then
+    echo "FAIL: no 'selection,' rows in $file" >&2
+    exit 1
+fi
+local count
+count=$(grep -c '^selection,' "$file")
+```
+
+For scenarios where zero genuinely is a meaningful count (e.g., "this run should produce zero unmatched lines"), say so explicitly in the assertion and structure the check as a numeric comparison against an expected value, not as a presence check.
+
+#### Trap 6: Unconditional counter advancement
+
+```bash
+# WRONG — counter ticks regardless of whether the assertion actually fired
+run_test() {
+    # ... does some work, may have failed silently ...
+    count=$((count + 1))
+}
+```
+
+If the work inside the function silently failed (any of traps 1–5), `count` still increments. The final report shows N tests "ran" when in reality some of them did not actually assert anything. This is the harness equivalent of the missing-anchor-as-pass anti-pattern at the orchestration level.
+
+```bash
+# RIGHT — counter only advances on confirmed success
+run_test() {
+    # ... do work, with hard failures on any anchor not matching ...
+    if [[ ! -s "$outfile" ]]; then
+        fail=$((fail + 1))
+        return 1
+    fi
+    pass=$((pass + 1))
+}
+```
+
+The summary line at the end of a harness (`"Results: N passed, M failed"`) must reflect actual assertions made, not iterations attempted.
+
+#### Trap 7: `local x=$(...)` masks the inner command's exit code
+
+```bash
+# TRAP — $? after this line is 0 even if the inner command failed
+local tmpfile=$(mktemp /nonexistent-path/XXX 2>/dev/null)
+```
+
+The `local` keyword's own return value (0) overrides the captured command's exit code. `set -e` will not catch a failure inside the `$(...)`.
+
+```bash
+# RIGHT — declare and assign separately so $? reflects the command
+local tmpfile
+tmpfile=$(mktemp)
+if [[ -z "$tmpfile" || ! -e "$tmpfile" ]]; then
+    echo "FAIL: mktemp produced no file" >&2
+    exit 1
+fi
+```
+
+This affects every assignment where the inner command can fail meaningfully: `local x=$(grep ...)`, `local x=$(awk ...)`, etc. Separate the declaration from the assignment whenever you want `set -e` to catch the failure.
+
+#### Trap 8: Intentional non-zero exits in a `pipefail` pipeline
+
+```bash
+# WRONG — diff returns 1 on differences (intentional!), pipefail propagates,
+# set -e aborts the harness before the Results summary prints
+set -euo pipefail
+diff --unified=3 "$ref" "$tmp" | head -30
+```
+
+Some commands (`diff`, `grep`, sometimes `cmp`) return non-zero to *report a finding*, not to report failure. Under `set -o pipefail`, that non-zero propagates through the pipeline; under `set -e`, the script aborts. The harness terminates mid-run with no diagnostic about what was actually intended.
+
+```bash
+# RIGHT — neutralize the intentional non-zero, preserve the diagnostic
+{ diff --unified=3 "$ref" "$tmp" || true; } | head -30
+```
+
+The `|| true` is correct here because the diff is *diagnostic output*, not an assertion. The assertion that drove this branch already fired (`diff -q` succeeded or failed earlier); the `diff --unified=3` exists only to show the human what differs.
+
+This is the inverse of Trap 2 (`|| true` swallowing assertion failures). The distinction: `|| true` is wrong on the assertion itself, right on the diagnostic command that runs *after* an assertion has already failed. If you find yourself reaching for `|| true`, ask: is this command asserting something, or is it explaining a prior assertion's result?
+
+#### Trap 9: Temp artifacts written next to deliverables
+
+```bash
+# WRONG — writes a diagnostic .stderr file alongside the deliverable
+local outfile="$REF_DIR/$name.txt"      # deliverable
+local stderrfile="$REF_DIR/$name.stderr" # transient artifact in the same dir
+"$@" 2>"$stderrfile" > "$outfile"
+```
+
+Two separate problems compound: (a) the directory `$REF_DIR` contains tracked, committed reference files — putting transient `.stderr` files in it pollutes the deliverables area and risks committing them by accident; (b) without explicit cleanup the transient files persist across runs and confuse future readers ("is this `.stderr` left over from a real failure, or just normal noise from last week?").
+
+```bash
+# RIGHT — transient artifacts go in a temp dir with a cleanup trap
+STDERR_DIR=$(mktemp -d)
+trap 'rm -rf "$STDERR_DIR"' EXIT
+
+local outfile="$REF_DIR/$name.txt"           # deliverable
+local stderrfile="$STDERR_DIR/$name.stderr"  # transient, auto-cleaned
+"$@" 2>"$stderrfile" > "$outfile"
+```
+
+Rule: a harness directory under `tests/` that contains tracked files (regression references, fixtures, captures) is a *deliverables area* and only the tracked files belong in it. Transient capture, temp output, intermediate state — all go in `$(mktemp -d)` with an `EXIT` trap to clean up.
+
+#### Trap 10: `mktemp -d` without an `EXIT` trap
+
+```bash
+# WRONG — explicit cleanup at end-of-script only fires on normal exit
+TMP_DIR=$(mktemp -d)
+# ... lots of work, may abort under set -e ...
+rm -rf "$TMP_DIR"   # never runs if any prior command aborted
+```
+
+`set -e` causes the script to terminate immediately on any failure. The explicit `rm -rf` at the end is skipped. Every aborted run accumulates a `/tmp/tmp.XXX/` directory the script will never clean up.
+
+```bash
+# RIGHT — cleanup runs unconditionally via EXIT trap
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
+# ... lots of work — even if it aborts, EXIT trap fires ...
+```
+
+Add the trap on the *same logical line* as the `mktemp` so it can't be forgotten between declaration and use. If the harness uses multiple temp dirs, set the trap to clean all of them: `trap 'rm -rf "$DIR1" "$DIR2"' EXIT`.
+
 ## Self-documenting assertions
 
 **Every assertion must answer three questions at the moment of failure, without the reader leaving the harness output:**
