@@ -144,7 +144,7 @@ These options control what is shown and how. After the timeline bar graph, logti
 | `-lbg, --light-background` | Use pale-to-bright color gradients suited for light/white terminal backgrounds |
 | `-nah, --no-auto-hide` | Disable automatic column hiding at narrow terminal widths (squeeze all columns instead) |
 | `-p, --pause` | Wait for a keypress between pages of output |
-| `-V, --verbose` | Print detailed processing information including regex matches and parsing decisions |
+| `-V, --verbose [<section>...]` | Emit diagnostic sections. Bare `-V` emits all; `-V <name>[,<name>...]` or repeated `-V` selects sections; `-V list` prints known sections. See "Verbose output (`-V`)" section below |
 
 ```bash
 # Show top 50 messages in the summary table
@@ -202,7 +202,7 @@ ltl -pp 7 access.log
 ltl -pbpd 100 access.log
 
 # Inspect the resolved settings
-ltl -V access.log | grep -A 5 'BIN-COUNTER MODE'
+ltl -V histogram-bin-counters access.log
 
 # Opt out to exact (sort-based) percentiles for byte-exact comparison
 ltl -ep access.log
@@ -295,6 +295,38 @@ ltl -tpas app.log
 # Track multiple thread pools
 ltl -tpa "http-" -tpa "async-" app.log
 ```
+
+### Verbose output (`-V`)
+
+The `-V` flag emits diagnostic sections describing internal state — effective configuration, index pre-seed lookups, bin-counter feature state, message-grouping statistics, benchmark data. Each section is named and bracketed by `=== <name> ===` / `=== END <name> ===` markers so it can be extracted by `grep`, `sed`, or `awk`.
+
+| Form | Behavior |
+|------|----------|
+| `-V` (no argument) | Emit all known sections |
+| `-V all` | Same as bare `-V` (explicit) |
+| `-V list` | Print known section names + descriptions, exit 0 |
+| `-V <name>` | Emit only the named section |
+| `-V <a>,<b>,<c>` | Emit a comma-separated list of sections |
+| `-V <a> -V <b>` | Repeat the flag — equivalent to `-V a,b` |
+| `-V <unknown>` | Warn to stderr, continue with remaining valid sections |
+
+Section names are stable across releases — renames are breaking changes governed by `tests/HARNESS-DESIGN.md`. Discover the current set with `ltl -V list`.
+
+```bash
+# Inspect the bin-counter feature state for a run
+ltl -V histogram-bin-counters access.log
+
+# Capture benchmark TSV for a regression run
+ltl -V benchmark-data access.log
+
+# Capture two sections at once
+ltl -V runtime-config,benchmark-data access.log
+
+# Discover the available sections
+ltl -V list
+```
+
+Section content is governed by per-section stability contracts — additions are non-breaking, renames and removals are breaking. Test harnesses consume these sections; see `tests/HARNESS-DESIGN.md` for the contributor-facing contract.
 
 ## Environment
 

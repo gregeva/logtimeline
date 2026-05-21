@@ -86,7 +86,7 @@ done
 # within bin-resolution bound (well below visibility threshold per #201 V8)
 # but not byte-identical, which would make this layout/rendering regression
 # suite fragile to precision tweaks. Layout coverage is what we want here;
-# bin-counter accuracy is covered by tests/validate-percentile-mode.sh.
+# bin-counter accuracy is covered by tests/validate-histogram-bin-counters.sh.
 for mode in duration bytes count; do
     run_test "heatmap-${mode}-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm "$mode" "$SCRIPT_LOG"
 done

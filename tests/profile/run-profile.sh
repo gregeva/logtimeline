@@ -220,7 +220,7 @@ run_one_profile() {
     echo "  Profiling..."
     (
         cd "$output_dir"
-        "$PERL" -d:NYTProf "$LTL" -V "${ltl_run_args[@]}" > verbose.txt 2>&1
+        "$PERL" -d:NYTProf "$LTL" -V all "${ltl_run_args[@]}" > verbose.txt 2>&1
     )
     echo "  Profile data: $output_dir/nytprof.out ($(du -sh "$output_dir/nytprof.out" 2>/dev/null | cut -f1 || echo '?'))"
 

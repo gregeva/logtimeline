@@ -119,14 +119,14 @@ run_test() {
         benchmark_defaults="$benchmark_defaults -bs 60"
     fi
     local output
-    if ! output=$($LTL --disable-progress -V -mem $benchmark_defaults $options $EXTRA_OPTIONS $file_args 2>&1); then
+    if ! output=$($LTL --disable-progress -V benchmark-data -mem $benchmark_defaults $options $EXTRA_OPTIONS $file_args 2>&1); then
         echo "FAIL: $test_name — ltl returned non-zero" >&2
         return 1
     fi
 
     # Extract benchmark data block
     local benchmark_data
-    benchmark_data=$(echo "$output" | sed -n '/^=== BENCHMARK DATA ===/,/^=== END BENCHMARK DATA ===/p' | grep -v '^=== ')
+    benchmark_data=$(echo "$output" | sed -n '/^=== benchmark-data ===/,/^=== END benchmark-data ===/p' | grep -v '^=== ')
 
     if [[ -z "$benchmark_data" ]]; then
         echo "FAIL: $test_name — no benchmark data found in output" >&2
