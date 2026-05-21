@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# validate-index-readback.sh — Validate Issue #179 (ltl-index.csv read-back) behavior
-# Usage: ./tests/validate-index-readback.sh
+# validate-index-read-back.sh — Validate ltl-index.csv read-back behavior (Issue #179).
+# Usage: ./tests/validate-index-read-back.sh
 #
 # Each scenario sets up an isolated cwd, orchestrates ltl-index.csv state
 # directly (seeding via ltl runs, then selectively deleting/editing rows
-# via Text::CSV), invokes ltl with -V, and asserts specific labeled lines
-# in the `=== INDEX READ-BACK ===` section. Format contract is in
-# features/179-index-read-back.md.
+# via Text::CSV), invokes ltl with -V index-read-back, and asserts specific
+# labeled lines in the `=== index-read-back ===` section. Format contract
+# is in features/179-index-read-back.md.
 #
 # Departs from validate-regression.sh in assertion style: greps the -V
 # section for expected key/value lines rather than diffing full output
@@ -21,8 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 
-# Reuse the same test files used by validate-regression.sh for consistency.
-ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log.2025-03-21.txt"
+ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt"
 SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
 
 # Common options: suppress progress and limit top messages.
@@ -58,10 +57,12 @@ run_ltl() {
     echo "$outfile"
 }
 
-# Convenience: run ltl with -V and the COMMON flags, return capture path.
+# Convenience: run ltl with -V index-read-back and the COMMON flags,
+# return capture path. Issue #226: narrow capture to the section this
+# harness actually asserts against.
 # Usage: out=$(run_ltl_v <extra args...> "$LOG")
 run_ltl_v() {
-    run_ltl $COMMON -V "$@"
+    run_ltl $COMMON -V index-read-back "$@"
 }
 
 # Seed the index by running ltl normally. The run produces real file and
@@ -69,7 +70,7 @@ run_ltl_v() {
 # path so callers can extract calibrated bounds for downstream assertions.
 # Usage: out=$(seed_via_ltl <ltl args...>)
 seed_via_ltl() {
-    run_ltl $COMMON -V "$@"
+    run_ltl $COMMON -V index-read-back "$@"
 }
 
 # Extract a key's value from a -V capture file.

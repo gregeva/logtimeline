@@ -73,6 +73,53 @@ my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages, $elapsed_heatmap_statistics, $elapsed_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 my @verbose_output;           # Accumulated verbose output lines (Issue #56)
+
+# Verbose section registry (Issue #226).
+# Each top-level section emitted under -V is named in kebab-case and
+# registered here. Names are part of the stability contract with test
+# harnesses — renames are breaking changes. See tests/HARNESS-DESIGN.md.
+# Order in this hash is the natural emission order when no specific
+# selection is requested. Iteration uses a parallel ordered list because
+# Perl hash iteration is unordered.
+my %verbose_section_registry = (
+    'runtime-config' => {
+        description => 'Effective runtime configuration: LTL_CONFIG and merged include/exclude/highlight/threadpool-activity regexes.',
+    },
+    'index-read-back' => {
+        description => 'Index pre-seed lookups, freshness checks, aggregated bounds, drift detection (Issue #179).',
+    },
+    'histogram' => {
+        description => 'Legacy in-memory histogram dimensions: per-metric sample counts, min/max, decades, bucket layout.',
+    },
+    'histogram-bin-counters' => {
+        description => 'Bin-counter feature state: opt-out, percentile precision, per-consumer partition keying, rebin events, finalized histogram dimensions.',
+    },
+    'message-grouping' => {
+        description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction (Issue #96).',
+    },
+    'benchmark-data' => {
+        description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
+    },
+);
+my @verbose_section_order = qw(
+    runtime-config
+    index-read-back
+    histogram
+    histogram-bin-counters
+    message-grouping
+    benchmark-data
+);
+my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
+
+# Issue #226: deferred sub-section content keyed by parent section name.
+# Producers that emit a sub-section from a different code path than the
+# parent section's emitter (e.g., `histogram-bin-counters / dimensions`
+# is produced in finalize_histogram_unified while the parent section is
+# emitted in emit_bin_counter_mode_verbose) push their lines here. The
+# parent section's emitter pulls the buffered content and splices it
+# inside its own brackets. Value: arrayref of pre-formatted lines that
+# already include the sub-section's start/end markers.
+my %verbose_section_buffer;
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_sessions );
 my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
@@ -162,7 +209,8 @@ my $csv_epoch_timestamp = 0;  # 1 if CSV timestamp column contains epoch values
 
 # Pattern file filter options (Issue #19)
 my (@include_files, @exclude_files, @highlight_files);   # File paths from command line (arrays for multiple files)
-my $verbose = 0;                                         # Verbose mode flag (-V)
+my $verbose = 0;                                         # Verbose mode flag (-V); true if any section requested
+my @verbose_args;                                        # Raw -V arguments collected by Getopt (Issue #226)
 my $pattern_file_max_size = 10 * 1024;                   # 10KB file size limit
 my $pattern_file_max_patterns = 1000;                    # Max patterns per file (warn if exceeded)
 my $pattern_regex_max_length = 10240;                    # 10KB regex length warning threshold
@@ -1204,14 +1252,14 @@ sub detect_index_drift {
     return;
 }
 
-# Issue #179: Emit the dedicated `=== INDEX READ-BACK ===` section
-# into @verbose_output. Always emitted under -V; the index_used line
-# inside the section is the diagnostic, not the section's presence.
+# Issue #179: Emit the dedicated `=== index-read-back ===` section
+# into @verbose_output. The index_used line inside the section is the
+# diagnostic, not the section's presence.
 # Format is the contract from features/179-index-read-back.md §"-V verbose output".
 sub emit_index_readback_verbose {
-    return unless $verbose;
+    return unless section_requested('index-read-back');
 
-    push @verbose_output, "=== INDEX READ-BACK ===";
+    push @verbose_output, "=== index-read-back ===";
     push @verbose_output, "index_used: " . ($index_used ? "yes" : "no");
     push @verbose_output, "index_filter_signature: $index_filter_sig";
 
@@ -1265,6 +1313,8 @@ sub emit_index_readback_verbose {
             }
         }
     }
+
+    push @verbose_output, "=== END index-read-back ===";
 }
 
 # Section name, field names, consumer-name strings, and the three-value audit
@@ -1273,9 +1323,9 @@ sub emit_index_readback_verbose {
 # Field-name changes require a new locked-decision entry. Field values may
 # evolve freely.
 sub emit_bin_counter_mode_verbose {
-    return unless $verbose;
+    return unless section_requested('histogram-bin-counters');
 
-    push @verbose_output, "=== BIN-COUNTER MODE ===";
+    push @verbose_output, "=== histogram-bin-counters ===";
 
     # Run-level header — opt_out_active first per the locked example output.
     my $opt_out = $exact_percentiles_optout ? 'yes' : 'no';
@@ -1424,6 +1474,15 @@ sub emit_bin_counter_mode_verbose {
                 join(' ', map { "$_=none" } @$pset);
         }
     }
+
+    # Drain buffered sub-section content (e.g., histogram-bin-counters / dimensions
+    # from finalize_histogram_unified) before closing the section bracket.
+    if (my $buf = delete $verbose_section_buffer{'histogram-bin-counters'}) {
+        push @verbose_output, "" if @$buf;
+        push @verbose_output, @$buf;
+    }
+
+    push @verbose_output, "=== END histogram-bin-counters ===";
 }
 
 sub write_index_file {
@@ -1758,7 +1817,7 @@ sub print_help {
     $out .= $opt->("-lbg, --light-background",      "Use pale-to-bright color gradients suited for light/white terminal backgrounds");
     $out .= $opt->("-nah, --no-auto-hide",          "Disable automatic column hiding at narrow terminal widths (squeeze all columns instead)");
     $out .= $opt->("-p,   --pause",                 "Wait for a keypress between pages of output");
-    $out .= $opt->("-V,   --verbose",               "Print detailed processing information including regex matches and parsing decisions");
+    $out .= $opt->("-V,   --verbose [<section>...]", "Emit diagnostic sections. Bare -V emits all; -V <name>[,<name>...] or repeated -V selects sections; -V list prints known sections");
 
     # Sorting
     $out .= $subheading->("Sorting");
@@ -4100,7 +4159,7 @@ sub adapt_to_command_line_options {
         'exclude-file|ef=s' => \@exclude_files,
         'include-file|if=s' => \@include_files,
         'highlight-file|hf=s' => \@highlight_files,
-        'verbose|V' => \$verbose,
+        'verbose|V:s@' => \@verbose_args,   # Issue #226: optional, repeatable section name; bare -V = all sections
         'top-messages|n=i' => \$top_n_messages,
         'omit-values|ov' => \$omit_values,
         'omit-stats|os' => \$omit_stats,
@@ -4166,6 +4225,71 @@ sub adapt_to_command_line_options {
         'validate-layout' => \$validate_layout,
         'help' => \$show_help
     ) or die print_usage( "required options not provided" );
+
+    # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
+    # GetOptions :s@) into %verbose_sections_requested. See HARNESS-DESIGN.md
+    # for the contract. Behavior:
+    #   no -V                       => $verbose=0, no sections, nothing emitted
+    #   -V (no arg)                 => $verbose=1, 'all' sentinel set
+    #   -V all                      => same as bare -V
+    #   -V list                     => print known sections + descriptions, exit 0
+    #   -V <name>                   => $verbose=1, that section selected
+    #   -V <a>,<b>  /  -V a -V b    => $verbose=1, both selected
+    #   -V bogus                    => warn to stderr, continue without that section
+    if (@verbose_args) {
+        $verbose = 1;
+        my @requested;
+        for my $arg (@verbose_args) {
+            # Bare -V (no =value) pushes empty string; treat as 'all'.
+            if (!defined $arg || $arg eq '') {
+                push @requested, 'all';
+                next;
+            }
+            # Allow comma-list shorthand: -V a,b,c
+            push @requested, split(/,/, $arg);
+        }
+        for my $name (@requested) {
+            $name =~ s/^\s+|\s+$//g;
+            next if $name eq '';
+            if ($name eq 'list') {
+                print "Known -V sections (Issue #226):\n";
+                for my $section (@verbose_section_order) {
+                    printf "  %-25s  %s\n",
+                        $section, $verbose_section_registry{$section}{description};
+                }
+                print "\nUsage: -V             emit all sections (default)\n";
+                print "       -V all         emit all sections (explicit)\n";
+                print "       -V <name>      emit only the named section\n";
+                print "       -V a,b,c       emit a comma-separated list of sections\n";
+                print "       -V a -V b      same as -V a,b (repeatable)\n";
+                exit 0;
+            }
+            if ($name eq 'all') {
+                $verbose_sections_requested{'all'} = 1;
+                next;
+            }
+            if (exists $verbose_section_registry{$name}) {
+                $verbose_sections_requested{$name} = 1;
+            } elsif ($name =~ m{[/.]} || -e $name) {
+                # Looks like a filename (path separator, dot, or existing file
+                # on disk) — Getopt::Long greedily ate the next positional
+                # argument when the user typed bare `-V <file>`. Push it back
+                # to @ARGV and treat -V as bare (all sections). Same pattern
+                # as -g, -hm, -hg elsewhere in this parser.
+                unshift @ARGV, $name;
+                $verbose_sections_requested{'all'} = 1;
+            } else {
+                warn "Unknown -V section: $name. Known sections: "
+                    . join(', ', @verbose_section_order)
+                    . " (and 'all', 'list'). Continuing.\n";
+            }
+        }
+        # If -V was given but every requested name was unknown,
+        # %verbose_sections_requested is empty. Keep $verbose=1 so the run
+        # still records that verbose was requested, but no sections will
+        # match through section_requested(). This mirrors the issue body:
+        # exit code unchanged, warning emitted, run continues.
+    }
 
     $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
     $filter_range{'end'} = $filter_range_end if defined(  $filter_range_end );
@@ -4286,9 +4410,9 @@ sub adapt_to_command_line_options {
     $exclude_regex   = $exclude_filter->{regex}   if $exclude_filter;
     $highlight_regex = $highlight_filter->{regex}  if $highlight_filter;
 
-    # Verbose output (Issue #19, #21, #56)
-    if ($verbose) {
-        push @verbose_output, "=== Verbose ===";
+    # Verbose output: runtime-config section (Issues #19, #21, #56, #226)
+    if (section_requested('runtime-config')) {
+        push @verbose_output, "=== runtime-config ===";
         if ($ltl_config_raw ne '') {
             push @verbose_output, "LTL_CONFIG: $ltl_config_raw";
         }
@@ -4296,6 +4420,7 @@ sub adapt_to_command_line_options {
         push @verbose_output, "exclude (merged): " . (defined $exclude_regex ? $exclude_regex : "(not set)");
         push @verbose_output, "highlight (merged): " . (defined $highlight_regex ? $highlight_regex : "(not set)");
         push @verbose_output, "threadpool-activity (merged): " . (defined $threadpool_activity_regex ? $threadpool_activity_regex : "(not set)");
+        push @verbose_output, "=== END runtime-config ===";
         push @verbose_output, "";
     }
 
@@ -5416,7 +5541,7 @@ sub calculate_heatmap_buckets {
 sub calculate_heatmap_buckets_exact {
     return unless defined $heatmap_min && defined $heatmap_max && $heatmap_max > $heatmap_min && $heatmap_max > 0;
 
-    print "\rCalculating heatmap buckets...";
+    print "\rCalculating heatmap buckets..." unless $disable_progress;
 
     # Clear any previous boundary values
     @heatmap_boundaries = ();
@@ -5503,7 +5628,7 @@ sub finalize_heatmap_unified {
     $bin_counter_telemetry{heatmap_cells}   = snapshot_counter_telemetry(\%heatmap_counters);
     $bin_counter_telemetry{heatmap_markers} = $bin_counter_telemetry{heatmap_cells};
 
-    print "\rCalculating heatmap buckets...";
+    print "\rCalculating heatmap buckets..." unless $disable_progress;
 
     my $W = $heatmap_width;
     my $effective_min = $heatmap_min > 0 ? $heatmap_min : 1;
@@ -5635,7 +5760,7 @@ sub calculate_histogram_buckets {
 }
 
 sub calculate_histogram_buckets_exact {
-    print "Calculating histogram statistics...";
+    print "Calculating histogram statistics..." unless $disable_progress;
 
     my @metrics_with_data = ();
 
@@ -5747,10 +5872,12 @@ sub calculate_histogram_buckets_exact {
         print " " x ( $terminal_width - length( "Calculating histogram statistics completed." ) );
     }
 
-    # Verbose output for bucket calculation (Issue #25, #56)
-    if ($verbose && @metrics_with_data) {
-        push @verbose_output, "";
-        push @verbose_output, "Histogram bucket calculation:";
+    # Verbose output for bucket calculation (Issues #25, #56, #226)
+    # Legacy in-memory histogram path. Emitted as the `histogram` section
+    # with a `dimensions` sub-section.
+    if (section_requested('histogram') && @metrics_with_data) {
+        push @verbose_output, "=== histogram ===";
+        push @verbose_output, "=== histogram / dimensions ===";
         for my $metric (@metrics_with_data) {
             my $stats = $histogram_stats{$metric};
             my $min_fmt = format_heatmap_value($stats->{min}, $metric);
@@ -5764,6 +5891,8 @@ sub calculate_histogram_buckets_exact {
                    $histogram_buckets_per_decade,
                    $stats->{bucket_count});
         }
+        push @verbose_output, "=== END histogram / dimensions ===";
+        push @verbose_output, "=== END histogram ===";
         push @verbose_output, "";
     }
 
@@ -5783,7 +5912,7 @@ sub finalize_histogram_unified {
     $bin_counter_telemetry{histogram_view} = snapshot_counter_telemetry(\%histogram_counters);
     $bin_counter_telemetry{histogram_bins} = $bin_counter_telemetry{histogram_view};
 
-    print "Calculating histogram statistics...";
+    print "Calculating histogram statistics..." unless $disable_progress;
 
     my @metrics_with_data;
 
@@ -5898,14 +6027,18 @@ sub finalize_histogram_unified {
         print " " x ( $terminal_width - length( "Calculating histogram statistics completed." ) );
     }
 
-    if ($verbose && @metrics_with_data) {
-        push @verbose_output, "";
-        push @verbose_output, "Histogram bucket calculation:";
+    # Streaming bin-counter finalize path. Emit as the
+    # `histogram-bin-counters / dimensions` sub-section via the deferred
+    # buffer — parent section markers are emitted by
+    # emit_bin_counter_mode_verbose() (Issue #226).
+    if (section_requested('histogram-bin-counters') && @metrics_with_data) {
+        my @lines;
+        push @lines, "=== histogram-bin-counters / dimensions ===";
         for my $metric (@metrics_with_data) {
             my $stats = $histogram_stats{$metric};
             my $min_fmt = format_heatmap_value($stats->{min}, $metric);
             my $max_fmt = format_heatmap_value($stats->{max}, $metric);
-            push @verbose_output, sprintf("  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d",
+            push @lines, sprintf("  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d",
                    ucfirst($metric) . ":",
                    $stats->{count},
                    $min_fmt,
@@ -5914,7 +6047,8 @@ sub finalize_histogram_unified {
                    $histogram_buckets_per_decade,
                    $stats->{bucket_count});
         }
-        push @verbose_output, "";
+        push @lines, "=== END histogram-bin-counters / dimensions ===";
+        push @{ $verbose_section_buffer{'histogram-bin-counters'} }, @lines;
     }
 
     return;
@@ -6337,7 +6471,7 @@ sub calculate_all_statistics {
         }
     }
 
-    print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
+    print "\r" . " " x ($terminal_width - 1) . "\r" unless $disable_progress;		# clear the line of progress messages when moving on to the next file
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Calculating statistics completed.$colors{'NC'}";
         print " " x ( $terminal_width - length( "Calculating statistics completed." ) );
@@ -7107,7 +7241,7 @@ sub normalize_data_for_output {
         }
     }
 
-    print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
+    print "\r" . " " x ($terminal_width - 1) . "\r" unless $disable_progress;		# clear the line of progress messages when moving on to the next file
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
         print " " x ( $terminal_width - length( "Scaling and normalizing data completed." ) );
@@ -7407,15 +7541,30 @@ sub print_heatmap_footer_scale {
 }
 
 # Issue #56: Print accumulated verbose output and benchmark data block
+# Issue #226: dispatcher for named-section selectivity on -V.
+# Returns true if the named section should be emitted in this run.
+# - Returns false if -V was not given at all.
+# - Returns true if bare -V / -V all / -V <name>,... that includes <name>.
+# Sub-section gating uses the parent section's name; sub-sections are
+# display + grep anchors only, not separately selectable on the CLI.
+sub section_requested {
+    my ($name) = @_;
+    return 0 unless %verbose_sections_requested;
+    return 1 if $verbose_sections_requested{'all'};
+    return $verbose_sections_requested{$name} ? 1 : 0;
+}
+
 sub print_verbose_output {
-    return unless $verbose && @verbose_output;
+    return unless $verbose;
 
     for my $line (@verbose_output) {
         print "$line\n";
     }
 
-    # Benchmark data block — machine-parseable TSV
-    print "=== BENCHMARK DATA ===\n";
+    # Benchmark data block — machine-parseable TSV (Issue #226: gated as its own section)
+    return unless section_requested('benchmark-data');
+
+    print "=== benchmark-data ===\n";
     print "version\t$version_number\n";
 
     # File metadata
@@ -7478,7 +7627,7 @@ sub print_verbose_output {
     printf "CONFIG\ttime_bucket_size\t%d\n", $time_bucket_size;
     printf "CONFIG\tbucket_size_seconds\t%.2f\n", $bucket_size_seconds;
 
-    print "=== END BENCHMARK DATA ===\n";
+    print "=== END benchmark-data ===\n";
 }
 
 sub print_bar_graph {
@@ -8987,10 +9136,10 @@ unless( $group_similar_sensitivity eq "none" ) {
     $end_time = [gettimeofday];
     $elapsed_group_similar_messages = tv_interval($start_time, $end_time);
 
-    # Consolidation verbose diagnostics
-    if ($verbose) {
+    # message-grouping verbose diagnostics (Issue #96).
+    if (section_requested('message-grouping')) {
         push @verbose_output, "";
-        push @verbose_output, "=== Consolidation Summary (Issue #96) ===";
+        push @verbose_output, "=== message-grouping ===";
         push @verbose_output, sprintf("  Threshold: %d%%  Trigger: %d  Ceiling: %d  Final pass: %s",
             $consolidation_threshold, $consolidation_trigger, $consolidation_occurrence_ceiling,
             $consolidation_final_pass ? "on (threshold=${consolidation_final_threshold}%, ceiling=${consolidation_final_ceiling})" : "off");
@@ -9130,7 +9279,7 @@ unless( $group_similar_sensitivity eq "none" ) {
 
         if (scalar keys %consolidation_cat_stats > 1) {
             push @verbose_output, "";
-            push @verbose_output, "  === Grand Totals (Streaming) ===";
+            push @verbose_output, "=== message-grouping / grand-totals ===";
             push @verbose_output, sprintf("    Total keys seen:       %d", $grand_keys);
             push @verbose_output, sprintf("    Total S1 Inline:       %d", $grand_s1);
             push @verbose_output, sprintf("    Total S2 Ceiling:      %d", $grand_s2);
@@ -9141,7 +9290,9 @@ unless( $group_similar_sensitivity eq "none" ) {
             push @verbose_output, sprintf("    Total checkpoints:     %d", $grand_checkpoints);
             push @verbose_output, sprintf("    Total patterns:        %d", $grand_patterns);
             push @verbose_output, sprintf("    Total fc calls:        %d", $grand_fc);
+            push @verbose_output, "=== END message-grouping / grand-totals ===";
         }
+        push @verbose_output, "=== END message-grouping ===";
         push @verbose_output, "";
     }
 }

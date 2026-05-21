@@ -77,7 +77,7 @@ done
 # unified bin-counter path (#34/#201) is approximate within bin-resolution
 # bound and would make the reference fragile to precision tweaks. Layout
 # coverage is what we want; bin-counter accuracy is covered by
-# tests/validate-percentile-mode.sh.
+# tests/validate-histogram-bin-counters.sh.
 echo "Heatmap modes at width 160:"
 for mode in duration bytes count; do
     run_test "heatmap-${mode}-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm "$mode" "$SCRIPT_LOG"
