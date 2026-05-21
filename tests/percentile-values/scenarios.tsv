@@ -1,0 +1,33 @@
+# Percentile-value regression scenarios.
+# One scenario per row. Tab-separated. Lines starting with # are comments.
+#
+# Columns:
+#   name     — short scenario id (used for baseline directory name)
+#   file     — path relative to repo root
+#   options  — ltl options (excluding --disable-progress and the input file)
+#
+# Three canonical option-set families per file (chosen to exercise different
+# code paths that affect percentile calculation):
+#   daily         — large bucket, ranked by mean        (-bs 1440 -n 25 -so mean -o)
+#   consolidated  — message consolidation at -g 90      (-bs 240 -g 90 -n 25 -o)
+#   time-sorted   — small bucket, ranked by duration    (-bs 60 -n 25 -so duration -o)
+#
+# Four golden log files (see docs/test-logs.md):
+#   apache-us       Apache HTTP2 microsecond duration
+#   tomcat-large    Tomcat 9 production-scale millisecond duration
+#   twx-scriptlog   ThingWorx ScriptLog with durationMS
+#   codebeamer      Codebeamer access log
+#
+# name	file	options
+apache-us-daily	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 1440 -n 25 -so mean -o
+apache-us-consolidated	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -g 90 -n 25 -o
+apache-us-time-sorted	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 60 -n 25 -so duration -o
+tomcat-large-daily	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-bs 1440 -n 25 -so mean -o
+tomcat-large-consolidated	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-bs 240 -g 90 -n 25 -o
+tomcat-large-time-sorted	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-bs 60 -n 25 -so duration -o
+twx-scriptlog-daily	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 1440 -n 25 -so mean -o
+twx-scriptlog-consolidated	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 240 -g 90 -n 25 -o
+twx-scriptlog-time-sorted	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 60 -n 25 -so duration -o
+codebeamer-daily	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-bs 1440 -n 25 -so mean -o
+codebeamer-consolidated	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-bs 240 -g 90 -n 25 -o
+codebeamer-time-sorted	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-bs 60 -n 25 -so duration -o

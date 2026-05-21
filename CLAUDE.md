@@ -74,10 +74,8 @@ If any of these rules conflict with what you're about to do, stop and read HARNE
 
 LogTimeLine (ltl) is a Perl-based command-line log analysis tool that identifies hotspots in large log files through statistical analysis and time-bucket visualization. It displays horizontal bar graphs with color-coded performance bands and calculates percentile latency statistics (P1 through P99.9).
 
-The repository contains three tools:
+The repository contains one tool:
 - **ltl** - Main analysis tool (single Perl script, ~2,500 lines)
-- **cleanlogs** - Bash helper that removes stack traces, partial lines, and health probes
-- **twxsummarize** - ThingWorx-specific log summarizer
 
 ## Build Commands
 
