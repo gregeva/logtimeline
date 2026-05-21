@@ -101,28 +101,36 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 
 **CRITICAL: Follow these steps exactly. Do not skip steps or change the order.**
 
-### Pre-release (for each feature/bugfix branch)
+### Per-feature workflow (every feature/bugfix branch — MANDATORY post-merge)
+
+When a feature/bugfix branch lands via PR into the release branch, complete the following in order. **Do not skip steps.** These are per-feature obligations, not release-cutting tasks:
+
 1. Commit all changes to feature branch
 2. Push feature branch: `git push origin {feature-branch}`
-3. Update GitHub issue with completion comment
+3. Create PR into the active release branch: `gh pr create --base release/X.Y.Z --head {feature-branch}`
+4. Merge the PR: `gh pr merge {PR#} --merge`
+5. Verify the release branch picked up the merge: `git log origin/release/X.Y.Z --oneline -3`
+6. Update `releases/v{version}.md` directly on the release branch: add ONE bullet per merged issue with `(#NNN)` reference. No prose, no metacommentary. Commit + push directly to the release branch (this is the canonical exception to "no direct commits" — release-notes maintenance is release-process work, not issue work).
+7. Add a completion comment to the GitHub issue: commit hash, branch name, PR #, merge commit, summary of what shipped.
+8. Close the issue: `gh issue close {number} --reason completed`. The issue is addressed when it makes it into a release branch — it does not need to wait for the release to ship.
 
-### Create Release
-4. Switch to main: `git checkout main && git pull origin main`
-5. Create release branch: `git checkout -b release/X.Y.Z` (no `v` prefix)
-6. Merge each feature/bugfix branch: `git merge {branch-name} --no-edit` (repeat for all branches going into this release)
-7. Update version in `ltl` (`$version_number` near top of GLOBALS section)
-8. **Run benchmarks**: `./tests/baseline/run-benchmark.sh full --label vX.Y.Z` — captures baseline for this release
-9. **Compare benchmarks** (if previous baseline exists): `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv` — saves full report to `tests/baseline/results/`.
-10. Create release notes: `releases/v{version}.md` — **keep it concise**: one bullet per feature/fix with issue reference. Include benchmark comparison table (from step 9) if available. No usage examples, no file lists, no "Breaking Changes: None", no "Known Issues", no root cause analysis. See `releases/TEMPLATE.md`.
-11. Commit: `git commit -am "Release vX.Y.Z"`
-12. Push release branch: `git push -u origin release/X.Y.Z`
-13. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
+### Cutting the release
+
+By the time you cut the release, every feature/bugfix issue has already been comment-and-closed under the per-feature workflow above, and `releases/v{version}.md` already contains all the bullets. This phase finalizes versioning, benchmarks, tagging, and the merge back to main.
+
+9. Switch to the release branch: `git checkout release/X.Y.Z && git pull origin release/X.Y.Z`
+10. Update version in `ltl` (`$version_number` near top of GLOBALS section)
+11. **Run benchmarks**: `./tests/baseline/run-benchmark.sh full --label vX.Y.Z` — captures baseline for this release
+12. **Compare benchmarks** (if previous baseline exists): `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv` — saves full report to `tests/baseline/results/`.
+13. Finalize `releases/v{version}.md` — verify all per-feature bullets are present, append benchmark comparison table (from step 12) if available. No usage examples, no file lists, no "Breaking Changes: None", no "Known Issues", no root cause analysis. See `releases/TEMPLATE.md`.
+14. Commit: `git commit -am "Release vX.Y.Z"`
+15. Push release branch: `git push -u origin release/X.Y.Z`
+16. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
 
 ### Post-release
-14. **Merge to main via PR (NEVER direct merge):** `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` (do NOT use `--delete-branch` — release branches must be preserved)
-15. **Sync Wiki:** `git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cp docs/purpose.md /tmp/ltl-wiki/Purpose-and-Design-Philosophy.md && cd /tmp/ltl-wiki && git add Home.md Purpose-and-Design-Philosophy.md && git commit -m "Sync wiki docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki` — `docs/usage.md` and `docs/purpose.md` are the single sources of truth; the wiki is overwritten on each release.
-16. Close all issues included in release: `gh issue close {number} --reason completed`
-17. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each, NOT the release branch)
+17. **Merge to main via PR (NEVER direct merge):** `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` (do NOT use `--delete-branch` — release branches must be preserved)
+18. **Sync Wiki:** `git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cp docs/purpose.md /tmp/ltl-wiki/Purpose-and-Design-Philosophy.md && cd /tmp/ltl-wiki && git add Home.md Purpose-and-Design-Philosophy.md && git commit -m "Sync wiki docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki` — `docs/usage.md` and `docs/purpose.md` are the single sources of truth; the wiki is overwritten on each release.
+19. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each, NOT the release branch)
 
 ### Run Directly
 ```bash
