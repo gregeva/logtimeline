@@ -146,12 +146,30 @@ Hidden CLI options: `--disable-progress` (ALWAYS use from Claude Code), `--termi
 
 ## Development Workflow
 
-Each issue gets its own branch: `{issue-number}-{short-description}`. **CRITICAL: Verify branch before making code changes.** Do not write production code until implementation plan is approved.
+### Branch Naming (MANDATORY)
+
+Each issue gets its own branch named `{issue-number}-{semantic-slug-from-issue-title}`. The slug MUST be derived from the GitHub issue's title (kebab-cased, semantically tight) — **never** from the activity being performed on the branch.
+
+**Why this matters:** Branches outlive their initial purpose. A branch named after the current activity becomes misleading once it grows into other work. A branch named after the issue stays accurate through the whole lifecycle.
+
+**Examples:**
+- Issue #224 "Percentile-value regression test harness with tiered tolerance" → `224-percentile-value-harness` ✓
+- Issue #225 "Test-harness coverage gaps: high-priority additions..." → `225-test-harness-coverage-gaps` ✓
+
+**Anti-patterns — DO NOT use:**
+- `225-research` / `225-research-deliverables` — activity name, not issue title
+- `225-scaffolding` / `225-grounding` / `225-cleanup` — activity names
+- `225-fix-it` — vague activity description
+- Issue number without any slug — ambiguous
+
+If multiple branches are genuinely needed for one issue (rare), differentiate with a numeric suffix like `225-test-harness-coverage-gaps-2`, **not** with an activity name.
 
 ### Branch Verification (MANDATORY FIRST STEP)
 ```bash
-git branch --show-current  # Must match issue number
+git branch --show-current  # Must start with the issue number AND match the issue's semantic title
 ```
+
+**CRITICAL:** Verify branch before making code changes. Do not write production code until implementation plan is approved.
 
 ### GitHub Issue Updates (MANDATORY)
 Update issues throughout development: when starting, during investigation, on design decisions, and when complete. Close with `gh issue close <number> --reason completed`.
