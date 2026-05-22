@@ -162,21 +162,34 @@ ltl -dbg access.log
 
 ### Sorting
 
-The summary table is sorted by occurrence count by default. Use `-so` to rank messages by a different metric — total duration, min/max/mean latency, standard deviation, bytes, count, impact (occurrences × mean duration), or coefficient of variation. Use `-sa` to reverse the sort order.
+The summary table is sorted by occurrence count by default. Use `-so` to rank messages by a different metric — total duration, latency statistics (min/max/mean/stddev/cv), per-percentile latency (p1–p99999), distribution-shape moments (iqr/skewness/kurtosis/bimodality_coef), bytes, count, or impact (occurrences × mean duration). Use `-sa` to reverse the sort order.
 
 | Option | Description |
 |--------|-------------|
-| `-so, --sort-on <field>` | Choose which metric to rank messages by in the summary (`occurrences`, `duration`, `min`, `mean`, `max`, `stddev`, `bytes`, `count`, `impact`, `cv`) |
+| `-so, --sort-on <field>` | Choose which metric to rank messages by in the summary. Valid values are grouped below. |
 | `-sa, --sort-ascending` | Reverse the sort order to show lowest values first |
+
+| Group | Values |
+|-------|--------|
+| Aggregates | `occurrences`, `duration` (alias `time`), `bytes` (alias `size`), `mean_bytes`, `count`, `count_occurrences`, `count_min`, `count_mean`, `count_max`, `impact` |
+| Latency stats | `min`, `mean` (alias `avg`), `max`, `stddev` (alias `std_dev`), `cv` |
+| Percentile latency | `p1`, `p5`, `p10`, `p25`, `p50`, `p75`, `p90`, `p95`, `p99`, `p999`, `p9999`, `p99999` |
+| Distribution shape | `iqr`, `skewness`, `kurtosis`, `bimodality_coef` |
 
 ```bash
 # Rank messages by total duration (heaviest hitters)
 ltl -so duration access.log
 # Find messages with the highest max latency
 ltl -so max access.log
+# Find the worst tail-latency offenders
+ltl -so p999 access.log
+# Surface likely multimodal distributions (cache-hit vs cache-miss patterns)
+ltl -so bimodality_coef access.log
 # Find the least frequent messages
 ltl -so occurrences -sa access.log
 ```
+
+Percentile and shape metrics require a sufficient sample size to be statistically meaningful: `p999` ≥ ~1k, `p9999` ≥ ~100k, `p99999` ≥ ~1M. `bimodality_coef` is a *screening* statistic — at n < 100 small-sample noise can produce false positives. Skewness/kurtosis/bimodality_coef are undefined (blank in CSV, treated as 0 for sort ordering) when n < 4.
 
 ### Percentile mode
 
@@ -225,8 +238,9 @@ Sample-size requirements:
 - All three statistics require `n ≥ 4`; emitted blank otherwise (BC denominator requires `n > 3`).
 - `bimodality_coef` is a *screening* statistic, not a test. At `n < 100` small-sample noise can produce false positives — treat low-sample bimodality flags as exploratory.
 - `p9999` is meaningful at `n ≥ ~100,000`; below that, it collapses toward `max`.
+- `p99999` is meaningful at `n ≥ ~1,000,000`; below that, it collapses toward `max` and carries no signal independent of `p9999`.
 
-The body percentile `p25` and the precomputed interquartile range `iqr` (= `p75 − p25`) are also emitted in both CSV files, completing the body/tail percentile pairing recommended in the Google SRE book.
+The body percentiles `p5`, `p10`, and `p25` and the precomputed interquartile range `iqr` (= `p75 − p25`) are emitted in both CSV files, completing the body/tail percentile pairing recommended in the Google SRE book.
 
 ### Heatmap
 
