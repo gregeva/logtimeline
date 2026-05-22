@@ -15,7 +15,7 @@ Until a sub-issue ships, its scoping lives in a per-sub-issue research file (e.g
 | Sub-issue | Coverage area | Status |
 |---|---|---|
 | [#227](https://github.com/gregeva/logtimeline/issues/227) | Packaged-binary smoke tests | **CANCELLED 2026-05-22** — cannot self-test locally without building a binary first; see issue for rationale |
-| [#228](https://github.com/gregeva/logtimeline/issues/228) | Log format detection regression | OPEN |
+| [#228](https://github.com/gregeva/logtimeline/issues/228) | Log format detection regression | **CLOSED 2026-05-22** |
 | [#229](https://github.com/gregeva/logtimeline/issues/229) | Pattern file correctness | **CANCELLED 2026-05-22** — scope exceeded value; see issue for rationale |
 | [#230](https://github.com/gregeva/logtimeline/issues/230) | Filter logic truth tables | OPEN |
 | [#231](https://github.com/gregeva/logtimeline/issues/231) | CLI option parsing / conflict detection | OPEN |
@@ -107,3 +107,63 @@ The harness reads this annotation to distinguish intentionally-hidden flags from
 
 - The version string is currently emitted at three in-binary sites: `print_usage()` banner, `print_version()` (`-v`), and the `benchmark-data` TSV row in `print_verbose_output()` (`-V benchmark-data`). The harness asserts D and E cover the latter two; the banner is verified indirectly via `--help` exit code. If a new emission site is added, extend the harness with a matching assertion.
 - The harness uses the `=== benchmark-data ===` / `=== END benchmark-data ===` delimiter contract from HARNESS-DESIGN.md. The `benchmark-data` section name is reserved (HARNESS-DESIGN.md § Reserved section names) — renames are breaking changes that require updating Scenario E's pattern in the same commit.
+
+---
+
+## #228 — Log format detection regression
+
+### Status
+**Closed 2026-05-22.** Implemented in PR #247, merge commit `55f44c1`.
+
+### Overview
+
+`tests/validate-format-detection.sh` — bash harness asserting that ltl's log-format auto-detection cascade resolves each fixture to the expected slug and `match_type`. Consumes a new `format-detection` `-V` section.
+
+This sub-issue addresses the **silent unit-misinterpretation risk**: Apache HTTP Server's `%D` is microseconds, Tomcat 9's `%D` is milliseconds, both share the same access-log regex. Without a unit-level assertion, a 1000× off-by-unit error sails past percentile assertions because every percentile scales the same way.
+
+### Scope reduction
+
+7 of 14 internal `match_type` values have committed fixtures in `logs/` and are covered by the harness. The remaining 7 (`thingworx_rac_client`, `connection_server_json`, `java_gc_log`, `tw_analytics_v2`, `tw_analytics_worker`, `jboss_access`, `connection_server_standard`, `tomcat_access_common`) were deferred — they need either hand-crafted fixtures or to wait for the format-registry rewrite (#23).
+
+### Code surfaces touched
+
+- `ltl` — added `%match_type_to_slug` table near GLOBALS, `%format_detection` per-file accumulator, tracking sites in the line-scanning loop of `read_and_process_logs()` (both matched and unmatched branches), `emit_format_detection_verbose()` emitter, registration in `%verbose_section_registry` + `@verbose_section_order`, dispatch call from the main flow.
+- `tests/validate-format-detection.sh` (new) — 7 scenarios, 16 assertions.
+- `docs/test-logs.md` — corrected false claim about value-range autodetection (replaced with accurate `-du us` workaround).
+
+### Scenarios
+
+| # | Scenario | Fixture | Expected slug | `match_type` |
+|---|---|---|---|---|
+| 1 | tomcat9-ms | `localhost_access_log-twx01-...-5k.txt` | `tomcat_access_with_duration` | 3 |
+| 2 | apache-httpd-us | `ApacheHTTP2Server-...2026-01-25.log` | `tomcat_access_with_duration` (misclassified — see below) | 3 |
+| 3 | codebeamer | `codebeamer_access_log.2025-10-29.txt` | `tomcat_codebeamer` | 12 |
+| 4 | thingworx-standard | `ApplicationLog.2025-05-05.0.log` | `thingworx_standard` | 1 |
+| 5 | thingworx-with-metrics | `ScriptLog-DPMExtended-clean.log` | `thingworx_standard` (`is_access_log: yes`) | 1 |
+| 6 | tw-edge-c-sdk | `rea-assets-5402_-TW_SSL_READ-...log` | `tw_edge_c_sdk` | 11 |
+| 7 | csv-with-udm | `results_data_idonly-timestampMs.csv` | `csv` | 13 |
+
+Self-test result on landing: **16 passed, 0 failed.**
+
+### Bug fix folded into this sub-task
+
+The match_type 12 (Codebeamer) regex captured only a single character for the duration field (`\[([0-9.])ms\]`), so any multi-digit duration like `[293ms]` fell through to match_type 3 (Tomcat). Changed to `\[([0-9.]+)ms\]`. Discovered during harness self-test against `logs/Codebeamber/codebeamer_access_log.2025-10-29.txt` which contains all multi-digit durations — every line of that fixture was being silently misclassified.
+
+This is exactly the class of regression the harness is meant to surface.
+
+### Doc fix folded into this sub-task
+
+`docs/test-logs.md` previously claimed "ltl auto-detects the unit based on value ranges" — false. Replaced with accurate behavior (no autodetection; use `-du us` for Apache HTTP Server microsecond logs). Tracked for proper autodetection by issues #17/#23.
+
+### Decisions locked
+
+1. **Slug naming**: semantic descriptive form (e.g., `tomcat_access_with_duration`) rather than server+version (e.g., `tomcat9_access_d_ms`) or generic shape.
+2. **Apache HTTP2 misclassification**: codified — Apache HTTP2 log and Tomcat 9 log resolve to the same slug today. When #23 splits the formats, the `apache-httpd-us` scenario will need an update.
+3. **Single PR** vs. two-PR split: combined ltl changes + harness into one PR rather than two.
+
+### Stability notes for future maintainers
+
+- `%match_type_to_slug` in `ltl` GLOBALS is the **contract surface**. Slug values are stability-locked under `HARNESS-DESIGN.md § Stability contract` — renames require updating every consumer (currently just `tests/validate-format-detection.sh`) in the same commit.
+- The `format-detection` `-V` section is reserved per `HARNESS-DESIGN.md § Reserved section names`.
+- The Apache HTTP2 misclassification is a **known, intentional** mapping today, pending the format-registry rewrite (#23). The scenarios.apache-httpd-us assertion is the canary that will fail when #23 lands — that failure is the signal to update both the slug map and the harness in the same commit.
+- The CSV path (match_type 13) requires `-udm <name>` to fire. A CSV file passed without `-udm` produces no matches and is intentional — the harness covers this with a positive scenario.
