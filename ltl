@@ -182,7 +182,8 @@ my @column_colors = (
       gradient_light => [189, 183, 177, 171, 135, 134, 93, 55] },
 );
 my %column_color_lookup = map { $_->{name} => $_ } @column_colors;
-my ( $print_durations, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, 0 );
+my ( $print_durations, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, undef );
+my $explain_arg;   # --explain [<topic>]: undef = not given; '' = bare; non-empty = topic name (Issue #261)
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
 my ( $filter_count_min, $filter_count_max );
@@ -517,6 +518,13 @@ my %histogram_box_sets = (
 
 # 8-level block characters for sub-character resolution in histograms
 my @histogram_block_chars = (' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█');
+
+# Help-rendering layout constants (Issue #261). Lifted from sub print_help
+# so the same wrap/option machinery is shared with print_help_statistics,
+# print_explain_registry, and the --explain block renderers.
+my $help_opt_col   = 4;    # indent for option text
+my $help_short_col = 8;    # width allocated for short option text (including trailing comma)
+my $help_desc_col  = 52;   # column where descriptions begin
 
 # Histogram colors — resolved from @column_layout in normalize_data_for_output()
 my %histogram_base_colors;
@@ -1387,7 +1395,7 @@ sub _classify_argv_provenance {
                 'pp|percentile-precision',
                 'ep|exact-percentiles',
                 'terminal-width|tw', 'no-auto-hide|nah',
-                'debug-layout', 'validate-layout', 'help',
+                'debug-layout', 'validate-layout', 'help:s', 'explain|ex:s',
             );
             for my $s (@specs) {
                 my @parts = split /\|/, $s;
@@ -2032,15 +2040,18 @@ sub write_index_file {
     }
 }
 
-sub print_title {
-    my $title = <<"END";
+sub get_title_string {
+    return <<"END";
 \033[0;37m \033[90m\033[109m
 ──────────────────────────────────────────────────────────────────────────────────────────────
    ,:: ltl ::' log timeline [$version_number] --  by Greg Eva // geva\@ptc.com // gregeva\@gmail.com
 ──────────────────────────────────────────────────────────────────────────────────────────────
 \033[0m
 END
-    print $title;
+}
+
+sub print_title {
+    print get_title_string();
     return;
 }
 
@@ -2053,245 +2064,1472 @@ sub print_usage {
     return;
 }
 
-sub print_help {
-    # Backspace overstrike decoration (compatible with less, more, and terminals)
-    my $bs_bold = sub {
-        my ($text) = @_;
-        return join('', map { "$_\b$_" } split(//, $text));
-    };
-    my $bs_underline = sub {
-        my ($text) = @_;
-        return join('', map { "_\b$_" } split(//, $text));
-    };
+# Help-rendering primitives (Issue #261). Module-level so that print_help,
+# print_help_statistics, print_explain_registry, and the --explain block
+# renderers (render_heading/paragraph/table/pre) all share one wrap
+# implementation, one set of layout constants, and the same backspace-
+# overstrike decoration scheme. Pure functions — no captured state.
+sub help_wrap_width {
+    return ($terminal_width && $terminal_width > 80) ? $terminal_width : 80;
+}
 
-    # Description column starts at this position; adapt to terminal width
-    my $opt_col   = 4;    # indent for option text
-    my $desc_col  = 52;   # column where descriptions begin (bumped from 47 to 52 in PR #189-3 to accommodate longer long-form option names like --histogram-buckets-per-decade and --percentile-buckets-per-decade per the project requirement that every option exposes both short and long forms; tied to $short_col below — when $short_col grows by N, $desc_col must grow by N)
-    my $wrap_width = ($terminal_width && $terminal_width > 80) ? $terminal_width : 80;
+# help_ansi_enabled: returns true when bold/underline ANSI escapes should
+# be emitted. Industry-standard env vars are honored:
+#   1. FORCE_COLOR set (npm/node ecosystem convention, also chalk,
+#      supports-color) -> force ANSI on, even through pipes.
+#   2. NO_COLOR set (universal convention, no-color.org) -> force off.
+#   3. Otherwise -> ANSI on iff stdout is a TTY.
+# Precedence: FORCE_COLOR wins over NO_COLOR when both are set, matching
+# the supports-color library behavior. less -R correctly interprets ANSI
+# so when we end up paginating, the styling is preserved end-to-end.
+sub help_ansi_enabled {
+    return 1 if defined $ENV{FORCE_COLOR} && $ENV{FORCE_COLOR} ne '' && $ENV{FORCE_COLOR} ne '0';
+    return 0 if defined $ENV{NO_COLOR};
+    return -t STDOUT ? 1 : 0;
+}
 
-    # Word-wrap a description string to fit between $desc_col and $wrap_width
-    my $wrap = sub {
-        my ($text) = @_;
-        my $max_desc = $wrap_width - $desc_col;
-        $max_desc = 30 if $max_desc < 30;
-        my @words = split /\s+/, $text;
-        my @lines;
-        my $line = "";
-        for my $word (@words) {
-            if ($line eq "") {
-                $line = $word;
-            } elsif (length($line) + 1 + length($word) <= $max_desc) {
-                $line .= " $word";
-            } else {
-                push @lines, $line;
-                $line = $word;
-            }
-        }
-        push @lines, $line if $line ne "";
-        return $lines[0] . "\n" . join("\n", map { " " x $desc_col . $_ } @lines[1..$#lines]) if @lines > 1;
-        return $lines[0] // "";
-    };
+sub bs_bold {
+    my ($text) = @_;
+    # ANSI bold (SGR 1) + reset bold (SGR 22) when the output context can
+    # render it; plain text otherwise. The legacy backspace-overstrike
+    # form (X\bX) was unreliable in modern terminals (Terminal.app,
+    # iTerm2) which often strip \b.
+    return help_ansi_enabled() ? "\033[1m" . $text . "\033[22m" : $text;
+}
 
-    # Format an option line: option text left-aligned, description word-wrapped
-    my $short_col = 8;  # width allocated for short option text (including trailing comma). Bumped from 7 to 8 in PR #189-3 to accommodate "-hgbpd," (7 chars including comma) without forcing the long-form column one position right of every other row's long-form column. Also requires bumping $desc_col by the same amount.
-    my $opt = sub {
-        my ($flags, $desc) = @_;
-        my $formatted;
-        if ($flags =~ /^(\S+,)\s+(.+)$/) {
-            # Short + long option: pad short to fixed width
-            my ($short, $long) = ($1, $2);
-            my $short_pad = $short_col - length($short);
-            $short_pad = 1 if $short_pad < 1;
-            $formatted = $short . " " x $short_pad . $long;
-        } elsif ($flags =~ /^\s+(--\S.*)$/) {
-            # Long option only: pad to align -- with other long options
-            $formatted = " " x $short_col . $1;
+sub bs_underline {
+    my ($text) = @_;
+    # ANSI underline (SGR 4) + reset underline (SGR 24) when the output
+    # context can render it; plain text otherwise.
+    return help_ansi_enabled() ? "\033[4m" . $text . "\033[24m" : $text;
+}
+
+# help_heading: top-level section heading (bold, blank line above and below).
+sub help_heading {
+    my ($text) = @_;
+    return "\n" . bs_bold($text) . "\n\n";
+}
+
+# help_subheading: subsection heading (underlined, indented two spaces).
+# Trailing blank line separates heading from following content. Used by
+# print_help for the Time & Buckets / Filtering / etc. subsection layout
+# and by --explain topic sub-section headings (Interpretation, Operational
+# use, etc.) via render_subheading.
+sub help_subheading {
+    my ($text) = @_;
+    return "\n  " . bs_underline($text) . "\n\n";
+}
+
+# help_subheading_tight: subsection heading with NO trailing blank.
+# The next line should be content. Used by --help statistics / --explain
+# registry where each group is immediately followed by its topic list
+# (Issue #261 layout per user feedback).
+sub help_subheading_tight {
+    my ($text) = @_;
+    return "\n  " . bs_underline($text) . "\n";
+}
+
+# strip_ansi: remove ANSI CSI escape sequences from a string. Backspace-
+# overstrike pairs (X\bX for bold, _\bX for underline) are preserved --
+# less/more interpret those natively. Used on Windows where the default
+# pager (`more`) cannot render ANSI as color and would otherwise show the
+# escape codes as literal "^[[Nm" text. Also used as the fallback when no
+# pager is available.
+sub strip_ansi {
+    my ($s) = @_;
+    return $s unless defined $s;
+    $s =~ s/\x1b\[[0-9;]*[A-Za-z]//g;
+    return $s;
+}
+
+# pipe_to_pager: pipe a rendered string through a pager for proper
+# overstrike rendering. We invoke the pager ourselves; the choice depends
+# on platform and whether the user has overridden via $PAGER:
+#
+#   - $PAGER set:           honor verbatim; user knows what they want.
+#                           Assume the user-chosen pager handles ANSI as
+#                           they expect; do not strip color.
+#   - Unix, $PAGER unset:   `less -R` -- ANSI color codes from the title
+#                           banner render as color in the pager view.
+#   - Windows, $PAGER unset:`more` -- legacy more does not interpret
+#                           ANSI, so we strip ANSI from the output first
+#                           to avoid literal "^[[Nm" text appearing. The
+#                           Windows Terminal app interprets ANSI natively
+#                           and a user there can override via $PAGER.
+#
+# Routes to plain print when the output is short enough to fit on screen
+# (no pager needed) or when the pager fails to start. Adds a trailing
+# blank line so output doesn't end flush against the shell prompt on
+# exit (Issue #261).
+sub pipe_to_pager {
+    my ($out) = @_;
+    # Collapse runs of 3+ newlines (= 2+ blank lines) down to 2 newlines
+    # (= 1 blank line). Block-renderer composition can over-stack blanks
+    # at section boundaries -- this gives every view a uniform "at most
+    # one blank line between sections" guarantee.
+    $out =~ s/\n{3,}/\n\n/g;
+    $out .= "\n" unless $out =~ /\n\n\z/;
+
+    # If stdout is not a TTY (piped to another command, redirected to a
+    # file, captured by a harness), skip the pager and print directly.
+    # No human eyes mean no need to paginate; the consumer captures the
+    # full content verbatim. ANSI is left intact so the consumer can
+    # process colored output if they want.
+    if (! -t STDOUT) {
+        print $out;
+        return;
+    }
+
+    # If output fits in the terminal, skip the pager -- short --explain
+    # topics (min, max, mean) would otherwise force the user into less
+    # for no reason. Threshold = $terminal_height - 2 (leave room for
+    # the shell prompt and any trailing output).
+    my $line_count = ($out =~ tr/\n//);
+    my $threshold = ($terminal_height && $terminal_height > 5)
+                  ? $terminal_height - 2
+                  : 23;   # conservative default if terminal_height unknown
+    if ($line_count <= $threshold) {
+        print $out;
+        return;
+    }
+
+    # Choose pager and decide whether to strip ANSI from the content.
+    my ($pager, $strip_ansi);
+    if (defined $ENV{PAGER} && length $ENV{PAGER}) {
+        $pager      = $ENV{PAGER};
+        $strip_ansi = 0;                                 # honor user setup verbatim
+    } elsif ($^O eq 'MSWin32') {
+        $pager      = 'more';
+        $strip_ansi = 1;                                 # legacy `more` shows ANSI as literal text
+    } else {
+        $pager      = 'less -R';
+        $strip_ansi = 0;                                 # less -R interprets ANSI as color
+    }
+
+    $out = strip_ansi($out) if $strip_ansi;
+
+    if (open(my $pager_fh, '|-', $pager)) {
+        print $pager_fh $out;
+        close $pager_fh;
+    } else {
+        # Pager failed to spawn -- print directly. Strip ANSI as a safety
+        # measure: the fallback target might be a non-terminal stdout.
+        print strip_ansi($out);
+    }
+    return;
+}
+
+# help_wrap: word-wrap a string to fit between an indent column and the
+# terminal width. Named args (all optional):
+#   width  - terminal width to wrap to (default help_wrap_width())
+#   indent - column where continuation lines indent to (default $help_desc_col)
+#   first_indent - column of the first line (default 0 — caller has already
+#                  printed leading text on this line). When set, the first line
+#                  is also indented to this column; useful for free-form
+#                  paragraph blocks rendered at the left margin.
+# When the first line is on its own (i.e. first_indent is set), every line
+# (including the first) is prefixed with the indent.
+sub help_wrap {
+    my ($text, %opts) = @_;
+    my $width        = $opts{width}        // help_wrap_width();
+    my $indent       = $opts{indent}       // $help_desc_col;
+    my $first_indent = $opts{first_indent};
+
+    my $max_desc = $width - $indent;
+    $max_desc = 30 if $max_desc < 30;
+
+    my @words = split /\s+/, $text;
+    my @lines;
+    my $line = "";
+    for my $word (@words) {
+        if ($line eq "") {
+            $line = $word;
+        } elsif (length($line) + 1 + length($word) <= $max_desc) {
+            $line .= " $word";
         } else {
-            $formatted = $flags;
-        }
-        my $padding = $desc_col - $opt_col - length($formatted);
-        $padding = 2 if $padding < 2;
-        return " " x $opt_col . $formatted . " " x $padding . $wrap->($desc) . "\n";
-    };
-
-    # Section heading: bold, uppercase
-    my $heading = sub {
-        my ($text) = @_;
-        return "\n" . $bs_bold->($text) . "\n\n";
-    };
-
-    # Subsection heading: underlined
-    my $subheading = sub {
-        my ($text) = @_;
-        return "\n  " . $bs_underline->($text) . "\n\n";
-    };
-
-    my $out = "";
-
-    my $intro = "LogTimeLine -- a command-line log analysis tool that aggregates timestamped log files into visual timelines. Filter, highlight, zoom, and switch between occurrence counts, latency statistics, heatmaps, histograms, and custom metrics to investigate system behavior over time.";
-    my @intro_words = split /\s+/, $intro;
-    my $intro_line = "";
-    for my $word (@intro_words) {
-        if ($intro_line eq "") {
-            $intro_line = $word;
-        } elsif (length($intro_line) + 1 + length($word) <= $wrap_width) {
-            $intro_line .= " $word";
-        } else {
-            $out .= $intro_line . "\n";
-            $intro_line = $word;
+            push @lines, $line;
+            $line = $word;
         }
     }
-    $out .= $intro_line . "\n" if $intro_line ne "";
+    push @lines, $line if $line ne "";
+
+    if (defined $first_indent) {
+        # All lines indented (including first). Useful for free-form paragraphs.
+        my $pad = " " x $first_indent;
+        return join("\n", map { $pad . $_ } @lines);
+    }
+    # Drop-in replacement for the original wrap closure: first line emitted
+    # bare (caller has already printed leading text), continuations padded
+    # to $indent.
+    return $lines[0] . "\n" . join("\n", map { " " x $indent . $_ } @lines[1..$#lines]) if @lines > 1;
+    return $lines[0] // "";
+}
+
+# help_opt: format an option line — option text left-aligned, description
+# word-wrapped from the description column.
+sub help_opt {
+    my ($flags, $desc) = @_;
+    my $formatted;
+    if ($flags =~ /^(\S+,)\s+(.+)$/) {
+        my ($short, $long) = ($1, $2);
+        my $short_pad = $help_short_col - length($short);
+        $short_pad = 1 if $short_pad < 1;
+        $formatted = $short . " " x $short_pad . $long;
+    } elsif ($flags =~ /^\s+(--\S.*)$/) {
+        $formatted = " " x $help_short_col . $1;
+    } else {
+        $formatted = $flags;
+    }
+    my $padding = $help_desc_col - $help_opt_col - length($formatted);
+    $padding = 2 if $padding < 2;
+    return " " x $help_opt_col . $formatted . " " x $padding . help_wrap($desc) . "\n";
+}
+
+# ============================================================================
+# --help statistics / --explain framework (Issue #261)
+#
+# Two parallel CLI surfaces share this infrastructure:
+#   - `ltl --help statistics` -- grouped one-line index of all stats
+#   - `ltl --explain <topic>`  -- long-form per-statistic documentation
+#
+# Content is stored in %explain_topics as arrayrefs of typed blocks
+# (heading/paragraph/table/pre). Paragraph text is stored UNWRAPPED in
+# source -- reflow happens at render time based on $terminal_width
+# (--terminal-width override honored).
+#
+# See docs/explain/statistics.md for the Wiki-mirror of the same content.
+# ============================================================================
+
+# Aliases resolved by --explain. Mirrors -so value aliases (avg → mean,
+# stddev → std_dev) plus every individual percentile slug routed to the
+# shared 'percentiles' topic since one explanation covers all of p1..p99999.
+my %explain_aliases = (
+    avg     => 'mean',
+    stddev  => 'std_dev',
+    p1      => 'percentiles', p5     => 'percentiles', p10    => 'percentiles',
+    p25     => 'percentiles', p50    => 'percentiles', p75    => 'percentiles',
+    p90     => 'percentiles', p95    => 'percentiles', p99    => 'percentiles',
+    p999    => 'percentiles', p9999  => 'percentiles', p99999 => 'percentiles',
+);
+
+# Group → ordered topic list. Single source of truth for the --explain
+# registry. Each group has a category tag so the registry can emit
+# section headings (STATISTICS / VISUALIZATIONS) per category transition.
+# `--help statistics` index uses only the groups tagged 'statistics'.
+my @explain_groups = (
+    { category => 'statistics',     name => 'Range',              topics => [qw(min max)] },
+    { category => 'statistics',     name => 'Central tendency',   topics => [qw(mean)] },
+    { category => 'statistics',     name => 'Spread',             topics => [qw(std_dev cv iqr)] },
+    { category => 'statistics',     name => 'Percentiles',        topics => [qw(percentiles)] },
+    { category => 'statistics',     name => 'Distribution shape', topics => [qw(skewness kurtosis bimodality_coef)] },
+    # Visualizations: each chart gets its own group so each appears as an
+    # underlined subheading under the VISUALIZATIONS category. Mirrors the
+    # Percentiles group (one topic per group) and leaves room for future
+    # sub-topics per chart (e.g. heatmap-duration, heatmap-bytes).
+    { category => 'visualizations', name => 'heatmap',            topics => [qw(heatmap)] },
+    { category => 'visualizations', name => 'histogram',          topics => [qw(histogram)] },
+);
+
+# Top-level section-heading labels (rendered as bold uppercase by
+# help_heading) shown before the first group in each category.
+my %explain_category_heading = (
+    statistics     => 'STATISTICS',
+    visualizations => 'VISUALIZATIONS',
+);
+
+# Number of leading groups tagged 'statistics'. --help statistics slices
+# @explain_groups[0..$_explain_stats_group_count-1] so that the stats
+# index stays narrow even as Visualizations and future categories grow.
+my $_explain_stats_group_count = 5;
+
+# One-line summary per topic, used by the grouped index views. Long-form
+# content lives in %explain_topics below.
+my %explain_summary = (
+    min             => 'Smallest observed value',
+    max             => 'Largest observed value',
+    mean            => 'Arithmetic mean of all observed values (alias: avg)',
+    std_dev         => 'Standard deviation -- absolute spread (alias: stddev)',
+    cv              => 'Coefficient of variation -- relative spread (std_dev / mean)',
+    iqr             => 'Interquartile range -- robust spread (p75 - p25)',
+    percentiles     => 'Latency percentiles at p1..p99999 (ltl --explain percentiles)',
+    skewness        => 'Distribution asymmetry (>0 = right-tail-heavy)',
+    kurtosis        => 'Tail-heaviness (>3 = heavy outliers; >10 = pathological)',
+    bimodality_coef => 'Sarle\'s bimodality coefficient (>0.555 = suspect multimodal)',
+    heatmap         => 'Color-intensity time-vs-value visualization (-hm)',
+    histogram       => 'Bin-counter distribution chart with percentile ticks (-hg)',
+);
+
+# Topic content registry. Each value is an arrayref of typed block hashrefs:
+#   { type => 'heading',    text => '...' }
+#   { type => 'paragraph',  text => '... single unwrapped logical line ...' }
+#   { type => 'table',      headers => [...], rows => [[...],[...]] }
+#   { type => 'pre',        text => "...\n... multi-line preformatted ...\n" }
+#
+# Defined below %explain_topics scaffolding; populated by populate_explain_topics()
+# at the bottom of this section so the per-topic heredoc helpers can be defined
+# nearby without ballooning the registry literal.
+my %explain_topics;
+
+# Resolve a user-supplied --explain argument to a canonical topic name,
+# honoring %explain_aliases. Returns undef on unknown topic.
+sub resolve_explain_topic {
+    my ($name) = @_;
+    return undef unless defined $name && $name ne '';
+    my $key = lc $name;
+    $key = $explain_aliases{$key} if exists $explain_aliases{$key};
+    return exists $explain_topics{$key} ? $key : undef;
+}
+
+# Strip backspace-overstrike decoration from a string. Used by render_table
+# to measure cell visual width (overstrike sequences add bytes/codepoints
+# that don't contribute to display width).
+sub visible_length {
+    my ($s) = @_;
+    # Strip non-printing decorations so length() reflects visible width.
+    $s =~ s/\x1b\[[0-9;]*[A-Za-z]//g;   # ANSI CSI escape sequences (bold/underline/color)
+    $s =~ s/.\x08//g;                   # backspace-overstrike pairs (X\bX, _\bX)
+    return length($s);
+}
+
+# Render a heading block. Reuses help_heading for visual consistency with
+# the existing OPTIONS / EXAMPLES headers in print_help.
+sub render_heading {
+    my ($block, $width) = @_;
+    return help_heading($block->{text});
+}
+
+# Render a subheading block. Reuses help_subheading -- title case, underlined
+# via backspace overstrike, indented two spaces, with one blank line below
+# before the following content. Visually matches the Time & Buckets /
+# Filtering / Recording & Processing subsections in print_help.
+sub render_subheading {
+    my ($block, $width) = @_;
+    return help_subheading($block->{text});
+}
+
+# Render a paragraph block. The block's text is one unwrapped logical line
+# stored in source; we reflow it here against the live terminal width.
+# Indent is 2 columns -- the same gentle indent used elsewhere in help
+# output for free-form prose.
+sub render_paragraph {
+    my ($block, $width) = @_;
+    $width //= help_wrap_width();
+    return help_wrap($block->{text}, indent => 2, first_indent => 2, width => $width) . "\n";
+}
+
+# Render a preformatted block (code / example output / ASCII art). Emit
+# verbatim -- no wrapping, no indent injection beyond what's already in
+# the source.
+sub render_pre {
+    my ($block, $width) = @_;
+    my $text = $block->{text};
+    $text .= "\n" unless $text =~ /\n\z/;
+    return $text;
+}
+
+# Render a table block with Unicode box-drawing borders. Glyphs are reused
+# from %histogram_box_sets{light} so explain tables visually match the
+# histogram axis borders.
+#
+# Algorithm:
+#   1. Compute natural column widths = max(visible length over headers + rows).
+#   2. If sum(widths) + borders fits in $width: emit fixed-width.
+#   3. Otherwise: keep first column at natural width (key/value column);
+#      distribute remaining width across remaining columns; cell-wrap
+#      via help_wrap; vertically pad shorter cells.
+sub render_table {
+    my ($block, $width) = @_;
+    $width //= help_wrap_width();
+    my $box = $histogram_box_sets{light};
+
+    my @headers = @{ $block->{headers} };
+    my @rows    = @{ $block->{rows} };
+    my $ncols   = scalar @headers;
+    return "" unless $ncols;
+
+    # Natural width per column.
+    my @col_w = map { visible_length($_) } @headers;
+    for my $r (@rows) {
+        for my $c (0 .. $ncols - 1) {
+            my $len = visible_length($r->[$c] // '');
+            $col_w[$c] = $len if $len > $col_w[$c];
+        }
+    }
+
+    # Total width including borders: 2 spaces leading indent + N+1 vertical
+    # separators + 2 cells of padding per column (one on each side).
+    my $indent = 2;
+    my $border_cost = $indent + ($ncols + 1) + 2 * $ncols;   # leading-indent + verticals + per-cell padding
+    my $natural_total = 0;
+    $natural_total += $_ for @col_w;
+    $natural_total += $border_cost;
+
+    if ($natural_total > $width) {
+        # Shrink: keep col 0 natural, redistribute remaining.
+        my $remaining_for_rest = $width - $border_cost - $col_w[0];
+        $remaining_for_rest = 8 * ($ncols - 1) if $remaining_for_rest < 8 * ($ncols - 1);
+        my $rest_natural = 0;
+        $rest_natural += $col_w[$_] for 1 .. $ncols - 1;
+        if ($rest_natural > 0 && $remaining_for_rest < $rest_natural) {
+            for my $c (1 .. $ncols - 1) {
+                my $share = int($col_w[$c] * $remaining_for_rest / $rest_natural);
+                $share = 6 if $share < 6;
+                $col_w[$c] = $share;
+            }
+        }
+    }
+
+    # Wrap cell content per column width; produce a 2D array of cell lines.
+    my @all_rows = ([@headers], @rows);
+    my @rendered;   # @rendered[$row_idx][$col_idx] = arrayref of wrapped lines
+    for my $r (0 .. $#all_rows) {
+        for my $c (0 .. $ncols - 1) {
+            my $cell = $all_rows[$r][$c] // '';
+            if (visible_length($cell) <= $col_w[$c]) {
+                $rendered[$r][$c] = [$cell];
+            } else {
+                # Wrap to column width.
+                my @lines;
+                my @words = split /\s+/, $cell;
+                my $line = '';
+                for my $w (@words) {
+                    if ($line eq '') {
+                        $line = $w;
+                    } elsif (visible_length($line) + 1 + length($w) <= $col_w[$c]) {
+                        $line .= " $w";
+                    } else {
+                        push @lines, $line;
+                        $line = $w;
+                    }
+                }
+                push @lines, $line if $line ne '';
+                $rendered[$r][$c] = \@lines;
+            }
+        }
+    }
+
+    # Build border strings.
+    my $pad = " " x $indent;
+    my $hline_for = sub {
+        my $w = shift;
+        return $box->{h_line} x ($w + 2);  # +2 for one pad space on each side
+    };
+    my $top    = $pad . $box->{corner_tl} . join($box->{t_down}, map { $hline_for->($_) } @col_w) . $box->{corner_tr} . "\n";
+    my $sep    = $pad . $box->{t_right}   . join($box->{cross},  map { $hline_for->($_) } @col_w) . $box->{t_left}   . "\n";
+    my $bottom = $pad . $box->{corner_bl} . join($box->{t_up},   map { $hline_for->($_) } @col_w) . $box->{corner_br} . "\n";
+
+    my $emit_row = sub {
+        my ($row_idx, $bold) = @_;
+        my @cell_lines = @{ $rendered[$row_idx] };
+        my $h = 0;
+        for my $c (0 .. $ncols - 1) { $h = scalar @{$cell_lines[$c]} if scalar @{$cell_lines[$c]} > $h }
+        my $out = '';
+        for my $line_idx (0 .. $h - 1) {
+            $out .= $pad . $box->{v_line};
+            for my $c (0 .. $ncols - 1) {
+                my $cell_line = $cell_lines[$c][$line_idx] // '';
+                $cell_line = bs_bold($cell_line) if $bold && $cell_line ne '';
+                my $vlen = visible_length($cell_line);
+                my $right_pad = $col_w[$c] - $vlen;
+                $right_pad = 0 if $right_pad < 0;
+                $out .= ' ' . $cell_line . ' ' x $right_pad . ' ' . $box->{v_line};
+            }
+            $out .= "\n";
+        }
+        return $out;
+    };
+
+    my $out = $top;
+    $out .= $emit_row->(0, 1);    # header, bold
+    $out .= $sep;
+    for my $r (1 .. $#all_rows) {
+        $out .= $emit_row->($r, 0);
+    }
+    $out .= $bottom;
+    return $out;
+}
+
+# Block-type → renderer-function dispatch table.
+my %explain_block_renderers = (
+    heading     => \&render_heading,
+    subheading  => \&render_subheading,
+    paragraph   => \&render_paragraph,
+    table       => \&render_table,
+    pre         => \&render_pre,
+);
+
+# Render a topic's blocks to a string. Public entry point used by the
+# --explain dispatch.
+sub render_blocks {
+    my ($blocks, $width) = @_;
+    $width //= help_wrap_width();
+    my $out = '';
+    for my $b (@$blocks) {
+        my $renderer = $explain_block_renderers{$b->{type}};
+        unless (defined $renderer) {
+            $out .= "[unknown block type: $b->{type}]\n";
+            next;
+        }
+        $out .= $renderer->($b, $width);
+    }
+    return $out;
+}
+
+# `ltl --help statistics`: grouped one-line index. Uses the same help_opt
+# geometry as the main print_help so columns line up visually. Group
+# subheadings use the tight variant -- title-case underlined, NO blank
+# line below; items follow immediately, then one blank line between groups.
+# Banner is incorporated into the output so it appears at the top of the
+# less buffer (Issue #261 per user feedback).
+sub print_help_statistics {
+    my $out = '';
+    $out .= get_title_string();
+    $out .= help_wrap(
+        "Statistics emitted in the summary table and -o CSV. Use 'ltl --explain <topic>' for a detailed explanation of any individual statistic.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    $out .= help_heading("STATISTICS");
+
+    # Stats-only slice: --help statistics stays narrow even as the
+    # --explain registry expands to cover new categories (#261 phase 2).
+    for my $group (@explain_groups[0 .. $_explain_stats_group_count - 1]) {
+        $out .= help_subheading_tight($group->{name});
+        for my $topic (@{ $group->{topics} }) {
+            my $summary = $explain_summary{$topic} // '';
+            $out .= help_opt($topic, $summary);
+        }
+    }
+    $out .= "\n";
+    $out .= help_wrap(
+        "See 'ltl --explain' for the full list of available --explain topics, or 'ltl --explain <topic>' for a long-form explanation.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    return $out;
+}
+
+# `ltl --explain` (no argument): grouped list of available topics across
+# all categories. Each category transition emits a top-level section
+# heading (STATISTICS, VISUALIZATIONS) and the group subheadings follow
+# beneath. Banner is incorporated into the output so it appears at the
+# top of the less buffer (Issue #261 per user feedback).
+sub print_explain_registry {
+    my $out = '';
+    $out .= get_title_string();
+    $out .= help_wrap(
+        "Use 'ltl --explain <topic>' for a long-form explanation of any of the following.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+
+    my $current_category = '';
+    for my $group (@explain_groups) {
+        if ($group->{category} ne $current_category) {
+            $current_category = $group->{category};
+            my $label = $explain_category_heading{$current_category} // uc($current_category);
+            $out .= help_heading($label);
+        }
+        $out .= help_subheading_tight($group->{name});
+        for my $topic (@{ $group->{topics} }) {
+            my $summary = $explain_summary{$topic} // '';
+            $out .= help_opt($topic, $summary);
+        }
+    }
+    $out .= "\n";
+    $out .= help_wrap(
+        "Aliases: 'avg' resolves to 'mean'; 'stddev' resolves to 'std_dev'; each percentile slug (p1, p5, p10, ..., p99999) resolves to the shared 'percentiles' topic.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    return $out;
+}
+
+# Render a single --explain topic. Caller is responsible for resolving
+# the topic name (via resolve_explain_topic). The output is prefixed with
+# the program banner and a short intro sentence positioning the topic
+# within the broader statistics landscape, so the user has context even
+# when invoking --explain on a single topic with no prior browsing
+# (Issue #261 per user feedback).
+sub print_explain_topic {
+    my ($topic) = @_;
+    my $blocks = $explain_topics{$topic};
+    return "" unless $blocks;
+
+    my $out = '';
+    $out .= get_title_string();
+    $out .= help_wrap(
+        "Long-form documentation for one of the statistics ltl emits in the summary table and -o CSV outputs. For an index of all statistics, run 'ltl --help statistics'. For the list of explainable topics, run 'ltl --explain'.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    $out .= render_blocks($blocks, help_wrap_width());
+    return $out;
+}
+
+# Populate %explain_topics with all 10 topic block arrayrefs. Each topic
+# follows the common 7-block skeleton (heading -> intuition -> interpretation
+# table -> operational paragraph -> example -> algorithm note -> see-also).
+#
+# Paragraph text is stored as one unwrapped logical line per the locked
+# Issue #261 design: source is paragraph-form, reflow at render time. Long
+# paragraphs live in heredoc scalars above the topic definition.
+
+# --- min ---
+my $explain_min_intuition = q{The smallest observed value of the metric across all log entries in scope. For latency analysis, `min` answers "what's the fastest this operation ever ran?" -- the unloaded, cache-warm, fast-path response time. It's the floor below which no observation has ever fallen.};
+my $explain_min_operational = q{The `min` is the most outlier-sensitive statistic ltl emits, but it's outlier-sensitive in the *opposite* direction from `max`: a single artificially-fast measurement (clock skew, cache effect, partial response) drags `min` toward zero. Read `min` alongside `p1` -- if they diverge sharply, `min` is reporting a one-off floor and `p1` is reporting the real fast-path baseline. For SLO work, `p1` is almost always the better lower-bound signal than `min`.};
+my $explain_min_compute = q{Computed as the first element of the sorted duration array per time bucket (or per message key when consolidating). One pass through the data; no approximation.};
+
+# --- max ---
+my $explain_max_intuition = q{The largest observed value of the metric across all log entries in scope. For latency analysis, `max` is the worst single response time -- the slowest request, the longest GC pause, the most extreme outlier. It's the ceiling above which no observation has ever risen.};
+my $explain_max_operational = q{The `max` is highly outlier-sensitive: one runaway request from any cause (lock contention, GC pause, retry storm, network anomaly) sets the value. Read `max` alongside `p999` and `p9999`: if `max` is far above `p9999`, the worst-case is a one-off event; if `max` is close to `p9999`, the heavy tail is consistent. For SLO ceilings, `p999` or `p9999` are usually the right tail-bound statistic, not `max` -- but `max` answers the audit question "what's the worst that ever happened?" which `p9999` does not.};
+my $explain_max_compute = q{Computed as the last element of the sorted duration array per time bucket (or per message key when consolidating). One pass through the data; no approximation.};
+
+# --- mean ---
+my $explain_mean_intuition = q{The arithmetic average of all observed values: sum of values divided by count. For latency, `mean` answers "on average, how long does this operation take?" -- the typical experience weighted equally across every request.};
+my $explain_mean_operational = q{The `mean` is highly sensitive to tail behavior: a single 10-second request mixed into 10,000 fast requests pulls the mean up significantly. This makes `mean` *misleading* for skewed distributions (which is most production latency data). Prefer `p50` (the median) when you want a "typical" value robust to outliers. Use `mean` when you specifically want a measure of *total work performed* -- mean × count = total duration, which is the right signal for capacity-planning and impact-ranking analysis. ltl's `-so mean` ranks messages by average latency; `-so duration` ranks by total duration (= mean × count). The two answer different operational questions.};
+my $explain_mean_compute = q{Computed as `total_duration / count` per time bucket (or per message key when consolidating). One pass through the data; exact.};
+
+# --- std_dev ---
+my $explain_std_dev_intuition = q{Standard deviation measures *absolute spread* around the mean: how far observed values typically deviate from the average, in the same units as the original data. A latency stream with mean=100ms and std_dev=5ms is tightly clustered; one with mean=100ms and std_dev=50ms is highly variable. The square root of variance.};
+my $explain_std_dev_operational = q{`std_dev` is the conventional spread statistic but has two limitations: (1) it scales with the absolute magnitude -- a service with mean=10s and std_dev=1s and a service with mean=10ms and std_dev=1ms have *very different* operational characteristics but the same shape; (2) it assumes a roughly normal-shaped distribution, which latency data rarely is (latency is typically right-skewed with heavy tails). For relative spread that's scale-independent, use `cv` (= std_dev / mean). For robust spread that ignores tail outliers, use `iqr` (= p75 - p25). For raw spread in absolute units to combine with `mean`, `std_dev` is the right choice.};
+my $explain_std_dev_compute = q{Computed via the sum-of-squares accumulator across each time bucket's duration array: `sqrt(E[X^2] - E[X]^2)`, where E[X] is the mean. Single-pass O(n); a floor at zero guards against floating-point underflow on near-constant data (variance can otherwise come out slightly negative).};
+
+# --- cv ---
+my $explain_cv_intuition = q{Coefficient of variation = `std_dev / mean`. CV measures *relative* spread: a service with CV=0.05 has values clustered within ~5% of the mean; a service with CV=2.0 has values varying by 200% of the mean. Because CV normalizes by the mean, it's scale-independent -- a microsecond-latency service and a multi-second-latency service can be compared directly.};
+my $explain_cv_operational = q{CV is the SRE workhorse statistic for "how predictable is this latency?" CV < 0.3 generally indicates a tight, predictable distribution. CV > 1 indicates substantial variation -- the standard deviation is larger than the mean, which only happens when the distribution has a long tail (since mean and std_dev share units, std_dev > mean implies values must extend far beyond mean to push std_dev that high). CV is dimensionless, so it's the right metric for ranking and comparing services with different absolute speeds. ltl's `-so cv` surfaces the most variable APIs -- frequently the right starting point for tail-latency investigations.};
+my $explain_cv_compute = q{Derived from already-computed `std_dev` and `mean`: `cv = std_dev / mean`. Undefined when `mean == 0`. Displayed with adaptive precision (2 decimals when < 10; 1 decimal when 10..100; integer when >= 100) so the column stays narrow on stable services and stays readable on chaotic ones.};
+
+# --- iqr ---
+my $explain_iqr_intuition = q{Interquartile range = `p75 - p25`. IQR captures the spread of the *middle 50%* of observations -- the range between the lower quartile and the upper quartile. Half of all values fall inside this band; one quarter are slower, one quarter are faster.};
+my $explain_iqr_operational = q{IQR is the *robust* spread statistic: by construction it ignores the bottom 25% and top 25%, which contain all the outliers, fast-path edge cases, and pathological-tail events. This makes IQR resistant to the failure modes that compromise `std_dev` (single 10-second outlier dominates) and `cv` (right-skew inflates std_dev). For SRE work where you want "what's the typical operational range this API behaves in", IQR is usually the right answer -- mean +/- std_dev assumes a normal distribution which production latency violates. IQR pairs well with `p50` (median) as a robust center: the trio `p25 / p50 / p75` describes the body of the distribution without being skewed by tails.};
+my $explain_iqr_compute = q{Derived from already-computed percentiles: `iqr = p75 - p25`. Inherits the same precision as the underlying percentile computation -- around 1.3% by default, tunable via `-pbpd` (buckets per decade) for tighter or looser bin spacing.};
+
+# --- percentiles (the major topic, covers p1..p99999) ---
+my $explain_percentiles_intuition = q{Percentiles answer the question "what value is faster than (or equal to) N% of all observations?" The N-th percentile pN is the value at which N percent of observed durations fall at or below. p50 is the median; p99 is the value that 99% of requests beat; p999 is the value that 99.9% of requests beat. Where `mean` collapses a distribution to a single average, percentiles describe its *shape* -- by reading off the values at many different points along the cumulative distribution.};
+my $explain_percentiles_operational = q{Percentiles are the primary SRE latency-investigation tool. Each percentile answers a different operational question: `p50` (median) is the "typical" experience; `p90` and `p95` are commonly-used SLO target points; `p99`, `p999`, and higher tail percentiles describe the user-visible worst-case latencies that drive outage and complaint patterns; `p1`, `p5`, `p10` are the lower-body percentiles useful for fast-path analysis (cache effectiveness, what does the system look like when not loaded). The progression of nines -- p99, p999, p9999, p99999 -- describes *how heavy* the tail is: in a benign distribution these values converge quickly; in a pathological one (GC pauses, lock contention, retry storms) they diverge sharply.};
+my $explain_percentiles_table_intro = q{Available percentile slugs and their operational meaning:};
+my $explain_percentiles_sample_size = q{Higher percentiles require larger samples to be statistically meaningful. The general rule: pN needs at least 10/(1-N/100) observations to be informative -- p99 needs ~1000, p999 needs ~10000, p9999 needs ~100000, p99999 needs ~1 million. Below these thresholds the percentile collapses toward `max` and carries no signal independent of `max`. ltl emits every percentile column regardless of sample size, so check the `occurrences` column when interpreting high-nines values.};
+my $explain_percentiles_compute = q{ltl computes percentiles using log-spaced bin counters with HDR-histogram-style precision. The default 53 buckets per decade gives ~1.3% precision, matching the resolution of common observability tools. The number of buckets per decade is tunable via `-pbpd`; `--percentile-precision` exposes named tiers (1..9). For byte-exact verification against sort-based percentiles, `-ep` opts out of the binned computation.};
+
+# --- skewness (user-supplied content) ---
+my $explain_skewness_intuition = q{Skewness measures the *asymmetry* of a distribution -- how lopsided it is around its mean. Whether the values tend to bunch up on one side with a tail extending toward the other. For latency, skewness answers "is the tail leaning one way?" -- positive skew means the right tail is heavier (most fast, occasionally slow); negative skew means the left tail is heavier (unusual for latency; common when something caps execution at a ceiling).};
+my $explain_skewness_operational = q{Skewness has three concrete operational uses. First, detecting clipped or timed-out distributions: if you expect right-skew (the natural latency shape) but see near-zero or negative skewness on a slow API, you may have a hidden cap -- requests that should be 10s are getting killed at 5s and piling up there. Second, spotting "bimodal" patterns before `bimodality_coef` fires: skewness near zero combined with high kurtosis is the signature of "fast and slow modes coexisting" -- the means cancel out, but the tails are fat on both sides. Third, skewness is a *structural prerequisite* for `bimodality_coef`: Sarle's BC formula is `(skewness^2 + 1) / (kurtosis_adjusted)`, so without skewness the multimodal screening doesn't work.};
+my $explain_skewness_compute = q{Standardized third central moment (population skewness): `mean((x - mean)^3) / std_dev^3`. Single-pass O(n) accumulator on the sorted-values pass; requires n >= 4 and non-zero std_dev (emitted blank otherwise). The same accumulator pass produces `kurtosis`, so the marginal cost of skewness over std_dev is negligible.};
+
+# --- kurtosis (user-supplied content) ---
+my $explain_kurtosis_intuition = q{Kurtosis measures the *tail-heaviness* (and concentration around the mean) of a distribution: how prone the distribution is to producing extreme outliers compared to a normal bell curve. For latency, kurtosis answers "how often do rare, extreme values show up?" -- low kurtosis means values cluster predictably and tails are thin; high kurtosis means most values cluster near the mean *but* the tails are heavy -- the "occasionally horrible" pattern. It's not about spread (that's std_dev / cv) and not about asymmetry (that's skewness). Kurtosis specifically captures the shape of the tails.};
+my $explain_kurtosis_operational = q{Kurtosis separates "this API is reliably slow" from "this API is mostly fine but occasionally catastrophic." These look similar in p50/p90 but diverge sharply in tails. High kurtosis with normal p50/p90 means most requests are fine but you have invisible outliers being suffered by a small population of users; p99/p999 will show them, but kurtosis tells you they're *concentrated* at the tail rather than spread out. Low kurtosis with slow p50 means uniform slowness affecting everyone -- different problem, different fix. Kurtosis is one of three shape moments (with `skewness` and `bimodality_coef`) that let SREs characterize *distribution shape* from the CSV alone, without re-running ltl.};
+my $explain_kurtosis_compute = q{Standardized fourth central moment minus 3 (excess kurtosis -- a normal distribution reads 0). Formula: `mean((x - mean)^4) / std_dev^4 - 3`. Single-pass O(n) accumulator on the sorted-values pass; requires n >= 4 and non-zero std_dev (emitted blank otherwise). The same accumulator pass produces `skewness` and feeds `bimodality_coef`.};
+
+# --- bimodality_coef (user-supplied content; the big one) ---
+my $explain_bc_intuition = q{Sarle's bimodality coefficient screens for whether a distribution likely has *two (or more) modes* -- two distinct populations of values mashed into the same dataset, each with its own peak. The classic case: 80% of requests hit a cache and return in 5ms, the other 20% miss and take 200ms. The mean (45ms) is in a valley where almost no requests actually land; the distribution has two modes but every summary statistic pretends it has one. `bimodality_coef` is the single number designed to flag that exactly that case.};
+my $explain_bc_operational = q{This is the cheapest, most actionable multimodality screening statistic available -- specifically useful for catching cache-hit-vs-miss patterns. `std_dev` and `cv` tell you "values are spread out" but not *why*; `bimodality_coef` distinguishes uniformly-noisy from bimodal. Threshold > 5/9 (approximately 0.555) flags suspect multimodal; values approaching 1.0 indicate strongly bimodal with equal-mass modes. The 0.555 cutoff is canonical from the bimodality-detection literature (it is the BC of a uniform distribution -- anything more spread-out-looking than uniform is suspect bimodal). `-so bimodality_coef` ranks every message in the log by likelihood of multimodality.};
+my $explain_bc_uses = q{Common operational triggers: (1) cache effectiveness investigations -- a bimodal API is often a caching layer working partially; modes are "served from cache" vs "fell through to backend"; if BC drops over time without changes, your cache is degrading. (2) Hidden two-population effects -- authenticated vs unauthenticated, read-from-replica vs read-from-primary, or other internal branching producing two distinct latency profiles. (3) Queueing detection -- queued vs unqueued requests are bimodal by construction; high BC on an API that shouldn't have queues signals contention. (4) Distribution-shape fingerprinting -- skewness + kurtosis + bimodality_coef together form a 3-column shape signature that's diagnostic without needing the heatmap.};
+my $explain_bc_caveats = q{Sarle's BC is a *screen*, not a test. Two important caveats: small-sample false positives -- at n < 100 random noise alone produces BC > 0.555, so high BC on a low-traffic API is a hint not a verdict; and skewed-bimodal blind spots -- if the two modes are very unequal (99% fast / 1% slow), the dominant mode's mass overwhelms the skewness-squared term and BC may stay below threshold even though the distribution is technically bimodal. The case where BC works best is comparable mode populations (say 30/70 to 50/50). For verification when BC flags a candidate, Hartigan's dip test is the gold-standard follow-up (computationally expensive; not shipped in ltl).};
+my $explain_bc_compute = q{Sarle's formula with sample-size correction: `BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))`. The denominator's sample-size adjustment is what distinguishes Sarle's BC from the unadjusted moment-based version -- it prevents small-sample false positives from being even worse. Requires n >= 4 and non-zero std_dev; emitted blank otherwise. Total cost: three arithmetic operations on numbers (skewness, kurtosis, n) already computed for the other shape moments.};
+
+# --- heatmap (--explain heatmap) ---
+my $explain_heatmap_intuition = q{The heatmap (-hm) replaces the per-bucket latency statistics column with a color-intensity visualization showing how values are distributed *within* each time bucket. Where percentile statistics collapse a distribution to a handful of numbers, the heatmap reveals its full shape -- bimodal distributions, shifting modes over time, outlier clustering, long tails, and rare-but-extreme events all become visually apparent at a glance. Each row of the heatmap is one time bucket; each cell in the row represents a logarithmic value range; cell color intensity is proportional to the number of entries in that range.};
+
+my $explain_heatmap_layout = q{Reading the heatmap left-to-right: the X-axis is logarithmic across the metric's full observed range, with the smallest values on the left and the largest on the right. The footer scale labels show the actual numeric value at 0%, 25%, 50%, 75%, and 100% of the X-axis width. Each row corresponds to one time bucket from the timeline -- the rows align with the rows of the bar graph on the left of the screen. Per-row percentile markers (P50, P95, P99) appear as labels indicating where those values fall on the X-axis for THAT bucket; markers shift left or right as latency profiles change over time. The color gradient is metric-specific: yellow for duration (-hm duration), green for bytes (-hm bytes), cyan for count (-hm count). Darker / more saturated cells indicate more entries in that value range; lighter cells indicate fewer.};
+
+my $explain_heatmap_reading = q{The heatmap surfaces patterns that summary statistics cannot. Look for: (1) Bimodal distributions -- two distinct vertical color bands in a row indicate two value populations (cache hit / cache miss, queued / unqueued, authenticated / unauthenticated). (2) Mode drift over time -- the brightest band in each row sliding left or right as you scan top-to-bottom signals latency degradation or improvement. (3) Tail growth -- entries appearing in the rightmost columns where they weren't before signal new outliers (lock contention, GC pauses, retry storms). (4) Hot-spot clusters -- a concentrated bright region across many rows in the same column range indicates a recurring value cluster. (5) Sparse vs dense rows -- some time buckets may show only a thin horizontal slice while others span a wide range; that's variance shifting over time.};
+
+my $explain_heatmap_compute = q{Cell positions span the full observed value range on a logarithmic scale: each row uses the same column-to-value mapping, so a cell at a given horizontal position represents the same value across every time bucket. Per-bucket counts determine each cell's color intensity, mapped to an 8-step gradient in the metric's color (yellow for duration, green for bytes, cyan for count). The per-row percentile markers and the summary-table p99/p999 values are computed from the same observations, so the markers and the printed percentile statistics agree by construction. The heatmap width is controlled by `-hmw` (default 52 cells); narrower widths trade horizontal resolution for screen real estate.};
+
+# Synthetic heatmap example chart. Mirrors the real ltl layout: time
+# labels in the left margin, log-spaced value buckets across, per-row
+# percentile markers on the right. Yellow gradient (-hm duration) drawn
+# from @column_colors{yellow}->{gradient}: [58, 94, 136, 142, 178, 184, 220, 226].
+# Full-block cells use matching fg+bg (38;5;N;48;5;Nm) so adjacent cells
+# render seamlessly on macOS Terminal.
+my $explain_heatmap_example;
+{
+    # Yellow gradient (-hm duration) from the @column_colors yellow entry.
+    # Real ltl renders heatmap cells with foreground color on a `█` block,
+    # no background. All cells use the same character so there is no
+    # mixed partial/full block issue and no inter-cell seam to manage.
+    my @g = (58, 94, 136, 142, 178, 184, 220, 226);
+
+    # 80-cell log-spaced X-axis spanning 1ms..10s.
+    my $width = 80;
+    my $val_min_ms = 1;
+    my $val_max_ms = 10_000;
+
+    # value (ms) -> column index (0..$width-1) on the log scale.
+    my $col_of = sub {
+        my ($v) = @_;
+        return 0 if $v <= $val_min_ms;
+        return $width - 1 if $v >= $val_max_ms;
+        my $f = (log($v) - log($val_min_ms)) / (log($val_max_ms) - log($val_min_ms));
+        return int($f * ($width - 1) + 0.5);
+    };
+    # column index -> value (ms) at the bin centre.
+    my $val_of_col = sub {
+        my ($c) = @_;
+        my $f = $c / ($width - 1);
+        return $val_min_ms * (($val_max_ms / $val_min_ms) ** $f);
+    };
+
+    # Render a coloured cell at gradient level 0..7.
+    my $cell_at = sub {
+        my ($level) = @_;
+        my $c = $g[$level];
+        return "\e[38;5;${c}m█\e[0m";
+    };
+    # Percentile marker -- inline `|` in bright-black (ANSI 90, matches
+    # real ltl's $colors{'bright-black'} convention) so it stands out
+    # against the coloured cells.
+    my $marker = "\e[90m|\e[0m";
+
+    # Declarative per-row shape. Each row carries a primary mode (and
+    # optionally a secondary mode for bimodal cases). Cell intensities
+    # AND percentile values are derived from these shapes, so the bright
+    # cells, the `|` markers, and the footer scale all line up on the
+    # same log-spaced axis by construction -- no risk of declaring a
+    # percentile that doesn't visually correspond to the distribution.
+    my @rows = (
+        # 08:00  early-morning trickle, tight cluster around 6ms
+        { time => '08:00', lumps => [ { c_ms => 6,   sigma => 0.35, peak => 4 } ] },
+        # 08:05  ramping up, mode shifts to ~12ms
+        { time => '08:05', lumps => [ { c_ms => 12,  sigma => 0.45, peak => 6 } ] },
+        # 08:10  peak load, broad spread with a right tail
+        { time => '08:10', lumps => [ { c_ms => 22,  sigma => 0.55, peak => 7 } ] },
+        # 08:15  bimodal: cache-hit cluster (~10ms) + cache-miss cluster (~250ms)
+        { time => '08:15', lumps => [ { c_ms => 11,  sigma => 0.30, peak => 6 },
+                                      { c_ms => 250, sigma => 0.35, peak => 5 } ] },
+        # 08:20  tail runaway, main mode ~25ms with outliers reaching seconds
+        { time => '08:20', lumps => [ { c_ms => 25,  sigma => 0.50, peak => 6 },
+                                      { c_ms => 1500,sigma => 0.30, peak => 3 } ] },
+        # 08:25  cooling off, main mode back near 8ms with residual tail
+        { time => '08:25', lumps => [ { c_ms => 8,   sigma => 0.40, peak => 4 },
+                                      { c_ms => 400, sigma => 0.25, peak => 2 } ] },
+    );
+
+    # Compute per-cell intensity (0..8) and a cumulative-mass distribution
+    # over the row's cells. From the mass distribution we read off the
+    # actual p50/p95/p99 column positions -- guaranteed coherent with
+    # what the cells visually show.
+    my $analyse_row = sub {
+        my ($row) = @_;
+        # log(value-per-cell) units; convert each lump's sigma (decades)
+        # into a column-space sigma.
+        my $col_per_decade = ($width - 1) / (log($val_max_ms / $val_min_ms) / log(10));
+
+        my @level = (0) x $width;   # gradient level shown in each cell
+        my @mass  = (0) x $width;   # observation mass in each cell
+        for my $lump (@{ $row->{lumps} }) {
+            my $cc = $col_of->($lump->{c_ms});
+            my $sc = $lump->{sigma} * $col_per_decade;
+            $sc = 0.5 if $sc < 0.5;
+            for my $c (0 .. $width - 1) {
+                my $d = ($c - $cc) / $sc;
+                my $g = exp(-0.5 * $d * $d);
+                $mass[$c] += $g * $lump->{peak};
+                # Cell level: max of brightness contributions (avoids
+                # bimodal lumps drowning each other out).
+                my $level = int($lump->{peak} * $g + 0.5);
+                $level = 8 if $level > 8;
+                $level[$c] = $level if $level > $level[$c];
+            }
+        }
+        # Derive percentile column positions from the cumulative mass.
+        my $total = 0;
+        $total += $_ for @mass;
+        my @cum = (0) x $width;
+        my $running = 0;
+        for my $c (0 .. $width - 1) {
+            $running += $mass[$c];
+            $cum[$c] = $running;
+        }
+        my $pct_col = sub {
+            my ($pct) = @_;
+            my $target = $total * $pct;
+            for my $c (0 .. $width - 1) {
+                return $c if $cum[$c] >= $target;
+            }
+            return $width - 1;
+        };
+        return {
+            level   => \@level,
+            p50_col => $pct_col->(0.50),
+            p95_col => $pct_col->(0.95),
+            p99_col => $pct_col->(0.99),
+        };
+    };
+
+    # --- Build the chart. ---
+    my $out_ex = "";
+    my $left_pad   = ' ' x 4;
+    my $time_label_w = 6;   # "08:00 " padded to 6
+
+    for my $row (@rows) {
+        my $r = $analyse_row->($row);
+        my %pct_at_col = (
+            $r->{p50_col} => 1,
+            $r->{p95_col} => 1,
+            $r->{p99_col} => 1,
+        );
+
+        my $line = $left_pad . sprintf('%-*s', $time_label_w, $row->{time});
+        for my $c (0 .. $width - 1) {
+            if ($pct_at_col{$c}) {
+                $line .= $marker;
+            } elsif ($r->{level}[$c] > 0) {
+                # Gradient level $level[$c] in 1..8 maps to gradient index 0..7.
+                $line .= $cell_at->($r->{level}[$c] - 1);
+            } else {
+                $line .= ' ';
+            }
+        }
+        $out_ex .= $line . "\n";
+    }
+
+    # Footer scale: same log-spaced axis as the rows, with value labels
+    # at the canonical bucket boundaries.
+    my @scale_marks = (
+        { col => $col_of->(1),     label => '1ms'   },
+        { col => $col_of->(10),    label => '10ms'  },
+        { col => $col_of->(100),   label => '100ms' },
+        { col => $col_of->(1000),  label => '1s'    },
+        { col => $col_of->(10000), label => '10s'   },
+    );
+    my @scale_row = ('─') x $width;
+    for my $mark (@scale_marks) {
+        my $col = $mark->{col};
+        my $lbl = $mark->{label};
+        my $start;
+        if ($col <= 0) {
+            $start = 0;
+        } elsif ($col >= $width - length($lbl)) {
+            $start = $width - length($lbl);
+        } else {
+            $start = $col - int(length($lbl) / 2);
+            $start = 0 if $start < 0;
+        }
+        for my $k (0 .. length($lbl) - 1) {
+            $scale_row[$start + $k] = substr($lbl, $k, 1) if ($start + $k) < $width;
+        }
+    }
+    $out_ex .= $left_pad . (' ' x $time_label_w) . join('', @scale_row) . "\n";
+
+    $explain_heatmap_example = $out_ex;
+}
+
+my $explain_heatmap_flags = <<'END';
+    ltl -hm duration access.log                   # duration heatmap (yellow gradient)
+    ltl -hm bytes access.log                      # bytes heatmap (green gradient)
+    ltl -hm count access.log                      # count heatmap (cyan gradient)
+    ltl -hm duration -hmw 80 access.log           # wider heatmap (80 cells vs default 52)
+    ltl -hm duration -bs 5 access.log             # 5-minute time buckets for finer-grained view
+    ltl -hm duration -lbg access.log              # palette tuned for light terminal backgrounds
+    ltl -hm duration -dbg access.log              # force dark palette regardless of auto-detect
+END
+
+my $explain_heatmap_notes = q{The X-axis is logarithmic, so equal visual spacing represents an exponential range of values. A cell at the right of the chart represents values 10x to 100x larger than a cell at the same visual position one decade left. Color rendering depends on terminal support: modern Unix terminals and Windows Terminal display the 256-color gradient correctly; legacy Windows CMD with `more` shows monochrome cells (the layout and gridline structure remain readable). When the heatmap and histogram are both active (-hm and -hg together), the heatmap renders inline in the bar-graph rows and the histogram renders as a separate panel below.};
+
+# --- histogram (--explain histogram) ---
+my $explain_histogram_intuition = q{The histogram (-hg) renders a single distribution chart showing how often each value range occurs across the entire log -- not split per time bucket like the heatmap. Where the heatmap surfaces *temporal* shape, the histogram surfaces *aggregate* shape: the full distribution's body, modes, tails, and percentile structure visible at once. Bars rise from the X-axis to indicate frequency at each value range; the percentile tick marks along the bottom show exactly where p50, p95, p99, and p99.9 fall on the distribution.};
+
+my $explain_histogram_layout = q{The histogram has a dual Y-axis: the LEFT axis shows absolute count of observations falling in each bucket (labeled `Count`), and the RIGHT axis shows the same expressed as a percentage of total observations (labeled `%`). Both axes track each other (count + percent for the same bar), but the percentage axis gives the user a scale-free way to read the shape regardless of total volume. The X-axis is logarithmic across the full observed value range -- the same convention as the heatmap. Bar heights use 8-level sub-character resolution (the Unicode block characters from full block down through 7/8, 6/8, ..., 1/8 block) so bars at intermediate heights still render distinct intensities. The X-axis baseline carries two kinds of tick marks: `t-down` (looking like ┬) at each labelled bucket boundary, pointing DOWN to the value label below; and `t-up` (looking like ┴) at each percentile position, pointing UP into the chart. The percentile ticks are the visual anchor for the legend values shown beneath the chart -- they mark where P50, P95, P99, and P99.9 actually fall on the distribution, letting you cross-reference the legend's numeric values to the corresponding column of the histogram at a glance.};
+
+my $explain_histogram_reading = q{The histogram is the chart for answering "what does the distribution actually look like?" Read it as you would any frequency chart, but two ltl-specific patterns deserve special attention. First, log-scale tail interpretation: a small bar at the far right represents a small number of very large values -- those bars are diagnostically valuable even when short, because the X-axis is exponential. Second, percentile-tick alignment: P50 should fall on or near the tallest bar (the mode). When P50 is far from the peak, the distribution is highly skewed and the mean is unreliable. When P95 and P99 are far apart on the X-axis (multiple decades), the tail is fat -- common signature of GC pauses, lock contention, or retry storms. When P99 and P99.9 are visually adjacent, the worst-case is dominated by a small cluster of consistent outliers; when far apart, the worst-case is dominated by one or two extreme events.};
+
+my $explain_histogram_compute = q{The histogram uses log-spaced bins with HDR-histogram-style precision. Default precision (53 buckets per decade, controlled by `-pbpd`) gives ~1.3% resolution. The histogram width (default 95% of terminal) and height (default 8 rows) are tunable via `-hgw` and `-hgh`. Highlight overlays (`-h regex`) render colored sub-bars within each main bar, showing the proportion of highlighted entries at each value range. The percentile tick marks on the baseline are computed from the same observations as the summary-table p99/p999 values, so the visual ticks and the numeric statistics agree by construction.};
+
+# Synthetic histogram example chart. Mirrors the real ltl layout precisely:
+# - Top border (┌─...─┐)
+# - 8 rows of bars with 8-level sub-character resolution
+# - Left Y-axis: count values right-aligned + tick mark + bars
+# - Right Y-axis: percentage labels
+# - Bottom border (└─...─┘)
+# - X-axis bucket boundary labels
+# - Percentile legend (P50/P95/P99/P99.9 colored in metric color)
+my $explain_histogram_example;
+{
+    # Yellow gradient (duration metric) color: base yellow = 184.
+    my $bar_color  = 184;
+    my $tick_color = 184;
+    # Box-drawing glyphs reused from %histogram_box_sets{light}.
+    my $box = $histogram_box_sets{light};
+
+    # Chart geometry.
+    my $width = 60;     # bar-area width in cells (widened from 36)
+    my $height = 8;     # body rows (sub-character resolution gives 8x effective height)
+    my $left_label_w  = 6;  # right-aligned "Count" / 1247 / 935 / 624 / 312
+    my $right_label_w = 5;  # " 100%", "  75%", "  50%", "  25%"
+
+    # Synthetic bar shape: rising on the left, peak around col 24-30, gentle
+    # right tail, a small secondary lump at col 42-44, fading by col 54.
+    # 60 columns, values 0..8 (where 8 = full block, 0 = empty).
+    my @bars = (
+        0,0,0,0,0,1,1,2,2,3,    # 0..9
+        3,4,4,5,5,6,6,7,7,7,    # 10..19
+        7,8,8,8,8,8,7,7,6,6,    # 20..29  (peak around 24)
+        5,5,4,4,3,3,2,2,1,1,    # 30..39
+        1,2,2,2,1,1,1,0,0,0,    # 40..49  (secondary lump)
+        1,1,0,0,0,0,0,0,0,0,    # 50..59
+    );
+
+    # Y-axis tick rows (count + pct labels visible on these rows; gridlines
+    # extend across the bar area on these rows behind any unfilled cells).
+    my @y_ticks = (
+        { row => 7, count => 1247, pct => 100 },
+        { row => 5, count =>  935, pct =>  75 },
+        { row => 3, count =>  624, pct =>  50 },
+        { row => 1, count =>  312, pct =>  25 },
+    );
+    my %tick_by_row = map { $_->{row} => $_ } @y_ticks;
+
+    # X-axis: 7 bucket-boundary labels at log-spaced positions across the
+    # 60-cell width. These get `t_down` (┬) tick marks on the baseline,
+    # pointing down to the labels below.
+    my @x_bucket_labels = (
+        { col => 0,  label => '1ms'   },
+        { col => 10, label => '5ms'   },
+        { col => 20, label => '50ms'  },
+        { col => 30, label => '500ms' },
+        { col => 40, label => '5s'    },
+        { col => 50, label => '50s'   },
+        { col => 56, label => '500s'  },   # shifted left so the full label fits within $width
+    );
+    my %bucket_col = map { $_->{col} => 1 } @x_bucket_labels;
+
+    # Percentile tick positions on the X-axis baseline -- these get
+    # `t_up` (┴) tick marks pointing up into the chart, visually
+    # anchoring the legend values to the distribution.
+    my %pct_col = (
+        24 => 'P50',     # peak
+        37 => 'P95',
+        44 => 'P99',
+        51 => 'P99.9',
+    );
+
+    my $hg_out = "";
+
+    # --- Header row: "Count" (left) + " %" (right). No top border. ---
+    my $count_hdr = sprintf("%${left_label_w}s", 'Count');
+    my $pct_hdr   = sprintf("%${right_label_w}s", '%');
+    $hg_out .= $count_hdr . ' ' . (' ' x $width) . ' ' . $pct_hdr . "\n";
+
+    # --- Body rows (top-down). Each row: left label + │ + bars + │ + right label ---
+    for (my $r = $height - 1; $r >= 0; $r--) {
+        my $has_tick = exists $tick_by_row{$r};
+        my ($left_lbl, $right_lbl);
+        if ($has_tick) {
+            $left_lbl  = sprintf("%${left_label_w}d",  $tick_by_row{$r}{count});
+            $right_lbl = sprintf("%${right_label_w}s", $tick_by_row{$r}{pct} . '%');
+        } else {
+            $left_lbl  = ' ' x $left_label_w;
+            $right_lbl = ' ' x $right_label_w;
+        }
+        # Side borders: ├ / ┤ on tick rows, │ otherwise.
+        my $left_side  = $has_tick ? $box->{t_right} : $box->{v_line};
+        my $right_side = $has_tick ? $box->{t_left}  : $box->{v_line};
+
+        my $line = "$left_lbl$left_side";
+        for my $col (0 .. $width - 1) {
+            my $bar = $bars[$col];
+            if ($bar > $r) {
+                # Bar fully covers this row -- full block with matching bg+fg.
+                $line .= "\e[38;5;${bar_color};48;5;${bar_color}m█\e[0m";
+            } elsif ($bar == $r) {
+                # Partial block at this row -- fg only (no bg).
+                $line .= "\e[38;5;${bar_color}m▄\e[0m";
+            } else {
+                # Empty cell: gridline on tick rows, blank otherwise.
+                $line .= $has_tick ? "\e[38;5;238m─\e[0m" : ' ';
+            }
+        }
+        $line .= "$right_side$right_lbl\n";
+        $hg_out .= $line;
+    }
+
+    # --- Bottom baseline: └ + (─ / ┬ / ┴) + ┘ ---
+    # ┬ at bucket-label positions (pointing DOWN to the labels below).
+    # ┴ at percentile-tick positions (pointing UP into the chart).
+    my $bottom = (' ' x $left_label_w) . $box->{corner_bl};
+    for my $col (0 .. $width - 1) {
+        my $is_bucket = exists $bucket_col{$col};
+        my $is_pct    = exists $pct_col{$col};
+        if    ($is_bucket && $is_pct) { $bottom .= $box->{cross};   }
+        elsif ($is_bucket)            { $bottom .= $box->{t_down};  }   # ┬ pointing DOWN
+        elsif ($is_pct)               { $bottom .= $box->{t_up};    }   # ┴ pointing UP
+        else                          { $bottom .= $box->{h_line};  }
+    }
+    $bottom .= $box->{corner_br} . "\n";
+    $hg_out .= $bottom;
+
+    # --- X-axis bucket-boundary labels row (under the ┬ ticks). ---
+    my @xrow = (' ') x $width;
+    for my $lbl (@x_bucket_labels) {
+        my $col = $lbl->{col};
+        my $txt = $lbl->{label};
+        for my $k (0 .. length($txt) - 1) {
+            $xrow[$col + $k] = substr($txt, $k, 1) if ($col + $k) < $width;
+        }
+    }
+    $hg_out .= (' ' x ($left_label_w + 1)) . join('', @xrow) . "\n";
+
+    # --- Blank line, then centered percentile legend. ---
+    my $legend_text = "P50: 47ms   P95: 320ms   P99: 1.2s   P99.9: 4.5s";
+    my $chart_total_w = $left_label_w + 1 + $width + 1 + $right_label_w;
+    my $legend_pad = $left_label_w + 1 + int(($width - length($legend_text)) / 2);
+    $legend_pad = 0 if $legend_pad < 0;
+    $hg_out .= "\n";
+    $hg_out .= (' ' x $legend_pad)
+             . "\e[38;5;${tick_color}m" . $legend_text . "\e[0m"
+             . "\n";
+
+    # Shift the whole chart right so it visually balances under the
+    # surrounding topic prose (which is indented by 2). 5 leading spaces
+    # per line is the user-tuned offset.
+    my $indent = ' ' x 5;
+    $hg_out =~ s/^/$indent/mg;
+    $explain_histogram_example = $hg_out;
+}
+
+my $explain_histogram_flags = <<'END';
+    ltl -hg duration access.log                   # duration histogram (single metric)
+    ltl -hg bytes access.log                      # bytes histogram (response sizes)
+    ltl -hg count access.log                      # count histogram (per-bucket entry counts)
+    ltl -hg duration,bytes access.log             # multiple histograms in one invocation
+    ltl -hg duration -hgw 50 access.log           # narrow histogram (50% of terminal)
+    ltl -hg duration -hgh 16 access.log           # taller histogram (16 rows vs default 8)
+    ltl -hg duration -h "/api/v2/" access.log     # overlay highlight of matching entries
+    ltl -hg duration -pp 7 access.log             # tighter percentile precision (slower)
+END
+
+my $explain_histogram_notes = q{The X-axis log scale means that visual distance between bars represents an exponential, not linear, gap in actual value. Two bars that look the same width apart on the screen could represent a 10x difference at one part of the chart and a 100x difference at another. When -hg is invoked alongside the bar graph (default), the histogram renders as an additional panel below the timeline. When -hg is invoked with multiple metrics (-hg duration,bytes), each metric gets its own histogram panel stacked vertically. Highlight overlays (-h pattern) draw colored sub-bars within each main bar showing the proportion of matched entries; the highlight percentile legend appears below the main legend in highlight color. Color rendering depends on terminal support: modern Unix terminals and Windows Terminal display the gradient correctly; legacy Windows CMD with `more` shows monochrome bars (the layout and percentile ticks remain readable).};
+
+sub populate_explain_topics {
+    %explain_topics = (
+
+        # ---- min ----
+        min => [
+            { type => 'heading',   text => 'MIN' },
+            { type => 'paragraph', text => $explain_min_intuition },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_min_operational },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so min -n 20 access.log\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_min_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'p1, p5, mean, max, percentiles.' },
+        ],
+
+        # ---- max ----
+        max => [
+            { type => 'heading',   text => 'MAX' },
+            { type => 'paragraph', text => $explain_max_intuition },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_max_operational },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so max -n 20 access.log\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_max_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'p99, p999, p9999, p99999, mean, percentiles.' },
+        ],
+
+        # ---- mean ----
+        mean => [
+            { type => 'heading',   text => 'MEAN' },
+            { type => 'paragraph', text => $explain_mean_intuition },
+            { type => 'subheading', text => 'Interpretation' },
+            { type => 'table',
+              headers => ['Comparison',                          'Implication'],
+              rows    => [
+                  ['mean approximately equals p50',              'Distribution is roughly symmetric'],
+                  ['mean substantially greater than p50',        'Right-skewed; mean inflated by tail outliers -- prefer p50 for typical value'],
+                  ['mean substantially less than p50',           'Left-skewed (unusual); check for hidden cap or timeout'],
+                  ['mean times count equals total duration',     'Use total duration (-so duration) for capacity-planning, not mean'],
+              ] },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_mean_operational },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so mean -n 20 access.log         # rank by average latency\n    ltl -so duration -n 20 access.log     # rank by total work (mean * count)\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_mean_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'p50, std_dev, cv, percentiles, impact. Aliases: avg.' },
+        ],
+
+        # ---- std_dev ----
+        std_dev => [
+            { type => 'heading',   text => 'STD_DEV' },
+            { type => 'paragraph', text => $explain_std_dev_intuition },
+            { type => 'subheading', text => 'Interpretation' },
+            { type => 'table',
+              headers => ['Comparison',                       'Implication'],
+              rows    => [
+                  ['std_dev less than mean / 5',              'Very tight distribution; predictable latency'],
+                  ['std_dev around mean / 3',                 'Typical for well-behaved services'],
+                  ['std_dev around mean',                     'High variance; investigate tail'],
+                  ['std_dev greater than mean (cv greater than 1)', 'Long tail; mean is misleading -- prefer p50/iqr'],
+              ] },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_std_dev_operational },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so std_dev -n 20 access.log      # highest absolute spread\n    ltl -so cv -n 20 access.log           # highest relative spread\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_std_dev_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'mean, cv, iqr, skewness, kurtosis. Aliases: stddev.' },
+        ],
+
+        # ---- cv ----
+        cv => [
+            { type => 'heading',   text => 'CV (COEFFICIENT OF VARIATION)' },
+            { type => 'paragraph', text => $explain_cv_intuition },
+            { type => 'subheading', text => 'Interpretation' },
+            { type => 'table',
+              headers => ['CV value',          'Distribution character',                        'Operational meaning'],
+              rows    => [
+                  ['less than 0.1',            'Very tight',                                    'Predictable; CV alone is unlikely to surface anomalies'],
+                  ['0.1 to 0.3',               'Tight',                                         'Healthy operational variation'],
+                  ['0.3 to 1.0',               'Moderate',                                      'Some tail; check kurtosis for heavy outliers'],
+                  ['1.0 to 3.0',               'High',                                          'Right-skewed with long tail; check p99/p999'],
+                  ['greater than 3.0',         'Very high',                                     'Investigate: outliers dominate; possible bimodality (check bimodality_coef)'],
+              ] },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_cv_operational },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so cv -n 20 access.log           # surface most variable APIs\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_cv_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'mean, std_dev, iqr, kurtosis, bimodality_coef.' },
+        ],
+
+        # ---- iqr ----
+        iqr => [
+            { type => 'heading',   text => 'IQR (INTERQUARTILE RANGE)' },
+            { type => 'paragraph', text => $explain_iqr_intuition },
+            { type => 'subheading', text => 'Interpretation' },
+            { type => 'table',
+              headers => ['Comparison',                       'Implication'],
+              rows    => [
+                  ['iqr much less than std_dev',              'Tails are inflating std_dev; the body is actually tight'],
+                  ['iqr approximately equals std_dev',        'Distribution is roughly normal-shaped'],
+                  ['iqr much greater than (p99 - p75)',       'Body is wider than the right tail; unusual'],
+                  ['(p99 - p75) much greater than iqr',       'Right tail dominates the body; classic latency shape'],
+              ] },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_iqr_operational },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so iqr -n 20 access.log          # find APIs with the noisiest middle range\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_iqr_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'p25, p50, p75, std_dev, cv.' },
+        ],
+
+        # ---- percentiles (shared topic covering p1..p99999) ----
+        percentiles => [
+            { type => 'heading',   text => 'PERCENTILES' },
+            { type => 'paragraph', text => $explain_percentiles_intuition },
+            { type => 'subheading', text => 'Available percentiles' },
+            { type => 'paragraph', text => $explain_percentiles_table_intro },
+            { type => 'table',
+              headers => ['Slug',     'Quantile', 'Tail interpretation',                              'Min sample size'],
+              rows    => [
+                  ['p1',              '1%',       '1 in 100 requests is at or below this value',     '~100'],
+                  ['p5',              '5%',       'Fast-path representative; cache-warm baseline',   '~200'],
+                  ['p10',             '10%',      'Lower body; unloaded steady-state behavior',      '~100'],
+                  ['p25',             '25%',      'Lower quartile (paired with p75 for iqr)',        '~40'],
+                  ['p50',             '50%',      'Median; the "typical" value robust to outliers',  '~40'],
+                  ['p75',             '75%',      'Upper quartile (paired with p25 for iqr)',        '~40'],
+                  ['p90',             '90%',      'Common SLO point; "90% of users see this or better"', '~100'],
+                  ['p95',             '95%',      'Common SLO point; tighter than p90',              '~200'],
+                  ['p99',             '99%',      '1 in 100 requests is slower than this',           '~1,000'],
+                  ['p999',            '99.9%',    '1 in 1,000 requests is slower than this',         '~10,000'],
+                  ['p9999',           '99.99%',   '1 in 10,000 requests is slower; high-volume tail', '~100,000'],
+                  ['p99999',          '99.999%',  '1 in 100,000 requests is slower; very-high-volume tail', '~1,000,000'],
+              ] },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_percentiles_operational },
+            { type => 'subheading', text => 'Sample size and meaningfulness' },
+            { type => 'paragraph', text => $explain_percentiles_sample_size },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so p999 -n 20 access.log         # find APIs with the worst p999 tail latency\n    ltl -so p9999 -n 20 access.log        # tail-of-tail analysis; needs many samples\n    ltl -pp 7 access.log                  # tighten percentile precision (slower; more memory)\n    ltl -ep access.log                    # opt out of bin counters; exact sort-based percentiles\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_percentiles_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'min, max, iqr, skewness, kurtosis, bimodality_coef. Flags: -pbpd, -pp, -ep.' },
+        ],
+
+        # ---- skewness ----
+        skewness => [
+            { type => 'heading',   text => 'SKEWNESS' },
+            { type => 'paragraph', text => $explain_skewness_intuition },
+            { type => 'subheading', text => 'Interpretation' },
+            { type => 'table',
+              headers => ['Value',           'Shape',                       'Latency interpretation'],
+              rows    => [
+                  ['0',                       'Symmetric',                  'Bell-curve-like; fast and slow excursions equally likely'],
+                  ['0 to +1',                 'Mildly right-skewed',        'Healthy latency shape; small fast-path bias'],
+                  ['+1 to +3',                'Strongly right-skewed',      'Long-tail behavior; classic occasional-slow-request shape'],
+                  ['greater than +3',         'Severely right-skewed',      'Pathological tail; most fast, but a long heavy reach into slow territory'],
+                  ['less than 0',             'Left-skewed',                'Unusual for latency; often indicates a hard timeout or cap clipping the right tail'],
+                  ['approximately 0 with high kurtosis', 'Symmetric, heavy-tailed', 'Sometimes bimodal -- check bimodality_coef'],
+              ] },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_skewness_operational },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so skewness -n 20 access.log     # most asymmetric distributions\n    ltl -so skewness -sa -n 20 access.log # most negatively-skewed (timeout candidates)\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_skewness_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'kurtosis, bimodality_coef, std_dev, percentiles.' },
+        ],
+
+        # ---- kurtosis ----
+        kurtosis => [
+            { type => 'heading',   text => 'KURTOSIS' },
+            { type => 'paragraph', text => $explain_kurtosis_intuition },
+            { type => 'subheading', text => 'Interpretation' },
+            { type => 'table',
+              headers => ['Value',         'Distribution shape',                             'Operational meaning'],
+              rows    => [
+                  ['0',                    'Normal (Gaussian)',                              'Tails behave like a bell curve'],
+                  ['less than 0',          'Platykurtic -- flatter, thinner tails',          'Bounded behavior; extreme outliers unlikely'],
+                  ['0 to ~3',              'Roughly normal',                                 'Typical for healthy latency distributions'],
+                  ['3 to ~10',             'Leptokurtic -- peaked with heavier tails',       'Outliers getting common enough to matter'],
+                  ['greater than 10',      'Very heavy tails',                               'A few extreme outliers dominate the tail; pathological-latency signature (GC, locks, retries)'],
+                  ['greater than 30',      'Extreme',                                        'Almost certainly indicates something is wrong'],
+              ] },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_kurtosis_operational },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so kurtosis -n 20 access.log     # heaviest tails\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_kurtosis_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'skewness, bimodality_coef, std_dev, cv, percentiles.' },
+        ],
+
+        # ---- bimodality_coef ----
+        bimodality_coef => [
+            { type => 'heading',   text => 'BIMODALITY_COEF (SARLE\'S BC)' },
+            { type => 'paragraph', text => $explain_bc_intuition },
+            { type => 'subheading', text => 'Interpretation' },
+            { type => 'table',
+              headers => ['BC value',         'Interpretation'],
+              rows    => [
+                  ['less than 0.555 (5/9)',   'Likely unimodal -- one peak'],
+                  ['greater than 0.555',      'Suspect bimodal or multimodal -- investigate'],
+                  ['approaching 1.0',         'Strongly bimodal'],
+                  ['equal to 0.555',          'BC of a uniform distribution -- the canonical screening threshold'],
+              ] },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_bc_operational },
+            { type => 'subheading', text => 'Common triggers' },
+            { type => 'paragraph', text => $explain_bc_uses },
+            { type => 'subheading', text => 'Caveats (screening, not testing)' },
+            { type => 'paragraph', text => $explain_bc_caveats },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so bimodality_coef -n 20 access.log     # most likely multimodal APIs\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_bc_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'skewness, kurtosis, cv, std_dev.' },
+        ],
+
+        # ---- heatmap (Visualizations group) ----
+        heatmap => [
+            { type => 'heading',   text => 'HEATMAP' },
+            { type => 'paragraph', text => $explain_heatmap_intuition },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_heatmap_layout },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => $explain_heatmap_example },
+            { type => 'subheading', text => 'What to look for' },
+            { type => 'paragraph', text => $explain_heatmap_reading },
+            { type => 'subheading', text => 'Common flag combinations' },
+            { type => 'pre',       text => $explain_heatmap_flags },
+            { type => 'subheading', text => 'Notes' },
+            { type => 'paragraph', text => $explain_heatmap_notes },
+            { type => 'subheading', text => 'How ltl renders this' },
+            { type => 'paragraph', text => $explain_heatmap_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'histogram, percentiles, skewness, kurtosis, bimodality_coef. Flags: -hm, -hmw, -bs, -lbg, -dbg.' },
+        ],
+
+        # ---- histogram (Visualizations group) ----
+        histogram => [
+            { type => 'heading',   text => 'HISTOGRAM' },
+            { type => 'paragraph', text => $explain_histogram_intuition },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_histogram_layout },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => $explain_histogram_example },
+            { type => 'subheading', text => 'What to look for' },
+            { type => 'paragraph', text => $explain_histogram_reading },
+            { type => 'subheading', text => 'Common flag combinations' },
+            { type => 'pre',       text => $explain_histogram_flags },
+            { type => 'subheading', text => 'Notes' },
+            { type => 'paragraph', text => $explain_histogram_notes },
+            { type => 'subheading', text => 'How ltl renders this' },
+            { type => 'paragraph', text => $explain_histogram_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'heatmap, percentiles, skewness, kurtosis, bimodality_coef. Flags: -hg, -hgw, -hgh, -pbpd, -pp, -ep.' },
+        ],
+    );
+    return;
+}
+
+populate_explain_topics();
+
+sub print_help {
+    my $out = "";
+
+    # Banner is incorporated into the pager-piped help output so the title
+    # appears at the top of the less buffer (Issue #261). The standalone
+    # print_title() in MAIN is suppressed when --help is invoked.
+    $out .= get_title_string();
+
+    my $intro = "LogTimeLine -- a command-line log analysis tool that aggregates timestamped log files into visual timelines. Filter, highlight, zoom, and switch between occurrence counts, latency statistics, heatmaps, histograms, and custom metrics to investigate system behavior over time.";
+    $out .= help_wrap($intro, indent => 0, first_indent => 0) . "\n";
 
     # USAGE
-    $out .= $heading->("USAGE");
+    $out .= help_heading("USAGE");
     $out .= "    ltl [options] <logfile> [logfile2 ...]\n";
 
     # OPTIONS
-    $out .= $heading->("OPTIONS");
+    $out .= help_heading("OPTIONS");
 
     # Time & Buckets
-    $out .= $subheading->("Time & Buckets");
-    $out .= $opt->("-bs,  --bucket-size <N>",       "Set the width of each time bucket on the timeline (default unit: minutes; see -s, -ms)");
-    $out .= $opt->("-s,   --seconds",               "Interpret bucket size as seconds instead of minutes");
-    $out .= $opt->("-ms,  --milliseconds",          "Enable sub-second timestamp parsing and allow bucket sizes down to 100ms");
-    $out .= $opt->("-st,  --start <timestamp>",     "Only process log lines at or after this time (YYYY-MM-DD HH:MM:SS[.mmm])");
-    $out .= $opt->("-et,  --end <timestamp>",       "Only process log lines before this time (HH:MM:SS[.mmm])");
-    $out .= $opt->("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when auto-detection is not possible (ns, us, ms, s)");
-    $out .= $opt->("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: s (second), m (minute, default), h (hour), d (day)");
+    $out .= help_subheading("Time & Buckets");
+    $out .= help_opt("-bs,  --bucket-size <N>",       "Set the width of each time bucket on the timeline (default unit: minutes; see -s, -ms)");
+    $out .= help_opt("-s,   --seconds",               "Interpret bucket size as seconds instead of minutes");
+    $out .= help_opt("-ms,  --milliseconds",          "Enable sub-second timestamp parsing and allow bucket sizes down to 100ms");
+    $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time (YYYY-MM-DD HH:MM:SS[.mmm])");
+    $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time (HH:MM:SS[.mmm])");
+    $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when auto-detection is not possible (ns, us, ms, s)");
+    $out .= help_opt("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: s (second), m (minute, default), h (hour), d (day)");
 
     # Filtering
-    $out .= $subheading->("Filtering");
-    $out .= $opt->("-i,   --include <regex>",       "Only process lines matching this pattern, discard everything else. Can be specified multiple times; patterns are combined with OR. Use & for AND: \"A&B\" matches lines containing both A and B. && for literal &. & binds tighter than |.");
-    $out .= $opt->("-e,   --exclude <regex>",       "Discard lines matching this pattern before analysis. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
-    $out .= $opt->("-h,   --highlight <regex>",     "Show matching lines as a separate colored bar alongside the main bar for visual comparison. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
-    $out .= $opt->("-if,  --include-file <file>",   "Load include patterns from a file (one pattern per line)");
-    $out .= $opt->("-ef,  --exclude-file <file>",   "Load exclude patterns from a file (one pattern per line)");
-    $out .= $opt->("-hf,  --highlight-file <file>", "Load highlight patterns from a file (one pattern per line)");
-    $out .= $opt->("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold");
-    $out .= $opt->("-dmax, --duration-max <N>",     "Hide log entries with duration above this threshold");
-    $out .= $opt->("-bmin, --bytes-min <N>",        "Hide log entries with response size below this threshold");
-    $out .= $opt->("-bmax, --bytes-max <N>",        "Hide log entries with response size above this threshold");
-    $out .= $opt->("-cmin, --count-min <N>",        "Hide log entries with count below this threshold");
-    $out .= $opt->("-cmax, --count-max <N>",        "Hide log entries with count above this threshold");
+    $out .= help_subheading("Filtering");
+    $out .= help_opt("-i,   --include <regex>",       "Only process lines matching this pattern, discard everything else. Can be specified multiple times; patterns are combined with OR. Use & for AND: \"A&B\" matches lines containing both A and B. && for literal &. & binds tighter than |.");
+    $out .= help_opt("-e,   --exclude <regex>",       "Discard lines matching this pattern before analysis. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
+    $out .= help_opt("-h,   --highlight <regex>",     "Show matching lines as a separate colored bar alongside the main bar for visual comparison. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
+    $out .= help_opt("-if,  --include-file <file>",   "Load include patterns from a file (one pattern per line)");
+    $out .= help_opt("-ef,  --exclude-file <file>",   "Load exclude patterns from a file (one pattern per line)");
+    $out .= help_opt("-hf,  --highlight-file <file>", "Load highlight patterns from a file (one pattern per line)");
+    $out .= help_opt("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold");
+    $out .= help_opt("-dmax, --duration-max <N>",     "Hide log entries with duration above this threshold");
+    $out .= help_opt("-bmin, --bytes-min <N>",        "Hide log entries with response size below this threshold");
+    $out .= help_opt("-bmax, --bytes-max <N>",        "Hide log entries with response size above this threshold");
+    $out .= help_opt("-cmin, --count-min <N>",        "Hide log entries with count below this threshold");
+    $out .= help_opt("-cmax, --count-max <N>",        "Hide log entries with count above this threshold");
     $out .= "\n";
     my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population.";
-    my $note_width = $wrap_width - $opt_col;
-    $note_width = 30 if $note_width < 30;
-    my @note_words = split /\s+/, $note_text;
-    my $note_line = "";
-    for my $word (@note_words) {
-        if ($note_line eq "") {
-            $note_line = $word;
-        } elsif (length($note_line) + 1 + length($word) <= $note_width) {
-            $note_line .= " $word";
-        } else {
-            $out .= " " x $opt_col . $note_line . "\n";
-            $note_line = $word;
-        }
-    }
-    $out .= " " x $opt_col . $note_line . "\n" if $note_line ne "";
+    $out .= help_wrap($note_text, indent => $help_opt_col, first_indent => $help_opt_col) . "\n";
 
     # Recording & Processing
-    $out .= $subheading->("Recording & Processing");
-    $out .= $opt->("-ov,  --omit-values",           "Hide the per-bucket numeric values on the bar graph");
-    $out .= $opt->("-os,  --omit-stats",            "Hide the statistics columns (min/avg/max/stddev/etc.)");
-    $out .= $opt->("-oe,  --omit-empty",            "Skip time buckets that contain zero log entries");
-    $out .= $opt->("-or,  --omit-rate",             "Hide the error/message rate from the legend");
-    $out .= $opt->("-od,  --omit-durations",        "Suppress duration extraction and related columns (significantly reduces memory and processing time on large files)");
-    $out .= $opt->("-ob,  --omit-bytes",            "Suppress byte-size extraction and related columns");
-    $out .= $opt->("-oc,  --omit-count",            "Suppress count extraction and related columns");
-    $out .= $opt->("-ic,  --include-count",         "Add a count column to the output (off by default)");
+    $out .= help_subheading("Recording & Processing");
+    $out .= help_opt("-ov,  --omit-values",           "Hide the per-bucket numeric values on the bar graph");
+    $out .= help_opt("-os,  --omit-stats",            "Hide the statistics columns (min/avg/max/stddev/etc.)");
+    $out .= help_opt("-oe,  --omit-empty",            "Skip time buckets that contain zero log entries");
+    $out .= help_opt("-or,  --omit-rate",             "Hide the error/message rate from the legend");
+    $out .= help_opt("-od,  --omit-durations",        "Suppress duration extraction and related columns (significantly reduces memory and processing time on large files)");
+    $out .= help_opt("-ob,  --omit-bytes",            "Suppress byte-size extraction and related columns");
+    $out .= help_opt("-oc,  --omit-count",            "Suppress count extraction and related columns");
+    $out .= help_opt("-ic,  --include-count",         "Add a count column to the output (off by default)");
 
     # Message Grouping
-    $out .= $subheading->("Message Grouping");
-    $out .= $opt->("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output.");
-    $out .= $opt->("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
-    $out .= $opt->("-iqs, --include-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
-    $out .= $opt->("-is,  --include-session",       "Keep session/user IDs when grouping messages, so each session is tracked separately");
-    $out .= $opt->("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
+    $out .= help_subheading("Message Grouping");
+    $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output.");
+    $out .= help_opt("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
+    $out .= help_opt("-iqs, --include-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
+    $out .= help_opt("-is,  --include-session",       "Keep session/user IDs when grouping messages, so each session is tracked separately");
+    $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
 
     # Display & Output
-    $out .= $subheading->("Display & Output");
-    $out .= $opt->("-n,   --top-messages <N>",      "Number of unique messages to show in the summary table (default: 10)");
-    $out .= $opt->("-o,   --output-csv",            "Write all extracted data to a CSV file for external analysis");
-    $out .= $opt->("-osum, --omit-summary",         "Hide the summary table printed after the bar graph");
-    $out .= $opt->("-hl,  --hide-legend",           "Hide the legend column (category breakdowns and rates)");
-    $out .= $opt->("-ho,  --hide-occurrences",      "Hide the occurrences bar graph column, freeing space for other metric columns");
-    $out .= $opt->("-hd,  --hide-duration",         "Hide the duration bar graph column");
-    $out .= $opt->("-hb,  --hide-bytes",            "Hide the bytes bar graph column");
-    $out .= $opt->("-hc,  --hide-count",            "Hide the count bar graph column");
-    $out .= $opt->("-hs,  --hide-session",          "Hide the Sessions column that automatically appears when session IDs are found in the log data");
-    $out .= $opt->("-hst, --hide-stats",            "Hide the latency statistics or heatmap column");
-    $out .= $opt->("-lbg, --light-background",      "Use pale-to-bright color gradients suited for light/white terminal backgrounds");
-    $out .= $opt->("-dbg, --dark-background",       "Force dark-background color gradients (disables auto-detect; wins over -lbg if both given)");
-    $out .= $opt->("-nah, --no-auto-hide",          "Disable automatic column hiding at narrow terminal widths (squeeze all columns instead)");
-    $out .= $opt->("-p,   --pause",                 "Wait for a keypress between pages of output");
-    $out .= $opt->("-V,   --verbose [<section>...]", "Emit diagnostic sections. Bare -V emits all; -V <name>[,<name>...] or repeated -V selects sections; -V list prints known sections");
+    $out .= help_subheading("Display & Output");
+    $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the summary table (default: 10)");
+    $out .= help_opt("-o,   --output-csv",            "Write all extracted data to a CSV file for external analysis");
+    $out .= help_opt("-osum, --omit-summary",         "Hide the summary table printed after the bar graph");
+    $out .= help_opt("-hl,  --hide-legend",           "Hide the legend column (category breakdowns and rates)");
+    $out .= help_opt("-ho,  --hide-occurrences",      "Hide the occurrences bar graph column, freeing space for other metric columns");
+    $out .= help_opt("-hd,  --hide-duration",         "Hide the duration bar graph column");
+    $out .= help_opt("-hb,  --hide-bytes",            "Hide the bytes bar graph column");
+    $out .= help_opt("-hc,  --hide-count",            "Hide the count bar graph column");
+    $out .= help_opt("-hs,  --hide-session",          "Hide the Sessions column that automatically appears when session IDs are found in the log data");
+    $out .= help_opt("-hst, --hide-stats",            "Hide the latency statistics or heatmap column");
+    $out .= help_opt("-lbg, --light-background",      "Use pale-to-bright color gradients suited for light/white terminal backgrounds");
+    $out .= help_opt("-dbg, --dark-background",       "Force dark-background color gradients (disables auto-detect; wins over -lbg if both given)");
+    $out .= help_opt("-nah, --no-auto-hide",          "Disable automatic column hiding at narrow terminal widths (squeeze all columns instead)");
+    $out .= help_opt("-p,   --pause",                 "Wait for a keypress between pages of output");
+    $out .= help_opt("-V,   --verbose [<section>...]", "Emit diagnostic sections. Bare -V emits all; -V <name>[,<name>...] or repeated -V selects sections; -V list prints known sections");
 
     # Sorting
-    $out .= $subheading->("Sorting");
-    $out .= $opt->("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. Aggregates: occurrences, duration, bytes, mean_bytes, count, impact. Stats: min, mean, max, stddev, cv. Percentiles: p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999. Shape: iqr, skewness, kurtosis, bimodality_coef");
-    $out .= $opt->("-sa,  --sort-ascending",        "Reverse the sort order to show lowest values first");
+    $out .= help_subheading("Sorting");
+    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. Aggregates: occurrences, duration, bytes, mean_bytes, count, impact. Stats: min, mean, max, stddev, cv. Percentiles: p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999. Shape: iqr, skewness, kurtosis, bimodality_coef. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details.");
+    $out .= help_opt("-sa,  --sort-ascending",        "Reverse the sort order to show lowest values first");
 
     # Heatmap
-    $out .= $subheading->("Heatmap");
-    $out .= $opt->("-hm,  --heatmap [metric]",      "Replace statistics with a color-intensity histogram showing value distribution per time bucket (duration, bytes, or count)");
-    $out .= $opt->("-hmw, --heatmap-width <N>",     "Number of columns for the heatmap display (default: 52)");
+    $out .= help_subheading("Heatmap");
+    $out .= help_opt("-hm,  --heatmap [metric]",      "Replace statistics with a color-intensity histogram showing value distribution per time bucket (duration, bytes, or count)");
+    $out .= help_opt("-hmw, --heatmap-width <N>",     "Number of columns for the heatmap display (default: 52)");
 
     # Histogram
-    $out .= $subheading->("Histogram");
-    $out .= $opt->("-hg,  --histogram [metric]",    "Show an overall distribution histogram after the bar graph (duration, bytes, or count)");
-    $out .= $opt->("-hgw, --histogram-width <N>",   "Histogram width as percentage of terminal (default: 95)");
-    $out .= $opt->("-hgh, --histogram-height <N>",  "Histogram height in rows (default: 8)");
-    $out .= $opt->("-hgbpd, --histogram-buckets-per-decade <N>", "Histogram buckets per decade (default: 8; 4=~10%, 8=~5%, 16=~2.5%, 32=~1% precision)");
-    $out .= $opt->("-hgb,  --histogram-buckets <N>",             "Override total histogram bucket count (default: 0 = auto-calculate from buckets-per-decade)");
+    $out .= help_subheading("Histogram");
+    $out .= help_opt("-hg,  --histogram [metric]",    "Show an overall distribution histogram after the bar graph (duration, bytes, or count)");
+    $out .= help_opt("-hgw, --histogram-width <N>",   "Histogram width as percentage of terminal (default: 95)");
+    $out .= help_opt("-hgh, --histogram-height <N>",  "Histogram height in rows (default: 8)");
+    $out .= help_opt("-hgbpd, --histogram-buckets-per-decade <N>", "Histogram buckets per decade (default: 8; 4=~10%, 8=~5%, 16=~2.5%, 32=~1% precision)");
+    $out .= help_opt("-hgb,  --histogram-buckets <N>",             "Override total histogram bucket count (default: 0 = auto-calculate from buckets-per-decade)");
 
     # Percentile mode (Issue #189)
-    $out .= $subheading->("Percentile mode");
-    $out .= $opt->("-pp,   --percentile-precision <N>",            "Set percentile binning precision tier 1..9 (default: 5 = ~1.3%; 1=~10%, 9=~0.1%). Affects migrated consumers; see docs/usage.md");
-    $out .= $opt->("-pbpd, --percentile-buckets-per-decade <N>",   "Set percentile buckets-per-decade directly (default: 53; valid 4..616). Overrides --percentile-precision when both supplied");
-    $out .= $opt->("-ep,   --exact-percentiles",                   "Disable unified percentile mode; revert to exact sort-based computation (deprecated; -V shows opt_out_active: yes)");
+    $out .= help_subheading("Percentile mode");
+    $out .= help_opt("-pp,   --percentile-precision <N>",            "Set percentile binning precision tier 1..9 (default: 5 = ~1.3%; 1=~10%, 9=~0.1%). Affects migrated consumers; see docs/usage.md");
+    $out .= help_opt("-pbpd, --percentile-buckets-per-decade <N>",   "Set percentile buckets-per-decade directly (default: 53; valid 4..616). Overrides --percentile-precision when both supplied");
+    $out .= help_opt("-ep,   --exact-percentiles",                   "Disable unified percentile mode; revert to exact sort-based computation (deprecated; -V shows opt_out_active: yes)");
 
     # User-Defined Metrics
-    $out .= $subheading->("User-Defined Metrics");
-    $out .= $opt->("-udm, --user-defined-metrics <spec>", "Extract a custom numeric metric from each log line. Format: name[:unit[:function]][:/regex/]");
-    $out .= $opt->("      name",                   "Metric name; also matches \"name=value\" or \"name: value\" in log lines");
-    $out .= $opt->("      unit",                   "Time: ns, us, ms, s, m, h. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T. Omit for raw numbers.");
-    $out .= $opt->("      function",               "Aggregations: sum (default), min, max, avg. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), avg(delta), max(idelta), etc.");
-    $out .= $opt->("      /regex/",                "Custom extraction pattern with one capture group around the numeric value to extract. Overrides default name=value matching.");
-    $out .= $opt->("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
-    $out .= $opt->("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter when using -ucm (default: comma)");
+    $out .= help_subheading("User-Defined Metrics");
+    $out .= help_opt("-udm, --user-defined-metrics <spec>", "Extract a custom numeric metric from each log line. Format: name[:unit[:function]][:/regex/]");
+    $out .= help_opt("      name",                   "Metric name; also matches \"name=value\" or \"name: value\" in log lines");
+    $out .= help_opt("      unit",                   "Time: ns, us, ms, s, m, h. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T. Omit for raw numbers.");
+    $out .= help_opt("      function",               "Aggregations: sum (default), min, max, avg. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), avg(delta), max(idelta), etc.");
+    $out .= help_opt("      /regex/",                "Custom extraction pattern with one capture group around the numeric value to extract. Overrides default name=value matching.");
+    $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
+    $out .= help_opt("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter when using -ucm (default: comma)");
 
     # Thread Pool Activity
-    $out .= $subheading->("Thread Pool Activity");
-    $out .= $opt->("-tpa, --threadpool-activity <regex>",  "Track activity over time for threads whose name matches the given pattern. Can be specified multiple times; patterns are combined with OR.");
-    $out .= $opt->("-tpas, --threadpool-activity-summary", "Show a summary of activity across all detected thread pools based on thread names in the log");
+    $out .= help_subheading("Thread Pool Activity");
+    $out .= help_opt("-tpa, --threadpool-activity <regex>",  "Track activity over time for threads whose name matches the given pattern. Can be specified multiple times; patterns are combined with OR.");
+    $out .= help_opt("-tpas, --threadpool-activity-summary", "Show a summary of activity across all detected thread pools based on thread names in the log");
 
     # ENVIRONMENT
-    $out .= $heading->("ENVIRONMENT");
-    $out .= $opt->("LTL_CONFIG", "Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (-i, -e, -h, -if, -ef, -hf, -tpa, -udm, -ucm) combine from both sources.");
+    $out .= help_heading("ENVIRONMENT");
+    $out .= help_opt("LTL_CONFIG", "Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (-i, -e, -h, -if, -ef, -hf, -tpa, -udm, -ucm) combine from both sources.");
 
     # INFO
-    $out .= $heading->("INFO");
-    $out .= $opt->("-v,   --version",       "Print the version number and exit");
-    $out .= $opt->("      --help",          "Show this help screen and exit");
-    $out .= $opt->("-mem, --memory-usage",  "Display memory consumption statistics after processing completes");
+    $out .= help_heading("INFO");
+    $out .= help_opt("-v,   --version",       "Print the version number and exit");
+    $out .= help_opt("      --help [<topic>]","Show this help screen and exit. With 'statistics', shows the grouped index of statistics emitted in the summary and CSV.");
+    $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic. Bare --explain lists available topics. Aliases shared with -so (avg, stddev, p1..p99999).");
+    $out .= help_opt("-mem, --memory-usage",  "Display memory consumption statistics after processing completes");
 
-    $out .= $heading->("EXAMPLES");
+    $out .= help_heading("EXAMPLES");
     my $ex_desc_col = 68;  # description column for examples (commands are longer than options)
     my $ex = sub {
         my ($cmd, $desc) = @_;
-        my $padding = $ex_desc_col - $opt_col - length($cmd);
+        my $padding = $ex_desc_col - $help_opt_col - length($cmd);
         $padding = 2 if $padding < 2;
-        return " " x $opt_col . $cmd . " " x $padding . $desc . "\n";
+        return " " x $help_opt_col . $cmd . " " x $padding . $desc . "\n";
     };
     # Header row
-    my $cmd_header = $bs_underline->("Command");
-    my $desc_header = $bs_underline->("Description");
-    my $header_pad = $ex_desc_col - $opt_col - 7;  # 7 = visible length of "Command"
+    my $cmd_header = bs_underline("Command");
+    my $desc_header = bs_underline("Description");
+    my $header_pad = $ex_desc_col - $help_opt_col - 7;  # 7 = visible length of "Command"
     $header_pad = 2 if $header_pad < 2;
-    $out .= " " x $opt_col . $cmd_header . " " x $header_pad . $desc_header . "\n";
+    $out .= " " x $help_opt_col . $cmd_header . " " x $header_pad . $desc_header . "\n";
     $out .= "\n";
     $out .= $ex->("ltl access.log",                                                "Basic analysis");
     $out .= $ex->("ltl -bs 5 access.log",                                          "5-minute time buckets");
@@ -2310,14 +3548,7 @@ sub print_help {
     $out .= $ex->("ltl logs/2025-05-*.txt",                                        "Glob multiple files");
     $out .= "\n";
 
-    # Auto-pipe through a pager for proper overstrike rendering
-    my $pager = $ENV{PAGER} || ($^O eq 'MSWin32' ? 'more' : 'less');
-    if (open(my $pager_fh, '|-', $pager)) {
-        print $pager_fh $out;
-        close $pager_fh;
-    } else {
-        print $out;
-    }
+    pipe_to_pager($out);
     return;
 }
 
@@ -4642,7 +5873,8 @@ sub adapt_to_command_line_options {
         'no-auto-hide|nah' => \$no_auto_hide,
         'debug-layout' => \$debug_layout,                                           # hidden
         'validate-layout' => \$validate_layout,                                     # hidden
-        'help' => \$show_help                                                       # hidden — special-cased in print_help; legacy aliases -?/--help via PreProcessor
+        'help:s'       => \$show_help,                                              # hidden — special-cased; legacy aliases -?/--help via PreProcessor. Optional arg: '' = full help; 'statistics' = stats index; other = error (Issue #261).
+        'explain|ex:s' => \$explain_arg,                                            # Issue #261: optional arg: '' = topic registry; <topic> = long-form explanation. Aliases shared with -so (avg, stddev, p1..p99999).
     ) or die print_usage( "required options not provided" );
 
     # Issue #231: surface --exact-percentiles as deprecated. The flag
@@ -4866,9 +6098,43 @@ sub adapt_to_command_line_options {
         exit;
     }
 
-    if ( $show_help ) {
-        print_help();
-        exit;
+    # --help dispatch (Issue #261). $show_help is defined when --help was
+    # given (bare = ''; --help statistics = 'statistics'; --help <other> = error).
+    # All help variants pipe through the pager so long output (esp. the
+    # percentiles topic) is browsable. The leading newline emitted by
+    # help_heading is stripped to avoid double-blanks against the banner.
+    if ( defined $show_help ) {
+        if ( $show_help eq '' ) {
+            print_help();         # already paginated internally
+            exit 0;
+        }
+        elsif ( $show_help eq 'statistics' ) {
+            my $out = print_help_statistics();
+            $out =~ s/^\n+//;     # strip leading blank lines (Issue #261)
+            pipe_to_pager($out);
+            exit 0;
+        }
+        else {
+            die print_usage("unknown --help topic '$show_help' (try: statistics)");
+        }
+    }
+
+    # --explain dispatch (Issue #261). $explain_arg is defined when --explain
+    # was given (bare = ''; --explain <topic> = topic name).
+    if ( defined $explain_arg ) {
+        my $out;
+        if ( $explain_arg eq '' ) {
+            $out = print_explain_registry();
+        } else {
+            my $topic = resolve_explain_topic($explain_arg);
+            if ( !defined $topic ) {
+                die print_usage("unknown --explain topic '$explain_arg' (try: 'ltl --explain' for the list)");
+            }
+            $out = print_explain_topic($topic);
+        }
+        $out =~ s/^\n+//;         # strip leading blank lines (Issue #261)
+        pipe_to_pager($out);
+        exit 0;
     }
 
     foreach my $pattern (@ARGV) {									# do in process file globbing for common experience across environments (Windows doesn't glob in the shell, passes in the parameters)
@@ -9633,7 +10899,22 @@ sub print_threadpool_summary {
 
 ## MAIN ##
 
-print_title();
+# Skip the banner when --help or --explain is being dispatched -- those
+# views render the banner inside their own pager-piped content so the
+# title appears at the top of the less buffer instead of being scrolled
+# off-screen by less (Issue #261). Includes the legacy --help aliases
+# remapped at the top of adapt_to_command_line_options (-?, /help, /?).
+my $_help_or_explain_invoked = grep {
+       $_ eq '--help'
+    || $_ eq '--explain'
+    || $_ eq '-ex'
+    || $_ eq '-?'
+    || $_ eq '/help'
+    || $_ eq '/?'
+    || /^--help=/
+    || /^--explain=/
+} @ARGV;
+print_title() unless $_help_or_explain_invoked;
 adapt_to_command_line_options();
 adapt_to_terminal_settings();
 

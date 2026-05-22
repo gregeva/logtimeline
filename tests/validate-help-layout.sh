@@ -39,15 +39,16 @@ if [[ ! -x "$LTL" ]]; then
 fi
 
 # Extract layout constants from ltl so the test follows future changes
-# automatically. The print_help() sub declares three:
-#     my $opt_col   = 4;    # indent for option text
-#     my $desc_col  = 52;   # column where descriptions begin
-#     my $short_col = 8;    # width allocated for short option (incl. comma)
-OPT_COL=$(perl -ne   'if (/^\s*my\s+\$opt_col\s*=\s*(\d+)\s*;/)   { print $1; exit }' "$LTL")
-DESC_COL=$(perl -ne  'if (/^\s*my\s+\$desc_col\s*=\s*(\d+)\s*;/)  { print $1; exit }' "$LTL")
-SHORT_COL=$(perl -ne 'if (/^\s*my\s+\$short_col\s*=\s*(\d+)\s*;/) { print $1; exit }' "$LTL")
+# automatically. As of Issue #261 these are module-scope so they can be
+# shared with --help statistics / --explain renderers:
+#     my $help_opt_col   = 4;    # indent for option text
+#     my $help_short_col = 8;    # width allocated for short option (incl. comma)
+#     my $help_desc_col  = 52;   # column where descriptions begin
+OPT_COL=$(perl -ne   'if (/^\s*my\s+\$help_opt_col\s*=\s*(\d+)\s*;/)   { print $1; exit }' "$LTL")
+DESC_COL=$(perl -ne  'if (/^\s*my\s+\$help_desc_col\s*=\s*(\d+)\s*;/)  { print $1; exit }' "$LTL")
+SHORT_COL=$(perl -ne 'if (/^\s*my\s+\$help_short_col\s*=\s*(\d+)\s*;/) { print $1; exit }' "$LTL")
 if [[ -z "$OPT_COL" || -z "$DESC_COL" || -z "$SHORT_COL" ]]; then
-    echo "ERROR: could not locate \$opt_col / \$desc_col / \$short_col in ltl print_help()"
+    echo "ERROR: could not locate \$help_opt_col / \$help_desc_col / \$help_short_col at module scope in ltl"
     exit 1
 fi
 # 1-indexed columns derived from the print_help layout invariants.
@@ -86,15 +87,15 @@ note_fail() { fail=$((fail + 1)); failures+=("$1"); echo "  FAIL  $1"; }
 # ---------------------------------------------------------------------------
 echo "[sanity]"
 if [[ "$DESC_COL" -lt 30 || "$DESC_COL" -gt 80 ]]; then
-    note_fail "sanity :: \$desc_col=$DESC_COL is out of plausible range (30..80)"
+    note_fail "sanity :: \$help_desc_col=$DESC_COL is out of plausible range (30..80)"
 elif [[ "$SHORT_COL" -lt 5 || "$SHORT_COL" -gt 12 ]]; then
-    note_fail "sanity :: \$short_col=$SHORT_COL is out of plausible range (5..12)"
+    note_fail "sanity :: \$help_short_col=$SHORT_COL is out of plausible range (5..12)"
 elif [[ "$OPT_COL" -lt 2 || "$OPT_COL" -gt 8 ]]; then
-    note_fail "sanity :: \$opt_col=$OPT_COL is out of plausible range (2..8)"
+    note_fail "sanity :: \$help_opt_col=$OPT_COL is out of plausible range (2..8)"
 elif [[ "$DESC_COL" -le "$EXPECTED_LONG_COL" ]]; then
-    note_fail "sanity :: \$desc_col=$DESC_COL must exceed long-form column ($EXPECTED_LONG_COL = \$opt_col + \$short_col)"
+    note_fail "sanity :: \$help_desc_col=$DESC_COL must exceed long-form column ($EXPECTED_LONG_COL = \$help_opt_col + \$help_short_col)"
 else
-    note_pass "sanity :: \$opt_col=$OPT_COL  \$short_col=$SHORT_COL  \$desc_col=$DESC_COL  long-form col=$EXPECTED_LONG_COL  desc col=$EXPECTED_DESC_COL"
+    note_pass "sanity :: \$help_opt_col=$OPT_COL  \$help_short_col=$SHORT_COL  \$help_desc_col=$DESC_COL  long-form col=$EXPECTED_LONG_COL  desc col=$EXPECTED_DESC_COL"
 fi
 
 # ---------------------------------------------------------------------------

@@ -242,6 +242,8 @@ Sample-size requirements:
 
 The body percentiles `p5`, `p10`, and `p25` and the precomputed interquartile range `iqr` (= `p75 − p25`) are emitted in both CSV files, completing the body/tail percentile pairing recommended in the Google SRE book.
 
+For detailed explanations of every statistic ltl emits — including interpretation tables, operational use cases, and worked examples — run `ltl --explain <topic>` (e.g. `ltl --explain kurtosis`, `ltl --explain bimodality_coef`, `ltl --explain percentiles`). The full reference is also available on the [Statistics Reference](Statistics-Reference) wiki page. Use `ltl --help statistics` for a one-line index of all statistics, or `ltl --explain` (no argument) for the list of available `--explain` topics.
+
 ### Heatmap
 
 Heatmap mode replaces the per-bucket latency statistics with a color-intensity visualization showing how values are distributed within each time bucket. Where percentile statistics reduce a distribution to a handful of numbers, the heatmap reveals its full shape — bimodal distributions (cache hits vs. misses), shifting modes over time, outlier clustering, and long tails all become visually apparent. Each cell represents a value range, with color intensity proportional to the number of entries falling within that range. Logarithmic bucket boundaries provide resolution across the full range of values, from sub-millisecond to multi-second durations.
