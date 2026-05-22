@@ -75,6 +75,7 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `histogram-array` — exact-percentile (in-memory array) histogram dimensions; active under `--exact-percentiles`
 - `histogram-bin-counters` — HDR-style bin-counter histogram state and finalized histogram dimensions (Issue #187)
 - `message-grouping` — fuzzy message consolidation (Issue #96)
+- `heatmap-palette` — heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250)
 - `benchmark-data` — machine-parseable TSV: version, files, line counts, timings, memory, structure counts
 
 **Reserved by sub-issues, not yet implemented:**
