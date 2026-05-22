@@ -14,6 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 4. **Small steps with confirmation.** Present one idea or change at a time. Wait for confirmation before proceeding.
 5. **No unsolicited implementation.** Do not write production code until explicitly asked.
 6. **Dialog over monologue.** Keep responses concise. If writing more than a few paragraphs, stop and ask a clarifying question instead.
+7. **Do exactly what was asked — no more.** Treat every instruction as literal scope, not as a hint toward a larger goal. "Commit" means commit, not commit+push+PR. "Push" means push, not push+open-PR. "Create the branch" means create the branch, not branch+commit+push. "File the issue" means file the issue, not file+cross-link+update-related. When the next step seems obvious, ask — don't take it. The user is the architect; inferring "what they really wanted" is overreach, even when the inference is correct.
 
 ### Anti-patterns to Avoid
 
@@ -21,6 +22,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Making architectural decisions independently then defending them
 - Lengthy explanations when a question would suffice
 - Trying to solve everything in one pass instead of iterating
+- Extending an instruction past its literal scope (e.g., committing → also pushing → also opening a PR when only "commit" was asked)
+- Treating "the natural next step" as implicit permission. The natural next step is for the user to direct, not for Claude to take.
+- Acting on the inferred larger goal when only a specific narrow step was requested. If the user asks for step 3 of a 10-step plan, do step 3 and stop — even if step 4 looks trivial.
 
 ### Continuous Improvement
 
@@ -177,12 +181,30 @@ Hidden CLI options: `--disable-progress` (ALWAYS use from Claude Code), `--termi
 
 ## Development Workflow
 
-Each issue gets its own branch: `{issue-number}-{short-description}`. **CRITICAL: Verify branch before making code changes.** Do not write production code until implementation plan is approved.
+### Branch Naming (MANDATORY)
+
+Each issue gets its own branch named `{issue-number}-{semantic-slug-from-issue-title}`. The slug MUST be derived from the GitHub issue's title (kebab-cased, semantically tight) — **never** from the activity being performed on the branch.
+
+**Why this matters:** Branches outlive their initial purpose. A branch named after the current activity becomes misleading once it grows into other work. A branch named after the issue stays accurate through the whole lifecycle.
+
+**Examples:**
+- Issue #224 "Percentile-value regression test harness with tiered tolerance" → `224-percentile-value-harness` ✓
+- Issue #225 "Test-harness coverage gaps: high-priority additions..." → `225-test-harness-coverage-gaps` ✓
+
+**Anti-patterns — DO NOT use:**
+- `225-research` / `225-research-deliverables` — activity name, not issue title
+- `225-scaffolding` / `225-grounding` / `225-cleanup` — activity names
+- `225-fix-it` — vague activity description
+- Issue number without any slug — ambiguous
+
+If multiple branches are genuinely needed for one issue (rare), differentiate with a numeric suffix like `225-test-harness-coverage-gaps-2`, **not** with an activity name.
 
 ### Branch Verification (MANDATORY FIRST STEP)
 ```bash
-git branch --show-current  # Must match issue number
+git branch --show-current  # Must start with the issue number AND match the issue's semantic title
 ```
+
+**CRITICAL:** Verify branch before making code changes. Do not write production code until implementation plan is approved.
 
 ### GitHub Issue Updates (MANDATORY)
 Update issues throughout development: when starting, during investigation, on design decisions, and when complete. Close with `gh issue close <number> --reason completed`.

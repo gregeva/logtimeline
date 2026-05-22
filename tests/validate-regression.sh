@@ -23,6 +23,12 @@ COMMON="--disable-progress -osum -n 1"
 # Test log files
 ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log.2025-03-21.txt"
 SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
+# Issue #235 — additional fixtures for the extended heatmap/histogram tests
+# below. APACHE_LOG is the canonical clean Apache HTTP2 access log; it ships
+# bytes + microsecond-%D durations and is small (~100 KB), keeping capture
+# time tight. Per repo memory (feedback_test_logs.md), new fixtures must NOT
+# use logs/AccessLogs/localhost_access_log.2025-03-21.txt due to corrupt lines.
+APACHE_LOG="$REPO_DIR/logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
 
 # Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin
 strip_nondeterministic() {
@@ -134,6 +140,55 @@ run_test "autohide-hm-w120" "$LTL" $COMMON --exact-percentiles --terminal-width 
 
 # --- Millisecond precision ---
 run_test "ms-w160" "$LTL" $COMMON --terminal-width 160 -ms -bs 1000 -st 00:00 -et 00:05 "$ACCESS_LOG"
+
+# ---------------------------------------------------------------------------
+# Issue #235 — extended heatmap and histogram rendering coverage
+# ---------------------------------------------------------------------------
+# All --exact-percentiles for the same reason as the original heatmap tests
+# above: pins to the sort-and-index path so byte-identical fixtures survive
+# precision tweaks. Light-background auto-detection is inert under shell
+# redirection (ltl:2722 checks -t STDOUT before doing OSC 11 query); no
+# environment override needed. Issue #250 tracks the missing
+# --no-light-background flag if a future change perturbs that.
+#
+# Fixtures use APACHE_LOG (clean Apache HTTP2 access log) for histogram
+# scenarios that benefit from access-log style data, and SCRIPT_LOG (the
+# DPM ScriptLog, already in use above) for heatmap and count-axis scenarios.
+
+# --- Heatmap at narrow widths (autohide interaction) ---
+run_test "heatmap-duration-w80"  "$LTL" $COMMON --exact-percentiles --terminal-width 80  -hm duration "$SCRIPT_LOG"
+run_test "heatmap-duration-w100" "$LTL" $COMMON --exact-percentiles --terminal-width 100 -hm duration "$SCRIPT_LOG"
+run_test "heatmap-bytes-w120"    "$LTL" $COMMON --exact-percentiles --terminal-width 120 -hm bytes    "$SCRIPT_LOG"
+run_test "heatmap-count-w100"    "$LTL" $COMMON --exact-percentiles --terminal-width 100 -hm count    "$SCRIPT_LOG"
+
+# --- Light-background heatmap ---
+run_test "heatmap-lbg-duration-w160" "$LTL" $COMMON --exact-percentiles --light-background --terminal-width 160 -hm duration "$SCRIPT_LOG"
+
+# --- Custom heatmap width ---
+run_test "heatmap-hmw30-duration-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm duration -hmw 30 "$SCRIPT_LOG"
+run_test "heatmap-hmw80-duration-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm duration -hmw 80 "$SCRIPT_LOG"
+
+# --- Histogram single-metric across widths ---
+run_test "hg-duration-w80"  "$LTL" $COMMON --exact-percentiles --terminal-width 80  -hg duration "$APACHE_LOG"
+run_test "hg-duration-w120" "$LTL" $COMMON --exact-percentiles --terminal-width 120 -hg duration "$APACHE_LOG"
+run_test "hg-duration-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration "$APACHE_LOG"
+
+# --- Histogram per metric (axis formatters) ---
+run_test "hg-bytes-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg bytes "$APACHE_LOG"
+run_test "hg-count-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg count "$SCRIPT_LOG"
+
+# --- Multi-histogram stacked panels ---
+run_test "hg-multi-duration-bytes-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration,bytes        "$APACHE_LOG"
+run_test "hg-multi-all-w160"            "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration,bytes,count "$SCRIPT_LOG"
+
+# --- Custom histogram dimensions ---
+run_test "hg-hgw30-duration-w160"     "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration       -hgw 30 "$APACHE_LOG"
+run_test "hg-hgw50-multi-w160"        "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration,bytes -hgw 50 "$APACHE_LOG"
+run_test "hg-hgh4-duration-w160"      "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration       -hgh 4  "$APACHE_LOG"
+run_test "hg-hgh16-duration-w160"     "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration       -hgh 16 "$APACHE_LOG"
+
+# --- Composition: heatmap + histogram together ---
+run_test "hm-hg-duration-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm duration -hg duration "$SCRIPT_LOG"
 
 echo ""
 echo "Results: $pass passed, $fail failed, $skip skipped"
