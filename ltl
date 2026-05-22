@@ -4191,7 +4191,7 @@ sub adapt_to_command_line_options {
         'count-min|cmin=i' => \$filter_count_min,
         'count-max|cmax=i' => \$filter_count_max,
 	    'memory-usage|mem' => \$show_memory,
-        'disable-progress' => \$disable_progress,
+        'disable-progress' => \$disable_progress,                                   # hidden
         'output-csv|o' => \$write_messages_to_csv,
         'sort-on|so=s' => \$sort_type,
         'sort-ascending|sa' => \$sort_ascending,
@@ -4202,11 +4202,11 @@ sub adapt_to_command_line_options {
         'udm-csv-separator|ucs=s'  => \$csv_separator_override,
         'mask-uuid|uuid' => \$mask_uuid,
         'group-similar|g:s' => \$group_similar_sensitivity,
-        'no-final-pass' => sub { $consolidation_final_pass = 0; },
-        'consolidation-trigger=i' => \$consolidation_trigger,
-        'consolidation-ceiling=i' => \$consolidation_occurrence_ceiling,
-        'consolidation-max-patterns=i' => \$consolidation_max_patterns,
-        'final-threshold=i' => \$consolidation_final_threshold,
+        'no-final-pass' => sub { $consolidation_final_pass = 0; },                  # hidden
+        'consolidation-trigger=i' => \$consolidation_trigger,                       # hidden
+        'consolidation-ceiling=i' => \$consolidation_occurrence_ceiling,            # hidden
+        'consolidation-max-patterns=i' => \$consolidation_max_patterns,             # hidden
+        'final-threshold=i' => \$consolidation_final_threshold,                     # hidden
         'group-ceiling|gc=i' => \$consolidation_final_ceiling,
         'heatmap|hm:s' => \$heatmap_metric,
         'heatmap-width|hmw=i' => \$heatmap_width,
@@ -4219,11 +4219,11 @@ sub adapt_to_command_line_options {
         'pbpd|percentile-buckets-per-decade=i' => \$percentile_buckets_per_decade,
         'pp|percentile-precision=i' => \$percentile_precision_level,
         'ep|exact-percentiles' => \$exact_percentiles_optout,
-        'terminal-width|tw=i' => \$terminal_width,
+        'terminal-width|tw=i' => \$terminal_width,                                  # hidden
         'no-auto-hide|nah' => \$no_auto_hide,
-        'debug-layout' => \$debug_layout,
-        'validate-layout' => \$validate_layout,
-        'help' => \$show_help
+        'debug-layout' => \$debug_layout,                                           # hidden
+        'validate-layout' => \$validate_layout,                                     # hidden
+        'help' => \$show_help                                                       # hidden — special-cased in print_help; legacy aliases -?/--help via PreProcessor
     ) or die print_usage( "required options not provided" );
 
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
