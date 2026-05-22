@@ -97,6 +97,9 @@ my %verbose_section_registry = (
     'message-grouping' => {
         description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction (Issue #96).',
     },
+    'format-detection' => {
+        description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts (Issue #228).',
+    },
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
@@ -107,6 +110,7 @@ my @verbose_section_order = qw(
     histogram-array
     histogram-bin-counters
     message-grouping
+    format-detection
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -220,6 +224,50 @@ my %pattern_file_status;                                 # {filter_type}{filenam
 
 # Duration unit override (Issue #17)
 my $duration_unit_override = undef;                      # User-specified unit via -du (ns, us, ms, s)
+
+# Format-detection observability (Issue #228).
+#
+# Maps the implicit $match_type 1-13 set in read_and_process_logs() to
+# stable, user-facing slug names. The slug is the contract surface that
+# the format-detection -V section emits and that the regression harness
+# asserts on. Slug values are locked by features/225-test-harness-coverage-gaps.md;
+# renames are breaking changes that require updating every harness consumer
+# in the same commit per tests/HARNESS-DESIGN.md § Stability contract.
+#
+# Note on Apache HTTP Server 2.x: its access log has the same shape as
+# Tomcat 9 (`%h %l %u %t "%r" %s %b %D`) but %D emits microseconds, not
+# milliseconds. Both currently bind to slug `tomcat_access_with_duration`
+# because the detection regex is identical. The misclassification is
+# tracked for future split by the format-registry rewrite (#23); the
+# harness codifies current behavior and will need an update when #23
+# lands.
+my %match_type_to_slug = (
+    1  => 'thingworx_standard',              # ThingWorx standard log + Logback fallback
+    2  => 'thingworx_rac_client',            # Remote Access Client
+    3  => 'tomcat_access_with_duration',     # Tomcat 9 %D; also catches Apache HTTP2 %D (see note above)
+    4  => 'tomcat_access_common',            # access log without duration
+    5  => 'connection_server_json',          # ThingWorx Connection Server JSON
+    6  => 'java_gc_log',                     # Java 11 GC info-level pause
+    7  => 'tw_analytics_v2',                 # ThingWorx Analytics V2
+    8  => 'tw_analytics_worker',             # ThingWorx Analytics worker
+    9  => 'jboss_access',                    # JBoss / Jersey access log
+    10 => 'connection_server_standard',      # ThingWorx Connection Server standard
+    11 => 'tw_edge_c_sdk',                   # ThingWorx Edge C SDK
+    12 => 'tomcat_codebeamer',               # Tomcat/CodeBeamer [%Dms] [%Ts]
+    13 => 'csv',                             # CSV via detect_and_parse_csv_header()
+);
+
+# Per-file format-detection accumulator. Populated in read_and_process_logs()
+# as the cascade matches each line and consumed by emit_format_detection_verbose().
+# Schema per file:
+#   match_type         => integer 1-13 (first successful bind for this file)
+#   slug               => string from %match_type_to_slug
+#   is_access_log      => 0|1
+#   ts_precision       => 'ms' | 's' | undef
+#   matched_lines      => integer
+#   unmatched_lines    => integer
+#   first_match_line   => integer (1-based file line number of first match)
+my %format_detection;
 
 # Rate unit override (Issue #122)
 my $rate_unit = 'm';                                     # Default: per-minute (preserves existing behavior)
@@ -1315,6 +1363,59 @@ sub emit_index_readback_verbose {
     }
 
     push @verbose_output, "=== END index-read-back ===";
+}
+
+# Section name and field names are locked by
+# features/225-test-harness-coverage-gaps.md § #228 section. Slug values are
+# locked by %match_type_to_slug at the top of GLOBALS. Renames and
+# field-name changes are breaking under tests/HARNESS-DESIGN.md §
+# Stability contract; consumer harnesses (tests/validate-format-detection.sh)
+# must be updated in the same commit.
+#
+# The Apache HTTP Server 2.x access log is currently misclassified as
+# slug `tomcat_access_with_duration` because its regex is identical to
+# Tomcat 9's. Apache emits %D in microseconds; Tomcat 9 in milliseconds.
+# The misclassification is intentional pending the format-registry
+# rewrite (#23); the harness codifies it and will need an update when
+# #23 splits the formats.
+sub emit_format_detection_verbose {
+    return unless section_requested('format-detection');
+
+    push @verbose_output, "=== format-detection ===";
+
+    # Run-level config visible here so the reader does not need to
+    # cross-reference -V runtime-config.
+    push @verbose_output, "duration_unit_override: " .
+        (defined $duration_unit_override ? $duration_unit_override : '-');
+    push @verbose_output, "files: " . scalar(@in_files);
+
+    # Per-file blocks in input order; @in_files is the canonical order.
+    for my $file (@in_files) {
+        my $fdd = $format_detection{$file};
+        push @verbose_output, "file: $file";
+        if (!defined $fdd) {
+            # File registered but produced no bind attempts (e.g., empty,
+            # filtered out entirely, or read error before parse).
+            push @verbose_output, "  format: -";
+            push @verbose_output, "  match_type: -";
+            push @verbose_output, "  is_access_log: -";
+            push @verbose_output, "  matched_lines: 0";
+            push @verbose_output, "  unmatched_lines: 0";
+            push @verbose_output, "  first_match_line: -";
+            next;
+        }
+        my $slug = $fdd->{slug} // '-';
+        my $mt   = defined $fdd->{match_type} ? $fdd->{match_type} : '-';
+        push @verbose_output, "  format: $slug";
+        push @verbose_output, "  match_type: $mt";
+        push @verbose_output, "  is_access_log: " . ($fdd->{is_access_log} ? 'yes' : 'no');
+        push @verbose_output, "  matched_lines: $fdd->{matched_lines}";
+        push @verbose_output, "  unmatched_lines: $fdd->{unmatched_lines}";
+        push @verbose_output, "  first_match_line: " .
+            (defined $fdd->{first_match_line} ? $fdd->{first_match_line} : '-');
+    }
+
+    push @verbose_output, "=== END format-detection ===";
 }
 
 # Section name, field names, consumer-name strings, and the three-value audit
@@ -4788,7 +4889,7 @@ sub read_and_process_logs {
                 $timestamp_str =~ tr/T/ /;
 
             ## Apache Tomcat Access Log with CodeBeamer format for Service Execution Time in ms ([%Dms]) and seconds ([%Ts])  ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, undef) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.])ms\] \[(.+)s\]/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, undef) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.]+)ms\] \[(.+)s\]/ ) {
                 $is_line_match = 1;
                 $match_type = 12;			# matching Tomcat access log CodeBeamer format 192.168.223.1 - - [29/Oct/2025:08:52:11 +0000] "GET /urlversioned/202510290803/images/newskin/login_page/icon_qa.png HTTP/1.1" 200 20097 [5ms] [0.005s]
 
@@ -5015,6 +5116,25 @@ sub read_and_process_logs {
             $is_access_log = 1 if %udm_values;
 
             if( $is_line_match ) {
+                # Format-detection tracking (Issue #228). First successful
+                # match for the file establishes match_type/slug; subsequent
+                # matches just increment matched_lines.
+                my $fdd = $format_detection{$in_file} //= {
+                    match_type       => undef,
+                    slug             => undef,
+                    is_access_log    => 0,
+                    matched_lines    => 0,
+                    unmatched_lines  => 0,
+                    first_match_line => undef,
+                };
+                if (!defined $fdd->{match_type}) {
+                    $fdd->{match_type}       = $match_type;
+                    $fdd->{slug}             = $match_type_to_slug{$match_type} // 'unknown';
+                    $fdd->{first_match_line} = $line_number;
+                }
+                $fdd->{matched_lines}++;
+                $fdd->{is_access_log} = 1 if $is_access_log;
+
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
 
                 # Duration unit conversion (Issue #17) - convert to milliseconds if user specified a unit
@@ -5492,6 +5612,18 @@ sub read_and_process_logs {
                         $log_sessions{$bucket}{highlight}{$session} += 1;
                     }
                 }
+            } else {
+                # Format-detection: unmatched lines tracked even before any
+                # match has bound a slug for this file (Issue #228).
+                my $fdd = $format_detection{$in_file} //= {
+                    match_type       => undef,
+                    slug             => undef,
+                    is_access_log    => 0,
+                    matched_lines    => 0,
+                    unmatched_lines  => 0,
+                    first_match_line => undef,
+                };
+                $fdd->{unmatched_lines}++;
             }
         }
 
@@ -9343,6 +9475,8 @@ detect_index_drift();
 emit_index_readback_verbose();
 
 emit_bin_counter_mode_verbose();
+
+emit_format_detection_verbose();
 
 print_verbose_output();
 

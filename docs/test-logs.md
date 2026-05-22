@@ -35,7 +35,7 @@ logs/
 ```
 Fields: IP, -, -, [timestamp], "method path protocol", status_code, bytes, duration
 
-**Note**: Apache HTTP Server uses `%D` for microseconds, while Tomcat uses `%D` for milliseconds. The ltl tool auto-detects the unit based on value ranges.
+**Note**: Apache HTTP Server uses `%D` for microseconds, while Tomcat uses `%D` for milliseconds. The detection regex is the same for both servers, so ltl resolves both to the same internal format (`tomcat_access_with_duration`) and assumes milliseconds. For Apache HTTP Server logs, pass `-du us` to convert microsecond durations into milliseconds for statistics; without it, durations are reported in the wrong unit by a factor of 1000. (Value-range autodetection is tracked separately by issues #17 and #23.)
 
 ---
 
