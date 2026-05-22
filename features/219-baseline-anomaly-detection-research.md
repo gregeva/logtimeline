@@ -1,159 +1,100 @@
-# Baseline-driven anomaly detection — research foundation (#219)
+# Baseline-driven anomaly detection — research notes (#219)
 
-## Purpose
+## Status
 
-Capture the research findings that bear on **#219 (baseline-driven anomaly detection)** and on the related but distinct goal of **per-API inflection-point detection**. The research was conducted while scoping #222 (SRE-grade distribution-analysis CSV columns); the shape-moment and tail columns landed under #222 are referenced here as the *upstream substrate* that future #219 work will consume.
+In-progress research notes. Not a design, not a plan, not a frozen record. The questions in this file are open. Anything written here is intended to inform a future investigation, not to constrain it.
 
-This file is a frozen research record. Implementation discussions for #219 belong in a separate planning document at the time #219 is scheduled.
-
----
-
-## What #222 delivered (substrate)
-
-For each per-key (MESSAGES) row and each per-bucket (STATS) row, ltl now emits in the `-o` CSV:
-
-- **Body percentile fill:** `p25`, `iqr` (= `p75 − p25`)
-- **High-volume tail:** `p9999`
-- **Shape moments:** `skewness`, `kurtosis` (excess; normal = 0)
-- **Multimodality screening:** `bimodality_coef` (Sarle's BC; > 5/9 ≈ 0.555 → suspect multimodal)
-
-These columns are O(n) to compute on the existing sorted array inside `calculate_statistics`. They provide a **three-column shape fingerprint** (skewness + kurtosis + BC) at every row, which any downstream consumer — including the future #219 baseline comparator — can use to detect *distribution-shape change* in addition to *percentile-value change*.
-
-The unused `z_score` column was removed from STATS in the same commit; it was a rolling-window z-score on the bucket mean that no display path or internal logic consumed.
+A prior version of this file proposed a four-goals framing and five recommendations (R1–R5) that were not grounded in cited sources or in actual ltl behavior. That content has been removed; see the retracted comment on #219 for the record.
 
 ---
 
-## Four SRE analysis goals the research surveyed
+## Problem statement
 
-1. **Load-shape mode characterization** — per API, identifying unimodal/bimodal/heavy-tail/bounded distributions; distinguishing populations within a single key (e.g. cache-hit vs cache-miss).
-2. **Mode evolution over time** — detecting that a key's shape is changing across time buckets (e.g. previously unimodal becoming bimodal; tail expansion while body stays stable).
-3. **Per-API inflection-point detection** — identifying the load level at which a key's latency knee occurs; the load-vs-latency curve.
-4. **Per-API certainty** — bounding the confidence of any "API X has degraded" assertion based on sample size and tail-quantile stability.
+Given two `-o` outputs from the same system at two different points in time, surface the log-keys whose per-key performance distribution has meaningfully shifted between the earlier (baseline) run and the later (current) run. The output is intended to point an analyst toward where to look — not to explain what changed upstream.
 
-Goals 1, 2, and 4 are addressable from MESSAGES (per-key totals) or STATS (per-bucket totals) with column additions — that's what #222 delivered. **Goal 3 is structurally unsolvable from those two CSV shapes** — and that finding is the focus of this document.
+The unit of comparison is per-run, per-key. ltl does not store time-bucketed per-key percentiles, and no plan to do so is in scope for this ticket.
 
 ---
 
-## The goal-3 structural gap
+## What `-o` actually emits today
 
-| Existing CSV | Per-key partition? | Per-bucket time axis? | Sufficient for inflection? |
-|---|---|---|---|
-| MESSAGES | ✓ | ✗ (totals over the whole run) | No |
-| STATS | ✗ (totals across all keys) | ✓ | No |
+For each log-key, MESSAGES rows in `-o` carry:
 
-Per-API inflection-point detection requires *all three axes at once*:
-- A **per-key partition** (so the per-API curve is isolable)
-- A **per-bucket time axis** (so load varies)
-- A **load metric** alongside latency in the same row (so the curve is fittable)
+- `occurrences` — count for the whole run
+- `min`, `mean`, `max`, `std_dev`
+- Percentiles: `p1`, `p25`, `p50`, `p75`, `p90`, `p95`, `p99`, `p999`, `p9999`
+- Shape columns added under #222: `iqr` (= p75 − p25), `skewness`, `kurtosis` (excess), `bimodality_coef` (Sarle's BC)
 
-Neither MESSAGES nor STATS carries all three. MESSAGES has the per-key partition but no time; STATS has time but no per-key partition. **Adding columns to either cannot close the gap** — the missing dimension is in the CSV's row shape, not its column list.
+These are computed in `calculate_statistics` from the sorted observation array for the key. Two MESSAGES CSVs from two runs of the same system therefore expose the same column set on the same per-key partition; the comparison shape is symmetric.
 
-This is why the original #222 research recommended splitting goal 3 into a follow-up issue. #219 (baseline-driven anomaly detection) is the closest existing ticket; the recommendation is that #219's design conversation pick up the structural finding rather than #222 dragging it in.
+STATS rows are per-bucket and aggregated across keys — they do not provide a per-key partition and are therefore not the input for this work.
 
 ---
 
-## Literature/practice grounding (sources)
+## Literature and practice grounding (sources)
 
-The full source list is in the research report at `/tmp/222-research.md` (working copy; the substantive citations of interest to #219 are reproduced below):
+The table below records sources surveyed for relevance to this problem. The "what it suggests" column captures what the source itself says, framed as input to future investigation — not as a decision.
 
-| Source | Relevance to #219 |
+| Source | What it suggests for #219 investigation |
 |---|---|
-| **HdrHistogram** (Gil Tene) | "Progression of nines" argument: high nines (p99.9, p99.99) cannot be recomputed from lower nines, must be emitted explicitly. #222's `p9999` honors this; #219's baseline comparator should treat each nine as an independent dimension, not just compare p99. |
-| **Google SRE Book Ch. 6** | "Multi-grade SLO" framing: body+tail percentile pairing is the SLO grammar. A meaningful "is API X degraded vs baseline?" comparison should track *both* a body percentile and a tail percentile, not collapse to one anchor. |
-| **USE/RED methods** (Brendan Gregg, Tom Wilkie) | USE adds *saturation* as a first-class signal. Goal-3 inflection detection cannot proceed without a load axis paired with the latency axis — RED dashboards always pair `rate` with `duration` at the same bucket. |
-| **OpenTelemetry exponential histograms** | The convergent design across OTel/Prometheus/DDSketch is **carry bins, derive quantiles** — bins are the truth, percentiles are a projection. ltl's existing bin-counter primitive (`%heatmap_data`, ~53 bpd default) is structurally aligned with this design. A future per-key × per-bucket emission could expose per-key bin counts at low cost. |
-| **DDSketch** (Datadog) | Relative-error guarantee in the tail (~2% typical). The right shape for "how much did this API's p99 move?" is a per-quantile relative-error bound, not an absolute-value bound. |
-| **Honeycomb BubbleUp** | The closest extant pattern for goal 3 baseline anomaly detection: compare in-selection distribution vs surrounding-baseline distribution, rank dimensions that explain the difference. The shape — selection vs reference, with a ranked output — is what #219 should aim for. |
-| **Sarle's bimodality coefficient** | `BC = (g² + 1) / (k + 3(n-1)²/((n-2)(n-3)))`. Cheapest multimodality screen available; flags shape changes (uni → bi) that no percentile movement can capture. #222 emits this per-row; #219's comparator can use *change in BC* as a signal independent of percentile drift. |
-| **Hartigan's dip test** | Expensive lookup-based test; Sarle BC captures ~80–90% of the screening signal at ~0% added cost. Recommendation for #219: do not adopt dip test unless BC false-positive rate is shown problematic in practice. |
-| **Bootstrap percentile sample-size literature** | For percentile p_q from n observations, 95% CI half-width on rank ≈ ±1.96 × √(n × q × (1−q)). p99.9 needs n ≥ ~10,000 for any meaning; p99.99 needs n ≥ ~100,000. #219 must suppress comparisons where one side has insufficient n. |
+| **HdrHistogram** (Gil Tene) — *How NOT to Measure Latency*, Strange Loop 2015; HdrHistogram design rationale | Tene's canonical points: percentiles cannot be averaged across time windows ("you can't average percentiles. Period."), and the analyst's job is to "look deeper" than a single anchor percentile. HdrHistogram is designed to capture an accurate *number of nines*. Implication for investigation: a comparator that compares only one anchor percentile (e.g., p99) discards information that the deeper nines (p999, p9999) carry independently — this is a defensible inference from Tene's work, not a direct quote of his. |
+| **Google SRE Book, Ch. 6** ("Monitoring Distributed Systems") | SLOs are commonly stated as pairs of a body and a tail target (e.g. "p50 < X and p99 < Y"). Implication for investigation: a useful comparator likely needs to reflect this body-vs-tail distinction rather than treat all percentiles as one homogeneous vector. |
+| **USE method** (Brendan Gregg) / **RED method** (Tom Wilkie) | Both pair latency with a load axis (saturation in USE; rate in RED). Implication for investigation: latency change in isolation is harder to interpret than latency change paired with traffic-volume change. For #219 the corresponding load signal available per-key is `occurrences`. |
+| **OpenTelemetry exponential histograms; Prometheus native histograms** | Convergent design across modern observability systems: carry bin counts as the primitive, derive percentiles as projections. ltl's `%heatmap_data` already carries bin counters per bucket. Implication: not directly used in #219, but documents that the field has moved toward bin-level primitives where exact percentiles matter. |
+| **DDSketch** (Masson, Rim, Lee, VLDB 2019; Datadog) | Provides a configurable relative-error guarantee α on quantile estimates; α is picked at sketch construction. Common production deployments use α in the 0.5%–2% range. Implication for investigation: a relative-error formulation in the tail has precedent in production observability tooling, but the magnitude is a deployment choice, not a universal default. |
+| **Honeycomb BubbleUp** (product documentation) | UX pattern: user selects a region of interest, system compares it to a reference region and ranks dimensions that explain the difference. The shape (selection-vs-reference with a ranked output) is the closest extant pattern to what #219 is trying to do, though BubbleUp operates on traces, not log-key latency distributions. |
+| **Sarle's bimodality coefficient** | Formula: `BC = (g² + 1) / (k + 3(n-1)²/((n-2)(n-3)))`, where g is skewness and k is excess kurtosis. The literature heuristic is `BC > 5/9 ≈ 0.555` flags suspect multimodality. Implication: ltl already emits this per-row, so a comparator can use *change in BC* as one signal. The threshold is heuristic, not exact. |
+| **Hartigan's dip test** (Hartigan & Hartigan, 1985) | A formal nonparametric test for unimodality vs. multimodality. Computationally heavier than BC (requires either a lookup table of critical values or bootstrap simulation). Known properties of the two relative to each other: BC is O(1) given moments ltl already computes, but has documented failure modes — it can flag highly-skewed unimodal distributions as multimodal (false positives), and can miss multimodality when modes are close together (false negatives). Dip test is more powerful but more expensive. Implication for investigation: BC is the natural first-line screen given it's already emitted; whether its failure modes are problematic on real ltl-analyzed logs is an empirical question. |
+| **Order-statistic quantile CI** (binomial method; Conover, *Practical Nonparametric Statistics*) | The rank position of the q-th sample quantile in an ordered sample of n observations is binomially distributed Bin(n, q). The normal-approximation 95% CI half-width on the *rank* is `±1.96 × √(n × q × (1−q))`. This is a rank CI, not a value CI — converting to a value CI requires reading back the empirical distribution at the ranks. Implication for investigation: gives a defensible basis for sample-size gating, with the caveat that the rank-to-value conversion is what an analyst actually sees move. |
 
 ---
 
-## Recommendations for a future #219 design pass
+## Open methodological questions
 
-These are **research findings**, not approved design decisions. They are written to seed the #219 planning conversation.
+These mirror the open questions in the rewritten #219 ticket body; this section captures what the literature above suggests might be relevant to each, *without proposing answers*.
 
-### R1 — Add a third CSV shape: per-key × per-bucket
+**Q1. What constitutes a meaningful shift in a per-key distribution?**
 
-The minimal data shape for goal 3 (inflection) and a strong baseline comparator (goal 4) is:
+Candidate signal axes already present in the MESSAGES CSV: center (mean, p50), spread (std_dev, iqr), tail (p90, p95, p99, p999, p9999), shape (skewness, kurtosis, bimodality_coef), volume (occurrences). The literature suggests these are not equivalent — body and tail behave differently (SRE Book; HdrHistogram); shape change can occur with percentile values unchanged (BC, dip test); and volume change can confound latency interpretation (USE/RED). Investigation is needed to determine which axes actually carry signal in practice on real ltl-analyzed logs, which are redundant, and how to present per-axis findings without overwhelming an analyst.
 
-```
-timestamp, category, message, occurrences,
-<load_metric>,
-min, mean, max, std_dev,
-p1, p25, p50, p75, iqr, p90, p95, p99, p999, p9999,
-cv, skewness, kurtosis, bimodality_coef
-```
+**Q2. How should sample-size asymmetry be handled?**
 
-One row per `(time_bucket, key)` pair. The MESSAGES shape collapses time; the STATS shape collapses key; this third file (working name: **PERMSG-STATS**) collapses neither.
+The order-statistic CI in the literature table establishes the principle. Applied to specific quantiles, with the working convention that the rank CI half-width should be no more than ±6 ranks at the target quantile:
 
-The load metric column is the critical addition: `sessions` (concurrent count proxy) is the natural choice given ltl already auto-detects it; alternatives are `msg-rate` per bucket per key, or `count` per bucket per key. The choice affects which inflection curve is fittable.
+- p99 (q=0.99): half-width ≈ 0.195 × √n. ±6 ranks needs n ≈ 1,000.
+- p999 (q=0.999): half-width ≈ 0.062 × √n. ±6 ranks needs n ≈ 10,000.
+- p9999 (q=0.9999): half-width ≈ 0.0196 × √n. ±6 ranks needs n ≈ 100,000.
 
-CLI shape suggestion: `-ops` / `--output-per-key-stats` to emit alongside existing MESSAGES + STATS.
+These thresholds are conventional, not authoritative — a different tolerance (e.g., ±3 ranks or ±10 ranks) shifts them up or down. The investigation needs to determine: what gating policy is workable in practice (per-percentile, per-key, or both); what tolerance an analyst can interpret; how to communicate "n too low to compare" to the analyst without burying real findings; and how to handle the asymmetric case where one side has enough n and the other does not.
 
-Risk: row explosion. A 24-hour log with 5-minute buckets and 1,000 unique keys produces 288,000 rows. Mitigation: only emit rows where `occurrences > 0` for the key in the bucket (which is the natural sparseness — most keys don't fire in most buckets).
+**Q3. How should keys present in only one run be handled?**
 
-### R2 — Baseline comparator (the headline #219 idea)
+No literature directly addresses this in the comparator context; it is a design question. Options that need investigation: surface separately as new/disappeared lists; include in the main output with an explicit marker; threshold by occurrences before surfacing at all. The implications of each for analyst workflow are not yet known.
 
-Given the post-#222 shape, the **per-row signal vector** for comparing baseline vs current is roughly:
+**Q4. What threshold grammar can an analyst actually reason about?**
 
-```
-{ p50, p95, p99, p999, p9999, skewness, kurtosis, bimodality_coef }
-```
+Absolute (e.g., "shifted by ≥ 50ms"), relative (e.g., "shifted by ≥ 20%"), and sigma-based (e.g., "shifted by ≥ 2σ from baseline variance") all have precedent. DDSketch's relative-error grammar suggests relative formulations are workable in the tail. The investigation question is which grammar (or combination) an analyst can specify and predict the behavior of — not just which is statistically well-founded.
 
-Eight dimensions per key. A row-level "deviance" score is then a weighted distance over those dimensions, with per-dimension tolerance bands derived from baseline sample size (n-aware certainty).
+**Q5. What is the right output shape?**
 
-Three modes per #219 issue body:
-- **Filter in** — show only keys whose vector-distance exceeds threshold
-- **Filter out** — hide keys whose vector-distance is within tolerance
-- **Highlight** — render all keys, visually flag deviant rows
+Filtering (show only changed keys), ranking (order by deviance magnitude), per-row annotation (mark each row with which signals moved), and named-pattern matching (match against a scenario ruleset — sibling ticket) are all candidates. The choice is downstream of Q1 and Q4 and likely should not be fixed until both have been investigated.
 
-For **bimodality_coef specifically**, the signal isn't "BC moved by X" — it's "BC crossed the 0.555 threshold *in one direction*". A key that went from BC=0.4 (unimodal) to BC=0.7 (multimodal) is a regime change, not a continuous drift. The comparator should treat threshold crossings as distinct events.
+**Q6. How does this interact with the sibling scenario-detection ruleset (#258)?**
 
-### R3 — Sample-size gating
-
-For each percentile column compared, suppress the comparison if `n < n_min(q)`:
-- p99 needs `n ≥ ~1,000`
-- p999 needs `n ≥ ~10,000`
-- p9999 needs `n ≥ ~100,000`
-- skewness/kurtosis/BC need `n ≥ 4` (already enforced by #222 — emitted blank otherwise) but for *meaningful* comparison `n ≥ ~100`
-
-A key with 50 occurrences in baseline and 50 occurrences in current cannot meaningfully report a p999 change. Surface as "n too low to compare" rather than treating absence as zero.
-
-### R4 — Threshold expression
-
-#219 issue body asks "absolute (ms), relative (%), or sigma-style?" The literature converges on **relative-error in the tail, absolute-or-sigma in the body**:
-- p1 / p25 / p50 / p75 → absolute or sigma (the body is typically tight; relative thresholds blow up near zero)
-- p90 / p95 / p99 / p999 / p9999 → relative-error (DDSketch grammar; tail movement is naturally multiplicative)
-- skewness / kurtosis → absolute delta with a min-magnitude floor
-- bimodality_coef → threshold-crossing, not delta
-
-A single threshold-shape switch (`--threshold-relative` / `--threshold-absolute`) would underserve the analysis. The default should be per-column-class.
-
-### R5 — New keys, disappeared keys
-
-#219 issue body asks how to handle messages present in one run but not the other. Recommendation:
-- **New key in current** — list separately as "newly observed in current", flag if occurrences > meaningful-N floor
-- **Disappeared key in baseline** — list separately as "absent from current", flag if baseline occurrences > meaningful-N floor (suggests dropped traffic, not natural decay)
-
-Not "synthesize zero values for missing keys" — that distorts the deviance computation.
+Generic deviance detection (this ticket) flags "something is different here." Scenario detection (#258) flags "this matches a known degradation pattern." Both consume the same input data. The relationship between the two — sequencing, overlap, shared infrastructure, output integration — is itself an open question that should be revisited as both lines of work progress.
 
 ---
 
-## What this file is NOT
+## What this file is not
 
-- An implementation plan for #219. That belongs in a future planning doc when #219 is scheduled.
-- A binding commitment to any specific column set, threshold, or CSV shape. The recommendations above are research-grounded but not approved.
-- A statement that #178 (inflection detection) is the same as #219. They're related — both need a per-key × per-bucket data shape — but #178 is curve-fitting (USL-style), and #219 is distribution comparison. They share the same upstream substrate (R1).
+- Not an implementation plan.
+- Not a commitment to any specific column set, threshold scheme, output format, or CLI shape.
+- Not a frozen record. It will be revised as investigation proceeds.
 
 ---
 
 ## Cross-references
 
-- **#222** (delivered) — added the shape-moment + body/tail percentile columns referenced as R2's signal vector
-- **#219** (the home for the next iteration) — this file's R2/R3/R4/R5 inform that conversation
-- **#178** (planned) — per-API inflection-point detection; shares R1's per-key × per-bucket substrate
-- **#187** — unified percentile contract; the bin-counter primitive that R1's load-metric-aware extension could exploit
-- **#224** (planned) — percentile-value regression harness; once #224 + #219 both exist, they form a tiered observability gate (drift detection in 224, structural anomaly in 219)
-- Research source notes at `/tmp/222-research.md` (working copy; survives this session for cross-checking but is not committed)
+- **#219** (this ticket) — the home for baseline-driven anomaly detection investigation.
+- **#222** (delivered) — added the shape-moment columns (`iqr`, `skewness`, `kurtosis`, `bimodality_coef`) that any per-key distribution comparison will consume.
+- **#258** — scenario detection ruleset with predictive scoring (sibling ticket). Detects named degradation patterns rather than generic deviance.
