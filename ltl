@@ -451,7 +451,7 @@ my %histogram_boundaries = (
 );
 
 my %histogram_stats = (
-    duration => {},  # Will contain: min, max, p1, p10, p25, p50, p75, p90, p95, p99, p999, p9999, count, bucket_count
+    duration => {},  # Will contain: min, max, p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999, count, bucket_count
     bytes    => {},
     count    => {},
 );
@@ -2231,7 +2231,7 @@ sub print_help {
 
     # Sorting
     $out .= $subheading->("Sorting");
-    $out .= $opt->("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary (occurrences, duration, min, mean, max, stddev, bytes, count, impact, cv)");
+    $out .= $opt->("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. Aggregates: occurrences, duration, bytes, mean_bytes, count, impact. Stats: min, mean, max, stddev, cv. Percentiles: p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999. Shape: iqr, skewness, kurtosis, bimodality_coef");
     $out .= $opt->("-sa,  --sort-ascending",        "Reverse the sort order to show lowest values first");
 
     # Heatmap
@@ -4878,7 +4878,13 @@ sub adapt_to_command_line_options {
 	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
 
     die print_usage( "unable to open any files" ) unless @in_files;
-    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw( occurrences total duration time bytes size impact cv count count_occurrences count_total count_sum count_min count_mean count_avg count_max std_dev stddev min mean avg max);
+    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw(
+        occurrences total duration time bytes size mean_bytes impact cv
+        count count_occurrences count_total count_sum count_min count_mean count_avg count_max
+        std_dev stddev min mean avg max
+        p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+        iqr skewness kurtosis bimodality_coef
+    );
 
     if( $sort_type =~ /^duration|time$/i ) {
         $sort_key = "total_duration_num";
@@ -4908,6 +4914,12 @@ sub adapt_to_command_line_options {
         $sort_key = "count_mean";
     } elsif( $sort_type =~ /^count_max$/i ) {
         $sort_key = "count_max";
+    } elsif( $sort_type =~ /^mean_bytes$/i ) {
+        $sort_key = "mean_bytes";
+    } elsif( $sort_type =~ /^(p1|p5|p10|p25|p50|p75|p90|p95|p99|p999|p9999|p99999|iqr|skewness|kurtosis|bimodality_coef)$/i ) {
+        # Identity mapping: percentile and distribution-shape metrics are stored on
+        # %log_messages under the same key name they're invoked by on -so (#220, #222).
+        $sort_key = lc $sort_type;
     }
 
     parse_udm_configs() if @udm_raw_args;
@@ -6268,6 +6280,7 @@ sub calculate_histogram_buckets_exact {
             max    => $sorted[-1],
             count  => $n,
             p1     => $sorted[int($n * 0.01)],
+            p5     => $sorted[int($n * 0.05)],
             p10    => $sorted[int($n * 0.10)],
             p25    => $sorted[int($n * 0.25)],
             p50    => $sorted[int($n * 0.50)],
@@ -6277,6 +6290,7 @@ sub calculate_histogram_buckets_exact {
             p99    => $sorted[int($n * 0.99)],
             p999   => $sorted[int($n * 0.999)] // $sorted[-1],
             p9999  => $sorted[int($n * 0.9999)] // $sorted[-1],
+            p99999 => $sorted[int($n * 0.99999)] // $sorted[-1],
         };
 
         my $min = $sorted[0];
@@ -6333,6 +6347,7 @@ sub calculate_histogram_buckets_exact {
                 max    => $sorted_hl[-1],
                 count  => $n_hl,
                 p1     => $sorted_hl[int($n_hl * 0.01)],
+                p5     => $sorted_hl[int($n_hl * 0.05)],
                 p10    => $sorted_hl[int($n_hl * 0.10)],
                 p25    => $sorted_hl[int($n_hl * 0.25)],
                 p50    => $sorted_hl[int($n_hl * 0.50)],
@@ -6342,6 +6357,7 @@ sub calculate_histogram_buckets_exact {
                 p99    => $sorted_hl[int($n_hl * 0.99)],
                 p999   => $sorted_hl[int($n_hl * 0.999)] // $sorted_hl[-1],
                 p9999  => $sorted_hl[int($n_hl * 0.9999)] // $sorted_hl[-1],
+                p99999 => $sorted_hl[int($n_hl * 0.99999)] // $sorted_hl[-1],
             };
 
             # Assign highlighted values to buckets using same boundaries
@@ -6448,9 +6464,9 @@ sub finalize_histogram_unified {
         # partition per #34 R5 / features/34-*.md line 120.
         my %stats = (count => $n, min => $min, max => $max,
                      bucket_count => $bucket_count, decades => $decades);
-        for my $pair (['p1',0.01], ['p10',0.10], ['p25',0.25], ['p50',0.50],
+        for my $pair (['p1',0.01], ['p5',0.05], ['p10',0.10], ['p25',0.25], ['p50',0.50],
                       ['p75',0.75], ['p90',0.90], ['p95',0.95], ['p99',0.99],
-                      ['p999',0.999], ['p9999',0.9999]) {
+                      ['p999',0.999], ['p9999',0.9999], ['p99999',0.99999]) {
             my ($name, $q) = @$pair;
             my ($v) = percentile($final_entry, $q);
             $stats{$name} = $v;
@@ -6489,9 +6505,9 @@ sub finalize_histogram_unified {
                 };
 
                 my %stats_hl = (count => $n_hl, min => $min, max => $max);
-                for my $pair (['p1',0.01], ['p10',0.10], ['p25',0.25], ['p50',0.50],
+                for my $pair (['p1',0.01], ['p5',0.05], ['p10',0.10], ['p25',0.25], ['p50',0.50],
                               ['p75',0.75], ['p90',0.90], ['p95',0.95], ['p99',0.99],
-                              ['p999',0.999], ['p9999',0.9999]) {
+                              ['p999',0.999], ['p9999',0.9999], ['p99999',0.99999]) {
                     my ($name, $q) = @$pair;
                     my ($v) = percentile($final_entry_hl, $q);
                     $stats_hl{$name} = $v;
@@ -6701,7 +6717,7 @@ sub calculate_all_statistics {
         # The duration based statistics won't catch the counts if there are no durations (see else condition below)
         if( $print_durations && !$omit_durations ) {
             my ($min, $mean, $max,
-                $p1, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999,
+                $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
                 $std_dev, $cv,
                 $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
 
@@ -6722,6 +6738,8 @@ sub calculate_all_statistics {
                 mean          => $mean,
                 max           => $max,
                 p1            => $p1,
+                p5            => $p5,
+                p10           => $p10,
                 p25           => $p25,
                 p50           => $p50,
                 p75           => $p75,
@@ -6731,6 +6749,7 @@ sub calculate_all_statistics {
                 p99           => $p99,
                 p999          => $p999,
                 p9999         => $p9999,
+                p99999        => $p99999,
                 std_dev       => $std_dev,
                 cv            => $cv,
                 skewness      => $skewness,
@@ -6802,7 +6821,7 @@ sub calculate_all_statistics {
             # Collect and sort the log keys based on the count within each log_key
             my (@sorted_log_keys, @top_keys);
 
-            if( $sort_key !~ /min|mean|max|p1|p50|p75|p90|p95|p99|p999|sdt_dev|cv/ ) {
+            if( $sort_key !~ /^(min|mean|max|std_dev|cv|iqr|skewness|kurtosis|bimodality_coef|p1|p5|p10|p25|p50|p75|p90|p95|p99|p999|p9999|p99999)$/ ) {
                 @sorted_log_keys = sort {
                     my $occurrences_a = $log_messages{$category}{$a}{$sort_key} // 0;
                     my $occurrences_b = $log_messages{$category}{$b}{$sort_key} // 0;
@@ -6835,7 +6854,7 @@ sub calculate_all_statistics {
 
                 if( defined $aggregated_data->{total_duration} && !$omit_durations ) {
                     my ($min, $mean, $max,
-                        $p1, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999,
+                        $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
                         $std_dev, $cv,
                         $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
 
@@ -6844,6 +6863,8 @@ sub calculate_all_statistics {
                     $log_messages{$category}{$log_key}{max} = $max;
                     $log_messages{$category}{$log_key}{std_dev} = $std_dev;
                     $log_messages{$category}{$log_key}{p1} = $p1;
+                    $log_messages{$category}{$log_key}{p5} = $p5;
+                    $log_messages{$category}{$log_key}{p10} = $p10;
                     $log_messages{$category}{$log_key}{p25} = $p25;
                     $log_messages{$category}{$log_key}{p50} = $p50;
                     $log_messages{$category}{$log_key}{p75} = $p75;
@@ -6853,6 +6874,7 @@ sub calculate_all_statistics {
                     $log_messages{$category}{$log_key}{p99} = $p99;
                     $log_messages{$category}{$log_key}{p999} = $p999;
                     $log_messages{$category}{$log_key}{p9999} = $p9999;
+                    $log_messages{$category}{$log_key}{p99999} = $p99999;
                     $log_messages{$category}{$log_key}{cv} = $cv;
                     $log_messages{$category}{$log_key}{skewness} = $skewness;
                     $log_messages{$category}{$log_key}{kurtosis} = $kurtosis;
@@ -6991,6 +7013,8 @@ sub calculate_statistics {
     # Percentile calculations must use duration_count, not occurrences
     # to correctly index into the sorted durations array
     my $p1    = int($sorted[int($duration_count * 0.01)]);
+    my $p5    = int($sorted[int($duration_count * 0.05)]);
+    my $p10   = int($sorted[int($duration_count * 0.10)]);
     my $p25   = int($sorted[int($duration_count * 0.25)]);
     my $p50   = int($sorted[int($duration_count * 0.5)]);
     my $p75   = int($sorted[int($duration_count * 0.75)]);
@@ -6999,6 +7023,7 @@ sub calculate_statistics {
     my $p99   = int($sorted[int($duration_count * 0.99)]);
     my $p999  = int($sorted[int($duration_count * 0.999)]);
     my $p9999 = int($sorted[int($duration_count * 0.9999)] // $sorted[-1]);
+    my $p99999 = int($sorted[int($duration_count * 0.99999)] // $sorted[-1]);
     my $iqr   = $p75 - $p25;
 
     # Distribution-shape moments — Sarle's bimodality coefficient screening (#222)
@@ -7026,7 +7051,7 @@ sub calculate_statistics {
     }
 
     return ($min, $mean, $max,
-            $p1, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999,
+            $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
             $std_dev, $cv,
             $skewness, $kurtosis, $bimodality_coef);
 }
@@ -7653,7 +7678,7 @@ sub normalize_data_for_output {
 
     # Add CSV output columns for latency stats
     if ($print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled) {
-        push @output_columns, qw( min mean max std_dev p1 p25 p50 p75 iqr p90 p95 p99 p999 p9999 cv skewness kurtosis bimodality_coef );
+        push @output_columns, qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );
     }
 
     foreach my $bucket (keys %log_occurrences) {
@@ -8365,7 +8390,7 @@ sub print_bar_graph {
                         defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-5s$colors{'NC'} ", ( length( $log_stats{$bucket}{p999} ) >= 4 ? format_time( $log_stats{$bucket}{p999}, 'ms' ) : $log_stats{$bucket}{p999} ) ) : printf( " " x 11 );
                         defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", $log_stats{$bucket}{cv} ) : printf ( " " x 7 );
 
-                        foreach my $stat ( qw( min mean max std_dev p1 p25 p50 p75 iqr p90 p95 p99 p999 p9999 cv skewness kurtosis bimodality_coef ) ) {
+                        foreach my $stat ( qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef ) ) {
                             push @csv_data, $log_stats{$bucket}{$stat};
                         }
                     }
@@ -9417,6 +9442,8 @@ sub print_message_summary {
                     my $std_dev = $log_messages{$grouping}{$key}{std_dev};
                     my $impact = $log_messages{$grouping}{$key}{impact};
                     my $p1 = $log_messages{$grouping}{$key}{p1};
+                    my $p5 = $log_messages{$grouping}{$key}{p5};
+                    my $p10 = $log_messages{$grouping}{$key}{p10};
                     my $p25 = $log_messages{$grouping}{$key}{p25};
                     my $p50 = $log_messages{$grouping}{$key}{p50};
                     my $p75 = $log_messages{$grouping}{$key}{p75};
@@ -9426,6 +9453,7 @@ sub print_message_summary {
                     my $p99 = $log_messages{$grouping}{$key}{p99};
                     my $p999 = $log_messages{$grouping}{$key}{p999};
                     my $p9999 = $log_messages{$grouping}{$key}{p9999};
+                    my $p99999 = $log_messages{$grouping}{$key}{p99999};
                     my $cv = $log_messages{$grouping}{$key}{cv};
                     my $skewness = $log_messages{$grouping}{$key}{skewness};
                     my $kurtosis = $log_messages{$grouping}{$key}{kurtosis};
@@ -9465,7 +9493,7 @@ sub print_message_summary {
                                     $log_messages{$grouping}{$key}{"udm_${name}_sum"};
                             }
                         }
-                        $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $cv, $skewness, $kurtosis, $bimodality_coef, $total_duration_num, $total_duration, $impact, @udm_csv_values ]);
+                        $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999, $cv, $skewness, $kurtosis, $bimodality_coef, $total_duration_num, $total_duration, $impact, @udm_csv_values ]);
                     }
 
                     print "$row\n";
@@ -9876,7 +9904,7 @@ if( $write_messages_to_csv ) {                     # If write to CSV enabled, op
             push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
         }
     }
-    $csv->print($csv_fh, [qw(category message occurrences mean_bytes bytes bytes_nice count_occurrences count_min count_mean count_max count_sum min mean max std_dev p1 p25 p50 p75 iqr p90 p95 p99 p999 p9999 cv skewness kurtosis bimodality_coef duration duration_nice impact), @udm_csv_headers]);
+    $csv->print($csv_fh, [qw(category message occurrences mean_bytes bytes bytes_nice count_occurrences count_min count_mean count_max count_sum min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef duration duration_nice impact), @udm_csv_headers]);
 }
 
 print_message_summary();														                    # Print and write message summaries
