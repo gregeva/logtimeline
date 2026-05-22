@@ -21,7 +21,7 @@ Until a sub-issue ships, its scoping lives in a per-sub-issue research file (e.g
 | [#231](https://github.com/gregeva/logtimeline/issues/231) | CLI option parsing / conflict detection | OPEN |
 | [#232](https://github.com/gregeva/logtimeline/issues/232) | `--help` content correctness | **CLOSED 2026-05-22** |
 | [#233](https://github.com/gregeva/logtimeline/issues/233) | Empty / degenerate inputs | OPEN |
-| [#234](https://github.com/gregeva/logtimeline/issues/234) | Documentation example execution | OPEN |
+| [#234](https://github.com/gregeva/logtimeline/issues/234) | Documentation example execution | **CLOSED 2026-05-22** |
 | [#235](https://github.com/gregeva/logtimeline/issues/235) | Extended heatmap/histogram rendering coverage | OPEN |
 
 ## Cross-cutting decisions
@@ -167,3 +167,57 @@ This is exactly the class of regression the harness is meant to surface.
 - The `format-detection` `-V` section is reserved per `HARNESS-DESIGN.md § Reserved section names`.
 - The Apache HTTP2 misclassification is a **known, intentional** mapping today, pending the format-registry rewrite (#23). The scenarios.apache-httpd-us assertion is the canary that will fail when #23 lands — that failure is the signal to update both the slug map and the harness in the same commit.
 - The CSV path (match_type 13) requires `-udm <name>` to fire. A CSV file passed without `-udm` produces no matches and is intentional — the harness covers this with a positive scenario.
+
+---
+
+## #234 — Documentation example execution
+
+### Status
+**Closed 2026-05-22.** Implemented in PR #248, merge commit `d5fdac4`.
+
+### Overview
+
+`tests/validate-doc-examples.sh` (with `tests/extract-doc-examples.pl`) — runs every `ltl` example in `docs/usage.md` against real (truncated) fixtures, asserting exit 0 and non-empty stdout. Catches the documentation-drift class: option renames, removed flags, restructured `-V` blocks that break documented `-V | grep` patterns.
+
+CLAUDE.md release-step 15 pushes `docs/usage.md` to the wiki at every release. Before this sub-issue, there was nothing between "release-branch ready" and "wiki overwritten with possibly-broken examples." This harness slots in at step 8b — after the version bump, before benchmarks — to gate broken examples from shipping.
+
+### Code surfaces touched
+
+- `tests/extract-doc-examples.pl` (new) — Perl extractor that streams markdown line-by-line, recognizes `bash`/`sh`/`shell` fences (plus unlabeled), honors `<!-- ltl-test: skip -->` immediately above a fence, and emits TSV rows `file<TAB>line<TAB>command` for each `ltl …`/`./ltl …` invocation. Handles `\` line continuations.
+- `tests/validate-doc-examples.sh` (new) — bash-3.2 compatible driver. Truncates each source fixture to 1000 lines under `$TMP_DIR` at startup so the 37 example invocations complete in ~36s rather than ~1:45 against full multi-megabyte sources. Self-documenting failures per HARNESS-DESIGN.md.
+
+No `ltl` code changes. No `docs/usage.md` edits (the substitution table lives in the harness).
+
+### Substitution table
+
+Maintained in `tests/validate-doc-examples.sh`:
+
+| Placeholder | Fixture |
+|---|---|
+| `access.log` | `logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` |
+| `app.log` | `logs/ThingworxLogs/ApplicationLog.log` |
+| `error.log` | `logs/ThingworxLogs/ErrorLog.log` |
+
+Per repo memory (`feedback_test_logs.md`), the corrupt `localhost_access_log.2025-03-21.txt` is never used.
+
+### Self-test on landing
+
+- Extracted: 45 candidate examples from `docs/usage.md`.
+- Result: **37 passed, 0 failed, 8 skipped**.
+- Skipped breakdown: 4 `-V` examples (deferred), 1 structural synopsis (`ltl [options] <logfile>`), 3 with `logs/*/access.log` style globs the substitution can't safely expand.
+- Runtime: ~36 s.
+
+### Decisions locked
+
+1. **Hardcoded substitution table** in the harness rather than per-example annotations in docs. Keeps user-facing docs clean; one auditable place in the harness.
+2. **Out of scope**: `demo-use-cases.md` (internal use), `docs/test-logs.md` (intentionally untouched in this PR), `README.md` / `CLAUDE.md` (no testable `ltl` examples beyond synopsis/build).
+3. **`-V` examples deferred** — the `-V` surface is still being shaped by post-#226 follow-ups; pinning examples now would create more breakage than the harness catches.
+4. **Release-gate only** — no per-PR CI integration. Slot in at step 8b of the release process.
+5. **`docs/test-logs.md:191` corrupt-file reference left as-is in this PR** — separate ticket later.
+
+### Stability notes for future maintainers
+
+- The substitution table is the contract surface. Removing a placeholder is a breaking change for whatever example used it; adding one is non-breaking. When `docs/usage.md` introduces a new placeholder, add it to `SUBSTITUTION_KEYS`/`SUBSTITUTION_VALS` and to the substitution table above in the same commit.
+- The bash-3.2 compatibility constraint (macOS system bash) is the reason for parallel arrays rather than `declare -A`. Keep that style when extending the harness.
+- The `1000` line truncation is empirical. If a future example needs longer input (e.g., a time-window filter that excludes the first 1000 lines), bump `FIXTURE_LINES` rather than disabling truncation.
+- `-V` examples (currently 4 in `docs/usage.md`) are excluded by a substring match on `" -V"`. When the `-V` surface stabilises and we want to bring those examples under test, remove that branch from `run_doc_example()`.
