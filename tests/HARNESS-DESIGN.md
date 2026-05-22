@@ -72,8 +72,8 @@ This list prevents collisions across parallel work. Update it when adding a new 
 **Implemented:**
 - `runtime-config` — effective runtime configuration: LTL_CONFIG and merged include/exclude/highlight/threadpool regexes
 - `index-read-back` — index pre-seed lookups, freshness, aggregated bounds, drift detection (Issue #179)
-- `histogram` — legacy in-memory histogram dimensions
-- `histogram-bin-counters` — bin-counter feature state and finalized histogram dimensions (Issue #187)
+- `histogram-array` — exact-percentile (in-memory array) histogram dimensions; active under `--exact-percentiles`
+- `histogram-bin-counters` — HDR-style bin-counter histogram state and finalized histogram dimensions (Issue #187)
 - `message-grouping` — fuzzy message consolidation (Issue #96)
 - `benchmark-data` — machine-parseable TSV: version, files, line counts, timings, memory, structure counts
 

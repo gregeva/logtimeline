@@ -88,11 +88,11 @@ my %verbose_section_registry = (
     'index-read-back' => {
         description => 'Index pre-seed lookups, freshness checks, aggregated bounds, drift detection (Issue #179).',
     },
-    'histogram' => {
-        description => 'Legacy in-memory histogram dimensions: per-metric sample counts, min/max, decades, bucket layout.',
+    'histogram-array' => {
+        description => 'Exact-percentile (in-memory array) histogram dimensions: per-metric sample counts, min/max, decades, bucket layout. Active under --exact-percentiles.',
     },
     'histogram-bin-counters' => {
-        description => 'Bin-counter feature state: opt-out, percentile precision, per-consumer partition keying, rebin events, finalized histogram dimensions.',
+        description => 'HDR-style bin-counter histogram state: opt-out, percentile precision, per-consumer partition keying, rebin events, finalized histogram dimensions.',
     },
     'message-grouping' => {
         description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction (Issue #96).',
@@ -104,7 +104,7 @@ my %verbose_section_registry = (
 my @verbose_section_order = qw(
     runtime-config
     index-read-back
-    histogram
+    histogram-array
     histogram-bin-counters
     message-grouping
     benchmark-data
@@ -5751,6 +5751,26 @@ sub find_histogram_bucket_index {
     return $lo;
 }
 
+# Format a single per-metric "dimensions" line for verbose output. Shared
+# by both histogram emission paths (the exact-percentile in-memory array
+# path and the HDR-style bin-counters path) so the dimensions surface
+# stays consistent across the two architectures.
+sub format_histogram_dimensions_line {
+    my ($metric, $stats) = @_;
+    my $min_fmt = format_heatmap_value($stats->{min}, $metric);
+    my $max_fmt = format_heatmap_value($stats->{max}, $metric);
+    return sprintf(
+        "  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d",
+        ucfirst($metric) . ":",
+        $stats->{count},
+        $min_fmt,
+        $max_fmt,
+        $stats->{decades},
+        $histogram_buckets_per_decade,
+        $stats->{bucket_count}
+    );
+}
+
 # Calculate histogram buckets for all collected metrics - Issue #25
 sub calculate_histogram_buckets {
     return unless $histogram_enabled;
@@ -5872,27 +5892,20 @@ sub calculate_histogram_buckets_exact {
         print " " x ( $terminal_width - length( "Calculating histogram statistics completed." ) );
     }
 
-    # Verbose output for bucket calculation (Issues #25, #56, #226)
-    # Legacy in-memory histogram path. Emitted as the `histogram` section
-    # with a `dimensions` sub-section.
-    if (section_requested('histogram') && @metrics_with_data) {
-        push @verbose_output, "=== histogram ===";
-        push @verbose_output, "=== histogram / dimensions ===";
+    # Verbose output for bucket calculation (Issues #25, #56, #226, #237).
+    # Exact-percentile (in-memory array) histogram path — active when
+    # --exact-percentiles is set. Emitted as the `histogram-array`
+    # section with a `dimensions` sub-section. Per-metric line formatting
+    # shared with the bin-counter path via format_histogram_dimensions_line().
+    if (section_requested('histogram-array') && @metrics_with_data) {
+        push @verbose_output, "=== histogram-array ===";
+        push @verbose_output, "=== histogram-array / dimensions ===";
         for my $metric (@metrics_with_data) {
-            my $stats = $histogram_stats{$metric};
-            my $min_fmt = format_heatmap_value($stats->{min}, $metric);
-            my $max_fmt = format_heatmap_value($stats->{max}, $metric);
-            push @verbose_output, sprintf("  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d",
-                   ucfirst($metric) . ":",
-                   $stats->{count},
-                   $min_fmt,
-                   $max_fmt,
-                   $stats->{decades},
-                   $histogram_buckets_per_decade,
-                   $stats->{bucket_count});
+            push @verbose_output,
+                format_histogram_dimensions_line($metric, $histogram_stats{$metric});
         }
-        push @verbose_output, "=== END histogram / dimensions ===";
-        push @verbose_output, "=== END histogram ===";
+        push @verbose_output, "=== END histogram-array / dimensions ===";
+        push @verbose_output, "=== END histogram-array ===";
         push @verbose_output, "";
     }
 
@@ -6030,22 +6043,15 @@ sub finalize_histogram_unified {
     # Streaming bin-counter finalize path. Emit as the
     # `histogram-bin-counters / dimensions` sub-section via the deferred
     # buffer — parent section markers are emitted by
-    # emit_bin_counter_mode_verbose() (Issue #226).
+    # emit_bin_counter_mode_verbose() (Issue #226). Per-metric line
+    # formatting shared with the array path via
+    # format_histogram_dimensions_line() (Issue #237).
     if (section_requested('histogram-bin-counters') && @metrics_with_data) {
         my @lines;
         push @lines, "=== histogram-bin-counters / dimensions ===";
         for my $metric (@metrics_with_data) {
-            my $stats = $histogram_stats{$metric};
-            my $min_fmt = format_heatmap_value($stats->{min}, $metric);
-            my $max_fmt = format_heatmap_value($stats->{max}, $metric);
-            push @lines, sprintf("  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d",
-                   ucfirst($metric) . ":",
-                   $stats->{count},
-                   $min_fmt,
-                   $max_fmt,
-                   $stats->{decades},
-                   $histogram_buckets_per_decade,
-                   $stats->{bucket_count});
+            push @lines,
+                format_histogram_dimensions_line($metric, $histogram_stats{$metric});
         }
         push @lines, "=== END histogram-bin-counters / dimensions ===";
         push @{ $verbose_section_buffer{'histogram-bin-counters'} }, @lines;
