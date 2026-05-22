@@ -208,6 +208,23 @@ ltl -V histogram-bin-counters access.log
 ltl -ep access.log
 ```
 
+### Distribution shape (CSV columns)
+
+The `-o` CSV outputs (MESSAGES and STATS) carry three distribution-shape statistics alongside the percentile columns, enabling characterization of a latency distribution's *shape* — not just its quantile values:
+
+| Column | Range | Interpretation |
+|---|---|---|
+| `skewness` | typically -3 to +3 | Distribution asymmetry. 0 = symmetric (e.g. Gaussian); positive = right tail heavier (typical for latencies); negative = left tail heavier. |
+| `kurtosis` | typically -2 to ~30 | Excess kurtosis (normal = 0). Positive = heavier tails than a Gaussian; high values (> 10) indicate extreme outliers dominate. |
+| `bimodality_coef` | 0 to 1 | Sarle's bimodality coefficient. **Values > 5/9 ≈ 0.555 flag suspect multimodal distributions** (e.g. cache-hit vs. cache-miss populations within a single API). |
+
+Sample-size requirements:
+- All three statistics require `n ≥ 4`; emitted blank otherwise (BC denominator requires `n > 3`).
+- `bimodality_coef` is a *screening* statistic, not a test. At `n < 100` small-sample noise can produce false positives — treat low-sample bimodality flags as exploratory.
+- `p9999` is meaningful at `n ≥ ~100,000`; below that, it collapses toward `max`.
+
+The body percentile `p25` and the precomputed interquartile range `iqr` (= `p75 − p25`) are also emitted in both CSV files, completing the body/tail percentile pairing recommended in the Google SRE book.
+
 ### Heatmap
 
 Heatmap mode replaces the per-bucket latency statistics with a color-intensity visualization showing how values are distributed within each time bucket. Where percentile statistics reduce a distribution to a handful of numbers, the heatmap reveals its full shape — bimodal distributions (cache hits vs. misses), shifting modes over time, outlier clustering, and long tails all become visually apparent. Each cell represents a value range, with color intensity proportional to the number of entries falling within that range. Logarithmic bucket boundaries provide resolution across the full range of values, from sub-millisecond to multi-second durations.
