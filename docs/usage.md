@@ -127,7 +127,7 @@ ltl -g 80 -iqs -is access.log
 
 ### Display & Output
 
-These options control what is shown and how. After the timeline bar graph, logtimeline prints a summary table ranking the top contributing messages — `-n` controls how many entries appear, and `-osum` suppresses it entirely. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. The light background mode (`-lbg`) switches color gradients for white or light terminal backgrounds. The pause option (`-p`) is useful when output exceeds the terminal height.
+These options control what is shown and how. After the timeline bar graph, logtimeline prints a summary table ranking the top contributing messages — `-n` controls how many entries appear, and `-osum` suppresses it entirely. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. The light background mode (`-lbg`) switches color gradients for white or light terminal backgrounds. The dark background mode (`-dbg`) forces the dark gradients and overrides `-lbg` if both are passed. The pause option (`-p`) is useful when output exceeds the terminal height.
 
 | Option | Description |
 |--------|-------------|
@@ -142,6 +142,7 @@ These options control what is shown and how. After the timeline bar graph, logti
 | `-hs, --hide-session` | Hide the Sessions column that automatically appears when session IDs are found in the log data |
 | `-hst, --hide-stats` | Hide the latency statistics or heatmap column |
 | `-lbg, --light-background` | Use pale-to-bright color gradients suited for light/white terminal backgrounds |
+| `-dbg, --dark-background` | Force dark-background color gradients; overrides `-lbg` and disables auto-detect |
 | `-nah, --no-auto-hide` | Disable automatic column hiding at narrow terminal widths (squeeze all columns instead) |
 | `-p, --pause` | Wait for a keypress between pages of output |
 | `-V, --verbose [<section>...]` | Emit diagnostic sections. Bare `-V` emits all; `-V <name>[,<name>...]` or repeated `-V` selects sections; `-V list` prints known sections. See "Verbose output (`-V`)" section below |
@@ -155,6 +156,8 @@ ltl -o access.log
 ltl -osum access.log
 # Use color gradients suited for light terminal backgrounds
 ltl -lbg access.log
+# Force dark-background gradients (overrides auto-detect and -lbg)
+ltl -dbg access.log
 ```
 
 ### Sorting
@@ -316,7 +319,7 @@ ltl -tpa "http-" -tpa "async-" app.log
 
 ### Verbose output (`-V`)
 
-The `-V` flag emits diagnostic sections describing internal state — effective configuration (CLI + environment), index pre-seed lookups, bin-counter feature state, message-grouping statistics, log-format detection, benchmark data. Each section is named and bracketed by `=== <name> ===` / `=== END <name> ===` markers so it can be extracted by `grep`, `sed`, or `awk`.
+The `-V` flag emits diagnostic sections describing internal state — effective configuration (CLI + environment), index pre-seed lookups, bin-counter feature state, message-grouping statistics, log-format detection, heatmap palette resolution, benchmark data. Each section is named and bracketed by `=== <name> ===` / `=== END <name> ===` markers so it can be extracted by `grep`, `sed`, or `awk`.
 
 | Form | Behavior |
 |------|----------|

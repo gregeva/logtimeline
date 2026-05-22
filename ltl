@@ -99,6 +99,9 @@ my %verbose_section_registry = (
     'format-detection' => {
         description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts (Issue #228).',
     },
+    'heatmap-palette' => {
+        description => 'Heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250).',
+    },
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
@@ -110,6 +113,7 @@ my @verbose_section_order = qw(
     histogram-bin-counters
     message-grouping
     format-detection
+    heatmap-palette
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -354,7 +358,9 @@ my $heatmap_udm_config;                     # Reference to @udm_configs entry fo
 my @histogram_udm_configs;                  # References to @udm_configs entries for histogram UDM metrics
 my $heatmap_width = 52;                     # Number of histogram buckets (default matches latency stats width)
 my $heatmap_light_bg = 0;                   # Flag: use light background color gradients (set by -lbg or auto-detect)
-my $heatmap_light_bg_auto = 1;              # Flag: auto-detect terminal background (disabled if -lbg explicitly set)
+my $heatmap_light_bg_auto = 1;              # Flag: auto-detect terminal background (disabled if -lbg or -dbg explicitly set)
+my $heatmap_dark_bg_explicit = 0;           # Flag: -dbg given on CLI; forces dark, wins over -lbg
+my $heatmap_light_bg_source = 'default';    # Provenance of $heatmap_light_bg: '-lbg' | '-dbg' | 'auto-detect' | 'default'
 my %heatmap_data;                           # {$bucket}{$range_index} = count
 my %heatmap_data_hl;                        # {$bucket}{$range_index} = highlighted count
 my %heatmap_raw;                            # {$bucket} = [raw values] - exact-path only
@@ -1373,7 +1379,7 @@ sub _classify_argv_provenance {
                 'consolidation-trigger', 'consolidation-ceiling',
                 'consolidation-max-patterns', 'final-threshold',
                 'group-ceiling|gc', 'heatmap|hm', 'heatmap-width|hmw',
-                'light-background|lbg', 'histogram|hg',
+                'light-background|lbg', 'dark-background|dbg', 'histogram|hg',
                 'histogram-width|hgw', 'histogram-height|hgh',
                 'hgbpd|histogram-buckets-per-decade',
                 'hgb|histogram-buckets',
@@ -1667,6 +1673,57 @@ sub emit_format_detection_verbose {
     }
 
     push @verbose_output, "=== END format-detection ===";
+}
+
+# Emit the heatmap-palette `-V` section. Reports the resolved palette state
+# at render time: which metric is active, light vs dark selection, the
+# provenance of that selection, and the dark/light gradient arrays that
+# print_heatmap_row() picks between. Always emitted when requested; reports
+# heatmap_active: no with n/a fields when -hm is not set.
+#
+# Contract (Issue #250): the section is consumed by
+# tests/validate-heatmap-palette.sh. Renames of the section header, any
+# field key, or the comma-separated gradient format are breaking changes
+# per tests/HARNESS-DESIGN.md and require updating every consumer in the
+# same commit.
+sub emit_heatmap_palette_verbose {
+    return unless section_requested('heatmap-palette');
+
+    push @verbose_output, "=== heatmap-palette ===";
+
+    if (!$heatmap_enabled || !defined $heatmap_metric) {
+        push @verbose_output, "heatmap_active: no";
+        push @verbose_output, "metric: n/a";
+        push @verbose_output, "light_bg: $heatmap_light_bg";
+        push @verbose_output, "light_bg_source: $heatmap_light_bg_source";
+        push @verbose_output, "color_name: n/a";
+        push @verbose_output, "gradient_dark: n/a";
+        push @verbose_output, "gradient_light: n/a";
+        push @verbose_output, "gradient_active: n/a";
+        push @verbose_output, "=== END heatmap-palette ===";
+        return;
+    }
+
+    # Resolve the same way print_heatmap_row() does at ltl read sites:
+    # color_key comes from heatmap_metric_map; entry from column_color_lookup
+    # (for column-bound colors like yellow/green/cyan) or from
+    # %heatmap_special_gradients (for non-column colors like white).
+    my $color_key = $heatmap_metric_map{$heatmap_metric}{color};
+    my $entry = $column_color_lookup{$color_key} // $heatmap_special_gradients{$color_key};
+
+    my $gradient_dark_str  = defined $entry && $entry->{gradient}       ? join(',', @{$entry->{gradient}})       : 'n/a';
+    my $gradient_light_str = defined $entry && $entry->{gradient_light} ? join(',', @{$entry->{gradient_light}}) : 'n/a';
+    my $gradient_active    = $heatmap_light_bg ? 'light' : 'dark';
+
+    push @verbose_output, "heatmap_active: yes";
+    push @verbose_output, "metric: $heatmap_metric";
+    push @verbose_output, "light_bg: $heatmap_light_bg";
+    push @verbose_output, "light_bg_source: $heatmap_light_bg_source";
+    push @verbose_output, "color_name: " . (defined $color_key ? $color_key : 'n/a');
+    push @verbose_output, "gradient_dark: $gradient_dark_str";
+    push @verbose_output, "gradient_light: $gradient_light_str";
+    push @verbose_output, "gradient_active: $gradient_active";
+    push @verbose_output, "=== END heatmap-palette ===";
 }
 
 # Section name, field names, consumer-name strings, and the three-value audit
@@ -2167,6 +2224,7 @@ sub print_help {
     $out .= $opt->("-hs,  --hide-session",          "Hide the Sessions column that automatically appears when session IDs are found in the log data");
     $out .= $opt->("-hst, --hide-stats",            "Hide the latency statistics or heatmap column");
     $out .= $opt->("-lbg, --light-background",      "Use pale-to-bright color gradients suited for light/white terminal backgrounds");
+    $out .= $opt->("-dbg, --dark-background",       "Force dark-background color gradients (disables auto-detect; wins over -lbg if both given)");
     $out .= $opt->("-nah, --no-auto-hide",          "Disable automatic column hiding at narrow terminal widths (squeeze all columns instead)");
     $out .= $opt->("-p,   --pause",                 "Wait for a keypress between pages of output");
     $out .= $opt->("-V,   --verbose [<section>...]", "Emit diagnostic sections. Bare -V emits all; -V <name>[,<name>...] or repeated -V selects sections; -V list prints known sections");
@@ -4570,7 +4628,8 @@ sub adapt_to_command_line_options {
         'group-ceiling|gc=i' => \$consolidation_final_ceiling,
         'heatmap|hm:s' => \$heatmap_metric,
         'heatmap-width|hmw=i' => \$heatmap_width,
-        'light-background|lbg' => sub { $heatmap_light_bg = 1; $heatmap_light_bg_auto = 0; },
+        'light-background|lbg' => sub { $heatmap_light_bg = 1; $heatmap_light_bg_auto = 0; $heatmap_light_bg_source = '-lbg'; },
+        'dark-background|dbg'  => sub { $heatmap_dark_bg_explicit = 1; $heatmap_light_bg_auto = 0; },
         'histogram|hg:s' => \&handle_histogram_option,
         'histogram-width|hgw=i' => sub { $histogram_width_percent = $_[1]; $histogram_width_explicit = 1; },
         'histogram-height|hgh=i' => sub { $histogram_height = $_[1]; $histogram_height_explicit = 1; },
@@ -4706,9 +4765,17 @@ sub adapt_to_command_line_options {
             $heatmap_metric = 'duration';  # time is allowed for consistency, but what is really meant is duration
         }
 
-        # Auto-detect light terminal background if -lbg wasn't explicitly set
+        # -dbg wins over -lbg regardless of CLI order: force dark and skip auto-detect
+        if ($heatmap_dark_bg_explicit) {
+            $heatmap_light_bg = 0;
+            $heatmap_light_bg_auto = 0;
+            $heatmap_light_bg_source = '-dbg';
+        }
+
+        # Auto-detect light terminal background if neither -lbg nor -dbg was set
         if ($heatmap_light_bg_auto) {
             $heatmap_light_bg = detect_light_terminal_background();
+            $heatmap_light_bg_source = 'auto-detect';
         }
     }
 
@@ -9771,6 +9838,8 @@ emit_index_readback_verbose();
 emit_bin_counter_mode_verbose();
 
 emit_format_detection_verbose();
+
+emit_heatmap_palette_verbose();
 
 print_verbose_output();
 
