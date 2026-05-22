@@ -299,7 +299,7 @@ ltl -tpa "http-" -tpa "async-" app.log
 
 ### Verbose output (`-V`)
 
-The `-V` flag emits diagnostic sections describing internal state — effective configuration, index pre-seed lookups, bin-counter feature state, message-grouping statistics, benchmark data. Each section is named and bracketed by `=== <name> ===` / `=== END <name> ===` markers so it can be extracted by `grep`, `sed`, or `awk`.
+The `-V` flag emits diagnostic sections describing internal state — effective configuration (CLI + environment), index pre-seed lookups, bin-counter feature state, message-grouping statistics, log-format detection, benchmark data. Each section is named and bracketed by `=== <name> ===` / `=== END <name> ===` markers so it can be extracted by `grep`, `sed`, or `awk`.
 
 | Form | Behavior |
 |------|----------|
@@ -328,6 +328,19 @@ ltl -V list
 ```
 
 Section content is governed by per-section stability contracts — additions are non-breaking, renames and removals are breaking. Test harnesses consume these sections; see `tests/HARNESS-DESIGN.md` for the contributor-facing contract.
+
+### Stderr warnings
+
+`ltl` emits warnings to stderr when an input is accepted but resolved in a way that may surprise the user. These do not affect exit codes — the run proceeds — but pipelines that capture stderr may need to filter them. The warnings exist to make previously-silent overrides observable; suppressing them by default would defeat the purpose.
+
+| Trigger | Warning |
+|---------|---------|
+| `-g <non-numeric>` (e.g. `-g logfile.log`) | The non-numeric value is treated as a positional argument and the default similarity threshold (85) is applied. |
+| `-hm <unknown-metric>` without any `-udm` configured (e.g. `-hm bogus`) | The value is treated as a positional argument and the default heatmap metric (`duration`) is applied. |
+| Both `-pbpd` and `--percentile-precision` supplied | `-pbpd` wins; the warning surfaces the override so it is visible without `-V`. |
+| `--exact-percentiles` (or `-ep`) supplied | Deprecation notice. The flag reverts every migrated percentile consumer to pre-#187 sort-based computation and is scheduled for removal in a future release. |
+
+To inspect the resolved configuration after warnings have fired, use `-V runtime-config` and read the `command-line` and `environment-variable` sub-sections.
 
 ## Environment
 
