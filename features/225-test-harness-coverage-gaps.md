@@ -17,10 +17,10 @@ Until a sub-issue ships, its scoping lives in a per-sub-issue research file (e.g
 | [#227](https://github.com/gregeva/logtimeline/issues/227) | Packaged-binary smoke tests | **CANCELLED 2026-05-22** — cannot self-test locally without building a binary first; see issue for rationale |
 | [#228](https://github.com/gregeva/logtimeline/issues/228) | Log format detection regression | **CLOSED 2026-05-22** |
 | [#229](https://github.com/gregeva/logtimeline/issues/229) | Pattern file correctness | **CANCELLED 2026-05-22** — scope exceeded value; see issue for rationale |
-| [#230](https://github.com/gregeva/logtimeline/issues/230) | Filter logic truth tables | OPEN |
+| [#230](https://github.com/gregeva/logtimeline/issues/230) | Filter logic truth tables | **CANCELLED 2026-05-22** — depended on the cancelled #229 `-V filter-summary` section; see issue for rationale |
 | [#231](https://github.com/gregeva/logtimeline/issues/231) | CLI option parsing / conflict detection | **CLOSED 2026-05-22** |
 | [#232](https://github.com/gregeva/logtimeline/issues/232) | `--help` content correctness | **CLOSED 2026-05-22** |
-| [#233](https://github.com/gregeva/logtimeline/issues/233) | Empty / degenerate inputs | OPEN |
+| [#233](https://github.com/gregeva/logtimeline/issues/233) | Empty / degenerate inputs | **CANCELLED 2026-05-22** — depended on cancelled #229/#230 plus a different #228 shape than landed; see issue for rationale |
 | [#234](https://github.com/gregeva/logtimeline/issues/234) | Documentation example execution | **CLOSED 2026-05-22** |
 | [#235](https://github.com/gregeva/logtimeline/issues/235) | Extended heatmap/histogram rendering coverage | **CLOSED 2026-05-22** |
 
