@@ -16,7 +16,7 @@ Until a sub-issue ships, its scoping lives in a per-sub-issue research file (e.g
 |---|---|---|
 | [#227](https://github.com/gregeva/logtimeline/issues/227) | Packaged-binary smoke tests | OPEN |
 | [#228](https://github.com/gregeva/logtimeline/issues/228) | Log format detection regression | OPEN |
-| [#229](https://github.com/gregeva/logtimeline/issues/229) | Pattern file correctness | OPEN |
+| [#229](https://github.com/gregeva/logtimeline/issues/229) | Pattern file correctness | **CANCELLED 2026-05-22** — scope exceeded value; see issue for rationale |
 | [#230](https://github.com/gregeva/logtimeline/issues/230) | Filter logic truth tables | OPEN |
 | [#231](https://github.com/gregeva/logtimeline/issues/231) | CLI option parsing / conflict detection | OPEN |
 | [#232](https://github.com/gregeva/logtimeline/issues/232) | `--help` content correctness | **CLOSED 2026-05-22** |
