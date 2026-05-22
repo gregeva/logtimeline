@@ -236,6 +236,7 @@ Histograms show the overall distribution shape of a metric across the entire tim
 | `-hgw, --histogram-width <N>` | Histogram width as percentage of terminal (default: 95) |
 | `-hgh, --histogram-height <N>` | Histogram height in rows (default: 8) |
 | `-hgbpd, --histogram-buckets-per-decade <N>` | Bar resolution: bars per order-of-magnitude of value range (default: 8) |
+| `-hgb, --histogram-buckets <N>` | Override total histogram bucket count (default: 0 = auto-calculate from `-hgbpd`) |
 
 **Bar resolution (`-hgbpd`).** The default of 8 gives roughly the bar density of the legacy histogram and is suitable for most analyses. Raise it (16, 32, 53) when the default's bars look too wide to distinguish distinct modes in the data — each step gives narrower, more numerous bars and a more detailed distribution shape, at the cost of proportionally more memory during analysis. Values above 53 rarely add visible detail at typical histogram heights.
 
