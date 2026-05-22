@@ -97,6 +97,40 @@ assert_line() {
     fi
 }
 
+# Self-documenting assertion: no line matching `pattern` may be present.
+# Same field requirements as assert_line; inverse semantics.
+assert_no_line() {
+    local outfile="$1"
+    shift
+    local pattern asserts produced_by contract
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            pattern)     pattern="$2";     shift 2 ;;
+            asserts)     asserts="$2";     shift 2 ;;
+            produced_by) produced_by="$2"; shift 2 ;;
+            contract)    contract="$2";    shift 2 ;;
+            *) echo "assert_no_line: unknown field '$1'"; exit 2 ;;
+        esac
+    done
+    : "${pattern:?assert_no_line requires pattern}"
+    : "${asserts:?assert_no_line requires asserts}"
+    : "${produced_by:?assert_no_line requires produced_by}"
+    : "${contract:?assert_no_line requires contract}"
+
+    if grep -qE "$pattern" "$outfile"; then
+        echo "  FAIL  $current_scenario"
+        echo "        pattern:     !$pattern (unexpectedly present)"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: !$pattern (unexpectedly present)")
+    else
+        echo "  PASS  $current_scenario :: !$pattern"
+        pass=$((pass + 1))
+    fi
+}
+
 # Assert the captured ltl exit code matches an expected value.
 assert_exit() {
     local actual="$1"
@@ -270,7 +304,7 @@ assert_max_line_width() {
 # Scenarios
 # ============================================================================
 
-TOPICS=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef)
+TOPICS=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef heatmap histogram)
 
 # --- Scenario 1: every topic renders non-empty with the expected heading. ---
 scenario_all_topics_render() {
@@ -372,20 +406,40 @@ scenario_registry() {
         produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch block, empty-string branch)' \
         contract    'Issue #261: bare --explain prints the grouped registry'
 
+    # No top-level heading: the registry mixes categories (Statistics +
+    # Visualizations) so a single top heading would be misleading. The
+    # group subheadings (Range, ..., Visualizations) carry the structure.
     assert_line "$out" \
-        pattern     '^STATISTICS$' \
-        asserts     "Registry view emits the STATISTICS heading (shared with --help statistics)" \
+        pattern     "Use 'ltl --explain <topic>' for a long-form explanation" \
+        asserts     "Registry view leads with the intro sentence positioning the page (no top-level heading by design)" \
         produced_by 'print_explain_registry() in ltl' \
-        contract    'Issue #261: bare --explain prints a STATISTICS heading; future categories (heatmap, histogram, etc.) will use their own headings'
+        contract    'Issue #261 phase 2: registry intro is the sole framing; group subheadings carry the structure'
 
-    # Every group name must appear.
+    # Statistics group subheadings must appear under the STATISTICS heading.
     for group in 'Range' 'Central tendency' 'Spread' 'Percentiles' 'Distribution shape'; do
         assert_line "$out" \
             pattern     "^  ${group}\$" \
-            asserts     "Registry view emits the '$group' subheading" \
+            asserts     "Registry view emits the '$group' subheading under STATISTICS" \
             produced_by 'print_explain_registry() in ltl iterating @explain_groups' \
             contract    'Issue #261: registry groups match @explain_groups exactly'
     done
+
+    # Category section headings must appear (STATISTICS, VISUALIZATIONS).
+    for cat in 'STATISTICS' 'VISUALIZATIONS'; do
+        assert_line "$out" \
+            pattern     "^${cat}\$" \
+            asserts     "Registry view emits the '$cat' top-level section heading" \
+            produced_by 'print_explain_registry() in ltl emitting help_heading per category transition' \
+            contract    'Issue #261 phase 2: registry has two section headings: STATISTICS for stats topics, VISUALIZATIONS for chart topics'
+    done
+
+    # The redundant "Visualizations" subheading (group name == category
+    # heading) must be suppressed.
+    assert_no_line "$out" \
+        pattern     '^  Visualizations$' \
+        asserts     "Registry suppresses the group subheading when it would duplicate the category heading (one-group-named-same case)" \
+        produced_by 'print_explain_registry() in ltl (uc group name vs category-heading dedup)' \
+        contract    'Issue #261 phase 2 layout: avoid stuttering category/group when they are identical'
 
     # Every topic name must appear.
     for topic in "${TOPICS[@]}"; do
@@ -438,22 +492,43 @@ scenario_help_statistics() {
         produced_by 'print_help_statistics() in ltl' \
         contract    'Issue #261: --help statistics emits a top-level STATISTICS heading'
 
-    # Group subheadings.
+    # Group subheadings -- statistics groups only. The Visualizations
+    # group (heatmap, histogram) is intentionally absent because
+    # --help statistics stays narrow (#261 phase 2: visualizations belong
+    # in --explain, not in the statistics index).
     for group in 'Range' 'Central tendency' 'Spread' 'Percentiles' 'Distribution shape'; do
         assert_line "$out" \
             pattern     "^  ${group}\$" \
             asserts     "Statistics index emits the '$group' subheading" \
-            produced_by 'print_help_statistics() in ltl iterating @explain_groups' \
-            contract    'Issue #261: --help statistics groups mirror @explain_groups'
+            produced_by 'print_help_statistics() in ltl iterating @explain_groups[0..$_explain_stats_group_count-1]' \
+            contract    'Issue #261: --help statistics groups mirror the statistics-only slice of @explain_groups'
     done
 
-    # Every topic name appears in the index too.
-    for topic in "${TOPICS[@]}"; do
+    # The Visualizations group must NOT appear in --help statistics.
+    assert_no_line "$out" \
+        pattern     '^  Visualizations$' \
+        asserts     "--help statistics excludes the Visualizations group; that content belongs to --explain (#261 phase 2)" \
+        produced_by 'print_help_statistics() in ltl (stats-only slice of @explain_groups)' \
+        contract    'Issue #261 phase 2: $_explain_stats_group_count constant bounds the slice; widening it here would re-introduce the bug'
+
+    # Every statistics topic appears in the index. heatmap and histogram
+    # are excluded per the narrowing rule.
+    local stats_topics=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef)
+    for topic in "${stats_topics[@]}"; do
         assert_line "$out" \
             pattern     "^    ${topic}[[:space:]]" \
             asserts     "Statistics index lists topic '$topic'" \
             produced_by 'print_help_statistics() in ltl' \
-            contract    'Issue #261: the statistics index covers every entry in %explain_topics'
+            contract    'Issue #261: the statistics index covers every statistic in %explain_topics'
+    done
+
+    # heatmap and histogram must NOT appear in --help statistics.
+    for topic in heatmap histogram; do
+        assert_no_line "$out" \
+            pattern     "^    ${topic}[[:space:]]" \
+            asserts     "Visualization topic '$topic' must not appear in --help statistics; it belongs to --explain only" \
+            produced_by 'print_help_statistics() in ltl (stats-only slice)' \
+            contract    'Issue #261 phase 2: --help statistics is the statistics index; visualization topics live under --explain'
     done
 
     # Cross-reference to --explain.
@@ -557,6 +632,147 @@ scenario_box_drawing() {
     done
 }
 
+# --- Scenario 9b: table borders align with column dividers. ---
+# Regression guard for the misalignment caused when ANSI bold/underline
+# in headers was not stripped from visible_length() in render_table.
+# Symptom: top/bottom borders extended past column verticals because
+# bold-wrapped headers measured wrong, leaving body cells short.
+# Property: for every top border line (^\s*┌), the column positions of
+# the box-drawing characters (┌ ┬ ┐) must equal the column positions of
+# the verticals (│) on the next body row, AND the column positions on
+# the corresponding bottom border (└ ┴ ┘).
+# Implemented in Perl with UTF-8 decoding so multi-byte glyphs map to
+# single character positions.
+scenario_table_border_alignment() {
+    for topic in cv mean std_dev iqr skewness kurtosis bimodality_coef percentiles; do
+        current_scenario="table-border-align:$topic"
+        echo "[$current_scenario]"
+        # FORCE_COLOR puts bold/underline ANSI escapes around headers --
+        # exactly the conditions under which the original bug manifested
+        # (render_table's visible_length() failed to strip ANSI codes,
+        # causing column widths to be computed wrong, which left borders
+        # extending past the cell verticals). The Perl probe below strips
+        # ANSI before measuring column positions so the comparison is
+        # apples-to-apples.
+        local raw="$TMP_DIR/border-align-$topic.raw"
+        set +e
+        FORCE_COLOR=1 "$LTL" --explain "$topic" > "$raw" 2>&1
+        set -e
+
+        # Run a Perl probe that finds each top-border line and verifies
+        # the column positions of ┌ ┬ ┐ align with the verticals on the
+        # next body row. ANSI CSI sequences are stripped before measuring
+        # positions so bold-wrapped headers do not inflate column indices.
+        local probe_result
+        probe_result=$(perl -CSDA -e '
+            use strict; use warnings;
+            my $file = shift;
+            open my $fh, "<:encoding(UTF-8)", $file or die "open $file: $!";
+            my @lines;
+            while (my $l = <$fh>) {
+                chomp $l;
+                # Strip ANSI CSI sequences so column-position comparison
+                # measures only visible characters.
+                $l =~ s/\x1b\[[0-9;]*[A-Za-z]//g;
+                push @lines, $l;
+            }
+            close $fh;
+
+            my $tables_found = 0;
+            my $mismatch = 0;
+            my @details;
+            for (my $i = 0; $i < $#lines; $i++) {
+                # Top border: contains ┌ and (zero or more) ┬ and ┐.
+                next unless $lines[$i] =~ /\x{250c}/;
+                next unless $lines[$i] =~ /\x{2510}/;
+
+                # Collect column positions of ┌ ┬ ┐ on this top line.
+                my @top_cols;
+                for my $c (0 .. length($lines[$i]) - 1) {
+                    my $ch = substr($lines[$i], $c, 1);
+                    if ($ch eq "\x{250c}" || $ch eq "\x{252c}" || $ch eq "\x{2510}") {
+                        push @top_cols, $c;
+                    }
+                }
+
+                # Find the next line below that has ┌ glyph siblings --
+                # i.e. body row with │. The body row immediately follows
+                # the top border in our renderer.
+                my $body = $lines[$i + 1];
+                last unless defined $body;
+
+                # Collect column positions of │ on the body row.
+                my @body_cols;
+                for my $c (0 .. length($body) - 1) {
+                    if (substr($body, $c, 1) eq "\x{2502}") {
+                        push @body_cols, $c;
+                    }
+                }
+
+                # Also locate the matching bottom border (next line with └).
+                my $bot_line_idx;
+                for my $j ($i + 1 .. $#lines) {
+                    if ($lines[$j] =~ /\x{2514}/ && $lines[$j] =~ /\x{2518}/) {
+                        $bot_line_idx = $j;
+                        last;
+                    }
+                }
+                last unless defined $bot_line_idx;
+
+                my @bot_cols;
+                for my $c (0 .. length($lines[$bot_line_idx]) - 1) {
+                    my $ch = substr($lines[$bot_line_idx], $c, 1);
+                    if ($ch eq "\x{2514}" || $ch eq "\x{2534}" || $ch eq "\x{2518}") {
+                        push @bot_cols, $c;
+                    }
+                }
+
+                $tables_found++;
+                my $top_str  = join(",", @top_cols);
+                my $body_str = join(",", @body_cols);
+                my $bot_str  = join(",", @bot_cols);
+                if ($top_str ne $body_str) {
+                    $mismatch = 1;
+                    push @details, "  table at top-line $i: top cols [$top_str] != body cols [$body_str]";
+                }
+                if ($top_str ne $bot_str) {
+                    $mismatch = 1;
+                    push @details, "  table at top-line $i: top cols [$top_str] != bottom cols [$bot_str]";
+                }
+            }
+
+            print "tables=$tables_found mismatch=$mismatch\n";
+            print "$_\n" for @details;
+        ' "$raw")
+
+        local tables_found
+        tables_found=$(echo "$probe_result" | head -1 | sed -n "s/tables=\([0-9]*\).*/\1/p")
+        local mismatch
+        mismatch=$(echo "$probe_result" | head -1 | sed -n "s/.*mismatch=\([0-9]*\)/\1/p")
+
+        if [[ "$tables_found" -lt 1 ]]; then
+            echo "  FAIL  $current_scenario"
+            echo "        no tables found in rendered output -- topic '$topic' should contain at least one table"
+            echo "        asserts:     topic '$topic' renders at least one box-drawn table"
+            echo "        produced_by: render_table() in ltl"
+            echo "        contract:    Issue #261: topics with interpretation tables must render those tables"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: no tables found in $topic")
+        elif [[ "$mismatch" -eq 0 ]]; then
+            echo "  PASS  $current_scenario :: ${tables_found} table(s), all borders aligned with column dividers"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $current_scenario"
+            echo "$probe_result" | tail -n +2
+            echo "        asserts:     Top border (┌┬┐) and bottom border (└┴┘) column positions must match the column positions of verticals (│) on body rows"
+            echo "        produced_by: render_table() in ltl + visible_length() correctly stripping non-printing decorations"
+            echo "        contract:    Issue #261 phase 2: visible_length must strip ANSI codes AND backspace overstrike so cell padding aligns with border glyphs"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: table borders misaligned in $topic")
+        fi
+    done
+}
+
 # --- Scenario 10: short -ex alias works. ---
 scenario_short_alias() {
     current_scenario="short-alias:-ex"
@@ -568,6 +784,158 @@ scenario_short_alias() {
         asserts     "ltl -ex mean produces output identical to ltl --explain mean" \
         produced_by 'GetOptions wiring in ltl (--explain|ex:s)' \
         contract    'Issue #261: -ex is the short-form alias for --explain'
+}
+
+# --- Scenario: bold/underline render correctly in ASCII and ANSI modes. ---
+# Industry-standard env vars control rendering:
+#   - NO_COLOR set    (no-color.org convention) -> force ASCII; plain text
+#                     headings with NO ANSI bold/underline escapes.
+#   - FORCE_COLOR set (npm/node/chalk convention) -> force ANSI; headings
+#                     wrapped in SGR 1/22 (bold) and SGR 4/24 (underline)
+#                     so color-aware terminals and less -R render them.
+# Default (TTY without either env) -> ANSI. Non-TTY (harness default) and
+# NO_COLOR both fall back to plain ASCII.
+scenario_ascii_and_ansi_modes() {
+    current_scenario="mode:ascii (NO_COLOR=1)"
+    echo "[$current_scenario]"
+    local out_ascii="$TMP_DIR/mode-ascii.raw"
+    set +e
+    NO_COLOR=1 "$LTL" --explain mean > "$out_ascii" 2>&1
+    set -e
+
+    # No ANSI bold/underline SGR codes should appear anywhere.
+    # SGR 1 (bold), SGR 22 (no-bold), SGR 4 (underline), SGR 24 (no-underline).
+    # Title banner uses 38;5; foreground codes which are out of scope here.
+    if perl -e '
+        my $f = shift;
+        open my $fh, "<", $f or die $!;
+        local $/;
+        my $c = <$fh>;
+        if ($c =~ /\x1b\[(?:1|22|4|24)m/) { exit 1 }
+        exit 0;
+    ' "$out_ascii"; then
+        echo "  PASS  $current_scenario :: no bold/underline ANSI escapes in output"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario"
+        echo "        ASCII mode (NO_COLOR=1) should suppress SGR 1/22/4/24 codes"
+        echo "        asserts:     With NO_COLOR set, headings render as plain text -- no ANSI bold/underline escapes leak through"
+        echo "        produced_by: help_ansi_enabled() in ltl (returns 0 when NO_COLOR is defined)"
+        echo "        contract:    Issue #261 phase 2: bold/underline gated by help_ansi_enabled; NO_COLOR convention honored"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: ANSI bold/underline leaked under NO_COLOR")
+    fi
+
+    # In ASCII mode the heading text must still appear (just not styled).
+    assert_line "$out_ascii" \
+        pattern     '^MEAN$' \
+        asserts     "ASCII mode: heading text is plain (no ANSI), still recognizable" \
+        produced_by 'bs_bold() returns plain text when help_ansi_enabled() is false' \
+        contract    'Issue #261 phase 2: bold and underline must work in ASCII mode -- plain text is the universal fallback'
+
+    # Subheadings (Operational use, etc.) must also render plain in ASCII mode.
+    assert_line "$out_ascii" \
+        pattern     '^  Operational use$' \
+        asserts     "ASCII mode: subheading text is plain, no ANSI underline escapes" \
+        produced_by 'bs_underline() returns plain text when help_ansi_enabled() is false' \
+        contract    'Issue #261 phase 2: subheadings render readably without ANSI'
+
+    # ----- ANSI mode -----
+    current_scenario="mode:ansi (FORCE_COLOR=1)"
+    echo "[$current_scenario]"
+    local out_ansi="$TMP_DIR/mode-ansi.raw"
+    set +e
+    FORCE_COLOR=1 "$LTL" --explain mean > "$out_ansi" 2>&1
+    set -e
+
+    # Bold ANSI escape (SGR 1) must appear -- the MEAN heading is bolded.
+    # NOTE: exit(($match) ? 0 : 1) -- the outer parens are required to
+    # bind the ternary to exit's argument; otherwise perl parses it as
+    # `exit($match) ? 0 : 1` and exits with the match result directly.
+    if perl -e '
+        my $f = shift;
+        open my $fh, "<", $f or die $!;
+        local $/;
+        my $c = <$fh>;
+        exit (($c =~ /\x1b\[1m/) ? 0 : 1);
+    ' "$out_ansi"; then
+        echo "  PASS  $current_scenario :: ANSI bold (SGR 1) present"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario"
+        echo "        ANSI mode (FORCE_COLOR=1) should emit SGR 1 (bold) around headings"
+        echo "        asserts:     With FORCE_COLOR set, headings are wrapped in ANSI bold (SGR 1)"
+        echo "        produced_by: help_ansi_enabled() in ltl (returns 1 when FORCE_COLOR is set)"
+        echo "        contract:    Issue #261 phase 2: FORCE_COLOR (npm/chalk standard) forces ANSI on; color terminals render styled headings"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: ANSI bold missing under FORCE_COLOR")
+    fi
+
+    # Underline ANSI escape (SGR 4) must appear -- subheadings are underlined.
+    if perl -e '
+        my $f = shift;
+        open my $fh, "<", $f or die $!;
+        local $/;
+        my $c = <$fh>;
+        exit (($c =~ /\x1b\[4m/) ? 0 : 1);
+    ' "$out_ansi"; then
+        echo "  PASS  $current_scenario :: ANSI underline (SGR 4) present"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario"
+        echo "        ANSI mode (FORCE_COLOR=1) should emit SGR 4 (underline) around subheadings"
+        echo "        asserts:     Subheadings (Operational use, etc.) wrapped in ANSI underline (SGR 4)"
+        echo "        produced_by: help_ansi_enabled() in ltl + bs_underline() emitting SGR 4"
+        echo "        contract:    Issue #261 phase 2: FORCE_COLOR enables subheading underlines; they are visually important for navigability"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: ANSI underline missing under FORCE_COLOR")
+    fi
+}
+
+# --- Scenario X: Visualization topics carry the synthetic ANSI chart. ---
+# heatmap and histogram topics include a synthetic example chart authored
+# with 256-color ANSI escape sequences and full-block characters. This
+# scenario asserts the chart bytes survived heredoc assembly and render
+# correctly. Because run_ltl pipes through strip_decoration, we capture a
+# RAW version without stripping to look for the ANSI sequences directly.
+scenario_visualization_charts() {
+    for topic in heatmap histogram; do
+        current_scenario="viz-chart:$topic"
+        echo "[$current_scenario]"
+        local raw_file="$TMP_DIR/viz-$topic.raw"
+        # Run ltl WITHOUT decoration stripping so ANSI bytes are visible.
+        set +e
+        "$LTL" --explain "$topic" > "$raw_file" 2>&1
+        set -e
+
+        # Use Perl to count ANSI CSI sequences in the captured raw output.
+        local ansi_count
+        ansi_count=$(perl -e '
+            my ($file) = @ARGV;
+            open my $fh, "<", $file or die $!;
+            local $/;
+            my $content = <$fh>;
+            close $fh;
+            my $count = () = $content =~ /\x1b\[/g;
+            print $count;
+        ' "$raw_file")
+
+        # The synthetic chart has many ANSI sequences (one per colored cell).
+        # 20 is a safe lower bound -- both heatmap and histogram should have
+        # 50+ each.
+        if [[ "$ansi_count" -ge 20 ]]; then
+            echo "  PASS  $current_scenario :: ANSI sequences=$ansi_count (>=20)"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $current_scenario"
+            echo "        expected >= 20 ANSI CSI sequences in raw output, found $ansi_count"
+            echo "        asserts:     Topic '$topic' embeds a synthetic ANSI example chart in a pre block; the chart bytes (ANSI 256-color escape sequences) must survive heredoc assembly and render unmolested through the pager."
+            echo "        produced_by: populate_explain_topics() in ltl (heredoc assembly for \$explain_${topic}_example)"
+            echo "        contract:    Issue #261 phase 2: visualization topics include synthetic colored charts; this assertion guards against accidental ANSI stripping at authoring time"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: only $ansi_count ANSI sequences (expected >=20)")
+        fi
+    done
 }
 
 # --- Scenario 11: pager invocation and ANSI handling. ---
@@ -666,9 +1034,15 @@ scenario_reflow
 echo ""
 scenario_box_drawing
 echo ""
+scenario_table_border_alignment
+echo ""
+scenario_visualization_charts
+echo ""
 scenario_short_alias
 echo ""
 scenario_pager_ansi
+echo ""
+scenario_ascii_and_ansi_modes
 
 echo ""
 echo "Results: $pass passed, $fail failed"

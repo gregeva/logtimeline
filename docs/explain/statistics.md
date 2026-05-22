@@ -159,7 +159,7 @@ ltl -so cv -n 20 access.log           # surface most variable APIs
 ltl -so iqr -n 20 access.log          # find APIs with the noisiest middle range
 ```
 
-**How ltl computes this.** Derived from already-computed percentiles: `iqr = p75 − p25`. Computed as part of the unified percentile contract under Issue #187 — bin-counter substrate with HDR-style log-spaced geometry, ~1.3% precision by default (53 buckets per decade).
+**How ltl computes this.** Derived from already-computed percentiles: `iqr = p75 − p25`. Inherits the same precision as the underlying percentile computation — around 1.3% by default, tunable via `-pbpd` (buckets per decade) for tighter or looser bin spacing.
 
 **See also.** `p25`, `p50`, `p75`, `std_dev`, `cv`.
 
@@ -203,7 +203,7 @@ ltl -pp 7 access.log                  # tighten percentile precision (slower; mo
 ltl -ep access.log                    # opt out of bin counters; exact sort-based percentiles
 ```
 
-**How ltl computes this.** ltl computes percentiles via HDR-style bin counters with log-spaced geometry (Issue #187). The default 53 buckets per decade gives ~1.3% precision, matching OpenTelemetry's Scale-4 analog. The number of buckets per decade is tunable via `-pbpd`; `--percentile-precision` exposes named tiers (1..9). For byte-exact verification against sort-based percentiles, `-ep` opts out of the bin-counter substrate.
+**How ltl computes this.** ltl computes percentiles using log-spaced bin counters with HDR-histogram-style precision. The default 53 buckets per decade gives ~1.3% precision, matching the resolution of common observability tools. The number of buckets per decade is tunable via `-pbpd`; `--percentile-precision` exposes named tiers (1..9). For byte-exact verification against sort-based percentiles, `-ep` opts out of the binned computation.
 
 **See also.** `min`, `max`, `iqr`, `skewness`, `kurtosis`, `bimodality_coef`. Flags: `-pbpd`, `-pp`, `-ep`.
 
@@ -256,7 +256,7 @@ Kurtosis measures the *tail-heaviness* (and concentration around the mean) of a 
 | `> 10` | Very heavy tails | A few extreme outliers dominate the tail; pathological-latency signature (GC, locks, retries) |
 | `> 30` | Extreme | Almost certainly indicates something is wrong |
 
-**Operational use.** Kurtosis separates "this API is reliably slow" from "this API is mostly fine but occasionally catastrophic." These look similar in `p50`/`p90` but diverge sharply in tails. **High kurtosis with normal `p50`/`p90`** means most requests are fine but you have invisible outliers being suffered by a small population of users; `p99`/`p999` will show them, but kurtosis tells you they're *concentrated* at the tail rather than spread out. **Low kurtosis with slow `p50`** means uniform slowness affecting everyone — different problem, different fix. Kurtosis is one of the three shape moments (with `skewness` and `bimodality_coef`) that #222 added so SREs can characterize *distribution shape* from CSV alone, without re-running ltl.
+**Operational use.** Kurtosis separates "this API is reliably slow" from "this API is mostly fine but occasionally catastrophic." These look similar in `p50`/`p90` but diverge sharply in tails. **High kurtosis with normal `p50`/`p90`** means most requests are fine but you have invisible outliers being suffered by a small population of users; `p99`/`p999` will show them, but kurtosis tells you they're *concentrated* at the tail rather than spread out. **Low kurtosis with slow `p50`** means uniform slowness affecting everyone — different problem, different fix. Kurtosis is one of three shape moments (with `skewness` and `bimodality_coef`) that let SREs characterize *distribution shape* from the CSV alone, without re-running ltl.
 
 **Example.**
 
@@ -283,7 +283,7 @@ Sarle's bimodality coefficient screens for whether a distribution likely has *tw
 | Approaching `1.0` | Strongly bimodal |
 | `= 0.555` | BC of a uniform distribution — the canonical screening threshold |
 
-**Operational use.** This is the cheapest, most actionable multimodality screening statistic available and the one shipped in #222 explicitly to catch cache-hit-vs-miss patterns. `std_dev` and `cv` tell you "values are spread out" but not *why*; `bimodality_coef` distinguishes uniformly-noisy from bimodal. The threshold `> 5/9 ≈ 0.555` flags suspect multimodal; values approaching 1.0 indicate strongly bimodal with equal-mass modes. The 0.555 cutoff is canonical from the bimodality-detection literature (it's the BC of a uniform distribution — anything more spread-out-looking than uniform is suspect bimodal). With Issue #220 shipping, `-so bimodality_coef` ranks every message in the log by likelihood of multimodality — the operational primitive #222's research was building toward.
+**Operational use.** This is the cheapest, most actionable multimodality screening statistic available — specifically useful for catching cache-hit-vs-miss patterns. `std_dev` and `cv` tell you "values are spread out" but not *why*; `bimodality_coef` distinguishes uniformly-noisy from bimodal. The threshold `> 5/9 ≈ 0.555` flags suspect multimodal; values approaching 1.0 indicate strongly bimodal with equal-mass modes. The 0.555 cutoff is canonical from the bimodality-detection literature (it is the BC of a uniform distribution — anything more spread-out-looking than uniform is suspect bimodal). `-so bimodality_coef` ranks every message in the log by likelihood of multimodality.
 
 **Common triggers.** (1) *Cache effectiveness investigations* — a bimodal API is often a caching layer working partially; modes are "served from cache" vs "fell through to backend"; if BC drops over time without changes, your cache is degrading. (2) *Hidden two-population effects* — authenticated vs unauthenticated, read-from-replica vs read-from-primary, or other internal branching producing two distinct latency profiles. (3) *Queueing detection* — queued vs unqueued requests are bimodal by construction; high BC on an API that shouldn't have queues signals contention. (4) *Distribution-shape fingerprinting* — `skewness + kurtosis + bimodality_coef` together form a 3-column shape signature that's diagnostic without needing the heatmap.
 

@@ -2073,14 +2073,35 @@ sub help_wrap_width {
     return ($terminal_width && $terminal_width > 80) ? $terminal_width : 80;
 }
 
+# help_ansi_enabled: returns true when bold/underline ANSI escapes should
+# be emitted. Industry-standard env vars are honored:
+#   1. FORCE_COLOR set (npm/node ecosystem convention, also chalk,
+#      supports-color) -> force ANSI on, even through pipes.
+#   2. NO_COLOR set (universal convention, no-color.org) -> force off.
+#   3. Otherwise -> ANSI on iff stdout is a TTY.
+# Precedence: FORCE_COLOR wins over NO_COLOR when both are set, matching
+# the supports-color library behavior. less -R correctly interprets ANSI
+# so when we end up paginating, the styling is preserved end-to-end.
+sub help_ansi_enabled {
+    return 1 if defined $ENV{FORCE_COLOR} && $ENV{FORCE_COLOR} ne '' && $ENV{FORCE_COLOR} ne '0';
+    return 0 if defined $ENV{NO_COLOR};
+    return -t STDOUT ? 1 : 0;
+}
+
 sub bs_bold {
     my ($text) = @_;
-    return join('', map { "$_\b$_" } split(//, $text));
+    # ANSI bold (SGR 1) + reset bold (SGR 22) when the output context can
+    # render it; plain text otherwise. The legacy backspace-overstrike
+    # form (X\bX) was unreliable in modern terminals (Terminal.app,
+    # iTerm2) which often strip \b.
+    return help_ansi_enabled() ? "\033[1m" . $text . "\033[22m" : $text;
 }
 
 sub bs_underline {
     my ($text) = @_;
-    return join('', map { "_\b$_" } split(//, $text));
+    # ANSI underline (SGR 4) + reset underline (SGR 24) when the output
+    # context can render it; plain text otherwise.
+    return help_ansi_enabled() ? "\033[4m" . $text . "\033[24m" : $text;
 }
 
 # help_heading: top-level section heading (bold, blank line above and below).
@@ -2291,15 +2312,35 @@ my %explain_aliases = (
     p999    => 'percentiles', p9999  => 'percentiles', p99999 => 'percentiles',
 );
 
-# Group → ordered topic list. Single source of truth shared by both
-# `--help statistics` (the index) and `--explain` (the registry view).
+# Group → ordered topic list. Single source of truth for the --explain
+# registry. Each group has a category tag so the registry can emit
+# section headings (STATISTICS / VISUALIZATIONS) per category transition.
+# `--help statistics` index uses only the groups tagged 'statistics'.
 my @explain_groups = (
-    { name => 'Range',              topics => [qw(min max)] },
-    { name => 'Central tendency',   topics => [qw(mean)] },
-    { name => 'Spread',             topics => [qw(std_dev cv iqr)] },
-    { name => 'Percentiles',        topics => [qw(percentiles)] },
-    { name => 'Distribution shape', topics => [qw(skewness kurtosis bimodality_coef)] },
+    { category => 'statistics',     name => 'Range',              topics => [qw(min max)] },
+    { category => 'statistics',     name => 'Central tendency',   topics => [qw(mean)] },
+    { category => 'statistics',     name => 'Spread',             topics => [qw(std_dev cv iqr)] },
+    { category => 'statistics',     name => 'Percentiles',        topics => [qw(percentiles)] },
+    { category => 'statistics',     name => 'Distribution shape', topics => [qw(skewness kurtosis bimodality_coef)] },
+    # Visualizations: each chart gets its own group so each appears as an
+    # underlined subheading under the VISUALIZATIONS category. Mirrors the
+    # Percentiles group (one topic per group) and leaves room for future
+    # sub-topics per chart (e.g. heatmap-duration, heatmap-bytes).
+    { category => 'visualizations', name => 'heatmap',            topics => [qw(heatmap)] },
+    { category => 'visualizations', name => 'histogram',          topics => [qw(histogram)] },
 );
+
+# Top-level section-heading labels (rendered as bold uppercase by
+# help_heading) shown before the first group in each category.
+my %explain_category_heading = (
+    statistics     => 'STATISTICS',
+    visualizations => 'VISUALIZATIONS',
+);
+
+# Number of leading groups tagged 'statistics'. --help statistics slices
+# @explain_groups[0..$_explain_stats_group_count-1] so that the stats
+# index stays narrow even as Visualizations and future categories grow.
+my $_explain_stats_group_count = 5;
 
 # One-line summary per topic, used by the grouped index views. Long-form
 # content lives in %explain_topics below.
@@ -2314,6 +2355,8 @@ my %explain_summary = (
     skewness        => 'Distribution asymmetry (>0 = right-tail-heavy)',
     kurtosis        => 'Tail-heaviness (>3 = heavy outliers; >10 = pathological)',
     bimodality_coef => 'Sarle\'s bimodality coefficient (>0.555 = suspect multimodal)',
+    heatmap         => 'Color-intensity time-vs-value visualization (-hm)',
+    histogram       => 'Bin-counter distribution chart with percentile ticks (-hg)',
 );
 
 # Topic content registry. Each value is an arrayref of typed block hashrefs:
@@ -2342,7 +2385,9 @@ sub resolve_explain_topic {
 # that don't contribute to display width).
 sub visible_length {
     my ($s) = @_;
-    $s =~ s/.\x08//g;     # consume any "X\bX" or "_\bX" overstrike pair (one char before \b)
+    # Strip non-printing decorations so length() reflects visible width.
+    $s =~ s/\x1b\[[0-9;]*[A-Za-z]//g;   # ANSI CSI escape sequences (bold/underline/color)
+    $s =~ s/.\x08//g;                   # backspace-overstrike pairs (X\bX, _\bX)
     return length($s);
 }
 
@@ -2546,7 +2591,9 @@ sub print_help_statistics {
     ) . "\n";
     $out .= help_heading("STATISTICS");
 
-    for my $group (@explain_groups) {
+    # Stats-only slice: --help statistics stays narrow even as the
+    # --explain registry expands to cover new categories (#261 phase 2).
+    for my $group (@explain_groups[0 .. $_explain_stats_group_count - 1]) {
         $out .= help_subheading_tight($group->{name});
         for my $topic (@{ $group->{topics} }) {
             my $summary = $explain_summary{$topic} // '';
@@ -2562,10 +2609,10 @@ sub print_help_statistics {
     return $out;
 }
 
-# `ltl --explain` (no argument): grouped list of available topics.
-# Heading is "STATISTICS" -- consistent with --help statistics. Future
-# explain categories (heatmap, histogram, etc.) will get their own
-# headings. Banner is incorporated into the output so it appears at the
+# `ltl --explain` (no argument): grouped list of available topics across
+# all categories. Each category transition emits a top-level section
+# heading (STATISTICS, VISUALIZATIONS) and the group subheadings follow
+# beneath. Banner is incorporated into the output so it appears at the
 # top of the less buffer (Issue #261 per user feedback).
 sub print_explain_registry {
     my $out = '';
@@ -2575,9 +2622,14 @@ sub print_explain_registry {
         indent       => 0,
         first_indent => 0,
     ) . "\n";
-    $out .= help_heading("STATISTICS");
 
+    my $current_category = '';
     for my $group (@explain_groups) {
+        if ($group->{category} ne $current_category) {
+            $current_category = $group->{category};
+            my $label = $explain_category_heading{$current_category} // uc($current_category);
+            $out .= help_heading($label);
+        }
         $out .= help_subheading_tight($group->{name});
         for my $topic (@{ $group->{topics} }) {
             my $summary = $explain_summary{$topic} // '';
@@ -2651,14 +2703,14 @@ my $explain_cv_compute = q{Derived from already-computed `std_dev` and `mean`: `
 # --- iqr ---
 my $explain_iqr_intuition = q{Interquartile range = `p75 - p25`. IQR captures the spread of the *middle 50%* of observations -- the range between the lower quartile and the upper quartile. Half of all values fall inside this band; one quarter are slower, one quarter are faster.};
 my $explain_iqr_operational = q{IQR is the *robust* spread statistic: by construction it ignores the bottom 25% and top 25%, which contain all the outliers, fast-path edge cases, and pathological-tail events. This makes IQR resistant to the failure modes that compromise `std_dev` (single 10-second outlier dominates) and `cv` (right-skew inflates std_dev). For SRE work where you want "what's the typical operational range this API behaves in", IQR is usually the right answer -- mean +/- std_dev assumes a normal distribution which production latency violates. IQR pairs well with `p50` (median) as a robust center: the trio `p25 / p50 / p75` describes the body of the distribution without being skewed by tails.};
-my $explain_iqr_compute = q{Derived from already-computed percentiles: `iqr = p75 - p25`. Computed as part of the unified percentile contract under Issue #187 -- bin-counter substrate with HDR-style log-spaced geometry, ~1.3% precision by default (53 buckets per decade).};
+my $explain_iqr_compute = q{Derived from already-computed percentiles: `iqr = p75 - p25`. Inherits the same precision as the underlying percentile computation -- around 1.3% by default, tunable via `-pbpd` (buckets per decade) for tighter or looser bin spacing.};
 
 # --- percentiles (the major topic, covers p1..p99999) ---
 my $explain_percentiles_intuition = q{Percentiles answer the question "what value is faster than (or equal to) N% of all observations?" The N-th percentile pN is the value at which N percent of observed durations fall at or below. p50 is the median; p99 is the value that 99% of requests beat; p999 is the value that 99.9% of requests beat. Where `mean` collapses a distribution to a single average, percentiles describe its *shape* -- by reading off the values at many different points along the cumulative distribution.};
 my $explain_percentiles_operational = q{Percentiles are the primary SRE latency-investigation tool. Each percentile answers a different operational question: `p50` (median) is the "typical" experience; `p90` and `p95` are commonly-used SLO target points; `p99`, `p999`, and higher tail percentiles describe the user-visible worst-case latencies that drive outage and complaint patterns; `p1`, `p5`, `p10` are the lower-body percentiles useful for fast-path analysis (cache effectiveness, what does the system look like when not loaded). The progression of nines -- p99, p999, p9999, p99999 -- describes *how heavy* the tail is: in a benign distribution these values converge quickly; in a pathological one (GC pauses, lock contention, retry storms) they diverge sharply.};
 my $explain_percentiles_table_intro = q{Available percentile slugs and their operational meaning:};
 my $explain_percentiles_sample_size = q{Higher percentiles require larger samples to be statistically meaningful. The general rule: pN needs at least 10/(1-N/100) observations to be informative -- p99 needs ~1000, p999 needs ~10000, p9999 needs ~100000, p99999 needs ~1 million. Below these thresholds the percentile collapses toward `max` and carries no signal independent of `max`. ltl emits every percentile column regardless of sample size, so check the `occurrences` column when interpreting high-nines values.};
-my $explain_percentiles_compute = q{ltl computes percentiles via HDR-style bin counters with log-spaced geometry (Issue #187). The default 53 buckets per decade gives ~1.3% precision, matching OpenTelemetry's Scale-4 analog. The number of buckets per decade is tunable via `-pbpd`; `--percentile-precision` exposes named tiers (1..9). For byte-exact verification against sort-based percentiles, `-ep` opts out of the bin-counter substrate.};
+my $explain_percentiles_compute = q{ltl computes percentiles using log-spaced bin counters with HDR-histogram-style precision. The default 53 buckets per decade gives ~1.3% precision, matching the resolution of common observability tools. The number of buckets per decade is tunable via `-pbpd`; `--percentile-precision` exposes named tiers (1..9). For byte-exact verification against sort-based percentiles, `-ep` opts out of the binned computation.};
 
 # --- skewness (user-supplied content) ---
 my $explain_skewness_intuition = q{Skewness measures the *asymmetry* of a distribution -- how lopsided it is around its mean. Whether the values tend to bunch up on one side with a tail extending toward the other. For latency, skewness answers "is the tail leaning one way?" -- positive skew means the right tail is heavier (most fast, occasionally slow); negative skew means the left tail is heavier (unusual for latency; common when something caps execution at a ceiling).};
@@ -2667,15 +2719,389 @@ my $explain_skewness_compute = q{Standardized third central moment (population s
 
 # --- kurtosis (user-supplied content) ---
 my $explain_kurtosis_intuition = q{Kurtosis measures the *tail-heaviness* (and concentration around the mean) of a distribution: how prone the distribution is to producing extreme outliers compared to a normal bell curve. For latency, kurtosis answers "how often do rare, extreme values show up?" -- low kurtosis means values cluster predictably and tails are thin; high kurtosis means most values cluster near the mean *but* the tails are heavy -- the "occasionally horrible" pattern. It's not about spread (that's std_dev / cv) and not about asymmetry (that's skewness). Kurtosis specifically captures the shape of the tails.};
-my $explain_kurtosis_operational = q{Kurtosis separates "this API is reliably slow" from "this API is mostly fine but occasionally catastrophic." These look similar in p50/p90 but diverge sharply in tails. High kurtosis with normal p50/p90 means most requests are fine but you have invisible outliers being suffered by a small population of users; p99/p999 will show them, but kurtosis tells you they're *concentrated* at the tail rather than spread out. Low kurtosis with slow p50 means uniform slowness affecting everyone -- different problem, different fix. Kurtosis is one of the three shape moments (with `skewness` and `bimodality_coef`) that #222 added so SREs can characterize *distribution shape* from CSV alone, without re-running ltl.};
+my $explain_kurtosis_operational = q{Kurtosis separates "this API is reliably slow" from "this API is mostly fine but occasionally catastrophic." These look similar in p50/p90 but diverge sharply in tails. High kurtosis with normal p50/p90 means most requests are fine but you have invisible outliers being suffered by a small population of users; p99/p999 will show them, but kurtosis tells you they're *concentrated* at the tail rather than spread out. Low kurtosis with slow p50 means uniform slowness affecting everyone -- different problem, different fix. Kurtosis is one of three shape moments (with `skewness` and `bimodality_coef`) that let SREs characterize *distribution shape* from the CSV alone, without re-running ltl.};
 my $explain_kurtosis_compute = q{Standardized fourth central moment minus 3 (excess kurtosis -- a normal distribution reads 0). Formula: `mean((x - mean)^4) / std_dev^4 - 3`. Single-pass O(n) accumulator on the sorted-values pass; requires n >= 4 and non-zero std_dev (emitted blank otherwise). The same accumulator pass produces `skewness` and feeds `bimodality_coef`.};
 
 # --- bimodality_coef (user-supplied content; the big one) ---
 my $explain_bc_intuition = q{Sarle's bimodality coefficient screens for whether a distribution likely has *two (or more) modes* -- two distinct populations of values mashed into the same dataset, each with its own peak. The classic case: 80% of requests hit a cache and return in 5ms, the other 20% miss and take 200ms. The mean (45ms) is in a valley where almost no requests actually land; the distribution has two modes but every summary statistic pretends it has one. `bimodality_coef` is the single number designed to flag that exactly that case.};
-my $explain_bc_operational = q{This is the cheapest, most actionable multimodality screening statistic available and the one shipped in #222 explicitly to catch cache-hit-vs-miss patterns. `std_dev` and `cv` tell you "values are spread out" but not *why*; `bimodality_coef` distinguishes uniformly-noisy from bimodal. Threshold > 5/9 (approximately 0.555) flags suspect multimodal; values approaching 1.0 indicate strongly bimodal with equal-mass modes. The 0.555 cutoff is canonical from the bimodality-detection literature (it's the BC of a uniform distribution -- anything more spread-out-looking than uniform is suspect bimodal). With Issue #220 shipping, `-so bimodality_coef` ranks every message in the log by likelihood of multimodality -- the operational primitive #222's research was building toward.};
+my $explain_bc_operational = q{This is the cheapest, most actionable multimodality screening statistic available -- specifically useful for catching cache-hit-vs-miss patterns. `std_dev` and `cv` tell you "values are spread out" but not *why*; `bimodality_coef` distinguishes uniformly-noisy from bimodal. Threshold > 5/9 (approximately 0.555) flags suspect multimodal; values approaching 1.0 indicate strongly bimodal with equal-mass modes. The 0.555 cutoff is canonical from the bimodality-detection literature (it is the BC of a uniform distribution -- anything more spread-out-looking than uniform is suspect bimodal). `-so bimodality_coef` ranks every message in the log by likelihood of multimodality.};
 my $explain_bc_uses = q{Common operational triggers: (1) cache effectiveness investigations -- a bimodal API is often a caching layer working partially; modes are "served from cache" vs "fell through to backend"; if BC drops over time without changes, your cache is degrading. (2) Hidden two-population effects -- authenticated vs unauthenticated, read-from-replica vs read-from-primary, or other internal branching producing two distinct latency profiles. (3) Queueing detection -- queued vs unqueued requests are bimodal by construction; high BC on an API that shouldn't have queues signals contention. (4) Distribution-shape fingerprinting -- skewness + kurtosis + bimodality_coef together form a 3-column shape signature that's diagnostic without needing the heatmap.};
 my $explain_bc_caveats = q{Sarle's BC is a *screen*, not a test. Two important caveats: small-sample false positives -- at n < 100 random noise alone produces BC > 0.555, so high BC on a low-traffic API is a hint not a verdict; and skewed-bimodal blind spots -- if the two modes are very unequal (99% fast / 1% slow), the dominant mode's mass overwhelms the skewness-squared term and BC may stay below threshold even though the distribution is technically bimodal. The case where BC works best is comparable mode populations (say 30/70 to 50/50). For verification when BC flags a candidate, Hartigan's dip test is the gold-standard follow-up (computationally expensive; not shipped in ltl).};
 my $explain_bc_compute = q{Sarle's formula with sample-size correction: `BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))`. The denominator's sample-size adjustment is what distinguishes Sarle's BC from the unadjusted moment-based version -- it prevents small-sample false positives from being even worse. Requires n >= 4 and non-zero std_dev; emitted blank otherwise. Total cost: three arithmetic operations on numbers (skewness, kurtosis, n) already computed for the other shape moments.};
+
+# --- heatmap (--explain heatmap) ---
+my $explain_heatmap_intuition = q{The heatmap (-hm) replaces the per-bucket latency statistics column with a color-intensity visualization showing how values are distributed *within* each time bucket. Where percentile statistics collapse a distribution to a handful of numbers, the heatmap reveals its full shape -- bimodal distributions, shifting modes over time, outlier clustering, long tails, and rare-but-extreme events all become visually apparent at a glance. Each row of the heatmap is one time bucket; each cell in the row represents a logarithmic value range; cell color intensity is proportional to the number of entries in that range.};
+
+my $explain_heatmap_layout = q{Reading the heatmap left-to-right: the X-axis is logarithmic across the metric's full observed range, with the smallest values on the left and the largest on the right. The footer scale labels show the actual numeric value at 0%, 25%, 50%, 75%, and 100% of the X-axis width. Each row corresponds to one time bucket from the timeline -- the rows align with the rows of the bar graph on the left of the screen. Per-row percentile markers (P50, P95, P99) appear as labels indicating where those values fall on the X-axis for THAT bucket; markers shift left or right as latency profiles change over time. The color gradient is metric-specific: yellow for duration (-hm duration), green for bytes (-hm bytes), cyan for count (-hm count). Darker / more saturated cells indicate more entries in that value range; lighter cells indicate fewer.};
+
+my $explain_heatmap_reading = q{The heatmap surfaces patterns that summary statistics cannot. Look for: (1) Bimodal distributions -- two distinct vertical color bands in a row indicate two value populations (cache hit / cache miss, queued / unqueued, authenticated / unauthenticated). (2) Mode drift over time -- the brightest band in each row sliding left or right as you scan top-to-bottom signals latency degradation or improvement. (3) Tail growth -- entries appearing in the rightmost columns where they weren't before signal new outliers (lock contention, GC pauses, retry storms). (4) Hot-spot clusters -- a concentrated bright region across many rows in the same column range indicates a recurring value cluster. (5) Sparse vs dense rows -- some time buckets may show only a thin horizontal slice while others span a wide range; that's variance shifting over time.};
+
+my $explain_heatmap_compute = q{Cell positions span the full observed value range on a logarithmic scale: each row uses the same column-to-value mapping, so a cell at a given horizontal position represents the same value across every time bucket. Per-bucket counts determine each cell's color intensity, mapped to an 8-step gradient in the metric's color (yellow for duration, green for bytes, cyan for count). The per-row percentile markers and the summary-table p99/p999 values are computed from the same observations, so the markers and the printed percentile statistics agree by construction. The heatmap width is controlled by `-hmw` (default 52 cells); narrower widths trade horizontal resolution for screen real estate.};
+
+# Synthetic heatmap example chart. Mirrors the real ltl layout: time
+# labels in the left margin, log-spaced value buckets across, per-row
+# percentile markers on the right. Yellow gradient (-hm duration) drawn
+# from @column_colors{yellow}->{gradient}: [58, 94, 136, 142, 178, 184, 220, 226].
+# Full-block cells use matching fg+bg (38;5;N;48;5;Nm) so adjacent cells
+# render seamlessly on macOS Terminal.
+my $explain_heatmap_example;
+{
+    # Yellow gradient (-hm duration) from the @column_colors yellow entry.
+    # Real ltl renders heatmap cells with foreground color on a `█` block,
+    # no background. All cells use the same character so there is no
+    # mixed partial/full block issue and no inter-cell seam to manage.
+    my @g = (58, 94, 136, 142, 178, 184, 220, 226);
+
+    # 80-cell log-spaced X-axis spanning 1ms..10s.
+    my $width = 80;
+    my $val_min_ms = 1;
+    my $val_max_ms = 10_000;
+
+    # value (ms) -> column index (0..$width-1) on the log scale.
+    my $col_of = sub {
+        my ($v) = @_;
+        return 0 if $v <= $val_min_ms;
+        return $width - 1 if $v >= $val_max_ms;
+        my $f = (log($v) - log($val_min_ms)) / (log($val_max_ms) - log($val_min_ms));
+        return int($f * ($width - 1) + 0.5);
+    };
+    # column index -> value (ms) at the bin centre.
+    my $val_of_col = sub {
+        my ($c) = @_;
+        my $f = $c / ($width - 1);
+        return $val_min_ms * (($val_max_ms / $val_min_ms) ** $f);
+    };
+
+    # Render a coloured cell at gradient level 0..7.
+    my $cell_at = sub {
+        my ($level) = @_;
+        my $c = $g[$level];
+        return "\e[38;5;${c}m█\e[0m";
+    };
+    # Percentile marker -- inline `|` in bright-black (ANSI 90, matches
+    # real ltl's $colors{'bright-black'} convention) so it stands out
+    # against the coloured cells.
+    my $marker = "\e[90m|\e[0m";
+
+    # Declarative per-row shape. Each row carries a primary mode (and
+    # optionally a secondary mode for bimodal cases). Cell intensities
+    # AND percentile values are derived from these shapes, so the bright
+    # cells, the `|` markers, and the footer scale all line up on the
+    # same log-spaced axis by construction -- no risk of declaring a
+    # percentile that doesn't visually correspond to the distribution.
+    my @rows = (
+        # 08:00  early-morning trickle, tight cluster around 6ms
+        { time => '08:00', lumps => [ { c_ms => 6,   sigma => 0.35, peak => 4 } ] },
+        # 08:05  ramping up, mode shifts to ~12ms
+        { time => '08:05', lumps => [ { c_ms => 12,  sigma => 0.45, peak => 6 } ] },
+        # 08:10  peak load, broad spread with a right tail
+        { time => '08:10', lumps => [ { c_ms => 22,  sigma => 0.55, peak => 7 } ] },
+        # 08:15  bimodal: cache-hit cluster (~10ms) + cache-miss cluster (~250ms)
+        { time => '08:15', lumps => [ { c_ms => 11,  sigma => 0.30, peak => 6 },
+                                      { c_ms => 250, sigma => 0.35, peak => 5 } ] },
+        # 08:20  tail runaway, main mode ~25ms with outliers reaching seconds
+        { time => '08:20', lumps => [ { c_ms => 25,  sigma => 0.50, peak => 6 },
+                                      { c_ms => 1500,sigma => 0.30, peak => 3 } ] },
+        # 08:25  cooling off, main mode back near 8ms with residual tail
+        { time => '08:25', lumps => [ { c_ms => 8,   sigma => 0.40, peak => 4 },
+                                      { c_ms => 400, sigma => 0.25, peak => 2 } ] },
+    );
+
+    # Compute per-cell intensity (0..8) and a cumulative-mass distribution
+    # over the row's cells. From the mass distribution we read off the
+    # actual p50/p95/p99 column positions -- guaranteed coherent with
+    # what the cells visually show.
+    my $analyse_row = sub {
+        my ($row) = @_;
+        # log(value-per-cell) units; convert each lump's sigma (decades)
+        # into a column-space sigma.
+        my $col_per_decade = ($width - 1) / (log($val_max_ms / $val_min_ms) / log(10));
+
+        my @level = (0) x $width;   # gradient level shown in each cell
+        my @mass  = (0) x $width;   # observation mass in each cell
+        for my $lump (@{ $row->{lumps} }) {
+            my $cc = $col_of->($lump->{c_ms});
+            my $sc = $lump->{sigma} * $col_per_decade;
+            $sc = 0.5 if $sc < 0.5;
+            for my $c (0 .. $width - 1) {
+                my $d = ($c - $cc) / $sc;
+                my $g = exp(-0.5 * $d * $d);
+                $mass[$c] += $g * $lump->{peak};
+                # Cell level: max of brightness contributions (avoids
+                # bimodal lumps drowning each other out).
+                my $level = int($lump->{peak} * $g + 0.5);
+                $level = 8 if $level > 8;
+                $level[$c] = $level if $level > $level[$c];
+            }
+        }
+        # Derive percentile column positions from the cumulative mass.
+        my $total = 0;
+        $total += $_ for @mass;
+        my @cum = (0) x $width;
+        my $running = 0;
+        for my $c (0 .. $width - 1) {
+            $running += $mass[$c];
+            $cum[$c] = $running;
+        }
+        my $pct_col = sub {
+            my ($pct) = @_;
+            my $target = $total * $pct;
+            for my $c (0 .. $width - 1) {
+                return $c if $cum[$c] >= $target;
+            }
+            return $width - 1;
+        };
+        return {
+            level   => \@level,
+            p50_col => $pct_col->(0.50),
+            p95_col => $pct_col->(0.95),
+            p99_col => $pct_col->(0.99),
+        };
+    };
+
+    # --- Build the chart. ---
+    my $out_ex = "";
+    my $left_pad   = ' ' x 4;
+    my $time_label_w = 6;   # "08:00 " padded to 6
+
+    for my $row (@rows) {
+        my $r = $analyse_row->($row);
+        my %pct_at_col = (
+            $r->{p50_col} => 1,
+            $r->{p95_col} => 1,
+            $r->{p99_col} => 1,
+        );
+
+        my $line = $left_pad . sprintf('%-*s', $time_label_w, $row->{time});
+        for my $c (0 .. $width - 1) {
+            if ($pct_at_col{$c}) {
+                $line .= $marker;
+            } elsif ($r->{level}[$c] > 0) {
+                # Gradient level $level[$c] in 1..8 maps to gradient index 0..7.
+                $line .= $cell_at->($r->{level}[$c] - 1);
+            } else {
+                $line .= ' ';
+            }
+        }
+        $out_ex .= $line . "\n";
+    }
+
+    # Footer scale: same log-spaced axis as the rows, with value labels
+    # at the canonical bucket boundaries.
+    my @scale_marks = (
+        { col => $col_of->(1),     label => '1ms'   },
+        { col => $col_of->(10),    label => '10ms'  },
+        { col => $col_of->(100),   label => '100ms' },
+        { col => $col_of->(1000),  label => '1s'    },
+        { col => $col_of->(10000), label => '10s'   },
+    );
+    my @scale_row = ('─') x $width;
+    for my $mark (@scale_marks) {
+        my $col = $mark->{col};
+        my $lbl = $mark->{label};
+        my $start;
+        if ($col <= 0) {
+            $start = 0;
+        } elsif ($col >= $width - length($lbl)) {
+            $start = $width - length($lbl);
+        } else {
+            $start = $col - int(length($lbl) / 2);
+            $start = 0 if $start < 0;
+        }
+        for my $k (0 .. length($lbl) - 1) {
+            $scale_row[$start + $k] = substr($lbl, $k, 1) if ($start + $k) < $width;
+        }
+    }
+    $out_ex .= $left_pad . (' ' x $time_label_w) . join('', @scale_row) . "\n";
+
+    $explain_heatmap_example = $out_ex;
+}
+
+my $explain_heatmap_flags = <<'END';
+    ltl -hm duration access.log                   # duration heatmap (yellow gradient)
+    ltl -hm bytes access.log                      # bytes heatmap (green gradient)
+    ltl -hm count access.log                      # count heatmap (cyan gradient)
+    ltl -hm duration -hmw 80 access.log           # wider heatmap (80 cells vs default 52)
+    ltl -hm duration -bs 5 access.log             # 5-minute time buckets for finer-grained view
+    ltl -hm duration -lbg access.log              # palette tuned for light terminal backgrounds
+    ltl -hm duration -dbg access.log              # force dark palette regardless of auto-detect
+END
+
+my $explain_heatmap_notes = q{The X-axis is logarithmic, so equal visual spacing represents an exponential range of values. A cell at the right of the chart represents values 10x to 100x larger than a cell at the same visual position one decade left. Color rendering depends on terminal support: modern Unix terminals and Windows Terminal display the 256-color gradient correctly; legacy Windows CMD with `more` shows monochrome cells (the layout and gridline structure remain readable). When the heatmap and histogram are both active (-hm and -hg together), the heatmap renders inline in the bar-graph rows and the histogram renders as a separate panel below.};
+
+# --- histogram (--explain histogram) ---
+my $explain_histogram_intuition = q{The histogram (-hg) renders a single distribution chart showing how often each value range occurs across the entire log -- not split per time bucket like the heatmap. Where the heatmap surfaces *temporal* shape, the histogram surfaces *aggregate* shape: the full distribution's body, modes, tails, and percentile structure visible at once. Bars rise from the X-axis to indicate frequency at each value range; the percentile tick marks along the bottom show exactly where p50, p95, p99, and p99.9 fall on the distribution.};
+
+my $explain_histogram_layout = q{The histogram has a dual Y-axis: the LEFT axis shows absolute count of observations falling in each bucket (labeled `Count`), and the RIGHT axis shows the same expressed as a percentage of total observations (labeled `%`). Both axes track each other (count + percent for the same bar), but the percentage axis gives the user a scale-free way to read the shape regardless of total volume. The X-axis is logarithmic across the full observed value range -- the same convention as the heatmap. Bar heights use 8-level sub-character resolution (the Unicode block characters from full block down through 7/8, 6/8, ..., 1/8 block) so bars at intermediate heights still render distinct intensities. The X-axis baseline carries two kinds of tick marks: `t-down` (looking like ┬) at each labelled bucket boundary, pointing DOWN to the value label below; and `t-up` (looking like ┴) at each percentile position, pointing UP into the chart. The percentile ticks are the visual anchor for the legend values shown beneath the chart -- they mark where P50, P95, P99, and P99.9 actually fall on the distribution, letting you cross-reference the legend's numeric values to the corresponding column of the histogram at a glance.};
+
+my $explain_histogram_reading = q{The histogram is the chart for answering "what does the distribution actually look like?" Read it as you would any frequency chart, but two ltl-specific patterns deserve special attention. First, log-scale tail interpretation: a small bar at the far right represents a small number of very large values -- those bars are diagnostically valuable even when short, because the X-axis is exponential. Second, percentile-tick alignment: P50 should fall on or near the tallest bar (the mode). When P50 is far from the peak, the distribution is highly skewed and the mean is unreliable. When P95 and P99 are far apart on the X-axis (multiple decades), the tail is fat -- common signature of GC pauses, lock contention, or retry storms. When P99 and P99.9 are visually adjacent, the worst-case is dominated by a small cluster of consistent outliers; when far apart, the worst-case is dominated by one or two extreme events.};
+
+my $explain_histogram_compute = q{The histogram uses log-spaced bins with HDR-histogram-style precision. Default precision (53 buckets per decade, controlled by `-pbpd`) gives ~1.3% resolution. The histogram width (default 95% of terminal) and height (default 8 rows) are tunable via `-hgw` and `-hgh`. Highlight overlays (`-h regex`) render colored sub-bars within each main bar, showing the proportion of highlighted entries at each value range. The percentile tick marks on the baseline are computed from the same observations as the summary-table p99/p999 values, so the visual ticks and the numeric statistics agree by construction.};
+
+# Synthetic histogram example chart. Mirrors the real ltl layout precisely:
+# - Top border (┌─...─┐)
+# - 8 rows of bars with 8-level sub-character resolution
+# - Left Y-axis: count values right-aligned + tick mark + bars
+# - Right Y-axis: percentage labels
+# - Bottom border (└─...─┘)
+# - X-axis bucket boundary labels
+# - Percentile legend (P50/P95/P99/P99.9 colored in metric color)
+my $explain_histogram_example;
+{
+    # Yellow gradient (duration metric) color: base yellow = 184.
+    my $bar_color  = 184;
+    my $tick_color = 184;
+    # Box-drawing glyphs reused from %histogram_box_sets{light}.
+    my $box = $histogram_box_sets{light};
+
+    # Chart geometry.
+    my $width = 60;     # bar-area width in cells (widened from 36)
+    my $height = 8;     # body rows (sub-character resolution gives 8x effective height)
+    my $left_label_w  = 6;  # right-aligned "Count" / 1247 / 935 / 624 / 312
+    my $right_label_w = 5;  # " 100%", "  75%", "  50%", "  25%"
+
+    # Synthetic bar shape: rising on the left, peak around col 24-30, gentle
+    # right tail, a small secondary lump at col 42-44, fading by col 54.
+    # 60 columns, values 0..8 (where 8 = full block, 0 = empty).
+    my @bars = (
+        0,0,0,0,0,1,1,2,2,3,    # 0..9
+        3,4,4,5,5,6,6,7,7,7,    # 10..19
+        7,8,8,8,8,8,7,7,6,6,    # 20..29  (peak around 24)
+        5,5,4,4,3,3,2,2,1,1,    # 30..39
+        1,2,2,2,1,1,1,0,0,0,    # 40..49  (secondary lump)
+        1,1,0,0,0,0,0,0,0,0,    # 50..59
+    );
+
+    # Y-axis tick rows (count + pct labels visible on these rows; gridlines
+    # extend across the bar area on these rows behind any unfilled cells).
+    my @y_ticks = (
+        { row => 7, count => 1247, pct => 100 },
+        { row => 5, count =>  935, pct =>  75 },
+        { row => 3, count =>  624, pct =>  50 },
+        { row => 1, count =>  312, pct =>  25 },
+    );
+    my %tick_by_row = map { $_->{row} => $_ } @y_ticks;
+
+    # X-axis: 7 bucket-boundary labels at log-spaced positions across the
+    # 60-cell width. These get `t_down` (┬) tick marks on the baseline,
+    # pointing down to the labels below.
+    my @x_bucket_labels = (
+        { col => 0,  label => '1ms'   },
+        { col => 10, label => '5ms'   },
+        { col => 20, label => '50ms'  },
+        { col => 30, label => '500ms' },
+        { col => 40, label => '5s'    },
+        { col => 50, label => '50s'   },
+        { col => 56, label => '500s'  },   # shifted left so the full label fits within $width
+    );
+    my %bucket_col = map { $_->{col} => 1 } @x_bucket_labels;
+
+    # Percentile tick positions on the X-axis baseline -- these get
+    # `t_up` (┴) tick marks pointing up into the chart, visually
+    # anchoring the legend values to the distribution.
+    my %pct_col = (
+        24 => 'P50',     # peak
+        37 => 'P95',
+        44 => 'P99',
+        51 => 'P99.9',
+    );
+
+    my $hg_out = "";
+
+    # --- Header row: "Count" (left) + " %" (right). No top border. ---
+    my $count_hdr = sprintf("%${left_label_w}s", 'Count');
+    my $pct_hdr   = sprintf("%${right_label_w}s", '%');
+    $hg_out .= $count_hdr . ' ' . (' ' x $width) . ' ' . $pct_hdr . "\n";
+
+    # --- Body rows (top-down). Each row: left label + │ + bars + │ + right label ---
+    for (my $r = $height - 1; $r >= 0; $r--) {
+        my $has_tick = exists $tick_by_row{$r};
+        my ($left_lbl, $right_lbl);
+        if ($has_tick) {
+            $left_lbl  = sprintf("%${left_label_w}d",  $tick_by_row{$r}{count});
+            $right_lbl = sprintf("%${right_label_w}s", $tick_by_row{$r}{pct} . '%');
+        } else {
+            $left_lbl  = ' ' x $left_label_w;
+            $right_lbl = ' ' x $right_label_w;
+        }
+        # Side borders: ├ / ┤ on tick rows, │ otherwise.
+        my $left_side  = $has_tick ? $box->{t_right} : $box->{v_line};
+        my $right_side = $has_tick ? $box->{t_left}  : $box->{v_line};
+
+        my $line = "$left_lbl$left_side";
+        for my $col (0 .. $width - 1) {
+            my $bar = $bars[$col];
+            if ($bar > $r) {
+                # Bar fully covers this row -- full block with matching bg+fg.
+                $line .= "\e[38;5;${bar_color};48;5;${bar_color}m█\e[0m";
+            } elsif ($bar == $r) {
+                # Partial block at this row -- fg only (no bg).
+                $line .= "\e[38;5;${bar_color}m▄\e[0m";
+            } else {
+                # Empty cell: gridline on tick rows, blank otherwise.
+                $line .= $has_tick ? "\e[38;5;238m─\e[0m" : ' ';
+            }
+        }
+        $line .= "$right_side$right_lbl\n";
+        $hg_out .= $line;
+    }
+
+    # --- Bottom baseline: └ + (─ / ┬ / ┴) + ┘ ---
+    # ┬ at bucket-label positions (pointing DOWN to the labels below).
+    # ┴ at percentile-tick positions (pointing UP into the chart).
+    my $bottom = (' ' x $left_label_w) . $box->{corner_bl};
+    for my $col (0 .. $width - 1) {
+        my $is_bucket = exists $bucket_col{$col};
+        my $is_pct    = exists $pct_col{$col};
+        if    ($is_bucket && $is_pct) { $bottom .= $box->{cross};   }
+        elsif ($is_bucket)            { $bottom .= $box->{t_down};  }   # ┬ pointing DOWN
+        elsif ($is_pct)               { $bottom .= $box->{t_up};    }   # ┴ pointing UP
+        else                          { $bottom .= $box->{h_line};  }
+    }
+    $bottom .= $box->{corner_br} . "\n";
+    $hg_out .= $bottom;
+
+    # --- X-axis bucket-boundary labels row (under the ┬ ticks). ---
+    my @xrow = (' ') x $width;
+    for my $lbl (@x_bucket_labels) {
+        my $col = $lbl->{col};
+        my $txt = $lbl->{label};
+        for my $k (0 .. length($txt) - 1) {
+            $xrow[$col + $k] = substr($txt, $k, 1) if ($col + $k) < $width;
+        }
+    }
+    $hg_out .= (' ' x ($left_label_w + 1)) . join('', @xrow) . "\n";
+
+    # --- Blank line, then centered percentile legend. ---
+    my $legend_text = "P50: 47ms   P95: 320ms   P99: 1.2s   P99.9: 4.5s";
+    my $chart_total_w = $left_label_w + 1 + $width + 1 + $right_label_w;
+    my $legend_pad = $left_label_w + 1 + int(($width - length($legend_text)) / 2);
+    $legend_pad = 0 if $legend_pad < 0;
+    $hg_out .= "\n";
+    $hg_out .= (' ' x $legend_pad)
+             . "\e[38;5;${tick_color}m" . $legend_text . "\e[0m"
+             . "\n";
+
+    # Shift the whole chart right so it visually balances under the
+    # surrounding topic prose (which is indented by 2). 5 leading spaces
+    # per line is the user-tuned offset.
+    my $indent = ' ' x 5;
+    $hg_out =~ s/^/$indent/mg;
+    $explain_histogram_example = $hg_out;
+}
+
+my $explain_histogram_flags = <<'END';
+    ltl -hg duration access.log                   # duration histogram (single metric)
+    ltl -hg bytes access.log                      # bytes histogram (response sizes)
+    ltl -hg count access.log                      # count histogram (per-bucket entry counts)
+    ltl -hg duration,bytes access.log             # multiple histograms in one invocation
+    ltl -hg duration -hgw 50 access.log           # narrow histogram (50% of terminal)
+    ltl -hg duration -hgh 16 access.log           # taller histogram (16 rows vs default 8)
+    ltl -hg duration -h "/api/v2/" access.log     # overlay highlight of matching entries
+    ltl -hg duration -pp 7 access.log             # tighter percentile precision (slower)
+END
+
+my $explain_histogram_notes = q{The X-axis log scale means that visual distance between bars represents an exponential, not linear, gap in actual value. Two bars that look the same width apart on the screen could represent a 10x difference at one part of the chart and a 100x difference at another. When -hg is invoked alongside the bar graph (default), the histogram renders as an additional panel below the timeline. When -hg is invoked with multiple metrics (-hg duration,bytes), each metric gets its own histogram panel stacked vertically. Highlight overlays (-h pattern) draw colored sub-bars within each main bar showing the proportion of matched entries; the highlight percentile legend appears below the main legend in highlight color. Color rendering depends on terminal support: modern Unix terminals and Windows Terminal display the gradient correctly; legacy Windows CMD with `more` shows monochrome bars (the layout and percentile ticks remain readable).};
 
 sub populate_explain_topics {
     %explain_topics = (
@@ -2910,6 +3336,46 @@ sub populate_explain_topics {
             { type => 'paragraph', text => $explain_bc_compute },
             { type => 'subheading', text => 'See also' },
             { type => 'paragraph', text => 'skewness, kurtosis, cv, std_dev.' },
+        ],
+
+        # ---- heatmap (Visualizations group) ----
+        heatmap => [
+            { type => 'heading',   text => 'HEATMAP' },
+            { type => 'paragraph', text => $explain_heatmap_intuition },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_heatmap_layout },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => $explain_heatmap_example },
+            { type => 'subheading', text => 'What to look for' },
+            { type => 'paragraph', text => $explain_heatmap_reading },
+            { type => 'subheading', text => 'Common flag combinations' },
+            { type => 'pre',       text => $explain_heatmap_flags },
+            { type => 'subheading', text => 'Notes' },
+            { type => 'paragraph', text => $explain_heatmap_notes },
+            { type => 'subheading', text => 'How ltl renders this' },
+            { type => 'paragraph', text => $explain_heatmap_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'histogram, percentiles, skewness, kurtosis, bimodality_coef. Flags: -hm, -hmw, -bs, -lbg, -dbg.' },
+        ],
+
+        # ---- histogram (Visualizations group) ----
+        histogram => [
+            { type => 'heading',   text => 'HISTOGRAM' },
+            { type => 'paragraph', text => $explain_histogram_intuition },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_histogram_layout },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => $explain_histogram_example },
+            { type => 'subheading', text => 'What to look for' },
+            { type => 'paragraph', text => $explain_histogram_reading },
+            { type => 'subheading', text => 'Common flag combinations' },
+            { type => 'pre',       text => $explain_histogram_flags },
+            { type => 'subheading', text => 'Notes' },
+            { type => 'paragraph', text => $explain_histogram_notes },
+            { type => 'subheading', text => 'How ltl renders this' },
+            { type => 'paragraph', text => $explain_histogram_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'heatmap, percentiles, skewness, kurtosis, bimodality_coef. Flags: -hg, -hgw, -hgh, -pbpd, -pp, -ep.' },
         ],
     );
     return;
