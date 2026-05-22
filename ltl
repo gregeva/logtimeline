@@ -64,8 +64,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 my $version_number = "0.14.5";
 my $start_time = [gettimeofday];
 my $log_base = 2;
-my ( @rolling_window, @ORIGINAL_ARGV, @files_processed );
-my $rolling_window_size = 5;					# Adjust this value as needed - more time buckets included in the rolling window will give better sample for Z-score
+my ( @ORIGINAL_ARGV, @files_processed );
 my $impact_time_exponent = 7;		            # it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $time_bucket_size, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
@@ -6634,7 +6633,10 @@ sub calculate_all_statistics {
     
         # The duration based statistics won't catch the counts if there are no durations (see else condition below)
         if( $print_durations && !$omit_durations ) {
-            my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
+            my ($min, $mean, $max,
+                $p1, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999,
+                $std_dev, $cv,
+                $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
 
             $log_stats{$bucket} = {
                 occurrences   => $aggregated_data->{occurrences},
@@ -6653,39 +6655,21 @@ sub calculate_all_statistics {
                 mean          => $mean,
                 max           => $max,
                 p1            => $p1,
+                p25           => $p25,
                 p50           => $p50,
                 p75           => $p75,
+                iqr           => $iqr,
                 p90           => $p90,
                 p95           => $p95,
                 p99           => $p99,
                 p999          => $p999,
+                p9999         => $p9999,
                 std_dev       => $std_dev,
                 cv            => $cv,
-                z_score       => undef
+                skewness      => $skewness,
+                kurtosis      => $kurtosis,
+                bimodality_coef => $bimodality_coef,
             };
-    
-            # Calculate rolling mean and std_dev (only if we have valid statistics)
-            if (defined $mean) {
-                my $rolling_mean = 0;
-                my $rolling_sum_of_squares = 0;
-                my $rolling_count = 0;
-                foreach my $prev_bucket (@rolling_window) {
-                    $rolling_mean += $prev_bucket->{mean};
-                    $rolling_sum_of_squares += $prev_bucket->{sum_of_squares};
-                    $rolling_count++;
-                }
-                if ($rolling_count > 0) {
-                    $rolling_mean /= $rolling_count;
-                    my $rolling_variance = ($rolling_sum_of_squares / $rolling_count) - ($rolling_mean ** 2);
-                    my $rolling_std_dev = sqrt($rolling_variance);
-                    my $z_score = calculate_z_score($mean, $rolling_mean, $rolling_std_dev);
-                   $log_stats{$bucket}{z_score} = $z_score;
-                }
-
-                # Update rolling window logic
-                push @rolling_window, { mean => $mean, sum_of_squares => $aggregated_data->{sum_of_squares} };
-                shift @rolling_window if @rolling_window > $rolling_window_size;
-            }
 
         } else {
             # This will catch the situation where there are no durations, printing them has been disabled, or they were not captured.
@@ -6783,20 +6767,29 @@ sub calculate_all_statistics {
                 }
 
                 if( defined $aggregated_data->{total_duration} && !$omit_durations ) {
-                    my ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv) = calculate_statistics($aggregated_data);
+                    my ($min, $mean, $max,
+                        $p1, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999,
+                        $std_dev, $cv,
+                        $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
 
                     $log_messages{$category}{$log_key}{min} = $min;
                     $log_messages{$category}{$log_key}{mean} = $mean;
                     $log_messages{$category}{$log_key}{max} = $max;
                     $log_messages{$category}{$log_key}{std_dev} = $std_dev;
                     $log_messages{$category}{$log_key}{p1} = $p1;
+                    $log_messages{$category}{$log_key}{p25} = $p25;
                     $log_messages{$category}{$log_key}{p50} = $p50;
                     $log_messages{$category}{$log_key}{p75} = $p75;
+                    $log_messages{$category}{$log_key}{iqr} = $iqr;
                     $log_messages{$category}{$log_key}{p90} = $p90;
                     $log_messages{$category}{$log_key}{p95} = $p95;
                     $log_messages{$category}{$log_key}{p99} = $p99;
                     $log_messages{$category}{$log_key}{p999} = $p999;
+                    $log_messages{$category}{$log_key}{p9999} = $p9999;
                     $log_messages{$category}{$log_key}{cv} = $cv;
+                    $log_messages{$category}{$log_key}{skewness} = $skewness;
+                    $log_messages{$category}{$log_key}{kurtosis} = $kurtosis;
+                    $log_messages{$category}{$log_key}{bimodality_coef} = $bimodality_coef;
                     $log_messages{$category}{$log_key}{total_duration_num} = $aggregated_data->{total_duration} if defined $aggregated_data->{total_duration};
                     $log_messages{$category}{$log_key}{total_duration} = format_time( $aggregated_data->{total_duration}, 'ms', 'medium', 'space' ) if defined $aggregated_data->{total_duration};
                 }
@@ -6896,13 +6889,6 @@ sub log_bucket {
     return $value > 0 ? floor(log($value) / log($base)) : 0;
 }
 
-# Function to calculate Z-score
-sub calculate_z_score {
-    my ($current_mean, $rolling_mean, $rolling_std_dev) = @_;
-    return undef if $rolling_std_dev == 0;
-    return sprintf("%.2f", ($current_mean - $rolling_mean) / $rolling_std_dev);
-}
-
 # Function to calculate statistical metrics
 sub calculate_statistics {
     my ($bucket_data) = @_;
@@ -6920,7 +6906,9 @@ sub calculate_statistics {
     my $mean = int($bucket_data->{total_duration} / $duration_count);
     my $max = max(@sorted);
     my $variance = ($bucket_data->{sum_of_squares} / $duration_count) - ($mean ** 2);
-    my $std_dev = sprintf("%.3f", sqrt($variance));
+    $variance = 0 if $variance < 0;  # guard floating-point underflow on near-constant data
+    my $std_num = sqrt($variance);
+    my $std_dev = sprintf("%.3f", $std_num);
     my $cv = undef;
     if ($mean != 0) {
         my $cv_raw = $std_dev / $mean;
@@ -6935,15 +6923,45 @@ sub calculate_statistics {
 
     # Percentile calculations must use duration_count, not occurrences
     # to correctly index into the sorted durations array
-    my $p1   = int($sorted[int($duration_count * 0.01)]);
-    my $p50  = int($sorted[int($duration_count * 0.5)]);
-    my $p75  = int($sorted[int($duration_count * 0.75)]);
-    my $p90  = int($sorted[int($duration_count * 0.9)]);
-    my $p95  = int($sorted[int($duration_count * 0.95)]);
-    my $p99  = int($sorted[int($duration_count * 0.99)]);
-    my $p999 = int($sorted[int($duration_count * 0.999)]);
+    my $p1    = int($sorted[int($duration_count * 0.01)]);
+    my $p25   = int($sorted[int($duration_count * 0.25)]);
+    my $p50   = int($sorted[int($duration_count * 0.5)]);
+    my $p75   = int($sorted[int($duration_count * 0.75)]);
+    my $p90   = int($sorted[int($duration_count * 0.9)]);
+    my $p95   = int($sorted[int($duration_count * 0.95)]);
+    my $p99   = int($sorted[int($duration_count * 0.99)]);
+    my $p999  = int($sorted[int($duration_count * 0.999)]);
+    my $p9999 = int($sorted[int($duration_count * 0.9999)] // $sorted[-1]);
+    my $iqr   = $p75 - $p25;
 
-    return ($min, $mean, $max, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $std_dev, $cv);
+    # Distribution-shape moments — Sarle's bimodality coefficient screening (#222)
+    # Sarle BC > 5/9 (~0.555) flags suspect multimodal; threshold is the canonical
+    # cutoff from the bimodality-detection literature. Requires n >= 4 (denominator
+    # of BC has (n-2)(n-3) factor) and non-zero std_dev.
+    my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
+    if ($duration_count >= 4 && $std_num > 0) {
+        my ($m3_sum, $m4_sum) = (0, 0);
+        for my $x (@sorted) {
+            my $d = $x - $mean;
+            my $d2 = $d * $d;
+            $m3_sum += $d2 * $d;
+            $m4_sum += $d2 * $d2;
+        }
+        my $m3 = $m3_sum / $duration_count;
+        my $m4 = $m4_sum / $duration_count;
+        my $g  = $m3 / ($std_num ** 3);          # population skewness
+        my $k  = $m4 / ($std_num ** 4) - 3;      # excess kurtosis (normal = 0)
+        $skewness = sprintf("%.3f", $g);
+        $kurtosis = sprintf("%.3f", $k);
+        my $n = $duration_count;
+        my $bc_denom = $k + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
+        $bimodality_coef = sprintf("%.3f", ($g * $g + 1) / $bc_denom) if $bc_denom > 0;
+    }
+
+    return ($min, $mean, $max,
+            $p1, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999,
+            $std_dev, $cv,
+            $skewness, $kurtosis, $bimodality_coef);
 }
 
 sub initialize_empty_time_windows {
@@ -7568,7 +7586,7 @@ sub normalize_data_for_output {
 
     # Add CSV output columns for latency stats
     if ($print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled) {
-        push @output_columns, qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score );
+        push @output_columns, qw( min mean max std_dev p1 p25 p50 p75 iqr p90 p95 p99 p999 p9999 cv skewness kurtosis bimodality_coef );
     }
 
     foreach my $bucket (keys %log_occurrences) {
@@ -8280,7 +8298,7 @@ sub print_bar_graph {
                         defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-5s$colors{'NC'} ", ( length( $log_stats{$bucket}{p999} ) >= 4 ? format_time( $log_stats{$bucket}{p999}, 'ms' ) : $log_stats{$bucket}{p999} ) ) : printf( " " x 11 );
                         defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", $log_stats{$bucket}{cv} ) : printf ( " " x 7 );
 
-                        foreach my $stat ( qw( min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv z_score ) ) {
+                        foreach my $stat ( qw( min mean max std_dev p1 p25 p50 p75 iqr p90 p95 p99 p999 p9999 cv skewness kurtosis bimodality_coef ) ) {
                             push @csv_data, $log_stats{$bucket}{$stat};
                         }
                     }
@@ -9332,13 +9350,19 @@ sub print_message_summary {
                     my $std_dev = $log_messages{$grouping}{$key}{std_dev};
                     my $impact = $log_messages{$grouping}{$key}{impact};
                     my $p1 = $log_messages{$grouping}{$key}{p1};
+                    my $p25 = $log_messages{$grouping}{$key}{p25};
                     my $p50 = $log_messages{$grouping}{$key}{p50};
                     my $p75 = $log_messages{$grouping}{$key}{p75};
+                    my $iqr = $log_messages{$grouping}{$key}{iqr};
                     my $p90 = $log_messages{$grouping}{$key}{p90};
                     my $p95 = $log_messages{$grouping}{$key}{p95};
                     my $p99 = $log_messages{$grouping}{$key}{p99};
                     my $p999 = $log_messages{$grouping}{$key}{p999};
+                    my $p9999 = $log_messages{$grouping}{$key}{p9999};
                     my $cv = $log_messages{$grouping}{$key}{cv};
+                    my $skewness = $log_messages{$grouping}{$key}{skewness};
+                    my $kurtosis = $log_messages{$grouping}{$key}{kurtosis};
+                    my $bimodality_coef = $log_messages{$grouping}{$key}{bimodality_coef};
                     my $total_duration_num = $log_messages{$grouping}{$key}{total_duration_num};
                     my $total_duration = $log_messages{$grouping}{$key}{total_duration};
 
@@ -9374,7 +9398,7 @@ sub print_message_summary {
                                     $log_messages{$grouping}{$key}{"udm_${name}_sum"};
                             }
                         }
-                        $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p50, $p75, $p90, $p95, $p99, $p999, $cv, $total_duration_num, $total_duration, $impact, @udm_csv_values ]);
+                        $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $cv, $skewness, $kurtosis, $bimodality_coef, $total_duration_num, $total_duration, $impact, @udm_csv_values ]);
                     }
 
                     print "$row\n";
@@ -9783,7 +9807,7 @@ if( $write_messages_to_csv ) {                     # If write to CSV enabled, op
             push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
         }
     }
-    $csv->print($csv_fh, [qw(category message occurrences mean_bytes bytes bytes_nice count_occurrences count_min count_mean count_max count_sum min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv duration duration_nice impact), @udm_csv_headers]);
+    $csv->print($csv_fh, [qw(category message occurrences mean_bytes bytes bytes_nice count_occurrences count_min count_mean count_max count_sum min mean max std_dev p1 p25 p50 p75 iqr p90 p95 p99 p999 p9999 cv skewness kurtosis bimodality_coef duration duration_nice impact), @udm_csv_headers]);
 }
 
 print_message_summary();														                    # Print and write message summaries
