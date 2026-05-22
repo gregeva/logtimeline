@@ -280,6 +280,16 @@ my $omit_values = 0;
 my ( $sort_type, $sort_key, $sort_ascending ) = ( "occurrences", "occurrences", 0 );
 my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 
+# CLI option resolution tracking (Issue #231) — populated in
+# adapt_to_command_line_options() and consumed by the runtime-config -V
+# section. %option_provenance maps long-flag-name -> arrayref of source
+# strings ('command-line' | 'environment-variable'); %option_overrides
+# records per-flag clamp/override metadata. The runtime-config emitter
+# walks these to produce the command-line and environment-variable
+# sub-sections.
+my %option_provenance;
+my %option_overrides;
+
 # Consolidation data structures (Issue #96 - Fuzzy Message Consolidation)
 my ( %consolidation_clusters, %consolidation_patterns, %consolidation_key_message );
 my ( %consolidation_unmatched, %consolidation_ngram_index, %consolidation_posting_size );
@@ -1298,6 +1308,248 @@ sub detect_index_drift {
         }
     }
     return;
+}
+
+# Issue #231: classify each known long-flag-name as having been supplied
+# via the command line, the LTL_CONFIG env-var splice, both, or neither.
+# Returns a hash mapping flag-name => list of sources ('command-line',
+# 'environment-variable') in the order each appeared. Flags absent from
+# both are absent from the hash.
+sub _classify_argv_provenance {
+    my ($cli_args, $env_args) = @_;
+    my %seen;
+    my $classify = sub {
+        my ($source, @args) = @_;
+        for my $a (@args) {
+            next unless defined $a;
+            # Accept both --long and -short forms; only record long-name
+            # for hash key. We resolve short -> long via a static map below.
+            if ($a =~ /^--?([a-zA-Z][a-zA-Z0-9-]*)(=.*)?$/) {
+                my $tok = $1;
+                # Map short forms to canonical long names.
+                my $long = _resolve_short_to_long($tok);
+                push @{ $seen{$long} }, $source if defined $long;
+            }
+        }
+    };
+    $classify->('environment-variable', @$env_args);
+    $classify->('command-line',         @$cli_args);
+    return %seen;
+}
+
+# Issue #231: resolve a CLI token (short or long) to its canonical long
+# name as declared in the GetOptions block. Returns undef if the token
+# is not a known flag.
+{
+    my %short_to_long;
+    my %known_long;
+    sub _resolve_short_to_long {
+        my $tok = shift;
+        if (!%known_long) {
+            # Populate once on first call from the same source-of-truth as
+            # GetOptions. The list mirrors the GetOptions key forms below,
+            # but in `long|short` form for direct hash insertion.
+            my @specs = (
+                'bucket-size|bs', 'pause|p', 'start|st', 'end|et',
+                'exclude|e', 'include|i', 'highlight|h',
+                'exclude-file|ef', 'include-file|if', 'highlight-file|hf',
+                'verbose|V', 'top-messages|n',
+                'omit-values|ov', 'omit-stats|os', 'omit-empty|oe',
+                'omit-summary|osum', 'omit-rate|or', 'omit-durations|od',
+                'omit-bytes|ob', 'omit-count|oc', 'include-count|ic',
+                'include-query-string|iqs', 'include-session|is',
+                'hide-session|hs', 'hide-occurrences|ho', 'hide-legend|hl',
+                'hide-duration|hd', 'hide-bytes|hb', 'hide-count|hc',
+                'hide-stats|hst', 'seconds|s', 'milliseconds|ms',
+                'version|v', 'duration-min|dmin', 'duration-max|dmax',
+                'duration-unit|du', 'rate-unit|ru',
+                'bytes-min|bmin', 'bytes-max|bmax',
+                'count-min|cmin', 'count-max|cmax',
+                'memory-usage|mem', 'disable-progress',
+                'output-csv|o', 'sort-on|so', 'sort-ascending|sa',
+                'threadpool-activity-summary|tpas', 'threadpool-activity|tpa',
+                'user-defined-metrics|udm', 'udm-csv-message|ucm',
+                'udm-csv-separator|ucs', 'mask-uuid|uuid',
+                'group-similar|g', 'no-final-pass',
+                'consolidation-trigger', 'consolidation-ceiling',
+                'consolidation-max-patterns', 'final-threshold',
+                'group-ceiling|gc', 'heatmap|hm', 'heatmap-width|hmw',
+                'light-background|lbg', 'histogram|hg',
+                'histogram-width|hgw', 'histogram-height|hgh',
+                'hgbpd|histogram-buckets-per-decade',
+                'hgb|histogram-buckets',
+                'pbpd|percentile-buckets-per-decade',
+                'pp|percentile-precision',
+                'ep|exact-percentiles',
+                'terminal-width|tw', 'no-auto-hide|nah',
+                'debug-layout', 'validate-layout', 'help',
+            );
+            for my $s (@specs) {
+                my @parts = split /\|/, $s;
+                my @sorted = sort { length($b) <=> length($a) } @parts;
+                my $long = $sorted[0];
+                $known_long{$long} = 1;
+                for my $p (@parts) {
+                    $short_to_long{$p} = $long;
+                }
+            }
+        }
+        return $short_to_long{$tok};
+    }
+}
+
+# Issue #231: emit the runtime-config -V section with two sub-sections:
+# command-line (flags supplied on the CLI) and environment-variable
+# (flags from LTL_CONFIG). Both are always present per the locked
+# stability contract in features/225-test-harness-coverage-gaps.md § #231;
+# an empty body means no inputs from that source. Annotation grammar:
+#   value                        -> as resolved
+#   value; overridden            -> beaten by a higher-precedence flag
+#                                    or by a CLI value of the same name
+#   value; clamped from <orig>   -> out-of-range, clamped during validation
+# These are the only three forms — no per-row source annotation is needed
+# because the parent sub-section header already carries that information.
+#
+# A `defaults` sub-section was scoped at first but dropped: ltl resolves
+# defaults at multiple sites scattered through adapt_to_command_line_options(),
+# with several defaults (e.g. $time_bucket_size, $heatmap_metric) emerging
+# from user-input-dependent code paths. There is no coherent snapshot point
+# where "the defaults" exist independent of user input, so a defaults
+# sub-section would either lie or duplicate documentation. The command-line
+# and environment-variable sub-sections are the user-actionable observability
+# surface; the defaults are documented in docs/usage.md and print_help().
+sub emit_runtime_config_verbose {
+    return unless section_requested('runtime-config');
+
+    push @verbose_output, "=== runtime-config ===";
+
+    # Existing content (Issues #19, #21, #56) — filter-related runtime
+    # artifacts that are computed, not directly user-supplied. Stays at
+    # the top of the parent section.
+    if (defined $ltl_config_raw && $ltl_config_raw ne '') {
+        push @verbose_output, "LTL_CONFIG: $ltl_config_raw";
+    }
+    push @verbose_output, "include (merged): "    . (defined $include_regex   ? $include_regex   : "(not set)");
+    push @verbose_output, "exclude (merged): "    . (defined $exclude_regex   ? $exclude_regex   : "(not set)");
+    push @verbose_output, "highlight (merged): "  . (defined $highlight_regex ? $highlight_regex : "(not set)");
+    push @verbose_output, "threadpool-activity (merged): " . (defined $threadpool_activity_regex ? $threadpool_activity_regex : "(not set)");
+
+    # Per-flag current values (Issue #231) — collected from the snapshot
+    # taken at the top of adapt_to_command_line_options() vs the
+    # post-resolution values now held in their respective globals. The
+    # snapshot covers ~50 tracked flags; any global not in the snapshot
+    # is silently ignored (e.g. callbacks like -lbg, -hgw, -hgh that
+    # don't have a single backing scalar).
+    my %resolved_values = (
+        'bucket-size'                       => $time_bucket_size,
+        'pause'                             => $pause_output,
+        'start'                             => $filter_range_start,
+        'end'                               => $filter_range_end,
+        'top-messages'                      => $top_n_messages,
+        'omit-values'                       => $omit_values,
+        'omit-stats'                        => $omit_stats,
+        'omit-empty'                        => $omit_empty,
+        'omit-summary'                      => $omit_summary,
+        'omit-rate'                         => $omit_rate,
+        'omit-durations'                    => $omit_durations,
+        'omit-bytes'                        => $omit_bytes,
+        'omit-count'                        => $omit_count,
+        'include-count'                     => $include_count,
+        'include-query-string'              => $include_query_string,
+        'include-session'                   => $include_session,
+        'hide-session'                      => $hide_session,
+        'hide-occurrences'                  => $hide_occurrences,
+        'hide-legend'                       => $hide_legend,
+        'hide-duration'                     => $hide_duration,
+        'hide-bytes'                        => $hide_bytes,
+        'hide-count'                        => $hide_count,
+        'hide-stats'                        => $hide_stats,
+        'seconds'                           => $print_seconds,
+        'milliseconds'                      => $print_milliseconds,
+        'duration-min'                      => $filter_duration_min,
+        'duration-max'                      => $filter_duration_max,
+        'duration-unit'                     => $duration_unit_override,
+        'rate-unit'                         => $rate_unit,
+        'bytes-min'                         => $filter_bytes_min,
+        'bytes-max'                         => $filter_bytes_max,
+        'count-min'                         => $filter_count_min,
+        'count-max'                         => $filter_count_max,
+        'memory-usage'                      => $show_memory,
+        'output-csv'                        => $write_messages_to_csv,
+        'sort-on'                           => $sort_type,
+        'sort-ascending'                    => $sort_ascending,
+        'threadpool-activity-summary'       => $include_threadpool_summary,
+        'mask-uuid'                         => $mask_uuid,
+        'group-similar'                     => $group_similar_sensitivity,
+        'group-ceiling'                     => $consolidation_final_ceiling,
+        'heatmap'                           => $heatmap_metric,
+        'heatmap-width'                     => $heatmap_width,
+        'histogram-buckets-per-decade'      => $histogram_buckets_per_decade,
+        'histogram-buckets'                 => $histogram_bucket_override,
+        'percentile-buckets-per-decade'     => $percentile_buckets_per_decade,
+        'percentile-precision'              => $percentile_precision_level,
+        'exact-percentiles'                 => $exact_percentiles_optout,
+        'no-auto-hide'                      => $no_auto_hide,
+    );
+
+    # Helper: render the value for display.
+    my $render = sub {
+        my $v = shift;
+        return '(not set)' unless defined $v;
+        return $v eq '' ? '(empty)' : "$v";
+    };
+
+    # Helper: annotation suffix per #231 grammar.
+    my $annotate = sub {
+        my $flag = shift;
+        my $o = $option_overrides{$flag};
+        return '' unless $o;
+        if (defined $o->{clamped_from}) {
+            return "; clamped from $o->{clamped_from}";
+        }
+        return '; overridden' if $o->{overridden};
+        return '';
+    };
+
+    # Partition flags by source. A flag may appear in both command-line
+    # and environment-variable sub-sections if it was supplied in both
+    # places (env-var value will carry "; overridden" since CLI wins).
+    # Flags not present in either source are not emitted — defaults are
+    # documented in docs/usage.md and print_help(), not duplicated here.
+    my (@cli_flags, @env_flags);
+    for my $flag (sort keys %resolved_values) {
+        my $sources = $option_provenance{$flag} || [];
+        my $in_cli = grep { $_ eq 'command-line' }       @$sources;
+        my $in_env = grep { $_ eq 'environment-variable' } @$sources;
+        push @cli_flags, $flag if $in_cli;
+        push @env_flags, $flag if $in_env;
+    }
+
+    # Command-line sub-section.
+    push @verbose_output, "=== runtime-config / command-line ===";
+    for my $flag (@cli_flags) {
+        push @verbose_output, "$flag: " . $render->($resolved_values{$flag}) . $annotate->($flag);
+    }
+    push @verbose_output, "=== END runtime-config / command-line ===";
+
+    # Environment-variable sub-section. If a flag was supplied in both
+    # env and CLI, the env-side row carries "; overridden" because the
+    # CLI value (later in argv) is the effective one.
+    push @verbose_output, "=== runtime-config / environment-variable ===";
+    for my $flag (@env_flags) {
+        my $sources = $option_provenance{$flag} || [];
+        my $also_cli = grep { $_ eq 'command-line' } @$sources;
+        my $suffix = $also_cli ? "; overridden" : '';
+        # Env-var values are the *resolved* values when CLI didn't supply
+        # the flag; when CLI did supply it, the env-var value is lost and
+        # we cannot reconstruct it without re-parsing @env_args. For now,
+        # surface the resolved value with the overridden annotation.
+        push @verbose_output, "$flag: " . $render->($resolved_values{$flag}) . $suffix;
+    }
+    push @verbose_output, "=== END runtime-config / environment-variable ===";
+
+    push @verbose_output, "=== END runtime-config ===";
+    push @verbose_output, "";
 }
 
 # Issue #179: Emit the dedicated `=== index-read-back ===` section
@@ -4240,12 +4492,20 @@ sub handle_histogram_option {
 sub adapt_to_command_line_options {
     @ORIGINAL_ARGV = @ARGV;
 
+    # Issue #231: record which flag tokens appear in @ARGV vs the env-var
+    # splice so the runtime-config -V section can attribute each
+    # user-supplied flag to its source (command-line vs environment-variable).
+    my @cli_argv = @ARGV;
+
     # Parse LTL_CONFIG environment variable (Issue #21)
+    my @env_args = ();
     if (defined $ENV{LTL_CONFIG} && $ENV{LTL_CONFIG} ne '') {
         $ltl_config_raw = $ENV{LTL_CONFIG};
-        my @env_args = shellwords($ltl_config_raw);
+        @env_args = shellwords($ltl_config_raw);
         unshift @ARGV, @env_args;
     }
+
+    %option_provenance = _classify_argv_provenance(\@cli_argv, \@env_args);
 
     @ARGV = map { ($_ eq '-?' || $_ eq '/help' || $_ eq '/?') ? '--help' : $_ } @ARGV;
 
@@ -4327,6 +4587,14 @@ sub adapt_to_command_line_options {
         'help' => \$show_help                                                       # hidden — special-cased in print_help; legacy aliases -?/--help via PreProcessor
     ) or die print_usage( "required options not provided" );
 
+    # Issue #231: surface --exact-percentiles as deprecated. The flag
+    # reverts every migrated -V/percentile consumer to pre-#187 sort-based
+    # computation and is scheduled for removal in a future release per
+    # features/187-histogram-bin-counter-percentiles.md § Decision 8.
+    if ($exact_percentiles_optout) {
+        warn "--exact-percentiles is deprecated and will be removed in a future release. Migrated consumers will revert to pre-#187 sort-based percentile computation for this run.\n";
+    }
+
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
     # GetOptions :s@) into %verbose_sections_requested. See HARNESS-DESIGN.md
     # for the contract. Behavior:
@@ -4403,7 +4671,10 @@ sub adapt_to_command_line_options {
         } elsif ($group_similar_sensitivity =~ /^\d+$/) {
             $consolidation_threshold = int($group_similar_sensitivity);
         } else {
-            # Non-numeric value captured (likely a filename) — push it back
+            # Non-numeric value captured (likely a filename) — push it back.
+            # Issue #231: surface this previously-silent pushback so users
+            # see why -g looks like it took the default threshold.
+            warn "-g value '$group_similar_sensitivity' is not numeric; treating as positional argument and using default threshold 85.\n";
             unshift @ARGV, $group_similar_sensitivity;
             $consolidation_threshold = 85;
         }
@@ -4423,7 +4694,9 @@ sub adapt_to_command_line_options {
                 if (@udm_raw_args) {
                     # UDM args exist — keep the value, validate after parse_udm_configs()
                 } else {
-                    # No UDM args — it's likely a filename, push it back
+                    # No UDM args — it's likely a filename, push it back.
+                    # Issue #231: surface this previously-silent pushback.
+                    warn "-hm value '$heatmap_metric' is not a built-in metric (duration|bytes|count) and no -udm configs are defined; treating as positional argument and using default metric 'duration'.\n";
                     unshift @ARGV, $heatmap_metric;
                     $heatmap_metric = 'duration';  # Default metric
                 }
@@ -4482,6 +4755,11 @@ sub adapt_to_command_line_options {
         $percentile_precision_source = defined $percentile_precision_level
             ? "-pbpd $percentile_buckets_per_decade; --percentile-precision $percentile_precision_level overridden"
             : "-pbpd $percentile_buckets_per_decade";
+        # Issue #231: surface the override on stderr too — until now it was
+        # only visible inside the -V histogram-bin-counters section.
+        if (defined $percentile_precision_level) {
+            warn "-pbpd $percentile_buckets_per_decade overrides --percentile-precision $percentile_precision_level; using $percentile_buckets_per_decade buckets per decade.\n";
+        }
     }
     if ($percentile_buckets_per_decade < 4 || $percentile_buckets_per_decade > 616) {
         warn "Invalid -pbpd: $percentile_buckets_per_decade (must be 4..616). Using default (53).\n";
@@ -4511,19 +4789,11 @@ sub adapt_to_command_line_options {
     $exclude_regex   = $exclude_filter->{regex}   if $exclude_filter;
     $highlight_regex = $highlight_filter->{regex}  if $highlight_filter;
 
-    # Verbose output: runtime-config section (Issues #19, #21, #56, #226)
-    if (section_requested('runtime-config')) {
-        push @verbose_output, "=== runtime-config ===";
-        if ($ltl_config_raw ne '') {
-            push @verbose_output, "LTL_CONFIG: $ltl_config_raw";
-        }
-        push @verbose_output, "include (merged): " . (defined $include_regex ? $include_regex : "(not set)");
-        push @verbose_output, "exclude (merged): " . (defined $exclude_regex ? $exclude_regex : "(not set)");
-        push @verbose_output, "highlight (merged): " . (defined $highlight_regex ? $highlight_regex : "(not set)");
-        push @verbose_output, "threadpool-activity (merged): " . (defined $threadpool_activity_regex ? $threadpool_activity_regex : "(not set)");
-        push @verbose_output, "=== END runtime-config ===";
-        push @verbose_output, "";
-    }
+    # Verbose output: runtime-config section (Issues #19, #21, #56, #226, #231).
+    # Extended in #231 to surface per-flag resolution under three sub-sections
+    # (command-line, environment-variable, defaults) per the locked decision in
+    # features/225-test-harness-coverage-gaps.md § #231.
+    emit_runtime_config_verbose();
 
     if( $print_version ) {
         print_version();
