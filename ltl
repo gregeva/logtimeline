@@ -7459,7 +7459,7 @@ sub normalize_data_for_output {
             push @output_columns, $category_bucket;
         }
     }
-    push @output_columns, "totalOccurrences"; # if $category_bucket =~ /^err-rate$/;
+    push @output_columns, "occurrences"; # if $category_bucket =~ /^err-rate$/;
 
     # --- Layout engine (Phase 1): build and calculate but do NOT use for rendering ---
     {
@@ -7541,7 +7541,7 @@ sub normalize_data_for_output {
     foreach my $key (@graph_columns) {
         if (defined $max_total{$key} && $max_total{$key} != 0) {
             push @populated_graph_columns, $key;
-            push @output_columns, "${key}Nice" if $key =~ /^(duration|bytes)$/;
+            push @output_columns, "${key}_nice" if $key =~ /^(duration|bytes)$/;
             if ($key =~ /^count$/) {
                 push @output_columns, "${key}_occurrences", "${key}_min", "${key}_mean", "${key}_max", "${key}_sum" if !$omit_count;
             } elsif ($key =~ /^udm_/) {
@@ -8142,7 +8142,7 @@ sub print_bar_graph {
             # Add the log level message counts to the output CSV file
             foreach my $category_bucket ( @output_columns ) {
                next if $category_bucket =~ /^timestamp$/;								# skip the first column and get to the counts
-               last if $category_bucket =~ /^totalOccurrences$/;								# only fill in empty values up to the totalOccurrences
+               last if $category_bucket =~ /^occurrences$/;								# only fill in empty values up to the occurrences column
 
                if( exists $output_columns{$category_bucket} ) {								# if there was a count for this log level, add it to the list
                    push @csv_data, $output_columns{$category_bucket};
@@ -9783,7 +9783,7 @@ if( $write_messages_to_csv ) {                     # If write to CSV enabled, op
             push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
         }
     }
-    $csv->print($csv_fh, [qw(Category Message Occurrences MeanBytes TotalBytes TotalBytesNice count_occurrences count_min count_mean count_max count_sum MinDuration MeanDuration MaxDuration StdDev P1 P50 P75 P90 P95 P99 P99.9 CV TotalDuration TotalDurationNice Impact), @udm_csv_headers]);
+    $csv->print($csv_fh, [qw(category message occurrences mean_bytes bytes bytes_nice count_occurrences count_min count_mean count_max count_sum min mean max std_dev p1 p50 p75 p90 p95 p99 p999 cv duration duration_nice impact), @udm_csv_headers]);
 }
 
 print_message_summary();														                    # Print and write message summaries
