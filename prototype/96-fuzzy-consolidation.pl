@@ -1659,7 +1659,7 @@ for my $i (0 .. $show_count - 1) {
 # Write MESSAGES CSV (matching ltl format for validation)
 my $csv_file = "/tmp/prototype-messages.csv";
 open my $csv_fh, '>', $csv_file or die "Cannot open $csv_file: $!";
-print $csv_fh "Category,Message,Occurrences,MeanBytes,TotalBytes,TotalBytesNice,count_occurrences,count_min,count_mean,count_max,count_sum,MinDuration,MeanDuration,MaxDuration,StdDev,P1,P50,P75,P90,P95,P99,P99.9,CV,TotalDuration,TotalDurationNice,Impact\n";
+print $csv_fh "category,message,occurrences,mean_bytes,bytes,bytes_nice,count_occurrences,count_min,count_mean,count_max,count_sum,min,mean,max,std_dev,p1,p50,p75,p90,p95,p99,p999,cv,duration,duration_nice,impact\n";
 
 for my $e (@all_entries) {
     my $s = $e->{stats};
@@ -1670,7 +1670,7 @@ for my $e (@all_entries) {
     # Format values matching ltl output
     my $mean_bytes     = defined $s->{mean_bytes}     ? $s->{mean_bytes}               : '';
     my $total_bytes    = defined $s->{total_bytes}     ? $s->{total_bytes}              : '';
-    my $total_bytes_n  = '';  # TotalBytesNice — cosmetic, skip for validation
+    my $total_bytes_n  = '';  # bytes_nice — cosmetic, skip for validation
     my $min_dur        = defined $s->{min}             ? $s->{min}                      : '';
     my $mean_dur       = defined $s->{mean}            ? int($s->{mean})                : '';
     my $max_dur        = defined $s->{max}             ? $s->{max}                      : '';
@@ -1684,7 +1684,7 @@ for my $e (@all_entries) {
     my $p999           = defined $s->{p999}            ? $s->{p999}                     : '';
     my $cv             = defined $s->{cv}              ? sprintf("%.2f", $s->{cv})      : '';
     my $total_dur      = defined $s->{total_duration}  ? $s->{total_duration}           : '';
-    my $total_dur_nice = '';  # TotalDurationNice — cosmetic, skip for validation
+    my $total_dur_nice = '';  # duration_nice — cosmetic, skip for validation
     my $impact         = '';  # Impact — derived, skip for now
 
     print $csv_fh "plain,\"$msg\",$occ,$mean_bytes,$total_bytes,$total_bytes_n,,,,,,$min_dur,$mean_dur,$max_dur,$std_dev,$p1,$p50,$p75,$p90,$p95,$p99,$p999,$cv,$total_dur,$total_dur_nice,$impact\n";
