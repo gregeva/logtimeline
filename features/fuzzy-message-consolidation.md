@@ -1076,8 +1076,8 @@ The prototype is 1.9× faster and uses 40% less memory than ltl -od. S1 inline m
    - Population variance: `sum_of_squares / N - mean^2` (not sample variance)
    - Mean: `int(total_duration / duration_count)` where `duration_count` is length of durations array
    - Percentiles: `int($sorted[int($n * fraction)])` index method
-   - MeanBytes: `int(total_bytes / occurrences + 0.5)` (rounded)
-   - StdDev formatted to 3 decimal places, CV to 2
+   - mean_bytes: `int(total_bytes / occurrences + 0.5)` (rounded)
+   - std_dev formatted to 3 decimal places, cv to 2
 
 6. **CSV output:** Prototype writes `/tmp/prototype-messages.csv` in ltl's MESSAGES CSV format for comparison.
 
@@ -1089,25 +1089,25 @@ Tested against ltl CSV baseline for two unconsolidated entries that exist in bot
 
 | Field | ltl | Prototype |
 |-------|-----|-----------|
-| Occurrences | 12466 | 12466 |
-| MeanBytes | 87 | 87 |
-| TotalBytes | 1078390 | 1078390 |
-| Min/Mean/Max | 0/1/13 | 0/1/13 |
-| StdDev | 1.181 | 1.181 |
-| P1/P50/P75/P90/P95/P99/P99.9 | 0/1/2/3/3/3/4 | 0/1/2/3/3/3/4 |
-| CV | 1.18 | 1.18 |
-| TotalDuration | 13829 | 13829 |
+| occurrences | 12466 | 12466 |
+| mean_bytes | 87 | 87 |
+| bytes | 1078390 | 1078390 |
+| min/mean/max | 0/1/13 | 0/1/13 |
+| std_dev | 1.181 | 1.181 |
+| p1/p50/p75/p90/p95/p99/p999 | 0/1/2/3/3/3/4 | 0/1/2/3/3/3/4 |
+| cv | 1.18 | 1.18 |
+| duration | 13829 | 13829 |
 
 **ThingWorx DPM — `GetMetricsList` (32 occurrences):**
 
 | Field | ltl | Prototype |
 |-------|-----|-----------|
-| Occurrences | 32 | 32 |
-| Min/Mean/Max | 949/1018/1149 | 949/1018/1149 |
-| StdDev | 62.659 | 62.659 |
-| P1/P50/P75/P90/P95/P99/P99.9 | 949/1016/1041/1070/1128/1149/1149 | 949/1016/1041/1070/1128/1149/1149 |
-| CV | 0.06 | 0.06 |
-| TotalDuration | 32606 | 32606 |
+| occurrences | 32 | 32 |
+| min/mean/max | 949/1018/1149 | 949/1018/1149 |
+| std_dev | 62.659 | 62.659 |
+| p1/p50/p75/p90/p95/p99/p999 | 949/1016/1041/1070/1128/1149/1149 | 949/1016/1041/1070/1128/1149/1149 |
+| cv | 0.06 | 0.06 |
+| duration | 32606 | 32606 |
 
 **All fields match exactly** across both log formats. The stats merging implementation is correct and matches ltl's computation.
 
