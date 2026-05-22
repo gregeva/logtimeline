@@ -378,6 +378,21 @@ On failure, the harness prints:
 
 The reader can now act without leaving the failure output.
 
+### When the assertion isn't a simple line grep
+
+Some assertions don't fit the "match this regex against this output file" shape — for example, checking that multiple grep conditions ALL hold against an on-disk artifact, running a Perl one-liner to validate CSV well-formedness, or counting rows of a specific type. For those, use a sibling helper `assert_command` that takes the same documentation fields plus a `command` (eval'd; PASS if exit code 0) and a `label` (short human-readable summary for the PASS line, since the command itself is too verbose to print on every PASS).
+
+```bash
+assert_command \
+    command     'grep -q "^selection,.*,-dmin=50$" ltl-index.csv && grep -q "^selection,.*,-dmin=100$" ltl-index.csv' \
+    label       'both -dmin=50 and -dmin=100 selection rows preserved after write' \
+    asserts     'After the run, the end-of-run write must preserve the pre-existing -dmin=50 selection row AND append a new -dmin=100 selection row' \
+    produced_by 'write_index_file() in ltl (end-of-run #46 write side; merge-with-existing semantics)' \
+    contract    'features/179-index-read-back.md § Interactions with existing features § "With write side (#46)"'
+```
+
+On failure, `assert_command` surfaces the `command` (so the reader can re-run it) plus all the documentation fields. Use `assert_line` for "match this regex in this file" and `assert_command` for everything else — both share the same three documentation field requirements.
+
 ## When a harness needs new observable state
 
 If a harness needs to assert against application state that is not currently exposed via a `-V` section: open or update a ticket against the application requesting a new section (or a new field within an existing section). Do not work around the gap by grepping the bar graph, the summary table, or other rendered output.
