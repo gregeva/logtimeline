@@ -21,8 +21,18 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 
-ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt"
-SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
+# 5k-line samples of real production logs, sliced from the middle of the
+# corresponding logs/<source>/ files. See docs/test-logs.md and
+# tests/fixtures/regenerate-index-readback-fixtures.sh for derivation.
+ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
+
+# Prebuilt ltl-index.csv covering both ACCESS_LOG and SCRIPT_LOG with file
+# rows + unfiltered selection rows + filtered (-dmin=50) selection rows.
+# Scenarios copy this into their cwd and manipulate it (delete rows, edit
+# bounds, age entries, corrupt the file) to drive specific code paths
+# without paying for a full ltl seed run per scenario.
+INDEX_FIXTURE="$SCRIPT_DIR/fixtures/ltl-index-readback.csv"
 
 # Common options: suppress progress and limit top messages.
 COMMON="--disable-progress -osum -n 1"
@@ -31,12 +41,30 @@ if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
 fi
+
+# The sample logs and prebuilt index are gitignored derived artifacts. If
+# any are missing, run the regenerate script to produce them, then check
+# again. If they are still missing the script itself failed (typically
+# because the source logs in logs/ are not present locally) — hard-fail
+# with a clear diagnostic.
+REGENERATE_SCRIPT="$SCRIPT_DIR/fixtures/regenerate-index-readback-fixtures.sh"
+if [[ ! -f "$ACCESS_LOG" || ! -f "$SCRIPT_LOG" || ! -f "$INDEX_FIXTURE" ]]; then
+    echo "Fixtures missing; running $REGENERATE_SCRIPT to generate them..."
+    if ! "$REGENERATE_SCRIPT"; then
+        echo "ERROR: $REGENERATE_SCRIPT failed; cannot run this harness" >&2
+        exit 1
+    fi
+fi
 if [[ ! -f "$ACCESS_LOG" ]]; then
-    echo "ERROR: ACCESS_LOG not found: $ACCESS_LOG"
+    echo "ERROR: ACCESS_LOG still not found after regenerate: $ACCESS_LOG" >&2
     exit 1
 fi
 if [[ ! -f "$SCRIPT_LOG" ]]; then
-    echo "ERROR: SCRIPT_LOG not found: $SCRIPT_LOG"
+    echo "ERROR: SCRIPT_LOG still not found after regenerate: $SCRIPT_LOG" >&2
+    exit 1
+fi
+if [[ ! -f "$INDEX_FIXTURE" ]]; then
+    echo "ERROR: INDEX_FIXTURE still not found after regenerate: $INDEX_FIXTURE" >&2
     exit 1
 fi
 
@@ -65,12 +93,44 @@ run_ltl_v() {
     run_ltl $COMMON -V index-read-back "$@"
 }
 
-# Seed the index by running ltl normally. The run produces real file and
-# selection rows for the given log + filter args. Returns the -V capture
-# path so callers can extract calibrated bounds for downstream assertions.
-# Usage: out=$(seed_via_ltl <ltl args...>)
-seed_via_ltl() {
-    run_ltl $COMMON -V index-read-back "$@"
+# Drop the prebuilt ltl-index.csv fixture into the current cwd. Scenarios
+# that need an already-seeded index call this once at the start, then
+# manipulate the local copy (delete rows, edit bounds, age entries,
+# corrupt) to drive whatever code path they assert against.
+seed_from_fixture() {
+    cp "$INDEX_FIXTURE" ./ltl-index.csv
+}
+
+# Read a column from a row in ltl-index.csv (current cwd) where one or
+# more other columns match given values. Used to read calibrated bounds
+# from the fixture rather than re-deriving them via a full ltl run.
+# Predicate syntax: column=value [AND column=value]...
+# Usage: v=$(read_index_column duration_max 'entry_type=selection AND filters=-dmin=50')
+read_index_column() {
+    local column="$1" predicate="$2"
+    [[ -f ltl-index.csv ]] || { echo "ERROR: no ltl-index.csv in cwd" >&2; return 1; }
+    perl -MText::CSV -e '
+        my ($column, $predicate) = @ARGV;
+        my @clauses = split /\s+AND\s+/, $predicate;
+        my %want; for my $c (@clauses) { my ($k, $v) = split /=/, $c, 2; $want{$k} = $v; }
+        my $csv = Text::CSV->new({binary=>1, eol=>$/});
+        open my $fh, "<", "ltl-index.csv" or die;
+        my %ci; my $header;
+        while (my $r = $csv->getline($fh)) {
+            if (!$header) { $header = $r; for my $i (0..$#$r) { $ci{$r->[$i]} = $i } next; }
+            my $matches = 1;
+            for my $k (keys %want) {
+                my $idx = $ci{$k};
+                if (!defined $idx || ($r->[$idx] // "") ne $want{$k}) { $matches = 0; last; }
+            }
+            if ($matches) {
+                my $idx = $ci{$column};
+                print $r->[$idx] // "" if defined $idx;
+                exit 0;
+            }
+        }
+        # No match — print empty; caller checks with [[ -z ]]
+    ' "$column" "$predicate"
 }
 
 # Extract a key's value from a -V capture file.
@@ -236,10 +296,9 @@ in_scenario_dir() {
 
 helper_self_test() {
     local name="helpers"
-    # Seed an index from a real run.
-    seed_via_ltl "$ACCESS_LOG" > /dev/null
+    seed_from_fixture
     if [[ ! -f ltl-index.csv ]]; then
-        echo "  FAIL  $name :: seed_via_ltl did not produce ltl-index.csv"
+        echo "  FAIL  $name :: seed_from_fixture did not produce ltl-index.csv"
         fail=$((fail + 1))
         return
     fi
@@ -252,7 +311,7 @@ helper_self_test() {
         return
     fi
 
-    # Test delete_index_rows: remove the selection row.
+    # Test delete_index_rows: remove all selection rows.
     delete_index_rows "entry_type=selection"
     local sel_rows_after
     sel_rows_after=$(grep -c '^selection,' ltl-index.csv || true)
@@ -274,13 +333,16 @@ helper_self_test() {
         fail=$((fail + 1))
     fi
 
-    # Test corrupt_index_file: truncate.
+    # Test corrupt_index_file: truncate to half-size.
+    local size_before size_after
+    size_before=$(wc -c < ltl-index.csv | tr -d ' ')
     corrupt_index_file truncate
-    if [[ "$(wc -c < ltl-index.csv)" -lt 2000 ]]; then
+    size_after=$(wc -c < ltl-index.csv | tr -d ' ')
+    if [[ "$size_after" -lt "$size_before" ]]; then
         pass=$((pass + 1))
-        echo "  PASS  $name :: corrupt_index_file truncate"
+        echo "  PASS  $name :: corrupt_index_file truncate ($size_before -> $size_after bytes)"
     else
-        echo "  FAIL  $name :: truncate did not shrink file"
+        echo "  FAIL  $name :: truncate did not shrink file ($size_before -> $size_after)"
         fail=$((fail + 1))
     fi
 }
@@ -304,7 +366,7 @@ scenario_cold_no_index() {
 }
 
 scenario_warm_unfiltered() {
-    seed_via_ltl "$ACCESS_LOG" > /dev/null
+    seed_from_fixture
     local out
     out=$(run_ltl_v "$ACCESS_LOG")
     assert_line "warm-unfiltered" "$out" '^index_used: yes$'
@@ -317,9 +379,11 @@ scenario_warm_unfiltered() {
 }
 
 scenario_cold_filtered_tier2_fallback() {
-    # Seed produces a selection row with filters=- only. Filtered run should
-    # fall back to Tier 2 (file row) since no matching selection row exists.
-    seed_via_ltl "$ACCESS_LOG" > /dev/null
+    # Filtered run with -dmin=50 should fall back to Tier 2 (file row)
+    # when no matching selection row exists. Remove the prebuilt
+    # -dmin=50 row so the scenario actually exercises the fallback.
+    seed_from_fixture
+    delete_index_rows "entry_type=selection AND filters=-dmin=50"
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
     assert_line "cold-filtered-tier2-fallback" "$out" '^index_used: yes$'
@@ -332,9 +396,9 @@ scenario_cold_filtered_tier2_fallback() {
 }
 
 scenario_warm_tier1_filtered() {
-    # First filtered run creates the selection row.
-    seed_via_ltl -dmin 50 "$ACCESS_LOG" > /dev/null
-    # Second filtered run hits Tier 1.
+    # Fixture already has a selection row for -dmin=50, so this run
+    # hits Tier 1 directly.
+    seed_from_fixture
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
     assert_line "warm-tier1-filtered" "$out" '^index_used: yes$'
@@ -344,8 +408,9 @@ scenario_warm_tier1_filtered() {
 }
 
 scenario_warm_tier2_different_filters() {
-    # Seed with one filter set; run with a different filter set.
-    seed_via_ltl -dmin 50 "$ACCESS_LOG" > /dev/null
+    # Fixture has -dmin=50; this run uses -dmin=100 (different filter set).
+    # Tier 1 miss → Tier 2 fallback → new selection row appended on write.
+    seed_from_fixture
     local out
     out=$(run_ltl_v -dmin 100 "$ACCESS_LOG")
     assert_line "warm-tier2-different-filters" "$out" '^  lookup: tier_2_file$'
@@ -358,14 +423,15 @@ scenario_warm_tier2_different_filters() {
 }
 
 scenario_stale_mtime() {
-    # Seed, then advance the on-disk file's mtime. The stored entry is now stale.
-    # Use a local copy so we can touch it without modifying the shared logs/ file.
+    # Need a local copy of the log we can touch without mutating the shared
+    # logs/ file. Seed against that local copy so the index records its
+    # specific path/mtime/size — then advance mtime to provoke staleness.
+    # (Fixture cannot be reused here because it references a different path.)
     local local_log="./access.log"
     cp "$ACCESS_LOG" "$local_log"
-    seed_via_ltl "$local_log" > /dev/null
-    # Wait briefly + touch to ensure mtime advances (file system mtime resolution).
+    run_ltl $COMMON -V index-read-back "$local_log" > /dev/null
     sleep 1
-    touch "$local_log"
+    touch "$local_log"   # advance mtime past stored value
     local out
     out=$(run_ltl_v "$local_log")
     assert_line "stale-mtime" "$out" '^index_used: no$'
@@ -373,10 +439,12 @@ scenario_stale_mtime() {
 }
 
 scenario_stale_size() {
-    # Seed, then manually edit the index's stored file_size to a different value.
+    # Same setup as stale_mtime — need a local copy referenced by the
+    # index — but instead of touching the file, we corrupt the index's
+    # stored file_size to a wrong value to provoke staleness.
     local local_log="./access.log"
     cp "$ACCESS_LOG" "$local_log"
-    seed_via_ltl "$local_log" > /dev/null
+    run_ltl $COMMON -V index-read-back "$local_log" > /dev/null
     edit_index_row "entry_type=file" "file_size=42"
     local out
     out=$(run_ltl_v "$local_log")
@@ -385,22 +453,18 @@ scenario_stale_size() {
 }
 
 scenario_drift_refresh_tier1() {
-    # Seed with filtered run -> selection row is written with real bounds.
-    local cal_out
-    cal_out=$(seed_via_ltl -dmin 50 "$ACCESS_LOG")
+    # Fixture has selection rows for -dmin=50 with real calibrated bounds.
+    # Read the calibrated duration_max, narrow it deliberately, run, assert
+    # drift detection — then re-run and assert drift cleared by the write.
+    seed_from_fixture
     local cal_max
-    cal_max=$(extract_v_value "$cal_out" 'preseed_duration_max')
+    cal_max=$(read_index_column duration_max \
+        "entry_type=selection AND file_path=$ACCESS_LOG AND filters=-dmin=50")
     if [[ -z "$cal_max" || "$cal_max" == "-" ]]; then
-        # First run had no preseed (cold). Seed once more so subsequent run can show calibration.
-        cal_out=$(seed_via_ltl -dmin 50 "$ACCESS_LOG")
-        cal_max=$(extract_v_value "$cal_out" 'preseed_duration_max')
-    fi
-    if [[ -z "$cal_max" || "$cal_max" == "-" ]]; then
-        echo "  FAIL  drift-refresh-tier1 :: could not calibrate cal_max"
+        echo "  FAIL  drift-refresh-tier1 :: fixture missing calibrated duration_max for $ACCESS_LOG -dmin=50"
         fail=$((fail + 1))
         return
     fi
-    # Narrow the selection row's duration_max to half the calibrated max.
     local narrowed=$((cal_max / 2))
     edit_index_row "entry_type=selection AND filters=-dmin=50" "duration_max=$narrowed"
     local out
@@ -417,20 +481,18 @@ scenario_drift_refresh_tier1() {
 }
 
 scenario_drift_refresh_tier2() {
-    local cal_out
-    cal_out=$(seed_via_ltl "$ACCESS_LOG")
+    # Read calibrated duration_max from the fixture's file row, then force
+    # an unfiltered Tier 2 path by deleting the unfiltered selection rows,
+    # and narrow the file row's bound to provoke drift detection.
+    seed_from_fixture
     local cal_max
-    cal_max=$(extract_v_value "$cal_out" 'preseed_duration_max')
+    cal_max=$(read_index_column duration_max \
+        "entry_type=file AND file_path=$ACCESS_LOG")
     if [[ -z "$cal_max" || "$cal_max" == "-" ]]; then
-        cal_out=$(seed_via_ltl "$ACCESS_LOG")
-        cal_max=$(extract_v_value "$cal_out" 'preseed_duration_max')
-    fi
-    if [[ -z "$cal_max" || "$cal_max" == "-" ]]; then
-        echo "  FAIL  drift-refresh-tier2 :: could not calibrate cal_max"
+        echo "  FAIL  drift-refresh-tier2 :: fixture missing calibrated duration_max for $ACCESS_LOG"
         fail=$((fail + 1))
         return
     fi
-    # Force an unfiltered Tier 2 path by deleting the unfiltered selection row.
     delete_index_rows "entry_type=selection AND filters=-"
     local narrowed=$((cal_max / 2))
     edit_index_row "entry_type=file" "duration_max=$narrowed"
@@ -442,8 +504,9 @@ scenario_drift_refresh_tier2() {
 }
 
 scenario_multi_file_all_fresh_tier2_unfiltered() {
-    # Seed both files, force Tier 2 by deleting selection rows, then run again.
-    seed_via_ltl "$ACCESS_LOG" "$SCRIPT_LOG" > /dev/null
+    # Force Tier 2 for both files by removing all selection rows from the
+    # fixture. Both files remain fresh (file rows untouched).
+    seed_from_fixture
     delete_index_rows "entry_type=selection"
     local out
     out=$(run_ltl_v "$ACCESS_LOG" "$SCRIPT_LOG")
@@ -462,7 +525,8 @@ scenario_multi_file_all_fresh_tier2_unfiltered() {
 }
 
 scenario_multi_file_all_fresh_tier1() {
-    seed_via_ltl -dmin 50 "$ACCESS_LOG" "$SCRIPT_LOG" > /dev/null
+    # Fixture already has -dmin=50 selection rows for both files.
+    seed_from_fixture
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG" "$SCRIPT_LOG")
     assert_line "multi-file-all-fresh-tier1" "$out" '^index_used: yes$'
@@ -476,9 +540,9 @@ scenario_multi_file_all_fresh_tier1() {
 }
 
 scenario_multi_file_mixed_tiers() {
-    # Seed both files for -dmin=50 (so both have tier 1 candidates).
-    seed_via_ltl -dmin 50 "$ACCESS_LOG" "$SCRIPT_LOG" > /dev/null
-    # Delete the SCRIPT_LOG selection row so SCRIPT_LOG falls back to Tier 2.
+    # Fixture has -dmin=50 for both files. Delete SCRIPT_LOG's row so it
+    # falls back to Tier 2 while ACCESS_LOG stays at Tier 1.
+    seed_from_fixture
     delete_index_rows "entry_type=selection AND file_path=$SCRIPT_LOG AND filters=-dmin=50"
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG" "$SCRIPT_LOG")
@@ -491,11 +555,13 @@ scenario_multi_file_mixed_tiers() {
 }
 
 scenario_multi_file_one_stale() {
+    # As with stale_mtime: local copies needed so we can touch without
+    # mutating shared logs. The index records the local paths.
     local f1="./access.log"
     local f2="./script.log"
     cp "$ACCESS_LOG" "$f1"
     cp "$SCRIPT_LOG" "$f2"
-    seed_via_ltl "$f1" "$f2" > /dev/null
+    run_ltl $COMMON -V index-read-back "$f1" "$f2" > /dev/null
     sleep 1
     touch "$f1"   # advance only $f1's mtime
     local out
@@ -506,7 +572,7 @@ scenario_multi_file_one_stale() {
 }
 
 scenario_malformed_index() {
-    seed_via_ltl "$ACCESS_LOG" > /dev/null
+    seed_from_fixture
     # Use 'malform' (mismatched quotes appended) rather than 'truncate'.
     # Truncate leaves a row with a partial path that the existing #46
     # write side preserves verbatim on rewrite, yielding 2 file rows
@@ -531,7 +597,7 @@ scenario_malformed_index() {
 }
 
 scenario_missing_bound_column() {
-    seed_via_ltl "$ACCESS_LOG" > /dev/null
+    seed_from_fixture
     edit_index_row "entry_type=file" "duration_max=-"
     delete_index_rows "entry_type=selection"   # force Tier 2
     local out
@@ -544,7 +610,7 @@ scenario_missing_bound_column() {
 }
 
 scenario_expired_selection_entry() {
-    seed_via_ltl -dmin 50 "$ACCESS_LOG" > /dev/null
+    seed_from_fixture
     set_entry_date "entry_type=selection AND filters=-dmin=50" 91
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
