@@ -22,7 +22,7 @@ Until a sub-issue ships, its scoping lives in a per-sub-issue research file (e.g
 | [#232](https://github.com/gregeva/logtimeline/issues/232) | `--help` content correctness | **CLOSED 2026-05-22** |
 | [#233](https://github.com/gregeva/logtimeline/issues/233) | Empty / degenerate inputs | OPEN |
 | [#234](https://github.com/gregeva/logtimeline/issues/234) | Documentation example execution | **CLOSED 2026-05-22** |
-| [#235](https://github.com/gregeva/logtimeline/issues/235) | Extended heatmap/histogram rendering coverage | OPEN |
+| [#235](https://github.com/gregeva/logtimeline/issues/235) | Extended heatmap/histogram rendering coverage | **CLOSED 2026-05-22** |
 
 ## Cross-cutting decisions
 
@@ -304,3 +304,76 @@ Self-test result on landing: **23 passed, 0 failed.**
 - The "env-side row shows the resolved value, not the original env-var value" behavior is a known limitation. When the same flag is in both env and CLI, the env-side row carries `; overridden` but its value is the resolved (CLI-supplied) value because reconstructing the original env value would require re-parsing `@env_args`. Documented in-code; revisit if a real harness scenario needs the original.
 - The 4 stderr warnings are gated on specific input shapes. A regression that fires one on a clean run would be caught by scenario 12 (`no-warning-on-clean-run`).
 - Naming: harness file is `tests/validate-runtime-config.sh` per `HARNESS-DESIGN.md § Naming rules`. Issue framing was "CLI option parsing"; section framing is `runtime-config`; the section wins the file name.
+
+---
+
+## #235 — Extended heatmap/histogram rendering coverage
+
+### Status
+**Closed 2026-05-22.** Implemented in PR #251, merge commit `5c05af2`.
+
+### Overview
+
+Extends `tests/validate-regression.sh` and `tests/capture-regression.sh` with 19 new byte-identical fixture combinations covering heatmap and histogram rendering surfaces not exercised today. Brings the byte-identical regression suite from 19 → 38 fixtures.
+
+No `ltl` code changes — fixtures + harness wiring only.
+
+### Code surfaces touched
+
+- `tests/validate-regression.sh` — `APACHE_LOG` variable added; 19 new `run_test` invocations.
+- `tests/capture-regression.sh` — mirror additions in lockstep.
+- `tests/reference-output/` — 19 new fixture files (heatmap × 7, histogram × 11, composition × 1).
+
+### New fixture inventory
+
+| Surface | New fixtures |
+|---|---|
+| Heatmap at narrow widths | `heatmap-duration-w80`, `heatmap-duration-w100`, `heatmap-bytes-w120`, `heatmap-count-w100` |
+| Light-background palette | `heatmap-lbg-duration-w160` |
+| Custom heatmap width | `heatmap-hmw30-duration-w160`, `heatmap-hmw80-duration-w160` |
+| Histogram single-metric × widths | `hg-duration-w80`, `hg-duration-w120`, `hg-duration-w160` |
+| Histogram per metric | `hg-bytes-w160`, `hg-count-w160` |
+| Multi-histogram panels | `hg-multi-duration-bytes-w160`, `hg-multi-all-w160` |
+| Custom histogram dimensions | `hg-hgw30-duration-w160`, `hg-hgw50-multi-w160`, `hg-hgh4-duration-w160`, `hg-hgh16-duration-w160` |
+| Composition (heatmap + histogram) | `hm-hg-duration-w160` |
+
+### `--exact-percentiles` policy
+
+All new fixtures use `--exact-percentiles` for the same reason as the existing heatmap fixtures: pins to the sort-and-index path so the reference stays byte-stable while bin-counter precision work (#34/#187/#201) lands. `calculate_histogram_buckets()` at `ltl:5630-5635` dispatches through the same opt-out flag, so the policy applies to histogram fixtures too.
+
+A future audit (separate issue) should re-capture all fixtures without `--exact-percentiles` once the unified path is locked, and migrate the harness off the deprecated flag.
+
+### Logs used
+
+- **`SCRIPT_LOG`** (existing) — `ScriptLog-DPMExtended-clean.log` for heatmap scenarios and count-axis / three-panel histogram scenarios.
+- **`APACHE_LOG`** (new) — `ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` for access-log-flavoured histogram fixtures. Clean Apache HTTP2 log, ~100 KB, bytes + microsecond-%D durations.
+
+Per repo memory (`feedback_test_logs.md`), no new fixture uses the corrupt `localhost_access_log.2025-03-21.txt`. Existing `SCRIPT_LOG` variable retained as-is (not renamed to `DPM_LOG` as the research proposed) to avoid touching the 19 existing fixture invocations.
+
+### Light-background determinism
+
+Light-background auto-detection is **inert under shell redirection** — `ltl:2722` checks `-t STDOUT` before issuing the OSC 11 query. The capture script pipes output, so the auto-detect path returns 0 without querying the terminal. No `NO_COLOR=1` environment override needed for fixture stability.
+
+**Issue #250** (filed during this work) tracks the missing explicit `--no-light-background` / `--dark-background` flag, which would be the proper defense if a future change to that auto-detect heuristic perturbs fixtures.
+
+### Decisions locked
+
+1. **`-lbg` capture environment**: rely on the non-TTY pipe check at `ltl:2722` (not `NO_COLOR=1`). After inspecting the auto-detect code, the safety is already in place.
+2. **`-hgw 30` at narrow width is fine** — fixture rendering verified deterministic at that scale.
+3. **Existing fixtures NOT migrated** off the corrupt 2025-03-21 log. Separate ticket if it happens.
+4. **Composition fixture named `hm-hg-duration-w160`** (not `heatmap-hg-...` or `combo-...`).
+5. **Both `-hgh 4` (low) AND `-hgh 16` (high) shipped** — guards layout drift symmetry. Brought new fixture count from 18 → 19.
+
+### Self-test on landing
+
+- `tests/validate-regression.sh`: **38 pass, 0 fail, 0 skip**
+- **Idempotency confirmed**: two consecutive `capture-regression.sh` runs produce byte-identical fixture output (no non-determinism)
+- Sibling harnesses unaffected: `validate-help-content` (8/0), `validate-format-detection` (16/0), `validate-help-layout` (9/0), `validate-runtime-config` (23/0)
+- Capture runtime: ~47s wall-clock for all 38 fixtures
+
+### Stability notes for future maintainers
+
+- The `--exact-percentiles` flag is documented-deprecated (warning now fires per #231); when it's removed, this harness needs to be re-captured against whatever the new opt-out mechanism is, OR the harness has to migrate to non-byte-identical assertions for heatmap/histogram (probably bin-counter-precision-aware tolerance bands). Captured behavior here is anchored on the current opt-out flag.
+- The light-background fixture (`heatmap-lbg-duration-w160`) is deterministic today only because of the non-TTY pipe check at `ltl:2722`. If `detect_light_terminal_background()` is ever refactored to engage under piped stdout, this fixture will perturb across machines. Issue #250 should land as the defensive measure before any such refactor.
+- The `APACHE_LOG` variable is the canonical clean small-access-log fixture for new tests. Use it (not the corrupt 2025-03-21 file) for any future access-log-flavoured fixture.
+- Both scripts must move in lockstep when fixtures are added — `validate-regression.sh` asserts on what `capture-regression.sh` produces.
