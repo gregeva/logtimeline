@@ -18,7 +18,7 @@ Until a sub-issue ships, its scoping lives in a per-sub-issue research file (e.g
 | [#228](https://github.com/gregeva/logtimeline/issues/228) | Log format detection regression | **CLOSED 2026-05-22** |
 | [#229](https://github.com/gregeva/logtimeline/issues/229) | Pattern file correctness | **CANCELLED 2026-05-22** — scope exceeded value; see issue for rationale |
 | [#230](https://github.com/gregeva/logtimeline/issues/230) | Filter logic truth tables | OPEN |
-| [#231](https://github.com/gregeva/logtimeline/issues/231) | CLI option parsing / conflict detection | OPEN |
+| [#231](https://github.com/gregeva/logtimeline/issues/231) | CLI option parsing / conflict detection | **CLOSED 2026-05-22** |
 | [#232](https://github.com/gregeva/logtimeline/issues/232) | `--help` content correctness | **CLOSED 2026-05-22** |
 | [#233](https://github.com/gregeva/logtimeline/issues/233) | Empty / degenerate inputs | OPEN |
 | [#234](https://github.com/gregeva/logtimeline/issues/234) | Documentation example execution | **CLOSED 2026-05-22** |
@@ -221,3 +221,86 @@ Per repo memory (`feedback_test_logs.md`), the corrupt `localhost_access_log.202
 - The bash-3.2 compatibility constraint (macOS system bash) is the reason for parallel arrays rather than `declare -A`. Keep that style when extending the harness.
 - The `1000` line truncation is empirical. If a future example needs longer input (e.g., a time-window filter that excludes the first 1000 lines), bump `FIXTURE_LINES` rather than disabling truncation.
 - `-V` examples (currently 4 in `docs/usage.md`) are excluded by a substring match on `" -V"`. When the `-V` surface stabilises and we want to bring those examples under test, remove that branch from `run_doc_example()`.
+
+---
+
+## #231 — CLI option parsing and conflict detection
+
+### Status
+**Closed 2026-05-22.** Implemented in PR #249, merge commit `d9dfcfd`.
+
+### Overview
+
+Extends the existing `runtime-config` `-V` section with two locked sub-sections (`command-line` and `environment-variable`), adds 4 stderr warnings for previously-silent override cases in `adapt_to_command_line_options()`, and ships `tests/validate-runtime-config.sh` as the harness covering both surfaces.
+
+Targets the silent-override class: behaviors where ltl resolves a user input differently from what was asked (clamping, pushing back as positional, deprecation, env-vs-CLI override) but emits no signal. Four such sites covered in this sub-issue.
+
+### Code surfaces touched
+
+- `ltl` — provenance tracking in `adapt_to_command_line_options()` (`%option_provenance`, `_classify_argv_provenance()`, `_resolve_short_to_long()`); new `emit_runtime_config_verbose()` sub replacing the inline block; 4 new stderr warnings.
+- `tests/validate-runtime-config.sh` (new) — bash harness, 12 scenarios, 23 assertions.
+
+### Sub-sections (locked contract)
+
+| Sub-section | Content |
+|---|---|
+| `command-line` | One row per long-flag-name supplied on the CLI. Always emits; empty body if no CLI flags. |
+| `environment-variable` | One row per long-flag-name supplied via `LTL_CONFIG`. Always emits; empty body if no env var. When the same flag is also on the CLI, env-side row carries `; overridden`. |
+
+A `defaults` sub-section was scoped at first but **dropped**: ltl resolves defaults at multiple sites scattered through `adapt_to_command_line_options()`, with several defaults emerging from user-input-dependent code paths (e.g., `$time_bucket_size` depends on the heatmap mode chosen by the user). No coherent snapshot point exists where "the defaults" are independent of user input. Defaults remain documented in `docs/usage.md` and `print_help()` — the canonical user-facing surface.
+
+### Annotation grammar (locked, 3 forms)
+
+- `value` — as resolved (no annotation)
+- `value; overridden` — beaten by a same-flag CLI value (env-side row when both env and CLI supply the same flag)
+- `value; clamped from <orig>` — out-of-range, clamped during validation (reserved for future use; no current emission site)
+
+Semicolon-separated form matches the `histogram-bin-counters` (#189) precedent.
+
+### Silent-override warnings (4 sites)
+
+| # | Site | Behavior before | Behavior now |
+|---|---|---|---|
+| 1 | `-g <non-numeric>` | Silently pushed back as positional, default 85 threshold used | Warns to stderr |
+| 2 | `-hm <non-builtin>` without `-udm` | Silently pushed back as positional, default `duration` used | Warns to stderr |
+| 3 | `-pbpd` overriding `--percentile-precision` | Only visible via `-V histogram-bin-counters` | Also on stderr |
+| 4 | `--exact-percentiles` | Silent; documented as deprecated | Deprecation warning on every use |
+
+### Scenarios
+
+| # | Scenario | Asserts |
+|---|---|---|
+| 1 | runtime-config-command-line | Section + command-line sub-section + supplied-flag rows present |
+| 2 | runtime-config-env-only | LTL_CONFIG-supplied flag in environment-variable sub-section |
+| 3 | runtime-config-env-overridden | Same flag in both sources: CLI in command-line, env in env sub-section with `; overridden` |
+| 4 | warning-g-non-numeric | New stderr warning fires on `-g bogus` |
+| 5 | warning-hm-non-builtin | New stderr warning fires on `-hm bogus` |
+| 6 | warning-pbpd-overrides-pp | New stderr warning fires on `-pbpd 100 -pp 7` |
+| 7 | warning-exact-percentiles-deprecated | Deprecation warning fires on `--exact-percentiles` |
+| 8 | error-unknown-so | Exit 1, stdout has `invalid sort type` |
+| 9 | error-unknown-du | Exit 1, stdout has `Invalid duration unit` |
+| 10 | error-unknown-ru | Exit 1, stdout has `Invalid rate unit` |
+| 11 | error-no-files | Exit 2, stdout has `unable to open any files` |
+| 12 | no-warning-on-clean-run | No new warnings fire on baseline invocation |
+
+Self-test result on landing: **23 passed, 0 failed.**
+
+### Pinned current behavior (intentionally deferred)
+
+- **Exit codes are inconsistent**: `print_usage()` paths exit 1, the no-files path exits 2. The harness pins both. Exit-code harmonization is a separate deferred ticket.
+- **User-visible diagnostic text** (`Error: ...` lines) is emitted to **stdout** via `print_usage()`, not stderr. Only the bare `Died at ./ltl line N.` Perl trace goes to stderr. The harness asserts against stdout for the user-visible text and exit code for the failure signal.
+
+### Decisions locked
+
+1. **Single `-V` section** (extend `runtime-config`) rather than a new `option-resolution` section. `runtime-config` already exists; extending it avoids duplicate intent.
+2. **Two sub-sections, not three** — defaults dropped due to ltl's interleaved default-resolution architecture.
+3. **Annotation grammar**: `; overridden` / `; clamped from N` / no annotation. Semicolons match the #189 precedent.
+4. **All 4 silent-override warnings shipped** rather than just the deprecation.
+5. **Single PR** combining ltl changes + harness.
+
+### Stability notes for future maintainers
+
+- The `runtime-config` section is reserved per `HARNESS-DESIGN.md § Reserved section names`. The two sub-section names (`command-line`, `environment-variable`) are also stability-locked — renames are breaking changes that require updating `tests/validate-runtime-config.sh` in the same commit.
+- The "env-side row shows the resolved value, not the original env-var value" behavior is a known limitation. When the same flag is in both env and CLI, the env-side row carries `; overridden` but its value is the resolved (CLI-supplied) value because reconstructing the original env value would require re-parsing `@env_args`. Documented in-code; revisit if a real harness scenario needs the original.
+- The 4 stderr warnings are gated on specific input shapes. A regression that fires one on a clean run would be caught by scenario 12 (`no-warning-on-clean-run`).
+- Naming: harness file is `tests/validate-runtime-config.sh` per `HARNESS-DESIGN.md § Naming rules`. Issue framing was "CLI option parsing"; section framing is `runtime-config`; the section wins the file name.
