@@ -9521,7 +9521,13 @@ sub print_bar_graph {
                last if $category_bucket =~ /^occurrences$/;								# only fill in empty values up to the occurrences column
 
                if( exists $output_columns{$category_bucket} ) {								# if there was a count for this log level, add it to the list
-                   push @csv_data, $output_columns{$category_bucket};
+                   my $val = $output_columns{$category_bucket};
+                   # Rate columns (err-rate, msg-rate) are raw division output;
+                   # format to a sensible precision for CSV consumers.
+                   if( $category_bucket =~ /^(err|msg)-rate$/ && defined $val ) {
+                       $val = sprintf( "%.1f", $val );
+                   }
+                   push @csv_data, $val;
 
 # 2026-01-04 TO DO: this may not be required, test after fixing the count and byte metric collection with no duration stats
                } else {
@@ -9671,7 +9677,13 @@ sub print_bar_graph {
 
             # Print statistics for time-bucket statistics to the CSV file if activated
             if( $write_messages_to_csv && defined $csv_fh ) {
-                $csv->print($csv_fh, [ $bucket_time_str, @csv_data ]);
+                # Pad row to header width so every row has the same field count.
+                # Trailing empties (percentile/shape cols on no-duration buckets)
+                # would otherwise emit short rows that misalign downstream consumers.
+                my @row = ( $bucket_time_str, @csv_data );
+                my $target_width = scalar @output_columns;
+                push @row, (undef) x ( $target_width - scalar @row ) if scalar @row < $target_width;
+                $csv->print($csv_fh, \@row);
             }
 
             undef @csv_data;
