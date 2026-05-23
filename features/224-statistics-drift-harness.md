@@ -8,7 +8,7 @@ The harness has three independent validation layers, each catching a different c
 
 ## GitHub Issue
 
-[#224](https://github.com/gregeva/logtimeline/issues/224) — numeric drift harness for calculated statistics in CSV columns.
+[#224](https://github.com/gregeva/logtimeline/issues/224) — calculated-statistics drift and correctness harness.
 
 ## Status
 
