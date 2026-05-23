@@ -125,17 +125,18 @@ By the time you cut the release, every feature/bugfix issue has already been com
 
 9. Switch to the release branch: `git checkout release/X.Y.Z && git pull origin release/X.Y.Z`
 10. Update version in `ltl` (`$version_number` near top of GLOBALS section)
-11. **Run benchmarks**: `./tests/baseline/run-benchmark.sh full --label vX.Y.Z` — captures baseline for this release
-12. **Compare benchmarks** (if previous baseline exists): `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv` — saves full report to `tests/baseline/results/`.
-13. Finalize `releases/v{version}.md` — verify all per-feature bullets are present, append benchmark comparison table (from step 12) if available. No usage examples, no file lists, no "Breaking Changes: None", no "Known Issues", no root cause analysis. See `releases/TEMPLATE.md`.
-14. Commit: `git commit -am "Release vX.Y.Z"`
-15. Push release branch: `git push -u origin release/X.Y.Z`
-16. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
+11. **Validate CSV output structure**: `./tests/validate-csv-output.sh` — must exit 0 before proceeding. Structural regressions in `-o` CSV outputs (column presence, ordering, population, family group consistency, data types, decimal precision) block the release.
+12. **Run benchmarks**: `./tests/baseline/run-benchmark.sh full --label vX.Y.Z` — captures baseline for this release
+13. **Compare benchmarks** (if previous baseline exists): `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv` — saves full report to `tests/baseline/results/`.
+14. Finalize `releases/v{version}.md` — verify all per-feature bullets are present, append benchmark comparison table (from step 13) if available. No usage examples, no file lists, no "Breaking Changes: None", no "Known Issues", no root cause analysis. See `releases/TEMPLATE.md`.
+15. Commit: `git commit -am "Release vX.Y.Z"`
+16. Push release branch: `git push -u origin release/X.Y.Z`
+17. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
 
 ### Post-release
-17. **Merge to main via PR (NEVER direct merge):** `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` (do NOT use `--delete-branch` — release branches must be preserved)
-18. **Sync Wiki:** `git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cp docs/purpose.md /tmp/ltl-wiki/Purpose-and-Design-Philosophy.md && cp docs/explain/statistics.md /tmp/ltl-wiki/Statistics-Reference.md && cp docs/explain/heatmap.md /tmp/ltl-wiki/Heatmap-Reference.md && cp docs/explain/histogram.md /tmp/ltl-wiki/Histogram-Reference.md && cd /tmp/ltl-wiki && git add Home.md Purpose-and-Design-Philosophy.md Statistics-Reference.md Heatmap-Reference.md Histogram-Reference.md && git commit -m "Sync wiki docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki` — `docs/usage.md`, `docs/purpose.md`, `docs/explain/statistics.md`, `docs/explain/heatmap.md`, and `docs/explain/histogram.md` are the single sources of truth; the wiki is overwritten on each release.
-19. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each, NOT the release branch)
+18. **Merge to main via PR (NEVER direct merge):** `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` (do NOT use `--delete-branch` — release branches must be preserved)
+19. **Sync Wiki:** `git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cp docs/purpose.md /tmp/ltl-wiki/Purpose-and-Design-Philosophy.md && cp docs/explain/statistics.md /tmp/ltl-wiki/Statistics-Reference.md && cp docs/explain/heatmap.md /tmp/ltl-wiki/Heatmap-Reference.md && cp docs/explain/histogram.md /tmp/ltl-wiki/Histogram-Reference.md && cd /tmp/ltl-wiki && git add Home.md Purpose-and-Design-Philosophy.md Statistics-Reference.md Heatmap-Reference.md Histogram-Reference.md && git commit -m "Sync wiki docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki` — `docs/usage.md`, `docs/purpose.md`, `docs/explain/statistics.md`, `docs/explain/heatmap.md`, and `docs/explain/histogram.md` are the single sources of truth; the wiki is overwritten on each release.
+20. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each, NOT the release branch)
 
 ### Run Directly
 ```bash

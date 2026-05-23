@@ -1,0 +1,4 @@
+scenario	logfile	options	expected_families
+access-bytes-duration	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25	bytes,duration,percentile,shape,level
+thingworx-script	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 240 -n 25	duration,count,percentile,shape,level
+thingworx-application	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	-bs 240 -n 25	level
