@@ -9652,7 +9652,10 @@ sub print_bar_graph {
                     }
 
                 } elsif ($col_id eq 'latency') {
-                    # Duration statistics
+                    # Duration statistics — terminal display only. CSV emission of
+                    # these stats happens after the column loop, independent of
+                    # whether this column is visible (so auto-hide on narrow
+                    # terminals does not silently drop the values from -o output).
                     if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{p99} || defined $log_stats{$bucket}{p999} || defined $log_stats{$bucket}{cv} ) {
                         my $cv_color = defined $log_stats{$bucket}{cv} && $log_stats{$bucket}{cv} >= 20 ? 'WARN-HL' : 'white-underline';
 
@@ -9661,10 +9664,6 @@ sub print_bar_graph {
                         defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p99} ) >= 4 ? format_time( $log_stats{$bucket}{p99}, 'ms' ) : $log_stats{$bucket}{p99} ) ) : printf( " " x 11 );
                         defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-5s$colors{'NC'} ", ( length( $log_stats{$bucket}{p999} ) >= 4 ? format_time( $log_stats{$bucket}{p999}, 'ms' ) : $log_stats{$bucket}{p999} ) ) : printf( " " x 11 );
                         defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", $log_stats{$bucket}{cv} ) : printf ( " " x 7 );
-
-                        foreach my $stat ( qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef ) ) {
-                            push @csv_data, $log_stats{$bucket}{$stat};
-                        }
                     }
 
                 } elsif ($col_id eq 'heatmap') {
@@ -9673,6 +9672,18 @@ sub print_bar_graph {
 
                 # Print spacing after this column
                 print " " x ($col->{spacing_after} // 0);
+            }
+
+            # Append latency stats to CSV data. The header lists these columns
+            # when $print_durations && !$omit_durations && !$omit_stats &&
+            # !$heatmap_enabled (see normalize_data_for_output). The push must
+            # use the same gate so rows always match the header regardless of
+            # whether the latency *display column* was auto-hidden by terminal
+            # width. (Issue #263)
+            if( $print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled ) {
+                foreach my $stat ( qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef ) ) {
+                    push @csv_data, $log_stats{$bucket}{$stat};
+                }
             }
 
             # Print statistics for time-bucket statistics to the CSV file if activated
