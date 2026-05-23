@@ -14,6 +14,8 @@ The harness has three independent validation layers, each catching a different c
 
 **Planning complete 2026-05-23.** Awaiting implementation commit on branch `224-percentile-value-harness`.
 
+The CSV is the **observation channel** for this harness, not the thing under test. The harness validates `ltl`'s **internal statistics calculation** — how durations are captured, stored, and reduced into statistics in memory. Wherever this document refers to MESSAGES CSV or STATS CSV, the subject is the underlying calculation surface being observed: per-message-key statistics (observed via MESSAGES CSV) and per-time-bucket statistics (observed via STATS CSV).
+
 ## Prerequisites (all merged into `release/0.14.6`)
 
 | Issue | What it shipped | Why #224 needed it |
@@ -23,6 +25,7 @@ The harness has three independent validation layers, each catching a different c
 | [#222](https://github.com/gregeva/logtimeline/issues/222) | Added `p25, iqr, p9999, p99999, skewness, kurtosis, bimodality_coef` columns | The harness must baseline against the final column set, not an intermediate one |
 | [#223](https://github.com/gregeva/logtimeline/issues/223) | Structural CSV-integrity harness with rules-driven column schemas | Structural correctness is a precondition for meaningful drift comparison; #224 reads #223's rules TSVs |
 | [#263](https://github.com/gregeva/logtimeline/issues/263) | Decoupled STATS CSV emission from terminal-width-driven visibility | CSV content must be deterministic per input, independent of terminal geometry |
+| [#266](https://github.com/gregeva/logtimeline/issues/266) | Omnibus `-dm` / `--data-model` plus per-surface selectors `-hgdm` / `-hmdm` / `-mdm` / `-bdm`, each accepting `raw|bin` | Replaces the deprecated negative opt-out `--exact-percentiles` with positive selectors; enables the `bin-data-model` scenario family and Layer 4 cross-model agreement (Decision 9). What #266 did NOT ship: the bin-counter implementation for the per-message-key and per-time-bucket surfaces — `-mdm bin` / `-bdm bin` silently fall back to raw today. A future ticket lands those; this harness is wired to surface drift the moment it does. |
 
 ## Background — why this harness exists
 
@@ -34,9 +37,9 @@ Upcoming work will intervene on how percentiles and distribution-shape values ar
 
 A binary diff doesn't fit because legitimate algorithmic changes can shift values by small amounts. A tiered model with explicit advisory/blocking levels lets intentional change cross the tight tiers while preserving the loose ones. A single-layer drift check is insufficient because drift only knows what yesterday's value was — it cannot tell you whether yesterday's value was correct.
 
-## Decision 1 — Three independent validation layers, all required
+## Decision 1 — Four independent validation layers, all required
 
-The harness validates `ltl`'s calculated values at three independent layers. All three run on every scenario; failure at any layer blocks the release at T3 or T4.
+The harness validates `ltl`'s calculated values at four independent layers. Each catches a class of regression the others cannot. All four run on every scenario where they apply; failure at any layer blocks the release at T3 or T4. (Layer 4 is specified in detail in Decision 9 below; the summary appears here so the layer list reads as a single contract.)
 
 ### Layer 1 — Drift (baseline comparison)
 
@@ -60,6 +63,14 @@ The harness validates `ltl`'s calculated values at three independent layers. All
 - **Catches**: methodology regressions. Drift alone cannot catch wrong methodology because drift only knows about yesterday's value, which may have been wrong too.
 - **Source-log reads**: yes, but **only to feed the oracle**, never to re-implement `ltl`'s arithmetic inline in the harness. The oracle *is* the independent implementation.
 - **Tier model**: same T1/T2/T3 thresholds as Layer 1, applied to (oracle vs `ltl`) deviation. T1 means perfect agreement; T3+ blocks the release.
+
+### Layer 4 — Cross-model agreement (raw vs bin at single code state)
+
+- **What it asserts**: at a single code state, the raw-array and bin-counter data models compute statistics that agree within a documented tolerance envelope on the same sample set. Persistent disagreement beyond that envelope is an algorithmic bug in one of the two implementations.
+- **Inputs**: per logfile, the produced CSVs from the `default` (raw) scenario and the paired `bin-data-model` scenario.
+- **Catches**: cross-model algorithmic divergence. L1 can drift in lockstep across both models; L2 is single-row; L3 compares each model independently against the oracle, not against each other.
+- **Source-log reads**: none — operates only on the two paired CSVs.
+- **Tier model**: T1 bitwise / T2 ≤1% / T3 ≤4% / T4 >4%. Tolerances are per-scenario and per-column overridable via `tests/statistics-drift/cross-model-tolerances.tsv`. Full specification in Decision 9.
 
 ## Decision 2 — Strict non-overlap with #223
 
@@ -186,12 +197,12 @@ Chosen for variety of timestamp precision, sample distribution shape, and datase
 
 ### Option families
 
-Each family exercises a different statistic-affecting code path.
+Each family exercises a different statistic-affecting code path. All families pin the per-message-key and per-time-bucket data models explicitly via #266's selectors (`-mdm` and `-bdm`); the harness never relies on internal defaults.
 
-- **`default`** — `-bs 240 -n 25 -o` — standard bucket size, default ranking. Baseline statistics path (HDR bin counters).
-- **`consolidated`** — `-bs 240 -g 90 -n 25 -o` — fuzzy consolidation at 90% changes which samples land in which message-key bucket, exercising the statistics path over consolidated sample populations.
-- **`exact-percentiles`** — `-bs 240 -n 25 --exact-percentiles -o` — forces the in-memory array path instead of HDR bin counters. **Critical**: this is the path the upcoming statistic-computation work will intervene on, and the tier model exists specifically to catch drift between the two paths.
-- **`sorted-by-p999`** — `-bs 240 -n 25 -so p999 -o` — ranks output by `p999` (unlocked by #220), exercising the ranking path's use of statistic values to select the top-N messages, which changes which keys appear in MESSAGES CSV.
+- **`default`** — `-bs 240 -n 25 -mdm raw -bdm raw -o` — raw-array data model on both observed surfaces. Standard bucket size, default ranking. Baseline of the path users hit today.
+- **`consolidated`** — `-bs 240 -g 90 -n 25 -mdm raw -bdm raw -o` — fuzzy consolidation at 90% changes which samples land in which message-key bucket, exercising the statistics path over consolidated sample populations.
+- **`bin-data-model`** — `-bs 240 -n 25 -mdm bin -bdm bin -o` — bin-counter data model selected on both observed surfaces. Today the bin-counter implementation does not yet exist for these surfaces and `ltl` silently falls back to raw, so this scenario's initial baselines are byte-identical to `default`. The scenario is wired anyway so Layer 4 has a pairing to compare and so the harness surfaces drift the moment a future feature ticket lands the bin implementation. The implementing ticket is responsible for re-capturing this scenario's baselines and populating `cross-model-tolerances.tsv` with whatever envelopes are appropriate.
+- **`sorted-by-p999`** — `-bs 240 -n 25 -so p999 -mdm raw -bdm raw -o` — ranks output by `p999` (unlocked by #220), exercising the ranking path's use of statistic values to select the top-N messages, which changes which keys appear in MESSAGES CSV.
 
 ### Apache HTTP2 microsecond duration: `-du us`
 
@@ -203,14 +214,14 @@ Every Apache scenario prepends `-du us`. Other logfiles do not need `-du`: Tomca
 
 ### Resolved scenario options per logfile
 
-- **Apache HTTP2** (4 scenarios): `-du us -bs 240 -n 25 -o` / `-du us -bs 240 -g 90 -n 25 -o` / `-du us -bs 240 -n 25 --exact-percentiles -o` / `-du us -bs 240 -n 25 -so p999 -o`.
+- **Apache HTTP2** (4 scenarios): `-du us -bs 240 -n 25 -mdm raw -bdm raw -o` / `-du us -bs 240 -g 90 -n 25 -mdm raw -bdm raw -o` / `-du us -bs 240 -n 25 -mdm bin -bdm bin -o` / `-du us -bs 240 -n 25 -so p999 -mdm raw -bdm raw -o`.
 - **Tomcat, ThingWorx, Codebeamer**: the four option-family strings without `-du`.
 
 ### Matrix size
 
 **4 logs × 4 option families = 16 scenarios**, 32 baseline CSV files.
 
-If 16 proves too heavy for routine release runs, the `default` and `exact-percentiles` families are the **required** ones (8 scenarios, 16 baselines); `consolidated` and `sorted-by-p999` can be tagged as `extended` and run on demand. This split is operational, not architectural — the harness implements all 16.
+If 16 proves too heavy for routine release runs, the `default` and `bin-data-model` families are the **required** ones (8 scenarios, 16 baselines) — these are the two halves of the Layer 4 pairing; `consolidated` and `sorted-by-p999` can be tagged as `extended` and run on demand. This split is operational, not architectural — the harness implements all 16.
 
 ## Decision 7 — Failure-output format
 
@@ -236,19 +247,76 @@ FAIL [T3-L3] scenario=apache-default file=messages key="plain|[200] GET /…" co
        rule: abs(ltl-oracle) > 5% * oracle
 ```
 
+For Layer-4 failures, the failure line names both implementations and the tolerance source row:
+
+```
+FAIL [T4-L4] scenario-pair=apache-default↔apache-bin-data-model file=messages key="plain|[200] GET /…" column=p99
+       raw=1320 bin=1485 deviation=12.50% tolerance=4.00%
+       asserts: bin-counter percentile must agree with raw within configured tolerance
+       produced_by: calculate_statistics() (raw) vs <future-bin-sub>() (bin) in ltl
+       contract: features/224-statistics-drift-harness.md § Decision 9 — Layer 4 cross-model agreement
+       rule: abs(raw-bin) > tolerance% * raw   (tolerance source: cross-model-tolerances.tsv defaults)
+```
+
 Per-scenario summary line:
 
 ```
-apache-default/messages: 248 cells checked, 0 T4, 0 T3, 2 T2, 5 T1, structural=OK, L3=OK
+apache-default/messages: 248 cells checked, 0 T4, 0 T3, 2 T2, 5 T1, structural=OK, L3=OK, L4=OK
 ```
 
 ## Decision 8 — Release-process integration
 
 A new step in CLAUDE.md release process, inserted **after** #223's structural validation and **before** benchmarks:
 
-> **Validate statistics drift:** `./tests/validate-statistics-drift.sh` — must exit 0 (no T3/T4 failures across any layer) before proceeding. T1/T2 advisories are non-blocking; review to confirm any drift is intentional.
+> **Validate statistics drift:** `./tests/validate-statistics-drift.sh` — must exit 0 (no T3/T4 failures across any of the four layers) before proceeding. T1/T2 advisories are non-blocking; review to confirm any drift is intentional. Layer 4 cross-model failures often indicate that a tolerance row in `cross-model-tolerances.tsv` needs to be added or widened — review on a case-by-case basis.
 
 Order rationale: structural correctness (#223) is a precondition for meaningful drift comparison. If columns are missing or mis-typed, the drift harness has nothing to compare. Benchmark runs (1+ hour) come after both validators because there's no point spending an hour on perf benchmarks if statistic-correctness is broken.
+
+## Decision 9 — Layer 4 cross-model agreement
+
+The raw-array and bin-counter data models are independent implementations of the same statistical contract. At any single code state they should produce statistics that agree within a documented tolerance envelope on the same sample set. Layer 4 enforces this. It is the only layer that catches algorithmic divergence between the two implementations at a single code state — L1 can drift in lockstep, L2 is single-row, L3 compares each model independently against the oracle rather than against each other.
+
+### Pairing
+
+For each logfile in the scenario matrix, the engine joins the `default` scenario's output (raw data model) against the `bin-data-model` scenario's output, row-by-row on `(category, message, bucket)`. Every numeric column emitted by both is compared cell-by-cell.
+
+### Tier ladder
+
+Same shape as Layer 1, applied to the cross-model deviation:
+
+| Tier | Default rule | Blocking |
+|---|---|---|
+| T1 | bitwise identical | Advisory |
+| T2 | within ±1% | Advisory |
+| T3 | within ±4% | Advisory |
+| T4 | beyond ±4% | **Yes** |
+
+### Tolerance overrides — `cross-model-tolerances.tsv`
+
+Per-scenario / per-column tolerance overrides live in a separate TSV at `tests/statistics-drift/cross-model-tolerances.tsv`. Tuning is expected: bin-counter implementations quantize samples into bin boundaries, so percentile drift relative to raw is bounded by bin width at the relevant percentile. Wider tolerances on `p99999` than on `p50` are normal. Widening the tolerance is the contract change; it is reviewed via TSV diffs, not engine code edits.
+
+Schema:
+
+```
+scenario  column  t2_pct  t3_pct  notes
+```
+
+Resolution rules:
+
+- A row with non-blank `scenario` and `column` applies only to that pair.
+- A row with blank `scenario` and non-blank `column` applies to that column across all scenarios.
+- A row with non-blank `scenario` and blank `column` applies to all columns of that scenario.
+- A row with both blank is a syntax error and the engine refuses to start.
+- No matching row → ladder defaults apply (`0` / `1%` / `4%` / `>4%`).
+- Multiple matches → most-specific wins (scenario+column > column-only > scenario-only).
+
+The failure-output `rule:` line names the tolerance source: `cross-model-tolerances.tsv defaults` or `cross-model-tolerances.tsv scenario=X column=Y`.
+
+### Skip / sanity-check semantics during transition
+
+Today, the bin-counter implementation does not exist for the per-message-key and per-time-bucket surfaces. `-mdm bin` / `-bdm bin` parse cleanly but silently fall back to the raw-array reduction in `calculate_statistics()` (`ltl:8248`), so the `bin-data-model` scenario produces output byte-identical to `default`. Layer 4 still runs the pairing and reports `T1` on every cell — a wiring sanity check that confirms the pairing logic works end-to-end. When a future feature ticket lands the bin implementation for these surfaces and the outputs begin to diverge, the same harness immediately surfaces it without code change.
+
+A scenario where the flag itself is not exposed (none today, since #266 covers all four surfaces) would emit `L4=N/A` in the per-scenario summary instead of running the pairing. This case exists in the spec for symmetry, not for current use.
 
 ## Files
 
@@ -258,7 +326,8 @@ tests/
 └── statistics-drift/
     ├── README.md                            ← usage + scope + non-overlap with #223
     ├── scenarios.tsv                        ← 16 scenarios
-    ├── compare-statistics-drift.pl          ← Perl engine: drift + intra-row + Layer-3 join
+    ├── cross-model-tolerances.tsv           ← per-scenario / per-column Layer-4 tolerance overrides
+    ├── compare-statistics-drift.pl          ← Perl engine: L1 drift + L2 intra-row + L3 oracle join + L4 cross-model pairing
     ├── oracle/
     │   └── calculate-reference.py           ← NumPy/SciPy oracle (per-scenario invocation)
     └── baselines/
@@ -279,7 +348,7 @@ The existing scaffolding at `tests/percentile-values/` is renamed wholesale to `
 - [ ] Engine refuses to start (with a self-documenting diagnostic) if any qualifying column is missing from its column spec.
 - [ ] Engine emits a startup line listing every column it will compare, so the reader can independently verify the family is covered completely.
 - [ ] Engine does **not** re-implement #223's structural checks. If column-set / row-count / type drift is detected, it emits `STRUCTURE_DRIFT: run validate-csv-output.sh first` and exits non-zero.
-- [ ] Self-documenting assertion fields (`asserts`, `produced_by`, `contract`) are surfaced on every T3/T4 failure across all three layers.
+- [ ] Self-documenting assertion fields (`asserts`, `produced_by`, `contract`) are surfaced on every T3/T4 failure across all four layers.
 - [ ] All ten traps from `tests/HARNESS-DESIGN.md` audited and absent.
 - [ ] All cross-column invariants from Decision 4 implemented as Layer-2 T4 checks.
 - [ ] Layer-3 oracle `tests/statistics-drift/oracle/calculate-reference.py` exists and produces per-`(category, message, bucket)` JSON.
@@ -288,6 +357,11 @@ The existing scaffolding at `tests/percentile-values/` is renamed wholesale to `
 - [ ] For totals, counts, durations, and bytes the harness does not read the source log — Layer 1 + Layer 2 only.
 - [ ] For the sensitive statistics in Decision 3, Layer 3 reads the source log specifically to feed the oracle.
 - [ ] Every Apache HTTP2 scenario prepends `-du us` to its options.
+- [ ] `tests/statistics-drift/cross-model-tolerances.tsv` exists with the Decision 9 schema (`scenario  column  t2_pct  t3_pct  notes`) and the engine loads it at startup.
+- [ ] Layer 4 pairs the `default` and `bin-data-model` scenarios per logfile and reports `T1` cells / advisory tiers / blocking T4 per the Decision 9 ladder and tolerance overrides.
+- [ ] Layer-4 failure lines include the tolerance-source annotation (`cross-model-tolerances.tsv defaults` or scoped row identification).
+- [ ] On day one, with the bin path silently falling back to raw, Layer 4 reports `T1=OK` for every paired cell and exits 0 — confirms the pairing wiring is correct.
+- [ ] Per-scenario summary line ends with `L4=OK` (or the appropriate non-OK state) on every scenario where the pairing applies.
 - [ ] CLAUDE.md release process updated per Decision 8.
 - [ ] Release notes for v0.14.6 include a bullet referencing #224.
 - [ ] Harness self-validates: exits 0 on freshly captured baselines.
@@ -296,25 +370,28 @@ The existing scaffolding at `tests/percentile-values/` is renamed wholesale to `
 
 When the follow-up implementation lands, every check below must pass.
 
-1. `./tests/validate-statistics-drift.sh` against freshly captured baselines: exits 0, prints one PASS line per scenario, summary line shows `structural=OK` and `L3=OK` for every scenario.
+1. `./tests/validate-statistics-drift.sh` against freshly captured baselines: exits 0, prints one PASS line per scenario, summary line shows `structural=OK`, `L3=OK`, and `L4=OK` for every scenario.
 2. `./tests/validate-statistics-drift.sh --show-all`: prints T1/T2 advisories (mostly T1 on fresh baselines), still exits 0.
 3. `./tests/validate-statistics-drift.sh --scenario <one>`: runs only the named scenario, exits 0.
 4. **Hand-induced T3 (Layer 1)**: bump one baseline cell by 7%, re-run, confirm the failure prints all four self-documenting fields and exits 1.
 5. **Hand-induced T4 (Layer 2)**: hand-edit a baseline row so `iqr != p75 − p25`, re-run, confirm T4 with the IQR-derivation invariant identified by name, exit 1.
 6. **Hand-induced T3 (Layer 3)**: temporarily change `ltl`'s p99 interpolation method, re-run, confirm the oracle reports a T3-L3 disagreement on `p99` and identifies `numpy.percentile` as the reference. Revert and confirm Layer 3 returns to all-T1.
-7. **Anchor-missing**: rename one column in the #223 rules TSV, re-run, confirm hard failure (not silent zero-match pass).
-8. **Dependency-missing**: temporarily uninstall NumPy, confirm the driver fails fast with an install hint, not a silent skip.
-9. CLAUDE.md release-process step renders correctly when read end-to-end.
+7. **Day-one Layer-4 sanity**: with the bin implementation absent and the `-mdm bin` / `-bdm bin` selectors falling back to raw, confirm the `default ↔ bin-data-model` pairing reports `T1` for every cell on every logfile.
+8. **Hand-induced T4 (Layer 4)**: hand-edit a `bin-data-model` baseline cell to introduce a >4% delta from the paired `default` baseline, re-run, confirm a T4-L4 failure with the tolerance-source annotation and all four self-documenting fields. Add a matching row to `cross-model-tolerances.tsv` widening the tolerance to >12%, re-run, confirm the failure becomes a T2/T3 advisory.
+9. **Anchor-missing**: rename one column in the #223 rules TSV, re-run, confirm hard failure (not silent zero-match pass).
+10. **Dependency-missing**: temporarily uninstall NumPy, confirm the driver fails fast with an install hint, not a silent skip.
+11. CLAUDE.md release-process step renders correctly when read end-to-end.
 
 ## Requirements-drift prevention
 
-Three requirements surfaces describe this work:
+Two requirements surfaces describe this work:
 
 1. GitHub issue #224 body — canonical user-facing requirements.
-2. This file (`features/224-statistics-drift-harness.md`) — per-issue umbrella feature/requirements file.
-3. Working plan at `/Users/gregeva/.claude/plans/there-have-been-a-lexical-globe.md` (private to the implementation session).
+2. This file (`features/224-statistics-drift-harness.md`) — per-issue umbrella feature/requirements file (the source of truth for the design).
 
-Any edit to one must propagate to the others in the same commit. The implementation-commit precondition is "all surfaces consistent and signed off."
+Any edit to one must propagate to the other in the same commit. The implementation-commit precondition is "all surfaces consistent and signed off."
+
+Working plans under `~/.claude/plans/` are session-private notes and are not a requirements surface — if a planning conversation changes the contract, the change lands here (and in the issue body if user-facing) before implementation starts.
 
 ## Cross-references
 
