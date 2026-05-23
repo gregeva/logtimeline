@@ -422,6 +422,23 @@ my $percentile_precision_source    = 'default';  # 'default' | '-pbpd N' | '--pe
 my $exact_percentiles_optout       = 0;       # when set, migrated consumers revert to calculate_statistics
 my $percentile_seed_decades        = 5;       # partition seeds at 5 decades centered on first value
 
+# Issue #266: explicit per-surface statistical data-model selectors. The five
+# scalars below hold the user-supplied selector for each surface (or undef
+# when the user did not pass the flag). resolve_data_model()/choose_data_model()
+# read these to dispatch raw vs bin reductions at the caller. Defaults live in
+# the call sites, not here — the flags exist purely to override.
+my $data_model_omnibus             = undef;   # -dm   / --data-model
+my $data_model_histogram           = undef;   # -hgdm / --histogram-data-model
+my $data_model_heatmap             = undef;   # -hmdm / --heatmap-data-model
+my $data_model_message             = undef;   # -mdm  / --message-stats-data-model
+my $data_model_bucket              = undef;   # -bdm  / --bucket-stats-data-model
+
+# Issue #266: caller-side capture-mode cache for the parsing hot path. Set
+# once before the parsing loop begins (see choose_data_model() callers) so
+# the per-line branch in read_and_process_logs() does not re-resolve.
+my $histogram_capture_mode         = undef;   # 'raw' or 'bin' (set before parsing loop)
+my $heatmap_capture_mode           = undef;   # 'raw' or 'bin' (set before parsing loop)
+
 # Streaming-partition bpd for display-geometry-bound consumers (#201).
 # Higher than the F1 default (53) because F2/F3 partition counts are bounded
 # (~70 total across all heatmap time buckets + histogram metrics) and the
@@ -1323,6 +1340,47 @@ sub detect_index_drift {
     return;
 }
 
+# Issue #266: validate a --*data-model selector value. Dies at parse time
+# with a clear message on any value other than 'raw' or 'bin'.
+sub _validate_dm {
+    my ($flag_name, $value) = @_;
+    return if defined $value && ($value eq 'raw' || $value eq 'bin');
+    die "--$flag_name: '" . (defined $value ? $value : '') . "' is not a valid data model; valid values are 'raw' and 'bin'\n";
+}
+
+# Issue #266: resolve the user-supplied data-model selector for a surface.
+# Returns 'raw', 'bin', or undef. undef means the user supplied neither the
+# per-surface flag nor the omnibus -dm/--data-model; callers fall back to
+# their existing internal default. The surface name is one of: histogram,
+# heatmap, message-stats, bucket-stats.
+sub resolve_data_model {
+    my ($surface) = @_;
+    my %per_surface = (
+        histogram       => $data_model_histogram,
+        heatmap         => $data_model_heatmap,
+        'message-stats' => $data_model_message,
+        'bucket-stats'  => $data_model_bucket,
+    );
+    my $per = $per_surface{$surface};
+    return $per if defined $per;
+    return $data_model_omnibus if defined $data_model_omnibus;
+    return undef;
+}
+
+# Issue #266: caller-side dispatch helper. Resolves the user-supplied
+# selector via resolve_data_model(), then folds in the legacy
+# --exact-percentiles opt-out as a fallback (which means 'raw' on
+# the histogram and heatmap surfaces; surfaces 3 and 4 never honored it).
+# Returns 'raw', 'bin', or undef (undef = no user opinion at all; caller
+# applies its own internal default).
+sub choose_data_model {
+    my ($surface) = @_;
+    my $dm = resolve_data_model($surface);
+    return $dm if defined $dm;
+    return 'raw' if $exact_percentiles_optout;
+    return undef;
+}
+
 # Issue #231: classify each known long-flag-name as having been supplied
 # via the command line, the LTL_CONFIG env-var splice, both, or neither.
 # Returns a hash mapping flag-name => list of sources ('command-line',
@@ -1394,6 +1452,11 @@ sub _classify_argv_provenance {
                 'pbpd|percentile-buckets-per-decade',
                 'pp|percentile-precision',
                 'ep|exact-percentiles',
+                'dm|data-model',
+                'hgdm|histogram-data-model',
+                'hmdm|heatmap-data-model',
+                'mdm|message-stats-data-model',
+                'bdm|bucket-stats-data-model',
                 'terminal-width|tw', 'no-auto-hide|nah',
                 'debug-layout', 'validate-layout', 'help:s', 'explain|ex:s',
             );
@@ -1502,6 +1565,14 @@ sub emit_runtime_config_verbose {
         'percentile-buckets-per-decade'     => $percentile_buckets_per_decade,
         'percentile-precision'              => $percentile_precision_level,
         'exact-percentiles'                 => $exact_percentiles_optout,
+        # Issue #266: explicit data-model selectors. Emitted only when the
+        # user supplied them (per the existing provenance partitioning at
+        # the bottom of this sub) — unset flags emit nothing.
+        'data-model'                        => $data_model_omnibus,
+        'histogram-data-model'              => $data_model_histogram,
+        'heatmap-data-model'                => $data_model_heatmap,
+        'message-stats-data-model'          => $data_model_message,
+        'bucket-stats-data-model'           => $data_model_bucket,
         'no-auto-hide'                      => $no_auto_hide,
     );
 
@@ -3488,7 +3559,17 @@ sub print_help {
     $out .= help_subheading("Percentile mode");
     $out .= help_opt("-pp,   --percentile-precision <N>",            "Set percentile binning precision tier 1..9 (default: 5 = ~1.3%; 1=~10%, 9=~0.1%). Affects migrated consumers; see docs/usage.md");
     $out .= help_opt("-pbpd, --percentile-buckets-per-decade <N>",   "Set percentile buckets-per-decade directly (default: 53; valid 4..616). Overrides --percentile-precision when both supplied");
-    $out .= help_opt("-ep,   --exact-percentiles",                   "Disable unified percentile mode; revert to exact sort-based computation (deprecated; -V shows opt_out_active: yes)");
+    $out .= help_opt("-ep,   --exact-percentiles",                   "Disable unified percentile mode; revert to exact sort-based computation (deprecated; superseded by --data-model raw)");
+
+    # Data-model selectors (Issue #266). Pin which reduction path each
+    # surface uses. No defaults — when unset, the surface's existing
+    # internal logic chooses. Per-surface flag > -dm > internal default.
+    $out .= help_subheading("Data-model selectors");
+    $out .= help_opt("-dm,   --data-model <raw|bin>",                  "Pin the data model for every surface (overridden by any per-surface flag below)");
+    $out .= help_opt("-hgdm, --histogram-data-model <raw|bin>",        "Pin the histogram surface's data model");
+    $out .= help_opt("-hmdm, --heatmap-data-model <raw|bin>",          "Pin the heatmap surface's data model");
+    $out .= help_opt("-mdm,  --message-stats-data-model <raw|bin>",    "Pin the per-message-key statistics data model (selector resolved but currently always uses raw; bin lands in a follow-up)");
+    $out .= help_opt("-bdm,  --bucket-stats-data-model <raw|bin>",     "Pin the per-time-bucket statistics data model (selector resolved but currently always uses raw; bin lands in a follow-up)");
 
     # User-Defined Metrics
     $out .= help_subheading("User-Defined Metrics");
@@ -5869,6 +5950,14 @@ sub adapt_to_command_line_options {
         'pbpd|percentile-buckets-per-decade=i' => \$percentile_buckets_per_decade,
         'pp|percentile-precision=i' => \$percentile_precision_level,
         'ep|exact-percentiles' => \$exact_percentiles_optout,
+        # Issue #266: explicit data-model selectors. Each accepts 'raw' or 'bin';
+        # any other value dies at parse time via _validate_dm. The flags have no
+        # defaults — when unset, the surface's existing logic applies.
+        'dm|data-model=s'                  => sub { _validate_dm('data-model',                  $_[1]); $data_model_omnibus   = $_[1]; },
+        'hgdm|histogram-data-model=s'      => sub { _validate_dm('histogram-data-model',       $_[1]); $data_model_histogram = $_[1]; },
+        'hmdm|heatmap-data-model=s'        => sub { _validate_dm('heatmap-data-model',         $_[1]); $data_model_heatmap   = $_[1]; },
+        'mdm|message-stats-data-model=s'   => sub { _validate_dm('message-stats-data-model',   $_[1]); $data_model_message   = $_[1]; },
+        'bdm|bucket-stats-data-model=s'    => sub { _validate_dm('bucket-stats-data-model',    $_[1]); $data_model_bucket    = $_[1]; },
         'terminal-width|tw=i' => \$terminal_width,                                  # hidden
         'no-auto-hide|nah' => \$no_auto_hide,
         'debug-layout' => \$debug_layout,                                           # hidden
@@ -5877,12 +5966,14 @@ sub adapt_to_command_line_options {
         'explain|ex:s' => \$explain_arg,                                            # Issue #261: optional arg: '' = topic registry; <topic> = long-form explanation. Aliases shared with -so (avg, stddev, p1..p99999).
     ) or die print_usage( "required options not provided" );
 
-    # Issue #231: surface --exact-percentiles as deprecated. The flag
-    # reverts every migrated -V/percentile consumer to pre-#187 sort-based
-    # computation and is scheduled for removal in a future release per
-    # features/187-histogram-bin-counter-percentiles.md § Decision 8.
+    # Issue #266: --exact-percentiles is superseded by the explicit
+    # data-model selectors. Equivalent migration paths:
+    #   --exact-percentiles  -->  --data-model raw                (omnibus)
+    #                        -->  --histogram-data-model raw      (histogram only)
+    #                        -->  --heatmap-data-model raw        (heatmap only)
+    # The flag continues to work this release; removal is a follow-up.
     if ($exact_percentiles_optout) {
-        warn "--exact-percentiles is deprecated and will be removed in a future release. Migrated consumers will revert to pre-#187 sort-based percentile computation for this run.\n";
+        warn "--exact-percentiles is deprecated; use --data-model raw (omnibus) or --histogram-data-model raw / --heatmap-data-model raw (per-surface) instead. --exact-percentiles is equivalent to --data-model raw on the histogram and heatmap surfaces, which is what it has always controlled. This flag will be removed in a future release.\n";
     }
 
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
@@ -6363,6 +6454,15 @@ sub pause_for_keypress {
 # Parse logs, bucket by time, and count log levels
 sub read_and_process_logs {
     %in_files_matched = map { $_ => 0 } @in_files;			# set hash key per file to match boolean = false
+
+    # Issue #266: resolve the heatmap and histogram capture modes once,
+    # before entering the per-line parsing loop. The hot-path branches at
+    # the heatmap and histogram raw-value-capture sites read these scalars
+    # so they do not re-resolve per line. Default to 'bin' when the user
+    # did not pin a selector and --exact-percentiles is not set (matches
+    # today's behavior).
+    $heatmap_capture_mode   = choose_data_model('heatmap')   // 'bin';
+    $histogram_capture_mode = choose_data_model('histogram') // 'bin';
 
     foreach my $in_file (@in_files) {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
@@ -7129,7 +7229,9 @@ sub read_and_process_logs {
                             $heatmap_min = $heatmap_value if !defined $heatmap_min || $heatmap_value < $heatmap_min;
                             $heatmap_max = $heatmap_value if !defined $heatmap_max || $heatmap_value > $heatmap_max;
 
-                            if ($exact_percentiles_optout) {
+                            # Issue #266: dispatch via $heatmap_capture_mode resolved
+                            # once before this loop (set near the parsing-loop entry).
+                            if ($heatmap_capture_mode eq 'raw') {
                                 push @{$heatmap_raw{$bucket}}, $heatmap_value;
                                 push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $category_bucket =~ /-HL$/;
                             } else {
@@ -7145,7 +7247,9 @@ sub read_and_process_logs {
                     if ($histogram_enabled) {
                         my $is_highlighted = ($category_bucket =~ /-HL$/);
 
-                        if ($exact_percentiles_optout) {
+                        # Issue #266: dispatch via $histogram_capture_mode resolved
+                        # once before this loop (set near the parsing-loop entry).
+                        if ($histogram_capture_mode eq 'raw') {
                             if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$omit_durations) {
                                 push @{$histogram_values{duration}}, $duration;
                                 push @{$histogram_values_hl{duration}}, $duration if $is_highlighted;
@@ -7279,7 +7383,11 @@ sub find_heatmap_bucket {
 
 sub calculate_heatmap_buckets {
     return unless $heatmap_enabled;
-    return $exact_percentiles_optout
+    # Issue #266: caller-side data-model dispatch. Defaults to 'bin' (today's
+    # behavior) when the user did not pin a selector and --exact-percentiles
+    # is not set.
+    my $dm = choose_data_model('heatmap') // 'bin';
+    return $dm eq 'raw'
         ? calculate_heatmap_buckets_exact()
         : finalize_heatmap_unified();
 }
@@ -7520,7 +7628,11 @@ sub format_histogram_dimensions_line {
 # Calculate histogram buckets for all collected metrics - Issue #25
 sub calculate_histogram_buckets {
     return unless $histogram_enabled;
-    return $exact_percentiles_optout
+    # Issue #266: caller-side data-model dispatch. Defaults to 'bin' (today's
+    # behavior) when the user did not pin a selector and --exact-percentiles
+    # is not set.
+    my $dm = choose_data_model('histogram') // 'bin';
+    return $dm eq 'raw'
         ? calculate_histogram_buckets_exact()
         : finalize_histogram_unified();
 }
@@ -7982,6 +8094,12 @@ sub calculate_all_statistics {
     
         # The duration based statistics won't catch the counts if there are no durations (see else condition below)
         if( $print_durations && !$omit_durations ) {
+            # Issue #266: caller-side data-model dispatch shell. Surface 4
+            # (per-time-bucket statistics). The selector resolves to 'raw',
+            # 'bin', or undef but only the raw reduction is implemented
+            # today — calculate_statistics() is the raw primitive. When the
+            # bin reduction lands, branch on $dm before this call.
+            my $dm = choose_data_model('bucket-stats') // 'raw';
             my ($min, $mean, $max,
                 $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
                 $std_dev, $cv,
@@ -8119,6 +8237,12 @@ sub calculate_all_statistics {
                 }
 
                 if( defined $aggregated_data->{total_duration} && !$omit_durations ) {
+                    # Issue #266: caller-side data-model dispatch shell. Surface 3
+                    # (per-message-key statistics). The selector resolves to 'raw',
+                    # 'bin', or undef but only the raw reduction is implemented
+                    # today — calculate_statistics() is the raw primitive. When the
+                    # bin reduction lands, branch on $dm before this call.
+                    my $dm = choose_data_model('message-stats') // 'raw';
                     my ($min, $mean, $max,
                         $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
                         $std_dev, $cv,

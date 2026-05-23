@@ -201,7 +201,7 @@ When this matters: at the default precision, percentile values like P50 / P99 ar
 |--------|-------------|
 | `-pp, --percentile-precision <N>` | Precision tier 1..9 (default: 5). Higher tiers give tighter percentile values at the cost of more memory per partition. |
 | `-pbpd, --percentile-buckets-per-decade <N>` | Buckets per decade directly (default: 53; valid 4..616). Overrides `--percentile-precision` when both supplied. |
-| `-ep, --exact-percentiles` | Revert to exact sort-based percentile computation. Deprecated; safety net retained from the bin-counter migration. |
+| `-ep, --exact-percentiles` | Revert to exact sort-based percentile computation. Deprecated; superseded by `-dm raw` / `--data-model raw` (see Data-model selectors below). |
 
 **Precision (`-pp` / `-pbpd`).** The default (tier 5 / 53 bpd) is appropriate for the vast majority of analyses — percentile values land very close to their true sort-based values. Raise it (tier 6–9, or `-pbpd` values up to 616) when you need tighter precision on tail percentiles (P99.9, P99.99) or when comparing two runs whose true percentiles differ by very small amounts; lower it (tier 1–4) to trade percentile precision for less memory on per-message percentile computation (summary table, CSV output), which fans out to one partition per unique message and so scales with message diversity. The histogram and heatmap consumers are unaffected — they use their own internal precision tuned for display rendering and ignore this knob.
 
@@ -222,6 +222,47 @@ ltl -V histogram-bin-counters access.log
 
 # Opt out to exact (sort-based) percentiles for byte-exact comparison
 ltl -ep access.log
+```
+
+### Data-model selectors
+
+ltl reduces duration samples into statistics through one of two internal data models:
+
+- **raw** — every observed duration retained, sorted at calculation time, statistics derived by direct array operations.
+- **bin** — HDR-style bin-counter; samples bucketed at capture time into bins-per-decade primitives, statistics derived from bin counts.
+
+The choice is independent per consumer surface. There are four surfaces:
+
+| # | Surface | Today's data model |
+|---|---|---|
+| 1 | Histogram statistics (consumed by `-hg`) | bin |
+| 2 | Heatmap statistics (consumed by `-hm`) | bin |
+| 3 | Per-message-key statistics | raw |
+| 4 | Per-time-bucket statistics | raw |
+
+The data-model selectors below let you **pin** which data model a surface uses when you need certainty (test harnesses, reproducibility, A/B comparison). They have no defaults — when unset, the surface's existing internal logic chooses, and ltl's user-observable behavior is unchanged from previous releases.
+
+| Option | Description |
+|--------|-------------|
+| `-dm, --data-model <raw\|bin>` | Pin the data model for every surface (overridden by any per-surface flag below). |
+| `-hgdm, --histogram-data-model <raw\|bin>` | Pin the histogram surface's data model. |
+| `-hmdm, --heatmap-data-model <raw\|bin>` | Pin the heatmap surface's data model. |
+| `-mdm, --message-stats-data-model <raw\|bin>` | Pin the per-message-key statistics data model. Selector is resolved but currently only the raw reduction is implemented for this surface; `bin` lands in a follow-up. |
+| `-bdm, --bucket-stats-data-model <raw\|bin>` | Pin the per-time-bucket statistics data model. Same status as `-mdm` — selector resolved, raw only today. |
+
+**Resolution.** Per-surface flag overrides `-dm`; `-dm` overrides the surface's internal default. Invalid values (anything other than `raw` or `bin`) cause ltl to exit at option-parse time with a clear error. Conflicting flags on the same axis follow standard last-one-wins ordering.
+
+**Relationship to `--exact-percentiles`.** `--exact-percentiles` is equivalent to `--data-model raw` on the histogram and heatmap surfaces (which is what it has always controlled). The new selectors supersede it; `--exact-percentiles` continues to work in this release but emits a deprecation notice and is scheduled for removal in a future release.
+
+```bash
+# Pin every surface to the raw reduction path
+ltl -dm raw access.log
+
+# Override just the histogram surface; leave the heatmap on its default
+ltl -hgdm raw -hm duration -hg access.log
+
+# Inspect which selectors are active for this run
+ltl -V runtime-config -dm raw -hgdm bin access.log
 ```
 
 ### Distribution shape (CSV columns)
@@ -374,7 +415,8 @@ Section content is governed by per-section stability contracts — additions are
 | `-g <non-numeric>` (e.g. `-g logfile.log`) | The non-numeric value is treated as a positional argument and the default similarity threshold (85) is applied. |
 | `-hm <unknown-metric>` without any `-udm` configured (e.g. `-hm bogus`) | The value is treated as a positional argument and the default heatmap metric (`duration`) is applied. |
 | Both `-pbpd` and `--percentile-precision` supplied | `-pbpd` wins; the warning surfaces the override so it is visible without `-V`. |
-| `--exact-percentiles` (or `-ep`) supplied | Deprecation notice. The flag reverts every migrated percentile consumer to pre-#187 sort-based computation and is scheduled for removal in a future release. |
+| `--exact-percentiles` (or `-ep`) supplied | Deprecation notice naming the new data-model selectors (`-dm raw`, `-hgdm raw`, `-hmdm raw`) as replacements. The flag continues to work; scheduled for removal in a future release. |
+| `--data-model`, `--histogram-data-model`, `--heatmap-data-model`, `--message-stats-data-model`, or `--bucket-stats-data-model` supplied with a value other than `raw` or `bin` | ltl exits with `<flag>: '<value>' is not a valid data model; valid values are 'raw' and 'bin'`. |
 
 To inspect the resolved configuration after warnings have fired, use `-V runtime-config` and read the `command-line` and `environment-variable` sub-sections.
 
