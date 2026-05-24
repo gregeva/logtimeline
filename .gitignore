@@ -34,3 +34,7 @@ credentials*
 *.log
 *.csv
 *.out
+
+# #224 statistics-drift baselines are tracked deliverables, not produced
+# artifacts — negate the *.csv blanket ignore for that directory only.
+!tests/statistics-drift/baselines/**/*.csv
