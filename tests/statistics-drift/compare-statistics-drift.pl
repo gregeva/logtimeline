@@ -54,6 +54,7 @@ use warnings;
 use Getopt::Long;
 use File::Basename;
 use File::Spec;
+use JSON::PP;
 
 #-------------------------------------------------------------------------
 # Argument parsing and required-file preflight.
@@ -1199,6 +1200,168 @@ sub emit_l4_row_key_mismatch {
 }
 
 #-------------------------------------------------------------------------
+# Layer 3: external-oracle validation (Decision 3).
+#
+# Per Decision 3, Layer 3 validates the algebraically sensitive
+# statistics against NumPy/SciPy with explicitly pinned methodology
+# parameters. The oracle script (oracle/calculate-reference.py) reads
+# the source log, partitions samples identically to ltl, computes the
+# Decision-3 statistics, and emits JSON. This engine joins the JSON
+# against the ltl CSV by row key and tier-classifies every disagreement.
+#
+# Decision-3 column set:
+#-------------------------------------------------------------------------
+
+my @L3_COLUMNS = qw(
+    p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+    iqr std_dev cv skewness kurtosis bimodality_coef
+);
+my %L3_COLUMN_SET = map { $_ => 1 } @L3_COLUMNS;
+
+# Load an oracle JSON dump produced by calculate-reference.py.
+sub load_oracle {
+    my ($path) = @_;
+    open my $fh, '<', $path or die "cannot read $path: $!";
+    local $/;
+    my $body = <$fh>;
+    close $fh;
+    return decode_json($body);
+}
+
+# Build a row-key → oracle-row lookup for one file kind.
+sub index_oracle_rows {
+    my ($oracle, $file_kind) = @_;
+    my $rows_key = $file_kind eq 'messages' ? 'rows_messages' : 'rows_stats';
+    my %by_key;
+    for my $row (@{ $oracle->{$rows_key} // [] }) {
+        my $key;
+        if ($file_kind eq 'messages') {
+            $key = ($row->{category} // 'plain') . '|' . ($row->{message} // '');
+        } else {
+            $key = $row->{bucket} // '';
+        }
+        $by_key{$key} = $row;
+    }
+    return \%by_key;
+}
+
+sub emit_l3_failure {
+    my (%f) = @_;
+    my $dev;
+    if (!defined $f{deviation}) {
+        $dev = 'n/a';
+    } elsif ($f{deviation} =~ /^-?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?$/) {
+        $dev = sprintf('%.2f%%', $f{deviation});
+    } else {
+        $dev = $f{deviation};
+    }
+    print "FAIL [$f{tier}-L3] scenario=$f{scenario} file=$f{file} key=\"$f{key}\" column=$f{column}\n";
+    print "       ltl=$f{ltl} oracle=$f{oracle} deviation=$dev\n";
+    print "       asserts: $f{asserts}\n";
+    print "       produced_by: $f{produced_by}\n";
+    print "       contract: features/224-validate-statistics-test-harness.md \xc2\xa7 Decision 3 \xe2\x80\x94 Layer 3 methodology\n";
+    print "       rule: abs(ltl-oracle) > 5% * oracle (T3 blocking threshold)\n";
+}
+
+sub emit_l3_advisory {
+    my (%f) = @_;
+    return unless $opt{show_all};
+    my $dev = defined $f{deviation}
+        ? (($f{deviation} =~ /^-?[0-9.]+/) ? sprintf('%.4f%%', $f{deviation}) : $f{deviation})
+        : 'n/a';
+    print "ADV  [$f{tier}-L3] scenario=$f{scenario} file=$f{file} key=\"$f{key}\" column=$f{column} ltl=$f{ltl} oracle=$f{oracle} deviation=$dev\n";
+}
+
+# Same ladder as L1, applied to (ltl, oracle) deviation.
+sub classify_cell_l3 {
+    my ($ltl_val, $oracle_val) = @_;
+    return ('T1', 0.0) if $ltl_val eq sprintf('%s', $oracle_val);
+    my $l = as_num($ltl_val);
+    my $o = as_num($oracle_val);
+    return ('T_NONNUMERIC', undef) if !defined $l || !defined $o;
+    if ($o == 0) {
+        return ('T1', 0.0) if $l == 0;
+        return ('T3', 'inf');
+    }
+    my $dev = abs($l - $o) / abs($o) * 100.0;
+    return ('T1', $dev) if $dev == 0.0;
+    return ('T2', $dev) if $dev <= 1.0;
+    return ('T3', $dev) if $dev <= 5.0;
+    return ('T3', $dev);  # >5% still T3 (matches L1 convention)
+}
+
+# Run Layer 3 against an oracle JSON. Per Decision 3, Layer-3 tolerates
+# float quantization (ltl writes at most 5 decimals per #223). The
+# oracle's value is compared against ltl's at the same precision ltl
+# actually wrote — so a "byte-identical" oracle quantization counts as T1.
+sub run_layer3 {
+    my ($new_data, $oracle, $scenario, $file_kind, $stats) = @_;
+
+    my $by_key = index_oracle_rows($oracle, $file_kind);
+
+    for my $n_row (@{ $new_data->{rows} }) {
+        my $k = row_key($n_row, $file_kind);
+        my $o_row = $by_key->{$k};
+        next unless defined $o_row;  # ltl ranks top-N; oracle has all keys
+        my $o_stats = $o_row->{stats} // {};
+
+        for my $col (@L3_COLUMNS) {
+            # Only check columns that ltl actually emitted in this row's CSV.
+            next unless exists $n_row->{$col};
+            my $ltl_val = $n_row->{$col};
+            next if is_blank($ltl_val);  # ltl undefined → cannot compare
+
+            my $o_entry = $o_stats->{$col};
+            next unless defined $o_entry && defined $o_entry->{value};
+            my $o_val = $o_entry->{value};
+
+            # Quantize oracle to ltl's emission precision. We infer the
+            # decimal count from ltl's emitted string itself rather than
+            # the rules TSV (since #268 shows ltl truncates more than
+            # the rules TSV declares).
+            my $decimals = 0;
+            if ($ltl_val =~ /\.(\d+)/) {
+                $decimals = length($1);
+            }
+            my $o_quantized = sprintf("%.${decimals}f", $o_val);
+
+            my ($tier, $dev) = classify_cell_l3($ltl_val, $o_quantized);
+            $stats->{l3_cells_checked}++;
+
+            if ($tier eq 'T_NONNUMERIC') {
+                $stats->{l3_nonnumeric}++;
+                next;
+            }
+            $stats->{"l3_$tier"}++;
+
+            if ($tier eq 'T1' || $tier eq 'T2') {
+                emit_l3_advisory(
+                    tier => $tier, scenario => $scenario, file => $file_kind,
+                    key => $k, column => $col,
+                    ltl => $ltl_val, oracle => $o_quantized, deviation => $dev,
+                );
+                next;
+            }
+
+            # T3 blocking. asserts/produced_by carry the NumPy/SciPy
+            # function name verbatim from the oracle's JSON entry.
+            emit_l3_failure(
+                tier        => $tier,
+                scenario    => $scenario,
+                file        => $file_kind,
+                key         => $k,
+                column      => $col,
+                ltl         => $ltl_val,
+                oracle      => $o_quantized,
+                deviation   => $dev,
+                asserts     => "$col must match the oracle's reference implementation within 5%",
+                produced_by => $o_entry->{produced_by} // 'unknown',
+            );
+        }
+    }
+}
+
+#-------------------------------------------------------------------------
 # Main control flow.
 #-------------------------------------------------------------------------
 
@@ -1227,6 +1390,11 @@ my %stats = (
     T4                   => 0,
     nonnumeric           => 0,
     key_mismatch         => 0,
+    l3_cells_checked     => 0,
+    l3_T1                => 0,
+    l3_T2                => 0,
+    l3_T3                => 0,
+    l3_nonnumeric        => 0,
     l4_cells_checked     => 0,
     l4_T1                => 0,
     l4_T2                => 0,
@@ -1264,6 +1432,24 @@ if (defined $baseline_data && $structural_ok) {
     run_layer2($baseline_data->{rows}, $opt{scenario}, $opt{file_kind}, \%stats, 'baseline');
 }
 
+# Layer 3: external-oracle validation. Triggered when --oracle-json
+# supplied. Validates the algebraically sensitive statistics per
+# Decision 3 against NumPy/SciPy reference values.
+my $l3_state = 'N/A';
+if (defined $opt{oracle_json}) {
+    if (!-f $opt{oracle_json}) {
+        print STDERR "compare-statistics-drift.pl: --oracle-json file missing: $opt{oracle_json}\n";
+        exit 2;
+    }
+    my $oracle = load_oracle($opt{oracle_json});
+    run_layer3($new_data, $oracle, $opt{scenario}, $opt{file_kind}, \%stats);
+    if ($stats{l3_T3} > 0 || $stats{l3_nonnumeric} > 0) {
+        $l3_state = 'FAIL';
+    } else {
+        $l3_state = 'OK';
+    }
+}
+
 # Layer 4: cross-model pairing. Triggered when --paired-with and
 # --paired-new are both supplied. Validates --new (raw scenario) against
 # --paired-new (bin scenario) on the same logfile.
@@ -1286,8 +1472,14 @@ if (defined $opt{paired_with} && defined $opt{paired_new}) {
     }
 }
 
-# Per-scenario summary (Decision 7). L3=N/A until Phase F lands.
+# Per-scenario summary (Decision 7).
 my $struct_state = $structural_ok ? 'OK' : 'DRIFT';
+my $l3_detail = '';
+if ($l3_state ne 'N/A') {
+    $l3_detail = sprintf(' | L3: %d cells, %d T3, %d T2, %d T1, nonnumeric=%d',
+        $stats{l3_cells_checked},
+        $stats{l3_T3}, $stats{l3_T2}, $stats{l3_T1}, $stats{l3_nonnumeric});
+}
 my $l4_detail = '';
 if ($l4_state ne 'N/A') {
     $l4_detail = sprintf(' | L4: %d cells, %d T4, %d T3, %d T2, %d T1, nonnumeric=%d, key_mismatch=%d',
@@ -1299,12 +1491,13 @@ print "SUMMARY scenario=$opt{scenario}/$opt{file_kind}: ",
       "$stats{cells_checked} cells checked, ",
       "$stats{T4} T4, $stats{T3} T3, $stats{T2} T2, $stats{T1} T1, ",
       "nonnumeric=$stats{nonnumeric}, key_mismatch=$stats{key_mismatch}, ",
-      "structural=$struct_state, L3=N/A, L4=$l4_state$l4_detail\n";
+      "structural=$struct_state, L3=$l3_state$l3_detail, L4=$l4_state$l4_detail\n";
 
 # Exit code: T3/T4 in L1/L2 block; L4 T4 blocks; nonnumeric also blocks
 # since it indicates the engine couldn't actually assert. key_mismatch
 # (both L1 and L4 sides) blocks unless --ignore-row-key-mismatch is set.
 my $exit_fail = ($stats{T3} > 0 || $stats{T4} > 0 || $stats{nonnumeric} > 0);
+$exit_fail = 1 if $stats{l3_T3} > 0 || $stats{l3_nonnumeric} > 0;
 $exit_fail = 1 if $stats{l4_T4} > 0 || $stats{l4_nonnumeric} > 0 || $stats{l4_structural_drift};
 if (!$opt{ignore_row_key_mismatch}) {
     $exit_fail = 1 if $stats{key_mismatch} > 0 || $stats{l4_key_mismatch} > 0;

@@ -84,15 +84,26 @@ reducing combined runtime dramatically.
 Layer 3 requires Python 3, NumPy, and SciPy. The driver fails fast with an
 install hint if any are missing — it does not silently skip Layer 3.
 
+Modern Homebrew Python (macOS) and modern Linux distros (Ubuntu 24.04+,
+Debian 12+, Fedora 38+) enforce PEP 668, which blocks `pip3 install`
+against the system-managed Python. Use `--user` to install into your home
+directory without sudo or override flags:
+
 ```bash
 # macOS
 brew install python
-pip3 install numpy scipy
+pip3 install --user numpy scipy
 
 # Ubuntu/Linux
 sudo apt-get install python3 python3-pip
-pip3 install numpy scipy
+pip3 install --user numpy scipy
 ```
+
+Verify with `python3 -c "import numpy, scipy"`.
+
+If you prefer a project-local venv, the harness driver honors the venv's
+Python when invoked with `PATH=$(pwd)/.venv/bin:$PATH`. See the top-level
+README's "Test-harness dependencies" section for the venv pattern.
 
 ## Cross-model tolerance overrides
 

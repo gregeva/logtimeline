@@ -64,14 +64,16 @@ ONLY_SCENARIO=""
 SHOW_ALL=0
 CAPTURE_BASELINES=0
 IGNORE_ROW_KEY_MISMATCH=0
+SKIP_L3=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --scenario)                ONLY_SCENARIO="$2"; shift 2 ;;
         --show-all)                SHOW_ALL=1; shift ;;
         --capture-baselines)       CAPTURE_BASELINES=1; shift ;;
         --ignore-row-key-mismatch) IGNORE_ROW_KEY_MISMATCH=1; shift ;;
+        --skip-l3)                 SKIP_L3=1; shift ;;
         -h|--help)
-            sed -n '2,46p' "$0"
+            sed -n '2,48p' "$0"
             exit 0
             ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -104,6 +106,108 @@ for f in "$LTL" "$SCENARIOS_TSV" "$TOLERANCES_TSV" "$ENGINE"; do
         exit 1
     fi
 done
+
+# Layer 3 dependency preflight. Per acceptance criterion: fail fast with
+# install hint if any of python3 / numpy / scipy is missing — DO NOT
+# silently skip Layer 3 (that would be a false-pass). The --skip-l3 flag
+# is the explicit opt-out for debugging / capture mode.
+ORACLE_SCRIPT="$HARNESS_DIR/oracle/calculate-reference.py"
+L3_ENABLED=1
+if [[ $SKIP_L3 -eq 1 || $CAPTURE_BASELINES -eq 1 ]]; then
+    L3_ENABLED=0
+fi
+if [[ $L3_ENABLED -eq 1 ]]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "ERROR: Layer 3 requires python3 (not found on PATH)." >&2
+        echo "       macOS:  brew install python" >&2
+        echo "       Ubuntu: sudo apt-get install python3 python3-pip" >&2
+        echo "       Or pass --skip-l3 to run without external-oracle validation." >&2
+        exit 1
+    fi
+    if ! python3 -c 'import numpy, scipy' >/dev/null 2>&1; then
+        echo "ERROR: Layer 3 requires NumPy and SciPy (one or both missing)." >&2
+        echo "       Install (avoiding PEP 668):" >&2
+        echo "         pip3 install --user numpy scipy" >&2
+        echo "       See README.md 'Test-harness dependencies' for venv alternative." >&2
+        echo "       Or pass --skip-l3 to run without external-oracle validation." >&2
+        exit 1
+    fi
+    if [[ ! -x "$ORACLE_SCRIPT" ]]; then
+        echo "ERROR: oracle script missing or not executable: $ORACLE_SCRIPT" >&2
+        exit 1
+    fi
+fi
+
+# Per-logfile oracle JSON cache. The oracle parses the full source log
+# (potentially seconds to minutes for the 277MB Tomcat file) so caching
+# by logfile-shorthand avoids the cost being paid once per scenario.
+ORACLE_CACHE_DIR="$SCRIPT_DIR/.artifacts/oracle"
+oracle_json_for_logfile() {
+    # Args: logfile_path, bucket_size_seconds, duration_unit, format
+    # Echoes the resolved oracle JSON path on stdout; produces it if not
+    # cached. Returns non-zero if the oracle invocation fails.
+    local logfile="$1" bs_sec="$2" du_unit="$3" fmt="$4"
+    local log_shorthand
+    log_shorthand="$(csv_cache_logfile_shorthand "$logfile")"
+    local cache_name="${fmt}_${log_shorthand}_bs${bs_sec}_du${du_unit}.json"
+    local cache_path="$ORACLE_CACHE_DIR/$cache_name"
+    if [[ -f "$cache_path" ]]; then
+        echo "$cache_path"
+        return 0
+    fi
+    mkdir -p "$ORACLE_CACHE_DIR"
+    local abs_log
+    if [[ "$logfile" = /* ]]; then
+        abs_log="$logfile"
+    else
+        abs_log="$REPO_DIR/$logfile"
+    fi
+    if ! python3 "$ORACLE_SCRIPT" \
+            --log "$abs_log" \
+            --bucket-size-seconds "$bs_sec" \
+            --duration-unit "$du_unit" \
+            --format "$fmt" \
+            > "$cache_path" 2>"$cache_path.stderr"; then
+        echo "ERROR: oracle failed for $logfile (see $cache_path.stderr)" >&2
+        rm -f "$cache_path"
+        return 1
+    fi
+    echo "$cache_path"
+    return 0
+}
+
+# Extract bucket size (seconds) from an ltl options string by looking
+# for "-bs N" (N is in minutes). Returns "0" if not found.
+extract_bucket_size_seconds() {
+    local opts="$*"
+    local bs_min
+    bs_min="$(echo "$opts" | sed -nE 's/.*-bs ([0-9]+).*/\1/p')"
+    if [[ -z "$bs_min" ]]; then
+        echo "0"
+        return
+    fi
+    echo "$((bs_min * 60))"
+}
+
+# Extract duration unit (ms or us) from an ltl options string. Default ms.
+extract_duration_unit() {
+    local opts="$*"
+    if echo "$opts" | grep -qE '(^|[[:space:]])-du[[:space:]]+us($|[[:space:]])'; then
+        echo "us"
+    else
+        echo "ms"
+    fi
+}
+
+# Map an ltl logfile path to an oracle format identifier. Phase F
+# supports tomcat-access only; other formats return empty (skip L3).
+oracle_format_for_logfile() {
+    local logfile="$1"
+    case "$logfile" in
+        logs/AccessLogs/localhost_access_log-twx*) echo "tomcat-access" ;;
+        *) echo "" ;;
+    esac
+}
 
 total_pass=0
 total_fail=0
@@ -186,6 +290,26 @@ while IFS=$'\t' read -r scenario logfile options; do
         fi
         if [[ $IGNORE_ROW_KEY_MISMATCH -eq 1 ]]; then
             engine_args+=(--ignore-row-key-mismatch)
+        fi
+
+        # Layer 3: resolve oracle JSON per-logfile (cached). The oracle
+        # only supports tomcat-access in Phase F; other formats skip L3
+        # (engine reports L3=N/A via absence of --oracle-json).
+        if [[ $L3_ENABLED -eq 1 ]]; then
+            fmt="$(oracle_format_for_logfile "$logfile")"
+            if [[ -n "$fmt" ]]; then
+                bs_sec="$(extract_bucket_size_seconds "$options")"
+                du_unit="$(extract_duration_unit "$options")"
+                if [[ "$bs_sec" != "0" ]]; then
+                    set +e
+                    oracle_json="$(oracle_json_for_logfile "$logfile" "$bs_sec" "$du_unit" "$fmt")"
+                    orc=$?
+                    set -e
+                    if [[ $orc -eq 0 && -n "$oracle_json" ]]; then
+                        engine_args+=(--oracle-json "$oracle_json")
+                    fi
+                fi
+            fi
         fi
 
         set +e
