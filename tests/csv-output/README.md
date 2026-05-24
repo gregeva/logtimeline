@@ -1,6 +1,6 @@
 # CSV-output integrity harness
 
-Issue #223. Sibling to `tests/percentile-values/` (Issue #224).
+Issue #223. Sibling to `tests/statistics-drift/` (Issue #224).
 
 ## What this harness validates
 
@@ -23,8 +23,10 @@ Categorical, pass/fail correctness of `-o` CSV outputs:
 
 ## What this harness does NOT validate
 
-- Numeric drift of values themselves (that's `tests/percentile-values/`, #224).
+- Numeric drift of values themselves (that's `tests/statistics-drift/`, #224).
 - Cross-column arithmetic relationships (that's #224's territory).
+- Algorithmic correctness against an external oracle (that's #224's territory).
+- Cross-model agreement between raw and bin data models (that's #224's territory).
 - Layout/rendering of the bar graph (that's `validate-regression.sh`).
 
 ## Files
@@ -109,6 +111,6 @@ what the CSV outputs *should* look like at any release tag.
 |---|---|
 | `validate-regression.sh` | Rendered terminal output byte-identity |
 | `validate-csv-output.sh` (this) | CSV structural & type-wise correctness |
-| `validate-percentile-values.sh` (#224) | Numeric drift of percentile/shape values |
+| `validate-statistics.sh` (#224) | Numeric drift, intra-row consistency, oracle correctness, cross-model agreement |
 
 These three layer cleanly: terminal layout, CSV structure, CSV values.

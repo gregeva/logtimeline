@@ -5,7 +5,7 @@
 # Categorical, pass/fail validation of -o CSV output: column structure,
 # population, group consistency, data-type correctness, fixed-decimal rules.
 #
-# Sibling to validate-percentile-values.sh (#224), which handles numeric drift.
+# Sibling to validate-statistics.sh (#224), which handles numeric drift.
 # This validator never checks numeric drift — only structural/type integrity.
 #
 # Usage:

@@ -1,0 +1,40 @@
+# Statistics-drift scenarios (Issue #224).
+# One scenario per row. Tab-separated. Lines starting with # are comments.
+#
+# Columns:
+#   scenario  — short id (used for baseline directory name and cache filenames)
+#   logfile   — path relative to repo root
+#   options   — ltl options (excluding --disable-progress; -o is always last)
+#
+# Decision 6 matrix: 4 golden log files x 4 option families = 16 scenarios.
+#
+# Option families (Decision 6):
+#   default          baseline raw-array data model on both observed surfaces
+#   consolidated     -g 90 changes which samples land in which message bucket
+#   bin-data-model   bin-counter data model on both surfaces (falls back to raw today)
+#   sorted-by-p999   ranks output by p999 (exercises percentile-based ranking)
+#
+# All scenarios pin -mdm and -bdm explicitly (#266 selectors) so the harness
+# never relies on internal defaults.
+#
+# Apache HTTP2 scenarios prepend -du us because its access log records duration
+# in microseconds and auto-detection cannot infer this. Without -du us every
+# statistic is wrong by 10^k.
+#
+# scenario	logfile	options
+apache-default	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-du us -bs 240 -n 25 -mdm raw -bdm raw -o
+apache-consolidated	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-du us -bs 240 -g 90 -n 25 -mdm raw -bdm raw -o
+apache-bin-data-model	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-du us -bs 240 -n 25 -mdm bin -bdm bin -o
+apache-sorted-by-p999	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-du us -bs 240 -n 25 -so p999 -mdm raw -bdm raw -o
+tomcat-default	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-bs 240 -n 25 -mdm raw -bdm raw -o
+tomcat-consolidated	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-bs 240 -g 90 -n 25 -mdm raw -bdm raw -o
+tomcat-bin-data-model	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-bs 240 -n 25 -mdm bin -bdm bin -o
+tomcat-sorted-by-p999	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-bs 240 -n 25 -so p999 -mdm raw -bdm raw -o
+thingworx-default	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 240 -n 25 -mdm raw -bdm raw -o
+thingworx-consolidated	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 240 -g 90 -n 25 -mdm raw -bdm raw -o
+thingworx-bin-data-model	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 240 -n 25 -mdm bin -bdm bin -o
+thingworx-sorted-by-p999	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 240 -n 25 -so p999 -mdm raw -bdm raw -o
+codebeamer-default	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-bs 240 -n 25 -mdm raw -bdm raw -o
+codebeamer-consolidated	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-bs 240 -g 90 -n 25 -mdm raw -bdm raw -o
+codebeamer-bin-data-model	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-bs 240 -n 25 -mdm bin -bdm bin -o
+codebeamer-sorted-by-p999	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-bs 240 -n 25 -so p999 -mdm raw -bdm raw -o
