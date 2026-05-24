@@ -215,5 +215,5 @@ The issue body's criterion "MESSAGES CSV and STATS CSV statistics emit when `-md
 
 - `features/187-histogram-bin-counter-percentiles.md`
 - `features/189-bin-counter-primitives-implementation-readiness-audit.md`
-- `features/224-statistics-drift-harness.md`
+- `features/224-validate-statistics-test-harness.md`
 - Issue #231 — current deprecation warning and `-V runtime-config` source-annotation pattern.

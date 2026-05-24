@@ -95,7 +95,7 @@ The harness validates `ltl`'s calculated values at four independent layers. Each
 
 The harness assumes structural correctness because #223 enforces it.
 
-- The release-process step running `validate-statistics-drift.sh` is ordered **after** `validate-csv-output.sh`. If #223 has not been run or has failed, #224's failure modes are undefined and the harness emits a single diagnostic line pointing the reader at #223.
+- The release-process step running `validate-statistics.sh` is ordered **after** `validate-csv-output.sh`. If #223 has not been run or has failed, #224's failure modes are undefined and the harness emits a single diagnostic line pointing the reader at #223.
 - The comparison engine does not re-implement #223's checks. If a baseline CSV and a fresh CSV disagree on column presence or ordering, that is a #223 regression — #224 emits a single `STRUCTURE_DRIFT: run validate-csv-output.sh first` diagnostic and exits non-zero, rather than emitting per-cell T4 failures that would shadow the real diagnosis.
 
 ## Decision 3 — Layer-3 oracle scope (algebraically sensitive statistics)
@@ -243,7 +243,7 @@ FAIL [T3-L3] scenario=apache-default file=messages key="plain|[200] GET /…" co
        ltl=1320 oracle=1310 deviation=0.76%
        asserts: p99 must match numpy.percentile(samples, 99, method='linear')
        produced_by: calculate_percentiles_for_bucket() in ltl
-       contract: features/224-statistics-drift-harness.md § Decision 3 — Layer 3 methodology
+       contract: features/224-validate-statistics-test-harness.md § Decision 3 — Layer 3 methodology
        rule: abs(ltl-oracle) > 5% * oracle
 ```
 
@@ -254,7 +254,7 @@ FAIL [T4-L4] scenario-pair=apache-default↔apache-bin-data-model file=messages 
        raw=1320 bin=1485 deviation=12.50% tolerance=4.00%
        asserts: bin-counter percentile must agree with raw within configured tolerance
        produced_by: calculate_statistics() (raw) vs <future-bin-sub>() (bin) in ltl
-       contract: features/224-statistics-drift-harness.md § Decision 9 — Layer 4 cross-model agreement
+       contract: features/224-validate-statistics-test-harness.md § Decision 9 — Layer 4 cross-model agreement
        rule: abs(raw-bin) > tolerance% * raw   (tolerance source: cross-model-tolerances.tsv defaults)
 ```
 
@@ -268,9 +268,9 @@ apache-default/messages: 248 cells checked, 0 T4, 0 T3, 2 T2, 5 T1, structural=O
 
 A new step in CLAUDE.md release process, inserted **after** #223's structural validation and **before** benchmarks:
 
-> **Validate statistics drift:** `./tests/validate-statistics-drift.sh` — must exit 0 (no T3/T4 failures across any of the four layers) before proceeding. T1/T2 advisories are non-blocking; review to confirm any drift is intentional. Layer 4 cross-model failures often indicate that a tolerance row in `cross-model-tolerances.tsv` needs to be added or widened — review on a case-by-case basis.
+> **Validate statistics:** `./tests/validate-statistics.sh` — must exit 0 (no T3/T4 failures across any of the four layers) before proceeding. T1/T2 advisories are non-blocking; review to confirm any drift is intentional. Layer 4 cross-model failures often indicate that a tolerance row in `cross-model-tolerances.tsv` needs to be added or widened — review on a case-by-case basis.
 
-Order rationale: structural correctness (#223) is a precondition for meaningful drift comparison. If columns are missing or mis-typed, the drift harness has nothing to compare. Benchmark runs (1+ hour) come after both validators because there's no point spending an hour on perf benchmarks if statistic-correctness is broken.
+Order rationale: structural correctness (#223) is a precondition for meaningful drift comparison. If columns are missing or mis-typed, the harness has nothing to compare. Benchmark runs (1+ hour) come after both validators because there's no point spending an hour on perf benchmarks if statistic-correctness is broken.
 
 ## Decision 9 — Layer 4 cross-model agreement
 
@@ -318,16 +318,97 @@ Today, the bin-counter implementation does not exist for the per-message-key and
 
 A scenario where the flag itself is not exposed (none today, since #266 covers all four surfaces) would emit `L4=N/A` in the per-scenario summary instead of running the pairing. This case exists in the spec for symmetry, not for current use.
 
+## Decision 10 — Shared CSV artifact cache (cross-harness reuse)
+
+Two harnesses currently run `ltl … -o` against overlapping scenarios: `validate-csv-output.sh` (#223) and `validate-statistics.sh` (#224). Producing each CSV is a multi-second to multi-minute `ltl` invocation; doing the same work twice in the same release-process pass is wasteful. End-to-end test runtime is a first-class concern — the combined harnesses can easily reach 2–5 minutes if every scenario runs `ltl` twice.
+
+A shared cache eliminates the duplication without coupling the harnesses to each other's internals.
+
+### Cache directory
+
+`tests/.artifacts/csv/` — gitignored, top-level under `tests/`. The leading dot groups it with hidden infrastructure and visually separates it from spec directories (`tests/csv-output/`, `tests/statistics-drift/`, etc.) which contain only committed files. Future shared scratch areas live as siblings under `tests/.artifacts/`.
+
+### Deterministic filename convention
+
+`ltl`'s `-o` flag auto-generates CSV filenames from the input log basename, so two scenarios that consume the same logfile would collide. Immediately after each `ltl` invocation, the producer-side helper renames the generated CSVs to deterministic names built from three kebab-case segments:
+
+```
+{scenario}_{options-shorthand}_{logfile-shorthand}__{messages|stats}.csv
+```
+
+- `{scenario}` — the scenario name as it appears in `scenarios.tsv` (e.g., `apache-default`, `tomcat-bin-data-model`).
+- `{options-shorthand}` — mechanically derived from the option string by stripping `-o` and kebab-joining the remainder (e.g., `-bs 240 -n 25 -mdm raw -bdm raw` becomes `bs240-n25-mdm-raw-bdm-raw`). The helper computes this; no hand-maintained mapping table.
+- `{logfile-shorthand}` — kebab-case basename of the input log minus its extension, truncated as needed.
+- `__{messages|stats}` — discriminator for the two CSVs `ltl` emits per run.
+
+The full filename for an Apache-default MESSAGES CSV is approximately `apache-default_bs240-n25-mdm-raw-bdm-raw_apachehttp2-2026-01-25__messages.csv`. Verbose, but unambiguous and self-describing on disk.
+
+### Producer flow (shared helper)
+
+The single source of truth is `tests/lib/csv-cache.sh`, sourced by both `validate-csv-output.sh` and `validate-statistics.sh`. For each scenario:
+
+1. Compute the expected cache filename pair (messages + stats).
+2. If both cache files exist → reuse, skip the `ltl` invocation entirely.
+3. Otherwise → run `ltl … -o` in a per-invocation temp directory, then rename the auto-generated CSVs to the cache filenames atomically.
+
+The cache is symmetric: whichever harness runs first populates it; the second one consumes whatever is there. There is no producer/consumer relationship hardcoded in either harness — they both simply ask the helper for a deterministically-named CSV and accept it.
+
+### Scenario alignment between #223 and #224
+
+For the cache to hit, the option strings must match exactly. Two paths:
+
+- **#224 scenarios that overlap #223's scenario set use the identical option string** so the cache filename collides → automatic reuse.
+- **#224 scenarios that #223 does not run** are #224-unique cache misses → `ltl` runs once, cache populated for any future caller.
+
+Whether to adjust #223's `scenarios.tsv` so more scenarios overlap (e.g., adding `-mdm raw -bdm raw` to #223 scenarios that don't have it) is a separate decision reviewed via a proposed diff to `tests/csv-output/scenarios.tsv` before any edit lands.
+
+### What the cache does NOT do
+
+- **Cross-branch invalidation.** The cache is keyed on filename, not `ltl` version or commit. A switch between branches with different `ltl` behavior may produce stale cached CSVs. Mitigation: the master cleanup script (Decision 11) deletes the cache at end-of-suite, so the next run starts cold. Developers switching branches mid-investigation should clear the cache manually.
+- **Baseline storage.** Layer 1 baselines live in `tests/statistics-drift/baselines/` (committed); they are not the same artifacts as the runtime cache. The cache is freshly-produced CSVs; the baselines are committed-from-a-prior-release CSVs.
+
+## Decision 11 — Master cleanup and orchestration awareness
+
+The CSV cache is intentionally not auto-cleaned per harness invocation, because the next harness in a chained run needs the cached files. But each harness must clean up after itself when run standalone, and the cache must not accumulate indefinitely.
+
+### Master cleanup script
+
+`tests/cleanup-test-artifacts.sh` — new top-level cleanup script invoked at the end of any orchestrated test run. Today its scope is `rm -rf tests/.artifacts/`. Future harnesses with shared scratch register themselves by extending this script.
+
+This is the only place in the test suite that deletes the shared cache. Per-harness traps that delete the cache are forbidden because they would defeat cross-harness reuse.
+
+### Orchestration signaling
+
+The harness needs to know whether it is the top of the call chain (standalone — must call cleanup itself) or running under an orchestrator (must leave the cache alone — orchestrator owns cleanup).
+
+The wiring mechanism is open and will be settled when the helper is drafted. Indicative shape: an environment variable like `LTL_TEST_ORCHESTRATED=1` set by the orchestrator; each harness checks it. Unset → cleanup at end. Set → skip cleanup. The orchestrator's own end-of-run does cleanup explicitly. This means `cleanup-test-artifacts.sh` is invoked exactly once per end-to-end test run, regardless of whether one or both validators ran.
+
+### Today's "orchestrator" is the release-process step list
+
+There is no master `run-all-tests.sh` today. The release-process step list in CLAUDE.md is the de facto orchestrator. The orchestration-signaling contract means the release process must either:
+
+- (a) wrap the validator pair in a small script that sets the env var, runs both validators, then calls cleanup; or
+- (b) document the env-var convention so each release-process step sets it inline.
+
+This decision is left to the implementing commit; either form satisfies the contract.
+
 ## Files
 
 ```
 tests/
-├── validate-statistics-drift.sh             ← driver (Bash, beside other validate-*.sh)
-└── statistics-drift/
+├── .artifacts/                              ← NEW: gitignored, top-level shared scratch
+│   └── csv/                                 ← deterministic-named CSVs shared by #223 ↔ #224 (Decision 10)
+├── cleanup-test-artifacts.sh                ← NEW: master end-of-suite cleanup (Decision 11)
+├── lib/
+│   └── csv-cache.sh                         ← NEW: shared producer + cache helper
+├── validate-csv-output.sh                   ← MODIFIED: source csv-cache.sh, drop self-contained cleanup, become orchestration-aware
+├── validate-statistics.sh                   ← NEW: driver (beside other validate-*.sh), orchestration-aware
+├── csv-output/                              ← UNCHANGED: pure spec (README, rules, scenarios.tsv, .pl) — no produced artifacts here
+└── statistics/                              ← git mv from tests/percentile-values/
     ├── README.md                            ← usage + scope + non-overlap with #223
     ├── scenarios.tsv                        ← 16 scenarios
     ├── cross-model-tolerances.tsv           ← per-scenario / per-column Layer-4 tolerance overrides
-    ├── compare-statistics-drift.pl          ← Perl engine: L1 drift + L2 intra-row + L3 oracle join + L4 cross-model pairing
+    ├── compare-statistics-drift.pl                ← Perl engine: L1 drift + L2 intra-row + L3 oracle join + L4 cross-model pairing
     ├── oracle/
     │   └── calculate-reference.py           ← NumPy/SciPy oracle (per-scenario invocation)
     └── baselines/
@@ -340,7 +421,7 @@ The existing scaffolding at `tests/percentile-values/` is renamed wholesale to `
 
 ## Acceptance Criteria
 
-- [ ] `tests/validate-statistics-drift.sh` exists and is executable.
+- [ ] `tests/validate-statistics.sh` exists and is executable.
 - [ ] `tests/percentile-values/` is removed (or `git mv`'d to `tests/statistics-drift/`).
 - [ ] `tests/statistics-drift/{scenarios.tsv, compare-statistics-drift.pl, README.md}` exist; `scenarios.tsv` has the 3-column shape (`scenario`, `logfile`, `options`).
 - [ ] 32 baseline CSV files captured under `tests/statistics-drift/baselines/`.
@@ -363,6 +444,15 @@ The existing scaffolding at `tests/percentile-values/` is renamed wholesale to `
 - [ ] On day one, with the bin path silently falling back to raw, Layer 4 reports `T1=OK` for every paired cell and exits 0 — confirms the pairing wiring is correct.
 - [ ] Per-scenario summary line ends with `L4=OK` (or the appropriate non-OK state) on every scenario where the pairing applies.
 - [ ] CLAUDE.md release process updated per Decision 8.
+- [ ] `tests/lib/csv-cache.sh` exists and is sourced by both `validate-csv-output.sh` and `validate-statistics.sh`.
+- [ ] `tests/.artifacts/` is added to `.gitignore`.
+- [ ] CSV cache filenames follow the `{scenario}_{options-shorthand}_{logfile-shorthand}__{messages|stats}.csv` pattern (Decision 10), computed mechanically — no hand-maintained scenario→filename table.
+- [ ] When the same option string + logfile combination is requested twice (by either harness), the second request reuses the cache file rather than re-running `ltl`.
+- [ ] `validate-csv-output.sh` no longer produces CSVs via `mktemp -d`; it uses the shared helper, and its own per-run cleanup `trap` is removed.
+- [ ] `tests/cleanup-test-artifacts.sh` exists, is executable, and removes `tests/.artifacts/` cleanly.
+- [ ] Each harness, when invoked without the orchestration signal, calls `cleanup-test-artifacts.sh` at its own end of run; when invoked with the orchestration signal, it leaves the cache in place.
+- [ ] The orchestration signal (env var or equivalent) is documented in both `validate-csv-output.sh` and `validate-statistics.sh` headers and in `tests/statistics-drift/README.md`.
+- [ ] README.md "Install Dependencies" section lists Python 3, NumPy, and SciPy as test-harness dependencies with install commands for macOS and Ubuntu.
 - [ ] Release notes for v0.14.6 include a bullet referencing #224.
 - [ ] Harness self-validates: exits 0 on freshly captured baselines.
 
@@ -370,9 +460,9 @@ The existing scaffolding at `tests/percentile-values/` is renamed wholesale to `
 
 When the follow-up implementation lands, every check below must pass.
 
-1. `./tests/validate-statistics-drift.sh` against freshly captured baselines: exits 0, prints one PASS line per scenario, summary line shows `structural=OK`, `L3=OK`, and `L4=OK` for every scenario.
-2. `./tests/validate-statistics-drift.sh --show-all`: prints T1/T2 advisories (mostly T1 on fresh baselines), still exits 0.
-3. `./tests/validate-statistics-drift.sh --scenario <one>`: runs only the named scenario, exits 0.
+1. `./tests/validate-statistics.sh` against freshly captured baselines: exits 0, prints one PASS line per scenario, summary line shows `structural=OK`, `L3=OK`, and `L4=OK` for every scenario.
+2. `./tests/validate-statistics.sh --show-all`: prints T1/T2 advisories (mostly T1 on fresh baselines), still exits 0.
+3. `./tests/validate-statistics.sh --scenario <one>`: runs only the named scenario, exits 0.
 4. **Hand-induced T3 (Layer 1)**: bump one baseline cell by 7%, re-run, confirm the failure prints all four self-documenting fields and exits 1.
 5. **Hand-induced T4 (Layer 2)**: hand-edit a baseline row so `iqr != p75 − p25`, re-run, confirm T4 with the IQR-derivation invariant identified by name, exit 1.
 6. **Hand-induced T3 (Layer 3)**: temporarily change `ltl`'s p99 interpolation method, re-run, confirm the oracle reports a T3-L3 disagreement on `p99` and identifies `numpy.percentile` as the reference. Revert and confirm Layer 3 returns to all-T1.
@@ -387,7 +477,7 @@ When the follow-up implementation lands, every check below must pass.
 Two requirements surfaces describe this work:
 
 1. GitHub issue #224 body — canonical user-facing requirements.
-2. This file (`features/224-statistics-drift-harness.md`) — per-issue umbrella feature/requirements file (the source of truth for the design).
+2. This file (`features/224-validate-statistics-test-harness.md`) — per-issue umbrella feature/requirements file (the source of truth for the design).
 
 Any edit to one must propagate to the other in the same commit. The implementation-commit precondition is "all surfaces consistent and signed off."
 

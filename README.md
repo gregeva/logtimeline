@@ -51,6 +51,20 @@ cpanm PAR::Packer
 cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
 ```
 
+#### Test-harness dependencies
+
+The `validate-statistics.sh` harness Layer 3 (external-oracle validation) requires Python 3, NumPy, and SciPy. The harness fails fast with an install hint if any are missing — it does not silently skip Layer 3.
+
+```bash
+# macOS
+brew install python
+pip3 install numpy scipy
+
+# Ubuntu/Linux
+sudo apt-get install python3 python3-pip
+pip3 install numpy scipy
+```
+
 ### Build Static Binaries
 
 ```bash
