@@ -1,6 +1,7 @@
 nytprof/
 _Inline/
 tests/profile/samples/
+tests/.artifacts/
 logs/
 
 # Runtime artifact (Issue #46 / #179)
