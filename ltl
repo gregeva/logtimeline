@@ -1856,9 +1856,20 @@ sub emit_csv_output_verbose {
         push @verbose_output, "decimals_$family: $decimals";
     }
 
+    # Default-mode ceiling is the max of (rules-TSV literal=5, family
+    # decimals after -du derivation). Sub-ms units push family decimals
+    # above 5, so the ceiling moves up accordingly. Full mode has no
+    # ceiling; N mode uses N.
     my $ceiling;
     if ($csv_precision eq 'default') {
-        $ceiling = '5 (default mode)';
+        my $max_family = 5;
+        for my $family (qw(meta count duration percentile shape bytes level)) {
+            next unless exists $csv_family_decimals{$family};
+            my $d = $csv_family_decimals{$family};
+            next unless $d =~ /^\d+$/;
+            $max_family = $d if $d > $max_family;
+        }
+        $ceiling = "$max_family (default mode)";
     } elsif ($csv_precision eq 'full') {
         $ceiling = 'n/a (full mode)';
     } else {
@@ -5965,7 +5976,13 @@ sub format_csv_value {
         $decimals = 1;
     }
     return $value if $decimals eq 'n/a';  # defensive — should not occur outside full mode
-    return sprintf("%.${decimals}f", $value);
+    # Round to the resolved decimal count, then strip trailing zeros (and a
+    # trailing bare decimal point) so the emitted form carries only
+    # significant digits. The family decimals are a max, not a fixed width.
+    my $formatted = sprintf("%.${decimals}f", $value);
+    $formatted =~ s/\.0+$//;
+    $formatted =~ s/(\.\d*?)0+$/$1/;
+    return $formatted;
 }
 
 # Issue #268: render-time CV formatter. Storage is precise; the table

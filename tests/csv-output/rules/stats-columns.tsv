@@ -23,7 +23,7 @@ msg-rate_min	*	float	no	1	level
 msg-rate_hr	*	float	no	1	level
 msg-rate_day	*	float	no	1	level
 occurrences	*	int	yes	0	meta
-duration	*	int	conditional:duration	0	duration
+duration	*	float	conditional:duration	9	duration
 duration_nice	*	nice	conditional:duration	n/a	duration
 bytes	*	int	conditional:bytes	0	bytes
 bytes_nice	*	nice	conditional:bytes	n/a	bytes

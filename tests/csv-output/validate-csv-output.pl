@@ -27,13 +27,18 @@ GetOptions(
     'scenario=s'           => \$opt{scenario},
     'file-kind=s'          => \$opt{file_kind},
     'expected-families=s'  => \$opt{expected_families},
+    'v-precision=s'        => \$opt{v_precision},
 ) or die "bad args\n";
 
-for my $k (qw(rules csv scenario file_kind expected_families)) {
+for my $k (qw(rules csv scenario file_kind expected_families v_precision)) {
     die "missing --$k\n" unless defined $opt{$k};
 }
 
 my %active_family = map { $_ => 1 } split /,/, $opt{expected_families};
+
+# Parse the -V csv-output / precision block — locked observability surface
+# per #268. Field-name keys without source-annotation suffix.
+my %vp = load_v_precision($opt{v_precision});
 
 my @rules = load_rules($opt{rules});
 
@@ -44,6 +49,13 @@ die "empty CSV: $opt{csv}\n" unless $header_row;
 
 my $fails = 0;
 my $checks = 0;
+
+# --- Phase 0: observability surface (#268 test class A + F) ---
+# Field presence is asserted on the messages pass only; the surface is a
+# run-level property, not a per-file one.
+if ($opt{file_kind} eq 'messages') {
+    $fails += check_observability_surface(\%vp);
+}
 
 # --- Phase 1: column structure ---
 $fails += check_column_structure($header_row, \@rules);
@@ -104,6 +116,14 @@ while (my $row = $csv->getline($fh)) {
         # type + decimal checks on non-empty cells
         $fails += check_type_and_decimals($rule, $val, $col_name, $row_num);
         $checks++;
+    }
+
+    # --- Storage-precision invariants (#268 test class D) ---
+    # Asserted under -cp full because default/N modes round emit and would
+    # mask sub-ceiling drift. The invariants describe what storage must
+    # uphold; full-mode emit exposes the stored values directly.
+    if ($vp{precision_mode} eq 'full') {
+        $fails += check_storage_precision_invariants($row, \%col_index, $row_num);
     }
 
     # group-consistency check: for each active family, all conditional columns
@@ -283,19 +303,22 @@ sub check_type_and_decimals {
             });
             $f++;
         }
-        # decimal-count check
-        if ($val =~ /\.(\d+)$/ && $rule->{max_decimals} ne 'n/a') {
+        # decimal-count check, honoring the --csv-precision mode (#268).
+        # The effective ceiling is sourced from the -V csv-output / precision
+        # block, not the rules TSV literal. Full mode bypasses the check.
+        my $ceiling = effective_max_decimals($rule, $col_name);
+        if ($val =~ /\.(\d+)$/ && defined $ceiling) {
             my $decimals = length($1);
-            if ($decimals > $rule->{max_decimals}) {
+            if ($decimals > $ceiling) {
                 emit_fail({
                     scenario => $opt{scenario}, file => $opt{file_kind}, row => $row_num,
                     column => $col_name,
-                    asserts => "column '$col_name' must not exceed max_decimals=$rule->{max_decimals}",
+                    asserts => "column '$col_name' must not exceed effective decimal ceiling=$ceiling (resolved from -V csv-output / precision)",
                     produced_by => producer($opt{file_kind}),
-                    contract => 'Issue #223 § Fixed-decimal rule',
-                    expected => "<= $rule->{max_decimals} decimal places",
+                    contract => 'Issue #223 § Fixed-decimal rule; Issue #268 § Precision-mode ceiling',
+                    expected => "<= $ceiling decimal places",
                     actual => "$decimals decimal places ($val)",
-                    rule => "max_decimals=$rule->{max_decimals}",
+                    rule => "effective_ceiling=$ceiling (precision_mode=$vp{precision_mode})",
                 });
                 $f++;
             }
@@ -379,14 +402,17 @@ sub producer {
 
 sub emit_fail {
     my ($f) = @_;
-    printf "FAIL scenario=%s file=%s row=%s column=%s asserts=%s produced_by=%s contract=%s expected=%s actual=%s rule=%s\n",
-        $f->{scenario}, $f->{file}, $f->{row}, $f->{column},
-        qquote($f->{asserts}),
-        $f->{produced_by},
-        qquote($f->{contract}),
-        qquote($f->{expected}),
-        qquote($f->{actual}),
-        qquote($f->{rule});
+    # Multi-line indented form per tests/HARNESS-DESIGN.md § Self-documenting
+    # assertions. Each field is quoted uniformly via qquote() so embedded
+    # parentheses or whitespace cannot confuse a reader.
+    printf "FAIL  scenario=%s file=%s row=%s column=%s\n",
+        $f->{scenario}, $f->{file}, $f->{row}, qquote($f->{column});
+    printf "        asserts:     %s\n", qquote($f->{asserts});
+    printf "        produced_by: %s\n", qquote($f->{produced_by});
+    printf "        contract:    %s\n", qquote($f->{contract});
+    printf "        expected:    %s\n", qquote($f->{expected});
+    printf "        actual:      %s\n", qquote($f->{actual});
+    printf "        rule:        %s\n", qquote($f->{rule});
 }
 
 sub qquote {
@@ -394,4 +420,177 @@ sub qquote {
     $s = '' unless defined $s;
     $s =~ s/"/\\"/g;
     return qq("$s");
+}
+
+# Issue #268: parse the -V csv-output / precision sub-section block.
+# Returns a hash keyed by field name. Source annotations '(<source>)'
+# are stripped to leave a bare value the validator can compare.
+sub load_v_precision {
+    my ($path) = @_;
+    open my $fh, '<', $path or die "open v-precision $path: $!";
+    my %h;
+    while (my $line = <$fh>) {
+        chomp $line;
+        next if $line =~ /^\s*$/;
+        next unless $line =~ /^(\w+):\s*(.+?)(?:\s*\(.*\))?\s*$/;
+        $h{$1} = $2;
+    }
+    close $fh;
+    return %h;
+}
+
+# Issue #268 test class A + F. Assert the locked surface fields are
+# present and that enum values are within their locked sets. precision_mode
+# values are 'default', 'full', or a non-negative integer string; the
+# duration unit is one of ns/us/ms/s/n/a; max_decimals_ceiling is 5, 'n/a',
+# or a non-negative integer.
+sub check_observability_surface {
+    my ($vp) = @_;
+    my $f = 0;
+    my @locked_fields = qw(
+        precision_mode
+        duration_unit_resolved
+        decimals_meta
+        decimals_count
+        decimals_duration
+        decimals_percentile
+        decimals_shape
+        decimals_bytes
+        decimals_level
+        max_decimals_ceiling
+    );
+
+    for my $field (@locked_fields) {
+        next if exists $vp->{$field};
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => 0,
+            column => "(v-csv-output/$field)",
+            asserts => "the locked -V csv-output / precision surface must include field '$field'",
+            produced_by => 'emit_csv_output_verbose() in ltl',
+            contract => 'Issue #268 § locked observability surface',
+            expected => "$field: <value>",
+            actual => 'field missing from -V csv-output / precision block',
+            rule => 'locked field presence',
+        });
+        $f++;
+    }
+    return $f if $f;  # short-circuit further enum checks if fields missing
+
+    if ($vp->{precision_mode} !~ /^(default|full|\d+)$/) {
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => 0,
+            column => '(v-csv-output/precision_mode)',
+            asserts => "precision_mode must be 'default', 'full', or a non-negative integer",
+            produced_by => 'emit_csv_output_verbose() in ltl',
+            contract => 'Issue #268 § precision_mode enum',
+            expected => "default | full | integer",
+            actual => $vp->{precision_mode},
+            rule => 'precision_mode enum',
+        });
+        $f++;
+    }
+
+    if ($vp->{duration_unit_resolved} !~ /^(ns|us|ms|s|n\/a)$/) {
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => 0,
+            column => '(v-csv-output/duration_unit_resolved)',
+            asserts => "duration_unit_resolved must be one of ns, us, ms, s, n/a",
+            produced_by => 'emit_csv_output_verbose() in ltl',
+            contract => 'Issue #268 § duration_unit_resolved enum',
+            expected => "ns | us | ms | s | n/a",
+            actual => $vp->{duration_unit_resolved},
+            rule => 'duration_unit_resolved enum',
+        });
+        $f++;
+    }
+
+    if ($vp->{max_decimals_ceiling} !~ /^(5|n\/a|\d+)$/) {
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => 0,
+            column => '(v-csv-output/max_decimals_ceiling)',
+            asserts => "max_decimals_ceiling must be 5, n/a, or a non-negative integer",
+            produced_by => 'emit_csv_output_verbose() in ltl',
+            contract => 'Issue #268 § max_decimals_ceiling enum',
+            expected => "5 | n/a | integer",
+            actual => $vp->{max_decimals_ceiling},
+            rule => 'max_decimals_ceiling enum',
+        });
+        $f++;
+    }
+
+    return $f;
+}
+
+# Issue #268: compute the effective max_decimals ceiling for a column.
+# The ceiling comes from -V csv-output / precision (max_decimals_ceiling),
+# not the rules TSV literal — that lets sub-ms duration units lift the
+# ceiling above 5 without amending the rules TSV per run.
+# In full mode the check is suppressed (returns undef). In N mode the
+# ceiling is N. In default mode it's the value ltl resolved.
+sub effective_max_decimals {
+    my ($rule, $col_name) = @_;
+    return undef if $vp{precision_mode} eq 'full';
+    return undef if $rule->{max_decimals} eq 'n/a';
+    my $ceiling = $vp{max_decimals_ceiling};
+    return undef unless defined $ceiling && $ceiling =~ /^\d+$/;
+    return $ceiling;
+}
+
+# Issue #268 test class D: storage-precision invariants. Asserted in full
+# mode because that mode exposes stored values directly. Tolerance is
+# float-quantization scale (1e-9 relative).
+sub check_storage_precision_invariants {
+    my ($row, $col_index, $row_num) = @_;
+    my $f = 0;
+    my $eps = 1e-9;
+
+    my $get = sub {
+        my ($name) = @_;
+        return undef unless exists $col_index->{$name};
+        my $v = $row->[$col_index->{$name}];
+        return undef unless defined $v && $v ne '';
+        return $v;
+    };
+
+    # D1: mean == duration / occurrences (when duration data is present)
+    my $mean        = $get->('mean');
+    my $duration    = $get->('duration');
+    my $occurrences = $get->('occurrences');
+    if (defined $mean && defined $duration && defined $occurrences && $occurrences > 0) {
+        my $expected = $duration / $occurrences;
+        my $delta = abs($mean - $expected);
+        my $tolerance = $eps * (abs($expected) > 1 ? abs($expected) : 1);
+        if ($delta > $tolerance) {
+            emit_fail({
+                scenario => $opt{scenario}, file => $opt{file_kind}, row => $row_num,
+                column => '(invariant: mean == duration / occurrences)',
+                asserts => 'mean must equal duration / occurrences within float-quantization tolerance',
+                produced_by => 'calculate_statistics() in ltl',
+                contract => 'Issue #268 § storage-precision invariants',
+                expected => sprintf('%.15g (= %s / %s)', $expected, $duration, $occurrences),
+                actual => sprintf('%.15g (delta %.3e, tolerance %.3e)', $mean, $delta, $tolerance),
+                rule => 'mean derivation',
+            });
+            $f++;
+        }
+    }
+
+    # D2: min <= p1 (when both are present)
+    my $min = $get->('min');
+    my $p1  = $get->('p1');
+    if (defined $min && defined $p1 && $min > $p1) {
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => $row_num,
+            column => '(invariant: min <= p1)',
+            asserts => 'min must not exceed p1; both come from the same sorted sample array',
+            produced_by => 'calculate_statistics() in ltl',
+            contract => 'Issue #268 § storage-precision invariants',
+            expected => "min ($min) <= p1 ($p1)",
+            actual => "min ($min) > p1 ($p1)",
+            rule => 'percentile ordering',
+        });
+        $f++;
+    }
+
+    return $f;
 }

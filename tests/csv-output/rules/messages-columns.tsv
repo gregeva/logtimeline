@@ -31,6 +31,6 @@ cv	29	float	conditional:duration	5	shape
 skewness	30	float	conditional:duration	5	shape
 kurtosis	31	float	conditional:duration	5	shape
 bimodality_coef	32	float	conditional:duration	5	shape
-duration	33	int	conditional:duration	0	duration
+duration	33	float	conditional:duration	9	duration
 duration_nice	34	nice	conditional:duration	n/a	duration
 impact	35	float	conditional:duration	5	shape
