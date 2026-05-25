@@ -102,6 +102,9 @@ my %verbose_section_registry = (
     'heatmap-palette' => {
         description => 'Heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250).',
     },
+    'csv-output' => {
+        description => 'CSV output precision mode, resolved per-family decimal counts, duration unit source, and max-decimals ceiling for the structural harness (Issue #268).',
+    },
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
@@ -114,6 +117,7 @@ my @verbose_section_order = qw(
     message-grouping
     format-detection
     heatmap-palette
+    csv-output
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -421,6 +425,16 @@ my $percentile_precision_level     = undef;   # 1..9 tier; resolves to a bpd via
 my $percentile_precision_source    = 'default';  # 'default' | '-pbpd N' | '--percentile-precision N' | '-pbpd N; --percentile-precision N overridden'
 my $exact_percentiles_optout       = 0;       # when set, migrated consumers revert to calculate_statistics
 my $percentile_seed_decades        = 5;       # partition seeds at 5 decades centered on first value
+
+# Issue #268: CSV output precision. $csv_precision is one of 'default', 'full',
+# or a non-negative integer N. Resolved values for per-family decimal counts
+# and the duration unit are populated during option resolution; the -V
+# csv-output section reads them.
+my $csv_precision                  = 'default';      # 'default' | 'full' | integer N
+my $csv_precision_source           = 'default';      # 'default' | '-cp <value>' | 'LTL_CONFIG'
+my $duration_unit_resolved         = undef;          # 'ns' | 'us' | 'ms' | 's' — final resolved unit
+my $duration_unit_source           = 'default';      # 'default' | '-du <value>' | 'auto-detected from <file>'
+my %csv_family_decimals;                             # populated during option resolution: family => N decimals
 
 # Issue #266: explicit per-surface statistical data-model selectors. The five
 # scalars below hold the user-supplied selector for each surface (or undef
@@ -1803,6 +1817,55 @@ sub emit_heatmap_palette_verbose {
     push @verbose_output, "gradient_light: $gradient_light_str";
     push @verbose_output, "gradient_active: $gradient_active";
     push @verbose_output, "=== END heatmap-palette ===";
+}
+
+# Issue #268: CSV output observability. The parent section opens unconditionally
+# (when -o is set) and contains one or more sub-sections. Currently:
+#   csv-output / precision   — precision mode, per-family decimals, max-decimals ceiling
+# Future sub-sections (e.g. csv-output / structure for column counts, output files)
+# slot in here without breaking the locked precision contract.
+#
+# Locked surface: parent section name, sub-section name, all field names within
+# precision sub-section, value enums (csv_active yes|no; precision_mode
+# default|full|integer; duration_unit_resolved us|ms|s|n/a; max_decimals_ceiling
+# 5|n/a|integer), and source annotation grammar. Inter-field ordering within a
+# sub-section is not contract-bound (consumers assert per-field contents).
+sub emit_csv_output_verbose {
+    return unless section_requested('csv-output');
+
+    push @verbose_output, "=== csv-output ===";
+
+    if (!$write_messages_to_csv) {
+        push @verbose_output, "csv_active: no";
+        push @verbose_output, "=== END csv-output ===";
+        return;
+    }
+
+    push @verbose_output, "csv_active: yes";
+
+    push @verbose_output, "=== csv-output / precision ===";
+    push @verbose_output, "precision_mode: $csv_precision ($csv_precision_source)";
+
+    my $du_value = defined $duration_unit_resolved ? $duration_unit_resolved : 'n/a';
+    push @verbose_output, "duration_unit_resolved: $du_value ($duration_unit_source)";
+
+    for my $family (qw(meta count duration percentile shape bytes)) {
+        my $decimals = exists $csv_family_decimals{$family} ? $csv_family_decimals{$family} : 'n/a';
+        push @verbose_output, "decimals_$family: $decimals";
+    }
+
+    my $ceiling;
+    if ($csv_precision eq 'default') {
+        $ceiling = '5 (default mode)';
+    } elsif ($csv_precision eq 'full') {
+        $ceiling = 'n/a (full mode)';
+    } else {
+        $ceiling = "$csv_precision (N mode)";
+    }
+    push @verbose_output, "max_decimals_ceiling: $ceiling";
+    push @verbose_output, "=== END csv-output / precision ===";
+
+    push @verbose_output, "=== END csv-output ===";
 }
 
 # Section name, field names, consumer-name strings, and the three-value audit
@@ -11283,6 +11346,8 @@ emit_bin_counter_mode_verbose();
 emit_format_detection_verbose();
 
 emit_heatmap_palette_verbose();
+
+emit_csv_output_verbose();
 
 print_verbose_output();
 
