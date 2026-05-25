@@ -192,56 +192,24 @@ ltl -so occurrences -sa access.log
 
 Percentile and shape metrics require a sufficient sample size to be statistically meaningful: `p999` ≥ ~1k, `p9999` ≥ ~100k, `p99999` ≥ ~1M. `bimodality_coef` is a *screening* statistic — at n < 100 small-sample noise can produce false positives. Skewness/kurtosis/bimodality_coef are undefined (blank in CSV, treated as 0 for sort ordering) when n < 4.
 
-### Percentile mode
+### Percentile data model and algorithm
 
-ltl computes latency percentiles for the summary table, CSV output, per-time-bucket statistics, heatmap markers, and histogram indicators. Under the unified percentile contract (issue [#187](https://github.com/gregeva/logtimeline/issues/187)), these consumers share a single bin-counter substrate with log-spaced bin geometry and HdrHistogram-style auto-resize. Bin precision is tunable; the locked default (53 buckets per decade, ~1.3% precision) matches OpenTelemetry's Scale-4 analog and is appropriate for the vast majority of analyses.
+ltl computes percentiles from one of two data models, each with its own algorithm. The two models produce different values for the same input, particularly in the tail; this is the data model, not a precision deviation. See `ltl --explain percentiles` for the deeper explanation, when to use which, and the trade-offs.
 
-When this matters: at the default precision, percentile values like P50 / P99 are within ~1.3% of their true sort-based values. Increasing precision reduces binning error proportionally at the cost of memory per partition (~2.1 KB per partition at default precision; scales linearly with bpd).
+**Raw values data model.** Every observation is held in memory and the percentile is selected by **nearest-rank** — an actually-observed sample at the computed rank in the sorted array. The returned value is a real request that happened. Scales with observation count.
 
-| Option | Description |
-|--------|-------------|
-| `-pp, --percentile-precision <N>` | Precision tier 1..9 (default: 5). Higher tiers give tighter percentile values at the cost of more memory per partition. |
-| `-pbpd, --percentile-buckets-per-decade <N>` | Buckets per decade directly (default: 53; valid 4..616). Overrides `--percentile-precision` when both supplied. |
-| `-ep, --exact-percentiles` | Revert to exact sort-based percentile computation. Deprecated; superseded by `-dm raw` / `--data-model raw` (see Data-model selectors below). |
+**Bin counter data model.** Observations are accumulated into log-spaced bins (HDR-histogram-style) and the percentile is computed by **linear interpolation between bucket boundaries**, the same approach Prometheus `histogram_quantile()` uses. The returned value is generally a synthesised value between bin edges, not an observed sample. Bin resolution sets the interpolation tightness — the default 53 buckets per decade gives roughly 1.3% relative bin width, matching OpenTelemetry's Scale-4 exponential histogram resolution. Scales with partition count rather than observation count.
 
-**Precision (`-pp` / `-pbpd`).** The default (tier 5 / 53 bpd) is appropriate for the vast majority of analyses — percentile values land very close to their true sort-based values. Raise it (tier 6–9, or `-pbpd` values up to 616) when you need tighter precision on tail percentiles (P99.9, P99.99) or when comparing two runs whose true percentiles differ by very small amounts; lower it (tier 1–4) to trade percentile precision for less memory on per-message percentile computation (summary table, CSV output), which fans out to one partition per unique message and so scales with message diversity. The histogram and heatmap consumers are unaffected — they use their own internal precision tuned for display rendering and ignore this knob.
+**Per-surface defaults.** Four consumer surfaces use percentile output; each has a default data model today:
 
-Use `-V` to inspect the active settings. The `=== BIN-COUNTER MODE ===` section reports the resolved precision, the source annotation (default, flag, or override), per-consumer state, and per-quantile audit codes (`out_of_range_bounded: pN=none|low|high`).
-
-```bash
-# Default precision (5 / 53 bpd)
-ltl access.log
-
-# Higher precision tier for tight outlier analysis
-ltl -pp 7 access.log
-
-# Direct buckets-per-decade override
-ltl -pbpd 100 access.log
-
-# Inspect the resolved settings
-ltl -V histogram-bin-counters access.log
-
-# Opt out to exact (sort-based) percentiles for byte-exact comparison
-ltl -ep access.log
-```
-
-### Data-model selectors
-
-ltl reduces duration samples into statistics through one of two internal data models:
-
-- **raw** — every observed duration retained, sorted at calculation time, statistics derived by direct array operations.
-- **bin** — HDR-style bin-counter; samples bucketed at capture time into bins-per-decade primitives, statistics derived from bin counts.
-
-The choice is independent per consumer surface. There are four surfaces:
-
-| # | Surface | Today's data model |
+| # | Surface | Default Data Model |
 |---|---|---|
-| 1 | Histogram statistics (consumed by `-hg`) | bin |
-| 2 | Heatmap statistics (consumed by `-hm`) | bin |
-| 3 | Per-message-key statistics | raw |
-| 4 | Per-time-bucket statistics | raw |
+| 1 | Histogram statistics (consumed by `-hg`) | bin counter |
+| 2 | Heatmap statistics (consumed by `-hm`) | bin counter |
+| 3 | Per-message-key statistics | raw values |
+| 4 | Per-time-bucket statistics | raw values |
 
-The data-model selectors below let you **pin** which data model a surface uses when you need certainty (test harnesses, reproducibility, A/B comparison). They have no defaults — when unset, the surface's existing internal logic chooses, and ltl's user-observable behavior is unchanged from previous releases.
+**Pinning the data model.** The selectors below override the per-surface default when you need certainty (test harnesses, reproducibility, A/B comparison). The omnibus `-dm` flag pins every surface; per-surface flags override `-dm` for their surface.
 
 | Option | Description |
 |--------|-------------|
@@ -251,9 +219,38 @@ The data-model selectors below let you **pin** which data model a surface uses w
 | `-mdm, --message-stats-data-model <raw\|bin>` | Pin the per-message-key statistics data model. Selector is resolved but currently only the raw reduction is implemented for this surface; `bin` lands in a follow-up. |
 | `-bdm, --bucket-stats-data-model <raw\|bin>` | Pin the per-time-bucket statistics data model. Same status as `-mdm` — selector resolved, raw only today. |
 
-**Resolution.** Per-surface flag overrides `-dm`; `-dm` overrides the surface's internal default. Invalid values (anything other than `raw` or `bin`) cause ltl to exit at option-parse time with a clear error. Conflicting flags on the same axis follow standard last-one-wins ordering.
+Per-surface flag overrides `-dm`; `-dm` overrides the per-surface default. Invalid values (anything other than `raw` or `bin`) cause ltl to exit at option-parse time with a clear error. Conflicting flags on the same axis follow standard last-one-wins ordering.
 
-**Relationship to `--exact-percentiles`.** `--exact-percentiles` is equivalent to `--data-model raw` on the histogram and heatmap surfaces (which is what it has always controlled). The new selectors supersede it; `--exact-percentiles` continues to work in this release but emits a deprecation notice and is scheduled for removal in a future release.
+**Tuning the bin counter algorithm.** When a surface uses the bin counter data model, bin resolution determines how tight the linear interpolation is. Raise resolution for tighter values in the tail percentiles (`p999`, `p9999`); lower it to reduce per-partition memory cost. The default (tier 5 / 53 bpd) suits most analyses.
+
+| Option | Description |
+|--------|-------------|
+| `-pp, --percentile-precision <N>` | Precision tier 1..9 (default: 5). Higher tiers give tighter percentile values at the cost of more memory per partition. |
+| `-pbpd, --percentile-buckets-per-decade <N>` | Buckets per decade directly (default: 53; valid 4..616). Overrides `--percentile-precision` when both supplied. |
+
+Per-message-key percentiles are the highest-cost consumer because they fan out to one partition per unique message; tier 1–4 trades resolution for less memory there. The histogram and heatmap surfaces are unaffected — they use their own internal resolution tuned for display rendering and ignore these knobs.
+
+Use `-V histogram-bin-counters` to inspect the resolved precision, the source (default, flag, or override), and per-consumer state.
+
+```bash
+# Default behavior (per-surface defaults above)
+ltl access.log
+
+# Higher precision tier for tight tail-percentile analysis
+ltl -pp 7 access.log
+
+# Direct buckets-per-decade override
+ltl -pbpd 100 access.log
+
+# Pin every surface to the raw values data model
+ltl -dm raw access.log
+
+# Override just the histogram surface; leave the heatmap on its default
+ltl -hgdm raw -hm duration -hg access.log
+
+# Inspect resolved settings
+ltl -V histogram-bin-counters access.log
+```
 
 ```bash
 # Pin every surface to the raw reduction path
