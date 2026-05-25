@@ -1,0 +1,38 @@
+# Cross-model tolerance overrides for Layer 4 (Issue #224, Decision 9).
+#
+# When the raw-array (`default` scenario) and bin-counter (`bin-data-model`
+# scenario) data models disagree on a value, Layer 4 classifies the deviation
+# against a tier ladder. Default ladder is:
+#   T1  bitwise identical                (advisory)
+#   T2  within +/-1%                     (advisory)
+#   T3  within +/-4%                     (advisory)
+#   T4  beyond +/-4%                     (blocking)
+#
+# Rows in this file override `t2_pct` and `t3_pct` for specific
+# (scenario, column) pairs. Tuning is expected: bin-counter implementations
+# quantize samples into bin boundaries, so percentile drift relative to raw
+# is bounded by bin width at the relevant percentile. Wider tolerances on
+# p99999 than on p50 are normal.
+#
+# Schema (tab-separated):
+#   scenario   non-blank for per-scenario override, blank for global-by-column
+#   column     non-blank for per-column override, blank for global-by-scenario
+#   t2_pct     numeric percent for the T2 advisory ceiling
+#   t3_pct     numeric percent for the T3 advisory ceiling (T4 is everything beyond)
+#   notes      free-form documentation; required, not optional
+#
+# Resolution rules (most-specific wins):
+#   1. (scenario, column) both non-blank   applies only to that pair
+#   2. scenario blank, column non-blank    applies to that column across all scenarios
+#   3. scenario non-blank, column blank    applies to all columns of that scenario
+#   4. both blank                          syntax error, engine refuses to start
+#   5. no matching row                     ladder defaults apply
+#
+# Today, the bin-counter implementation does not exist for the per-message-key
+# and per-time-bucket surfaces; -mdm bin / -bdm bin silently fall back to raw.
+# Layer 4 reports T1 on every paired cell as a wiring sanity check until the
+# bin implementation lands. This file ships with no data rows for that reason.
+# When bin lands, populate this file with the tolerance envelopes appropriate
+# for each scenario/column pair.
+#
+# scenario	column	t2_pct	t3_pct	notes

@@ -5,9 +5,20 @@
 # column presence, ordering, population, family group consistency, data-type
 # correctness, fixed-decimal rules. All checks are pass/fail (no tolerance).
 #
-# Sibling to validate-percentile-values.sh (#224), which handles numeric drift.
-# Run this BEFORE drift checks — structural correctness is a precondition for
-# meaningful drift comparison.
+# Sibling to validate-statistics.sh (#224), which handles numeric drift,
+# intra-row consistency, oracle correctness, and cross-model agreement.
+# Run this BEFORE the statistics harness — structural correctness is a
+# precondition for meaningful drift comparison.
+#
+# CSV production is delegated to tests/lib/csv-cache.sh which caches
+# produced CSVs under deterministic filenames in tests/.artifacts/csv/
+# so the statistics harness can reuse them.
+#
+# Orchestration: set CI=1 (industry-standard env var, also set by all
+# major CI runners) when chaining this harness with others, so the cache
+# is preserved for the next harness in the chain. The orchestrator is
+# responsible for calling cleanup-test-artifacts.sh at the end. When CI
+# is unset, this harness cleans up its own artifacts at end of run.
 #
 # Usage:
 #   ./tests/validate-csv-output.sh                       # all scenarios
@@ -24,15 +35,19 @@ RULES_MESSAGES="$HARNESS_DIR/rules/messages-columns.tsv"
 RULES_STATS="$HARNESS_DIR/rules/stats-columns.tsv"
 VALIDATOR="$HARNESS_DIR/validate-csv-output.pl"
 
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+# shellcheck source=lib/csv-cache.sh
+source "$SCRIPT_DIR/lib/csv-cache.sh"
+
+# End-of-run cleanup runs only when standalone (CI unset). Trap covers
+# both clean exit and error paths.
+trap csv_cache_maybe_cleanup EXIT
 
 ONLY_SCENARIO=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --scenario) ONLY_SCENARIO="$2"; shift 2 ;;
         -h|--help)
-            sed -n '2,15p' "$0"
+            sed -n '2,24p' "$0"
             exit 0
             ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -61,44 +76,54 @@ while IFS=$'\t' read -r scenario logfile options families; do
         continue
     fi
 
-    abs_log="$REPO_DIR/$logfile"
-    if [[ ! -f "$abs_log" ]]; then
-        echo "FAIL  scenario=$scenario logfile-missing=$abs_log" >&2
-        total_fail=$((total_fail + 1))
-        scenarios_run=$((scenarios_run + 1))
-        continue
-    fi
+    log_shorthand="$(csv_cache_logfile_shorthand "$logfile")"
 
-    scen_dir="$TMP_DIR/$scenario"
-    mkdir -p "$scen_dir"
-
-    # Run ltl in the per-scenario tempdir — `-o` writes CSV files with
-    # timestamped filenames into the current working directory.
-    # `-V csv-output` requested in the same invocation so the precision
-    # observability surface is captured alongside the CSVs; the validator
-    # reads it for per-family decimal ceiling assertions (#268).
-    pushd "$scen_dir" >/dev/null
     set +e
-    # shellcheck disable=SC2086  # word-splitting on $options is intentional
-    "$LTL" --disable-progress -V csv-output $options -o "$abs_log" >"$scen_dir/ltl.stdout" 2>"$scen_dir/ltl.stderr"
+    csv_cache_produce "$scenario" "$logfile" "$options" "$log_shorthand"
     rc=$?
     set -e
-    popd >/dev/null
 
     if [[ $rc -ne 0 ]]; then
-        echo "FAIL  scenario=$scenario ltl-exit=$rc" >&2
-        sed 's/^/        /' "$scen_dir/ltl.stderr" >&2
+        # csv_cache_produce already printed the diagnostic.
         total_fail=$((total_fail + 1))
         scenarios_run=$((scenarios_run + 1))
         continue
     fi
 
-    # Find produced CSV files by ltl's filename convention.
-    msg_csv="$(ls "$scen_dir"/*-LTL-MESSAGES-*.csv 2>/dev/null | head -1 || true)"
-    stats_csv="$(ls "$scen_dir"/*-LTL-STATS-*.csv 2>/dev/null | head -1 || true)"
+    msg_csv="$CSV_CACHE_MESSAGES"
+    stats_csv="$CSV_CACHE_STATS"
 
-    if [[ -z "$msg_csv" || -z "$stats_csv" ]]; then
-        echo "FAIL  scenario=$scenario missing-csv-files messages=${msg_csv:-MISSING} stats=${stats_csv:-MISSING}" >&2
+    # Capture -V csv-output separately. csv_cache_produce only stages the
+    # CSV files; the precision observability surface (#268) is requested
+    # here via a second invocation against the same logfile + options so
+    # the per-family decimal ceiling assertions can read the run's actual
+    # emit contract. The capture lives in a per-scenario tempdir under
+    # tests/.artifacts/v-csv-output/ — independent of the shared csv-cache
+    # so the contract between this harness and the cache stays narrow.
+    v_capture_dir="$SCRIPT_DIR/.artifacts/v-csv-output/$scenario"
+    mkdir -p "$v_capture_dir"
+    abs_log=""
+    if [[ "$logfile" = /* ]]; then
+        abs_log="$logfile"
+    else
+        abs_log="$REPO_DIR/$logfile"
+    fi
+    set +e
+    # shellcheck disable=SC2086  # word-splitting on $options is intentional
+    (
+        cd "$v_capture_dir"
+        "$LTL" --disable-progress -V csv-output $options -o "$abs_log" \
+            >"$v_capture_dir/ltl.stdout" 2>"$v_capture_dir/ltl.stderr"
+    )
+    vrc=$?
+    set -e
+    # Discard the timestamped CSV copies ltl emits as a side effect of
+    # `-o`; the csv-cache already produced the authoritative copies for
+    # validation. Keeping only ltl.stdout/ltl.stderr for the -V capture.
+    find "$v_capture_dir" -maxdepth 1 -name '*-LTL-*.csv' -delete 2>/dev/null || true
+    if [[ $vrc -ne 0 ]]; then
+        echo "FAIL  scenario=$scenario v-csv-output-capture-failed exit=$vrc" >&2
+        sed 's/^/        /' "$v_capture_dir/ltl.stderr" >&2
         total_fail=$((total_fail + 1))
         scenarios_run=$((scenarios_run + 1))
         continue
@@ -107,9 +132,9 @@ while IFS=$'\t' read -r scenario logfile options families; do
     # Extract -V csv-output / precision sub-section into a file the
     # validator reads. Anchored by the 'precision' sub-section markers
     # so the parent 'csv-output' wrapper is filtered out. (#268)
-    v_precision="$scen_dir/csv-output-precision.txt"
+    v_precision="$v_capture_dir/csv-output-precision.txt"
     awk '/=== csv-output \/ precision ===/{flag=1; next} /=== END csv-output \/ precision ===/{flag=0} flag' \
-        "$scen_dir/ltl.stdout" > "$v_precision"
+        "$v_capture_dir/ltl.stdout" > "$v_precision"
     if [[ ! -s "$v_precision" ]]; then
         echo "FAIL  scenario=$scenario missing-v-csv-output-precision-block" >&2
         echo "        -V csv-output / precision sub-section was empty or absent in ltl stdout" >&2

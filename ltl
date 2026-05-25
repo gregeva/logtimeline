@@ -105,6 +105,9 @@ my %verbose_section_registry = (
     'csv-output' => {
         description => 'CSV output precision mode, resolved per-family decimal counts, duration unit source, and max-decimals ceiling for the structural harness (Issue #268).',
     },
+    'percentile-algorithm' => {
+        description => 'Per-surface effective percentile algorithm: resolved data model and algorithm name for histogram, heatmap, message-stats, and bucket-stats (Issue #280).',
+    },
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
@@ -118,6 +121,7 @@ my @verbose_section_order = qw(
     format-detection
     heatmap-palette
     csv-output
+    percentile-algorithm
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -1879,6 +1883,127 @@ sub emit_csv_output_verbose {
     push @verbose_output, "=== END csv-output / precision ===";
 
     push @verbose_output, "=== END csv-output ===";
+}
+
+# Issue #280: per-surface effective percentile algorithm. Section content
+# is the contract Layer 3 of the statistics drift harness (Issue #224)
+# consumes to pick its reference computation. Per HARNESS-DESIGN.md, the
+# section is named for the user-facing capability (which algorithm
+# produced the emitted percentiles), not for the dispatch mechanism.
+#
+# Two facts per surface:
+#   data_model       — resolved selector ('raw' | 'bin'). The user-facing
+#                      axis from #266 selectors plus the legacy
+#                      --exact-percentiles fallback.
+#   effective_algorithm — algorithm name that actually computed the
+#                         values ltl emitted on that surface in this
+#                         run. Today the message-stats and bucket-stats
+#                         surfaces are pinned to nearest_rank regardless
+#                         of the resolved data_model (the bin reduction
+#                         for those surfaces is reserved for a follow-up
+#                         to #266 — see surfaces 3/4 dispatch comments
+#                         in calculate_all_statistics()).
+#
+# When data_model differs from what the algorithm row reports, an
+# `effective_algorithm_note:` line is emitted documenting the divergence
+# so a harness reading the section does not silently false-positive.
+sub emit_percentile_algorithm_verbose {
+    return unless section_requested('percentile-algorithm');
+
+    push @verbose_output, "=== percentile-algorithm ===";
+
+    # The two algorithms ltl can produce percentiles with today.
+    my $nearest_rank_formula =
+        "value = sorted[int(n * q)]; q in [0,1]; n = sample count";
+    my $nearest_rank_source =
+        "features/272-percentile-algorithm-industry-grounding.md § Nearest-rank";
+
+    my $exp_interp_formula =
+        "rank_in_bin = ceil(q * total_N) - cum_before_bin; "
+      . "fraction = rank_in_bin / bin_count; "
+      . "value = lower * (upper/lower)^fraction";
+    my $exp_interp_source =
+        "features/187-histogram-bin-counter-percentiles.md § Decision 1 "
+      . "(Prometheus histogram_quantile native-exponential rule)";
+
+    my %algorithm_meta = (
+        'nearest_rank' => {
+            formula => $nearest_rank_formula,
+            source  => $nearest_rank_source,
+        },
+        'exponential_interpolation_within_bucket' => {
+            formula => $exp_interp_formula,
+            source  => $exp_interp_source,
+        },
+    );
+
+    # Mirrors the call sites in calculate_all_statistics() (surfaces 3/4)
+    # and the heatmap/histogram capture-mode resolution at adapt time.
+    # The `effective_algorithm` column reports what the code actually
+    # ran, not what the resolved data_model implies.
+    my @surfaces = (
+        {
+            id              => 'histogram',
+            data_model      => choose_data_model('histogram')   // 'bin',
+            effective_track => 'matches_data_model',
+        },
+        {
+            id              => 'heatmap',
+            data_model      => choose_data_model('heatmap')     // 'bin',
+            effective_track => 'matches_data_model',
+        },
+        {
+            id              => 'message-stats',
+            data_model      => choose_data_model('message-stats') // 'raw',
+            effective_track => 'pinned_raw',
+        },
+        {
+            id              => 'bucket-stats',
+            data_model      => choose_data_model('bucket-stats')  // 'raw',
+            effective_track => 'pinned_raw',
+        },
+    );
+
+    my %dm_to_algorithm = (
+        'raw' => 'nearest_rank',
+        'bin' => 'exponential_interpolation_within_bucket',
+    );
+
+    for my $s (@surfaces) {
+        my $name = $s->{id};
+        my $dm   = $s->{data_model};
+        my $effective_alg;
+        my $note;
+
+        if ($s->{effective_track} eq 'pinned_raw') {
+            # Surfaces 3 and 4 always compute via the raw nearest-rank
+            # primitive today (calculate_statistics()), regardless of the
+            # resolved data_model. Flag any divergence explicitly.
+            $effective_alg = 'nearest_rank';
+            if ($dm ne 'raw') {
+                $note =
+                    "data_model resolved to '$dm' but only the raw reduction is "
+                  . "implemented for the $name surface today; the bin reduction "
+                  . "is a follow-up to #266. Effective algorithm is nearest_rank.";
+            }
+        } else {
+            # Surfaces 1 and 2: effective algorithm tracks data_model.
+            $effective_alg = $dm_to_algorithm{$dm}
+                // 'nearest_rank';  # Defensive fallback; should not be reached.
+        }
+
+        my $meta = $algorithm_meta{$effective_alg};
+
+        push @verbose_output, "=== percentile-algorithm / $name ===";
+        push @verbose_output, "data_model: $dm";
+        push @verbose_output, "effective_algorithm: $effective_alg";
+        push @verbose_output, "formula: $meta->{formula}";
+        push @verbose_output, "algorithm_source: $meta->{source}";
+        push @verbose_output, "effective_algorithm_note: $note" if defined $note;
+        push @verbose_output, "=== END percentile-algorithm / $name ===";
+    }
+
+    push @verbose_output, "=== END percentile-algorithm ===";
 }
 
 # Section name, field names, consumer-name strings, and the three-value audit
@@ -11576,6 +11701,8 @@ emit_format_detection_verbose();
 emit_heatmap_palette_verbose();
 
 emit_csv_output_verbose();
+
+emit_percentile_algorithm_verbose();
 
 print_verbose_output();
 

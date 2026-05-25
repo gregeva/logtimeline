@@ -198,7 +198,7 @@ ltl computes percentiles from one of two data models, each with its own algorith
 
 **Raw values data model.** Every observation is held in memory and the percentile is selected by **nearest-rank** — an actually-observed sample at the computed rank in the sorted array. The returned value is a real request that happened. Scales with observation count.
 
-**Bin counter data model.** Observations are accumulated into log-spaced bins (HDR-histogram-style) and the percentile is computed by **linear interpolation between bucket boundaries**, the same approach Prometheus `histogram_quantile()` uses. The returned value is generally a synthesised value between bin edges, not an observed sample. Bin resolution sets the interpolation tightness — the default 53 buckets per decade gives roughly 1.3% relative bin width, matching OpenTelemetry's Scale-4 exponential histogram resolution. Scales with partition count rather than observation count.
+**Bin counter data model.** Observations are accumulated into log-spaced bins and the percentile is computed by **exponential interpolation within the bucket** — a synthesised value placed inside the bin that contains the target rank, on the log scale spanning the bin's lower and upper edges. The returned value is generally not an observed sample. Bin resolution sets the interpolation tightness — the default of 53 buckets per decade gives roughly 1.3% relative bin width. Scales with partition count rather than observation count.
 
 **Per-surface defaults.** Four consumer surfaces use percentile output; each has a default data model today:
 
@@ -221,7 +221,7 @@ ltl computes percentiles from one of two data models, each with its own algorith
 
 Per-surface flag overrides `-dm`; `-dm` overrides the per-surface default. Invalid values (anything other than `raw` or `bin`) cause ltl to exit at option-parse time with a clear error. Conflicting flags on the same axis follow standard last-one-wins ordering.
 
-**Tuning the bin counter algorithm.** When a surface uses the bin counter data model, bin resolution determines how tight the linear interpolation is. Raise resolution for tighter values in the tail percentiles (`p999`, `p9999`); lower it to reduce per-partition memory cost. The default (tier 5 / 53 bpd) suits most analyses.
+**Tuning the bin counter algorithm.** When a surface uses the bin counter data model, bin resolution determines how tight the within-bucket interpolation is. Raise resolution for tighter values in the tail percentiles (`p999`, `p9999`); lower it to reduce per-partition memory cost. The default (tier 5 / 53 bpd) suits most analyses.
 
 | Option | Description |
 |--------|-------------|

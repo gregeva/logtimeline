@@ -175,6 +175,6 @@ This file documents the raw-array (full-observation) data model. Its sibling, `f
 `ltl`'s algorithm choices, recorded in issue #272:
 
 - Raw-array data model → nearest-rank (status quo).
-- Bin-counter data model → linear interpolation between bucket boundaries (status quo; implemented in #187).
+- Bin-counter data model → exponential interpolation within bucket (status quo; implemented in #187). The interpolation is in log space — `value = lower * (upper/lower)^fraction` — which is the rule Prometheus's `histogram_quantile()` uses for native exponential histograms (quoted above). It is *not* the linear-interpolation rule Prometheus applies to classic fixed-boundary histograms; the two rules are distinct.
 
 Both choices are defensible against the evidence in these two files. Neither is "the SRE-standard algorithm" — no such standard exists in the references surveyed. The choice in each case is driven by what the data model can faithfully express.
