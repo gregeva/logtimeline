@@ -93,6 +93,59 @@ while IFS=$'\t' read -r scenario logfile options families; do
     msg_csv="$CSV_CACHE_MESSAGES"
     stats_csv="$CSV_CACHE_STATS"
 
+    # Capture -V csv-output separately. csv_cache_produce only stages the
+    # CSV files; the precision observability surface (#268) is requested
+    # here via a second invocation against the same logfile + options so
+    # the per-family decimal ceiling assertions can read the run's actual
+    # emit contract. The capture lives in a per-scenario tempdir under
+    # tests/.artifacts/v-csv-output/ — independent of the shared csv-cache
+    # so the contract between this harness and the cache stays narrow.
+    v_capture_dir="$SCRIPT_DIR/.artifacts/v-csv-output/$scenario"
+    mkdir -p "$v_capture_dir"
+    abs_log=""
+    if [[ "$logfile" = /* ]]; then
+        abs_log="$logfile"
+    else
+        abs_log="$REPO_DIR/$logfile"
+    fi
+    set +e
+    # shellcheck disable=SC2086  # word-splitting on $options is intentional
+    (
+        cd "$v_capture_dir"
+        "$LTL" --disable-progress -V csv-output $options -o "$abs_log" \
+            >"$v_capture_dir/ltl.stdout" 2>"$v_capture_dir/ltl.stderr"
+    )
+    vrc=$?
+    set -e
+    # Discard the timestamped CSV copies ltl emits as a side effect of
+    # `-o`; the csv-cache already produced the authoritative copies for
+    # validation. Keeping only ltl.stdout/ltl.stderr for the -V capture.
+    find "$v_capture_dir" -maxdepth 1 -name '*-LTL-*.csv' -delete 2>/dev/null || true
+    if [[ $vrc -ne 0 ]]; then
+        echo "FAIL  scenario=$scenario v-csv-output-capture-failed exit=$vrc" >&2
+        sed 's/^/        /' "$v_capture_dir/ltl.stderr" >&2
+        total_fail=$((total_fail + 1))
+        scenarios_run=$((scenarios_run + 1))
+        continue
+    fi
+
+    # Extract -V csv-output / precision sub-section into a file the
+    # validator reads. Anchored by the 'precision' sub-section markers
+    # so the parent 'csv-output' wrapper is filtered out. (#268)
+    v_precision="$v_capture_dir/csv-output-precision.txt"
+    awk '/=== csv-output \/ precision ===/{flag=1; next} /=== END csv-output \/ precision ===/{flag=0} flag' \
+        "$v_capture_dir/ltl.stdout" > "$v_precision"
+    if [[ ! -s "$v_precision" ]]; then
+        echo "FAIL  scenario=$scenario missing-v-csv-output-precision-block" >&2
+        echo "        -V csv-output / precision sub-section was empty or absent in ltl stdout" >&2
+        echo "        asserts: every -o run must emit -V csv-output / precision when -V csv-output is requested" >&2
+        echo "        produced_by: emit_csv_output_verbose() in ltl" >&2
+        echo "        contract: Issue #268 § locked observability surface" >&2
+        total_fail=$((total_fail + 1))
+        scenarios_run=$((scenarios_run + 1))
+        continue
+    fi
+
     scen_fail=0
 
     for kind in messages stats; do
@@ -110,7 +163,8 @@ while IFS=$'\t' read -r scenario logfile options families; do
             --csv "$csv" \
             --scenario "$scenario" \
             --file-kind "$kind" \
-            --expected-families "$families"
+            --expected-families "$families" \
+            --v-precision "$v_precision"
         vrc=$?
         set -e
 

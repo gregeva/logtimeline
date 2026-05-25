@@ -159,7 +159,7 @@ ltl -so cv -n 20 access.log           # surface most variable APIs
 ltl -so iqr -n 20 access.log          # find APIs with the noisiest middle range
 ```
 
-**How ltl computes this.** Derived from already-computed percentiles: `iqr = p75 − p25`. Inherits the same precision as the underlying percentile computation — around 1.3% by default, tunable via `-pbpd` (buckets per decade) for tighter or looser bin spacing.
+**How ltl computes this.** Derived from already-computed percentiles: `iqr = p75 − p25`. Inherits the data model and algorithm of the underlying percentiles — exact relative to observed samples in the raw values data model, or subject to bin-width interpolation in the bin counter data model (default ~1.3% relative bin width).
 
 **See also.** `p25`, `p50`, `p75`, `std_dev`, `cv`.
 
@@ -200,12 +200,27 @@ Percentiles answer the question "what value is faster than (or equal to) N% of a
 ltl -so p999 -n 20 access.log         # find APIs with the worst p999 tail latency
 ltl -so p9999 -n 20 access.log        # tail-of-tail analysis; needs many samples
 ltl -pp 7 access.log                  # tighten percentile precision (slower; more memory)
-ltl -ep access.log                    # opt out of bin counters; exact sort-based percentiles
 ```
 
-**How ltl computes this.** ltl computes percentiles using log-spaced bin counters with HDR-histogram-style precision. The default 53 buckets per decade gives ~1.3% precision, matching the resolution of common observability tools. The number of buckets per decade is tunable via `-pbpd`; `--percentile-precision` exposes named tiers (1..9). For byte-exact verification against sort-based percentiles, `-ep` opts out of the binned computation.
+**How ltl computes this.** ltl computes percentiles from one of two data models, each using its own algorithm. The two models answer slightly different questions about the same data and produce different values, especially at the tail percentiles. Neither is "the truth" relative to the other — both are valid; the right one depends on what you're trying to learn.
 
-**See also.** `min`, `max`, `iqr`, `skewness`, `kurtosis`, `bimodality_coef`. Flags: `-pbpd`, `-pp`, `-ep`.
+**Raw values data model** — every observation is held in memory; the percentile is selected by **nearest-rank**, i.e. an actually-observed sample at the computed rank in the sorted array. The returned `p99` is a real request that happened. No interpolation, no synthesised values.
+
+**Bin counter data model** — observations are accumulated into log-spaced bins; the percentile is computed by **exponential interpolation within the bucket**, a synthesised value placed inside the bin that contains the target rank on the log scale spanning the bin's lower and upper edges. The returned value is generally not an observed sample. Bin resolution determines how tight the interpolation is — the default 53 buckets per decade gives roughly 1.3% relative bin width.
+
+**Why the values differ.** Nearest-rank returns a real sample; within-bucket interpolation returns a synthesised value inside the matching log-spaced bin. On the same input the two algorithms will report different `p99` (and other percentile) values, particularly in the tail. This is the data model, not a precision deviation. If you switch a surface between models, expect the percentile column to move.
+
+**Selecting the data model.** The choice comes down to memory budget, returned-value semantics, and what you're going to do with the result.
+
+**Choose the raw values data model when:** sample counts are bounded (a single message's per-bucket samples, a filtered analysis, a small log) and the per-observation memory cost is acceptable; you need the reported `p99` to map back to a specific log line you can go read; you're reproducing or comparing against another tool that returns observed samples.
+
+**Choose the bin counter data model when:** sample counts are large, unbounded, or unknown in advance (high-volume access logs, multi-gigabyte captures, long real-time runs) and a fixed per-partition memory cost is more predictable than a per-sample one; you're comparing against histogram-based tools that use a within-bucket interpolation algorithm; you only need the percentile *value*, not a mapping back to an individual observation.
+
+**Resource cost comparison.** The raw values data model scales with observation count: every sample occupies its own slot until the run completes. The bin counter data model scales with bin count: one partition per logical series, with a fixed bin footprint per partition regardless of how many observations stream through it. On small inputs the two are comparable; as sample counts grow the raw cost climbs linearly while the bin cost stays flat per partition. The crossover depends on how many distinct partitions you have — many low-volume series favour the raw values data model; few high-volume series favour the bin counter data model.
+
+**Flags.** Surfaces use sensible internal defaults (see the data-model selectors in `--help`); `--data-model raw` and `--data-model bin` pin every surface to one model. Per-surface selectors (`--histogram-data-model`, `--heatmap-data-model`, `--message-stats-data-model`, `--bucket-stats-data-model`) override the global setting. Bin resolution is tuned with `--percentile-buckets-per-decade` (default 53) or `--percentile-precision` (named tiers 1..9).
+
+**See also.** `min`, `max`, `iqr`, `skewness`, `kurtosis`, `bimodality_coef`. Flags: `--percentile-buckets-per-decade`, `--percentile-precision`, `--data-model`.
 
 ---
 
