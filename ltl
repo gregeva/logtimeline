@@ -3634,9 +3634,9 @@ sub print_help {
 
     # Percentile mode (Issue #189)
     $out .= help_subheading("Percentile mode");
-    $out .= help_opt("-pp,   --percentile-precision <N>",            "Set percentile binning precision tier 1..9 (default: 5 = ~1.3%; 1=~10%, 9=~0.1%). Affects migrated consumers; see docs/usage.md");
+    $out .= help_opt("-pp,   --percentile-precision <N>",            "Set percentile binning precision tier 1..9 (default: 5 = ~1.3%; 1=~10%, 9=~0.1%). Applies to surfaces using the bin counter data model; see docs/usage.md");
     $out .= help_opt("-pbpd, --percentile-buckets-per-decade <N>",   "Set percentile buckets-per-decade directly (default: 53; valid 4..616). Overrides --percentile-precision when both supplied");
-    $out .= help_opt("-ep,   --exact-percentiles",                   "Disable unified percentile mode; revert to exact sort-based computation (deprecated; superseded by --data-model raw)");
+    $out .= help_opt("-ep,   --exact-percentiles",                   "Pin the histogram and heatmap surfaces to the raw values data model (deprecated; superseded by --data-model raw)");
 
     # Data-model selectors (Issue #266). Pin which reduction path each
     # surface uses. No defaults — when unset, the surface's existing
