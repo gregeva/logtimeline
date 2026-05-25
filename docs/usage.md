@@ -133,6 +133,7 @@ These options control what is shown and how. After the timeline bar graph, logti
 |--------|-------------|
 | `-n, --top-messages <N>` | Number of unique messages to show in the summary table (default: 10) |
 | `-o, --output-csv` | Write all extracted data to a CSV file for external analysis |
+| `-cp, --csv-precision <mode>` | Control CSV decimal precision: `default` (per-family decimals derived from `-du`), `full` (raw precise floats), or an integer N (cap all numeric columns at N decimals) |
 | `-osum, --omit-summary` | Hide the summary table printed after the bar graph |
 | `-hl, --hide-legend` | Hide the legend column (category breakdowns and rates) |
 | `-ho, --hide-occurrences` | Hide the occurrences bar graph column, freeing space for other metric columns |
