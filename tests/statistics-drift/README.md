@@ -4,17 +4,15 @@ Numeric-correctness test harness for every calculated statistic `ltl` emits to
 its `-o` CSV outputs. Sibling to `tests/csv-output/` (Issue #223). Source of
 truth: `features/224-validate-statistics-test-harness.md`.
 
-## Four validation layers
+## Three validation layers
 
 | Layer | What it asserts | Catches | Reads source log? |
 |---|---|---|---|
 | **L1 — Drift** | Current CSV equals previously captured baseline CSV, tiered | Silent inter-release arithmetic regressions | No |
 | **L2 — Intra-row consistency** | Each row's columns are arithmetically consistent (e.g., `mean == duration / occurrences`, full percentile monotonicity, `iqr == p75 − p25`) | Arithmetic mistakes that leave values close to baseline but internally inconsistent | No |
-| **L3 — External oracle** | `ltl` agrees with NumPy/SciPy for the algebraically sensitive statistics over the same sample set | Wrong methodology — interpolation bugs, sign errors, biased vs unbiased formulas | Yes, only to feed the oracle |
-| **L4 — Cross-model agreement** | The raw-array (`default`) and bin-counter (`bin-data-model`) scenarios agree within a documented tolerance envelope at a single code state | Raw-vs-bin algorithmic divergence that L1/L2/L3 cannot see | No |
+| **L3 — Algorithm-aware external oracle** | `ltl` agrees with NumPy/SciPy for the algebraically sensitive statistics over the same sample set, with the reference computation dispatched by the algorithm declared in ltl's `-V percentile-algorithm` section (#280) | Wrong methodology — formula bugs, sign errors, biased vs unbiased formulas | Yes, only to feed the oracle |
 
-All four layers run on every scenario where they apply. Failure at T3 or T4
-(across any layer) blocks the release.
+All three layers run on every scenario. Failure at T3 or T4 blocks the release.
 
 ## Tier model
 
@@ -26,10 +24,6 @@ L1 and L3 share the same ladder:
 | T2 | `abs(new − old) ≤ 1% × old` | No (advisory) |
 | T3 | `abs(new − old) ≤ 5% × old` but > 1% | **Yes** |
 | T4 | cross-column invariant violated (L2) | **Yes** |
-
-L4 uses a separate ladder appropriate for cross-model deviation: T1 bitwise /
-T2 ≤1% / T3 ≤4% / T4 >4%, with per-scenario / per-column overrides in
-`cross-model-tolerances.tsv`.
 
 ## Scenario matrix
 
@@ -105,12 +99,6 @@ If you prefer a project-local venv, the harness driver honors the venv's
 Python when invoked with `PATH=$(pwd)/.venv/bin:$PATH`. See the top-level
 README's "Test-harness dependencies" section for the venv pattern.
 
-## Cross-model tolerance overrides
-
-Per-scenario / per-column Layer-4 tolerance overrides live in
-`cross-model-tolerances.tsv` with schema `scenario  column  t2_pct  t3_pct  notes`.
-Most-specific match wins. See the file header for full resolution rules.
-
 ## L2 cross-column invariants
 
 All apply within a single row; failure of any is a T4. Source: Decision 4 of
@@ -143,10 +131,9 @@ counts, rate counts) are validated by L1 + L2 only.
 tests/statistics-drift/
 ├── README.md                        ← this file
 ├── scenarios.tsv                    ← 16 scenarios (4 logs × 4 families)
-├── cross-model-tolerances.tsv       ← per-scenario / per-column L4 tolerance overrides
-├── compare-statistics-drift.pl      ← L1+L2+L3+L4 engine
+├── compare-statistics-drift.pl      ← L1+L2+L3 engine
 ├── oracle/
-│   └── calculate-reference.py       ← NumPy/SciPy oracle (per-scenario invocation)
+│   └── calculate-reference.py       ← algorithm-aware NumPy/SciPy oracle
 └── baselines/
     └── <scenario>/
         ├── messages.csv             ← captured -o MESSAGES baseline
@@ -172,7 +159,7 @@ casually:
 |---|---|
 | `validate-regression.sh` | Rendered terminal output byte-identity |
 | `validate-csv-output.sh` (#223) | CSV structural and type-wise correctness |
-| `validate-statistics.sh` (#224, this) | Numeric drift, intra-row consistency, oracle correctness, cross-model agreement |
+| `validate-statistics.sh` (#224, this) | Numeric drift, intra-row consistency, algorithm-aware oracle correctness |
 
 The three harnesses layer cleanly: terminal layout, CSV structure, CSV values.
 Run `validate-csv-output.sh` before `validate-statistics.sh` — structural

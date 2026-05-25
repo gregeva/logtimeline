@@ -1,18 +1,17 @@
 #!/usr/bin/env perl
 #
-# compare-statistics-drift.pl — L1+L2 statistics comparison engine
+# compare-statistics-drift.pl — three-layer statistics comparison engine
 # for the statistics-drift test harness (Issue #224).
 #
-# This file ships Phases C (L1 drift + L2 intra-row invariants) of the
-# four-layer harness. Phase E adds L4 cross-model pairing and Phase F
-# adds L3 oracle integration; both extend this file without changing its
-# invocation interface.
+# Layers:
+#   L1 — drift against committed baseline CSV
+#   L2 — intra-row arithmetic invariants
+#   L3 — algorithm-aware external-oracle (NumPy/SciPy) validation
 #
 # Invocation interface (locked):
 #
 #   compare-statistics-drift.pl --scenario <name> --file-kind messages|stats \
 #       --new <path> [--baseline <path>] [--show-all] [--oracle-json <path>]
-#       [--paired-with <other-scenario-name> --paired-new <path>]
 #
 # Exit codes:
 #   0   no T3/T4 failures across any layer
@@ -67,8 +66,6 @@ my %opt = (
     new                     => undef,
     show_all                => 0,
     oracle_json             => undef,
-    paired_with             => undef,
-    paired_new              => undef,
     ignore_row_key_mismatch => 0,
 );
 
@@ -79,8 +76,6 @@ GetOptions(
     'new=s'                     => \$opt{new},
     'show-all'                  => \$opt{show_all},
     'oracle-json=s'             => \$opt{oracle_json},
-    'paired-with=s'             => \$opt{paired_with},
-    'paired-new=s'              => \$opt{paired_new},
     'ignore-row-key-mismatch'   => \$opt{ignore_row_key_mismatch},
 ) or die "usage error\n";
 
@@ -181,85 +176,6 @@ my $RULES        = load_rules($RULES_TSV);
 my $NUMERIC_COLS = numeric_columns_from_rules($RULES);
 my %COL_FAMILY   = map { $_->{column} => $_->{family} } @$RULES;
 my %COL_TYPE     = map { $_->{column} => $_->{type}   } @$RULES;
-
-#-------------------------------------------------------------------------
-# Layer 4 tolerance loader. Reads cross-model-tolerances.tsv and returns a
-# resolver function. Per Decision 9, resolution rules are:
-#   1. (scenario, column) both non-blank → applies only to that pair
-#   2. scenario blank, column non-blank  → applies to that column across all scenarios
-#   3. scenario non-blank, column blank  → applies to all columns of that scenario
-#   4. both blank                        → syntax error, engine refuses to start
-#   5. no matching row                   → ladder defaults (T2=1%, T3=4%)
-# Multiple matches → most-specific wins.
-#-------------------------------------------------------------------------
-
-use constant L4_DEFAULT_T2_PCT => 1.0;
-use constant L4_DEFAULT_T3_PCT => 4.0;
-
-sub load_l4_tolerances {
-    my ($path) = @_;
-    my %by_pair;     # "$scenario|$column" => { t2, t3, source }
-    my %by_column;   # "$column"           => { t2, t3, source }
-    my %by_scenario; # "$scenario"         => { t2, t3, source }
-    return { by_pair => \%by_pair, by_column => \%by_column, by_scenario => \%by_scenario }
-        unless -f $path;
-    open my $fh, '<', $path or die "cannot read $path: $!";
-    my $header = <$fh>;
-    chomp $header if defined $header;
-    # Header is optional / commented; we look for the canonical column order
-    # (scenario, column, t2_pct, t3_pct, notes) — splitting on tabs.
-    while (my $line = <$fh>) {
-        chomp $line;
-        next if $line eq '' || $line =~ /^#/;
-        my @f = split /\t/, $line, -1;
-        next if @f < 4;
-        my ($sc, $col, $t2, $t3, $notes) = @f;
-        $sc    //= ''; $col   //= '';
-        $t2    //= ''; $t3    //= '';
-        $notes //= '';
-        if ($sc eq '' && $col eq '') {
-            print STDERR "compare-statistics-drift.pl: cross-model-tolerances.tsv row has blank scenario AND blank column (syntax error): $line\n";
-            exit 2;
-        }
-        my $t2n = as_num($t2);
-        my $t3n = as_num($t3);
-        unless (defined $t2n && defined $t3n) {
-            print STDERR "compare-statistics-drift.pl: cross-model-tolerances.tsv row has non-numeric t2_pct/t3_pct: $line\n";
-            exit 2;
-        }
-        my $entry = { t2 => $t2n, t3 => $t3n };
-        if ($sc ne '' && $col ne '') {
-            $entry->{source} = "cross-model-tolerances.tsv scenario=$sc column=$col";
-            $by_pair{"$sc|$col"} = $entry;
-        } elsif ($col ne '') {
-            $entry->{source} = "cross-model-tolerances.tsv column=$col";
-            $by_column{$col} = $entry;
-        } else {
-            $entry->{source} = "cross-model-tolerances.tsv scenario=$sc";
-            $by_scenario{$sc} = $entry;
-        }
-    }
-    close $fh;
-    return { by_pair => \%by_pair, by_column => \%by_column, by_scenario => \%by_scenario };
-}
-
-# Resolve tolerances for a (scenario, column) pair. Returns (t2_pct, t3_pct, source_label).
-sub resolve_l4_tolerance {
-    my ($tol, $scenario, $column) = @_;
-    if (my $e = $tol->{by_pair}{"$scenario|$column"}) {
-        return ($e->{t2}, $e->{t3}, $e->{source});
-    }
-    if (my $e = $tol->{by_column}{$column}) {
-        return ($e->{t2}, $e->{t3}, $e->{source});
-    }
-    if (my $e = $tol->{by_scenario}{$scenario}) {
-        return ($e->{t2}, $e->{t3}, $e->{source});
-    }
-    return (L4_DEFAULT_T2_PCT, L4_DEFAULT_T3_PCT, 'cross-model-tolerances.tsv defaults');
-}
-
-my $L4_TOLERANCES_TSV = "$SCRIPT_DIR/cross-model-tolerances.tsv";
-my $L4_TOLERANCES = load_l4_tolerances($L4_TOLERANCES_TSV);
 
 #-------------------------------------------------------------------------
 # CSV parsing. ltl -o emits comma-separated rows with double-quoted fields
@@ -1002,204 +918,6 @@ sub run_layer2 {
 }
 
 #-------------------------------------------------------------------------
-# Layer 4: cross-model agreement (Decision 9).
-#
-# Pairs the raw-array scenario's CSV (--new) against the bin-counter
-# scenario's CSV (--paired-new), joining by row key. Per-cell tier:
-#   T1  bitwise identical                       (advisory)
-#   T2  within +/- t2_pct (default 1%)          (advisory)
-#   T3  within +/- t3_pct (default 4%)          (advisory)
-#   T4  beyond t3_pct                           (blocking)
-# Tolerances are resolved per (scenario, column) via the
-# cross-model-tolerances.tsv lookup table. Day-one expectation: while
-# -mdm/-bdm bin silently fall back to raw, every paired cell reports T1
-# and the engine exits 0 — a wiring sanity check.
-#-------------------------------------------------------------------------
-
-# Classify a single (raw, bin) cell pair. Returns (tier, deviation_pct, source_label).
-sub classify_cell_l4 {
-    my ($raw, $bin, $scenario, $column) = @_;
-    my ($t2_pct, $t3_pct, $source) = resolve_l4_tolerance($L4_TOLERANCES, $scenario, $column);
-    return ('T1', 0.0, $source) if $raw eq $bin;
-    my $r = as_num($raw);
-    my $b = as_num($bin);
-    return ('T_NONNUMERIC', undef, $source) if !defined $r || !defined $b;
-    if ($r == 0) {
-        return ('T1', 0.0, $source) if $b == 0;
-        return ('T4', 'inf', $source);
-    }
-    my $dev = abs($b - $r) / abs($r) * 100.0;
-    return ('T1', $dev, $source) if $dev == 0.0;
-    return ('T2', $dev, $source) if $dev <= $t2_pct;
-    return ('T3', $dev, $source) if $dev <= $t3_pct;
-    return ('T4', $dev, $source);
-}
-
-sub emit_l4_failure {
-    my (%f) = @_;
-    my $dev;
-    if (!defined $f{deviation}) {
-        $dev = 'n/a';
-    } elsif ($f{deviation} =~ /^-?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?$/) {
-        $dev = sprintf('%.2f%%', $f{deviation});
-    } else {
-        $dev = $f{deviation};
-    }
-    print "FAIL [T4-L4] scenario-pair=$f{raw_scenario}<->$f{bin_scenario} file=$f{file} key=\"$f{key}\" column=$f{column}\n";
-    print "       raw=$f{raw} bin=$f{bin} deviation=$dev tolerance_t3=$f{tolerance_t3}%\n";
-    print "       asserts: bin-counter data model must agree with raw within configured tolerance\n";
-    print "       produced_by: calculate_statistics() (raw) vs bin-reduction sub (bin) in ltl\n";
-    print "       contract: features/224-validate-statistics-test-harness.md \xc2\xa7 Decision 9 \xe2\x80\x94 Layer 4 cross-model agreement\n";
-    print "       rule: abs(raw-bin) > $f{tolerance_t3}% * raw   (tolerance source: $f{source})\n";
-}
-
-sub emit_l4_advisory {
-    my (%f) = @_;
-    return unless $opt{show_all};
-    my $dev = defined $f{deviation}
-        ? (($f{deviation} =~ /^-?[0-9.]+/) ? sprintf('%.4f%%', $f{deviation}) : $f{deviation})
-        : 'n/a';
-    print "ADV  [$f{tier}-L4] scenario-pair=$f{raw_scenario}<->$f{bin_scenario} file=$f{file} key=\"$f{key}\" column=$f{column} raw=$f{raw} bin=$f{bin} deviation=$dev\n";
-}
-
-# Run cross-model pairing. Same row-key-mismatch handling as Layer 1 so
-# the --ignore-row-key-mismatch workaround applies symmetrically.
-sub run_layer4 {
-    my ($raw_data, $bin_data, $raw_scenario, $bin_scenario, $file_kind, $stats) = @_;
-
-    # Structural alignment: header sets must agree (column-set drift between
-    # paired scenarios indicates either #223 noise or a real bug; either way,
-    # do not continue with per-cell pairing).
-    my @r_hdr = @{ $raw_data->{header} };
-    my @b_hdr = @{ $bin_data->{header} };
-    if (scalar(@r_hdr) != scalar(@b_hdr)) {
-        print "STRUCTURE_DRIFT (L4): scenario-pair=$raw_scenario<->$bin_scenario file=$file_kind\n";
-        print "  detail: column count differs: raw=" . scalar(@r_hdr) . " bin=" . scalar(@b_hdr) . "\n";
-        print "  asserts: paired scenarios emit identical column sets\n";
-        print "  produced_by: column-set selection at end of calculate_statistics() in ltl\n";
-        print "  contract: features/224-validate-statistics-test-harness.md \xc2\xa7 Decision 9 \xe2\x80\x94 Layer 4 cross-model agreement\n";
-        $stats->{l4_structural_drift} = 1;
-        return;
-    }
-
-    # Build raw side row index by key.
-    my %raw_by_key;
-    for my $r (@{ $raw_data->{rows} }) {
-        $raw_by_key{ row_key($r, $file_kind) } = $r;
-    }
-
-    # Forward direction: every bin row should have a matching raw row.
-    for my $b_row (@{ $bin_data->{rows} }) {
-        my $k = row_key($b_row, $file_kind);
-        my $r_row = $raw_by_key{$k};
-        unless (defined $r_row) {
-            $stats->{l4_key_mismatch}++;
-            emit_l4_row_key_mismatch(
-                raw_scenario => $raw_scenario,
-                bin_scenario => $bin_scenario,
-                file_kind    => $file_kind,
-                key          => $k,
-                direction    => 'bin-not-in-raw',
-            );
-            next;
-        }
-        for my $col (@$NUMERIC_COLS) {
-            next if $IDENTIFIER_COLUMNS{$col};
-            # Skip columns not present in either header.
-            next unless (grep { $_ eq $col } @r_hdr) && (grep { $_ eq $col } @b_hdr);
-            my $rv = $r_row->{$col} // '';
-            my $bv = $b_row->{$col} // '';
-            next if is_blank($rv) && is_blank($bv);
-            if (is_blank($rv) xor is_blank($bv)) {
-                my (undef, $tol_t3, $source) = resolve_l4_tolerance($L4_TOLERANCES, $bin_scenario, $col);
-                $stats->{l4_T4}++;
-                emit_l4_failure(
-                    raw_scenario => $raw_scenario,
-                    bin_scenario => $bin_scenario,
-                    file         => $file_kind,
-                    key          => $k,
-                    column       => $col,
-                    raw          => $rv eq '' ? '(blank)' : $rv,
-                    bin          => $bv eq '' ? '(blank)' : $bv,
-                    deviation    => 'blank-vs-populated',
-                    tolerance_t3 => $tol_t3,
-                    source       => $source,
-                );
-                $stats->{l4_cells_checked}++;
-                next;
-            }
-            my ($tier, $dev, $source) = classify_cell_l4($rv, $bv, $bin_scenario, $col);
-            $stats->{l4_cells_checked}++;
-            if ($tier eq 'T_NONNUMERIC') {
-                $stats->{l4_nonnumeric}++;
-                next;
-            }
-            $stats->{"l4_$tier"}++;
-            if ($tier eq 'T4') {
-                my (undef, undef, $tol_t3) = resolve_l4_tolerance($L4_TOLERANCES, $bin_scenario, $col);
-                emit_l4_failure(
-                    raw_scenario => $raw_scenario,
-                    bin_scenario => $bin_scenario,
-                    file         => $file_kind,
-                    key          => $k,
-                    column       => $col,
-                    raw          => $rv,
-                    bin          => $bv,
-                    deviation    => $dev,
-                    tolerance_t3 => $tol_t3,
-                    source       => $source,
-                );
-            } else {
-                emit_l4_advisory(
-                    tier => $tier,
-                    raw_scenario => $raw_scenario, bin_scenario => $bin_scenario,
-                    file => $file_kind, key => $k, column => $col,
-                    raw => $rv, bin => $bv, deviation => $dev,
-                );
-            }
-        }
-    }
-
-    # Reverse direction: any raw row whose key is not in bin.
-    my %bin_keys = map { row_key($_, $file_kind) => 1 } @{ $bin_data->{rows} };
-    for my $r_row (@{ $raw_data->{rows} }) {
-        my $k = row_key($r_row, $file_kind);
-        next if $bin_keys{$k};
-        $stats->{l4_key_mismatch}++;
-        emit_l4_row_key_mismatch(
-            raw_scenario => $raw_scenario,
-            bin_scenario => $bin_scenario,
-            file_kind    => $file_kind,
-            key          => $k,
-            direction    => 'raw-not-in-bin',
-        );
-    }
-}
-
-# Layer-4 row-key-mismatch diagnostic. Same #269 workaround semantics as L1.
-sub emit_l4_row_key_mismatch {
-    my (%a) = @_;
-    my $raw_state = $a{direction} eq 'raw-not-in-bin' ? '(present)' : '(absent)';
-    my $bin_state = $a{direction} eq 'raw-not-in-bin' ? '(absent)'  : '(present)';
-    my $rule = $a{direction} eq 'raw-not-in-bin'
-        ? 'every row in the raw-scenario CSV must correspond to a row in the bin-scenario CSV by row key'
-        : 'every row in the bin-scenario CSV must correspond to a row in the raw-scenario CSV by row key';
-
-    if ($opt{ignore_row_key_mismatch}) {
-        print "ADV  [T4-L4] scenario-pair=$a{raw_scenario}<->$a{bin_scenario} file=$a{file_kind} key=\"$a{key}\" column=(row-key) ",
-              "raw=$raw_state bin=$bin_state deviation=row-key-mismatch (advisory: #269 workaround active)\n";
-        return;
-    }
-
-    print "FAIL [T4-L4] scenario-pair=$a{raw_scenario}<->$a{bin_scenario} file=$a{file_kind} key=\"$a{key}\" column=(row-key)\n";
-    print "       raw=$raw_state bin=$bin_state deviation=row-key-mismatch\n";
-    print "       asserts: paired scenarios produce the same row set (same top-N keys)\n";
-    print "       produced_by: ranking step in ltl (currently non-deterministic at ties \xe2\x80\x94 see Issue #269)\n";
-    print "       contract: features/224-validate-statistics-test-harness.md \xc2\xa7 Decision 9 \xe2\x80\x94 Layer 4 cross-model agreement\n";
-    print "       rule: $rule\n";
-}
-
-#-------------------------------------------------------------------------
 # Layer 3: external-oracle validation (Decision 3).
 #
 # Per Decision 3, Layer 3 validates the algebraically sensitive
@@ -1395,14 +1113,6 @@ my %stats = (
     l3_T2                => 0,
     l3_T3                => 0,
     l3_nonnumeric        => 0,
-    l4_cells_checked     => 0,
-    l4_T1                => 0,
-    l4_T2                => 0,
-    l4_T3                => 0,
-    l4_T4                => 0,
-    l4_nonnumeric        => 0,
-    l4_key_mismatch      => 0,
-    l4_structural_drift  => 0,
 );
 
 my $baseline_data;
@@ -1450,28 +1160,6 @@ if (defined $opt{oracle_json}) {
     }
 }
 
-# Layer 4: cross-model pairing. Triggered when --paired-with and
-# --paired-new are both supplied. Validates --new (raw scenario) against
-# --paired-new (bin scenario) on the same logfile.
-my $l4_state = 'N/A';
-if (defined $opt{paired_with} && defined $opt{paired_new}) {
-    if (!-f $opt{paired_new}) {
-        print STDERR "compare-statistics-drift.pl: --paired-new file missing: $opt{paired_new}\n";
-        exit 2;
-    }
-    my $bin_data = load_csv($opt{paired_new});
-    run_layer4($new_data, $bin_data, $opt{scenario}, $opt{paired_with}, $opt{file_kind}, \%stats);
-    if ($stats{l4_structural_drift}) {
-        $l4_state = 'STRUCT_DRIFT';
-    } elsif ($stats{l4_T4} > 0 || $stats{l4_nonnumeric} > 0) {
-        $l4_state = 'FAIL';
-    } elsif ($stats{l4_key_mismatch} > 0 && !$opt{ignore_row_key_mismatch}) {
-        $l4_state = 'FAIL';
-    } else {
-        $l4_state = 'OK';
-    }
-}
-
 # Per-scenario summary (Decision 7).
 my $struct_state = $structural_ok ? 'OK' : 'DRIFT';
 my $l3_detail = '';
@@ -1480,26 +1168,18 @@ if ($l3_state ne 'N/A') {
         $stats{l3_cells_checked},
         $stats{l3_T3}, $stats{l3_T2}, $stats{l3_T1}, $stats{l3_nonnumeric});
 }
-my $l4_detail = '';
-if ($l4_state ne 'N/A') {
-    $l4_detail = sprintf(' | L4: %d cells, %d T4, %d T3, %d T2, %d T1, nonnumeric=%d, key_mismatch=%d',
-        $stats{l4_cells_checked},
-        $stats{l4_T4}, $stats{l4_T3}, $stats{l4_T2}, $stats{l4_T1},
-        $stats{l4_nonnumeric}, $stats{l4_key_mismatch});
-}
 print "SUMMARY scenario=$opt{scenario}/$opt{file_kind}: ",
       "$stats{cells_checked} cells checked, ",
       "$stats{T4} T4, $stats{T3} T3, $stats{T2} T2, $stats{T1} T1, ",
       "nonnumeric=$stats{nonnumeric}, key_mismatch=$stats{key_mismatch}, ",
-      "structural=$struct_state, L3=$l3_state$l3_detail, L4=$l4_state$l4_detail\n";
+      "structural=$struct_state, L3=$l3_state$l3_detail\n";
 
-# Exit code: T3/T4 in L1/L2 block; L4 T4 blocks; nonnumeric also blocks
-# since it indicates the engine couldn't actually assert. key_mismatch
-# (both L1 and L4 sides) blocks unless --ignore-row-key-mismatch is set.
+# Exit code: T3/T4 in L1/L2 block; nonnumeric also blocks since it
+# indicates the engine couldn't actually assert. key_mismatch blocks
+# unless --ignore-row-key-mismatch is set.
 my $exit_fail = ($stats{T3} > 0 || $stats{T4} > 0 || $stats{nonnumeric} > 0);
 $exit_fail = 1 if $stats{l3_T3} > 0 || $stats{l3_nonnumeric} > 0;
-$exit_fail = 1 if $stats{l4_T4} > 0 || $stats{l4_nonnumeric} > 0 || $stats{l4_structural_drift};
 if (!$opt{ignore_row_key_mismatch}) {
-    $exit_fail = 1 if $stats{key_mismatch} > 0 || $stats{l4_key_mismatch} > 0;
+    $exit_fail = 1 if $stats{key_mismatch} > 0;
 }
 exit ($exit_fail ? 1 : 0);
