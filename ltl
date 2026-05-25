@@ -4078,7 +4078,7 @@ sub detect_and_parse_csv_header {
     my $tab_count   = () = $header_line =~ /\t/g;
 
     my %sep_counts = ( ',' => $comma_count, ';' => $semi_count, "\t" => $tab_count );
-    my ($best_sep) = sort { $sep_counts{$b} <=> $sep_counts{$a} } keys %sep_counts;
+    my ($best_sep) = sort { $sep_counts{$b} <=> $sep_counts{$a} || ($a cmp $b) } keys %sep_counts;
 
     # Override with user-specified separator
     if (defined $csv_separator_override) {
@@ -4576,7 +4576,7 @@ sub find_consolidation_candidates {
 
     # Phase 1: top-K most discriminative trigrams (smallest posting lists)
     my $ps = $consolidation_posting_size{$cat_gk};
-    my @disc_trigrams = sort { ($ps->{$a} // 0) <=> ($ps->{$b} // 0) }
+    my @disc_trigrams = sort { (($ps->{$a} // 0) <=> ($ps->{$b} // 0)) || ($a cmp $b) }
                         grep { exists $consolidation_ngram_index{$cat_gk}{$_} }
                         keys %$source_trigrams;
     my $topk_actual = min($consolidation_discriminative_topk, scalar @disc_trigrams);
@@ -8454,7 +8454,7 @@ sub calculate_all_statistics {
 
     ## STATS FOR TOP LOG MESSAGES ##
     # if( $print_durations ) {
-        foreach my $category (keys %log_messages) {
+        foreach my $category (sort keys %log_messages) {
             # Collect and sort the log keys based on the count within each log_key
             my (@sorted_log_keys, @top_keys);
 
@@ -8462,17 +8462,16 @@ sub calculate_all_statistics {
                 @sorted_log_keys = sort {
                     my $occurrences_a = $log_messages{$category}{$a}{$sort_key} // 0;
                     my $occurrences_b = $log_messages{$category}{$b}{$sort_key} // 0;
-                    if( $sort_ascending ) {
-                        $occurrences_a <=> $occurrences_b;
-                    } else {
-                        $occurrences_b <=> $occurrences_a;
-                    }
+                    ($sort_ascending
+                        ? ($occurrences_a <=> $occurrences_b)
+                        : ($occurrences_b <=> $occurrences_a))
+                    || ($a cmp $b);
                 } keys %{$log_messages{$category}};
                 # Capture only the top N log keys for calculations if possible
-                @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)]; 
+                @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)];
             } else {
-                # Sort by statistical metric which first needs to be calculated for all messages (will inevitably take longer)   
-                @top_keys = keys %{$log_messages{$category}}
+                # Sort by statistical metric which first needs to be calculated for all messages (will inevitably take longer)
+                @top_keys = sort keys %{$log_messages{$category}};
             }
 
             foreach my $log_key (@top_keys) {
@@ -8560,7 +8559,7 @@ sub calculate_all_statistics {
         }
     }
 
-    @ordered_threadpools = sort { $threadpools{$b}{occurrences} <=> $threadpools{$a}{occurrences} } keys %threadpools;
+    @ordered_threadpools = sort { $threadpools{$b}{occurrences} <=> $threadpools{$a}{occurrences} || ($a cmp $b) } keys %threadpools;
 
     foreach my $threadpool ( @ordered_threadpools ) {
         push( @graph_threadpools_activity, $threadpool ) if( $include_threadpool_summary || $threadpool =~ /${threadpool_activity_regex}/i );
@@ -10848,7 +10847,7 @@ sub print_summary_table {
             }
 
             # Sort by size descending, skip empty structures
-            my @sorted = sort { $memory_high_water_marks{$b} <=> $memory_high_water_marks{$a} }
+            my @sorted = sort { $memory_high_water_marks{$b} <=> $memory_high_water_marks{$a} || ($a cmp $b) }
                          grep { $memory_high_water_marks{$_} >= $min_size_threshold }
                          keys %memory_high_water_marks;
 
@@ -10982,11 +10981,10 @@ sub print_message_summary {
         my @sorted_keys = sort {
             my $occurrences_a = $log_messages{$grouping}{$a}{$sort_key} // 0;
             my $occurrences_b = $log_messages{$grouping}{$b}{$sort_key} // 0;
-            if( $sort_ascending ) {
-                $occurrences_a <=> $occurrences_b;
-            } else {
-                $occurrences_b <=> $occurrences_a;
-            }
+            ($sort_ascending
+                ? ($occurrences_a <=> $occurrences_b)
+                : ($occurrences_b <=> $occurrences_a))
+            || ($a cmp $b);
         } keys %{$log_messages{$grouping}};
 
         $sorted_keys{$grouping} = \@sorted_keys;
@@ -11234,11 +11232,10 @@ sub print_threadpool_summary {
         my @sorted_keys = sort {
             my $occurrences_a = scalar keys %{$threadpool_activity{$grouping}{$a}} // 0;
             my $occurrences_b = scalar keys %{$threadpool_activity{$grouping}{$b}} // 0;
-            if( $sort_ascending ) {
-                $occurrences_a <=> $occurrences_b;
-            } else {
-                $occurrences_b <=> $occurrences_a;
-            }
+            ($sort_ascending
+                ? ($occurrences_a <=> $occurrences_b)
+                : ($occurrences_b <=> $occurrences_a))
+            || ($a cmp $b);
         } keys %{$threadpool_activity{$grouping}};
 
         $sorted_keys{$grouping} = \@sorted_keys;
