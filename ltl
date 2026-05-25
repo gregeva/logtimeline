@@ -1451,7 +1451,7 @@ sub _classify_argv_provenance {
                 'bytes-min|bmin', 'bytes-max|bmax',
                 'count-min|cmin', 'count-max|cmax',
                 'memory-usage|mem', 'disable-progress',
-                'output-csv|o', 'sort-on|so', 'sort-ascending|sa',
+                'output-csv|o', 'csv-precision|cp', 'sort-on|so', 'sort-ascending|sa',
                 'threadpool-activity-summary|tpas', 'threadpool-activity|tpa',
                 'user-defined-metrics|udm', 'udm-csv-message|ucm',
                 'udm-csv-separator|ucs', 'mask-uuid|uuid',
@@ -5986,6 +5986,7 @@ sub adapt_to_command_line_options {
 	    'memory-usage|mem' => \$show_memory,
         'disable-progress' => \$disable_progress,                                   # hidden
         'output-csv|o' => \$write_messages_to_csv,
+        'csv-precision|cp=s' => sub { $csv_precision = $_[1]; $csv_precision_source = "-cp $_[1]"; },
         'sort-on|so=s' => \$sort_type,
         'sort-ascending|sa' => \$sort_ascending,
         'threadpool-activity-summary|tpas' => \$include_threadpool_summary,
@@ -6228,6 +6229,59 @@ sub adapt_to_command_line_options {
     # Rate unit option validation (Issue #122)
     die print_usage("Invalid rate unit '$rate_unit'. Valid values: s, m, h, d")
         unless $rate_unit =~ /^(s|m|h|d)$/;
+
+    # CSV precision option validation (Issue #268)
+    die print_usage("Invalid --csv-precision value '$csv_precision'. Valid values: default, full, or a non-negative integer.")
+        unless $csv_precision eq 'default' || $csv_precision eq 'full' || $csv_precision =~ /^\d+$/;
+
+    # Resolve duration unit for CSV emission (Issue #268). When -du is set,
+    # use that; otherwise ms is the implicit default ltl applies through
+    # the parsing/emit paths. Format-detection-derived units are not
+    # surfaced here today.
+    if (defined $duration_unit_override) {
+        $duration_unit_resolved = $duration_unit_override;
+        $duration_unit_source   = "-du $duration_unit_override";
+    } else {
+        $duration_unit_resolved = 'ms';
+        $duration_unit_source   = 'default';
+    }
+
+    # Resolve per-family decimal counts (Issue #268).
+    # - default mode: time-valued families derive from duration unit;
+    #   shape is fixed at 3 (unitless); meta and bytes are integer.
+    # - full mode: all families read 'n/a' (the emit path bypasses formatting).
+    # - N mode: every family uses N decimals.
+    my %decimals_by_unit = ( ns => 9, us => 6, ms => 0, s => 0 );
+    if ($csv_precision eq 'default') {
+        my $time_decimals = $decimals_by_unit{$duration_unit_resolved} // 0;
+        %csv_family_decimals = (
+            meta       => 0,
+            count      => 0,
+            duration   => $time_decimals,
+            percentile => $time_decimals,
+            shape      => 3,
+            bytes      => 0,
+        );
+    } elsif ($csv_precision eq 'full') {
+        %csv_family_decimals = (
+            meta       => 'n/a',
+            count      => 'n/a',
+            duration   => 'n/a',
+            percentile => 'n/a',
+            shape      => 'n/a',
+            bytes      => 'n/a',
+        );
+    } else {
+        # Integer N mode: every family uses N decimals.
+        %csv_family_decimals = (
+            meta       => $csv_precision + 0,
+            count      => $csv_precision + 0,
+            duration   => $csv_precision + 0,
+            percentile => $csv_precision + 0,
+            shape      => $csv_precision + 0,
+            bytes      => $csv_precision + 0,
+        );
+    }
 
     # Build compiled filter matchers (Issue #21, #117)
     # Handles CLI args with AND (&) / OR (|) operators and pattern files
