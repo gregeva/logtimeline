@@ -16,15 +16,32 @@ driver reports `L3=N/A` for those scenarios. The architecture is
 format-agnostic — adding a new format is a matter of writing a new
 parser function and dispatching on log shape.
 
-Methodology pinning (per Decision 3):
-  - Percentiles: numpy.percentile(samples, q, method='linear')
+Percentile algorithm dispatch (Issue #280): the oracle accepts a
+--percentile-algorithm argument that selects which reference
+computation it uses. The two supported values mirror the
+`effective_algorithm:` lines in ltl's `=== percentile-algorithm ===`
+`-V` section:
+
+  - 'nearest_rank' — replicates ltl's calculate_statistics() formula
+    verbatim: value = sorted[int(n * q)] with a max-clamp fallback at
+    very high percentiles. Used for the message-stats and bucket-stats
+    surfaces, which never use bin counters today (see #266 surfaces 3/4).
+
+  - 'exponential_interpolation_within_bucket' — reserved for the
+    histogram and heatmap surfaces when --hgdm bin / --hmdm bin is
+    active. Not yet exercised by Phase F (only CSV surfaces — i.e.
+    message-stats and bucket-stats — are validated by L3). Implementing
+    this path requires reproducing ltl's bin-counter capture from raw
+    samples and is a follow-up task.
+
+Other methodology pinning (per Decision 3):
   - std_dev:     numpy.std(samples, ddof=1)             [Bessel-corrected]
   - cv:          std_dev / mean
   - skewness:    scipy.stats.skew(samples, bias=False)
   - kurtosis:    scipy.stats.kurtosis(samples, fisher=True, bias=False)
   - bimodality:  Sarle's bimodality coefficient (g1² + 1) / (g2 + 3(n-1)²/((n-2)(n-3)))
 
-Each statistic's NumPy/SciPy call site name is surfaced in the emitted
+Each statistic's reference call-site name is surfaced in the emitted
 JSON so the Perl engine can cite it verbatim in failure output (the
 `produced_by` field). This is the contract Decision 3 establishes: when
 L3 fires, the operator sees exactly which reference call ltl is being
@@ -34,6 +51,7 @@ CLI:
   calculate-reference.py
       --log <path>
       --bucket-size-seconds <N>
+      --percentile-algorithm <nearest_rank|exponential_interpolation_within_bucket>
       [--duration-unit ms|us]            [default: ms]
       [--format tomcat-access]           [default: tomcat-access]
 
@@ -221,9 +239,81 @@ PERCENTILES = {
     "p99999":  99.999,
 }
 
+# Algorithm identifiers — mirror the `effective_algorithm:` values in
+# ltl's `=== percentile-algorithm ===` -V section (Issue #280).
+ALGO_NEAREST_RANK = "nearest_rank"
+ALGO_EXP_INTERP   = "exponential_interpolation_within_bucket"
 
-def compute_oracle_stats(samples):
+
+def _ltl_nearest_rank(sorted_arr, q_fraction):
+    """Replicate ltl's calculate_statistics() nearest-rank formula exactly.
+
+    ltl (raw-array path): value = sorted[int(n * q)], with a `// $sorted[-1]`
+    safety net for q values where int(n*q) >= n (p9999 / p99999 on small
+    sample sets). This function is a verbatim port so an L3 disagreement
+    is unambiguous: either the algorithm changed, or the input sample set
+    differs. There is no standard NumPy method that matches this exact
+    integer-index-into-sorted-array form (numpy 'nearest' rounds half-to-
+    even and 'inverted_cdf' uses a different tie-breaking rule).
+
+    Args:
+        sorted_arr: 1-D numpy array, sorted ascending.
+        q_fraction: percentile as a fraction in [0, 1] (e.g. 0.99 for p99).
+    """
+    n = sorted_arr.size
+    idx = int(n * q_fraction)
+    if idx >= n:
+        idx = n - 1
+    return float(sorted_arr[idx])
+
+
+def _percentile_value(arr, sorted_arr, q_fraction, algorithm):
+    """Compute one percentile using the requested algorithm."""
+    if algorithm == ALGO_NEAREST_RANK:
+        return _ltl_nearest_rank(sorted_arr, q_fraction)
+    if algorithm == ALGO_EXP_INTERP:
+        # Reserved for the histogram/heatmap surfaces under -hgdm bin /
+        # -hmdm bin. Phase F validates the CSV surfaces only (message-
+        # stats / bucket-stats), which always run nearest_rank today
+        # (#266 surfaces 3/4 are pinned-raw). The bin-counter reference
+        # requires reproducing ltl's partition-and-bin capture from raw
+        # samples — see features/187-histogram-bin-counter-percentiles.md
+        # § Decision 1. Tracked as a follow-up to #280.
+        raise NotImplementedError(
+            "Oracle support for the exponential_interpolation_within_bucket "
+            "algorithm is reserved for a follow-up. Phase F only exercises "
+            "the message-stats and bucket-stats surfaces, which use "
+            "nearest_rank regardless of the resolved data model."
+        )
+    raise ValueError(f"unknown percentile algorithm: {algorithm}")
+
+
+def _produced_by(q_fraction, algorithm):
+    """Return the citation string emitted in the JSON's produced_by field.
+
+    The engine surfaces this verbatim in L3 failure messages, so it must
+    name the reference computation precisely enough that an operator can
+    re-run it by hand from the failure output.
+    """
+    if algorithm == ALGO_NEAREST_RANK:
+        return (
+            f"ltl nearest_rank reference: sorted[int(n * {q_fraction})] "
+            "(see ltl:calculate_statistics; oracle: _ltl_nearest_rank)"
+        )
+    if algorithm == ALGO_EXP_INTERP:
+        return (
+            "ltl exponential_interpolation_within_bucket reference "
+            "(features/187-histogram-bin-counter-percentiles.md § Decision 1)"
+        )
+    return f"unknown algorithm: {algorithm}"
+
+
+def compute_oracle_stats(samples, algorithm):
     """Compute Decision-3 statistics for one sample list.
+
+    The percentile family (p1..p99999, iqr) is dispatched on `algorithm`
+    per Issue #280; the non-percentile statistics (std_dev, cv, skewness,
+    kurtosis, bimodality_coef) are algorithm-independent.
 
     Returns a dict {stat_name: {"value": v, "produced_by": "..."}} with
     one entry per Layer-3 statistic. Returns None for any statistic
@@ -234,25 +324,27 @@ def compute_oracle_stats(samples):
         return {}
     arr = np.array(samples, dtype=float)
     n = arr.size
+    sorted_arr = np.sort(arr)
 
     out = {}
 
-    # Percentiles — numpy.percentile with method='linear' (Decision 3 pin).
-    for name, q in PERCENTILES.items():
-        v = float(np.percentile(arr, q, method="linear"))
+    # Percentiles — dispatched on the requested algorithm (Issue #280).
+    for name, q_pct in PERCENTILES.items():
+        q_fraction = q_pct / 100.0
+        v = _percentile_value(arr, sorted_arr, q_fraction, algorithm)
         out[name] = {
             "value": _finite_or_none(v),
-            "produced_by": f"numpy.percentile(samples, {q}, method='linear')",
+            "produced_by": _produced_by(q_fraction, algorithm),
         }
 
-    # IQR — same family as percentile, but Decision 4 also derives it as
-    # p75 - p25. L3's job is to validate p25/p75 themselves; we still
-    # emit iqr so the engine can cross-check.
-    p75 = float(np.percentile(arr, 75.0, method="linear"))
-    p25 = float(np.percentile(arr, 25.0, method="linear"))
+    # IQR — derived from p25/p75 under the same algorithm.
+    p25 = _percentile_value(arr, sorted_arr, 0.25, algorithm)
+    p75 = _percentile_value(arr, sorted_arr, 0.75, algorithm)
     out["iqr"] = {
         "value": _finite_or_none(p75 - p25),
-        "produced_by": "numpy.percentile(samples, 75, method='linear') - numpy.percentile(samples, 25, method='linear')",
+        "produced_by": (
+            f"{_produced_by(0.75, algorithm)} - {_produced_by(0.25, algorithm)}"
+        ),
     }
 
     # std_dev — Bessel-corrected (ddof=1) per Decision 3.
@@ -337,10 +429,37 @@ def main():
                     help="Input duration unit (default: ms)")
     ap.add_argument("--format", default="tomcat-access", choices=("tomcat-access",),
                     help="Log format. Phase F supports tomcat-access only; other formats deferred.")
+    ap.add_argument(
+        "--percentile-algorithm",
+        required=True,
+        choices=(ALGO_NEAREST_RANK, ALGO_EXP_INTERP),
+        help=(
+            "Percentile algorithm to validate against. Must match the "
+            "`effective_algorithm:` value emitted by ltl's "
+            "`-V percentile-algorithm` section for the surface being "
+            "validated (Issue #280). nearest_rank is implemented; "
+            "exponential_interpolation_within_bucket is reserved for a "
+            "follow-up — Phase F only exercises CSV surfaces, which use "
+            "nearest_rank."
+        ),
+    )
     args = ap.parse_args()
 
     if args.format != "tomcat-access":
         print(f"ERROR: oracle does not yet support format '{args.format}'", file=sys.stderr)
+        sys.exit(2)
+
+    if args.percentile_algorithm == ALGO_EXP_INTERP:
+        # Fail fast with a clear error instead of waiting for the first
+        # _percentile_value() call to raise. The harness should not pass
+        # this until the bin-counter reference path is implemented.
+        print(
+            "ERROR: percentile-algorithm "
+            f"'{ALGO_EXP_INTERP}' is reserved for a follow-up to #280. "
+            "Phase F validates CSV surfaces (message-stats, bucket-stats) "
+            "which always use nearest_rank.",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     # Group samples by (row_key, bucket_epoch).
@@ -403,6 +522,7 @@ def main():
     # Build per-row aggregation by row_message.
     per_message_samples = {}
     per_bucket_samples = {}  # for STATS, aggregated across all messages
+    algorithm = args.percentile_algorithm
     for (row_message, be), samples in groups.items():
         per_message_samples.setdefault(row_message, []).extend(samples)
         per_bucket_samples.setdefault(be, []).extend(samples)
@@ -411,7 +531,7 @@ def main():
             "message":  row_message,
             "bucket":   bucket_label(be),
             "occurrences": len(samples),
-            "stats":    compute_oracle_stats(samples),
+            "stats":    compute_oracle_stats(samples, algorithm),
         })
 
     # MESSAGES CSV: one row per (category, message) aggregated across buckets.
@@ -423,7 +543,7 @@ def main():
             "message":  row_message,
             "bucket":   "",   # MESSAGES rows are not bucket-keyed
             "occurrences": len(samples),
-            "stats":    compute_oracle_stats(samples),
+            "stats":    compute_oracle_stats(samples, algorithm),
         })
 
     # STATS CSV: one row per bucket, aggregated across all messages (the
@@ -437,18 +557,19 @@ def main():
             "message":  "",
             "bucket":   bucket_label(be),
             "occurrences": len(samples),
-            "stats":    compute_oracle_stats(samples),
+            "stats":    compute_oracle_stats(samples, algorithm),
         })
 
     out = {
-        "format":              args.format,
-        "bucket_size_seconds": args.bucket_size_seconds,
-        "duration_unit":       args.duration_unit,
-        "lines_total":         lines_total,
-        "lines_parsed":        lines_parsed,
-        "lines_with_duration": lines_with_duration,
-        "rows_messages":       rows_messages,
-        "rows_stats":          rows_stats,
+        "format":               args.format,
+        "bucket_size_seconds":  args.bucket_size_seconds,
+        "duration_unit":        args.duration_unit,
+        "percentile_algorithm": algorithm,
+        "lines_total":          lines_total,
+        "lines_parsed":         lines_parsed,
+        "lines_with_duration":  lines_with_duration,
+        "rows_messages":        rows_messages,
+        "rows_stats":           rows_stats,
     }
 
     json.dump(out, sys.stdout, indent=None, separators=(",", ":"))

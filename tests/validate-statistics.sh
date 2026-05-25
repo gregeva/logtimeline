@@ -141,15 +141,17 @@ fi
 # Per-logfile oracle JSON cache. The oracle parses the full source log
 # (potentially seconds to minutes for the 277MB Tomcat file) so caching
 # by logfile-shorthand avoids the cost being paid once per scenario.
+# The cache key includes the percentile-algorithm name (Issue #280) so
+# raw and bin scenarios on the same logfile don't collide.
 ORACLE_CACHE_DIR="$SCRIPT_DIR/.artifacts/oracle"
 oracle_json_for_logfile() {
-    # Args: logfile_path, bucket_size_seconds, duration_unit, format
+    # Args: logfile_path, bucket_size_seconds, duration_unit, format, algorithm
     # Echoes the resolved oracle JSON path on stdout; produces it if not
     # cached. Returns non-zero if the oracle invocation fails.
-    local logfile="$1" bs_sec="$2" du_unit="$3" fmt="$4"
+    local logfile="$1" bs_sec="$2" du_unit="$3" fmt="$4" algorithm="$5"
     local log_shorthand
     log_shorthand="$(csv_cache_logfile_shorthand "$logfile")"
-    local cache_name="${fmt}_${log_shorthand}_bs${bs_sec}_du${du_unit}.json"
+    local cache_name="${fmt}_${log_shorthand}_bs${bs_sec}_du${du_unit}_${algorithm}.json"
     local cache_path="$ORACLE_CACHE_DIR/$cache_name"
     if [[ -f "$cache_path" ]]; then
         echo "$cache_path"
@@ -167,12 +169,81 @@ oracle_json_for_logfile() {
             --bucket-size-seconds "$bs_sec" \
             --duration-unit "$du_unit" \
             --format "$fmt" \
+            --percentile-algorithm "$algorithm" \
             > "$cache_path" 2>"$cache_path.stderr"; then
         echo "ERROR: oracle failed for $logfile (see $cache_path.stderr)" >&2
         rm -f "$cache_path"
         return 1
     fi
     echo "$cache_path"
+    return 0
+}
+
+# Per-scenario percentile-algorithm capture. Calls ltl with
+# `-V percentile-algorithm` against the same logfile + options the
+# scenario uses, then extracts the effective_algorithm for one surface.
+# This is the contract Issue #280 establishes between ltl and the
+# harness: the harness MUST NOT re-derive which algorithm ltl used —
+# it MUST read it from the section ltl emits.
+#
+# Cached at $SCRIPT_DIR/.artifacts/oracle/pa-<scenario>.txt to avoid
+# re-running ltl per file-kind.
+PA_CAPTURE_DIR="$SCRIPT_DIR/.artifacts/oracle"
+pa_capture_for_scenario() {
+    # Args: scenario_id, logfile, options
+    # Echoes the resolved capture file path on stdout. Returns non-zero
+    # on ltl failure.
+    local scenario="$1" logfile="$2" options="$3"
+    mkdir -p "$PA_CAPTURE_DIR"
+    local cache_path="$PA_CAPTURE_DIR/pa-${scenario}.txt"
+    if [[ -f "$cache_path" ]]; then
+        echo "$cache_path"
+        return 0
+    fi
+    local abs_log
+    if [[ "$logfile" = /* ]]; then
+        abs_log="$logfile"
+    else
+        abs_log="$REPO_DIR/$logfile"
+    fi
+    local tmp
+    tmp="$(mktemp)"
+    # shellcheck disable=SC2086  # word-splitting on $options is intentional
+    if ! "$LTL" --disable-progress -V percentile-algorithm $options "$abs_log" \
+            >"$tmp" 2>"$tmp.stderr"; then
+        echo "ERROR: ltl -V percentile-algorithm failed for scenario=$scenario" >&2
+        sed 's/^/        /' "$tmp.stderr" >&2
+        rm -f "$tmp" "$tmp.stderr"
+        return 1
+    fi
+    mv "$tmp" "$cache_path"
+    rm -f "$tmp.stderr"
+    echo "$cache_path"
+    return 0
+}
+
+# Read the effective_algorithm for one surface out of a captured
+# -V percentile-algorithm dump. HARNESS-DESIGN.md trap 1/3/4: confirm
+# the sub-section header is present, then extract the value, then fail
+# loudly if nothing was found. Echoes the algorithm name on success.
+pa_algorithm_for_surface() {
+    local capture_file="$1" surface="$2"
+    if ! grep -qE "^=== percentile-algorithm / ${surface} ===$" "$capture_file"; then
+        echo "ERROR: missing '=== percentile-algorithm / ${surface} ===' anchor in $capture_file" >&2
+        return 1
+    fi
+    local algo
+    algo="$(
+        sed -n "/^=== percentile-algorithm \/ ${surface} ===$/,/^=== END percentile-algorithm \/ ${surface} ===$/p" \
+            "$capture_file" \
+            | sed -nE 's/^effective_algorithm: (.+)$/\1/p' \
+            | head -1
+    )"
+    if [[ -z "$algo" ]]; then
+        echo "ERROR: missing 'effective_algorithm:' line under '/ ${surface}' in $capture_file" >&2
+        return 1
+    fi
+    echo "$algo"
     return 0
 }
 
@@ -294,19 +365,51 @@ while IFS=$'\t' read -r scenario logfile options; do
 
         # Layer 3: resolve oracle JSON per-logfile (cached). The oracle
         # only supports tomcat-access in Phase F; other formats skip L3
-        # (engine reports L3=N/A via absence of --oracle-json).
+        # (engine reports L3=N/A via absence of --oracle-json). The
+        # percentile algorithm is read from ltl's
+        # `-V percentile-algorithm` capture per the Issue #280 contract;
+        # the surface is selected by file-kind (messages → message-stats,
+        # stats → bucket-stats). When the effective algorithm has no
+        # oracle reference implementation yet (i.e.
+        # exponential_interpolation_within_bucket), L3 is skipped for
+        # that scenario+kind with no diagnostic noise.
         if [[ $L3_ENABLED -eq 1 ]]; then
             fmt="$(oracle_format_for_logfile "$logfile")"
             if [[ -n "$fmt" ]]; then
                 bs_sec="$(extract_bucket_size_seconds "$options")"
                 du_unit="$(extract_duration_unit "$options")"
                 if [[ "$bs_sec" != "0" ]]; then
+                    if [[ "$kind" == "messages" ]]; then
+                        pa_surface="message-stats"
+                    else
+                        pa_surface="bucket-stats"
+                    fi
                     set +e
-                    oracle_json="$(oracle_json_for_logfile "$logfile" "$bs_sec" "$du_unit" "$fmt")"
-                    orc=$?
+                    pa_capture="$(pa_capture_for_scenario "$scenario" "$logfile" "$options")"
+                    pac=$?
                     set -e
-                    if [[ $orc -eq 0 && -n "$oracle_json" ]]; then
-                        engine_args+=(--oracle-json "$oracle_json")
+                    if [[ $pac -eq 0 && -n "$pa_capture" ]]; then
+                        set +e
+                        pa_algorithm="$(pa_algorithm_for_surface "$pa_capture" "$pa_surface")"
+                        pasc=$?
+                        set -e
+                        if [[ $pasc -eq 0 && -n "$pa_algorithm" ]]; then
+                            # Algorithms with no oracle reference: skip
+                            # L3 for this scenario+kind. exp-interp is
+                            # reserved for a follow-up to #280.
+                            if [[ "$pa_algorithm" == "exponential_interpolation_within_bucket" ]]; then
+                                : # L3 skipped — engine reports L3=N/A
+                            else
+                                set +e
+                                oracle_json="$(oracle_json_for_logfile \
+                                    "$logfile" "$bs_sec" "$du_unit" "$fmt" "$pa_algorithm")"
+                                orc=$?
+                                set -e
+                                if [[ $orc -eq 0 && -n "$oracle_json" ]]; then
+                                    engine_args+=(--oracle-json "$oracle_json")
+                                fi
+                            fi
+                        fi
                     fi
                 fi
             fi
