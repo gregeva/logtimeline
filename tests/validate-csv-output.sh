@@ -74,10 +74,13 @@ while IFS=$'\t' read -r scenario logfile options families; do
 
     # Run ltl in the per-scenario tempdir — `-o` writes CSV files with
     # timestamped filenames into the current working directory.
+    # `-V csv-output` requested in the same invocation so the precision
+    # observability surface is captured alongside the CSVs; the validator
+    # reads it for per-family decimal ceiling assertions (#268).
     pushd "$scen_dir" >/dev/null
     set +e
     # shellcheck disable=SC2086  # word-splitting on $options is intentional
-    "$LTL" --disable-progress $options -o "$abs_log" >/dev/null 2>"$scen_dir/ltl.stderr"
+    "$LTL" --disable-progress -V csv-output $options -o "$abs_log" >"$scen_dir/ltl.stdout" 2>"$scen_dir/ltl.stderr"
     rc=$?
     set -e
     popd >/dev/null
@@ -101,6 +104,23 @@ while IFS=$'\t' read -r scenario logfile options families; do
         continue
     fi
 
+    # Extract -V csv-output / precision sub-section into a file the
+    # validator reads. Anchored by the 'precision' sub-section markers
+    # so the parent 'csv-output' wrapper is filtered out. (#268)
+    v_precision="$scen_dir/csv-output-precision.txt"
+    awk '/=== csv-output \/ precision ===/{flag=1; next} /=== END csv-output \/ precision ===/{flag=0} flag' \
+        "$scen_dir/ltl.stdout" > "$v_precision"
+    if [[ ! -s "$v_precision" ]]; then
+        echo "FAIL  scenario=$scenario missing-v-csv-output-precision-block" >&2
+        echo "        -V csv-output / precision sub-section was empty or absent in ltl stdout" >&2
+        echo "        asserts: every -o run must emit -V csv-output / precision when -V csv-output is requested" >&2
+        echo "        produced_by: emit_csv_output_verbose() in ltl" >&2
+        echo "        contract: Issue #268 § locked observability surface" >&2
+        total_fail=$((total_fail + 1))
+        scenarios_run=$((scenarios_run + 1))
+        continue
+    fi
+
     scen_fail=0
 
     for kind in messages stats; do
@@ -118,7 +138,8 @@ while IFS=$'\t' read -r scenario logfile options families; do
             --csv "$csv" \
             --scenario "$scenario" \
             --file-kind "$kind" \
-            --expected-families "$families"
+            --expected-families "$families" \
+            --v-precision "$v_precision"
         vrc=$?
         set -e
 

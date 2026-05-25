@@ -13,7 +13,7 @@ count_sum	11	float	conditional:count	5	count
 min	12	float	conditional:duration	5	duration
 mean	13	float	conditional:duration	5	duration
 max	14	float	conditional:duration	5	duration
-std_dev	15	float	conditional:duration	5	duration
+std_dev	15	float	conditional:duration	5	shape
 p1	16	float	conditional:duration	5	percentile
 p5	17	float	conditional:duration	5	percentile
 p10	18	float	conditional:duration	5	percentile
@@ -31,6 +31,6 @@ cv	29	float	conditional:duration	5	shape
 skewness	30	float	conditional:duration	5	shape
 kurtosis	31	float	conditional:duration	5	shape
 bimodality_coef	32	float	conditional:duration	5	shape
-duration	33	int	conditional:duration	0	duration
+duration	33	float	conditional:duration	9	duration
 duration_nice	34	nice	conditional:duration	n/a	duration
-impact	35	float	conditional:duration	5	duration
+impact	35	float	conditional:duration	5	shape
