@@ -5968,6 +5968,18 @@ sub format_csv_value {
     return sprintf("%.${decimals}f", $value);
 }
 
+# Issue #268: render-time CV formatter. Storage is precise; the table
+# and bar-graph cells have a fixed 4-char value budget, so render with
+# magnitude-adaptive decimals so the value always fits: integer above
+# 100, one decimal between 10 and 100, two decimals below 10.
+sub format_cv_display {
+    my ($cv) = @_;
+    return '' unless defined $cv;
+    return sprintf('%d',   $cv) if $cv >= 100;
+    return sprintf('%.1f', $cv) if $cv >= 10;
+    return sprintf('%.2f', $cv);
+}
+
 
 # utility function for formating numbers to normal format
 sub normalize { $_[0] =~ s/\.0+$//r }
@@ -9996,7 +10008,7 @@ sub print_bar_graph {
                         defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p95} ) >= 4 ? format_time( $log_stats{$bucket}{p95}, 'ms' ) : $log_stats{$bucket}{p95} ) ) : printf( " " x 11 );
                         defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6s$colors{'NC'} ", ( length( $log_stats{$bucket}{p99} ) >= 4 ? format_time( $log_stats{$bucket}{p99}, 'ms' ) : $log_stats{$bucket}{p99} ) ) : printf( " " x 11 );
                         defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-5s$colors{'NC'} ", ( length( $log_stats{$bucket}{p999} ) >= 4 ? format_time( $log_stats{$bucket}{p999}, 'ms' ) : $log_stats{$bucket}{p999} ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", $log_stats{$bucket}{cv} ) : printf ( " " x 7 );
+                        defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", format_cv_display( $log_stats{$bucket}{cv} ) ) : printf ( " " x 7 );
                     }
 
                 } elsif ($col_id eq 'heatmap') {
@@ -11089,7 +11101,7 @@ sub print_message_summary {
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", defined $min ? ( length( $min ) >= 4 ? format_time( $min, 'ms', 'short' ) : $min ) : "" ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", defined $p50 ? ( length( $p50 ) >= 4 ? format_time( $p50, 'ms', 'short' ) : $p50 ) : "" ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", defined $p999 ? ( length( $p999 ) >= 4 ? format_time( $p999, 'ms', 'short' ) : $p999 ) : "" ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", defined $cv ? $cv : "" ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", format_cv_display( $cv ) ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", defined $total_duration ? $total_duration : "" ) . " " x $table_padding_inner; 
                     } else {
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
