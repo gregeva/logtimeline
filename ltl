@@ -8382,7 +8382,7 @@ sub calculate_statistics {
 
     # Use duration_count (entries with duration data) for statistics, not occurrences (total entries)
     my $min = min(@sorted);
-    my $mean = int($bucket_data->{total_duration} / $duration_count);
+    my $mean = $bucket_data->{total_duration} / $duration_count;
     my $max = max(@sorted);
     my $variance = ($bucket_data->{sum_of_squares} / $duration_count) - ($mean ** 2);
     $variance = 0 if $variance < 0;  # guard floating-point underflow on near-constant data
