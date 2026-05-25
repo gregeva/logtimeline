@@ -4408,7 +4408,7 @@ sub group_similar_messages {
             # Recompute impact
             if (defined $entry->{total_duration} && $entry->{occurrences} > 0 && $entry->{total_duration} > 0) {
                 my $mean = $entry->{total_duration} / $entry->{occurrences};
-                $entry->{impact} = sprintf("%.2f", log($mean ** $impact_time_exponent * $entry->{occurrences}));
+                $entry->{impact} = log($mean ** $impact_time_exponent * $entry->{occurrences});
             }
         }
     }
@@ -7130,7 +7130,7 @@ sub read_and_process_logs {
                             # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
                             if( $duration > 0 ) {
                                 my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{occurrences};
-                                $log_messages{$category}{$log_key}{impact} = sprintf("%.2f", log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{occurrences} ));
+                                $log_messages{$category}{$log_key}{impact} = log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{occurrences} );
                             }
                         }
                     } else {
@@ -8116,7 +8116,7 @@ sub calculate_all_statistics {
                 count_occurrences => $log_analysis{$bucket}{count_occurrences},
                 count_min     => $log_analysis{$bucket}{count_min},
                 count_max     => $log_analysis{$bucket}{count_max},
-                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? sprintf("%.0f", $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
+                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? ($log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
                 count_sum     => $log_analysis{$bucket}{count_sum},
                 min           => $min,
                 mean          => $mean,
@@ -8154,7 +8154,7 @@ sub calculate_all_statistics {
                 count_occurrences => $log_analysis{$bucket}{count_occurrences},
                 count_min     => $log_analysis{$bucket}{count_min},
                 count_max     => $log_analysis{$bucket}{count_max},
-                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? sprintf("%.0f", $log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
+                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? ($log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
                 count_sum     => $log_analysis{$bucket}{count_sum}
             }
         }
@@ -8277,7 +8277,7 @@ sub calculate_all_statistics {
 
                 $log_messages{$category}{$log_key}{count_occurrences} = $log_messages{$category}{$log_key}{count_occurrences} if defined $log_messages{$category}{$log_key}{count_occurrences};
                 $log_messages{$category}{$log_key}{count_min} = $log_messages{$category}{$log_key}{count_min} if defined $log_messages{$category}{$log_key}{count_min};
-                $log_messages{$category}{$log_key}{count_mean} = ( defined $log_messages{$category}{$log_key}{count_sum} && defined $log_messages{$category}{$log_key}{count_occurrences} && $log_messages{$category}{$log_key}{count_occurrences} > 0 ) ? sprintf("%.0f", $log_messages{$category}{$log_key}{count_sum} / $log_messages{$category}{$log_key}{count_occurrences}) : undef if defined $log_messages{$category}{$log_key}{count_occurrences};
+                $log_messages{$category}{$log_key}{count_mean} = ( defined $log_messages{$category}{$log_key}{count_sum} && defined $log_messages{$category}{$log_key}{count_occurrences} && $log_messages{$category}{$log_key}{count_occurrences} > 0 ) ? ($log_messages{$category}{$log_key}{count_sum} / $log_messages{$category}{$log_key}{count_occurrences}) : undef if defined $log_messages{$category}{$log_key}{count_occurrences};
                 $log_messages{$category}{$log_key}{count_max} = $log_messages{$category}{$log_key}{count_max} if defined $log_messages{$category}{$log_key}{count_max};
                 $log_messages{$category}{$log_key}{count_sum} = $log_messages{$category}{$log_key}{count_sum} if defined $log_messages{$category}{$log_key}{count_sum};
 
@@ -8386,34 +8386,23 @@ sub calculate_statistics {
     my $max = max(@sorted);
     my $variance = ($bucket_data->{sum_of_squares} / $duration_count) - ($mean ** 2);
     $variance = 0 if $variance < 0;  # guard floating-point underflow on near-constant data
-    my $std_num = sqrt($variance);
-    my $std_dev = sprintf("%.3f", $std_num);
-    my $cv = undef;
-    if ($mean != 0) {
-        my $cv_raw = $std_dev / $mean;
-        if ($cv_raw >= 100) {
-            $cv = sprintf("%d", $cv_raw);
-        } elsif ($cv_raw >= 10) {
-            $cv = sprintf("%.1f", $cv_raw);
-        } else {
-            $cv = sprintf("%.2f", $cv_raw);
-        }
-    }
+    my $std_dev = sqrt($variance);
+    my $cv = $mean != 0 ? $std_dev / $mean : undef;
 
     # Percentile calculations must use duration_count, not occurrences
     # to correctly index into the sorted durations array
-    my $p1    = int($sorted[int($duration_count * 0.01)]);
-    my $p5    = int($sorted[int($duration_count * 0.05)]);
-    my $p10   = int($sorted[int($duration_count * 0.10)]);
-    my $p25   = int($sorted[int($duration_count * 0.25)]);
-    my $p50   = int($sorted[int($duration_count * 0.5)]);
-    my $p75   = int($sorted[int($duration_count * 0.75)]);
-    my $p90   = int($sorted[int($duration_count * 0.9)]);
-    my $p95   = int($sorted[int($duration_count * 0.95)]);
-    my $p99   = int($sorted[int($duration_count * 0.99)]);
-    my $p999  = int($sorted[int($duration_count * 0.999)]);
-    my $p9999 = int($sorted[int($duration_count * 0.9999)] // $sorted[-1]);
-    my $p99999 = int($sorted[int($duration_count * 0.99999)] // $sorted[-1]);
+    my $p1    = $sorted[int($duration_count * 0.01)];
+    my $p5    = $sorted[int($duration_count * 0.05)];
+    my $p10   = $sorted[int($duration_count * 0.10)];
+    my $p25   = $sorted[int($duration_count * 0.25)];
+    my $p50   = $sorted[int($duration_count * 0.5)];
+    my $p75   = $sorted[int($duration_count * 0.75)];
+    my $p90   = $sorted[int($duration_count * 0.9)];
+    my $p95   = $sorted[int($duration_count * 0.95)];
+    my $p99   = $sorted[int($duration_count * 0.99)];
+    my $p999  = $sorted[int($duration_count * 0.999)];
+    my $p9999 = $sorted[int($duration_count * 0.9999)] // $sorted[-1];
+    my $p99999 = $sorted[int($duration_count * 0.99999)] // $sorted[-1];
     my $iqr   = $p75 - $p25;
 
     # Distribution-shape moments — Sarle's bimodality coefficient screening (#222)
@@ -8421,7 +8410,7 @@ sub calculate_statistics {
     # cutoff from the bimodality-detection literature. Requires n >= 4 (denominator
     # of BC has (n-2)(n-3) factor) and non-zero std_dev.
     my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
-    if ($duration_count >= 4 && $std_num > 0) {
+    if ($duration_count >= 4 && $std_dev > 0) {
         my ($m3_sum, $m4_sum) = (0, 0);
         for my $x (@sorted) {
             my $d = $x - $mean;
@@ -8431,13 +8420,11 @@ sub calculate_statistics {
         }
         my $m3 = $m3_sum / $duration_count;
         my $m4 = $m4_sum / $duration_count;
-        my $g  = $m3 / ($std_num ** 3);          # population skewness
-        my $k  = $m4 / ($std_num ** 4) - 3;      # excess kurtosis (normal = 0)
-        $skewness = sprintf("%.3f", $g);
-        $kurtosis = sprintf("%.3f", $k);
+        $skewness = $m3 / ($std_dev ** 3);          # population skewness
+        $kurtosis = $m4 / ($std_dev ** 4) - 3;      # excess kurtosis (normal = 0)
         my $n = $duration_count;
-        my $bc_denom = $k + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
-        $bimodality_coef = sprintf("%.3f", ($g * $g + 1) / $bc_denom) if $bc_denom > 0;
+        my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
+        $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
     }
 
     return ($min, $mean, $max,
