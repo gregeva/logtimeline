@@ -39,7 +39,38 @@ fail=0
 failures=()
 
 note_pass() { pass=$((pass + 1)); echo "  PASS: $1"; }
-note_fail() { fail=$((fail + 1)); failures+=("$1"); echo "  FAIL: $1"; }
+
+# Self-documenting failure emitter per tests/HARNESS-DESIGN.md
+# § Self-documenting assertions. Required named fields: label, asserts,
+# produced_by, contract. Optional `detail` carries the run-specific
+# diagnostic (counts, widths, etc.).
+emit_fail() {
+    local label asserts produced_by contract detail
+    detail=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            label)       label="$2";       shift 2 ;;
+            asserts)     asserts="$2";     shift 2 ;;
+            produced_by) produced_by="$2"; shift 2 ;;
+            contract)    contract="$2";    shift 2 ;;
+            detail)      detail="$2";      shift 2 ;;
+            *) echo "emit_fail: unknown field '$1'"; exit 2 ;;
+        esac
+    done
+    : "${label:?emit_fail requires label}"
+    : "${asserts:?emit_fail requires asserts}"
+    : "${produced_by:?emit_fail requires produced_by}"
+    : "${contract:?emit_fail requires contract}"
+    echo "  FAIL  $label"
+    echo "        asserts:     $asserts"
+    echo "        produced_by: $produced_by"
+    echo "        contract:    $contract"
+    if [[ -n "$detail" ]]; then
+        echo "        detail:      $detail"
+    fi
+    fail=$((fail + 1))
+    failures+=("$label")
+}
 
 # ---------------------------------------------------------------------------
 # Inspector: parse one ltl run's output, extract per-histogram axis-tick and
@@ -179,7 +210,12 @@ test_single_width() {
     if [[ "$oo" == "0" ]]; then
         note_pass "no ┴/┻/┼/╋ outside axis lines (-hgw $hgw)"
     else
-        note_fail "found $oo lines containing ticks outside axis (-hgw $hgw)"
+        emit_fail \
+            label       "out-of-axis ticks (-hgw $hgw)" \
+            asserts     'Percentile tick characters (┴ ┻ ┼ ╋) appear only on the histogram x-axis frame row; appearance elsewhere means the tick emission code is firing on a non-axis row, which is a layout regression' \
+            produced_by 'print_histogram() in ltl — the tick characters are inserted into the same row that emits ┗ ━ ┳ ┛ for the histogram frame' \
+            contract    'Issue #185 § percentile tick marks on histogram x-axis — tick emission is confined to the axis row by construction; tick characters in other rows are not part of the contract' \
+            detail      "found $oo lines containing ticks outside axis (-hgw $hgw)"
     fi
 
     # Colour assertion.
@@ -188,7 +224,12 @@ test_single_width() {
     if [[ "$bad_colour" == "0" ]]; then
         note_pass "tick chars match axis frame colour (no ANSI wrapping) (-hgw $hgw)"
     else
-        note_fail "$bad_colour tick chars carry ANSI colour wrapping (-hgw $hgw)"
+        emit_fail \
+            label       "tick colour parity (-hgw $hgw)" \
+            asserts     'Percentile tick characters are emitted with no ANSI wrapping, matching the rest of the frame which is also unwrapped; an ANSI escape sequence immediately preceding a tick means the tick will render in a different colour than ┗ ━ ┳ ┛' \
+            produced_by 'print_histogram() in ltl — tick characters are appended to the frame string with no additional colour wrapping' \
+            contract    'Issue #185 — visual unity of the axis frame requires tick chars to inherit the frame colour by being emitted in the same uncoloured stream' \
+            detail      "$bad_colour tick chars carry ANSI colour wrapping (-hgw $hgw)"
     fi
 
     # Tick-vs-legend invariant: 1 <= ticks <= entries.
@@ -196,11 +237,21 @@ test_single_width() {
     tick_total=$(echo "$report" | awk -F: '/^AXIS:1:1:/ {for (i=1;i<=NF;i++) if ($i ~ /^total=/) {split($i,a,"="); print a[2]}}')
     legend_entries=$(echo "$report" | awk -F: '/^LEGEND:1:1:/ {for (i=1;i<=NF;i++) if ($i ~ /^entries=/) {split($i,a,"="); print a[2]}}')
     if [[ -z "$tick_total" || -z "$legend_entries" ]]; then
-        note_fail "could not extract axis/legend counts (-hgw $hgw): tick='$tick_total' legend='$legend_entries'"
+        emit_fail \
+            label       "tick/legend extraction (-hgw $hgw)" \
+            asserts     'The inspector must successfully extract both an AXIS tick total and a LEGEND entry count from the single-histogram output; a missing anchor here means the histogram or its legend was not emitted, OR the inspector regexes drifted from the rendered output' \
+            produced_by 'print_histogram() + legend rendering in ltl; inspector regexes in inspect_output() of this harness' \
+            contract    'tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors — a grep that matches nothing is a failure, not a pass' \
+            detail      "could not extract axis/legend counts (-hgw $hgw): tick='$tick_total' legend='$legend_entries'"
     elif [[ "$tick_total" -ge 1 && "$tick_total" -le "$legend_entries" ]]; then
         note_pass "axis ticks ($tick_total) within [1, $legend_entries] legend entries (-hgw $hgw)"
     else
-        note_fail "axis ticks ($tick_total) outside [1, $legend_entries] legend entries (-hgw $hgw)"
+        emit_fail \
+            label       "tick/legend cardinality (-hgw $hgw)" \
+            asserts     'The number of axis ticks is at least 1 and at most the number of legend entries; tick_count > legend_count means orphan ticks with no matching legend entry (the legend is the contract); tick_count < 1 means the percentile marker layer was not rendered at all' \
+            produced_by 'print_histogram() in ltl — tick column derivation maps each legend percentile to a column; duplicate columns collapse to one tick' \
+            contract    'Issue #185 — set-semantics: percentiles with identical (or column-quantised-identical) values collapse to one tick; orphan ticks have no place in the rendering' \
+            detail      "axis ticks ($tick_total) outside [1, $legend_entries] legend entries (-hgw $hgw)"
     fi
 
     rm -f "$out"
@@ -225,7 +276,12 @@ test_multi_histogram() {
     if [[ "$oo" == "0" ]]; then
         note_pass "no ticks outside axis (multi)"
     else
-        note_fail "found $oo lines with ticks outside axis (multi)"
+        emit_fail \
+            label       "out-of-axis ticks (multi)" \
+            asserts     'In a multi-histogram run, percentile tick characters still appear only on histogram x-axis frame rows; tick leakage into other rows is a layout regression that the single-width tests can miss because multi-histogram layout takes a different code path' \
+            produced_by 'print_histogram() in ltl — invoked once per metric for -hg duration,bytes; each invocation must restrict tick emission to its own axis row' \
+            contract    'Issue #185 — multi-histogram is the panel-stacking variant; the same axis-row containment invariant applies independently to each panel' \
+            detail      "found $oo lines with ticks outside axis (multi)"
     fi
 
     # Per-histogram tick-vs-legend invariant: 1 <= ticks <= entries.
@@ -234,11 +290,21 @@ test_multi_histogram() {
         tick=$(echo "$report" | awk -F: -v h="$hidx" '/^AXIS:1:/ && $3==h {for (i=1;i<=NF;i++) if ($i ~ /^total=/) {split($i,a,"="); print a[2]}}')
         legend=$(echo "$report" | awk -F: -v h="$hidx" '/^LEGEND:1:/ && $3==h {for (i=1;i<=NF;i++) if ($i ~ /^entries=/) {split($i,a,"="); print a[2]}}')
         if [[ -z "$tick" || -z "$legend" ]]; then
-            note_fail "could not extract counts for hist#$hidx (multi): tick='$tick' legend='$legend'"
+            emit_fail \
+                label       "tick/legend extraction (multi hist#$hidx)" \
+                asserts     "The inspector must successfully extract both an AXIS tick total and a LEGEND entry count for histogram panel #$hidx; missing data here means the panel was not rendered, or its legend was emitted on a row the inspector cannot identify" \
+                produced_by 'print_histogram() (per-panel invocation) + inspect_output() per-segment splitting in this harness' \
+                contract    'tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors — multi-histogram extraction failures must not silently degrade to a passing test' \
+                detail      "could not extract counts for hist#$hidx (multi): tick='$tick' legend='$legend'"
         elif [[ "$tick" -ge 1 && "$tick" -le "$legend" ]]; then
             note_pass "hist#$hidx ticks ($tick) within [1, $legend] legend entries"
         else
-            note_fail "hist#$hidx ticks ($tick) outside [1, $legend] legend entries"
+            emit_fail \
+                label       "tick/legend cardinality (multi hist#$hidx)" \
+                asserts     "Histogram panel #$hidx has at least 1 axis tick and no more axis ticks than legend entries; each panel carries its own independent tick set matching its own legend" \
+                produced_by 'print_histogram() in ltl — tick column derivation runs independently per panel' \
+                contract    'Issue #185 — multi-histogram panels carry independent tick sets; cross-panel sharing would create the orphan-tick failure mode this assertion exists to prevent' \
+                detail      "hist#$hidx ticks ($tick) outside [1, $legend] legend entries"
         fi
     done
 

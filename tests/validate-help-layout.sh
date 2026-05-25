@@ -80,20 +80,76 @@ fail=0
 failures=()
 
 note_pass() { pass=$((pass + 1)); echo "  PASS  $1"; }
-note_fail() { fail=$((fail + 1)); failures+=("$1"); echo "  FAIL  $1"; }
+
+# Self-documenting failure emitter per tests/HARNESS-DESIGN.md
+# § Self-documenting assertions. Required named fields: label, asserts,
+# produced_by, contract. An optional `detail` field appends an extra line
+# (used when the inspector produced a more specific diagnostic, e.g.
+# the exact mismatched column number).
+emit_fail() {
+    local label asserts produced_by contract detail
+    detail=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            label)       label="$2";       shift 2 ;;
+            asserts)     asserts="$2";     shift 2 ;;
+            produced_by) produced_by="$2"; shift 2 ;;
+            contract)    contract="$2";    shift 2 ;;
+            detail)      detail="$2";      shift 2 ;;
+            *) echo "emit_fail: unknown field '$1'"; exit 2 ;;
+        esac
+    done
+    : "${label:?emit_fail requires label}"
+    : "${asserts:?emit_fail requires asserts}"
+    : "${produced_by:?emit_fail requires produced_by}"
+    : "${contract:?emit_fail requires contract}"
+    echo "  FAIL  $label"
+    echo "        asserts:     $asserts"
+    echo "        produced_by: $produced_by"
+    echo "        contract:    $contract"
+    if [[ -n "$detail" ]]; then
+        echo "        detail:      $detail"
+    fi
+    fail=$((fail + 1))
+    failures+=("$label")
+}
 
 # ---------------------------------------------------------------------------
 # Sanity: $desc_col found and looks reasonable
 # ---------------------------------------------------------------------------
 echo "[sanity]"
+SANITY_ASSERTS='The three help-layout column constants ($help_opt_col, $help_short_col, $help_desc_col) extracted from ltl fall within plausible bounds, and $help_desc_col exceeds the long-form column so descriptions cannot overlap the long-form option text'
+SANITY_PRODUCED_BY='print_help() in ltl — module-scope my-declarations of $help_opt_col, $help_short_col, $help_desc_col'
+SANITY_CONTRACT='Issue #261 hoisted these constants to module scope so --help, --help statistics, and --explain share one source of truth; bounds here exist to catch typo-class regressions where one is reset to an obviously-wrong value'
+
 if [[ "$DESC_COL" -lt 30 || "$DESC_COL" -gt 80 ]]; then
-    note_fail "sanity :: \$help_desc_col=$DESC_COL is out of plausible range (30..80)"
+    emit_fail \
+        label       "sanity" \
+        asserts     "$SANITY_ASSERTS" \
+        produced_by "$SANITY_PRODUCED_BY" \
+        contract    "$SANITY_CONTRACT" \
+        detail      "\$help_desc_col=$DESC_COL is out of plausible range (30..80)"
 elif [[ "$SHORT_COL" -lt 5 || "$SHORT_COL" -gt 12 ]]; then
-    note_fail "sanity :: \$help_short_col=$SHORT_COL is out of plausible range (5..12)"
+    emit_fail \
+        label       "sanity" \
+        asserts     "$SANITY_ASSERTS" \
+        produced_by "$SANITY_PRODUCED_BY" \
+        contract    "$SANITY_CONTRACT" \
+        detail      "\$help_short_col=$SHORT_COL is out of plausible range (5..12)"
 elif [[ "$OPT_COL" -lt 2 || "$OPT_COL" -gt 8 ]]; then
-    note_fail "sanity :: \$help_opt_col=$OPT_COL is out of plausible range (2..8)"
+    emit_fail \
+        label       "sanity" \
+        asserts     "$SANITY_ASSERTS" \
+        produced_by "$SANITY_PRODUCED_BY" \
+        contract    "$SANITY_CONTRACT" \
+        detail      "\$help_opt_col=$OPT_COL is out of plausible range (2..8)"
 elif [[ "$DESC_COL" -le "$EXPECTED_LONG_COL" ]]; then
-    note_fail "sanity :: \$help_desc_col=$DESC_COL must exceed long-form column ($EXPECTED_LONG_COL = \$help_opt_col + \$help_short_col)"
+    emit_fail \
+        label       "sanity" \
+        asserts     "$SANITY_ASSERTS" \
+        produced_by "$SANITY_PRODUCED_BY" \
+        contract    "$SANITY_CONTRACT" \
+        detail      "\$help_desc_col=$DESC_COL must exceed long-form column ($EXPECTED_LONG_COL = \$help_opt_col + \$help_short_col)"
 else
     note_pass "sanity :: \$help_opt_col=$OPT_COL  \$help_short_col=$SHORT_COL  \$help_desc_col=$DESC_COL  long-form col=$EXPECTED_LONG_COL  desc col=$EXPECTED_DESC_COL"
 fi
@@ -231,11 +287,26 @@ if [[ $rc -eq 0 ]]; then
     note_pass "every option row description starts at col $EXPECTED_DESC_COL"
     note_pass "every wrapped-description continuation row starts at col $EXPECTED_DESC_COL"
 elif [[ $rc -eq 2 ]]; then
-    note_fail "one or more option rows have misaligned description column (see output above)"
+    emit_fail \
+        label       "option-row alignment" \
+        asserts     "Every option-row description begins at column \$help_desc_col+1 ($EXPECTED_DESC_COL); a row whose description starts to the right means its option text exceeded the column budget and overflowed silently" \
+        produced_by 'print_help() in ltl — the option-text rendering uses $help_desc_col as the padding target for the description column' \
+        contract    'Issue #189-3 root cause: long-form options exceeding the option-text column budget shipped silently because there was no test asserting the column was honored. This assertion is what makes the failure visible.' \
+        detail      "Perl inspector exit code 2 — one or more option rows misaligned (per-row diagnostics printed above)"
 elif [[ $rc -eq 3 ]]; then
-    note_fail "one or more continuation rows have misaligned column (see output above)"
+    emit_fail \
+        label       "continuation-row alignment" \
+        asserts     'Every wrapped-description continuation line begins at the same column as the description start ($help_desc_col+1)' \
+        produced_by 'print_help() in ltl — wrap continuations are emitted with the same leading indent as the description column' \
+        contract    'Issue #189-3 — the same column-budget bug that misaligns option rows also misaligns their wrap continuations; both must be guarded together' \
+        detail      "Perl inspector exit code 3 — one or more continuation rows misaligned (per-row diagnostics printed above)"
 else
-    note_fail "Perl inspector exited with unexpected code $rc"
+    emit_fail \
+        label       "option-row alignment (inspector)" \
+        asserts     'The Perl inspector must exit 0, 2, or 3; any other exit code means the inspector itself broke and the test is no longer asserting anything' \
+        produced_by 'inline Perl inspector at the top of validate-help-layout.sh' \
+        contract    'tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors — an inspector that cannot run is an unasserted test' \
+        detail      "Perl inspector exited with unexpected code $rc"
 fi
 
 # ---------------------------------------------------------------------------
@@ -287,9 +358,19 @@ rc=$?
 if [[ $rc -eq 0 ]]; then
     note_pass "every short+long row places its long form at col $EXPECTED_LONG_COL"
 elif [[ $rc -eq 2 ]]; then
-    note_fail "one or more short+long rows misalign the long-form column (see output above)"
+    emit_fail \
+        label       "long-form column alignment" \
+        asserts     "Every short+long option row places its long form starting at column \$help_opt_col + \$help_short_col + 1 ($EXPECTED_LONG_COL); a short form whose length pushes the long form rightward produces a ragged left margin even though the description column itself can still be honored" \
+        produced_by 'print_help() in ltl — the short-form rendering pads to $help_short_col before emitting the long form' \
+        contract    "Issue #261 — \$help_short_col was sized to accommodate the longest short form; a regression on either side (short form too long, or \$help_short_col bumped down) breaks left-margin alignment" \
+        detail      "Perl inspector exit code 2 — one or more short+long rows misaligned (per-row diagnostics printed above)"
 else
-    note_fail "long-form-column Perl inspector exited with unexpected code $rc"
+    emit_fail \
+        label       "long-form column alignment (inspector)" \
+        asserts     'The long-form-column Perl inspector must exit 0 or 2; any other exit code means the inspector itself broke' \
+        produced_by 'inline Perl inspector in the [long-form column alignment] block of validate-help-layout.sh' \
+        contract    'tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors — an inspector that cannot run is an unasserted test' \
+        detail      "long-form-column Perl inspector exited with unexpected code $rc"
 fi
 
 # ---------------------------------------------------------------------------
@@ -305,7 +386,12 @@ assert_pair() {
     if grep -qE "^[[:space:]]+${short}, +${long}([[:space:]]|<|\[|$)" "$STRIPPED"; then
         note_pass "$short, $long"
     else
-        note_fail "$short, $long  (expected both short and long form on same line)"
+        emit_fail \
+            label       "$short, $long" \
+            asserts     "Both the short form ($short) and long form ($long) appear on the same row of --help output, in the canonical 'short, long' order; missing-pair regressions cost the user a discoverable surface (memory: 'short forms required for every CLI option')" \
+            produced_by 'print_help() in ltl — the option-table row that registers this flag emits short+long together' \
+            contract    "MEMORY.md feedback_short_forms_required: every CLI flag in ltl must have both short and long form; 'no short form' decisions are errors that need amending before wiring" \
+            detail      "no row matched '^[[:space:]]+${short}, +${long}' in stripped --help output"
     fi
 }
 assert_pair "-pp"    "--percentile-precision"

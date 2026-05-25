@@ -275,10 +275,10 @@ scenario_warning_exact_percentiles_deprecated() {
     run_ltl "warn-ep" --exact-percentiles "$TEST_LOG"
 
     assert_line "$RUN_STDERR" \
-        pattern     '^--exact-percentiles is deprecated and will be removed in a future release\.' \
-        asserts     'ltl emits a deprecation warning on every run that uses --exact-percentiles. The flag reverts every migrated -V/percentile consumer to pre-#187 sort-based computation and is scheduled for removal — users should see the warning before the removal lands.' \
+        pattern     '^--exact-percentiles is deprecated' \
+        asserts     'ltl emits a deprecation warning on every run that uses --exact-percentiles. The flag is superseded by --data-model raw (and the per-surface --histogram-data-model / --heatmap-data-model overrides) introduced in #266; users must see the warning before the removal lands so they can migrate.' \
         produced_by 'adapt_to_command_line_options() in ltl (post-GetOptions deprecation gate)' \
-        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — --exact-percentiles is documented-deprecated; warning is the user-visible signal of the deprecation status'
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 + Issue #266 — --exact-percentiles is documented-deprecated and supersession is locked; warning is the user-visible signal of the deprecation status. Anchored at the opening clause because the body advises on replacement flags and may evolve as --data-model evolves.'
 }
 
 scenario_error_unknown_so() {

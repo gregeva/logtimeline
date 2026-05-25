@@ -46,6 +46,38 @@ fi
 pass=0
 fail=0
 skip=0
+failures=()
+
+# Self-documenting fields shared across every run_test assertion. The
+# assertion shape is uniform across this harness: a byte-stable rendering
+# of `ltl` output (after stripping nondeterministic content) must match
+# the captured reference file. The test-name dimension is what varies;
+# the invariant, producer, and contract are the same for every case.
+# Per tests/HARNESS-DESIGN.md § Self-documenting assertions, these three
+# fields are surfaced alongside every failure.
+REGRESSION_ASSERTS='ltl output (after stripping ANSI, timing, memory, and other nondeterministic content) is byte-identical to the captured reference file for this scenario'
+REGRESSION_PRODUCED_BY='print_bar_graph(), print_summary_table(), print_heatmap_row(), and the layout engine in ltl — composite rendered output'
+REGRESSION_CONTRACT='tests/HARNESS-DESIGN.md § Self-documenting assertions + this harness re-runs the commands from capture-regression.sh against tests/reference-output/; rebaselining is a per-release activity, not an automatic remediation'
+
+# Emit a regression-suite failure in the self-documenting multi-line form
+# required by tests/HARNESS-DESIGN.md § Self-documenting assertions.
+# Args: $1 scenario name, $2 short cause line, $3 (optional) path to a
+# file whose contents should be appended as an indented diagnostic body.
+emit_regression_fail() {
+    local name="$1"
+    local cause="$2"
+    local body_file="${3:-}"
+    echo "  FAIL  $name"
+    echo "        cause:       $cause"
+    echo "        asserts:     $REGRESSION_ASSERTS"
+    echo "        produced_by: $REGRESSION_PRODUCED_BY"
+    echo "        contract:    $REGRESSION_CONTRACT"
+    if [[ -n "$body_file" && -s "$body_file" ]]; then
+        sed 's/^/        /' "$body_file"
+    fi
+    fail=$((fail + 1))
+    failures+=("$name :: $cause")
+}
 
 run_test() {
     local name="$1"
@@ -53,6 +85,7 @@ run_test() {
     local reffile="$REF_DIR/$name.txt"
     local tmpfile="$TMP_DIR/$name.txt"
     local stderrfile="$TMP_DIR/$name.stderr"
+    local difffile="$TMP_DIR/$name.diff"
 
     if [[ ! -f "$reffile" ]]; then
         echo "  SKIP  $name (no reference file)"
@@ -70,15 +103,11 @@ run_test() {
     set -e
 
     if [[ "${pipe_status[0]}" -ne 0 ]]; then
-        echo "  FAIL  $name :: ltl exited ${pipe_status[0]}; stderr:" >&2
-        sed 's/^/        /' "$stderrfile" >&2
-        fail=$((fail + 1))
+        emit_regression_fail "$name" "ltl exited ${pipe_status[0]} (stderr below)" "$stderrfile"
         return
     fi
     if [[ ! -s "$tmpfile" ]]; then
-        echo "  FAIL  $name :: captured output is empty (regression target produced nothing); stderr:" >&2
-        sed 's/^/        /' "$stderrfile" >&2
-        fail=$((fail + 1))
+        emit_regression_fail "$name" "captured output is empty (regression target produced nothing; stderr below)" "$stderrfile"
         return
     fi
 
@@ -86,14 +115,13 @@ run_test() {
         echo "  PASS  $name"
         pass=$((pass + 1))
     else
-        echo "  FAIL  $name"
         # diff returns 1 on differences (intentional); pipefail would propagate
         # that and abort the harness before printing the Results summary.
         # Per tests/HARNESS-DESIGN.md, intentional non-zero exits in a
         # diagnostic pipeline must be neutralized so the harness can complete.
-        { diff --unified=3 "$reffile" "$tmpfile" || true; } | head -30
-        echo "  ..."
-        fail=$((fail + 1))
+        { diff --unified=3 "$reffile" "$tmpfile" || true; } | head -30 > "$difffile"
+        echo "  ..."  >> "$difffile"
+        emit_regression_fail "$name" "rendered output differs from reference (unified diff below, truncated to 30 lines)" "$difffile"
     fi
 }
 
@@ -195,6 +223,10 @@ echo "Results: $pass passed, $fail failed, $skip skipped"
 # TMP_DIR cleanup handled by EXIT trap at top of script
 
 if [[ $fail -gt 0 ]]; then
+    echo "Failures:"
+    for f in "${failures[@]}"; do
+        echo "  - $f"
+    done
     echo "REGRESSION DETECTED"
     exit 1
 else
