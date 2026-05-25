@@ -35,7 +35,7 @@ count_sum	*	float	conditional:count	5	count
 min	*	float	conditional:duration	5	duration
 mean	*	float	conditional:duration	5	duration
 max	*	float	conditional:duration	5	duration
-std_dev	*	float	conditional:duration	5	duration
+std_dev	*	float	conditional:duration	5	shape
 p1	*	float	conditional:duration	5	percentile
 p5	*	float	conditional:duration	5	percentile
 p10	*	float	conditional:duration	5	percentile

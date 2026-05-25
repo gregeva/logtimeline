@@ -1826,10 +1826,12 @@ sub emit_heatmap_palette_verbose {
 # slot in here without breaking the locked precision contract.
 #
 # Locked surface: parent section name, sub-section name, all field names within
-# precision sub-section, value enums (csv_active yes|no; precision_mode
-# default|full|integer; duration_unit_resolved us|ms|s|n/a; max_decimals_ceiling
-# 5|n/a|integer), and source annotation grammar. Inter-field ordering within a
-# sub-section is not contract-bound (consumers assert per-field contents).
+# precision sub-section (decimals_{meta,count,duration,percentile,shape,bytes,level}
+# plus precision_mode, duration_unit_resolved, max_decimals_ceiling), value enums
+# (csv_active yes|no; precision_mode default|full|integer; duration_unit_resolved
+# ns|us|ms|s|n/a; max_decimals_ceiling 5|n/a|integer), and source annotation grammar.
+# Inter-field ordering within a sub-section is not contract-bound (consumers
+# assert per-field contents).
 sub emit_csv_output_verbose {
     return unless section_requested('csv-output');
 
@@ -1849,7 +1851,7 @@ sub emit_csv_output_verbose {
     my $du_value = defined $duration_unit_resolved ? $duration_unit_resolved : 'n/a';
     push @verbose_output, "duration_unit_resolved: $du_value ($duration_unit_source)";
 
-    for my $family (qw(meta count duration percentile shape bytes)) {
+    for my $family (qw(meta count duration percentile shape bytes level)) {
         my $decimals = exists $csv_family_decimals{$family} ? $csv_family_decimals{$family} : 'n/a';
         push @verbose_output, "decimals_$family: $decimals";
     }
@@ -5865,6 +5867,107 @@ sub format_time {
     return defined $value ? "$formatted_value$unit_name" : undef;
 }
 
+# Issue #268: column-to-family lookup for CSV emit formatting. Mirrors the
+# 'family' annotations in tests/csv-output/rules/{messages,stats}-columns.tsv.
+# Static columns are listed explicitly; UDM/threadpool/session columns and
+# log-level/rate columns are resolved by suffix or registry lookup in
+# resolve_csv_column_family().
+my %csv_column_family = (
+    # meta
+    'category'          => 'meta',
+    'message'           => 'meta',
+    'timestamp'         => 'meta',
+    'occurrences'       => 'meta',
+    # bytes
+    'mean_bytes'        => 'bytes',
+    'bytes'             => 'bytes',
+    'bytes_nice'        => 'bytes',
+    # count
+    'count_occurrences' => 'count',
+    'count_min'         => 'count',
+    'count_mean'        => 'count',
+    'count_max'         => 'count',
+    'count_sum'         => 'count',
+    # duration
+    'min'               => 'duration',
+    'mean'              => 'duration',
+    'max'               => 'duration',
+    'duration'          => 'duration',
+    'duration_nice'     => 'duration',
+    # percentile
+    'p1'                => 'percentile',
+    'p5'                => 'percentile',
+    'p10'               => 'percentile',
+    'p25'               => 'percentile',
+    'p50'               => 'percentile',
+    'p75'               => 'percentile',
+    'iqr'               => 'percentile',
+    'p90'               => 'percentile',
+    'p95'               => 'percentile',
+    'p99'               => 'percentile',
+    'p999'              => 'percentile',
+    'p9999'             => 'percentile',
+    'p99999'            => 'percentile',
+    # shape (unitless or scale-derived; emit at fixed shape decimals)
+    'std_dev'           => 'shape',
+    'cv'                => 'shape',
+    'skewness'          => 'shape',
+    'kurtosis'          => 'shape',
+    'impact'            => 'shape',
+    'bimodality_coef'   => 'shape',
+);
+
+# Resolve the family for a CSV column name. Returns 'level' for log-level
+# count and rate columns (their names are dynamic — ERROR, WARN, 2xx, 5xx,
+# err-rate_min, etc.). Returns the matching family for UDM dynamic columns
+# (which always have a *_min/_mean/_max/_sum/_occurrences suffix). Returns
+# undef for unknown columns; the formatter falls back to pass-through.
+sub resolve_csv_column_family {
+    my ($column) = @_;
+    return undef unless defined $column;
+    return $csv_column_family{$column} if exists $csv_column_family{$column};
+    return 'level' if $column =~ /^(err|msg)-rate(_(sec|min|hr|day))?$/;
+    # Log-level columns: matched against the configured log levels.
+    return 'level' if grep { $_ eq $column } @log_levels;
+    return 'level' if $column =~ /^[1-5]xx$/;  # HTTP status family
+    return 'level' if $column =~ /^Pause (Young|Full)$/;
+    # UDM dynamic columns: <name>_<aggregate>; family follows the underlying
+    # metric, which for UDM today is 'count' (raw numeric) — leave to caller
+    # to override if a typed UDM lands.
+    return 'count' if $column =~ /_(min|mean|max|sum|occurrences)$/;
+    return undef;
+}
+
+# Issue #268: format a single numeric value for CSV emission, honoring
+# the --csv-precision mode resolved at startup.
+#
+# Returns:
+#   - undef             if $value is undef (preserves missing-data semantics)
+#   - $value unchanged  if precision mode is 'full' (raw stored precise float)
+#   - $value unchanged  if $value is non-numeric (already-formatted strings
+#                       like 'duration_nice', rate strings, etc. pass through)
+#   - sprintf("%.<N>f") otherwise, where N is the resolved decimals for the
+#                       column's family (or 0 if family is unknown)
+sub format_csv_value {
+    my ($value, $column) = @_;
+    return undef unless defined $value;
+    return $value if $csv_precision eq 'full';
+    # Non-numeric values (pre-formatted strings) pass through unchanged.
+    return $value unless $value =~ /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/;
+    my $family = resolve_csv_column_family($column);
+    my $decimals = defined $family && exists $csv_family_decimals{$family}
+        ? $csv_family_decimals{$family}
+        : 0;
+    # Per-column override: rate columns within the level family always use
+    # 1 decimal in default mode (matching the rules TSV's max_decimals=1).
+    # In N mode, N wins.
+    if (defined $column && $column =~ /^(err|msg)-rate/ && $csv_precision eq 'default') {
+        $decimals = 1;
+    }
+    return $value if $decimals eq 'n/a';  # defensive — should not occur outside full mode
+    return sprintf("%.${decimals}f", $value);
+}
+
 
 # utility function for formating numbers to normal format
 sub normalize { $_[0] =~ s/\.0+$//r }
@@ -6261,6 +6364,7 @@ sub adapt_to_command_line_options {
             percentile => $time_decimals,
             shape      => 3,
             bytes      => 0,
+            level      => 0,
         );
     } elsif ($csv_precision eq 'full') {
         %csv_family_decimals = (
@@ -6270,6 +6374,7 @@ sub adapt_to_command_line_options {
             percentile => 'n/a',
             shape      => 'n/a',
             bytes      => 'n/a',
+            level      => 'n/a',
         );
     } else {
         # Integer N mode: every family uses N decimals.
@@ -6280,6 +6385,7 @@ sub adapt_to_command_line_options {
             percentile => $csv_precision + 0,
             shape      => $csv_precision + 0,
             bytes      => $csv_precision + 0,
+            level      => $csv_precision + 0,
         );
     }
 
@@ -9749,13 +9855,11 @@ sub print_bar_graph {
                last if $category_bucket =~ /^occurrences$/;								# only fill in empty values up to the occurrences column
 
                if( exists $output_columns{$category_bucket} ) {								# if there was a count for this log level, add it to the list
-                   my $val = $output_columns{$category_bucket};
-                   # Rate columns (err-rate, msg-rate) are raw division output;
-                   # format to a sensible precision for CSV consumers.
-                   if( $category_bucket =~ /^(err|msg)-rate$/ && defined $val ) {
-                       $val = sprintf( "%.1f", $val );
-                   }
-                   push @csv_data, $val;
+                   # Issue #268: level-family columns (log-level counts and
+                   # rate columns) route through format_csv_value() so the
+                   # --csv-precision mode controls emit. Rate columns get a
+                   # per-column override of 1 decimal in default mode.
+                   push @csv_data, format_csv_value($output_columns{$category_bucket}, $category_bucket);
 
 # 2026-01-04 TO DO: this may not be required, test after fixing the count and byte metric collection with no duration stats
                } else {
@@ -9763,7 +9867,7 @@ sub print_bar_graph {
                }
             }
 
-            push @csv_data, $total_occurrences;										# add the total message count to the output CSV data
+            push @csv_data, format_csv_value($total_occurrences, 'occurrences');			# add the total message count to the output CSV data
 
             ## RENDER ROW BY ITERATING @column_layout
             for my $col (grep { $_->{visible} } @column_layout) {
@@ -9815,15 +9919,16 @@ sub print_bar_graph {
                             my $time_format = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
                             my $time_space = $time_format eq 'short' ? undef : ' ';
                             $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', $time_format, $time_space );
-                            push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};
+                            # CSV: duration_nice (pre-formatted), duration (numeric routed through helper)
+                            push @csv_data, ltrim( $trend_value ), format_csv_value( $log_stats{$bucket}{$key}, 'duration' );
                         } elsif( $key =~ /^bytes$/i ) {
                             $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
-                            push @csv_data, ltrim( $trend_value ), $log_stats{$bucket}{$key};
+                            push @csv_data, ltrim( $trend_value ), format_csv_value( $log_stats{$bucket}{$key}, 'bytes' );
                         } elsif( $key =~ /^count$/i ) {
                             $trend_value = " " . format_number( $log_stats{$bucket}{$key}, ' ', 2);
                             foreach my $metric ( qw( occurrences min mean max sum ) ) {
                                 my $key_metric = "${key}_${metric}";
-                                push @csv_data, $log_stats{$bucket}{$key_metric};
+                                push @csv_data, format_csv_value( $log_stats{$bucket}{$key_metric}, "count_${metric}" );
                             }
                         } elsif( $key =~ /^udm_(.+)$/ ) {
                             my $metric_name = $1;
@@ -9842,16 +9947,16 @@ sub print_bar_graph {
                             }
                             if ($config && $config->{name} ne $config->{base_name}) {
                                 # Disambiguated metric: single value (#99)
-                                push @csv_data, $log_stats{$bucket}{$key};
+                                push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
                             } else {
                                 foreach my $metric ( qw( occurrences min mean max sum ) ) {
-                                    push @csv_data, $log_stats{$bucket}{"${key}_${metric}"};
+                                    push @csv_data, format_csv_value( $log_stats{$bucket}{"${key}_${metric}"}, "${key}_${metric}" );
                                 }
                             }
                         } else {
                             my $decimals = $col_w > 10 ? 2 : ($col_w > 8 ? 1 : 0);
                             $trend_value = defined $log_stats{$bucket}{$key} ? " " . format_number( $log_stats{$bucket}{$key}, ' ', $decimals) : "";
-                            push @csv_data, $log_stats{$bucket}{$key};
+                            push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
                         }
 
                         # Render the metric bar using color from column layout
@@ -9910,7 +10015,7 @@ sub print_bar_graph {
             # width. (Issue #263)
             if( $print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled ) {
                 foreach my $stat ( qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef ) ) {
-                    push @csv_data, $log_stats{$bucket}{$stat};
+                    push @csv_data, format_csv_value( $log_stats{$bucket}{$stat}, $stat );
                 }
             }
 
@@ -11010,7 +11115,49 @@ sub print_message_summary {
                                     $log_messages{$grouping}{$key}{"udm_${name}_sum"};
                             }
                         }
-                        $csv->print($csv_fh, [ $grouping, $key, $occurrences, $mean_bytes, $total_bytes_num, $total_bytes, $count_occurrences, $count_min, $count_mean, $count_max, $count_sum, $min, $mean, $max, $std_dev, $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999, $cv, $skewness, $kurtosis, $bimodality_coef, $total_duration_num, $total_duration, $impact, @udm_csv_values ]);
+                        # Issue #268: format each numeric column per the resolved
+                        # --csv-precision mode. Column names mirror the header at
+                        # ltl:11541 so format_csv_value() can resolve each value's
+                        # family. Pre-formatted strings (bytes_nice, duration_nice)
+                        # and metadata pass through unchanged.
+                        $csv->print($csv_fh, [
+                            $grouping,
+                            $key,
+                            format_csv_value($occurrences,       'occurrences'),
+                            format_csv_value($mean_bytes,        'mean_bytes'),
+                            format_csv_value($total_bytes_num,   'bytes'),
+                            $total_bytes,
+                            format_csv_value($count_occurrences, 'count_occurrences'),
+                            format_csv_value($count_min,         'count_min'),
+                            format_csv_value($count_mean,        'count_mean'),
+                            format_csv_value($count_max,         'count_max'),
+                            format_csv_value($count_sum,         'count_sum'),
+                            format_csv_value($min,               'min'),
+                            format_csv_value($mean,              'mean'),
+                            format_csv_value($max,               'max'),
+                            format_csv_value($std_dev,           'std_dev'),
+                            format_csv_value($p1,                'p1'),
+                            format_csv_value($p5,                'p5'),
+                            format_csv_value($p10,               'p10'),
+                            format_csv_value($p25,               'p25'),
+                            format_csv_value($p50,               'p50'),
+                            format_csv_value($p75,               'p75'),
+                            format_csv_value($iqr,               'iqr'),
+                            format_csv_value($p90,               'p90'),
+                            format_csv_value($p95,               'p95'),
+                            format_csv_value($p99,               'p99'),
+                            format_csv_value($p999,              'p999'),
+                            format_csv_value($p9999,             'p9999'),
+                            format_csv_value($p99999,            'p99999'),
+                            format_csv_value($cv,                'cv'),
+                            format_csv_value($skewness,          'skewness'),
+                            format_csv_value($kurtosis,          'kurtosis'),
+                            format_csv_value($bimodality_coef,   'bimodality_coef'),
+                            format_csv_value($total_duration_num,'duration'),
+                            $total_duration,
+                            format_csv_value($impact,            'impact'),
+                            @udm_csv_values,
+                        ]);
                     }
 
                     print "$row\n";
