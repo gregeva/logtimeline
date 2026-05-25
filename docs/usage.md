@@ -26,9 +26,9 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 
 | Option | Description |
 |--------|-------------|
-| `-bs, --bucket-size <N>` | Set the width of each time bucket on the timeline (default unit: minutes; see `-s`, `-ms`) |
+| `-bs, --bucket-size <N>` | Set the width of each time bucket on the timeline (default unit: minutes; `-s` switches the unit to seconds, `-ms` switches it to milliseconds) |
 | `-s, --seconds` | Interpret bucket size as seconds instead of minutes |
-| `-ms, --milliseconds` | Enable sub-second timestamp parsing and allow bucket sizes down to 100ms |
+| `-ms, --milliseconds` | Switch the `-bs <N>` bucket width to milliseconds (and render timestamps with `.fff` precision). Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured. |
 | `-st, --start <timestamp>` | Only process log lines at or after this time (`YYYY-MM-DD HH:MM:SS[.mmm]`) |
 | `-et, --end <timestamp>` | Only process log lines before this time (`HH:MM:SS[.mmm]`) |
 | `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when auto-detection is not possible (`ns`, `us`, `ms`, `s`) |
@@ -39,7 +39,7 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 ltl -bs 5 access.log
 # 30-second buckets
 ltl -s -bs 30 access.log
-# Millisecond precision, 100ms buckets, zoomed into a 5-minute window
+# 100ms-wide buckets, zoomed into a 5-minute window (sub-second timestamp rendering enabled)
 ltl -ms -bs 100 -st "2025-05-05 08:15:00.000" -et "2025-05-05 08:20:00.000" app.log
 ```
 
