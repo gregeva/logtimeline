@@ -66,7 +66,6 @@ my %opt = (
     new                     => undef,
     show_all                => 0,
     oracle_json             => undef,
-    ignore_row_key_mismatch => 0,
 );
 
 GetOptions(
@@ -76,7 +75,6 @@ GetOptions(
     'new=s'                     => \$opt{new},
     'show-all'                  => \$opt{show_all},
     'oracle-json=s'             => \$opt{oracle_json},
-    'ignore-row-key-mismatch'   => \$opt{ignore_row_key_mismatch},
 ) or die "usage error\n";
 
 for my $required (qw(scenario file_kind new)) {
@@ -589,26 +587,20 @@ sub run_layer1 {
     }
 }
 
-# Emit a row-key-mismatch diagnostic. Severity is FAIL by default; under
-# --ignore-row-key-mismatch (intended for use until Issue #269 ships), it
-# downgrades to ADV. Either way, every field is self-documenting per
-# HARNESS-DESIGN.md so the reader sees the cause without archaeology.
+# Emit a row-key-mismatch diagnostic with self-documenting context.
+# A failure here means either a real ltl regression in deterministic
+# top-N selection or a stale baseline. HARNESS-DESIGN.md self-documenting
+# fields surface the cause without archaeology.
 sub emit_row_key_mismatch {
     my (%a) = @_;
     my $present = $a{direction} eq 'new-not-in-baseline' ? '(present)' : '(absent)';
     my $absent  = $a{direction} eq 'new-not-in-baseline' ? '(absent)'  : '(present)';
     my $asserts = 'row identity (' . ($a{file_kind} eq 'messages' ? 'category|message' : 'timestamp') . ') is stable between runs';
-    my $produced_by = 'ranking step in ltl (currently non-deterministic at ties — see Issue #269)';
+    my $produced_by = 'top-N ranking and message consolidation in ltl (deterministic per Issues #269 and #284)';
     my $contract = 'features/224-validate-statistics-test-harness.md § Decision 1 — Layer 1 drift, row-set identity';
     my $rule = $a{direction} eq 'new-not-in-baseline'
         ? 'every row in the new CSV must correspond to a row in the baseline CSV by row key'
         : 'every row in the baseline CSV must correspond to a row in the new CSV by row key';
-
-    if ($opt{ignore_row_key_mismatch}) {
-        print "ADV  [T3-L1] scenario=$a{scenario} file=$a{file_kind} key=\"$a{key}\" column=(row-key) ",
-              "baseline=$absent new=$present deviation=row-key-mismatch (advisory: #269 workaround active)\n";
-        return;
-    }
 
     emit_failure(
         tier        => 'T3',
@@ -1171,12 +1163,10 @@ print "SUMMARY scenario=$opt{scenario}/$opt{file_kind}: ",
       "nonnumeric=$stats{nonnumeric}, key_mismatch=$stats{key_mismatch}, ",
       "structural=$struct_state, L3=$l3_state$l3_detail\n";
 
-# Exit code: T3/T4 in L1/L2 block; nonnumeric also blocks since it
-# indicates the engine couldn't actually assert. key_mismatch blocks
-# unless --ignore-row-key-mismatch is set.
+# Exit code: T3/T4 in L1/L2 block; nonnumeric and key_mismatch also
+# block since both indicate the engine couldn't actually assert
+# against the baseline.
 my $exit_fail = ($stats{T3} > 0 || $stats{T4} > 0 || $stats{nonnumeric} > 0);
 $exit_fail = 1 if $stats{l3_T3} > 0 || $stats{l3_nonnumeric} > 0;
-if (!$opt{ignore_row_key_mismatch}) {
-    $exit_fail = 1 if $stats{key_mismatch} > 0;
-}
+$exit_fail = 1 if $stats{key_mismatch} > 0;
 exit ($exit_fail ? 1 : 0);

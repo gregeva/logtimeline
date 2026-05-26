@@ -27,7 +27,6 @@
 #   ./tests/validate-statistics.sh --show-all            # include T1/T2 advisories
 #   ./tests/validate-statistics.sh --capture-baselines   # rebaseline (with prompt)
 #   ./tests/validate-statistics.sh --capture-baselines --scenario <name>
-#   ./tests/validate-statistics.sh --ignore-row-key-mismatch  # workaround for Issue #269
 #
 # Exit codes:
 #   0  no T3/T4 failures across any layer
@@ -58,14 +57,12 @@ trap csv_cache_maybe_cleanup EXIT
 ONLY_SCENARIO=""
 SHOW_ALL=0
 CAPTURE_BASELINES=0
-IGNORE_ROW_KEY_MISMATCH=0
 SKIP_L3=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --scenario)                ONLY_SCENARIO="$2"; shift 2 ;;
         --show-all)                SHOW_ALL=1; shift ;;
         --capture-baselines)       CAPTURE_BASELINES=1; shift ;;
-        --ignore-row-key-mismatch) IGNORE_ROW_KEY_MISMATCH=1; shift ;;
         --skip-l3)                 SKIP_L3=1; shift ;;
         -h|--help)
             sed -n '2,48p' "$0"
@@ -340,9 +337,6 @@ while IFS=$'\t' read -r scenario logfile options; do
         fi
         if [[ $SHOW_ALL -eq 1 ]]; then
             engine_args+=(--show-all)
-        fi
-        if [[ $IGNORE_ROW_KEY_MISMATCH -eq 1 ]]; then
-            engine_args+=(--ignore-row-key-mismatch)
         fi
 
         # Layer 3: resolve oracle JSON per-logfile (cached). The oracle
