@@ -55,25 +55,28 @@ cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
 
 The `validate-statistics.sh` harness Layer 3 (external-oracle validation) requires Python 3, NumPy, and SciPy. The harness fails fast with an install hint if any are missing — it does not silently skip Layer 3.
 
-Modern Homebrew Python (macOS) and modern Linux distributions (Ubuntu 24.04+, Debian 12+, Fedora 38+) enforce [PEP 668](https://peps.python.org/pep-0668/), which blocks `pip3 install` against the system-managed Python. The recommended install paths below avoid PEP 668 friction.
+The right install command depends on which `python3` your harness will invoke. Run `which python3` from the shell that will run the harness (a non-interactive shell — PATH ordering can differ from your interactive shell), and pick the matching path below:
 
-Install using `python3 -m pip` (not bare `pip3`). The `python3 -m pip` form guarantees the install targets the same interpreter that `python3` on PATH resolves to. A bare `pip3` can be a sibling binary from a different Python version (e.g. a legacy `python@3.9` brew formula coexisting with the current `python@3.14`), which silently installs the modules into a Python the harness then cannot see.
-
-**macOS (Homebrew Python):**
+**macOS — Homebrew Python (`/opt/homebrew/bin/python3` or `/usr/local/bin/python3`):**
+Homebrew Python enforces [PEP 668](https://peps.python.org/pep-0668/), which blocks `pip install --user`. Use brew (NumPy and SciPy ship as brew formulas):
 ```bash
-brew install python
-python3 -m pip install --user numpy scipy
+brew install numpy scipy
 ```
 
-**Ubuntu/Linux:**
+**macOS — Apple Command-Line-Tools Python (`/Library/Developer/CommandLineTools/usr/bin/python3`):**
+No PEP 668; `pip --user` works:
+```bash
+/Library/Developer/CommandLineTools/usr/bin/python3 -m pip install --user numpy scipy
+```
+
+**Ubuntu/Linux — older distributions (pre-PEP-668):**
 ```bash
 sudo apt-get install python3 python3-pip
 python3 -m pip install --user numpy scipy
 ```
 
-`--user` installs packages into your home directory without sudo or system-packages overrides. Verify with `python3 -c "import numpy, scipy"` — if both modules import successfully under the same `python3` the harness invokes, you are done.
-
-Alternative (project-local venv) — useful when you want a fully isolated install:
+**Ubuntu/Linux — modern PEP-668 distributions (Ubuntu 24.04+, Debian 12+, Fedora 38+) and any system where the above hits `error: externally-managed-environment`:**
+Use a project-local venv:
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install numpy scipy
@@ -81,9 +84,14 @@ python3 -m venv .venv
 PATH=$(pwd)/.venv/bin:$PATH ./tests/validate-statistics.sh
 ```
 
-If you hit `error: externally-managed-environment`, you are seeing PEP 668. Use `--user` or a venv — do not use `--break-system-packages` unless you understand the consequence.
+Verify the install landed in the right place by running, in the harness's shell environment:
+```bash
+python3 -c "import numpy, scipy"
+```
 
-If `python3 -c "import numpy, scipy"` still fails after install, you have a version-mismatch case: `pip3` (or `python3 -m pip` under an older Python on your PATH) installed into one site-packages directory but the `python3` the harness invokes is a different interpreter. Resolve by re-running the install under the explicit interpreter the harness will use — `which python3` tells you which one that is.
+If this still fails after installing, you have a PATH-mismatch case: a bare `pip3` (or even `python3` in your interactive shell) targeted a different interpreter than the one `python3` resolves to in the harness's non-interactive shell. Re-run the install using the **full path** that `which python3` reports — e.g. `/opt/homebrew/bin/python3 -m pip install …`. The PATH-resolution variation is the most common failure mode.
+
+Do not use `--break-system-packages` unless you understand the consequence — it can break your system Python.
 
 ### Build Static Binaries
 
