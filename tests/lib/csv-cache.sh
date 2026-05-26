@@ -126,6 +126,20 @@ _csv_cache_find_produced() {
 csv_cache_produce() {
     local scenario="$1" logfile="$2" options="$3" log_shorthand="$4"
 
+    # Refuse stray -o in the options string. The helper owns -o emission;
+    # callers must supply options that exclude it. A stray -o here causes
+    # the resulting ltl command to receive `-o -o <logfile>`, which is
+    # subtly wrong in ways that affect output stability (see commit log
+    # for scenarios.tsv hygiene fix).
+    case " $options " in
+        *" -o "*|*" -o")
+            echo "csv-cache: refuse to invoke ltl with stray -o in options for scenario=$scenario" >&2
+            echo "           options: $options" >&2
+            echo "           scenarios.tsv must omit -o; the helper appends it itself" >&2
+            return 2
+            ;;
+    esac
+
     local msg_name stats_name
     msg_name="$(csv_cache_filename "$scenario" "$options" "$log_shorthand" messages)"
     stats_name="$(csv_cache_filename "$scenario" "$options" "$log_shorthand" stats)"
