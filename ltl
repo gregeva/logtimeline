@@ -4460,7 +4460,7 @@ sub group_similar_messages {
             my @sorted_keys = sort {
                 my ($msg_a) = $a =~ /^\[[^\]]+\]\s*(.*)/s;
                 my ($msg_b) = $b =~ /^\[[^\]]+\]\s*(.*)/s;
-                ($msg_a // $a) cmp ($msg_b // $b)
+                (($msg_a // $a) cmp ($msg_b // $b)) || ($a cmp $b)
             } keys %{$log_messages{$category}};
 
             my @window;
@@ -5073,7 +5073,7 @@ sub consolidation_process_key {
 
     # Check trigger per category — fire checkpoints for all groups in this category
     if (($consolidation_category_unmatched_count{$category} // 0) >= $consolidation_trigger) {
-        for my $ck (keys %consolidation_unmatched) {
+        for my $ck (sort keys %consolidation_unmatched) {
             next unless $ck =~ /^\Q$category\E\|/;
             next if scalar(keys %{$consolidation_unmatched{$ck}}) < 2;
             my ($cc, $gk) = split(/\|/, $ck, 2);
