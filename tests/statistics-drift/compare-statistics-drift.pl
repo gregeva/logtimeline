@@ -170,8 +170,21 @@ sub numeric_columns_from_rules {
     return \@cols;
 }
 
+# Return the set of every column name the rules TSV knows about,
+# regardless of type. Used to assert no CSV-header column is silently
+# unaccounted-for (HARNESS-DESIGN.md trap 5: anchor-missing as pass).
+sub all_columns_from_rules {
+    my ($rules_ref) = @_;
+    my %set;
+    for my $r (@$rules_ref) {
+        $set{$r->{column}} = 1;
+    }
+    return \%set;
+}
+
 my $RULES        = load_rules($RULES_TSV);
 my $NUMERIC_COLS = numeric_columns_from_rules($RULES);
+my $ALL_RULES_COLS = all_columns_from_rules($RULES);
 my %COL_FAMILY   = map { $_->{column} => $_->{family} } @$RULES;
 my %COL_TYPE     = map { $_->{column} => $_->{type}   } @$RULES;
 
@@ -1079,6 +1092,33 @@ sub run_layer3 {
 # family is covered completely."
 
 my $new_data = load_csv($opt{new});
+
+# Anchor check: every column in the produced CSV header MUST be known to
+# the rules TSV. A column that is in the CSV but absent from the rules
+# TSV would otherwise be silently excluded from L1 / L2 / L3 checks
+# (HARNESS-DESIGN.md trap 5: anchor-missing as pass — the engine appears
+# to validate but is actually asserting nothing about that column).
+# Identifier columns (category, message, timestamp) are exempt because
+# they intentionally have no numeric assertions.
+{
+    my @unaccounted;
+    for my $csv_col (@{ $new_data->{header} }) {
+        next if $IDENTIFIER_COLUMNS{$csv_col};
+        next if $ALL_RULES_COLS->{$csv_col};
+        push @unaccounted, $csv_col;
+    }
+    if (@unaccounted) {
+        print STDERR "compare-statistics-drift.pl: refuse to start — CSV columns absent from rules TSV:\n";
+        for my $c (@unaccounted) {
+            print STDERR "    $c\n";
+        }
+        print STDERR "  asserts: every emitted CSV column is covered by an entry in tests/csv-output/rules/$opt{file_kind}-columns.tsv\n";
+        print STDERR "  produced_by: rules TSV is #223's source of truth for column specs; this engine consumes it\n";
+        print STDERR "  contract: features/224-validate-statistics-test-harness.md \xc2\xa7 Decision 5 — all-or-nothing column coverage\n";
+        print STDERR "  rule: any unaccounted-for CSV column means the rules TSV has drifted or a new ltl column shipped without spec update\n";
+        exit 2;
+    }
+}
 
 my @startup_cols = grep {
     my $c = $_;
