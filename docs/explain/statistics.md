@@ -104,7 +104,7 @@ ltl -so std_dev -n 20 access.log      # highest absolute spread
 ltl -so cv -n 20 access.log           # highest relative spread
 ```
 
-**How ltl computes this.** Computed via the sum-of-squares accumulator across each time bucket's duration array: `sqrt(E[X²] − E[X]²)`, where E[X] is the mean. Single-pass O(n); a floor at zero guards against floating-point underflow on near-constant data (variance can otherwise come out slightly negative).
+**How ltl computes this.** Computed as the sample standard deviation (the same convention as pandas `.std()`, R `sd()`, and Excel `STDEV.S`): square root of the sum of squared deviations from the mean, divided by `n − 1`. Requires `n ≥ 2`; emitted blank for single-observation buckets. Single-pass O(n) via a sum-of-squares accumulator; a floor at zero guards floating-point underflow on near-constant data.
 
 **See also.** `mean`, `cv`, `iqr`, `skewness`, `kurtosis`.
 
@@ -250,7 +250,7 @@ ltl -so skewness -n 20 access.log     # most asymmetric distributions
 ltl -so skewness -sa -n 20 access.log # most negatively-skewed (timeout candidates)
 ```
 
-**How ltl computes this.** Standardized third central moment (population skewness): `mean((x − mean)³) / std_dev³`. Single-pass O(n) accumulator on the sorted-values pass; requires `n ≥ 4` and non-zero `std_dev` (emitted blank otherwise). The same accumulator pass produces `kurtosis`, so the marginal cost of skewness over `std_dev` is negligible.
+**How ltl computes this.** Sample-corrected standardized third moment (the same convention as pandas `.skew()` and R `e1071::skewness(type = 2)`): bias-adjusted so the expected value on a normal distribution is zero regardless of sample size. Requires `n ≥ 4` and a non-degenerate distribution (emitted blank otherwise). Single-pass O(n) accumulator on the sorted-values pass; the same pass produces `kurtosis`, so the marginal cost of skewness is negligible.
 
 **See also.** `kurtosis`, `bimodality_coef`, `std_dev`, `percentiles`.
 
@@ -279,7 +279,7 @@ Kurtosis measures the *tail-heaviness* (and concentration around the mean) of a 
 ltl -so kurtosis -n 20 access.log     # heaviest tails
 ```
 
-**How ltl computes this.** Standardized fourth central moment minus 3 (excess kurtosis — a normal distribution reads 0). Formula: `mean((x − mean)⁴) / std_dev⁴ − 3`. Single-pass O(n) accumulator on the sorted-values pass; requires `n ≥ 4` and non-zero `std_dev` (emitted blank otherwise). The same accumulator pass produces `skewness` and feeds `bimodality_coef`.
+**How ltl computes this.** Sample-corrected excess kurtosis (the same convention as pandas `.kurt()` and R `e1071::kurtosis(type = 2)`): a normal distribution reads zero regardless of sample size; positive values indicate heavier-than-normal tails, negative values indicate lighter tails. Requires `n ≥ 4` and a non-degenerate distribution (emitted blank otherwise). Single-pass O(n) accumulator on the sorted-values pass; the same pass produces `skewness` and feeds `bimodality_coef`.
 
 **See also.** `skewness`, `bimodality_coef`, `std_dev`, `cv`, `percentiles`.
 
