@@ -216,8 +216,8 @@ ltl computes percentiles from one of two data models, each with its own algorith
 | `-dm, --data-model <raw\|bin>` | Pin the data model for every surface (overridden by any per-surface flag below). |
 | `-hgdm, --histogram-data-model <raw\|bin>` | Pin the histogram surface's data model. |
 | `-hmdm, --heatmap-data-model <raw\|bin>` | Pin the heatmap surface's data model. |
-| `-mdm, --message-stats-data-model <raw\|bin>` | Pin the per-message-key statistics data model. Selector is resolved but currently only the raw reduction is implemented for this surface; `bin` lands in a follow-up. |
-| `-bdm, --bucket-stats-data-model <raw\|bin>` | Pin the per-time-bucket statistics data model. Same status as `-mdm` — selector resolved, raw only today. |
+| `-mdm, --message-stats-data-model <raw\|bin>` | Pin the per-message-key statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters plus Welford-Pébay sidecar accumulators for exact-value statistics. Default is `raw`. |
+| `-bdm, --bucket-stats-data-model <raw\|bin>` | Pin the per-time-bucket statistics data model. Selector is resolved but currently only the raw reduction is implemented for this surface; `bin` lands in a follow-up. |
 
 Per-surface flag overrides `-dm`; `-dm` overrides the per-surface default. Invalid values (anything other than `raw` or `bin`) cause ltl to exit at option-parse time with a clear error. Conflicting flags on the same axis follow standard last-one-wins ordering.
 

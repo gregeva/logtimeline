@@ -3816,7 +3816,7 @@ sub print_help {
     $out .= help_opt("-dm,   --data-model <raw|bin>",                  "Pin the data model for every surface (overridden by any per-surface flag below)");
     $out .= help_opt("-hgdm, --histogram-data-model <raw|bin>",        "Pin the histogram surface's data model");
     $out .= help_opt("-hmdm, --heatmap-data-model <raw|bin>",          "Pin the heatmap surface's data model");
-    $out .= help_opt("-mdm,  --message-stats-data-model <raw|bin>",    "Pin the per-message-key statistics data model (selector resolved but currently always uses raw; bin lands in a follow-up)");
+    $out .= help_opt("-mdm,  --message-stats-data-model <raw|bin>",    "Pin the per-message-key statistics data model (default raw; bin uses HDR-style bin counters with Prometheus-style exponential interpolation)");
     $out .= help_opt("-bdm,  --bucket-stats-data-model <raw|bin>",     "Pin the per-time-bucket statistics data model (selector resolved but currently always uses raw; bin lands in a follow-up)");
 
     # User-Defined Metrics
