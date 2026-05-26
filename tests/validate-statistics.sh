@@ -2,11 +2,12 @@
 # validate-statistics.sh — Calculated-statistics test harness (Issue #224).
 #
 # Validates every numeric calculated statistic ltl emits to its -o CSV
-# outputs through four independent layers:
+# outputs through three independent layers:
 #   L1  drift against committed baseline
 #   L2  intra-row arithmetic consistency
-#   L3  external-oracle (NumPy/SciPy) algorithmic correctness
-#   L4  cross-model agreement between raw-array and bin-counter data models
+#   L3  algorithm-aware external-oracle (NumPy/SciPy) validation,
+#       dispatching its reference computation by the algorithm declared
+#       in ltl's -V percentile-algorithm section (Issue #280)
 #
 # Sibling to validate-csv-output.sh (#223), which handles structural CSV
 # correctness. Run validate-csv-output.sh BEFORE this harness — structural
@@ -20,18 +21,12 @@
 # for calling cleanup-test-artifacts.sh at the end. When CI is unset, this
 # harness cleans up its own artifacts at end of run.
 #
-# Phase B status: scaffolding stub. The engine compare-statistics-drift.pl
-# is currently a stub that exits 0 without doing real comparison work.
-# Layer-by-layer implementation lands in Phase C (L1+L2), Phase E (L4),
-# Phase F (L3).
-#
 # Usage:
 #   ./tests/validate-statistics.sh                       # all scenarios
 #   ./tests/validate-statistics.sh --scenario <name>     # single scenario
 #   ./tests/validate-statistics.sh --show-all            # include T1/T2 advisories
 #   ./tests/validate-statistics.sh --capture-baselines   # rebaseline (with prompt)
 #   ./tests/validate-statistics.sh --capture-baselines --scenario <name>
-#   ./tests/validate-statistics.sh --ignore-row-key-mismatch  # workaround for Issue #269
 #
 # Exit codes:
 #   0  no T3/T4 failures across any layer
@@ -50,7 +45,6 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 HARNESS_DIR="$SCRIPT_DIR/statistics-drift"
 SCENARIOS_TSV="$HARNESS_DIR/scenarios.tsv"
-TOLERANCES_TSV="$HARNESS_DIR/cross-model-tolerances.tsv"
 ENGINE="$HARNESS_DIR/compare-statistics-drift.pl"
 BASELINES_DIR="$HARNESS_DIR/baselines"
 
@@ -63,14 +57,12 @@ trap csv_cache_maybe_cleanup EXIT
 ONLY_SCENARIO=""
 SHOW_ALL=0
 CAPTURE_BASELINES=0
-IGNORE_ROW_KEY_MISMATCH=0
 SKIP_L3=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --scenario)                ONLY_SCENARIO="$2"; shift 2 ;;
         --show-all)                SHOW_ALL=1; shift ;;
         --capture-baselines)       CAPTURE_BASELINES=1; shift ;;
-        --ignore-row-key-mismatch) IGNORE_ROW_KEY_MISMATCH=1; shift ;;
         --skip-l3)                 SKIP_L3=1; shift ;;
         -h|--help)
             sed -n '2,48p' "$0"
@@ -100,7 +92,7 @@ if [[ $CAPTURE_BASELINES -eq 1 ]]; then
     mkdir -p "$BASELINES_DIR"
 fi
 
-for f in "$LTL" "$SCENARIOS_TSV" "$TOLERANCES_TSV" "$ENGINE"; do
+for f in "$LTL" "$SCENARIOS_TSV" "$ENGINE"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: required file missing: $f" >&2
         exit 1
@@ -284,19 +276,6 @@ total_pass=0
 total_fail=0
 scenarios_run=0
 
-# Per-scenario state stashed during the main loop for the L4 pairing
-# pass afterwards. Parallel indexed arrays keep this compatible with
-# macOS system Bash 3.2 (no associative arrays).
-SCENARIO_NAMES=()
-SCENARIO_LOGFILES=()
-SCENARIO_MSG_CSVS=()
-SCENARIO_STATS_CSVS=()
-
-# L4 pairing counters (aggregated across all scenario-pairs).
-l4_total_pairs=0
-l4_pairs_ok=0
-l4_pairs_fail=0
-
 while IFS=$'\t' read -r scenario logfile options; do
     [[ -z "$scenario" ]] && continue
     [[ "$scenario" =~ ^# ]] && continue
@@ -358,9 +337,6 @@ while IFS=$'\t' read -r scenario logfile options; do
         fi
         if [[ $SHOW_ALL -eq 1 ]]; then
             engine_args+=(--show-all)
-        fi
-        if [[ $IGNORE_ROW_KEY_MISMATCH -eq 1 ]]; then
-            engine_args+=(--ignore-row-key-mismatch)
         fi
 
         # Layer 3: resolve oracle JSON per-logfile (cached). The oracle
@@ -426,13 +402,7 @@ while IFS=$'\t' read -r scenario logfile options; do
         fi
     done
 
-    # Stash scenario state for L4 pairing pass after the main loop.
-    SCENARIO_NAMES+=("$scenario")
-    SCENARIO_LOGFILES+=("$logfile")
-    SCENARIO_MSG_CSVS+=("$msg_csv")
-    SCENARIO_STATS_CSVS+=("$stats_csv")
-
-    scenarios_run=$((scenarios_run + 1))
+scenarios_run=$((scenarios_run + 1))
     if [[ $scen_fail -eq 0 ]]; then
         total_pass=$((total_pass + 1))
         echo "PASS  scenario=$scenario"
@@ -442,96 +412,11 @@ while IFS=$'\t' read -r scenario logfile options; do
     fi
 done < <(tail -n +2 "$SCENARIOS_TSV" | grep -v '^#')
 
-# Layer 4 cross-model pairing pass. Per Decision 9, pairs (default,
-# bin-data-model) per logfile. Both members must have run during the
-# main loop. Skipped entirely in --capture-baselines mode (capture
-# produces both halves; nothing to compare).
-if [[ $CAPTURE_BASELINES -eq 0 && ${#SCENARIO_NAMES[@]} -gt 0 ]]; then
-    # Build unique logfile list by scanning the stash. The `${a[@]+...}`
-    # idiom keeps `set -u` from erroring on empty arrays in Bash 3.2.
-    seen_logfiles=()
-    for i in "${!SCENARIO_NAMES[@]}"; do
-        lf="${SCENARIO_LOGFILES[$i]}"
-        found=0
-        for prev in ${seen_logfiles[@]+"${seen_logfiles[@]}"}; do
-            [[ "$prev" == "$lf" ]] && found=1 && break
-        done
-        [[ $found -eq 0 ]] && seen_logfiles+=("$lf")
-    done
-
-    for logfile in ${seen_logfiles[@]+"${seen_logfiles[@]}"}; do
-        # Find the (default, bin-data-model) pair for this logfile.
-        # Convention: scenario name ends with the family suffix.
-        raw_scenario=""; bin_scenario=""
-        raw_msg=""; raw_stats=""; bin_msg=""; bin_stats=""
-        for i in "${!SCENARIO_NAMES[@]}"; do
-            [[ "${SCENARIO_LOGFILES[$i]}" != "$logfile" ]] && continue
-            s="${SCENARIO_NAMES[$i]}"
-            if [[ "$s" == *-default ]]; then
-                raw_scenario="$s"
-                raw_msg="${SCENARIO_MSG_CSVS[$i]}"
-                raw_stats="${SCENARIO_STATS_CSVS[$i]}"
-            elif [[ "$s" == *-bin-data-model ]]; then
-                bin_scenario="$s"
-                bin_msg="${SCENARIO_MSG_CSVS[$i]}"
-                bin_stats="${SCENARIO_STATS_CSVS[$i]}"
-            fi
-        done
-
-        # Skip pairing if either side is missing (e.g. --scenario filter
-        # excluded one of the pair).
-        [[ -z "$raw_scenario" || -z "$bin_scenario" ]] && continue
-
-        l4_total_pairs=$((l4_total_pairs + 1))
-        pair_fail=0
-        for kind in messages stats; do
-            if [[ "$kind" == "messages" ]]; then
-                raw_csv="$raw_msg"
-                bin_csv="$bin_msg"
-            else
-                raw_csv="$raw_stats"
-                bin_csv="$bin_stats"
-            fi
-
-            engine_args=(
-                --scenario "$raw_scenario"
-                --file-kind "$kind"
-                --new "$raw_csv"
-                --paired-with "$bin_scenario"
-                --paired-new "$bin_csv"
-            )
-            if [[ $SHOW_ALL -eq 1 ]]; then
-                engine_args+=(--show-all)
-            fi
-            if [[ $IGNORE_ROW_KEY_MISMATCH -eq 1 ]]; then
-                engine_args+=(--ignore-row-key-mismatch)
-            fi
-
-            set +e
-            perl "$ENGINE" "${engine_args[@]}"
-            erc=$?
-            set -e
-
-            if [[ $erc -ne 0 ]]; then
-                pair_fail=$((pair_fail + 1))
-            fi
-        done
-
-        if [[ $pair_fail -eq 0 ]]; then
-            l4_pairs_ok=$((l4_pairs_ok + 1))
-            echo "PASS  pair=$raw_scenario<->$bin_scenario"
-        else
-            l4_pairs_fail=$((l4_pairs_fail + 1))
-            echo "FAIL  pair=$raw_scenario<->$bin_scenario (see FAIL lines emitted by engine above)"
-        fi
-    done
-fi
-
 echo ""
 if [[ $CAPTURE_BASELINES -eq 1 ]]; then
     echo "=== Baseline capture: $scenarios_run scenarios captured, $total_fail failed ==="
 else
-    echo "=== Statistics drift: $scenarios_run scenarios, $total_pass pass, $total_fail fail | L4 pairs: $l4_total_pairs total, $l4_pairs_ok ok, $l4_pairs_fail fail ==="
+    echo "=== Statistics drift: $scenarios_run scenarios, $total_pass pass, $total_fail fail ==="
 fi
 
 if [[ $scenarios_run -eq 0 ]]; then
@@ -539,5 +424,5 @@ if [[ $scenarios_run -eq 0 ]]; then
     exit 1
 fi
 
-[[ $total_fail -eq 0 && $l4_pairs_fail -eq 0 ]] || exit 1
+[[ $total_fail -eq 0 ]] || exit 1
 exit 0

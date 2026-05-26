@@ -2965,7 +2965,7 @@ my $explain_mean_compute = q{Computed as `total_duration / count` per time bucke
 # --- std_dev ---
 my $explain_std_dev_intuition = q{Standard deviation measures *absolute spread* around the mean: how far observed values typically deviate from the average, in the same units as the original data. A latency stream with mean=100ms and std_dev=5ms is tightly clustered; one with mean=100ms and std_dev=50ms is highly variable. The square root of variance.};
 my $explain_std_dev_operational = q{`std_dev` is the conventional spread statistic but has two limitations: (1) it scales with the absolute magnitude -- a service with mean=10s and std_dev=1s and a service with mean=10ms and std_dev=1ms have *very different* operational characteristics but the same shape; (2) it assumes a roughly normal-shaped distribution, which latency data rarely is (latency is typically right-skewed with heavy tails). For relative spread that's scale-independent, use `cv` (= std_dev / mean). For robust spread that ignores tail outliers, use `iqr` (= p75 - p25). For raw spread in absolute units to combine with `mean`, `std_dev` is the right choice.};
-my $explain_std_dev_compute = q{Computed via the sum-of-squares accumulator across each time bucket's duration array: `sqrt(E[X^2] - E[X]^2)`, where E[X] is the mean. Single-pass O(n); a floor at zero guards against floating-point underflow on near-constant data (variance can otherwise come out slightly negative).};
+my $explain_std_dev_compute = q{Computed as the sample standard deviation (the same convention as pandas `.std()`, R `sd()`, and Excel `STDEV.S`): square root of the sum of squared deviations from the mean, divided by `n - 1`. Requires `n >= 2`; emitted blank for single-observation buckets. Single-pass O(n) via a sum-of-squares accumulator; a floor at zero guards floating-point underflow on near-constant data.};
 
 # --- cv ---
 my $explain_cv_intuition = q{Coefficient of variation = `std_dev / mean`. CV measures *relative* spread: a service with CV=0.05 has values clustered within ~5% of the mean; a service with CV=2.0 has values varying by 200% of the mean. Because CV normalizes by the mean, it's scale-independent -- a microsecond-latency service and a multi-second-latency service can be compared directly.};
@@ -2987,12 +2987,12 @@ my $explain_percentiles_compute = q{ltl computes percentiles using log-spaced bi
 # --- skewness (user-supplied content) ---
 my $explain_skewness_intuition = q{Skewness measures the *asymmetry* of a distribution -- how lopsided it is around its mean. Whether the values tend to bunch up on one side with a tail extending toward the other. For latency, skewness answers "is the tail leaning one way?" -- positive skew means the right tail is heavier (most fast, occasionally slow); negative skew means the left tail is heavier (unusual for latency; common when something caps execution at a ceiling).};
 my $explain_skewness_operational = q{Skewness has three concrete operational uses. First, detecting clipped or timed-out distributions: if you expect right-skew (the natural latency shape) but see near-zero or negative skewness on a slow API, you may have a hidden cap -- requests that should be 10s are getting killed at 5s and piling up there. Second, spotting "bimodal" patterns before `bimodality_coef` fires: skewness near zero combined with high kurtosis is the signature of "fast and slow modes coexisting" -- the means cancel out, but the tails are fat on both sides. Third, skewness is a *structural prerequisite* for `bimodality_coef`: Sarle's BC formula is `(skewness^2 + 1) / (kurtosis_adjusted)`, so without skewness the multimodal screening doesn't work.};
-my $explain_skewness_compute = q{Standardized third central moment (population skewness): `mean((x - mean)^3) / std_dev^3`. Single-pass O(n) accumulator on the sorted-values pass; requires n >= 4 and non-zero std_dev (emitted blank otherwise). The same accumulator pass produces `kurtosis`, so the marginal cost of skewness over std_dev is negligible.};
+my $explain_skewness_compute = q{Sample-corrected standardized third moment (the same convention as pandas `.skew()` and R `e1071::skewness(type = 2)`): bias-adjusted so the expected value on a normal distribution is zero regardless of sample size. Requires `n >= 4` and a non-degenerate distribution (emitted blank otherwise). Single-pass O(n) accumulator on the sorted-values pass; the same pass produces `kurtosis`, so the marginal cost of skewness is negligible.};
 
 # --- kurtosis (user-supplied content) ---
 my $explain_kurtosis_intuition = q{Kurtosis measures the *tail-heaviness* (and concentration around the mean) of a distribution: how prone the distribution is to producing extreme outliers compared to a normal bell curve. For latency, kurtosis answers "how often do rare, extreme values show up?" -- low kurtosis means values cluster predictably and tails are thin; high kurtosis means most values cluster near the mean *but* the tails are heavy -- the "occasionally horrible" pattern. It's not about spread (that's std_dev / cv) and not about asymmetry (that's skewness). Kurtosis specifically captures the shape of the tails.};
 my $explain_kurtosis_operational = q{Kurtosis separates "this API is reliably slow" from "this API is mostly fine but occasionally catastrophic." These look similar in p50/p90 but diverge sharply in tails. High kurtosis with normal p50/p90 means most requests are fine but you have invisible outliers being suffered by a small population of users; p99/p999 will show them, but kurtosis tells you they're *concentrated* at the tail rather than spread out. Low kurtosis with slow p50 means uniform slowness affecting everyone -- different problem, different fix. Kurtosis is one of three shape moments (with `skewness` and `bimodality_coef`) that let SREs characterize *distribution shape* from the CSV alone, without re-running ltl.};
-my $explain_kurtosis_compute = q{Standardized fourth central moment minus 3 (excess kurtosis -- a normal distribution reads 0). Formula: `mean((x - mean)^4) / std_dev^4 - 3`. Single-pass O(n) accumulator on the sorted-values pass; requires n >= 4 and non-zero std_dev (emitted blank otherwise). The same accumulator pass produces `skewness` and feeds `bimodality_coef`.};
+my $explain_kurtosis_compute = q{Sample-corrected excess kurtosis (the same convention as pandas `.kurt()` and R `e1071::kurtosis(type = 2)`): a normal distribution reads zero regardless of sample size; positive values indicate heavier-than-normal tails, negative values indicate lighter tails. Requires `n >= 4` and a non-degenerate distribution (emitted blank otherwise). Single-pass O(n) accumulator on the sorted-values pass; the same pass produces `skewness` and feeds `bimodality_coef`.};
 
 # --- bimodality_coef (user-supplied content; the big one) ---
 my $explain_bc_intuition = q{Sarle's bimodality coefficient screens for whether a distribution likely has *two (or more) modes* -- two distinct populations of values mashed into the same dataset, each with its own peak. The classic case: 80% of requests hit a cache and return in 5ms, the other 20% miss and take 200ms. The mean (45ms) is in a valley where almost no requests actually land; the distribution has two modes but every summary statistic pretends it has one. `bimodality_coef` is the single number designed to flag that exactly that case.};
@@ -4460,7 +4460,7 @@ sub group_similar_messages {
             my @sorted_keys = sort {
                 my ($msg_a) = $a =~ /^\[[^\]]+\]\s*(.*)/s;
                 my ($msg_b) = $b =~ /^\[[^\]]+\]\s*(.*)/s;
-                ($msg_a // $a) cmp ($msg_b // $b)
+                (($msg_a // $a) cmp ($msg_b // $b)) || ($a cmp $b)
             } keys %{$log_messages{$category}};
 
             my @window;
@@ -5073,7 +5073,7 @@ sub consolidation_process_key {
 
     # Check trigger per category — fire checkpoints for all groups in this category
     if (($consolidation_category_unmatched_count{$category} // 0) >= $consolidation_trigger) {
-        for my $ck (keys %consolidation_unmatched) {
+        for my $ck (sort keys %consolidation_unmatched) {
             next unless $ck =~ /^\Q$category\E\|/;
             next if scalar(keys %{$consolidation_unmatched{$ck}}) < 2;
             my ($cc, $gk) = split(/\|/, $ck, 2);
@@ -8761,10 +8761,14 @@ sub calculate_statistics {
     my $min = min(@sorted);
     my $mean = $bucket_data->{total_duration} / $duration_count;
     my $max = max(@sorted);
-    my $variance = ($bucket_data->{sum_of_squares} / $duration_count) - ($mean ** 2);
-    $variance = 0 if $variance < 0;  # guard floating-point underflow on near-constant data
-    my $std_dev = sqrt($variance);
-    my $cv = $mean != 0 ? $std_dev / $mean : undef;
+    my ($std_dev, $cv);
+    if ($duration_count >= 2) {
+        my $sum_sq_dev = $bucket_data->{sum_of_squares} - $duration_count * ($mean ** 2);
+        $sum_sq_dev = 0 if $sum_sq_dev < 0;  # guard floating-point underflow on near-constant data
+        my $variance = $sum_sq_dev / ($duration_count - 1);
+        $std_dev = sqrt($variance);
+        $cv = $mean != 0 ? $std_dev / $mean : undef;
+    }
 
     # Percentile calculations must use duration_count, not occurrences
     # to correctly index into the sorted durations array
@@ -8782,26 +8786,33 @@ sub calculate_statistics {
     my $p99999 = $sorted[int($duration_count * 0.99999)] // $sorted[-1];
     my $iqr   = $p75 - $p25;
 
-    # Distribution-shape moments — Sarle's bimodality coefficient screening (#222)
-    # Sarle BC > 5/9 (~0.555) flags suspect multimodal; threshold is the canonical
-    # cutoff from the bimodality-detection literature. Requires n >= 4 (denominator
-    # of BC has (n-2)(n-3) factor) and non-zero std_dev.
+    # Distribution-shape moments — sample-corrected skewness and excess kurtosis,
+    # plus Sarle's bimodality coefficient screening. Sarle BC > 5/9 (~0.555) flags
+    # suspect multimodal; threshold is the canonical cutoff from the bimodality
+    # literature. Requires n >= 4 (denominator of BC has (n-2)(n-3) factor) and a
+    # non-degenerate distribution (positive second moment).
     my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
-    if ($duration_count >= 4 && $std_dev > 0) {
-        my ($m3_sum, $m4_sum) = (0, 0);
+    if ($duration_count >= 4) {
+        my ($m2_sum, $m3_sum, $m4_sum) = (0, 0, 0);
         for my $x (@sorted) {
             my $d = $x - $mean;
             my $d2 = $d * $d;
+            $m2_sum += $d2;
             $m3_sum += $d2 * $d;
             $m4_sum += $d2 * $d2;
         }
-        my $m3 = $m3_sum / $duration_count;
-        my $m4 = $m4_sum / $duration_count;
-        $skewness = $m3 / ($std_dev ** 3);          # population skewness
-        $kurtosis = $m4 / ($std_dev ** 4) - 3;      # excess kurtosis (normal = 0)
-        my $n = $duration_count;
-        my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
-        $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
+        my $n  = $duration_count;
+        my $m2 = $m2_sum / $n;
+        my $m3 = $m3_sum / $n;
+        my $m4 = $m4_sum / $n;
+        if ($m2 > 0) {
+            my $g1 = $m3 / ($m2 ** 1.5);
+            my $g2 = $m4 / ($m2 ** 2) - 3;
+            $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
+            $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
+            my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
+            $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
+        }
     }
 
     return ($min, $mean, $max,
