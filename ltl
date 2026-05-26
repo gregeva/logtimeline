@@ -9293,6 +9293,20 @@ sub calculate_statistics_bin {
             elsif ($new eq 'low'  && (!$cur || $cur eq 'none'))    { $message_stats_audit{$q} = 'low';  }
             elsif (!defined $cur)                                  { $message_stats_audit{$q} = 'none'; }
         }
+        # Clamp interpolated percentile values to the observed [min, max].
+        # The Prometheus formula returns values that can range up to the
+        # populated bin's UPPER boundary (partition geometry), which can
+        # exceed the observed max — partition boundaries are derived from
+        # the lazy-seed range (v_0 * sqrt(10^5)), not from observed values.
+        # The min/max sidecars (R2.2) carry the true observed extremes, so
+        # clamping here preserves #224 Decision 4's "min <= p1 ... p99999
+        # <= max" Layer 2 invariant while still using bin-counter precision
+        # for everything inside the observed range.
+        for ($p1, $p5, $p10, $p25, $p50, $p75, $p90, $p95, $p99, $p999, $p9999, $p99999) {
+            next unless defined;
+            $_ = $min if defined $min && $_ < $min;
+            $_ = $max if defined $max && $_ > $max;
+        }
     } else {
         # All-zero degenerate case: every percentile equals min (which is 0
         # here because durations are non-negative and we observed only zeros).
