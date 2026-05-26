@@ -7671,7 +7671,12 @@ sub read_and_process_logs {
                                     $stats_source->{total_duration} = $duration;
                                     $stats_source->{total_duration_num} = $duration;
                                     $stats_source->{sum_of_squares} = $duration ** 2;
-                                    $stats_source->{durations} = [$duration];
+                                    # Issue #287 Commit 5: skip the raw-array allocation under
+                                    # -mdm bin — the bin-counter store + Welford-Pébay sidecars
+                                    # (seeded below) carry the equivalent information and the
+                                    # consumer (calculate_statistics_bin) reads neither
+                                    # $stats_source->{durations} nor any descendant copy of it.
+                                    $stats_source->{durations} = [$duration] unless $message_stats_capture_mode eq 'bin';
                                     # Issue #287: under -mdm bin, additionally seed the
                                     # bin-state sidecars + counter entry on the single-
                                     # sample stats_source. merge_consolidation_stats's
@@ -7712,9 +7717,26 @@ sub read_and_process_logs {
                         # Issue #287: under -mdm bin, additionally allocate sidecar accumulators
                         # for the Welford-Pébay online central-moment update (m2/m3/m4) and the
                         # per-key running min/max. Under -mdm raw the hash shape is unchanged.
-                        $log_messages{$category}{$log_key} //= {
-                            occurrences => 0,
-                            total_bytes => 0,
+                        # Issue #287 Commit 5: under -mdm bin, the lazy initializer omits
+                        # the durations => [] field entirely (the bin-counter store and the
+                        # Welford-Pébay sidecars below carry the same data). Eliminating the
+                        # empty arrayref saves ~40 bytes per (category, log_key) — at 10^5+
+                        # key cardinality this is the dominant per-key allocation today.
+                        $log_messages{$category}{$log_key} //= ($message_stats_capture_mode eq 'bin' ? {
+                            occurrences    => 0,
+                            total_bytes    => 0,
+                            total_duration => 0,
+                            sum_of_squares => 0,
+                            duration_count => 0,
+                            min            => undef,
+                            max            => undef,
+                            _running_mean  => 0,
+                            m2_sum         => 0,
+                            m3_sum         => 0,
+                            m4_sum         => 0,
+                        } : {
+                            occurrences    => 0,
+                            total_bytes    => 0,
                             total_duration => 0,
                             # count_occurrences => 0,
                             # count_min => undef,
@@ -7722,17 +7744,8 @@ sub read_and_process_logs {
                             # count_max => undef,
                             # count_sum => 0,
                             sum_of_squares => 0,
-                            durations => [],
-                            ($message_stats_capture_mode eq 'bin' ? (
-                                duration_count => 0,
-                                min            => undef,
-                                max            => undef,
-                                _running_mean  => 0,
-                                m2_sum         => 0,
-                                m3_sum         => 0,
-                                m4_sum         => 0,
-                            ) : ()),
-                        };
+                            durations      => [],
+                        });
 
                         $log_messages{$category}{$log_key}{occurrences}++;
                         $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
@@ -7761,14 +7774,17 @@ sub read_and_process_logs {
 
                             # Accumulate the sum of squares for variance calculation
                             $log_messages{$category}{$log_key}{sum_of_squares} += $duration ** 2;
-                            push @{$log_messages{$category}{$log_key}{durations}}, $duration;
+                            # Issue #287 Commit 5: skip the durations[] push under -mdm bin —
+                            # this is the dominant memory consumer at high (category, log_key)
+                            # cardinality. The bin-counter store and Welford-Pébay sidecars
+                            # below carry equivalent information for the consumer.
+                            push @{$log_messages{$category}{$log_key}{durations}}, $duration
+                                unless $message_stats_capture_mode eq 'bin';
 
                             # Issue #287: under -mdm bin, additionally feed the per-key bin-counter
                             # store and update the Welford-Pébay online central-moment accumulators
-                            # plus the running min/max sidecars. durations[] is retained here as a
-                            # safety net through Commit 5 of #287; it will be elided once the
-                            # consumer-side derivation (Commit 2) has been validated against the
-                            # baseline harness.
+                            # plus the running min/max sidecars. Validated end-to-end through
+                            # Commit 4; this commit eliminates the durations[] safety net.
                             #
                             # The counter_update call is gated on $duration > 0 because log-spaced
                             # partitions cannot represent zero (mirrors the heatmap pattern at
@@ -8957,7 +8973,14 @@ sub calculate_all_statistics {
                 if( defined $log_messages{$category}{$log_key}{total_duration} && !$omit_durations ) {
                     $aggregated_data->{total_duration} += $log_messages{$category}{$log_key}{total_duration};
                     $aggregated_data->{sum_of_squares} += $log_messages{$category}{$log_key}{sum_of_squares};
-                    push @{$aggregated_data->{durations}}, @{$log_messages{$category}{$log_key}{durations}};
+                    # Issue #287 Commit 5: under -mdm bin the per-key durations[] no
+                    # longer exists. calculate_statistics_bin reads sidecars +
+                    # %log_messages_counters{...} entry directly, ignoring
+                    # $aggregated_data->{durations} — so the push is a no-op under
+                    # bin even if the source were present, and the absent field
+                    # would auto-vivify it as an empty arrayref. Skip the push.
+                    push @{$aggregated_data->{durations}}, @{$log_messages{$category}{$log_key}{durations}}
+                        unless $message_stats_capture_mode eq 'bin';
                 }
 
                 if( defined $aggregated_data->{total_duration} && !$omit_durations ) {
