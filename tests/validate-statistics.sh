@@ -395,20 +395,16 @@ while IFS=$'\t' read -r scenario logfile options; do
                         pasc=$?
                         set -e
                         if [[ $pasc -eq 0 && -n "$pa_algorithm" ]]; then
-                            # Algorithms with no oracle reference: skip
-                            # L3 for this scenario+kind. exp-interp is
-                            # reserved for a follow-up to #280.
-                            if [[ "$pa_algorithm" == "exponential_interpolation_within_bucket" ]]; then
-                                : # L3 skipped — engine reports L3=N/A
-                            else
-                                set +e
-                                oracle_json="$(oracle_json_for_logfile \
-                                    "$logfile" "$bs_sec" "$du_unit" "$fmt" "$pa_algorithm")"
-                                orc=$?
-                                set -e
-                                if [[ $orc -eq 0 && -n "$oracle_json" ]]; then
-                                    engine_args+=(--oracle-json "$oracle_json")
-                                fi
+                            # The oracle implements both nearest_rank and
+                            # exponential_interpolation_within_bucket; dispatch
+                            # to whichever the surface resolves to per #280.
+                            set +e
+                            oracle_json="$(oracle_json_for_logfile \
+                                "$logfile" "$bs_sec" "$du_unit" "$fmt" "$pa_algorithm")"
+                            orc=$?
+                            set -e
+                            if [[ $orc -eq 0 && -n "$oracle_json" ]]; then
+                                engine_args+=(--oracle-json "$oracle_json")
                             fi
                         fi
                     fi

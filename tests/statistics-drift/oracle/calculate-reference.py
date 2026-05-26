@@ -528,24 +528,220 @@ def _ltl_nearest_rank(sorted_arr, q_fraction):
     return float(sorted_arr[idx])
 
 
+# Bin-counter primitive constants — track ltl's locked defaults at
+# features/187-histogram-bin-counter-percentiles.md § Decision 2 (bpd=53)
+# and § Decision 5 (seed_decades=5).
+_BIN_BPD = 53
+_BIN_SEED_DECADES = 5
+
+
+class _BinPartition:
+    """Reference implementation of ltl's #189 R1+R2+R3 primitives in Python.
+
+    Mirrors ltl's lazy-construction, HdrHistogram-style doubling rebin,
+    and overflow/underflow counter behavior end-to-end so the L3 oracle
+    can derive a percentile from a raw sample stream the same way ltl
+    does under -mdm bin (and the post-Commit-9 harmonized -hmdm bin /
+    -hgdm bin equivalents).
+
+    Algorithm sources (locked verbatim):
+      - partition_new:    features/187-... § Decision 5 (seed)
+      - partition_extend: features/187-... § Decision 5 (HdrHistogram doubling)
+      - bin_assign:       closed-form log-spaced bin index
+      - percentile:       features/187-... § Decision 1 (Prometheus exponential interpolation)
+
+    Zero-valued samples are skipped because log-spaced partitions cannot
+    represent zero (matches ltl's `$duration > 0` guard at the
+    counter_update site).
+    """
+
+    def __init__(self, bpd=_BIN_BPD, seed_decades=_BIN_SEED_DECADES):
+        self.bpd = bpd
+        self.decades = seed_decades
+        self.min = None
+        self.max = None
+        self.bin_count = 0
+        self.log_ratio = 0.0
+        self.bins = []
+        self.overflow = 0
+        self.underflow = 0
+
+    def _init_from_v0(self, v0):
+        half_span = math.sqrt(10.0 ** self.decades)
+        self.min = v0 / half_span
+        self.max = v0 * half_span
+        self.bin_count = int(self.bpd * self.decades)
+        self.log_ratio = math.log(self.max / self.min)
+        self.bins = [0] * self.bin_count
+
+    def _boundary(self, i):
+        return self.min * math.exp(self.log_ratio * i / self.bin_count)
+
+    def _bin_assign(self, v):
+        if v < self.min:
+            return ("UNDERFLOW", None)
+        if v > self.max:
+            return ("OVERFLOW", None)
+        i = int(self.bin_count * math.log(v / self.min) / self.log_ratio)
+        if i >= self.bin_count:
+            i = self.bin_count - 1
+        if i < 0:
+            i = 0
+        return ("IN", i)
+
+    def _extend_to(self, v):
+        """HdrHistogram-style doubling rebin so v falls inside [min, max].
+        Remaps existing bin counts via geometric-midpoint projection."""
+        double_factor = 10.0 ** (self.decades / 2.0)
+        new_min, new_max = self.min, self.max
+        while v > new_max or v < new_min:
+            if v > new_max:
+                new_max *= double_factor
+            else:
+                new_min /= double_factor
+        new_decades = math.log10(new_max / new_min)
+        new_bin_count = int(self.bpd * new_decades)
+        if new_bin_count < self.bin_count:
+            new_bin_count = self.bin_count
+        new_log_ratio = math.log(new_max / new_min)
+        new_bins = [0] * new_bin_count
+        for old_i, count in enumerate(self.bins):
+            if count == 0:
+                continue
+            lower = self._boundary(old_i)
+            upper = self._boundary(old_i + 1)
+            midpoint = math.sqrt(lower * upper)
+            new_i = int(new_bin_count * math.log(midpoint / new_min) / new_log_ratio)
+            if new_i < 0:
+                new_i = 0
+            if new_i >= new_bin_count:
+                new_i = new_bin_count - 1
+            new_bins[new_i] += count
+        self.min = new_min
+        self.max = new_max
+        self.bin_count = new_bin_count
+        self.log_ratio = new_log_ratio
+        self.bins = new_bins
+
+    def update(self, v):
+        """Counter-update per #189 R3. Skips v <= 0 (log-spaced partition
+        cannot represent zero or negative; matches ltl's `$duration > 0`
+        guard at the per-line counter_update call site)."""
+        if v <= 0:
+            return
+        if self.min is None:
+            self._init_from_v0(v)
+        where, idx = self._bin_assign(v)
+        if where == "IN":
+            self.bins[idx] += 1
+            return
+        # Out of range: extend and re-assign.
+        self._extend_to(v)
+        where, idx = self._bin_assign(v)
+        if where == "IN":
+            self.bins[idx] += 1
+        elif where == "OVERFLOW":
+            self.overflow += 1
+        else:
+            self.underflow += 1
+
+    def percentile(self, q_fraction):
+        """Prometheus HistogramQuantile exponential-interpolation formula.
+        Locked verbatim against features/187-... § Decision 1:
+
+          target_rank = ceil(q * total_N)
+          walk: underflow → in-range bins → overflow
+          if target_rank in underflow: return boundary[0]
+          if target_rank in overflow:  return boundary[bin_count]
+          else: rank_in_bin = target_rank - (cum - c)
+                fraction    = rank_in_bin / c
+                value       = lower * (upper/lower)^fraction
+
+        Returns None on empty partitions (no positive samples observed).
+        """
+        if self.min is None:
+            return None
+        in_total = sum(self.bins)
+        total_n = self.underflow + in_total + self.overflow
+        if total_n == 0:
+            return None
+        target_rank = math.ceil(q_fraction * total_n)
+        if target_rank < 1:
+            target_rank = 1
+        if target_rank > total_n:
+            target_rank = total_n
+        cum = 0
+        if self.underflow > 0:
+            cum += self.underflow
+            if target_rank <= cum:
+                return self._boundary(0)
+        for i in range(self.bin_count):
+            c = self.bins[i]
+            if c == 0:
+                continue
+            cum += c
+            if target_rank <= cum:
+                lower = self._boundary(i)
+                upper = self._boundary(i + 1)
+                rank_in_bin = target_rank - (cum - c)
+                fraction = rank_in_bin / c
+                return lower * (upper / lower) ** fraction
+        # Must be overflow.
+        return self._boundary(self.bin_count)
+
+
+def _ltl_exp_interp(samples, q_fraction):
+    """Replicate ltl's bin-counter exponential-interpolation derivation
+    end-to-end against the raw sample stream:
+
+      1. Build a partition matching ltl's #189 primitives (lazy seed at
+         5 decades centered on first positive value, HdrHistogram-style
+         doubling rebin, bpd=53). Zero samples are excluded from the
+         partition (mirrors ltl's $duration > 0 guard).
+      2. Apply the Prometheus HistogramQuantile formula (#187 Decision 1)
+         to derive the percentile value from the partition's bin counts.
+      3. Clamp the result to the observed [min, max] from ALL samples
+         (including zeros). This mirrors ltl's post-percentile clamp at
+         calculate_statistics_bin — the partition's geometry boundaries
+         can exceed observed extents (a populated topmost bin's upper
+         boundary may sit above the true observed max), and Layer 2's
+         monotonicity invariant requires p99999 <= max.
+
+    Returns None on empty input or empty partition (no positive samples).
+    """
+    # samples may arrive as a Python list or as a numpy array; use len()
+    # rather than `not samples` so the truthiness check is unambiguous on
+    # multi-element numpy arrays.
+    if len(samples) == 0:
+        return None
+    p = _BinPartition()
+    for v in samples:
+        p.update(float(v))
+    observed_min = float(min(samples))
+    observed_max = float(max(samples))
+    value = p.percentile(q_fraction)
+    if value is None:
+        # Partition never allocated (every sample was <= 0). ltl's bin path
+        # collapses all percentiles to observed_min in this degenerate case
+        # (calculate_statistics_bin's no-counter-entry branch).
+        return observed_min
+    if value < observed_min:
+        value = observed_min
+    if value > observed_max:
+        value = observed_max
+    return value
+
+
 def _percentile_value(arr, sorted_arr, q_fraction, algorithm):
     """Compute one percentile using the requested algorithm."""
     if algorithm == ALGO_NEAREST_RANK:
         return _ltl_nearest_rank(sorted_arr, q_fraction)
     if algorithm == ALGO_EXP_INTERP:
-        # Reserved for the histogram/heatmap surfaces under -hgdm bin /
-        # -hmdm bin. Phase F validates the CSV surfaces only (message-
-        # stats / bucket-stats), which always run nearest_rank today
-        # (#266 surfaces 3/4 are pinned-raw). The bin-counter reference
-        # requires reproducing ltl's partition-and-bin capture from raw
-        # samples — see features/187-histogram-bin-counter-percentiles.md
-        # § Decision 1. Tracked as a follow-up to #280.
-        raise NotImplementedError(
-            "Oracle support for the exponential_interpolation_within_bucket "
-            "algorithm is reserved for a follow-up. Phase F only exercises "
-            "the message-stats and bucket-stats surfaces, which use "
-            "nearest_rank regardless of the resolved data model."
-        )
+        # Build the bin partition from samples and apply the Prometheus
+        # in-bucket interpolation formula. arr carries the same data as
+        # samples but as a numpy array; we iterate samples (Python list)
+        # directly for clarity — the partition build is O(n) regardless.
+        return _ltl_exp_interp(arr, q_fraction)
     raise ValueError(f"unknown percentile algorithm: {algorithm}")
 
 
@@ -563,8 +759,11 @@ def _produced_by(q_fraction, algorithm):
         )
     if algorithm == ALGO_EXP_INTERP:
         return (
-            "ltl exponential_interpolation_within_bucket reference "
-            "(features/187-histogram-bin-counter-percentiles.md § Decision 1)"
+            f"ltl exponential_interpolation_within_bucket reference at q={q_fraction} "
+            "(bin partition with bpd=53/seed_decades=5 per features/187-... § "
+            "Decisions 2/5; Prometheus formula per § Decision 1; "
+            "post-percentile clamp to observed [min, max]; "
+            "oracle: _ltl_exp_interp + _BinPartition)"
         )
     return f"unknown algorithm: {algorithm}"
 
@@ -699,26 +898,15 @@ def main():
             "Percentile algorithm to validate against. Must match the "
             "`effective_algorithm:` value emitted by ltl's "
             "`-V percentile-algorithm` section for the surface being "
-            "validated (Issue #280). nearest_rank is implemented; "
-            "exponential_interpolation_within_bucket is reserved for a "
-            "follow-up — Phase F only exercises CSV surfaces, which use "
-            "nearest_rank."
+            "validated (Issue #280). nearest_rank replicates the raw-array "
+            "sorted[int(n*q)] formula; exponential_interpolation_within_bucket "
+            "replicates the bin-counter Prometheus HistogramQuantile formula "
+            "(partition build per features/187 § Decision 5; in-bucket "
+            "interpolation per § Decision 1; post-percentile clamp to "
+            "observed [min, max])."
         ),
     )
     args = ap.parse_args()
-
-    if args.percentile_algorithm == ALGO_EXP_INTERP:
-        # Fail fast with a clear error instead of waiting for the first
-        # _percentile_value() call to raise. The harness should not pass
-        # this until the bin-counter reference path is implemented.
-        print(
-            "ERROR: percentile-algorithm "
-            f"'{ALGO_EXP_INTERP}' is reserved for a follow-up to #280. "
-            "Phase F validates CSV surfaces (message-stats, bucket-stats) "
-            "which always use nearest_rank.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
 
     # Group samples by (row_key, bucket_epoch).
     # Key: (row_message, bucket_epoch). Value: list of durations.
