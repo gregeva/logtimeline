@@ -456,6 +456,7 @@ my $data_model_bucket              = undef;   # -bdm  / --bucket-stats-data-mode
 # the per-line branch in read_and_process_logs() does not re-resolve.
 my $histogram_capture_mode         = undef;   # 'raw' or 'bin' (set before parsing loop)
 my $heatmap_capture_mode           = undef;   # 'raw' or 'bin' (set before parsing loop)
+my $message_stats_capture_mode     = undef;   # 'raw' or 'bin' (set before parsing loop) — Issue #287
 
 # Streaming-partition bpd for display-geometry-bound consumers (#201).
 # Higher than the F1 default (53) because F2/F3 partition counts are bounded
@@ -518,6 +519,13 @@ my %histogram_counters_hl;
 # partition bookkeeping bounds are wider than data — 5-decade seed).
 my %histogram_data_min;
 my %histogram_data_max;
+
+# Issue #287: per-message-key counter store. Flat top-level global keyed by
+# "$category\x1f$log_key" — same shape #34 uses for %heatmap_counters and
+# %histogram_counters. Populated under $message_stats_capture_mode eq 'bin'
+# by counter_update() during the parsing loop. Consumed by
+# calculate_statistics_bin() and snapshot_counter_telemetry() at end-of-parse.
+my %log_messages_counters;
 
 # Box drawing character sets for histogram axes (Issue #25)
 my $histogram_box_weight = 'heavy';  # 'heavy' or 'light'
@@ -6841,6 +6849,10 @@ sub read_and_process_logs {
     # today's behavior).
     $heatmap_capture_mode   = choose_data_model('heatmap')   // 'bin';
     $histogram_capture_mode = choose_data_model('histogram') // 'bin';
+    # Issue #287: per-message-key surface defaults to 'raw' (not 'bin') —
+    # F1 has unbounded (category, log_key) cardinality and the migration is
+    # opt-in until #287 ships behavior-change-by-default in a future ticket.
+    $message_stats_capture_mode = choose_data_model('message-stats') // 'raw';
 
     foreach my $in_file (@in_files) {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
@@ -7463,6 +7475,9 @@ sub read_and_process_logs {
                     if( $is_access_log ) {
 
                         # Initialize the hash if not already done (don't initialize it all, allowing for lazy population of only the fields we need)
+                        # Issue #287: under -mdm bin, additionally allocate sidecar accumulators
+                        # for the Welford-Pébay online central-moment update (m2/m3/m4) and the
+                        # per-key running min/max. Under -mdm raw the hash shape is unchanged.
                         $log_messages{$category}{$log_key} //= {
                             occurrences => 0,
                             total_bytes => 0,
@@ -7474,6 +7489,15 @@ sub read_and_process_logs {
                             # count_sum => 0,
                             sum_of_squares => 0,
                             durations => [],
+                            ($message_stats_capture_mode eq 'bin' ? (
+                                duration_count => 0,
+                                min            => undef,
+                                max            => undef,
+                                _running_mean  => 0,
+                                m2_sum         => 0,
+                                m3_sum         => 0,
+                                m4_sum         => 0,
+                            ) : ()),
                         };
 
                         $log_messages{$category}{$log_key}{occurrences}++;
@@ -7504,6 +7528,61 @@ sub read_and_process_logs {
                             # Accumulate the sum of squares for variance calculation
                             $log_messages{$category}{$log_key}{sum_of_squares} += $duration ** 2;
                             push @{$log_messages{$category}{$log_key}{durations}}, $duration;
+
+                            # Issue #287: under -mdm bin, additionally feed the per-key bin-counter
+                            # store and update the Welford-Pébay online central-moment accumulators
+                            # plus the running min/max sidecars. durations[] is retained here as a
+                            # safety net through Commit 5 of #287; it will be elided once the
+                            # consumer-side derivation (Commit 2) has been validated against the
+                            # baseline harness.
+                            #
+                            # The $duration > 0 guard mirrors the heatmap pattern at ltl:7671 —
+                            # log-spaced partitions cannot bin zero or negative values, so 0-duration
+                            # samples (e.g. Tomcat sub-millisecond responses) are dropped from the
+                            # bin path. The sidecar accumulators are gated the same way so the
+                            # sidecars and the partition stay aligned on the same sample subset;
+                            # Commit 2's per-statistic derivation reads both. Cross-model deviation
+                            # introduced by this drop is covered by tests/statistics-drift's
+                            # cross-model-tolerances.tsv (R9.2 of features/287-*.md), populated in
+                            # Commit 6 once Layer 4 measurement is available.
+                            if ($message_stats_capture_mode eq 'bin' && $duration > 0) {
+                                my $entry = $log_messages{$category}{$log_key};
+                                counter_update(\%log_messages_counters,
+                                               "$category\x1f$log_key",
+                                               $duration);
+                                # Running min/max sidecars (R2.2).
+                                $entry->{min} = $duration
+                                    if !defined $entry->{min} || $duration < $entry->{min};
+                                $entry->{max} = $duration
+                                    if !defined $entry->{max} || $duration > $entry->{max};
+                                # Welford-Pébay online M2/M3/M4 update (Pébay 2008,
+                                # SAND2008-6212). The order matters: M4 reads the old M2 and M3,
+                                # M3 reads the old M2, M2 is updated last. duration_count tracks
+                                # samples that contributed to the moment accumulators; it is
+                                # distinct from {occurrences}, which counts all matched lines
+                                # for this (category, log_key) regardless of duration presence.
+                                my $n_old = $entry->{duration_count};
+                                my $n     = $n_old + 1;
+                                if ($n_old == 0) {
+                                    $entry->{_running_mean} = $duration;
+                                } else {
+                                    my $mean     = $entry->{_running_mean};
+                                    my $delta    = $duration - $mean;
+                                    my $delta_n  = $delta / $n;
+                                    my $delta_n2 = $delta_n * $delta_n;
+                                    my $term1    = $delta * $delta_n * $n_old;
+                                    $entry->{_running_mean} = $mean + $delta_n;
+                                    $entry->{m4_sum} +=
+                                          $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
+                                        + 6 * $delta_n2 * $entry->{m2_sum}
+                                        - 4 * $delta_n  * $entry->{m3_sum};
+                                    $entry->{m3_sum} +=
+                                          $term1 * $delta_n * ($n - 2)
+                                        - 3 * $delta_n * $entry->{m2_sum};
+                                    $entry->{m2_sum} += $term1;
+                                }
+                                $entry->{duration_count} = $n;
+                            }
 
                             # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
                             if( $duration > 0 ) {
@@ -8614,16 +8693,34 @@ sub calculate_all_statistics {
                 }
 
                 if( defined $aggregated_data->{total_duration} && !$omit_durations ) {
-                    # Issue #266: caller-side data-model dispatch shell. Surface 3
-                    # (per-message-key statistics). The selector resolves to 'raw',
-                    # 'bin', or undef but only the raw reduction is implemented
-                    # today — calculate_statistics() is the raw primitive. When the
-                    # bin reduction lands, branch on $dm before this call.
+                    # Issue #266 dispatch shell, now wired for #287 surface 3.
+                    # Under 'raw' (and at default), the existing sort-and-index
+                    # primitive runs unchanged. Under 'bin', the new sibling
+                    # primitive calculate_statistics_bin() runs against the
+                    # per-key sidecar entry (%log_messages{...}) and the
+                    # corresponding counter-store entry (%log_messages_counters).
+                    # Commit 1 of #287 ships the stub forwarder; Commit 2 lands
+                    # the real sidecar-and-percentile derivation.
                     my $dm = choose_data_model('message-stats') // 'raw';
                     my ($min, $mean, $max,
                         $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
                         $std_dev, $cv,
-                        $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
+                        $skewness, $kurtosis, $bimodality_coef);
+                    if ($dm eq 'bin') {
+                        ($min, $mean, $max,
+                         $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
+                         $std_dev, $cv,
+                         $skewness, $kurtosis, $bimodality_coef) = calculate_statistics_bin(
+                            $log_messages{$category}{$log_key},
+                            $log_messages_counters{"$category\x1f$log_key"},
+                            $aggregated_data,
+                        );
+                    } else {
+                        ($min, $mean, $max,
+                         $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
+                         $std_dev, $cv,
+                         $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
+                    }
 
                     $log_messages{$category}{$log_key}{min} = $min;
                     $log_messages{$category}{$log_key}{mean} = $mean;
@@ -8819,6 +8916,25 @@ sub calculate_statistics {
             $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
             $std_dev, $cv,
             $skewness, $kurtosis, $bimodality_coef);
+}
+
+# Issue #287: per-message-key bin-counter consumer. Sibling of
+# calculate_statistics() — same 22-tuple return shape, different derivation:
+#   min/max  — running sidecar (R2.2 of features/287-*.md).
+#   mean     — total_duration / duration_count (matches raw path's denominator).
+#   std_dev, cv — from sum_of_squares accumulator (matches raw path).
+#   percentile ladder — Prometheus exp-interp via percentile($entry,$q) at ltl:958.
+#   iqr      — p75 - p25 (cascades).
+#   skewness/kurtosis/bimodality_coef — from Welford-Pébay m2/m3/m4 sidecars.
+#
+# Commit 1 of #287 ships THIS STUB only — it forwards to calculate_statistics()
+# verbatim because durations[] is still maintained under -mdm bin through
+# Commit 5. The stub presence proves the dispatch is wired and exercised;
+# observable output remains byte-identical to -mdm raw. Commit 2 replaces
+# the body with the real sidecar-and-percentile derivation.
+sub calculate_statistics_bin {
+    my ($sidecar_entry, $counter_entry, $aggregated_data) = @_;
+    return calculate_statistics($aggregated_data);
 }
 
 sub initialize_empty_time_windows {
