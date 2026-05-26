@@ -4510,7 +4510,7 @@ sub group_similar_messages {
                 if ($entry) {
                     my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
                     if ($cluster) {
-                        merge_consolidation_stats($cluster, $log_messages{$category}{$log_key});
+                        merge_log_message_entry_into_cluster($cluster, $category, $log_key);   # #287: bin-state-aware
                         delete $log_messages{$category}{$log_key};
                         $consolidation_cat_stats{$cat_gk}{fp_p1_s3} = ($consolidation_cat_stats{$cat_gk}{fp_p1_s3} // 0) + 1;
                         next;
@@ -4550,7 +4550,7 @@ sub group_similar_messages {
                     if ($entry) {
                         my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
                         if ($cluster) {
-                            merge_consolidation_stats($cluster, $log_messages{$category}{$log_key});
+                            merge_log_message_entry_into_cluster($cluster, $category, $log_key);   # #287: bin-state-aware
                             delete $log_messages{$category}{$log_key};
                             $consolidation_cat_stats{$cat_gk}{fp_p2_s3} = ($consolidation_cat_stats{$cat_gk}{fp_p2_s3} // 0) + 1;
                         }
@@ -4591,6 +4591,24 @@ sub group_similar_messages {
                 $entry->{durations}          = $cluster->{durations} // [];
                 $entry->{min}                = $cluster->{min} if defined $cluster->{min};
                 $entry->{max}                = $cluster->{max} if defined $cluster->{max};
+
+                # Issue #287: move the cluster's bin-path state into %log_messages
+                # and %log_messages_counters keyed by the canonical log_key. The
+                # cluster has already absorbed every constituent key's bin state
+                # (via merge_log_message_entry_into_cluster + merge_bin_state);
+                # this is where it lands in the global stores so the consumer-
+                # side dispatch at calculate_all_statistics sees a single keyed
+                # entry, indistinguishable from a non-consolidated key.
+                if ($message_stats_capture_mode eq 'bin') {
+                    $entry->{duration_count} = $cluster->{duration_count} if defined $cluster->{duration_count};
+                    $entry->{_running_mean}  = $cluster->{_running_mean}  if defined $cluster->{_running_mean};
+                    $entry->{m2_sum}         = $cluster->{m2_sum}         if defined $cluster->{m2_sum};
+                    $entry->{m3_sum}         = $cluster->{m3_sum}         if defined $cluster->{m3_sum};
+                    $entry->{m4_sum}         = $cluster->{m4_sum}         if defined $cluster->{m4_sum};
+                    if ($cluster->{bin_entry}) {
+                        $log_messages_counters{"$category\x1f$canonical_log_key"} = $cluster->{bin_entry};
+                    }
+                }
             }
 
             # Copy bytes stats
@@ -5008,6 +5026,126 @@ sub match_consolidation_patterns {
 
 # Merge stats from source entry into target (for consolidation cluster merging)
 # Handles all ltl %log_messages fields: occurrences, duration, bytes, count, UDM
+# Issue #287: merge two #189-shape counter-store entries. Used during fuzzy
+# consolidation (#96) when two clusters' or a cluster + key's bin partitions
+# need to combine. Target and source are each {partition, bins, overflow,
+# underflow} hashrefs; target is mutated to hold the merged state. When their
+# partitions have different (min, max, bin_count) extents, both are rebinned
+# via geometric-midpoint projection (partition_rebin / #189 R12) into the
+# union geometry first, so the per-bin add is well-defined.
+sub merge_bin_counter_entries {
+    my ($target, $source) = @_;
+    if (!$target->{partition}) {
+        # Target empty — adopt source wholesale.
+        $target->{partition} = $source->{partition};
+        $target->{bins}      = $source->{bins} // [];
+        $target->{overflow}  = $source->{overflow}  // 0;
+        $target->{underflow} = $source->{underflow} // 0;
+        return;
+    }
+    return unless $source->{partition};
+
+    my $tp = $target->{partition};
+    my $sp = $source->{partition};
+
+    # Compute the union geometry. partition_extend's doubling history can
+    # leave the two partitions with non-congruent (min, max) even when their
+    # observation streams overlapped, so we cannot just per-bin add directly
+    # — we rebin both into a shared union geometry first.
+    my $union_min = $tp->{min} < $sp->{min} ? $tp->{min} : $sp->{min};
+    my $union_max = $tp->{max} > $sp->{max} ? $tp->{max} : $sp->{max};
+    my $bpd       = $tp->{bpd};
+    my $union_decades   = log($union_max / $union_min) / log(10);
+    my $union_bin_count = int($bpd * $union_decades);
+    $union_bin_count = 1 if $union_bin_count < 1;
+
+    if ($tp->{min} != $union_min || $tp->{max} != $union_max || $tp->{bin_count} != $union_bin_count) {
+        my ($new_p, $new_bins) = partition_rebin($tp, $target->{bins}, $union_min, $union_max, $union_bin_count);
+        $target->{partition} = $new_p;
+        $target->{bins}      = $new_bins;
+    }
+
+    my $source_bins_aligned;
+    if ($sp->{min} != $union_min || $sp->{max} != $union_max || $sp->{bin_count} != $union_bin_count) {
+        my (undef, $new_bins) = partition_rebin($sp, $source->{bins}, $union_min, $union_max, $union_bin_count);
+        $source_bins_aligned = $new_bins;
+    } else {
+        $source_bins_aligned = $source->{bins};
+    }
+
+    for my $i (0 .. $union_bin_count - 1) {
+        my $sc = $source_bins_aligned->[$i] // 0;
+        next if $sc == 0;
+        $target->{bins}->[$i] = ($target->{bins}->[$i] // 0) + $sc;
+    }
+    $target->{overflow}  += ($source->{overflow}  // 0);
+    $target->{underflow} += ($source->{underflow} // 0);
+}
+
+# Issue #287: merge the bin-path state (Welford-Pébay sidecars + bin-counter
+# entry) of $source into $target. $source carries its bin-counter entry on
+# $source->{bin_entry}; callers at the %log_messages-source merge sites
+# attach it from %log_messages_counters before invoking this function (see
+# merge_log_message_entry_into_cluster). For cluster-source merges,
+# $cluster->{bin_entry} is already attached.
+#
+# Sidecar merge uses Chan-Welford-Pébay parallel-merge formulas (Pébay 2008,
+# SAND2008-6212) — the order matters: M4 uses M2 and M3 from both sides,
+# M3 uses M2 from both sides, M2 uses only n/mean. See feature file
+# § Algorithm appendix for the formulas.
+sub merge_bin_state {
+    my ($target, $source) = @_;
+    my $n_a = $target->{duration_count} // 0;
+    my $n_b = $source->{duration_count} // 0;
+    return if $n_b == 0;
+
+    if ($n_a == 0) {
+        # Target empty — adopt source sidecars wholesale.
+        $target->{duration_count} = $n_b;
+        $target->{_running_mean}  = $source->{_running_mean};
+        $target->{m2_sum}         = $source->{m2_sum} // 0;
+        $target->{m3_sum}         = $source->{m3_sum} // 0;
+        $target->{m4_sum}         = $source->{m4_sum} // 0;
+    } else {
+        my $n_ab    = $n_a + $n_b;
+        my $mean_a  = $target->{_running_mean};
+        my $mean_b  = $source->{_running_mean};
+        my $delta   = $mean_b - $mean_a;
+        my $M2_a    = $target->{m2_sum} // 0;
+        my $M2_b    = $source->{m2_sum} // 0;
+        my $M3_a    = $target->{m3_sum} // 0;
+        my $M3_b    = $source->{m3_sum} // 0;
+        my $M4_a    = $target->{m4_sum} // 0;
+        my $M4_b    = $source->{m4_sum} // 0;
+        my $d2      = $delta * $delta;
+        my $d3      = $d2 * $delta;
+        my $d4      = $d2 * $d2;
+        # Order: M4 (reads M2 and M3), M3 (reads M2), M2, mean. All read OLD
+        # state before any field is overwritten.
+        my $M4_ab = $M4_a + $M4_b
+                  + $d4 * $n_a * $n_b * ($n_a*$n_a - $n_a*$n_b + $n_b*$n_b) / ($n_ab * $n_ab * $n_ab)
+                  + 6 * $d2 * ($n_a*$n_a * $M2_b + $n_b*$n_b * $M2_a) / ($n_ab * $n_ab)
+                  + 4 * $delta * ($n_a * $M3_b - $n_b * $M3_a) / $n_ab;
+        my $M3_ab = $M3_a + $M3_b
+                  + $d3 * $n_a * $n_b * ($n_a - $n_b) / ($n_ab * $n_ab)
+                  + 3 * $delta * ($n_a * $M2_b - $n_b * $M2_a) / $n_ab;
+        my $M2_ab = $M2_a + $M2_b + $d2 * $n_a * $n_b / $n_ab;
+        my $mean_ab = $mean_a + $delta * $n_b / $n_ab;
+        $target->{duration_count} = $n_ab;
+        $target->{_running_mean}  = $mean_ab;
+        $target->{m2_sum}         = $M2_ab;
+        $target->{m3_sum}         = $M3_ab;
+        $target->{m4_sum}         = $M4_ab;
+    }
+
+    # Bin-counter entry merge (only meaningful when source observed at least
+    # one positive duration — counter_update is gated on $duration > 0).
+    if ($source->{bin_entry}) {
+        $target->{bin_entry} //= { partition => undef, bins => [], overflow => 0, underflow => 0 };
+        merge_bin_counter_entries($target->{bin_entry}, $source->{bin_entry});
+    }
+}
+
 sub merge_consolidation_stats {
     my ($target, $source) = @_;
     $target->{occurrences} += ($source->{occurrences} // 0);
@@ -5044,6 +5182,39 @@ sub merge_consolidation_stats {
         $target->{"udm_${name}_min"} = $smin if defined $smin && (!defined $target->{"udm_${name}_min"} || $smin < $target->{"udm_${name}_min"});
         my $smax = $source->{"udm_${name}_max"};
         $target->{"udm_${name}_max"} = $smax if defined $smax && (!defined $target->{"udm_${name}_max"} || $smax > $target->{"udm_${name}_max"});
+    }
+
+    # Issue #287: under -mdm bin, also merge the Welford-Pébay sidecars and
+    # the #189-shape bin-counter entry. Callers at %log_messages-source
+    # merge sites attach $source->{bin_entry} from %log_messages_counters
+    # before calling (see merge_log_message_entry_into_cluster); cluster-
+    # source merges already carry $source->{bin_entry} on the cluster
+    # hashref; stats_source-source merges build it inline at the producer
+    # site. The raw min/max copies above already happened — merge_bin_state
+    # only updates the duration_count, _running_mean, m2/m3/m4 sidecars
+    # and the bin counter.
+    if ($message_stats_capture_mode && $message_stats_capture_mode eq 'bin') {
+        merge_bin_state($target, $source);
+    }
+}
+
+# Issue #287: wrapper for the seven consolidation sites that merge a
+# %log_messages entry into a cluster. Under -mdm bin, attaches the
+# corresponding %log_messages_counters entry to the source hashref so
+# merge_consolidation_stats can fold it into the cluster's bin state,
+# then releases the global counter-store slot (the %log_messages entry
+# is deleted by the caller).
+sub merge_log_message_entry_into_cluster {
+    my ($cluster, $category, $log_key) = @_;
+    my $source = $log_messages{$category}{$log_key};
+    if ($message_stats_capture_mode && $message_stats_capture_mode eq 'bin') {
+        my $key = "$category\x1f$log_key";
+        $source->{bin_entry} = $log_messages_counters{$key};
+        merge_consolidation_stats($cluster, $source);
+        delete $log_messages_counters{$key};
+        delete $source->{bin_entry};
+    } else {
+        merge_consolidation_stats($cluster, $source);
     }
 }
 
@@ -5214,7 +5385,7 @@ sub run_consolidation_pass {
             $consumed{$key} = 1;
             my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
             if ($cluster && exists $log_messages{$category}{$key}) {
-                merge_consolidation_stats($cluster, $log_messages{$category}{$key});
+                merge_log_message_entry_into_cluster($cluster, $category, $key);   # #287: bin-state-aware
                 $messages_absorbed++;
             }
             $gate2_absorbed++;
@@ -5285,7 +5456,7 @@ sub run_consolidation_pass {
 
             for my $src_key ($key, $match->{key}) {
                 if (exists $log_messages{$category}{$src_key}) {
-                    merge_consolidation_stats($new_cluster, $log_messages{$category}{$src_key});
+                    merge_log_message_entry_into_cluster($new_cluster, $category, $src_key);   # #287: bin-state-aware
                     $new_cluster->{match_count}++;
                     $messages_absorbed++;
                 }
@@ -5333,7 +5504,7 @@ sub run_consolidation_pass {
                     if ($umsg =~ $scan_regex) {
                         $consumed{$ukey} = 1;
                         if (exists $log_messages{$category}{$ukey}) {
-                            merge_consolidation_stats($scan_cluster, $log_messages{$category}{$ukey});
+                            merge_log_message_entry_into_cluster($scan_cluster, $category, $ukey);   # #287: bin-state-aware
                             $scan_cluster->{match_count}++;
                             $scan_entry->{match_count} = $scan_cluster->{match_count} if $scan_entry;
                             $messages_absorbed++;
@@ -5429,7 +5600,7 @@ sub process_final_pass_window {
 
             for my $src_key ($log_key, $match->{key}) {
                 if (exists $log_messages{$category}{$src_key}) {
-                    merge_consolidation_stats($new_cluster, $log_messages{$category}{$src_key});
+                    merge_log_message_entry_into_cluster($new_cluster, $category, $src_key);   # #287: bin-state-aware
                     $new_cluster->{match_count}++;
                     $messages_absorbed++;
                 }
@@ -5475,7 +5646,7 @@ sub process_final_pass_window {
                     if ($umsg =~ $scan_regex) {
                         $consumed{$ukey} = 1;
                         if (exists $log_messages{$category}{$ukey}) {
-                            merge_consolidation_stats($scan_cluster, $log_messages{$category}{$ukey});
+                            merge_log_message_entry_into_cluster($scan_cluster, $category, $ukey);   # #287: bin-state-aware
                             $scan_cluster->{match_count}++;
                             $scan_entry->{match_count} = $scan_cluster->{match_count} if $scan_entry;
                             $messages_absorbed++;
@@ -7463,6 +7634,31 @@ sub read_and_process_logs {
                                     $stats_source->{total_duration_num} = $duration;
                                     $stats_source->{sum_of_squares} = $duration ** 2;
                                     $stats_source->{durations} = [$duration];
+                                    # Issue #287: under -mdm bin, additionally seed the
+                                    # bin-state sidecars + counter entry on the single-
+                                    # sample stats_source. merge_consolidation_stats's
+                                    # bin block (via merge_bin_state) folds this into
+                                    # the cluster. min/max from $stats_source->{min,max}
+                                    # already populated above via raw producer fields.
+                                    if ($message_stats_capture_mode eq 'bin') {
+                                        $stats_source->{duration_count} = 1;
+                                        $stats_source->{_running_mean}  = $duration;
+                                        $stats_source->{m2_sum}         = 0;
+                                        $stats_source->{m3_sum}         = 0;
+                                        $stats_source->{m4_sum}         = 0;
+                                        $stats_source->{min}            = $duration;
+                                        $stats_source->{max}            = $duration;
+                                        if ($duration > 0) {
+                                            # Build a single-sample #189-shape counter
+                                            # entry inline. counter_update on a private
+                                            # store with a sentinel key gives us the
+                                            # standard partition_new + bin_assign +
+                                            # initial-bin-increment behavior for free.
+                                            my %tmp;
+                                            counter_update(\%tmp, '_single', $duration);
+                                            $stats_source->{bin_entry} = $tmp{'_single'};
+                                        }
+                                    }
                                 }
                             }
 
