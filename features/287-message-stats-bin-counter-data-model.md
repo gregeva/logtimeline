@@ -33,7 +33,7 @@ This feature consumes the locked contract from #187, the primitives from #189, a
 | Step | Work | Owner | Status |
 |---|---|---|---|
 | 1 | Unified contract locked (F1, D1, D1A, D2, D3, D4, D5, D7, D8, D10) | #187 | Shipped |
-| 2 | Primitives (`partition_new`, `counter_update`, `partition_extend`, `partition_quantile`, `partition_rebin`) | #189 | Shipped via #34 |
+| 2 | Primitives (`partition_new`, `counter_update`, `partition_extend`, `percentile`, `partition_rebin`, `snapshot_counter_telemetry`) | #189 | Shipped via #34 |
 | 3 | Heatmap + histogram consumer migrations (F2/F3) | #34 | Shipped |
 | 4 | Data-model selector `-mdm`, dispatch stub at the call site, `-V` foundations | #266, #280 | Shipped |
 | 5 | **Per-message-key statistics migration (F1, Path A + A')** | **#287 — this ticket** | This feature |
@@ -63,7 +63,7 @@ This feature does **not** lock new decisions. It consumes the locked unified con
 | Locked decision | Owner | How #287 applies it |
 |---|---|---|
 | F1 — Design philosophy | #187 | Per-key partition + sidecars; rank-in-bin information used because ltl has it. |
-| D1 — In-bin interpolation formula | #187 | `partition_quantile` (#189 R4) applied per `(category, log_key)`; emitted ladder is P1, P5, P10, P25, P50, P75, P90, P95, P99, P999, P9999, P99999. |
+| D1 — In-bin interpolation formula | #187 | `percentile($entry, $q)` (the #189 R4 primitive at `ltl:958`) applied per `(category, log_key)`; emitted ladder is P1, P5, P10, P25, P50, P75, P90, P95, P99, P999, P9999, P99999. |
 | D2 — Precision lever | #187 | `buckets_per_decade` default 53 for this surface. **NOT** 616 — bpd=616 is the F2/F3 streaming default per #34 R5 because F2/F3 partition counts are bounded ~70 (per-`time_bucket` or per-metric); F1 partition counts scale with `(category, log_key)` cardinality (unbounded), so bpd=616 would multiply per-partition memory by ~12× and exceed the memory budget the migration is supposed to bound. Tunable via `-pbpd N` / `--percentile-precision 1..9` on the run as a whole, applied uniformly. |
 | D4 — Overflow/underflow handling | #187 | Per-partition underflow/overflow counters per #189 R6; counted toward total N; per-quantile `out_of_range_bounded: high\|low\|none` audit in `-V`. |
 | D5 — Partition lifecycle | #187 | HdrHistogram-style auto-resize per partition. Lazy construct on first observation per `(category, log_key)`; seeded at 5 decades centered on first value; HdrHistogram-convention doubling on rebin. **No finalize re-bin** — surface 3 has no display geometry to anchor against (the summary table and CSV writer consume scalar percentile values, not partition bins), so #189 R12 `partition_rebin` is not used on this surface. |
@@ -82,22 +82,23 @@ The dispatch site is `ltl:8622` (the existing `choose_data_model('message-stats'
 
 ### R2 — Producer-side data model under `-mdm bin`
 
-#### R2.1 — Per-key bin-counter partition replaces `durations[]`
+#### R2.1 — Per-key bin-counter store replaces `durations[]`
 
 Under `-mdm bin`, the parse-loop accumulation at `ltl:7466–7517` is modified so that for each observed `(duration, category, log_key)` triple:
 
 - The raw-array push `push @{$log_messages{$cat}{$key}{durations}}, $duration` is **not executed**.
-- Instead, the duration sample is fed into a `(category, log_key)`-keyed partition via the #189 R3 counter-update primitive. The store is `%log_messages{$cat}{$key}{bin_partition}` (lazily constructed via #189 R1 on first observation for the key; auto-resized via doubling rebin per #187 Decision 5 when subsequent values fall outside the partition's current `[min, max]`).
-- The lazy hash-entry initializer at `ltl:7466` is extended to allocate `bin_partition: undef` (the partition itself is allocated by #189 R1 on first counter_update for the key, not at hash-entry initialization).
+- Instead, the duration sample is fed into a `(category, log_key)`-keyed partition via the #189 R3 counter-update primitive. The counter store is a **flat top-level global** `%log_messages_counters`, keyed by `"$category\x1f$log_key"` (the `\x1f` join convention is the same one `counter_update` uses internally per `ltl:920`). This mirrors the #34 precedent — `%heatmap_counters` (per `time_bucket`) and `%histogram_counters` (per metric) are both flat top-level stores, not nested under another global. The flat shape is also what `snapshot_counter_telemetry($store)` expects.
+- Each store entry has the locked #189 shape: `{partition: hashref, bins: [], overflow: 0, underflow: 0}`. The partition is lazily constructed on first observation for a key via `counter_update`'s internal `partition_new` invocation; auto-resized via doubling rebin per #187 Decision 5 when subsequent values fall outside the partition's current `[min, max]`.
+- The producer-side call is `counter_update(\%log_messages_counters, "$category\x1f$log_key", $duration)` — no `$bpd_override` argument (F1 uses the resolved `$percentile_buckets_per_decade`, default 53; see R5).
 
 The two other producer-side write sites for `%log_messages{$cat}{$key}{durations}` follow the same pattern:
 
-- **Consolidation s1-matched stats_source initializer** at `ltl:7449–7453`. Under `-mdm bin`, the `stats_source->{durations} = [$duration]` initialization is replaced by a single `counter_update` invocation against a freshly-constructed partition.
-- **Cluster reinject** at `ltl:4582–4583`. Under `-mdm bin`, `entry->{durations} = $cluster->{durations} // []` is replaced by `entry->{bin_partition} = $cluster->{bin_partition}` (the cluster has already accumulated its partition during consolidation via R2.3 below).
+- **Consolidation s1-matched stats_source initializer** at `ltl:7449–7453`. Under `-mdm bin`, the `stats_source->{durations} = [$duration]` initialization is replaced by feeding the duration into the s1-cluster's own counter store (the cluster has its own working set during consolidation; the canonical-keyed entry in `%log_messages_counters` is materialized at reinject time per the next bullet).
+- **Cluster reinject** at `ltl:4582–4583`. Under `-mdm bin`, the cluster's counter-store entry is moved into `%log_messages_counters{"$category\x1f$canonical_log_key"}` instead of copying a `durations[]` array into `%log_messages`. The cluster has already accumulated its partition during consolidation via R2.3.
 
 #### R2.2 — Sidecar accumulators on the per-key hash
 
-Under `-mdm bin`, every per-key entry in `%log_messages` maintains the following sidecar fields alongside `bin_partition`:
+Under `-mdm bin`, every per-key entry in `%log_messages` maintains the following sidecar fields alongside its existing scalar accumulators. The counter-store entry for the same key lives separately in `%log_messages_counters` (R2.1); the consumer reads from both at end-of-parse.
 
 | Field | Purpose | Existing today? |
 |---|---|---|
@@ -115,8 +116,8 @@ The reason `m2_sum` is tracked even though `sum_of_squares` is already present: 
 
 `merge_consolidation_stats` (`ltl:5003–5020`) merges two `(category, log_key)` clusters during fuzzy consolidation. Under `-mdm raw` it appends `durations[]` arrays and sums `sum_of_squares` / `total_duration` / `occurrences`. Under `-mdm bin`, the same sub must:
 
-- Per-bin add the two partitions' bin counts (and the underflow/overflow counters). When one cluster's partition is wider than the other's, the narrower partition is extended via #189's auto-resize primitive (`partition_extend`) before the per-bin add so the indices align. The geometric-midpoint remap is the existing #189 mechanism; no new primitive surface.
-- Merge the moment sidecars via the Chan-Welford-Pébay parallel-merge formulas (Algorithm appendix). `sum_of_squares` and `total_duration` add directly (they are linear); `min`/`max` take elementwise min/max; `m2_sum`/`m3_sum`/`m4_sum` use the locked merge formulas.
+- Per-bin add the two clusters' counter-store entries (their `bins`, `overflow`, and `underflow` fields). When the two clusters' partitions have different `[min, max]` extents, the narrower partition is extended via #189's `partition_extend` to align with the wider one before the per-bin add. The geometric-midpoint remap is the existing #189 mechanism; no new primitive surface.
+- Merge the moment sidecars on the per-key hash via the Chan-Welford-Pébay parallel-merge formulas (Algorithm appendix). `sum_of_squares` and `total_duration` add directly (they are linear); `min`/`max` take elementwise min/max; `m2_sum`/`m3_sum`/`m4_sum` use the locked merge formulas.
 
 The merge produces a single combined cluster whose state is observationally identical (up to the bin-resolution bound on percentiles, and numerically identical on the sidecar-derived statistics) to what would have been produced by feeding every sample of both clusters into a single partition from scratch.
 
@@ -128,7 +129,7 @@ Under `-mdm raw` (and under `-mdm` unset → internal default raw), every produc
 
 #### R3.1 — Dispatch site
 
-At `ltl:8616–8651`, the existing dispatch resolves `$dm = choose_data_model('message-stats') // 'raw'`. Under `dm = 'bin'`, the call to `calculate_statistics($aggregated_data)` (`ltl:8623`) is replaced by a call to a sibling sub `calculate_statistics_bin($entry)` where `$entry` is `$log_messages{$category}{$log_key}` itself (no aggregation needed — the partition and sidecars are already keyed on the same `(category, log_key)` pair). The 22-tuple return shape is preserved verbatim so the downstream `$log_messages{$category}{$log_key}{...} = ...` writes at `ltl:8628–8648` are unchanged.
+At `ltl:8616–8651`, the existing dispatch resolves `$dm = choose_data_model('message-stats') // 'raw'`. Under `dm = 'bin'`, the call to `calculate_statistics($aggregated_data)` (`ltl:8623`) is replaced by a call to a sibling sub `calculate_statistics_bin($sidecar_entry, $counter_entry)` where `$sidecar_entry` is `$log_messages{$category}{$log_key}` (carrying the per-key sidecar fields per R2.2 plus the existing scalar accumulators) and `$counter_entry` is `$log_messages_counters{"$category\x1f$log_key"}` (the flat counter-store entry per R2.1 — directly consumable by `percentile($entry, $q)` at `ltl:958`). No aggregation across keys is needed — both inputs are already keyed on the same `(category, log_key)` pair. The 22-tuple return shape is preserved verbatim so the downstream `$log_messages{$category}{$log_key}{...} = ...` writes at `ltl:8628–8648` are unchanged.
 
 The sibling-sub structure mirrors the `_exact` / `_unified` split #34 used for the heatmap and histogram migrations. Preserving the pre-migration sub verbatim is part of the byte-identity contract (R12) and the `--exact-percentiles` opt-out surface (per #187 Decision 7).
 
@@ -143,7 +144,7 @@ Under `-mdm bin`, `calculate_statistics_bin` produces the same 22-tuple as `calc
 | `mean` | `total_duration / occurrences` from existing accumulators. |
 | `std_dev` | `sqrt((sum_of_squares − n·mean²) / (n − 1))` from existing accumulators, with the same numerical-cancellation guard as the raw path (`ltl:8767`). |
 | `cv` | `std_dev / mean` (cascades). |
-| `p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999` | #189 R4 (`partition_quantile`) invoked once per quantile against the partition. Each invocation returns a numeric value plus a per-quantile `out_of_range_bounded: high\|low\|none` audit code per #187 Decision 4. |
+| `p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999` | #189 R4 — the `percentile($counter_entry, $q)` sub at `ltl:958` — invoked once per quantile against the counter-store entry. Each invocation returns `($value, $audit_code)` where `$audit_code ∈ {none, low, high}` per #187 Decision 4. |
 | `iqr` | `p75 − p25` (cascades from the percentile-ladder derivation). |
 | `skewness` | From `m3_sum`, `m2_sum`, `n` via the bias-corrected sample skewness formula at `ltl:8811` (verbatim with the raw path; only the input source differs). |
 | `kurtosis` | From `m4_sum`, `m2_sum`, `n` via the bias-corrected excess-kurtosis formula at `ltl:8812` (verbatim). |
@@ -160,7 +161,7 @@ The skewness/kurtosis/BC formulas in the raw path consume `m2`, `m3`, `m4` (cent
 This feature does **not** redecide the percentile algorithm. Per #272's locked decision pair:
 
 - Under `-mdm raw`: nearest-rank (`$sorted[int($n * q)]`), the status quo at `ltl:8775–8786`.
-- Under `-mdm bin`: exponential interpolation within bucket (#187 Decision 1's locked Prometheus formula), via `partition_quantile` (#189 R4).
+- Under `-mdm bin`: exponential interpolation within bucket (#187 Decision 1's locked Prometheus formula), via the `percentile($entry, $q)` sub at `ltl:958` (the #189 R4 primitive).
 
 The `=== percentile-algorithm ===` `-V` section (`ltl:1910–2007`) already declares both algorithms with verbatim formulas and source citations; the #224 Layer 3 oracle reads this section to pick its reference computation. This feature requires removing the `effective_track => 'pinned_raw'` override for `message-stats` (`ltl:1958`) and replacing it with `'matches_data_model'` so `effective_algorithm` tracks `data_model` correctly under the bin path. The `effective_algorithm_note:` line emitted today (`ltl:1984–1988`) is removed.
 
@@ -180,7 +181,7 @@ Per-`(category, log_key)` partitions follow #187 Decision 5's locked auto-resize
 - Seeded at 5 decades centered on the first observed value (`min = v_0 / sqrt(10^5)`, `max = v_0 · sqrt(10^5)`).
 - Extended via HdrHistogram-convention doubling when subsequent values fall outside `[min, max]` (via #189's `partition_extend`).
 
-**No finalize re-bin** is performed. The surface 3 consumers (summary table cells, CSV scalars) consume scalar percentile values via #189 R4, not partition bins. There is no display geometry to project onto. The `partition_rebin` wrapper added by #189 R12 (for F2/F3 display-geometry-bound consumers per #201) is not used on this surface.
+**No finalize re-bin** is performed. The surface 3 consumers (summary table cells, CSV scalars) consume scalar percentile values via `percentile($entry, $q)`, not partition bins. There is no display geometry to project onto. The `partition_rebin` wrapper added by #189 R12 (for F2/F3 display-geometry-bound consumers per #201) is not used on this surface.
 
 ### R7 — Overflow / underflow per #187 Decision 4
 
@@ -217,7 +218,7 @@ The `summary_table` and `csv_output` consumers are added to the `%migrated` set 
 );
 ```
 
-The `summary_table` block emits the locked Decision 8 per-consumer fields populated from real partition state via `%bin_counter_telemetry{summary_table}` (the telemetry hash is already declared at `ltl:2149`; the migration populates it at end-of-parse from the partitions in `%log_messages`):
+The `summary_table` block emits the locked Decision 8 per-consumer fields populated from real partition state via `%bin_counter_telemetry{summary_table}` (the telemetry hash is declared at `ltl:389` and consumed by `emit_bin_counter_mode_verbose` at `ltl:2149`). A new sub `finalize_message_stats_unified()` — placed alongside `finalize_heatmap_unified` at `ltl:7848` and following the same shape — captures the telemetry snapshot from `%log_messages_counters` via `snapshot_counter_telemetry()` (`ltl:856`) and writes it to `$bin_counter_telemetry{summary_table}` (with `$bin_counter_telemetry{csv_output}` aliased to the same hashref per #189 R7 shared-partition consumers). MAIN orchestration (`ltl:11672–11708`) is extended to invoke `finalize_message_stats_unified()` after `calculate_all_statistics()` and before `emit_bin_counter_mode_verbose()`, matching the slot heatmap and histogram occupy today (`ltl:11680`, `ltl:11689`):
 
 ```
 consumer: summary_table
@@ -328,20 +329,23 @@ This feature does NOT own:
 
 | File:line (release/0.14.6 HEAD) | What changes |
 |---|---|
-| `ltl:7466–7477` (per-key lazy initializer) | Extend the `//= { ... }` initializer to allocate `bin_partition: undef` and the new sidecar fields when the resolved data model is `bin`. (Under raw, structure unchanged.) |
-| `ltl:7449–7453` (consolidation s1-matched stats_source) | Branch on resolved data model: under bin, replace `durations: [$duration]` with a `counter_update` against a freshly-constructed partition; update sidecars. |
-| `ltl:7500–7513` (parse-loop duration update) | Branch on resolved data model: under bin, replace the `push @{ ... {durations}}, $duration` at `ltl:7506` with a `counter_update`; update min/max sidecars; feed the Welford-Pébay online moment update. |
-| `ltl:4582–4583` (cluster reinject into `%log_messages`) | Under bin: copy `bin_partition` and sidecars from the consolidated cluster instead of `durations[]`. |
-| `ltl:5003–5020` (`merge_consolidation_stats`) | Add the bin-merge branch per R2.3: per-bin add the two partitions (extending the narrower if needed); merge sidecars via Chan-Welford-Pébay formulas. |
-| `ltl:8616–8651` (per-key dispatch in `calculate_all_statistics`) | Under `dm = 'bin'`, call the new `calculate_statistics_bin($entry)` and store the return tuple. Under raw, the existing `calculate_statistics($aggregated_data)` runs unchanged. |
-| `ltl` (new sub, alongside `calculate_statistics`) | `calculate_statistics_bin($entry)` — returns the 22-tuple per R3.2. |
+| `ltl` GLOBALS (near `%heatmap_counters` / `%histogram_counters` declarations, ~`ltl:250`) | Declare `my %log_messages_counters;` — flat top-level counter store keyed by `"$category\x1f$log_key"` (R2.1). |
+| `ltl:7466–7477` (per-key lazy initializer) | Under bin, extend the `//= { ... }` initializer to allocate sidecar fields `{min => undef, max => undef, m2_sum => 0, m3_sum => 0, m4_sum => 0}` (R2.2). Counter-store entry is materialized lazily by `counter_update` on first observation, not at hash-entry initialization. Under raw, structure unchanged. |
+| `ltl:7449–7453` (consolidation s1-matched stats_source) | Branch on resolved data model: under bin, route the duration sample into the s1-cluster's working counter store via `counter_update` instead of initializing `stats_source->{durations} = [$duration]`. Update sidecars. |
+| `ltl:7500–7513` (parse-loop duration update) | Branch on resolved data model: under bin, additionally call `counter_update(\%log_messages_counters, "$category\x1f$log_key", $duration)` and update `min`/`max`/`m2_sum`/`m3_sum`/`m4_sum` via the Welford-Pébay online formulas. The `push @{ ... {durations}}, $duration` at `ltl:7506` remains until Commit 5 (the memory-win step) — keeps a safety net through validation. |
+| `ltl:4582–4583` (cluster reinject into `%log_messages`) | Under bin: move the cluster's counter-store entry to `%log_messages_counters{"$category\x1f$canonical_log_key"}`; copy sidecar fields into the per-key hash. Under raw: unchanged (cluster's `durations[]` copied as today). |
+| `ltl:5003–5020` (`merge_consolidation_stats`) | Add the bin-merge branch per R2.3: per-bin add the two counter-store entries (extending the narrower via `partition_extend` first); merge sidecars via Chan-Welford-Pébay formulas. |
+| `ltl:8616–8651` (per-key dispatch in `calculate_all_statistics`) | Under `dm = 'bin'`, call `calculate_statistics_bin($log_messages{$category}{$log_key}, $log_messages_counters{"$category\x1f$log_key"})` and store the return tuple. Under raw, the existing `calculate_statistics($aggregated_data)` runs unchanged. |
+| `ltl` (new sub, alongside `calculate_statistics`) | `calculate_statistics_bin($sidecar_entry, $counter_entry)` — returns the 22-tuple per R3.2. Sidecar-derived stats from `$sidecar_entry`; percentile ladder via `percentile($counter_entry, $q)` invocations. |
+| `ltl` (new sub, alongside `finalize_heatmap_unified` at `ltl:7848`) | `finalize_message_stats_unified()` — captures `$bin_counter_telemetry{summary_table} = snapshot_counter_telemetry(\%log_messages_counters)` and aliases `$bin_counter_telemetry{csv_output}` to the same hashref. Runs unconditionally when `%log_messages_counters` is non-empty. |
+| `ltl:11672–11708` (MAIN orchestration) | Invoke `finalize_message_stats_unified()` after `calculate_all_statistics()` and before `emit_bin_counter_mode_verbose()`. |
 | `ltl:1956–2007` (`emit_percentile_algorithm_verbose`) | Change `message-stats` entry's `effective_track` from `'pinned_raw'` to `'matches_data_model'`; remove the override block's effect on `message-stats` (R8.2). |
-| `ltl:2068–2165` (`emit_bin_counter_mode_verbose`) | Add `summary_table` + `csv_output` to `%migrated`; extend `%shares_with`, `%percentile_set`, `%partition_keying`; populate `%bin_counter_telemetry{summary_table}` at end-of-parse from the partition state (R8.1). |
+| `ltl:2068–2165` (`emit_bin_counter_mode_verbose`) | Add `summary_table` + `csv_output` to `%migrated`; extend `%shares_with` (`csv_output => 'summary_table'`), `%percentile_set` (both consumers), `%partition_keying` (`summary_table => '(category, log_key)'`). The `%bin_counter_telemetry` hash this sub reads is populated by `finalize_message_stats_unified()` above. |
 | `tests/statistics-drift/baselines/{apache,tomcat,thingworx,codebeamer}-bin-data-model/messages.csv` | Re-capture against the new bin path (R9.1). |
 | `tests/statistics-drift/cross-model-tolerances.tsv` | Populate per-column envelopes for the four `*-bin-data-model` MESSAGES scenarios (R9.2). |
 | `docs/usage.md` (the `-mdm` entry) | Update the description: remove "selector resolved but currently only the raw reduction is implemented for this surface; `bin` lands in a follow-up". |
 | `print_help()` | Same update for the `-mdm` help line at `ltl:3773`. |
-| `releases/v0.14.7.md` (or active release) | One bullet referencing #287 per CLAUDE.md release process. |
+| `releases/v0.14.6.md` | One bullet referencing #287 per CLAUDE.md release process. |
 | `CLAUDE.md` | No change unless a release-process surface mentions the surface-3 fallback; sweep to confirm. |
 
 ## Algorithm appendix
@@ -370,6 +374,18 @@ M2    = M2 + term1
 The `M_k` accumulators (`m2_sum`, `m3_sum`, `m4_sum` in the R2.2 sidecar set) are the running sums of `Σ(x − μ_n)^k` evaluated at the current running mean — i.e. `n` times the central moment `m_k`. The conversion at consumer time is `m_k = M_k / n`.
 
 The downstream skewness/kurtosis/BC formulas at `ltl:8811–8814` consume `m2 = M2/n`, `m3 = M3/n`, `m4 = M4/n` and apply unchanged. The bias-corrected sample formulas remain authoritative; the bin path changes only the source of `m2`/`m3`/`m4`, not the formulas.
+
+### `counter_update` invocation shape for F1
+
+The producer-side per-line call is:
+
+```
+counter_update(\%log_messages_counters, "$category\x1f$log_key", $duration);
+```
+
+The fourth argument (`$bpd_override`) is **omitted**. `counter_update` (`ltl:916`) falls back to `$percentile_buckets_per_decade` (default 53, tunable via `--percentile-precision 1..9` / `-pbpd N`) per #187 Decision 2. F1 consumers do not use the F2/F3 streaming bpd=616 lever — partition counts on this surface scale with `(category, log_key)` cardinality and are unbounded; bpd=53 keeps per-partition memory at ~2 KB.
+
+The store-entry shape (`{partition, bins, overflow, underflow}`) is the locked #189 shape and is consumed directly by `percentile($entry, $q)` at consumer time. No `partition_rebin` finalize step (R6).
 
 ### Chan-Welford-Pébay parallel-merge for consolidation
 
@@ -423,7 +439,7 @@ Overflow and underflow counters add directly. No new primitive surface is requir
 | Per-key `occurrences = 0` | `calculate_statistics_bin` returns undef (matches `calculate_statistics`'s early return at `ltl:8752`). |
 | `--omit-durations` set | No duration accumulation at producer side (existing gate at `ltl:7500`); no partition is allocated for any key; consumer skips the dispatch entirely (gate at `ltl:8616`). Output unchanged. |
 | Fuzzy consolidation merging two clusters | R2.3 applies. Sidecars merge via Chan-Welford-Pébay; partitions per-bin-add after geometry alignment via `partition_extend`. |
-| Cluster reinject after consolidation | R2.1 cluster-reinject site at `ltl:4582–4583` copies `bin_partition` and sidecars; no `durations[]` array. |
+| Cluster reinject after consolidation | R2.1 cluster-reinject site at `ltl:4582–4583` moves the cluster's counter-store entry into `%log_messages_counters{"$cat\x1f$canonical_key"}` and copies the cluster's sidecar fields into `%log_messages{$cat}{$canonical_key}`; no `durations[]` array under bin. |
 | `-pbpd N` or `--percentile-precision M` (precision lever) | Applied uniformly per #187 Decision 2. The active bpd shapes every partition's bin count. `-V` reports the active bpd and source per Decision 8. |
 
 ## Acceptance criteria
