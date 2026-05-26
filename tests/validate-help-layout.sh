@@ -396,7 +396,6 @@ assert_pair() {
 }
 assert_pair "-pp"    "--percentile-precision"
 assert_pair "-pbpd"  "--percentile-buckets-per-decade"
-assert_pair "-ep"    "--exact-percentiles"
 assert_pair "-hgbpd" "--histogram-buckets-per-decade"
 assert_pair "-hgb"   "--histogram-buckets"
 

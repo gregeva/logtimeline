@@ -216,8 +216,8 @@ ltl computes percentiles from one of two data models, each with its own algorith
 | `-dm, --data-model <raw\|bin>` | Pin the data model for every surface (overridden by any per-surface flag below). |
 | `-hgdm, --histogram-data-model <raw\|bin>` | Pin the histogram surface's data model. |
 | `-hmdm, --heatmap-data-model <raw\|bin>` | Pin the heatmap surface's data model. |
-| `-mdm, --message-stats-data-model <raw\|bin>` | Pin the per-message-key statistics data model. Selector is resolved but currently only the raw reduction is implemented for this surface; `bin` lands in a follow-up. |
-| `-bdm, --bucket-stats-data-model <raw\|bin>` | Pin the per-time-bucket statistics data model. Same status as `-mdm` — selector resolved, raw only today. |
+| `-mdm, --message-stats-data-model <raw\|bin>` | Pin the per-message-key statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters plus Welford-Pébay sidecar accumulators for exact-value statistics. Default is `raw`. |
+| `-bdm, --bucket-stats-data-model <raw\|bin>` | Pin the per-time-bucket statistics data model. Selector is resolved but currently only the raw reduction is implemented for this surface; `bin` lands in a follow-up. |
 
 Per-surface flag overrides `-dm`; `-dm` overrides the per-surface default. Invalid values (anything other than `raw` or `bin`) cause ltl to exit at option-parse time with a clear error. Conflicting flags on the same axis follow standard last-one-wins ordering.
 
@@ -413,7 +413,6 @@ Section content is governed by per-section stability contracts — additions are
 | `-g <non-numeric>` (e.g. `-g logfile.log`) | The non-numeric value is treated as a positional argument and the default similarity threshold (85) is applied. |
 | `-hm <unknown-metric>` without any `-udm` configured (e.g. `-hm bogus`) | The value is treated as a positional argument and the default heatmap metric (`duration`) is applied. |
 | Both `-pbpd` and `--percentile-precision` supplied | `-pbpd` wins; the warning surfaces the override so it is visible without `-V`. |
-| `--exact-percentiles` (or `-ep`) supplied | Deprecation notice naming the new data-model selectors (`-dm raw`, `-hgdm raw`, `-hmdm raw`) as replacements. The flag continues to work; scheduled for removal in a future release. |
 | `--data-model`, `--histogram-data-model`, `--heatmap-data-model`, `--message-stats-data-model`, or `--bucket-stats-data-model` supplied with a value other than `raw` or `bin` | ltl exits with `<flag>: '<value>' is not a valid data model; valid values are 'raw' and 'bin'`. |
 
 To inspect the resolved configuration after warnings have fired, use `-V runtime-config` and read the `command-line` and `environment-variable` sub-sections.

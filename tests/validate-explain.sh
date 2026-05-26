@@ -1010,6 +1010,105 @@ scenario_pager_ansi() {
 }
 
 # ---------------------------------------------------------------------------
+# Issue #287: --explain compute sections were rewritten to describe both
+# the raw and bin data models (and to drop the deprecated `-ep` references).
+# Lock the post-#287 prose so a regression that reverts to data-model-blind
+# language or restores `-ep` references is caught at validation time.
+# ---------------------------------------------------------------------------
+scenario_data_model_aware_prose() {
+    # --- min and max: sidecar phrasing must appear ---
+    current_scenario="prose:min-mentions-bin-sidecar"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_ltl "prose-min" --explain min)
+    out="${out#*:}"
+    assert_line "$out" \
+        pattern     'bin counter path maintains a running min sidecar' \
+        asserts     "--explain min compute section describes the bin-path sidecar source post-#287; previously said 'first element of the sorted duration array' which is raw-only language" \
+        produced_by '$explain_min_compute in ltl' \
+        contract    'features/287-message-stats-bin-counter-data-model.md § R3.2 — derivation table names the sidecar source for min under -mdm bin'
+
+    current_scenario="prose:max-mentions-bin-sidecar"
+    echo "[$current_scenario]"
+    out=$(run_ltl "prose-max" --explain max)
+    out="${out#*:}"
+    assert_line "$out" \
+        pattern     'bin counter path maintains a running max sidecar' \
+        asserts     "--explain max compute section describes the bin-path sidecar source post-#287" \
+        produced_by '$explain_max_compute in ltl' \
+        contract    'features/287-message-stats-bin-counter-data-model.md § R3.2'
+
+    # --- iqr: data-model dependency must be stated ---
+    current_scenario="prose:iqr-mentions-both-models"
+    echo "[$current_scenario]"
+    out=$(run_ltl "prose-iqr" --explain iqr)
+    out="${out#*:}"
+    assert_line "$out" \
+        pattern     'bin-width interpolation' \
+        asserts     "--explain iqr describes the data-model dependency of its precision; bin-width interpolation language identifies the bin-counter path" \
+        produced_by '$explain_iqr_compute in ltl' \
+        contract    'features/272-percentile-algorithm-industry-grounding.md — both algorithms must be discoverable from --explain.'
+
+    # --- percentiles: both algorithms named + surface defaults stated + -ep absent ---
+    current_scenario="prose:percentiles-names-both-algorithms"
+    echo "[$current_scenario]"
+    out=$(run_ltl "prose-percentiles" --explain percentiles)
+    out="${out#*:}"
+    assert_line "$out" \
+        pattern     'exponential interpolation within the bucket' \
+        asserts     "--explain percentiles names the bin-counter algorithm by its locked term per #272 + #187 Decision 1" \
+        produced_by '$explain_percentiles_compute in ltl' \
+        contract    'features/272-percentile-algorithm-industry-grounding.md § Locked decisions — algorithm-name text is the user-facing identifier the harness oracle dispatches on (#280); pinning here prevents drift.'
+
+    assert_line "$out" \
+        pattern     'nearest-rank' \
+        asserts     "--explain percentiles names the raw-data-model algorithm by its locked term (#272)" \
+        produced_by '$explain_percentiles_compute in ltl' \
+        contract    'features/272-percentile-algorithm-industry-grounding.md § Locked decisions.'
+
+    assert_line "$out" \
+        pattern     'message-stats|per-message-key' \
+        asserts     "--explain percentiles names the per-message-key surface to disambiguate which surface uses which default" \
+        produced_by '$explain_percentiles_compute in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § R12 — surface naming locked at Decision 8 consumer strings'
+
+    # Patterns leading with '-' would be parsed as grep flags; wrap in a
+    # character class so the first char is data, not an option prefix.
+    assert_no_line "$out" \
+        pattern     'ltl [-]ep ' \
+        asserts     "--explain percentiles examples block does not reference -ep; user-facing examples guide users to the data-model selectors (-dm/-hgdm/-hmdm/-mdm)" \
+        produced_by '%explain_topics{percentiles} example block in ltl' \
+        contract    'Issue #266 — the data-model selectors are the locked opt-out surface for the histogram and heatmap percentile algorithms.'
+
+    assert_line "$out" \
+        pattern     '[-]mdm bin' \
+        asserts     "--explain percentiles examples block includes -mdm bin to demonstrate the per-message-key bin-counter opt-in path shipped by #287" \
+        produced_by '%explain_topics{percentiles} example block in ltl' \
+        contract    'features/287-message-stats-bin-counter-data-model.md — opt-in flag must be discoverable from --explain examples.'
+
+    # --- skewness and kurtosis: Welford-Pébay must be named under the bin path ---
+    current_scenario="prose:skewness-mentions-welford-pebay"
+    echo "[$current_scenario]"
+    out=$(run_ltl "prose-skewness" --explain skewness)
+    out="${out#*:}"
+    assert_line "$out" \
+        pattern     'Welford-Pébay' \
+        asserts     "--explain skewness names the online central-moment accumulator family used under the bin path post-#287" \
+        produced_by '$explain_skewness_compute in ltl' \
+        contract    'features/287-message-stats-bin-counter-data-model.md § Algorithm appendix — Welford-Pébay (Pébay 2008) is the locked accumulator family.'
+
+    current_scenario="prose:kurtosis-mentions-welford-pebay"
+    echo "[$current_scenario]"
+    out=$(run_ltl "prose-kurtosis" --explain kurtosis)
+    out="${out#*:}"
+    assert_line "$out" \
+        pattern     'Welford-Pébay' \
+        asserts     "--explain kurtosis names the online central-moment accumulator family used under the bin path post-#287" \
+        produced_by '$explain_kurtosis_compute in ltl' \
+        contract    'features/287-message-stats-bin-counter-data-model.md § Algorithm appendix.'
+}
+
+# ---------------------------------------------------------------------------
 # Run scenarios
 # ---------------------------------------------------------------------------
 
@@ -1041,6 +1140,8 @@ echo ""
 scenario_short_alias
 echo ""
 scenario_pager_ansi
+echo ""
+scenario_data_model_aware_prose
 echo ""
 scenario_ascii_and_ansi_modes
 

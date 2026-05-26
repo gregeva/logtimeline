@@ -109,14 +109,14 @@ for w in 160 200; do
 done
 
 # --- Heatmap modes at width 160 ---
-# --exact-percentiles pins these captures to the sort-and-index path. The
+# -dm raw pins these captures to the sort-and-index path. The
 # unified bin-counter path (#34/#201) is approximate within bin-resolution
 # bound and would make the reference fragile to precision tweaks. Layout
 # coverage is what we want; bin-counter accuracy is covered by
 # tests/validate-histogram-bin-counters.sh.
 echo "Heatmap modes at width 160:"
 for mode in duration bytes count; do
-    run_test "heatmap-${mode}-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm "$mode" "$SCRIPT_LOG"
+    run_test "heatmap-${mode}-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm "$mode" "$SCRIPT_LOG"
 done
 
 # --- Omit flags at width 160 ---
@@ -131,7 +131,7 @@ echo "Auto-hide at narrow widths:"
 run_test "autohide-w80" "$LTL" $COMMON --terminal-width 80 "$ACCESS_LOG"
 run_test "autohide-w100" "$LTL" $COMMON --terminal-width 100 "$ACCESS_LOG"
 run_test "noautohide-w80" "$LTL" $COMMON --terminal-width 80 --no-auto-hide "$ACCESS_LOG"
-run_test "autohide-hm-w120" "$LTL" $COMMON --exact-percentiles --terminal-width 120 -hm duration "$SCRIPT_LOG"
+run_test "autohide-hm-w120" "$LTL" $COMMON -dm raw --terminal-width 120 -hm duration "$SCRIPT_LOG"
 
 # --- Millisecond precision with constrained time range ---
 echo "Millisecond precision at width 160:"
@@ -148,39 +148,39 @@ run_test "ms-w160" "$LTL" $COMMON --terminal-width 160 -ms -bs 1000 -st 00:00 -e
 # --no-light-background flag.
 
 echo "Heatmap at narrow widths (autohide interaction):"
-run_test "heatmap-duration-w80"  "$LTL" $COMMON --exact-percentiles --terminal-width 80  -hm duration "$SCRIPT_LOG"
-run_test "heatmap-duration-w100" "$LTL" $COMMON --exact-percentiles --terminal-width 100 -hm duration "$SCRIPT_LOG"
-run_test "heatmap-bytes-w120"    "$LTL" $COMMON --exact-percentiles --terminal-width 120 -hm bytes    "$SCRIPT_LOG"
-run_test "heatmap-count-w100"    "$LTL" $COMMON --exact-percentiles --terminal-width 100 -hm count    "$SCRIPT_LOG"
+run_test "heatmap-duration-w80"  "$LTL" $COMMON -dm raw --terminal-width 80  -hm duration "$SCRIPT_LOG"
+run_test "heatmap-duration-w100" "$LTL" $COMMON -dm raw --terminal-width 100 -hm duration "$SCRIPT_LOG"
+run_test "heatmap-bytes-w120"    "$LTL" $COMMON -dm raw --terminal-width 120 -hm bytes    "$SCRIPT_LOG"
+run_test "heatmap-count-w100"    "$LTL" $COMMON -dm raw --terminal-width 100 -hm count    "$SCRIPT_LOG"
 
 echo "Light-background heatmap:"
-run_test "heatmap-lbg-duration-w160" "$LTL" $COMMON --exact-percentiles --light-background --terminal-width 160 -hm duration "$SCRIPT_LOG"
+run_test "heatmap-lbg-duration-w160" "$LTL" $COMMON -dm raw --light-background --terminal-width 160 -hm duration "$SCRIPT_LOG"
 
 echo "Custom heatmap width:"
-run_test "heatmap-hmw30-duration-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm duration -hmw 30 "$SCRIPT_LOG"
-run_test "heatmap-hmw80-duration-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm duration -hmw 80 "$SCRIPT_LOG"
+run_test "heatmap-hmw30-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hmw 30 "$SCRIPT_LOG"
+run_test "heatmap-hmw80-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hmw 80 "$SCRIPT_LOG"
 
 echo "Histogram single-metric across widths:"
-run_test "hg-duration-w80"  "$LTL" $COMMON --exact-percentiles --terminal-width 80  -hg duration "$APACHE_LOG"
-run_test "hg-duration-w120" "$LTL" $COMMON --exact-percentiles --terminal-width 120 -hg duration "$APACHE_LOG"
-run_test "hg-duration-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration "$APACHE_LOG"
+run_test "hg-duration-w80"  "$LTL" $COMMON -dm raw --terminal-width 80  -hg duration "$APACHE_LOG"
+run_test "hg-duration-w120" "$LTL" $COMMON -dm raw --terminal-width 120 -hg duration "$APACHE_LOG"
+run_test "hg-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration "$APACHE_LOG"
 
 echo "Histogram per metric (axis formatters):"
-run_test "hg-bytes-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg bytes "$APACHE_LOG"
-run_test "hg-count-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg count "$SCRIPT_LOG"
+run_test "hg-bytes-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg bytes "$APACHE_LOG"
+run_test "hg-count-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg count "$SCRIPT_LOG"
 
 echo "Multi-histogram stacked panels:"
-run_test "hg-multi-duration-bytes-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration,bytes        "$APACHE_LOG"
-run_test "hg-multi-all-w160"            "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration,bytes,count "$SCRIPT_LOG"
+run_test "hg-multi-duration-bytes-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration,bytes        "$APACHE_LOG"
+run_test "hg-multi-all-w160"            "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration,bytes,count "$SCRIPT_LOG"
 
 echo "Custom histogram dimensions:"
-run_test "hg-hgw30-duration-w160"     "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration       -hgw 30 "$APACHE_LOG"
-run_test "hg-hgw50-multi-w160"        "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration,bytes -hgw 50 "$APACHE_LOG"
-run_test "hg-hgh4-duration-w160"      "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration       -hgh 4  "$APACHE_LOG"
-run_test "hg-hgh16-duration-w160"     "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hg duration       -hgh 16 "$APACHE_LOG"
+run_test "hg-hgw30-duration-w160"     "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration       -hgw 30 "$APACHE_LOG"
+run_test "hg-hgw50-multi-w160"        "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration,bytes -hgw 50 "$APACHE_LOG"
+run_test "hg-hgh4-duration-w160"      "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration       -hgh 4  "$APACHE_LOG"
+run_test "hg-hgh16-duration-w160"     "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration       -hgh 16 "$APACHE_LOG"
 
 echo "Composition (heatmap + histogram together):"
-run_test "hm-hg-duration-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm duration -hg duration "$SCRIPT_LOG"
+run_test "hm-hg-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hg duration "$SCRIPT_LOG"
 
 echo ""
 echo "Captured $count reference files to: $REF_DIR"

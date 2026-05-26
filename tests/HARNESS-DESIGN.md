@@ -72,7 +72,7 @@ This list prevents collisions across parallel work. Update it when adding a new 
 **Implemented:**
 - `runtime-config` — effective runtime configuration: LTL_CONFIG and merged include/exclude/highlight/threadpool regexes
 - `index-read-back` — index pre-seed lookups, freshness, aggregated bounds, drift detection (Issue #179)
-- `histogram-array` — exact-percentile (in-memory array) histogram dimensions; active under `--exact-percentiles`
+- `histogram-array` — raw-array histogram dimensions; active when a surface resolves to the raw values data model
 - `histogram-bin-counters` — HDR-style bin-counter histogram state and finalized histogram dimensions (Issue #187)
 - `message-grouping` — fuzzy message consolidation (Issue #96)
 - `heatmap-palette` — heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250)

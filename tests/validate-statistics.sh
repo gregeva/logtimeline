@@ -117,10 +117,31 @@ if [[ $L3_ENABLED -eq 1 ]]; then
         exit 1
     fi
     if ! python3 -c 'import numpy, scipy' >/dev/null 2>&1; then
-        echo "ERROR: Layer 3 requires NumPy and SciPy (one or both missing)." >&2
-        echo "       Install (avoiding PEP 668):" >&2
-        echo "         pip3 install --user numpy scipy" >&2
-        echo "       See README.md 'Test-harness dependencies' for venv alternative." >&2
+        PY=$(command -v python3)
+        echo "ERROR: Layer 3 requires NumPy and SciPy (one or both missing under $PY)." >&2
+        echo "       Install command depends on which Python this is:" >&2
+        case "$PY" in
+            /opt/homebrew/*|/usr/local/Cellar/*|/usr/local/opt/*)
+                echo "         $PY is Homebrew Python — PEP 668 blocks 'pip install --user'." >&2
+                echo "         Install via brew (numpy and scipy ship as brew formulas):" >&2
+                echo "           brew install numpy scipy" >&2
+                ;;
+            /Library/Developer/CommandLineTools/*|/usr/bin/*)
+                echo "         $PY is Apple Command-Line-Tools Python — pip --user works:" >&2
+                echo "           $PY -m pip install --user numpy scipy" >&2
+                ;;
+            *)
+                # Linux PEP-668 distros (Ubuntu 24.04+, Debian 12+, Fedora 38+) also block
+                # pip --user; older ones do not. Venv works everywhere.
+                echo "         Try pip --user (works on pre-PEP-668 distros):" >&2
+                echo "           $PY -m pip install --user numpy scipy" >&2
+                echo "         If PEP 668 blocks, use a venv (works everywhere):" >&2
+                echo "           $PY -m venv .venv && .venv/bin/python -m pip install numpy scipy" >&2
+                echo "           Then re-run the harness with: PATH=\$(pwd)/.venv/bin:\$PATH ./tests/validate-statistics.sh" >&2
+                ;;
+        esac
+        echo "       Verify: $PY -c 'import numpy, scipy'" >&2
+        echo "       See README.md 'Test-harness dependencies' for the venv alternative." >&2
         echo "       Or pass --skip-l3 to run without external-oracle validation." >&2
         exit 1
     fi
@@ -374,20 +395,16 @@ while IFS=$'\t' read -r scenario logfile options; do
                         pasc=$?
                         set -e
                         if [[ $pasc -eq 0 && -n "$pa_algorithm" ]]; then
-                            # Algorithms with no oracle reference: skip
-                            # L3 for this scenario+kind. exp-interp is
-                            # reserved for a follow-up to #280.
-                            if [[ "$pa_algorithm" == "exponential_interpolation_within_bucket" ]]; then
-                                : # L3 skipped — engine reports L3=N/A
-                            else
-                                set +e
-                                oracle_json="$(oracle_json_for_logfile \
-                                    "$logfile" "$bs_sec" "$du_unit" "$fmt" "$pa_algorithm")"
-                                orc=$?
-                                set -e
-                                if [[ $orc -eq 0 && -n "$oracle_json" ]]; then
-                                    engine_args+=(--oracle-json "$oracle_json")
-                                fi
+                            # The oracle implements both nearest_rank and
+                            # exponential_interpolation_within_bucket; dispatch
+                            # to whichever the surface resolves to per #280.
+                            set +e
+                            oracle_json="$(oracle_json_for_logfile \
+                                "$logfile" "$bs_sec" "$du_unit" "$fmt" "$pa_algorithm")"
+                            orc=$?
+                            set -e
+                            if [[ $orc -eq 0 && -n "$oracle_json" ]]; then
+                                engine_args+=(--oracle-json "$oracle_json")
                             fi
                         fi
                     fi

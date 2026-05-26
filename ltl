@@ -88,10 +88,10 @@ my %verbose_section_registry = (
         description => 'Index pre-seed lookups, freshness checks, aggregated bounds, drift detection (Issue #179).',
     },
     'histogram-array' => {
-        description => 'Exact-percentile (in-memory array) histogram dimensions: per-metric sample counts, min/max, decades, bucket layout. Active under --exact-percentiles.',
+        description => 'Raw-array histogram dimensions: per-metric sample counts, min/max, decades, bucket layout. Active when a surface resolves to the raw values data model.',
     },
     'histogram-bin-counters' => {
-        description => 'HDR-style bin-counter histogram state: opt-out, percentile precision, per-consumer partition keying, rebin events, finalized histogram dimensions.',
+        description => 'HDR-style bin-counter histogram state: percentile precision, per-consumer partition keying, rebin events, finalized histogram dimensions.',
     },
     'message-grouping' => {
         description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction (Issue #96).',
@@ -423,11 +423,11 @@ my $histogram_bucket_override = 0;            # If > 0, use this exact bucket co
 # Default values are locked at:
 #   features/187-histogram-bin-counter-percentiles.md § Decision 2 (bpd=53)
 #   features/187-histogram-bin-counter-percentiles.md § Decision 5 (seed_decades=5)
-#   features/187-histogram-bin-counter-percentiles.md § Decision 7 (--exact-percentiles opt-out)
+# Opt-out is the per-surface -dm / -hgdm / -hmdm / -mdm / -bdm selector
+# resolving to 'raw' (per features/266-data-model-selectors.md).
 my $percentile_buckets_per_decade  = 53;      # ~1.3% precision; tier 5 in the locked precision table
 my $percentile_precision_level     = undef;   # 1..9 tier; resolves to a bpd via the locked precision table
 my $percentile_precision_source    = 'default';  # 'default' | '-pbpd N' | '--percentile-precision N' | '-pbpd N; --percentile-precision N overridden'
-my $exact_percentiles_optout       = 0;       # when set, migrated consumers revert to calculate_statistics
 my $percentile_seed_decades        = 5;       # partition seeds at 5 decades centered on first value
 
 # Issue #268: CSV output precision. $csv_precision is one of 'default', 'full',
@@ -456,6 +456,7 @@ my $data_model_bucket              = undef;   # -bdm  / --bucket-stats-data-mode
 # the per-line branch in read_and_process_logs() does not re-resolve.
 my $histogram_capture_mode         = undef;   # 'raw' or 'bin' (set before parsing loop)
 my $heatmap_capture_mode           = undef;   # 'raw' or 'bin' (set before parsing loop)
+my $message_stats_capture_mode     = undef;   # 'raw' or 'bin' (set before parsing loop) — Issue #287
 
 # Streaming-partition bpd for display-geometry-bound consumers (#201).
 # Higher than the F1 default (53) because F2/F3 partition counts are bounded
@@ -518,6 +519,22 @@ my %histogram_counters_hl;
 # partition bookkeeping bounds are wider than data — 5-decade seed).
 my %histogram_data_min;
 my %histogram_data_max;
+
+# Issue #287: per-message-key counter store. Flat top-level global keyed by
+# "$category\x1f$log_key" — same shape #34 uses for %heatmap_counters and
+# %histogram_counters. Populated under $message_stats_capture_mode eq 'bin'
+# by counter_update() during the parsing loop. Consumed by
+# calculate_statistics_bin() and snapshot_counter_telemetry() at end-of-parse.
+my %log_messages_counters;
+
+# Issue #287: per-quantile out_of_range_bounded audit aggregation for the
+# summary_table / csv_output consumers. Updated inside calculate_statistics_bin
+# as it invokes percentile() across all top-N keys. Aggregation rule:
+# 'high' overrides 'low' overrides 'none' (the worst-case-per-quantile-across-
+# all-partitions rule that matches the locked #187 Decision 8 / #189 R6
+# audit semantics). Drained by finalize_message_stats_unified() into
+# %bin_counter_telemetry{summary_table}{out_of_range_bounded}.
+my %message_stats_audit;
 
 # Box drawing character sets for histogram axes (Issue #25)
 my $histogram_box_weight = 'heavy';  # 'heavy' or 'light'
@@ -1385,18 +1402,13 @@ sub resolve_data_model {
     return undef;
 }
 
-# Issue #266: caller-side dispatch helper. Resolves the user-supplied
-# selector via resolve_data_model(), then folds in the legacy
-# --exact-percentiles opt-out as a fallback (which means 'raw' on
-# the histogram and heatmap surfaces; surfaces 3 and 4 never honored it).
-# Returns 'raw', 'bin', or undef (undef = no user opinion at all; caller
-# applies its own internal default).
+# Issue #266: caller-side dispatch helper. Returns the user-supplied
+# selector for $surface (a per-surface flag if set, else the omnibus -dm),
+# or undef if neither was supplied. Callers apply their own internal
+# default when undef is returned.
 sub choose_data_model {
     my ($surface) = @_;
-    my $dm = resolve_data_model($surface);
-    return $dm if defined $dm;
-    return 'raw' if $exact_percentiles_optout;
-    return undef;
+    return resolve_data_model($surface);
 }
 
 # Issue #231: classify each known long-flag-name as having been supplied
@@ -1469,7 +1481,6 @@ sub _classify_argv_provenance {
                 'hgb|histogram-buckets',
                 'pbpd|percentile-buckets-per-decade',
                 'pp|percentile-precision',
-                'ep|exact-percentiles',
                 'dm|data-model',
                 'hgdm|histogram-data-model',
                 'hmdm|heatmap-data-model',
@@ -1582,7 +1593,6 @@ sub emit_runtime_config_verbose {
         'histogram-buckets'                 => $histogram_bucket_override,
         'percentile-buckets-per-decade'     => $percentile_buckets_per_decade,
         'percentile-precision'              => $percentile_precision_level,
-        'exact-percentiles'                 => $exact_percentiles_optout,
         # Issue #266: explicit data-model selectors. Emitted only when the
         # user supplied them (per the existing provenance partitioning at
         # the bottom of this sub) — unset flags emit nothing.
@@ -1892,17 +1902,16 @@ sub emit_csv_output_verbose {
 # produced the emitted percentiles), not for the dispatch mechanism.
 #
 # Two facts per surface:
-#   data_model       — resolved selector ('raw' | 'bin'). The user-facing
-#                      axis from #266 selectors plus the legacy
-#                      --exact-percentiles fallback.
+#   data_model       — resolved data-model selector for the surface
+#                      ('raw' | 'bin'), driven by the #266 selectors
+#                      (-dm, -hgdm, -hmdm, -mdm, -bdm).
 #   effective_algorithm — algorithm name that actually computed the
 #                         values ltl emitted on that surface in this
-#                         run. Today the message-stats and bucket-stats
-#                         surfaces are pinned to nearest_rank regardless
-#                         of the resolved data_model (the bin reduction
-#                         for those surfaces is reserved for a follow-up
-#                         to #266 — see surfaces 3/4 dispatch comments
-#                         in calculate_all_statistics()).
+#                         run. The bucket-stats surface is pinned to
+#                         nearest_rank regardless of the resolved
+#                         data_model (its bin reduction is owned by a
+#                         sibling implementation ticket); the other
+#                         three surfaces track their resolved data_model.
 #
 # When data_model differs from what the algorithm row reports, an
 # `effective_algorithm_note:` line is emitted documenting the divergence
@@ -1955,7 +1964,9 @@ sub emit_percentile_algorithm_verbose {
         {
             id              => 'message-stats',
             data_model      => choose_data_model('message-stats') // 'raw',
-            effective_track => 'pinned_raw',
+            # Issue #287: bin reduction now implemented end-to-end; the
+            # effective algorithm tracks the resolved data model.
+            effective_track => 'matches_data_model',
         },
         {
             id              => 'bucket-stats',
@@ -2016,14 +2027,6 @@ sub emit_bin_counter_mode_verbose {
 
     push @verbose_output, "=== histogram-bin-counters ===";
 
-    # Run-level header — opt_out_active first per the locked example output.
-    my $opt_out = $exact_percentiles_optout ? 'yes' : 'no';
-    push @verbose_output, "opt_out_active: $opt_out";
-    if ($exact_percentiles_optout) {
-        push @verbose_output,
-            "opt_out_notice: --exact-percentiles is set; all migrated consumers reverted to pre-#187 sort-based computation. This flag is deprecated and will be removed in a future release.";
-    }
-
     # Two fields, two annotation styles per the locked Decision 8 contract:
     #
     # `percentile_precision: <LEVEL> (<source>)` — reports the
@@ -2057,13 +2060,10 @@ sub emit_bin_counter_mode_verbose {
         $level_source = $percentile_precision_source;
     }
 
-    # Suffix applied to both source annotations when opt-out is active.
-    my $not_in_effect = $exact_percentiles_optout ? '; not in effect this run' : '';
-
     push @verbose_output,
-        "percentile_precision: $level_label ($level_source$not_in_effect)";
+        "percentile_precision: $level_label ($level_source)";
     push @verbose_output,
-        "buckets_per_decade: $percentile_buckets_per_decade ($percentile_precision_source$not_in_effect)";
+        "buckets_per_decade: $percentile_buckets_per_decade ($percentile_precision_source)";
 
     my %feature_active = (
         summary_table     => 1,
@@ -2086,21 +2086,31 @@ sub emit_bin_counter_mode_verbose {
         histogram_bins
     );
 
-    # Consumers migrated to the unified path under #34. The other three
-    # (summary_table, csv_output, time_bucket_stats) are owned by separate
-    # F1 migration tickets and remain on the pre-migration path.
-    my %migrated = map { $_ => 1 } qw(heatmap_cells heatmap_markers histogram_view histogram_bins);
+    # Consumers migrated to the unified path. heatmap_cells / heatmap_markers
+    # / histogram_view / histogram_bins shipped via #34; summary_table /
+    # csv_output shipped via #287. time_bucket_stats remains on the
+    # pre-migration path until its own sibling implementation ticket lands.
+    my %migrated = map { $_ => 1 } qw(
+        heatmap_cells heatmap_markers histogram_view histogram_bins
+        summary_table csv_output
+    );
 
     # Shared-partition topology per #189 R7 / Decision 8 shares_partitions_with.
+    # csv_output reads the same per-(category, log_key) partitions that
+    # summary_table populates — both consumers consume the locked 12-quantile
+    # ladder from the same %log_messages_counters store.
     my %shares_with = (
         heatmap_markers => 'heatmap_cells',
         histogram_bins  => 'histogram_view',
+        csv_output      => 'summary_table',
     );
 
-    # Per-consumer percentile sets (R3 of #34, locked in #187 Decision 8).
+    # Per-consumer percentile sets (R3 of #34 / #287, locked in #187 Decision 8).
     my %percentile_set = (
         heatmap_markers => [qw(p50 p95 p99 p999)],
         histogram_view  => [qw(p1 p10 p25 p50 p75 p90 p95 p99 p999 p9999)],
+        summary_table   => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
+        csv_output      => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
     );
 
     # Per-consumer partition keying (Decision 8 field).
@@ -2109,6 +2119,21 @@ sub emit_bin_counter_mode_verbose {
         heatmap_markers => 'time_bucket',
         histogram_view  => 'metric_global',
         histogram_bins  => 'metric_global',
+        summary_table   => '(category, log_key)',
+    );
+
+    # Per-consumer path determination is uniform across all four data-model
+    # surfaces: the resolved capture mode for the surface this consumer
+    # belongs to drives the user_opt_out vs unified label. A migrated
+    # consumer whose surface resolved to 'raw' reports user_opt_out; one
+    # whose surface resolved to 'bin' reports unified.
+    my %consumer_opted_out_to_raw = (
+        summary_table   => ($message_stats_capture_mode  && $message_stats_capture_mode  eq 'raw') ? 1 : 0,
+        csv_output      => ($message_stats_capture_mode  && $message_stats_capture_mode  eq 'raw') ? 1 : 0,
+        heatmap_cells   => ($heatmap_capture_mode        && $heatmap_capture_mode        eq 'raw') ? 1 : 0,
+        heatmap_markers => ($heatmap_capture_mode        && $heatmap_capture_mode        eq 'raw') ? 1 : 0,
+        histogram_view  => ($histogram_capture_mode      && $histogram_capture_mode      eq 'raw') ? 1 : 0,
+        histogram_bins  => ($histogram_capture_mode      && $histogram_capture_mode      eq 'raw') ? 1 : 0,
     );
 
     for my $consumer (@consumer_order) {
@@ -2125,28 +2150,32 @@ sub emit_bin_counter_mode_verbose {
             next;
         }
 
-        if ($exact_percentiles_optout) {
+        if ($consumer_opted_out_to_raw{$consumer}) {
             push @verbose_output, "  path: user_opt_out";
             next;
         }
 
         push @verbose_output, "  path: unified";
 
+        # Look up shared telemetry up front so the audit line can read from
+        # the upstream consumer's snapshot when this consumer is downstream
+        # of a shares_partitions_with relationship (#287's csv_output reads
+        # summary_table's audit aggregation; #34's heatmap_markers and
+        # histogram_bins do not populate audit at all and fall back to 'none').
+        my $t = $bin_counter_telemetry{$consumer} // {};
+
         # Downstream consumer of a shared partition emits a short block.
         if (my $upstream = $shares_with{$consumer}) {
             push @verbose_output, "  shares_partitions_with: $upstream";
             if (my $pset = $percentile_set{$consumer}) {
                 push @verbose_output, "  percentiles_emitted: " . join(' ', @$pset);
-                # out_of_range_bounded reported as 'none' across all quantiles
-                # at default bpd=616 (V8 empirical: no overflow seen on
-                # canonical datasets; safety net per Decision 4).
+                my $audit = $t->{out_of_range_bounded} // {};
                 push @verbose_output, "  out_of_range_bounded: " .
-                    join(' ', map { "$_=none" } @$pset);
+                    join(' ', map { "$_=" . ($audit->{$_} // 'none') } @$pset);
             }
             next;
         }
 
-        my $t = $bin_counter_telemetry{$consumer} // {};
         push @verbose_output, "  partition_keying: $partition_keying{$consumer}";
         push @verbose_output, "  partition_count: "                 . ($t->{partition_count}                 // 0);
         push @verbose_output, "  total_rebin_events: "              . ($t->{total_rebin_events}              // 0);
@@ -2159,8 +2188,9 @@ sub emit_bin_counter_mode_verbose {
             $t->{rebins_p99} // 0, $t->{rebins_max} // 0);
         if (my $pset = $percentile_set{$consumer}) {
             push @verbose_output, "  percentiles_emitted: " . join(' ', @$pset);
+            my $audit = $t->{out_of_range_bounded} // {};
             push @verbose_output, "  out_of_range_bounded: " .
-                join(' ', map { "$_=none" } @$pset);
+                join(' ', map { "$_=" . ($audit->{$_} // 'none') } @$pset);
         }
     }
 
@@ -2950,12 +2980,12 @@ sub print_explain_topic {
 # --- min ---
 my $explain_min_intuition = q{The smallest observed value of the metric across all log entries in scope. For latency analysis, `min` answers "what's the fastest this operation ever ran?" -- the unloaded, cache-warm, fast-path response time. It's the floor below which no observation has ever fallen.};
 my $explain_min_operational = q{The `min` is the most outlier-sensitive statistic ltl emits, but it's outlier-sensitive in the *opposite* direction from `max`: a single artificially-fast measurement (clock skew, cache effect, partial response) drags `min` toward zero. Read `min` alongside `p1` -- if they diverge sharply, `min` is reporting a one-off floor and `p1` is reporting the real fast-path baseline. For SLO work, `p1` is almost always the better lower-bound signal than `min`.};
-my $explain_min_compute = q{Computed as the first element of the sorted duration array per time bucket (or per message key when consolidating). One pass through the data; no approximation.};
+my $explain_min_compute = q{The smallest duration observed for the bucket or message key, tracked exactly under either data model — the raw values path reads it off the sorted array; the bin counter path maintains a running min sidecar alongside the bin partition. Exact in both cases; no approximation.};
 
 # --- max ---
 my $explain_max_intuition = q{The largest observed value of the metric across all log entries in scope. For latency analysis, `max` is the worst single response time -- the slowest request, the longest GC pause, the most extreme outlier. It's the ceiling above which no observation has ever risen.};
 my $explain_max_operational = q{The `max` is highly outlier-sensitive: one runaway request from any cause (lock contention, GC pause, retry storm, network anomaly) sets the value. Read `max` alongside `p999` and `p9999`: if `max` is far above `p9999`, the worst-case is a one-off event; if `max` is close to `p9999`, the heavy tail is consistent. For SLO ceilings, `p999` or `p9999` are usually the right tail-bound statistic, not `max` -- but `max` answers the audit question "what's the worst that ever happened?" which `p9999` does not.};
-my $explain_max_compute = q{Computed as the last element of the sorted duration array per time bucket (or per message key when consolidating). One pass through the data; no approximation.};
+my $explain_max_compute = q{The largest duration observed for the bucket or message key, tracked exactly under either data model — the raw values path reads it off the sorted array; the bin counter path maintains a running max sidecar alongside the bin partition. Exact in both cases; no approximation.};
 
 # --- mean ---
 my $explain_mean_intuition = q{The arithmetic average of all observed values: sum of values divided by count. For latency, `mean` answers "on average, how long does this operation take?" -- the typical experience weighted equally across every request.};
@@ -2975,24 +3005,24 @@ my $explain_cv_compute = q{Derived from already-computed `std_dev` and `mean`: `
 # --- iqr ---
 my $explain_iqr_intuition = q{Interquartile range = `p75 - p25`. IQR captures the spread of the *middle 50%* of observations -- the range between the lower quartile and the upper quartile. Half of all values fall inside this band; one quarter are slower, one quarter are faster.};
 my $explain_iqr_operational = q{IQR is the *robust* spread statistic: by construction it ignores the bottom 25% and top 25%, which contain all the outliers, fast-path edge cases, and pathological-tail events. This makes IQR resistant to the failure modes that compromise `std_dev` (single 10-second outlier dominates) and `cv` (right-skew inflates std_dev). For SRE work where you want "what's the typical operational range this API behaves in", IQR is usually the right answer -- mean +/- std_dev assumes a normal distribution which production latency violates. IQR pairs well with `p50` (median) as a robust center: the trio `p25 / p50 / p75` describes the body of the distribution without being skewed by tails.};
-my $explain_iqr_compute = q{Derived from already-computed percentiles: `iqr = p75 - p25`. Inherits the same precision as the underlying percentile computation -- around 1.3% by default, tunable via `-pbpd` (buckets per decade) for tighter or looser bin spacing.};
+my $explain_iqr_compute = q{Derived from already-computed percentiles: `iqr = p75 - p25`. Inherits the data model and precision of the underlying percentile computation -- exact relative to observed samples on surfaces using the raw values data model, or subject to bin-width interpolation on surfaces using the bin counter data model (default ~1.3% relative bin width at 53 buckets per decade; tunable via `-pbpd` or `--percentile-precision`).};
 
 # --- percentiles (the major topic, covers p1..p99999) ---
 my $explain_percentiles_intuition = q{Percentiles answer the question "what value is faster than (or equal to) N% of all observations?" The N-th percentile pN is the value at which N percent of observed durations fall at or below. p50 is the median; p99 is the value that 99% of requests beat; p999 is the value that 99.9% of requests beat. Where `mean` collapses a distribution to a single average, percentiles describe its *shape* -- by reading off the values at many different points along the cumulative distribution.};
 my $explain_percentiles_operational = q{Percentiles are the primary SRE latency-investigation tool. Each percentile answers a different operational question: `p50` (median) is the "typical" experience; `p90` and `p95` are commonly-used SLO target points; `p99`, `p999`, and higher tail percentiles describe the user-visible worst-case latencies that drive outage and complaint patterns; `p1`, `p5`, `p10` are the lower-body percentiles useful for fast-path analysis (cache effectiveness, what does the system look like when not loaded). The progression of nines -- p99, p999, p9999, p99999 -- describes *how heavy* the tail is: in a benign distribution these values converge quickly; in a pathological one (GC pauses, lock contention, retry storms) they diverge sharply.};
 my $explain_percentiles_table_intro = q{Available percentile slugs and their operational meaning:};
 my $explain_percentiles_sample_size = q{Higher percentiles require larger samples to be statistically meaningful. The general rule: pN needs at least 10/(1-N/100) observations to be informative -- p99 needs ~1000, p999 needs ~10000, p9999 needs ~100000, p99999 needs ~1 million. Below these thresholds the percentile collapses toward `max` and carries no signal independent of `max`. ltl emits every percentile column regardless of sample size, so check the `occurrences` column when interpreting high-nines values.};
-my $explain_percentiles_compute = q{ltl computes percentiles using log-spaced bin counters with HDR-histogram-style precision. The default 53 buckets per decade gives ~1.3% precision, matching the resolution of common observability tools. The number of buckets per decade is tunable via `-pbpd`; `--percentile-precision` exposes named tiers (1..9). For byte-exact verification against sort-based percentiles, `-ep` opts out of the binned computation.};
+my $explain_percentiles_compute = q{ltl computes percentiles via one of two data models, each using its own algorithm. The raw values data model holds every observation in memory and selects the percentile by nearest-rank from the sorted array (an actually-observed value at the computed rank). The bin counter data model accumulates observations into log-spaced bin counters and computes the percentile by exponential interpolation within the bucket containing the target rank (a synthesised value placed inside the matching bin on a log scale spanning the bin's lower and upper edges); the default 53 buckets per decade gives ~1.3% relative bin width. The two algorithms return different values on the same input, particularly in the tail. Surface defaults: histogram and heatmap use the bin counter data model; per-message-key statistics (summary table / MESSAGES CSV) and per-time-bucket statistics (STATS CSV) use the raw values data model. Override per surface via `--message-stats-data-model`, `--bucket-stats-data-model`, `--histogram-data-model`, `--heatmap-data-model`; pin globally via `--data-model`. Bin resolution is tunable via `-pbpd` (buckets per decade) or `--percentile-precision` (named tiers 1..9).};
 
 # --- skewness (user-supplied content) ---
 my $explain_skewness_intuition = q{Skewness measures the *asymmetry* of a distribution -- how lopsided it is around its mean. Whether the values tend to bunch up on one side with a tail extending toward the other. For latency, skewness answers "is the tail leaning one way?" -- positive skew means the right tail is heavier (most fast, occasionally slow); negative skew means the left tail is heavier (unusual for latency; common when something caps execution at a ceiling).};
 my $explain_skewness_operational = q{Skewness has three concrete operational uses. First, detecting clipped or timed-out distributions: if you expect right-skew (the natural latency shape) but see near-zero or negative skewness on a slow API, you may have a hidden cap -- requests that should be 10s are getting killed at 5s and piling up there. Second, spotting "bimodal" patterns before `bimodality_coef` fires: skewness near zero combined with high kurtosis is the signature of "fast and slow modes coexisting" -- the means cancel out, but the tails are fat on both sides. Third, skewness is a *structural prerequisite* for `bimodality_coef`: Sarle's BC formula is `(skewness^2 + 1) / (kurtosis_adjusted)`, so without skewness the multimodal screening doesn't work.};
-my $explain_skewness_compute = q{Sample-corrected standardized third moment (the same convention as pandas `.skew()` and R `e1071::skewness(type = 2)`): bias-adjusted so the expected value on a normal distribution is zero regardless of sample size. Requires `n >= 4` and a non-degenerate distribution (emitted blank otherwise). Single-pass O(n) accumulator on the sorted-values pass; the same pass produces `kurtosis`, so the marginal cost of skewness is negligible.};
+my $explain_skewness_compute = q{Sample-corrected standardized third moment (the same convention as pandas `.skew()` and R `e1071::skewness(type = 2)`): bias-adjusted so the expected value on a normal distribution is zero regardless of sample size. Requires `n >= 4` and a non-degenerate distribution (emitted blank otherwise). Computed once per bucket or message key from an accumulator (a single-pass sum-of-cubed-deviations over the values under the raw data model, or a running Welford-Pébay central-moment update under the bin counter data model); `kurtosis` is computed from the same accumulator family, so the marginal cost of skewness is negligible.};
 
 # --- kurtosis (user-supplied content) ---
 my $explain_kurtosis_intuition = q{Kurtosis measures the *tail-heaviness* (and concentration around the mean) of a distribution: how prone the distribution is to producing extreme outliers compared to a normal bell curve. For latency, kurtosis answers "how often do rare, extreme values show up?" -- low kurtosis means values cluster predictably and tails are thin; high kurtosis means most values cluster near the mean *but* the tails are heavy -- the "occasionally horrible" pattern. It's not about spread (that's std_dev / cv) and not about asymmetry (that's skewness). Kurtosis specifically captures the shape of the tails.};
 my $explain_kurtosis_operational = q{Kurtosis separates "this API is reliably slow" from "this API is mostly fine but occasionally catastrophic." These look similar in p50/p90 but diverge sharply in tails. High kurtosis with normal p50/p90 means most requests are fine but you have invisible outliers being suffered by a small population of users; p99/p999 will show them, but kurtosis tells you they're *concentrated* at the tail rather than spread out. Low kurtosis with slow p50 means uniform slowness affecting everyone -- different problem, different fix. Kurtosis is one of three shape moments (with `skewness` and `bimodality_coef`) that let SREs characterize *distribution shape* from the CSV alone, without re-running ltl.};
-my $explain_kurtosis_compute = q{Sample-corrected excess kurtosis (the same convention as pandas `.kurt()` and R `e1071::kurtosis(type = 2)`): a normal distribution reads zero regardless of sample size; positive values indicate heavier-than-normal tails, negative values indicate lighter tails. Requires `n >= 4` and a non-degenerate distribution (emitted blank otherwise). Single-pass O(n) accumulator on the sorted-values pass; the same pass produces `skewness` and feeds `bimodality_coef`.};
+my $explain_kurtosis_compute = q{Sample-corrected excess kurtosis (the same convention as pandas `.kurt()` and R `e1071::kurtosis(type = 2)`): a normal distribution reads zero regardless of sample size; positive values indicate heavier-than-normal tails, negative values indicate lighter tails. Requires `n >= 4` and a non-degenerate distribution (emitted blank otherwise). Computed from the same accumulator family as `skewness` (single-pass sum-of-fourth-powered-deviations under the raw data model, or a running Welford-Pébay central-moment update under the bin counter data model); the same accumulator feeds `bimodality_coef`.};
 
 # --- bimodality_coef (user-supplied content; the big one) ---
 my $explain_bc_intuition = q{Sarle's bimodality coefficient screens for whether a distribution likely has *two (or more) modes* -- two distinct populations of values mashed into the same dataset, each with its own peak. The classic case: 80% of requests hit a cache and return in 5ms, the other 20% miss and take 200ms. The mean (45ms) is in a valley where almost no requests actually land; the distribution has two modes but every summary statistic pretends it has one. `bimodality_coef` is the single number designed to flag that exactly that case.};
@@ -3526,11 +3556,11 @@ sub populate_explain_topics {
             { type => 'subheading', text => 'Sample size and meaningfulness' },
             { type => 'paragraph', text => $explain_percentiles_sample_size },
             { type => 'subheading', text => 'Example' },
-            { type => 'pre',       text => "    ltl -so p999 -n 20 access.log         # find APIs with the worst p999 tail latency\n    ltl -so p9999 -n 20 access.log        # tail-of-tail analysis; needs many samples\n    ltl -pp 7 access.log                  # tighten percentile precision (slower; more memory)\n    ltl -ep access.log                    # opt out of bin counters; exact sort-based percentiles\n" },
+            { type => 'pre',       text => "    ltl -so p999 -n 20 access.log         # find APIs with the worst p999 tail latency\n    ltl -so p9999 -n 20 access.log        # tail-of-tail analysis; needs many samples\n    ltl -pp 7 access.log                  # tighten percentile precision on bin-counter surfaces (slower; more memory)\n    ltl -hgdm raw -hg access.log          # pin the histogram surface to exact nearest-rank instead of bin interpolation\n    ltl -mdm bin access.log               # opt the per-message-key surface into bin-counter percentile interpolation (default is raw)\n" },
             { type => 'subheading', text => 'How ltl computes this' },
             { type => 'paragraph', text => $explain_percentiles_compute },
             { type => 'subheading', text => 'See also' },
-            { type => 'paragraph', text => 'min, max, iqr, skewness, kurtosis, bimodality_coef. Flags: -pbpd, -pp, -ep.' },
+            { type => 'paragraph', text => 'min, max, iqr, skewness, kurtosis, bimodality_coef. Flags: -pbpd, -pp, -dm, -hgdm, -hmdm, -mdm.' },
         ],
 
         # ---- skewness ----
@@ -3761,7 +3791,6 @@ sub print_help {
     $out .= help_subheading("Percentile mode");
     $out .= help_opt("-pp,   --percentile-precision <N>",            "Set percentile binning precision tier 1..9 (default: 5 = ~1.3%; 1=~10%, 9=~0.1%). Applies to surfaces using the bin counter data model; see docs/usage.md");
     $out .= help_opt("-pbpd, --percentile-buckets-per-decade <N>",   "Set percentile buckets-per-decade directly (default: 53; valid 4..616). Overrides --percentile-precision when both supplied");
-    $out .= help_opt("-ep,   --exact-percentiles",                   "Pin the histogram and heatmap surfaces to the raw values data model (deprecated; superseded by --data-model raw)");
 
     # Data-model selectors (Issue #266). Pin which reduction path each
     # surface uses. No defaults — when unset, the surface's existing
@@ -3770,7 +3799,7 @@ sub print_help {
     $out .= help_opt("-dm,   --data-model <raw|bin>",                  "Pin the data model for every surface (overridden by any per-surface flag below)");
     $out .= help_opt("-hgdm, --histogram-data-model <raw|bin>",        "Pin the histogram surface's data model");
     $out .= help_opt("-hmdm, --heatmap-data-model <raw|bin>",          "Pin the heatmap surface's data model");
-    $out .= help_opt("-mdm,  --message-stats-data-model <raw|bin>",    "Pin the per-message-key statistics data model (selector resolved but currently always uses raw; bin lands in a follow-up)");
+    $out .= help_opt("-mdm,  --message-stats-data-model <raw|bin>",    "Pin the per-message-key statistics data model (default raw; bin uses HDR-style bin counters with Prometheus-style exponential interpolation)");
     $out .= help_opt("-bdm,  --bucket-stats-data-model <raw|bin>",     "Pin the per-time-bucket statistics data model (selector resolved but currently always uses raw; bin lands in a follow-up)");
 
     # User-Defined Metrics
@@ -4502,7 +4531,7 @@ sub group_similar_messages {
                 if ($entry) {
                     my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
                     if ($cluster) {
-                        merge_consolidation_stats($cluster, $log_messages{$category}{$log_key});
+                        merge_log_message_entry_into_cluster($cluster, $category, $log_key);   # #287: bin-state-aware
                         delete $log_messages{$category}{$log_key};
                         $consolidation_cat_stats{$cat_gk}{fp_p1_s3} = ($consolidation_cat_stats{$cat_gk}{fp_p1_s3} // 0) + 1;
                         next;
@@ -4542,7 +4571,7 @@ sub group_similar_messages {
                     if ($entry) {
                         my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
                         if ($cluster) {
-                            merge_consolidation_stats($cluster, $log_messages{$category}{$log_key});
+                            merge_log_message_entry_into_cluster($cluster, $category, $log_key);   # #287: bin-state-aware
                             delete $log_messages{$category}{$log_key};
                             $consolidation_cat_stats{$cat_gk}{fp_p2_s3} = ($consolidation_cat_stats{$cat_gk}{fp_p2_s3} // 0) + 1;
                         }
@@ -4583,6 +4612,24 @@ sub group_similar_messages {
                 $entry->{durations}          = $cluster->{durations} // [];
                 $entry->{min}                = $cluster->{min} if defined $cluster->{min};
                 $entry->{max}                = $cluster->{max} if defined $cluster->{max};
+
+                # Issue #287: move the cluster's bin-path state into %log_messages
+                # and %log_messages_counters keyed by the canonical log_key. The
+                # cluster has already absorbed every constituent key's bin state
+                # (via merge_log_message_entry_into_cluster + merge_bin_state);
+                # this is where it lands in the global stores so the consumer-
+                # side dispatch at calculate_all_statistics sees a single keyed
+                # entry, indistinguishable from a non-consolidated key.
+                if ($message_stats_capture_mode eq 'bin') {
+                    $entry->{duration_count} = $cluster->{duration_count} if defined $cluster->{duration_count};
+                    $entry->{_running_mean}  = $cluster->{_running_mean}  if defined $cluster->{_running_mean};
+                    $entry->{m2_sum}         = $cluster->{m2_sum}         if defined $cluster->{m2_sum};
+                    $entry->{m3_sum}         = $cluster->{m3_sum}         if defined $cluster->{m3_sum};
+                    $entry->{m4_sum}         = $cluster->{m4_sum}         if defined $cluster->{m4_sum};
+                    if ($cluster->{bin_entry}) {
+                        $log_messages_counters{"$category\x1f$canonical_log_key"} = $cluster->{bin_entry};
+                    }
+                }
             }
 
             # Copy bytes stats
@@ -5000,6 +5047,126 @@ sub match_consolidation_patterns {
 
 # Merge stats from source entry into target (for consolidation cluster merging)
 # Handles all ltl %log_messages fields: occurrences, duration, bytes, count, UDM
+# Issue #287: merge two #189-shape counter-store entries. Used during fuzzy
+# consolidation (#96) when two clusters' or a cluster + key's bin partitions
+# need to combine. Target and source are each {partition, bins, overflow,
+# underflow} hashrefs; target is mutated to hold the merged state. When their
+# partitions have different (min, max, bin_count) extents, both are rebinned
+# via geometric-midpoint projection (partition_rebin / #189 R12) into the
+# union geometry first, so the per-bin add is well-defined.
+sub merge_bin_counter_entries {
+    my ($target, $source) = @_;
+    if (!$target->{partition}) {
+        # Target empty — adopt source wholesale.
+        $target->{partition} = $source->{partition};
+        $target->{bins}      = $source->{bins} // [];
+        $target->{overflow}  = $source->{overflow}  // 0;
+        $target->{underflow} = $source->{underflow} // 0;
+        return;
+    }
+    return unless $source->{partition};
+
+    my $tp = $target->{partition};
+    my $sp = $source->{partition};
+
+    # Compute the union geometry. partition_extend's doubling history can
+    # leave the two partitions with non-congruent (min, max) even when their
+    # observation streams overlapped, so we cannot just per-bin add directly
+    # — we rebin both into a shared union geometry first.
+    my $union_min = $tp->{min} < $sp->{min} ? $tp->{min} : $sp->{min};
+    my $union_max = $tp->{max} > $sp->{max} ? $tp->{max} : $sp->{max};
+    my $bpd       = $tp->{bpd};
+    my $union_decades   = log($union_max / $union_min) / log(10);
+    my $union_bin_count = int($bpd * $union_decades);
+    $union_bin_count = 1 if $union_bin_count < 1;
+
+    if ($tp->{min} != $union_min || $tp->{max} != $union_max || $tp->{bin_count} != $union_bin_count) {
+        my ($new_p, $new_bins) = partition_rebin($tp, $target->{bins}, $union_min, $union_max, $union_bin_count);
+        $target->{partition} = $new_p;
+        $target->{bins}      = $new_bins;
+    }
+
+    my $source_bins_aligned;
+    if ($sp->{min} != $union_min || $sp->{max} != $union_max || $sp->{bin_count} != $union_bin_count) {
+        my (undef, $new_bins) = partition_rebin($sp, $source->{bins}, $union_min, $union_max, $union_bin_count);
+        $source_bins_aligned = $new_bins;
+    } else {
+        $source_bins_aligned = $source->{bins};
+    }
+
+    for my $i (0 .. $union_bin_count - 1) {
+        my $sc = $source_bins_aligned->[$i] // 0;
+        next if $sc == 0;
+        $target->{bins}->[$i] = ($target->{bins}->[$i] // 0) + $sc;
+    }
+    $target->{overflow}  += ($source->{overflow}  // 0);
+    $target->{underflow} += ($source->{underflow} // 0);
+}
+
+# Issue #287: merge the bin-path state (Welford-Pébay sidecars + bin-counter
+# entry) of $source into $target. $source carries its bin-counter entry on
+# $source->{bin_entry}; callers at the %log_messages-source merge sites
+# attach it from %log_messages_counters before invoking this function (see
+# merge_log_message_entry_into_cluster). For cluster-source merges,
+# $cluster->{bin_entry} is already attached.
+#
+# Sidecar merge uses Chan-Welford-Pébay parallel-merge formulas (Pébay 2008,
+# SAND2008-6212) — the order matters: M4 uses M2 and M3 from both sides,
+# M3 uses M2 from both sides, M2 uses only n/mean. See feature file
+# § Algorithm appendix for the formulas.
+sub merge_bin_state {
+    my ($target, $source) = @_;
+    my $n_a = $target->{duration_count} // 0;
+    my $n_b = $source->{duration_count} // 0;
+    return if $n_b == 0;
+
+    if ($n_a == 0) {
+        # Target empty — adopt source sidecars wholesale.
+        $target->{duration_count} = $n_b;
+        $target->{_running_mean}  = $source->{_running_mean};
+        $target->{m2_sum}         = $source->{m2_sum} // 0;
+        $target->{m3_sum}         = $source->{m3_sum} // 0;
+        $target->{m4_sum}         = $source->{m4_sum} // 0;
+    } else {
+        my $n_ab    = $n_a + $n_b;
+        my $mean_a  = $target->{_running_mean};
+        my $mean_b  = $source->{_running_mean};
+        my $delta   = $mean_b - $mean_a;
+        my $M2_a    = $target->{m2_sum} // 0;
+        my $M2_b    = $source->{m2_sum} // 0;
+        my $M3_a    = $target->{m3_sum} // 0;
+        my $M3_b    = $source->{m3_sum} // 0;
+        my $M4_a    = $target->{m4_sum} // 0;
+        my $M4_b    = $source->{m4_sum} // 0;
+        my $d2      = $delta * $delta;
+        my $d3      = $d2 * $delta;
+        my $d4      = $d2 * $d2;
+        # Order: M4 (reads M2 and M3), M3 (reads M2), M2, mean. All read OLD
+        # state before any field is overwritten.
+        my $M4_ab = $M4_a + $M4_b
+                  + $d4 * $n_a * $n_b * ($n_a*$n_a - $n_a*$n_b + $n_b*$n_b) / ($n_ab * $n_ab * $n_ab)
+                  + 6 * $d2 * ($n_a*$n_a * $M2_b + $n_b*$n_b * $M2_a) / ($n_ab * $n_ab)
+                  + 4 * $delta * ($n_a * $M3_b - $n_b * $M3_a) / $n_ab;
+        my $M3_ab = $M3_a + $M3_b
+                  + $d3 * $n_a * $n_b * ($n_a - $n_b) / ($n_ab * $n_ab)
+                  + 3 * $delta * ($n_a * $M2_b - $n_b * $M2_a) / $n_ab;
+        my $M2_ab = $M2_a + $M2_b + $d2 * $n_a * $n_b / $n_ab;
+        my $mean_ab = $mean_a + $delta * $n_b / $n_ab;
+        $target->{duration_count} = $n_ab;
+        $target->{_running_mean}  = $mean_ab;
+        $target->{m2_sum}         = $M2_ab;
+        $target->{m3_sum}         = $M3_ab;
+        $target->{m4_sum}         = $M4_ab;
+    }
+
+    # Bin-counter entry merge (only meaningful when source observed at least
+    # one positive duration — counter_update is gated on $duration > 0).
+    if ($source->{bin_entry}) {
+        $target->{bin_entry} //= { partition => undef, bins => [], overflow => 0, underflow => 0 };
+        merge_bin_counter_entries($target->{bin_entry}, $source->{bin_entry});
+    }
+}
+
 sub merge_consolidation_stats {
     my ($target, $source) = @_;
     $target->{occurrences} += ($source->{occurrences} // 0);
@@ -5036,6 +5203,39 @@ sub merge_consolidation_stats {
         $target->{"udm_${name}_min"} = $smin if defined $smin && (!defined $target->{"udm_${name}_min"} || $smin < $target->{"udm_${name}_min"});
         my $smax = $source->{"udm_${name}_max"};
         $target->{"udm_${name}_max"} = $smax if defined $smax && (!defined $target->{"udm_${name}_max"} || $smax > $target->{"udm_${name}_max"});
+    }
+
+    # Issue #287: under -mdm bin, also merge the Welford-Pébay sidecars and
+    # the #189-shape bin-counter entry. Callers at %log_messages-source
+    # merge sites attach $source->{bin_entry} from %log_messages_counters
+    # before calling (see merge_log_message_entry_into_cluster); cluster-
+    # source merges already carry $source->{bin_entry} on the cluster
+    # hashref; stats_source-source merges build it inline at the producer
+    # site. The raw min/max copies above already happened — merge_bin_state
+    # only updates the duration_count, _running_mean, m2/m3/m4 sidecars
+    # and the bin counter.
+    if ($message_stats_capture_mode && $message_stats_capture_mode eq 'bin') {
+        merge_bin_state($target, $source);
+    }
+}
+
+# Issue #287: wrapper for the seven consolidation sites that merge a
+# %log_messages entry into a cluster. Under -mdm bin, attaches the
+# corresponding %log_messages_counters entry to the source hashref so
+# merge_consolidation_stats can fold it into the cluster's bin state,
+# then releases the global counter-store slot (the %log_messages entry
+# is deleted by the caller).
+sub merge_log_message_entry_into_cluster {
+    my ($cluster, $category, $log_key) = @_;
+    my $source = $log_messages{$category}{$log_key};
+    if ($message_stats_capture_mode && $message_stats_capture_mode eq 'bin') {
+        my $key = "$category\x1f$log_key";
+        $source->{bin_entry} = $log_messages_counters{$key};
+        merge_consolidation_stats($cluster, $source);
+        delete $log_messages_counters{$key};
+        delete $source->{bin_entry};
+    } else {
+        merge_consolidation_stats($cluster, $source);
     }
 }
 
@@ -5206,7 +5406,7 @@ sub run_consolidation_pass {
             $consumed{$key} = 1;
             my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
             if ($cluster && exists $log_messages{$category}{$key}) {
-                merge_consolidation_stats($cluster, $log_messages{$category}{$key});
+                merge_log_message_entry_into_cluster($cluster, $category, $key);   # #287: bin-state-aware
                 $messages_absorbed++;
             }
             $gate2_absorbed++;
@@ -5277,7 +5477,7 @@ sub run_consolidation_pass {
 
             for my $src_key ($key, $match->{key}) {
                 if (exists $log_messages{$category}{$src_key}) {
-                    merge_consolidation_stats($new_cluster, $log_messages{$category}{$src_key});
+                    merge_log_message_entry_into_cluster($new_cluster, $category, $src_key);   # #287: bin-state-aware
                     $new_cluster->{match_count}++;
                     $messages_absorbed++;
                 }
@@ -5325,7 +5525,7 @@ sub run_consolidation_pass {
                     if ($umsg =~ $scan_regex) {
                         $consumed{$ukey} = 1;
                         if (exists $log_messages{$category}{$ukey}) {
-                            merge_consolidation_stats($scan_cluster, $log_messages{$category}{$ukey});
+                            merge_log_message_entry_into_cluster($scan_cluster, $category, $ukey);   # #287: bin-state-aware
                             $scan_cluster->{match_count}++;
                             $scan_entry->{match_count} = $scan_cluster->{match_count} if $scan_entry;
                             $messages_absorbed++;
@@ -5421,7 +5621,7 @@ sub process_final_pass_window {
 
             for my $src_key ($log_key, $match->{key}) {
                 if (exists $log_messages{$category}{$src_key}) {
-                    merge_consolidation_stats($new_cluster, $log_messages{$category}{$src_key});
+                    merge_log_message_entry_into_cluster($new_cluster, $category, $src_key);   # #287: bin-state-aware
                     $new_cluster->{match_count}++;
                     $messages_absorbed++;
                 }
@@ -5467,7 +5667,7 @@ sub process_final_pass_window {
                     if ($umsg =~ $scan_regex) {
                         $consumed{$ukey} = 1;
                         if (exists $log_messages{$category}{$ukey}) {
-                            merge_consolidation_stats($scan_cluster, $log_messages{$category}{$ukey});
+                            merge_log_message_entry_into_cluster($scan_cluster, $category, $ukey);   # #287: bin-state-aware
                             $scan_cluster->{match_count}++;
                             $scan_entry->{match_count} = $scan_cluster->{match_count} if $scan_entry;
                             $messages_absorbed++;
@@ -6271,7 +6471,6 @@ sub adapt_to_command_line_options {
         'hgb|histogram-buckets=i' => \$histogram_bucket_override,
         'pbpd|percentile-buckets-per-decade=i' => \$percentile_buckets_per_decade,
         'pp|percentile-precision=i' => \$percentile_precision_level,
-        'ep|exact-percentiles' => \$exact_percentiles_optout,
         # Issue #266: explicit data-model selectors. Each accepts 'raw' or 'bin';
         # any other value dies at parse time via _validate_dm. The flags have no
         # defaults — when unset, the surface's existing logic applies.
@@ -6287,16 +6486,6 @@ sub adapt_to_command_line_options {
         'help:s'       => \$show_help,                                              # hidden — special-cased; legacy aliases -?/--help via PreProcessor. Optional arg: '' = full help; 'statistics' = stats index; other = error (Issue #261).
         'explain|ex:s' => \$explain_arg,                                            # Issue #261: optional arg: '' = topic registry; <topic> = long-form explanation. Aliases shared with -so (avg, stddev, p1..p99999).
     ) or die print_usage( "required options not provided" );
-
-    # Issue #266: --exact-percentiles is superseded by the explicit
-    # data-model selectors. Equivalent migration paths:
-    #   --exact-percentiles  -->  --data-model raw                (omnibus)
-    #                        -->  --histogram-data-model raw      (histogram only)
-    #                        -->  --heatmap-data-model raw        (heatmap only)
-    # The flag continues to work this release; removal is a follow-up.
-    if ($exact_percentiles_optout) {
-        warn "--exact-percentiles is deprecated; use --data-model raw (omnibus) or --histogram-data-model raw / --heatmap-data-model raw (per-surface) instead. --exact-percentiles is equivalent to --data-model raw on the histogram and heatmap surfaces, which is what it has always controlled. This flag will be removed in a future release.\n";
-    }
 
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
     # GetOptions :s@) into %verbose_sections_requested. See HARNESS-DESIGN.md
@@ -6836,11 +7025,13 @@ sub read_and_process_logs {
     # Issue #266: resolve the heatmap and histogram capture modes once,
     # before entering the per-line parsing loop. The hot-path branches at
     # the heatmap and histogram raw-value-capture sites read these scalars
-    # so they do not re-resolve per line. Default to 'bin' when the user
-    # did not pin a selector and --exact-percentiles is not set (matches
-    # today's behavior).
-    $heatmap_capture_mode   = choose_data_model('heatmap')   // 'bin';
-    $histogram_capture_mode = choose_data_model('histogram') // 'bin';
+    # so they do not re-resolve per line. Heatmap and histogram default
+    # to 'bin' when the user did not pin a selector; the per-message-key
+    # surface defaults to 'raw' because its (category, log_key) cardinality
+    # is unbounded and bin must be opted into.
+    $heatmap_capture_mode       = choose_data_model('heatmap')       // 'bin';
+    $histogram_capture_mode     = choose_data_model('histogram')     // 'bin';
+    $message_stats_capture_mode = choose_data_model('message-stats') // 'raw';
 
     foreach my $in_file (@in_files) {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
@@ -7450,7 +7641,37 @@ sub read_and_process_logs {
                                     $stats_source->{total_duration} = $duration;
                                     $stats_source->{total_duration_num} = $duration;
                                     $stats_source->{sum_of_squares} = $duration ** 2;
-                                    $stats_source->{durations} = [$duration];
+                                    # Issue #287 Commit 5: skip the raw-array allocation under
+                                    # -mdm bin — the bin-counter store + Welford-Pébay sidecars
+                                    # (seeded below) carry the equivalent information and the
+                                    # consumer (calculate_statistics_bin) reads neither
+                                    # $stats_source->{durations} nor any descendant copy of it.
+                                    $stats_source->{durations} = [$duration] unless $message_stats_capture_mode eq 'bin';
+                                    # Issue #287: under -mdm bin, additionally seed the
+                                    # bin-state sidecars + counter entry on the single-
+                                    # sample stats_source. merge_consolidation_stats's
+                                    # bin block (via merge_bin_state) folds this into
+                                    # the cluster. min/max from $stats_source->{min,max}
+                                    # already populated above via raw producer fields.
+                                    if ($message_stats_capture_mode eq 'bin') {
+                                        $stats_source->{duration_count} = 1;
+                                        $stats_source->{_running_mean}  = $duration;
+                                        $stats_source->{m2_sum}         = 0;
+                                        $stats_source->{m3_sum}         = 0;
+                                        $stats_source->{m4_sum}         = 0;
+                                        $stats_source->{min}            = $duration;
+                                        $stats_source->{max}            = $duration;
+                                        if ($duration > 0) {
+                                            # Build a single-sample #189-shape counter
+                                            # entry inline. counter_update on a private
+                                            # store with a sentinel key gives us the
+                                            # standard partition_new + bin_assign +
+                                            # initial-bin-increment behavior for free.
+                                            my %tmp;
+                                            counter_update(\%tmp, '_single', $duration);
+                                            $stats_source->{bin_entry} = $tmp{'_single'};
+                                        }
+                                    }
                                 }
                             }
 
@@ -7463,9 +7684,29 @@ sub read_and_process_logs {
                     if( $is_access_log ) {
 
                         # Initialize the hash if not already done (don't initialize it all, allowing for lazy population of only the fields we need)
-                        $log_messages{$category}{$log_key} //= {
-                            occurrences => 0,
-                            total_bytes => 0,
+                        # Issue #287: under -mdm bin, additionally allocate sidecar accumulators
+                        # for the Welford-Pébay online central-moment update (m2/m3/m4) and the
+                        # per-key running min/max. Under -mdm raw the hash shape is unchanged.
+                        # Issue #287 Commit 5: under -mdm bin, the lazy initializer omits
+                        # the durations => [] field entirely (the bin-counter store and the
+                        # Welford-Pébay sidecars below carry the same data). Eliminating the
+                        # empty arrayref saves ~40 bytes per (category, log_key) — at 10^5+
+                        # key cardinality this is the dominant per-key allocation today.
+                        $log_messages{$category}{$log_key} //= ($message_stats_capture_mode eq 'bin' ? {
+                            occurrences    => 0,
+                            total_bytes    => 0,
+                            total_duration => 0,
+                            sum_of_squares => 0,
+                            duration_count => 0,
+                            min            => undef,
+                            max            => undef,
+                            _running_mean  => 0,
+                            m2_sum         => 0,
+                            m3_sum         => 0,
+                            m4_sum         => 0,
+                        } : {
+                            occurrences    => 0,
+                            total_bytes    => 0,
                             total_duration => 0,
                             # count_occurrences => 0,
                             # count_min => undef,
@@ -7473,8 +7714,8 @@ sub read_and_process_logs {
                             # count_max => undef,
                             # count_sum => 0,
                             sum_of_squares => 0,
-                            durations => [],
-                        };
+                            durations      => [],
+                        });
 
                         $log_messages{$category}{$log_key}{occurrences}++;
                         $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
@@ -7503,7 +7744,77 @@ sub read_and_process_logs {
 
                             # Accumulate the sum of squares for variance calculation
                             $log_messages{$category}{$log_key}{sum_of_squares} += $duration ** 2;
-                            push @{$log_messages{$category}{$log_key}{durations}}, $duration;
+                            # Issue #287 Commit 5: skip the durations[] push under -mdm bin —
+                            # this is the dominant memory consumer at high (category, log_key)
+                            # cardinality. The bin-counter store and Welford-Pébay sidecars
+                            # below carry equivalent information for the consumer.
+                            push @{$log_messages{$category}{$log_key}{durations}}, $duration
+                                unless $message_stats_capture_mode eq 'bin';
+
+                            # Issue #287: under -mdm bin, additionally feed the per-key bin-counter
+                            # store and update the Welford-Pébay online central-moment accumulators
+                            # plus the running min/max sidecars. Validated end-to-end through
+                            # Commit 4; this commit eliminates the durations[] safety net.
+                            #
+                            # The counter_update call is gated on $duration > 0 because log-spaced
+                            # partitions cannot represent zero (mirrors the heatmap pattern at
+                            # ltl:7671). The sidecar/Welford-Pébay updates are NOT gated — they
+                            # must include 0-duration samples so the bin-path exact-value statistics
+                            # (min, mean, std_dev, moments) match raw byte-for-byte per #224
+                            # Layer 4 T1 expectation. Zero-duration samples are therefore visible
+                            # to the sidecar-derived statistics but missing from the percentile
+                            # ladder; the cross-model envelope at tests/statistics-drift/cross-model-
+                            # tolerances.tsv (R9.2 of features/287-*.md) absorbs that divergence,
+                            # populated in Commit 6 once Layer 4 measurement is available.
+                            if ($message_stats_capture_mode eq 'bin') {
+                                my $entry = $log_messages{$category}{$log_key};
+
+                                # Percentile-ladder source (the bin partition). Skip zero-valued
+                                # samples — partition's log-spaced geometry cannot bin them.
+                                if ($duration > 0) {
+                                    counter_update(\%log_messages_counters,
+                                                   "$category\x1f$log_key",
+                                                   $duration);
+                                }
+
+                                # Sidecar accumulators (R2.2 of features/287-*.md) — fed on every
+                                # sample including 0, so calculate_statistics_bin can derive min,
+                                # mean, std_dev, skewness, kurtosis, bimodality_coef byte-identical
+                                # to the raw path.
+                                $entry->{min} = $duration
+                                    if !defined $entry->{min} || $duration < $entry->{min};
+                                $entry->{max} = $duration
+                                    if !defined $entry->{max} || $duration > $entry->{max};
+
+                                # Welford-Pébay online M2/M3/M4 update (Pébay 2008,
+                                # SAND2008-6212). The order matters: M4 reads the old M2 and M3,
+                                # M3 reads the old M2, M2 is updated last. duration_count tracks
+                                # samples that contributed to the moment accumulators; it is
+                                # distinct from {occurrences}, which counts all matched lines
+                                # for this (category, log_key) regardless of duration presence,
+                                # and matches the raw path's `scalar @{$bucket_data->{durations}}`.
+                                my $n_old = $entry->{duration_count};
+                                my $n     = $n_old + 1;
+                                if ($n_old == 0) {
+                                    $entry->{_running_mean} = $duration;
+                                } else {
+                                    my $mean     = $entry->{_running_mean};
+                                    my $delta    = $duration - $mean;
+                                    my $delta_n  = $delta / $n;
+                                    my $delta_n2 = $delta_n * $delta_n;
+                                    my $term1    = $delta * $delta_n * $n_old;
+                                    $entry->{_running_mean} = $mean + $delta_n;
+                                    $entry->{m4_sum} +=
+                                          $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
+                                        + 6 * $delta_n2 * $entry->{m2_sum}
+                                        - 4 * $delta_n  * $entry->{m3_sum};
+                                    $entry->{m3_sum} +=
+                                          $term1 * $delta_n * ($n - 2)
+                                        - 3 * $delta_n * $entry->{m2_sum};
+                                    $entry->{m2_sum} += $term1;
+                                }
+                                $entry->{duration_count} = $n;
+                            }
 
                             # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
                             if( $duration > 0 ) {
@@ -7761,9 +8072,8 @@ sub find_heatmap_bucket {
 
 sub calculate_heatmap_buckets {
     return unless $heatmap_enabled;
-    # Issue #266: caller-side data-model dispatch. Defaults to 'bin' (today's
-    # behavior) when the user did not pin a selector and --exact-percentiles
-    # is not set.
+    # Issue #266: caller-side data-model dispatch. Defaults to 'bin' when
+    # the user did not pin a selector for the heatmap surface.
     my $dm = choose_data_model('heatmap') // 'bin';
     return $dm eq 'raw'
         ? calculate_heatmap_buckets_exact()
@@ -7843,6 +8153,28 @@ sub calculate_heatmap_buckets_exact {
     }
 
     return;
+}
+
+sub finalize_message_stats_unified {
+    # Issue #287: snapshot per-message-key bin telemetry for the locked #187
+    # Decision 8 -V output (summary_table + csv_output blocks). Mirrors the
+    # shape of finalize_heatmap_unified / finalize_histogram_unified — runs
+    # after calculate_all_statistics, before emit_bin_counter_mode_verbose
+    # (see MAIN orchestration). No-op under -mdm raw (counter store is
+    # empty because the bin producer never fired).
+    return unless %log_messages_counters;
+
+    $bin_counter_telemetry{summary_table} = snapshot_counter_telemetry(\%log_messages_counters);
+    # csv_output shares partitions with summary_table per #189 R7 — aliased
+    # to the same telemetry hashref so emit_bin_counter_mode_verbose's
+    # short-form shares_partitions_with block reads consistent values.
+    $bin_counter_telemetry{csv_output} = $bin_counter_telemetry{summary_table};
+
+    # Drain the per-quantile audit aggregation (populated inside
+    # calculate_statistics_bin while it walked the top-N keys) into the
+    # telemetry hash so emit_bin_counter_mode_verbose's out_of_range_bounded
+    # line reflects real audit state instead of hard-coding 'none'.
+    $bin_counter_telemetry{summary_table}{out_of_range_bounded} = { %message_stats_audit };
 }
 
 sub finalize_heatmap_unified {
@@ -8006,9 +8338,8 @@ sub format_histogram_dimensions_line {
 # Calculate histogram buckets for all collected metrics - Issue #25
 sub calculate_histogram_buckets {
     return unless $histogram_enabled;
-    # Issue #266: caller-side data-model dispatch. Defaults to 'bin' (today's
-    # behavior) when the user did not pin a selector and --exact-percentiles
-    # is not set.
+    # Issue #266: caller-side data-model dispatch. Defaults to 'bin' when
+    # the user did not pin a selector for the histogram surface.
     my $dm = choose_data_model('histogram') // 'bin';
     return $dm eq 'raw'
         ? calculate_histogram_buckets_exact()
@@ -8133,8 +8464,8 @@ sub calculate_histogram_buckets_exact {
     }
 
     # Verbose output for bucket calculation (Issues #25, #56, #226, #237).
-    # Exact-percentile (in-memory array) histogram path — active when
-    # --exact-percentiles is set. Emitted as the `histogram-array`
+    # Raw-array histogram path — active when the histogram surface resolves
+    # to the raw values data model. Emitted as the `histogram-array`
     # section with a `dimensions` sub-section. Per-metric line formatting
     # shared with the bin-counter path via format_histogram_dimensions_line().
     if (section_requested('histogram-array') && @metrics_with_data) {
@@ -8610,20 +8941,45 @@ sub calculate_all_statistics {
                 if( defined $log_messages{$category}{$log_key}{total_duration} && !$omit_durations ) {
                     $aggregated_data->{total_duration} += $log_messages{$category}{$log_key}{total_duration};
                     $aggregated_data->{sum_of_squares} += $log_messages{$category}{$log_key}{sum_of_squares};
-                    push @{$aggregated_data->{durations}}, @{$log_messages{$category}{$log_key}{durations}};
+                    # Issue #287 Commit 5: under -mdm bin the per-key durations[] no
+                    # longer exists. calculate_statistics_bin reads sidecars +
+                    # %log_messages_counters{...} entry directly, ignoring
+                    # $aggregated_data->{durations} — so the push is a no-op under
+                    # bin even if the source were present, and the absent field
+                    # would auto-vivify it as an empty arrayref. Skip the push.
+                    push @{$aggregated_data->{durations}}, @{$log_messages{$category}{$log_key}{durations}}
+                        unless $message_stats_capture_mode eq 'bin';
                 }
 
                 if( defined $aggregated_data->{total_duration} && !$omit_durations ) {
-                    # Issue #266: caller-side data-model dispatch shell. Surface 3
-                    # (per-message-key statistics). The selector resolves to 'raw',
-                    # 'bin', or undef but only the raw reduction is implemented
-                    # today — calculate_statistics() is the raw primitive. When the
-                    # bin reduction lands, branch on $dm before this call.
+                    # Issue #266 dispatch shell, now wired for #287 surface 3.
+                    # Under 'raw' (and at default), the existing sort-and-index
+                    # primitive runs unchanged. Under 'bin', the new sibling
+                    # primitive calculate_statistics_bin() runs against the
+                    # per-key sidecar entry (%log_messages{...}) and the
+                    # corresponding counter-store entry (%log_messages_counters).
+                    # Commit 1 of #287 ships the stub forwarder; Commit 2 lands
+                    # the real sidecar-and-percentile derivation.
                     my $dm = choose_data_model('message-stats') // 'raw';
                     my ($min, $mean, $max,
                         $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
                         $std_dev, $cv,
-                        $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
+                        $skewness, $kurtosis, $bimodality_coef);
+                    if ($dm eq 'bin') {
+                        ($min, $mean, $max,
+                         $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
+                         $std_dev, $cv,
+                         $skewness, $kurtosis, $bimodality_coef) = calculate_statistics_bin(
+                            $log_messages{$category}{$log_key},
+                            $log_messages_counters{"$category\x1f$log_key"},
+                            $aggregated_data,
+                        );
+                    } else {
+                        ($min, $mean, $max,
+                         $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
+                         $std_dev, $cv,
+                         $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
+                    }
 
                     $log_messages{$category}{$log_key}{min} = $min;
                     $log_messages{$category}{$log_key}{mean} = $mean;
@@ -8805,6 +9161,135 @@ sub calculate_statistics {
         my $m2 = $m2_sum / $n;
         my $m3 = $m3_sum / $n;
         my $m4 = $m4_sum / $n;
+        if ($m2 > 0) {
+            my $g1 = $m3 / ($m2 ** 1.5);
+            my $g2 = $m4 / ($m2 ** 2) - 3;
+            $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
+            $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
+            my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
+            $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
+        }
+    }
+
+    return ($min, $mean, $max,
+            $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
+            $std_dev, $cv,
+            $skewness, $kurtosis, $bimodality_coef);
+}
+
+# Issue #287: per-message-key bin-counter consumer. Sibling of
+# calculate_statistics() — same 22-tuple return shape, different derivation:
+#   min/max  — running sidecar (R2.2 of features/287-*.md).
+#   mean     — total_duration / duration_count (matches raw path's denominator).
+#   std_dev, cv — from sum_of_squares accumulator (matches raw path).
+#   percentile ladder — Prometheus exp-interp via percentile($entry,$q) at ltl:958.
+#   iqr      — p75 - p25 (cascades).
+#   skewness/kurtosis/bimodality_coef — from Welford-Pébay m2/m3/m4 sidecars.
+#
+# Commit 1 of #287 ships THIS STUB only — it forwards to calculate_statistics()
+# verbatim because durations[] is still maintained under -mdm bin through
+# Commit 5. The stub presence proves the dispatch is wired and exercised;
+# observable output remains byte-identical to -mdm raw. Commit 2 replaces
+# the body with the real sidecar-and-percentile derivation.
+sub calculate_statistics_bin {
+    # Issue #287 Commit 2: real per-statistic derivation. Returns the same
+    # 22-tuple as calculate_statistics(), with derivation per the R3.2 table
+    # in features/287-message-stats-bin-counter-data-model.md:
+    #   min/max:                 sidecar (R2.2; populated unconditionally per
+    #                            sample so 0-duration samples are captured).
+    #   mean:                    total_duration / duration_count (matches the
+    #                            raw path's `scalar @sorted` denominator).
+    #   std_dev/cv:              sum_of_squares accumulator with the same
+    #                            cancellation guard as calculate_statistics
+    #                            at ltl:~8855.
+    #   p1..p99999:              percentile($counter_entry, $q) (#189 R4 at
+    #                            ltl:958) — exponential interpolation within
+    #                            bucket per #187 Decision 1.
+    #   iqr:                     p75 - p25 (cascades).
+    #   skewness/kurtosis/BC:    bias-corrected sample formulas verbatim with
+    #                            the raw path (ltl:~8895), with m2/m3/m4
+    #                            sourced from m2_sum/m3_sum/m4_sum sidecars
+    #                            divided by n (Pébay running M_k = n * m_k).
+    #
+    # Per-quantile out_of_range_bounded audit codes returned by percentile()
+    # are discarded here; Commit 4 of #287 wires them into -V telemetry.
+    my ($sidecar_entry, $counter_entry, $aggregated_data) = @_;
+    return unless $sidecar_entry && ($sidecar_entry->{occurrences} // 0) > 0;
+    my $n = $sidecar_entry->{duration_count} // 0;
+    return unless $n > 0;
+
+    my $min  = $sidecar_entry->{min};
+    my $max  = $sidecar_entry->{max};
+    my $mean = $sidecar_entry->{total_duration} / $n;
+
+    my ($std_dev, $cv);
+    if ($n >= 2) {
+        my $sum_sq_dev = $sidecar_entry->{sum_of_squares} - $n * ($mean ** 2);
+        $sum_sq_dev = 0 if $sum_sq_dev < 0;   # guard floating-point underflow on near-constant data
+        my $variance = $sum_sq_dev / ($n - 1);
+        $std_dev = sqrt($variance);
+        $cv = $mean != 0 ? $std_dev / $mean : undef;
+    }
+
+    # Percentile ladder. When $counter_entry is undef (the rare case of every
+    # observed duration being 0, so counter_update was never called for this
+    # key), all percentiles collapse to 0 — matches the raw path's behavior
+    # when @sorted is all-zero. Audit codes from percentile() are aggregated
+    # into %message_stats_audit for the -V out_of_range_bounded report;
+    # finalize_message_stats_unified() drains the aggregation into the
+    # per-consumer telemetry hash.
+    my ($p1, $p5, $p10, $p25, $p50, $p75, $p90, $p95, $p99, $p999, $p9999, $p99999);
+    if ($counter_entry) {
+        my %a;
+        ($p1,     $a{p1})     = percentile($counter_entry, 0.01);
+        ($p5,     $a{p5})     = percentile($counter_entry, 0.05);
+        ($p10,    $a{p10})    = percentile($counter_entry, 0.10);
+        ($p25,    $a{p25})    = percentile($counter_entry, 0.25);
+        ($p50,    $a{p50})    = percentile($counter_entry, 0.50);
+        ($p75,    $a{p75})    = percentile($counter_entry, 0.75);
+        ($p90,    $a{p90})    = percentile($counter_entry, 0.90);
+        ($p95,    $a{p95})    = percentile($counter_entry, 0.95);
+        ($p99,    $a{p99})    = percentile($counter_entry, 0.99);
+        ($p999,   $a{p999})   = percentile($counter_entry, 0.999);
+        ($p9999,  $a{p9999})  = percentile($counter_entry, 0.9999);
+        ($p99999, $a{p99999}) = percentile($counter_entry, 0.99999);
+        # Aggregate: 'high' wins over 'low' wins over 'none'.
+        for my $q (keys %a) {
+            my $new = $a{$q};
+            my $cur = $message_stats_audit{$q};
+            if    ($new eq 'high')                                 { $message_stats_audit{$q} = 'high'; }
+            elsif ($new eq 'low'  && (!$cur || $cur eq 'none'))    { $message_stats_audit{$q} = 'low';  }
+            elsif (!defined $cur)                                  { $message_stats_audit{$q} = 'none'; }
+        }
+        # Clamp interpolated percentile values to the observed [min, max].
+        # The Prometheus formula returns values that can range up to the
+        # populated bin's UPPER boundary (partition geometry), which can
+        # exceed the observed max — partition boundaries are derived from
+        # the lazy-seed range (v_0 * sqrt(10^5)), not from observed values.
+        # The min/max sidecars (R2.2) carry the true observed extremes, so
+        # clamping here preserves #224 Decision 4's "min <= p1 ... p99999
+        # <= max" Layer 2 invariant while still using bin-counter precision
+        # for everything inside the observed range.
+        for ($p1, $p5, $p10, $p25, $p50, $p75, $p90, $p95, $p99, $p999, $p9999, $p99999) {
+            next unless defined;
+            $_ = $min if defined $min && $_ < $min;
+            $_ = $max if defined $max && $_ > $max;
+        }
+    } else {
+        # All-zero degenerate case: every percentile equals min (which is 0
+        # here because durations are non-negative and we observed only zeros).
+        $p1 = $p5 = $p10 = $p25 = $p50 = $p75 = $p90 = $p95 = $p99 = $p999 = $p9999 = $p99999 = ($min // 0);
+    }
+    my $iqr = (defined $p75 && defined $p25) ? $p75 - $p25 : undef;
+
+    # Distribution-shape moments — same downstream formulas as calculate_statistics
+    # at ltl:~8895, with m2/m3/m4 sourced from the Welford-Pébay sidecar
+    # accumulators (M_k_sum / n = m_k central moment).
+    my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
+    if ($n >= 4) {
+        my $m2 = $sidecar_entry->{m2_sum} / $n;
+        my $m3 = $sidecar_entry->{m3_sum} / $n;
+        my $m4 = $sidecar_entry->{m4_sum} / $n;
         if ($m2 > 0) {
             my $g1 = $m3 / ($m2 ** 1.5);
             my $g2 = $m4 / ($m2 ** 2) - 3;
@@ -11673,6 +12158,12 @@ calculate_all_statistics();
 $end_time = [gettimeofday];
 $elapsed_calculate_statistics = tv_interval($start_time, $end_time);
 measure_memory_structures();
+
+# Issue #287: snapshot per-message-key bin-counter telemetry before any
+# subsequent stage discards the streaming counter store. Sibling of the
+# finalize_heatmap_unified and finalize_histogram_unified hooks below;
+# no-op under -mdm raw.
+finalize_message_stats_unified();
 
 # CALCULATE HEATMAP BUCKETS (if enabled) #
 if ($heatmap_enabled) {

@@ -27,5 +27,5 @@
 
                                P1: 1   P10: 1   P25: 2   P50: 4   P75: 8   P90: 11   P95: 16   P99: 26   P99.9: 1.2k   P99.99: 2.0k             
 
-command-line options: --disable-progress -osum -n 1 --exact-percentiles --terminal-width 160 -hg count 
+command-line options: --disable-progress -osum -n 1 -dm raw --terminal-width 160 -hg count 
 

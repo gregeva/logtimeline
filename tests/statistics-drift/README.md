@@ -78,26 +78,31 @@ reducing combined runtime dramatically.
 Layer 3 requires Python 3, NumPy, and SciPy. The driver fails fast with an
 install hint if any are missing — it does not silently skip Layer 3.
 
-Modern Homebrew Python (macOS) and modern Linux distros (Ubuntu 24.04+,
-Debian 12+, Fedora 38+) enforce PEP 668, which blocks `pip3 install`
-against the system-managed Python. Use `--user` to install into your home
-directory without sudo or override flags:
+The install command depends on which `python3` the harness will invoke. The
+top-level `README.md` § Test-harness dependencies documents the matrix in
+detail; the short version:
 
-```bash
-# macOS
-brew install python
-pip3 install --user numpy scipy
+- macOS, Homebrew Python (`/opt/homebrew/bin/python3` or `/usr/local/bin/python3`):
+  `brew install numpy scipy` (PEP 668 blocks `pip --user` against brew Python;
+  numpy and scipy ship as brew formulas).
+- macOS, Apple Command-Line-Tools Python (`/Library/Developer/CommandLineTools/...`):
+  `python3 -m pip install --user numpy scipy` (no PEP 668).
+- Ubuntu/Linux, pre-PEP-668 distros:
+  `python3 -m pip install --user numpy scipy`.
+- Ubuntu/Linux, PEP-668 distros (Ubuntu 24.04+, Debian 12+, Fedora 38+) or any
+  system where the above is blocked: project-local venv
+  (`python3 -m venv .venv && .venv/bin/python -m pip install numpy scipy`,
+  then run the harness with `PATH=$(pwd)/.venv/bin:$PATH`).
 
-# Ubuntu/Linux
-sudo apt-get install python3 python3-pip
-pip3 install --user numpy scipy
-```
+Verify the install landed under the harness's interpreter by running
+`python3 -c "import numpy, scipy"` from a non-interactive shell — PATH
+ordering can differ between your interactive shell and the harness's,
+which is the most common cause of "install said success, harness can't
+find the modules." If this happens, re-run the install using the full
+absolute path `which python3` reports from the harness's shell.
 
-Verify with `python3 -c "import numpy, scipy"`.
-
-If you prefer a project-local venv, the harness driver honors the venv's
-Python when invoked with `PATH=$(pwd)/.venv/bin:$PATH`. See the top-level
-README's "Test-harness dependencies" section for the venv pattern.
+The harness's fail-fast hint detects which Python it resolved and prints
+the matching install command for that case.
 
 ## L2 cross-column invariants
 
