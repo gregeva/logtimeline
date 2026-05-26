@@ -10,11 +10,15 @@ emits, but using NumPy + SciPy with explicitly pinned methodology
 parameters. The Perl comparison engine then joins ltl's CSV against the
 JSON this script emits and tier-classifies any disagreement.
 
-Phase F scope: Tomcat access logs only. Apache HTTP2, ThingWorx
-ScriptLog, and Codebeamer formats are deferred to Issue #270; the
-driver reports `L3=N/A` for those scenarios. The architecture is
-format-agnostic — adding a new format is a matter of writing a new
-parser function and dispatching on log shape.
+Supported formats (Issue #270 added the latter three on top of the
+Tomcat baseline that shipped in Phase F of #224):
+  - tomcat-access           (match_type 3, ltl:6999)
+  - apache-http2            (match_type 3 regex, microsecond duration)
+  - codebeamer-access       (match_type 12, ltl:6984)
+  - thingworx-scriptlog     (match_type 1, ltl:6941)
+The architecture is format-agnostic — adding a new format is a matter
+of writing a new `parse_*_line()` function and registering it in
+`PARSERS`.
 
 Percentile algorithm dispatch (Issue #280): the oracle accepts a
 --percentile-algorithm argument that selects which reference
@@ -53,7 +57,8 @@ CLI:
       --bucket-size-seconds <N>
       --percentile-algorithm <nearest_rank|exponential_interpolation_within_bucket>
       [--duration-unit ms|us]            [default: ms]
-      [--format tomcat-access]           [default: tomcat-access]
+      [--format tomcat-access|apache-http2|codebeamer-access|thingworx-scriptlog]
+                                         [default: tomcat-access]
 
 Output: JSON written to stdout. Top-level object:
   {
@@ -117,9 +122,28 @@ def _finite_or_none(v):
     return v
 
 # ---------------------------------------------------------------------
+# Log-key length cap (ltl:7407).
+#
+# When ltl writes the MESSAGES CSV (`-o <file>`, $write_messages_to_csv=1)
+# every $log_key is truncated to 350 chars before it lands in the row's
+# first column. The oracle must apply the same cap or its (category,
+# row_message, bucket) groupings drift from ltl's at the long-message
+# tail. The 350-char ceiling is identical across all four arms of the
+# log_key builder at ltl:7407, ltl:7409, ltl:7411, ltl:7413, so it is
+# defined once here and applied to every parser's row_message.
+# ---------------------------------------------------------------------
+LOG_KEY_MAX_LEN = 350
+
+
+def _cap_log_key(s):
+    """Apply the ltl:7407 350-char cap to a row-message string."""
+    return s[:LOG_KEY_MAX_LEN]
+
+
+# ---------------------------------------------------------------------
 # Tomcat access log parser — mirrors prototype/189-bin-counter-primitives.pl
 # which itself mirrors prototype/96-fuzzy-consolidation.pl, which mirrors
-# ltl's match_type 3 (production regex at ltl:6621).
+# ltl's match_type 3 (production regex at ltl:6999).
 # ---------------------------------------------------------------------
 
 # Verbatim from prototype/189:
@@ -143,12 +167,12 @@ TOMCAT_TS_FORMAT = "%d/%b/%Y:%H:%M:%S"
 
 
 def parse_tomcat_line(line):
-    """Parse one Tomcat access log line.
+    """Parse one Tomcat access log line (match_type 3, ltl:6999).
 
-    Returns a tuple (epoch_seconds, category, message, duration) or None
-    if the line does not match. Mirrors ltl:6621-6632 normalization
-    rules: strip ' HTTP/N.N', strip '?query_string', '5xx'-bucket the
-    status code into a category.
+    Returns a tuple (epoch_seconds, row_message, duration, level_family)
+    or None if the line does not match. Mirrors ltl:7003-7010 normalization:
+    strip timezone, strip ' HTTP/N.N', strip '?query_string', '5xx'-bucket
+    the status code as the level family.
     """
     m = TOMCAT_REGEX.match(line)
     if not m:
@@ -156,7 +180,7 @@ def parse_tomcat_line(line):
 
     ts_str, request, status_str, _bytes_str, dur_str, _thread, _session = m.groups()
 
-    # ltl:6627 — chop off timezone offset before parsing.
+    # ltl:7005 — chop off timezone offset before parsing.
     # The format is "07/May/2025:00:00:00 +0000" → "07/May/2025:00:00:00".
     ts_no_tz = re.sub(r' [+-]\d{4}$', '', ts_str)
     try:
@@ -168,13 +192,13 @@ def parse_tomcat_line(line):
     # as UTC"). For the bucket-size math, only the relative epoch matters.
     epoch = dt.replace(tzinfo=timezone.utc).timestamp()
 
-    # ltl:6630-6631 — normalize the request: strip ' HTTP/N.N' and '?query'.
+    # ltl:7008-7009 — normalize the request: strip ' HTTP/N.N' and '?query'.
     msg = re.sub(r' HTTP/\d\.\d$', '', request)
     msg = re.sub(r'\?.+$', '', msg)
 
     status_code = status_str
 
-    # ltl:6626 — bucket status code: 200 → 2xx, 404 → 4xx, etc.
+    # ltl:7004 — bucket status code: 200 → 2xx, 404 → 4xx, etc.
     # category here is the HTTP family used by ltl for the level columns.
     # However, the MESSAGES CSV `category` is 'plain' or 'highlight', NOT
     # the HTTP family — that's a different thing. For row keying we use
@@ -186,9 +210,10 @@ def parse_tomcat_line(line):
 
     # Row-key message = "[STATUS] METHOD /url" with no thread (the Tomcat
     # log file we test against does not record %I thread field, so the
-    # thread group is empty and ltl emits the no-thread variant — see the
-    # baselines/tomcat-default/messages.csv first column for confirmation).
-    row_message = f"[{status_code}] {msg}"
+    # thread group is empty and ltl emits the no-thread variant — see
+    # baselines/tomcat-default/messages.csv for confirmation). ltl:7413
+    # is the variant that builds the row key without thread or object.
+    row_message = _cap_log_key(f"[{status_code}] {msg}")
 
     # Duration parse — must be a clean numeric literal (mirrors prototype/189
     # corruption guard). Tomcat logs duration in ms.
@@ -197,6 +222,242 @@ def parse_tomcat_line(line):
         duration = float(dur_str)
 
     return (epoch, row_message, duration, level_family)
+
+
+# ---------------------------------------------------------------------
+# Apache HTTP2 access log parser — same regex shape as Tomcat
+# (match_type 3, ltl:6999). The only behavioural difference is that the
+# duration field is microseconds, not milliseconds; ltl honours this via
+# `-du us` on the command line. The oracle, like ltl, stores the raw
+# numeric value and lets the comparison happen in whatever unit the
+# field carries — so the parsing code is structurally identical to the
+# Tomcat parser. parse_apache_http2_line is a thin alias kept distinct
+# so the format dispatch table reads cleanly.
+# ---------------------------------------------------------------------
+
+def parse_apache_http2_line(line):
+    """Parse one Apache HTTP2 access log line.
+
+    Same shape as Tomcat (match_type 3); the duration field is in
+    microseconds, which the caller honours via --duration-unit us.
+    """
+    return parse_tomcat_line(line)
+
+
+# ---------------------------------------------------------------------
+# Codebeamer access log parser — match_type 12 (ltl:6984).
+# Same as Tomcat except duration is suffixed as "[Nms] [Ns]" instead of
+# a bare trailing number. ltl uses the ms group and ignores the seconds
+# group; the oracle does the same.
+# ---------------------------------------------------------------------
+
+# Verbatim from ltl:6984:
+#   ^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.]+)ms\] \[(.+)s\]
+CODEBEAMER_REGEX = re.compile(
+    r'^(?:.+? ){3}\[([^\]]+)\] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.]+)ms\] \[(.+)s\]'
+)
+
+
+def parse_codebeamer_line(line):
+    """Parse one Codebeamer Tomcat-derivative access log line
+    (match_type 12, ltl:6984).
+
+    Mirrors ltl:6989-6996 normalization (same as Tomcat: strip timezone,
+    strip ' HTTP/N.N', strip '?query_string', '5xx'-bucket the status
+    code). Duration comes from the [Nms] group, in milliseconds.
+    """
+    m = CODEBEAMER_REGEX.match(line)
+    if not m:
+        return None
+
+    ts_str, request, status_str, _bytes_str, dur_ms_str, _dur_s_str = m.groups()
+
+    ts_no_tz = re.sub(r' [+-]\d{4}$', '', ts_str)
+    try:
+        dt = datetime.strptime(ts_no_tz, TOMCAT_TS_FORMAT)
+    except ValueError:
+        return None
+    epoch = dt.replace(tzinfo=timezone.utc).timestamp()
+
+    msg = re.sub(r' HTTP/\d\.\d$', '', request)
+    msg = re.sub(r'\?.+$', '', msg)
+
+    status_code = status_str
+    level_family = re.sub(r'(\d)\d{2}', r'\1xx', status_code)
+
+    row_message = _cap_log_key(f"[{status_code}] {msg}")
+
+    duration = None
+    if dur_ms_str and re.fullmatch(r'\d+(?:\.\d+)?', dur_ms_str):
+        duration = float(dur_ms_str)
+
+    return (epoch, row_message, duration, level_family)
+
+
+# ---------------------------------------------------------------------
+# ThingWorx ScriptLog parser — match_type 1 (ltl:6941).
+#
+# The ScriptLog format differs from access logs in three ways the oracle
+# must reproduce faithfully or partition fidelity drifts:
+#
+#   1. Timestamp is "%Y-%m-%d %H:%M:%S.%3f+ZZZZ" (millisecond fractional;
+#      timezone-suffixed). ltl chops the timezone offset (effectively
+#      treats wall-clock as UTC for bucketing) — same convention as the
+#      access-log parsers.
+#
+#   2. Duration is embedded inside the message body as " durationMS=N"
+#      (or "durationMs"). ltl extracts it at ltl:6947, then masks both
+#      the bytes and duration values to '?' at ltl:6950 so the row key
+#      groups all (durationMS=*) variants together. The oracle reproduces
+#      the same mask.
+#
+#   3. The row key (ltl:7407) is built as
+#        "[LEVEL] [thread_first_20_chars] [object_last_25_chars] MESSAGE"
+#      capped at 350 chars. Both thread and object are always defined
+#      for match_type 1, so only that arm of the four-way if/elsif fires.
+#
+# count field: ltl extracts " count\s*=\s*(\d+)" in a separate place
+# (#125 path), but the harness validates duration-derived statistics
+# only — count does not factor into L3 percentile/shape/variability
+# checks. We do not need to parse it.
+# ---------------------------------------------------------------------
+
+# Verbatim from ltl:6941, with Python-compatible escaping:
+#   ^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4}
+#   \ \[L:\ ([^\]]*)\] \[O:\ ([^\]]*)] \[I:\ ([^\]]*)] \[U:\ ([^\]]*)]
+#   \ \[S:\ ([^\]]*)] \[P:\ ([^\]]*)] \[T:\ ((?:\](?! )|[^\]])*)] (.*)
+THINGWORX_SCRIPTLOG_REGEX = re.compile(
+    r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[+\-]\d{4} '
+    r'\[L: ([^\]]*)\] \[O: ([^\]]*)\] \[I: ([^\]]*)\] \[U: ([^\]]*)\] '
+    r'\[S: ([^\]]*)\] \[P: ([^\]]*)\] \[T: ((?:\](?! )|[^\]])*)\] (.*)'
+)
+
+THINGWORX_TS_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+
+# Mask patterns — verbatim from ltl:6950 (bytes / durationMS) and
+# ltl:7143-7145 (count). For bytes / durationMS, ltl substitutes the
+# full match with $1?, where $1 captured "(bytes|durationM[sS])\s*=\s*".
+# The Python equivalents preserve the leading space and the captured
+# prefix exactly. For count, ltl normalizes the whitespace to a single
+# "count=?" without preserving the original spacing.
+_BYTES_EXTRACT_RE = re.compile(r' bytes\s*=\s*(\d+)')
+_DURATION_EXTRACT_RE = re.compile(r' durationM[sS]\s*=\s*(\d+)')
+_COUNT_EXTRACT_RE = re.compile(r' count\s*=\s*(\d+)')
+_BYTES_MASK_RE = re.compile(r' (bytes\s*=\s*)\d+')
+_DURATION_MASK_RE = re.compile(r' (durationM[sS]\s*=\s*)\d+')
+_COUNT_MASK_RE = re.compile(r' count\s*=\s*\d+')
+
+# ltl:7152 — threadname normalization. When the thread name matches
+# /^(.*)-\d+$/, ltl uses the prefix (the "threadpool") as the
+# threadname; otherwise it uses the raw thread string. The row key
+# uses the normalized threadname (ltl:7153, then ltl:7402).
+_THREAD_POOL_RE = re.compile(r'^(.*)-\d+$')
+
+# ltl:7402-7403 — thread truncated to first 20 chars; object truncated
+# to its last 25 chars (substr(s, len-25, 25) when len > 25).
+_THREAD_TRUNCATE_LEN = 20
+_OBJECT_TRUNCATE_LEN = 25
+
+# ltl:135 — log_levels list (the levels ltl recognises). Lines whose
+# captured category isn't in this list are skipped at ltl:7256. The
+# oracle must apply the same filter so partition fidelity holds for
+# ScriptLog lines that carry levels like "STDERR" or empty.
+LOG_LEVELS = {
+    "FORCE", "AUDIT", "FATAL", "ERROR", "WARN", "INFO",
+    "DEBUG", "TRACE", "DATA",
+}
+
+
+def _truncate_object(obj):
+    """Mirror ltl:7403 — truncate object to its last _OBJECT_TRUNCATE_LEN
+    chars when longer; otherwise return as-is."""
+    if obj is None:
+        return None
+    if len(obj) > _OBJECT_TRUNCATE_LEN:
+        return obj[len(obj) - _OBJECT_TRUNCATE_LEN:]
+    return obj
+
+
+def parse_thingworx_scriptlog_line(line):
+    """Parse one ThingWorx ScriptLog (match_type 1, ltl:6941).
+
+    Returns (epoch_seconds, row_message, duration, level_family) or None
+    if the line does not match or carries an unrecognised level.
+    """
+    m = THINGWORX_SCRIPTLOG_REGEX.match(line)
+    if not m:
+        return None
+
+    (ts_str, level, obj, _instance, _user,
+     _session, _platform, thread, message) = m.groups()
+
+    # ltl:7256 — skip lines whose category isn't a recognised log level.
+    if level not in LOG_LEVELS:
+        return None
+
+    # Timestamp: "2025-04-10 04:46:35.844" (we already excluded the
+    # timezone offset via the regex group boundary). datetime.strptime
+    # with %f wants microseconds; pad the captured 3-digit fractional to
+    # 6 digits.
+    try:
+        dt = datetime.strptime(ts_str, THINGWORX_TS_FORMAT)
+    except ValueError:
+        return None
+    epoch = dt.replace(tzinfo=timezone.utc).timestamp()
+
+    # ltl:6947 — extract duration from message body BEFORE masking.
+    duration = None
+    dur_m = _DURATION_EXTRACT_RE.search(message)
+    if dur_m:
+        duration = float(dur_m.group(1))
+
+    # ltl:6950 — mask bytes= and durationMS= values to '?' in the
+    # message so the row key collapses all numeric variants. The
+    # substitution preserves the original "bytes=" / "durationMS="
+    # prefix verbatim (ltl uses $1 to keep " bytes=", with whatever
+    # whitespace the line had between the prefix and the value).
+    message = _BYTES_MASK_RE.sub(r' \1?', message)
+    message = _DURATION_MASK_RE.sub(r' \1?', message)
+
+    # ltl:7143-7145 — mask " count=N" to " count=?" so the row key
+    # collapses count variants. Unlike the bytes/durationMS mask, ltl
+    # normalises the original whitespace to a single literal "count=?".
+    message = _COUNT_MASK_RE.sub(' count=?', message)
+
+    # ltl:7152-7153 — threadname normalization. If thread matches
+    # /^(.*)-\d+$/, take the prefix; otherwise use the raw thread.
+    # This is what gets truncated into $truncated_thread.
+    pool_m = _THREAD_POOL_RE.match(thread)
+    threadname = pool_m.group(1) if pool_m else thread
+
+    # ltl:7402-7403, ltl:7407 — build the row key.
+    truncated_thread = threadname[:_THREAD_TRUNCATE_LEN]
+    truncated_object = _truncate_object(obj)
+
+    # ltl:7395 — for non-HTTP match types, $log_level is $category_bucket
+    # (i.e. the captured level string itself).
+    log_level = level
+
+    # ltl:7407 — first arm of the four-way builder (thread AND object
+    # are always defined for match_type 1).
+    row_message = _cap_log_key(
+        f"[{log_level}] [{truncated_thread}] [{truncated_object}] {message}"
+    )
+
+    return (epoch, row_message, duration, log_level)
+
+
+# ---------------------------------------------------------------------
+# Format dispatch table. Adding a new format = write a parse_*_line
+# function above, then register it here. Keys match the --format CLI
+# argument verbatim.
+# ---------------------------------------------------------------------
+PARSERS = {
+    "tomcat-access":       parse_tomcat_line,
+    "apache-http2":        parse_apache_http2_line,
+    "codebeamer-access":   parse_codebeamer_line,
+    "thingworx-scriptlog": parse_thingworx_scriptlog_line,
+}
 
 
 # ---------------------------------------------------------------------
@@ -427,8 +688,9 @@ def main():
                     help="Bucket size in seconds (e.g. -bs 240 → 14400)")
     ap.add_argument("--duration-unit", default="ms", choices=("ms", "us"),
                     help="Input duration unit (default: ms)")
-    ap.add_argument("--format", default="tomcat-access", choices=("tomcat-access",),
-                    help="Log format. Phase F supports tomcat-access only; other formats deferred.")
+    ap.add_argument("--format", default="tomcat-access",
+                    choices=tuple(PARSERS.keys()),
+                    help="Log format. One of: " + ", ".join(PARSERS.keys()))
     ap.add_argument(
         "--percentile-algorithm",
         required=True,
@@ -444,10 +706,6 @@ def main():
         ),
     )
     args = ap.parse_args()
-
-    if args.format != "tomcat-access":
-        print(f"ERROR: oracle does not yet support format '{args.format}'", file=sys.stderr)
-        sys.exit(2)
 
     if args.percentile_algorithm == ALGO_EXP_INTERP:
         # Fail fast with a clear error instead of waiting for the first
@@ -465,6 +723,22 @@ def main():
     # Group samples by (row_key, bucket_epoch).
     # Key: (row_message, bucket_epoch). Value: list of durations.
     groups = {}
+    parser = PARSERS[args.format]
+
+    # ltl:7233-7235 — when -du is set, every raw duration value is
+    # converted to milliseconds via convert_duration_to_ms() (ltl:4263)
+    # before any statistic is computed. So CSV-emitted percentile /
+    # mean / std_dev / etc. values are always in ms regardless of -du.
+    # The oracle must apply the same conversion or every statistic
+    # under -du us will deviate by exactly 1000× from ltl's output.
+    # Conversion factors mirror ltl:4263-4269.
+    DURATION_TO_MS = {
+        "ns": 1.0 / 1_000_000.0,
+        "us": 1.0 / 1_000.0,
+        "ms": 1.0,
+        "s":  1_000.0,
+    }
+    du_factor = DURATION_TO_MS[args.duration_unit]
 
     t_start = time.time()
     lines_total = 0
@@ -474,7 +748,7 @@ def main():
     with open(args.log, "r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
             lines_total += 1
-            parsed = parse_tomcat_line(line)
+            parsed = parser(line)
             if parsed is None:
                 continue
             lines_parsed += 1
@@ -483,13 +757,7 @@ def main():
                 continue
             lines_with_duration += 1
 
-            # ltl applies the duration-unit scaling at emission time (the
-            # `min`/`mean`/`max`/percentile values are in the same unit
-            # as the input field). For Tomcat the raw field is ms, and
-            # -du us is not used (only Apache HTTP2 sets that). When
-            # --duration-unit us is supplied, the oracle interprets the
-            # raw field as microseconds — same as ltl.
-            # For Tomcat scenarios in Phase F we always pass --duration-unit ms.
+            duration *= du_factor
 
             be = bucket_epoch(epoch, args.bucket_size_seconds)
             key = (row_message, be)
@@ -497,7 +765,7 @@ def main():
 
     t_parse = time.time() - t_start
     print(
-        f"INFO oracle: format=tomcat-access lines_total={lines_total} "
+        f"INFO oracle: format={args.format} lines_total={lines_total} "
         f"lines_parsed={lines_parsed} lines_with_duration={lines_with_duration} "
         f"unique_keys={len(groups)} parse_seconds={t_parse:.2f}",
         file=sys.stderr,

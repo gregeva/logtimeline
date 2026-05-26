@@ -262,12 +262,16 @@ extract_duration_unit() {
     fi
 }
 
-# Map an ltl logfile path to an oracle format identifier. Phase F
-# supports tomcat-access only; other formats return empty (skip L3).
+# Map an ltl logfile path to an oracle format identifier. Each pattern
+# must correspond to a parser registered in PARSERS in
+# oracle/calculate-reference.py. Unmatched paths return empty (skip L3).
 oracle_format_for_logfile() {
     local logfile="$1"
     case "$logfile" in
-        logs/AccessLogs/localhost_access_log-twx*) echo "tomcat-access" ;;
+        logs/AccessLogs/localhost_access_log-twx*)        echo "tomcat-access" ;;
+        logs/AccessLogs/ApacheHTTP2Server-*)              echo "apache-http2" ;;
+        logs/Codebeamber/codebeamer_access_log*)          echo "codebeamer-access" ;;
+        logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-*) echo "thingworx-scriptlog" ;;
         *) echo "" ;;
     esac
 }
