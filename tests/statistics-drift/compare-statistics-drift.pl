@@ -725,7 +725,7 @@ sub check_layer2_row {
                 asserts => $inv->{asserts},
                 produced_by => $inv->{produced_by},
                 contract => $inv->{contract},
-                rule => 'min <= mean <= max (tolerance 1 unit for display precision)',
+                rule => 'min <= mean <= max (tolerance 1e-9, float precision)',
             );
         }
     }
@@ -745,7 +745,7 @@ sub check_layer2_row {
                 asserts => $inv->{asserts},
                 produced_by => $inv->{produced_by},
                 contract => $inv->{contract},
-                rule => 'mean == duration / occurrences (tolerance 1 unit for display precision)',
+                rule => 'mean == duration / occurrences (tolerance 1e-9, float precision)',
             );
         }
     }
@@ -783,7 +783,7 @@ sub check_layer2_row {
                 asserts => $inv->{asserts},
                 produced_by => $inv->{produced_by},
                 contract => $inv->{contract},
-                rule => 'mean_bytes == bytes / occurrences (tolerance 1 byte)',
+                rule => 'mean_bytes == bytes / occurrences (tolerance 1 byte; mean_bytes is integer-typed per #223 rules TSV)',
             );
         }
     }
@@ -805,7 +805,7 @@ sub check_layer2_row {
                 asserts => $inv->{asserts},
                 produced_by => $inv->{produced_by},
                 contract => $inv->{contract},
-                rule => 'count_min <= count_mean <= count_max (tolerance 1 unit for display precision)',
+                rule => 'count_min <= count_mean <= count_max (tolerance 1e-9, float precision)',
             );
         }
     }
@@ -821,7 +821,7 @@ sub check_layer2_row {
                 asserts => $inv->{asserts},
                 produced_by => $inv->{produced_by},
                 contract => $inv->{contract},
-                rule => 'count_mean == count_sum / count_occurrences (tolerance 1 unit for display precision)',
+                rule => 'count_mean == count_sum / count_occurrences (tolerance 1e-9, float precision)',
             );
         }
     }
@@ -906,7 +906,7 @@ sub check_layer2_row {
                 asserts => $inv->{asserts},
                 produced_by => $inv->{produced_by},
                 contract => $inv->{contract},
-                rule => 'iqr == p75 - p25 (tolerance 1 unit for display precision)',
+                rule => 'iqr == p75 - p25 (tolerance 1e-9, float precision)',
             );
         }
     }
