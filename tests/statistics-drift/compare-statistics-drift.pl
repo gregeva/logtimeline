@@ -309,26 +309,23 @@ my %L1_FIELDS_BY_FAMILY = (
 #-------------------------------------------------------------------------
 # Tolerance for numeric equality in L2 derivation and ordering checks.
 #
-# ltl's rules TSV declares max_decimals=5 for most numeric columns, but
-# its actual emission is not uniform: some columns (count_mean, mean for
-# certain buckets, percentile values) are integer-truncated via sprintf
-# "%.0f" — see ltl:8119, ltl:8157, ltl:8280. This means a row can have
-# min=35.314 (decimals retained) and p1=35 (truncated). The mathematical
-# invariant min <= p1 is then breached by up to 1.0 absolute, without any
-# algorithmic bug present.
+# Scenarios in this harness invoke ltl with -cp full so float columns
+# (percentile, shape, mean, std_dev, etc.) emit precise floats rather
+# than the human-facing default rounding. For those columns the
+# harness validates against full precision; tolerance only needs to
+# absorb float-arithmetic quantization (last few ulps).
 #
-# DERIVATION_EPS absorbs this 1.0-unit display precision gap. The L2
-# invariants still catch genuine algorithmic bugs (mismatches at the
-# 1.0+ scale) without false-alarming on truncation.
-#
-# Issue #268 tracks the precision truncation as a real finding (it
-# defeats microsecond-precision input). Once that ships and time-valued
-# statistics emit with input-derived precision, these tolerances tighten
-# to ~1e-3 or whatever the resolved precision dictates.
+# BYTES_INTEGER_EPS is a separate, looser tolerance for the bytes_deriv
+# invariant. The rules TSV declares mean_bytes and bytes as `int`
+# (max_decimals=0), so ltl integer-rounds mean_bytes at emission. The
+# mathematical relation `mean_bytes == bytes / occurrences` can be
+# breached by up to 0.5 units of rounding error per side, which is
+# inherent to the column's contracted type — not an algorithmic bug.
 #-------------------------------------------------------------------------
 
-use constant DERIVATION_EPS  => 1.0;
-use constant ORDERING_EPS    => 1.0;
+use constant DERIVATION_EPS     => 1e-9;
+use constant ORDERING_EPS       => 1e-9;
+use constant BYTES_INTEGER_EPS  => 1.0;
 
 #-------------------------------------------------------------------------
 # Helpers: numeric parsing and tier classification.
@@ -771,7 +768,7 @@ sub check_layer2_row {
     if (defined $mb && defined $bt && defined $occ && $occ > 0) {
         my $expected = $bt / $occ;
         # Bytes are integer; tolerate <= 1.0 absolute diff (truncation/rounding).
-        if (abs($expected - $mb) > DERIVATION_EPS) {
+        if (abs($expected - $mb) > BYTES_INTEGER_EPS) {
             $stats->{T4}++;
             my $inv = $L2_INVARIANTS{bytes_deriv};
             emit_l2_failure(
