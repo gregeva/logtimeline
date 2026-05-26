@@ -21,6 +21,6 @@ plain,"[200] POST /Thingworx/Things/PTCDTS.OperationKPIImpl.Manager/Services/IsS
 plain,"[200] POST /Thingworx/Things/*/Services/GetPTCModelUid",1748,182,318152,"310.7 KiB",,,,,,0,1,2,0.442,0,0,0,1,1,1,0,1,1,1,2,2,2,0.577,-0.976,-0.266,0.713,1339,"1.3 sec",5.6
 plain,"[200] GET /Thingworx/Metrics",1736,14348,24908624,"23.8 MiB",,,,,,250,267,800,18.771,253,256,257,260,264,269,9,277,283,297,639,800,800,0.07,18.868,473.84,0.749,462938,"7.7 min",46.561
 plain,"[200] POST /Thingworx/Resources/CurrentSessionInfo/Services/SetGlobalSessionStringValue",1696,48,81408,"79.5 KiB",,,,,,0,1,1,0.5,0,0,0,0,1,1,1,1,1,1,1,1,1,0.958,-0.087,-1.995,0.997,885,"885 msec",2.883
-plain,"[304] GET /Thingworx/Common/extensions/_FsCoreExtension/ui/fs-core/libs/fs-*.min.*s",1509,0,0,"0 B",,,,,,0,0,1,0.448,0,0,0,0,0,1,1,1,1,1,1,1,1,1.611,0.99,-1.021,0.998,420,"420 msec",-1.633
 plain,"[200] GET /Thingworx/Mashups/PTC.Base.DurationEntry_MU",1501,10373,15569873,"14.8 MiB",,,,,,6,7,51,1.786,6,6,6,7,7,7,0,8,8,8,45,51,51,0.252,19.746,436.951,0.889,10645,"10.6 sec",21.027
 plain,"[200] POST /Thingworx/Resources/CurrentSessionInfo/Services/Get*",1400,1174,1643372,"1.6 MiB",,,,,,0,2,92,3.865,0,0,0,0,1,1,1,9,9,10,11,92,92,1.874,9.846,209.028,0.462,2887,"2.9 sec",12.31
+plain,"[200] POST /Thingworx/Things/Brembo.MESWatchdog.Manager/Services/IsUserSystemAdmin",1127,184,207339,"202.5 KiB",,,,,,1,2,4,0.457,1,2,2,2,2,2,0,3,3,3,4,4,4,0.209,0.947,1.263,0.444,2464,"2.5 sec",12.503
