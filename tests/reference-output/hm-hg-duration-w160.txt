@@ -27,5 +27,5 @@
 
                         P1: 2ms   P10: 2ms   P25: 3ms   P50: 6ms   P75: 8ms   P90: 1s   P95: 3s   P99: 5.9s   P99.9: 40.6s   P99.99: 1.4m       
 
-command-line options: --disable-progress -osum -n 1 --exact-percentiles --terminal-width 160 -hm duration -hg duration 
+command-line options: --disable-progress -osum -n 1 -dm raw --terminal-width 160 -hm duration -hg duration 
 

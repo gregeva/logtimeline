@@ -413,7 +413,6 @@ Section content is governed by per-section stability contracts — additions are
 | `-g <non-numeric>` (e.g. `-g logfile.log`) | The non-numeric value is treated as a positional argument and the default similarity threshold (85) is applied. |
 | `-hm <unknown-metric>` without any `-udm` configured (e.g. `-hm bogus`) | The value is treated as a positional argument and the default heatmap metric (`duration`) is applied. |
 | Both `-pbpd` and `--percentile-precision` supplied | `-pbpd` wins; the warning surfaces the override so it is visible without `-V`. |
-| `--exact-percentiles` (or `-ep`) supplied | Deprecation notice naming the new data-model selectors (`-dm raw`, `-hgdm raw`, `-hmdm raw`) as replacements. The flag continues to work; scheduled for removal in a future release. |
 | `--data-model`, `--histogram-data-model`, `--heatmap-data-model`, `--message-stats-data-model`, or `--bucket-stats-data-model` supplied with a value other than `raw` or `bin` | ltl exits with `<flag>: '<value>' is not a valid data model; valid values are 'raw' and 'bin'`. |
 
 To inspect the resolved configuration after warnings have fired, use `-V runtime-config` and read the `command-line` and `environment-variable` sub-sections.

@@ -12,5 +12,5 @@
  2025-04-10 06:00 ERROR: 405 WARN: 63691 INFO: 115  3.4:535.1/m │ █████████████ 
 ────────────────────────────────────────────────────────────────────────────────┴─1ms──────16.4ms───────340.4ms───────7.1s────────3.1m
 
-command-line options: --disable-progress -osum -n 1 --exact-percentiles --terminal-width 80 -hm duration 
+command-line options: --disable-progress -osum -n 1 -dm raw --terminal-width 80 -hm duration 
 

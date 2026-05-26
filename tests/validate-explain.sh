@@ -1076,9 +1076,9 @@ scenario_data_model_aware_prose() {
     # character class so the first char is data, not an option prefix.
     assert_no_line "$out" \
         pattern     'ltl [-]ep ' \
-        asserts     "--explain percentiles examples block no longer uses the deprecated -ep flag (replaced by per-surface selectors in #266 / -dm in #266)" \
+        asserts     "--explain percentiles examples block does not reference -ep; user-facing examples guide users to the data-model selectors (-dm/-hgdm/-hmdm/-mdm)" \
         produced_by '%explain_topics{percentiles} example block in ltl' \
-        contract    'Issue #266 — --exact-percentiles is deprecated; user-facing examples must guide users to the new selectors (-dm/-hgdm/-hmdm/-mdm).'
+        contract    'Issue #266 — the data-model selectors are the locked opt-out surface for the histogram and heatmap percentile algorithms.'
 
     assert_line "$out" \
         pattern     '[-]mdm bin' \

@@ -61,5 +61,5 @@
 
                      P50: 47.1s   P75: 1.5m   P90: 9m   P95: 22m   P99: 1.5h   P99.9: 2h   P99.99: 2h       
 
-command-line options: --disable-progress -osum -n 1 --exact-percentiles --terminal-width 120 -hg duration 
+command-line options: --disable-progress -osum -n 1 -dm raw --terminal-width 120 -hg duration 
 

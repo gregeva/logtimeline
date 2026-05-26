@@ -8,7 +8,7 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
      timestamp                 legend                        occurrences            duration     bytes                       latency statistics                 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- 2026-01-22 08:00 4xx: 2 2xx: 8           0:0.1/m │                                 52.8m      3.6 KiB   │  P50:2.9m   P95:12.9m  P99:12.9m  P999:12.9m CV:1.11
+ 2026-01-22 08:00 4xx: 2 2xx: 8           0:0.1/m │                                 52.8m      3.6 KiB   │  P50:2.9m   P95:12.9m  P99:12.9m  P999:12.9m CV:1.17
  2026-01-22 10:00                                 │                                                      │  
  2026-01-22 12:00                                 │                                                      │  
  2026-01-22 14:00                                 │                                                      │  
@@ -61,5 +61,5 @@
 
                 P50: 47.1s   P90: 9m   P95: 22m   P99: 1.5h   P99.9: 2h                         P50: 3 KiB   P99: 10.2 KiB   P99.9: 163.6 KiB           
 
-command-line options: --disable-progress -osum -n 1 --exact-percentiles --terminal-width 160 -hg duration,bytes 
+command-line options: --disable-progress -osum -n 1 -dm raw --terminal-width 160 -hg duration,bytes 
 
