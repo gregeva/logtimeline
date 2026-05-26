@@ -312,7 +312,174 @@ scenario_pbpd_out_of_range() {
 }
 
 # ---------------------------------------------------------------------------
-# Scenario 7: section is always present under -V histogram-bin-counters
+# Scenario 7a (Issue #287): -mdm bin engages the per-message-key bin path.
+# Asserts summary_table consumer block emits path: unified + all locked
+# Decision 8 telemetry fields populated from the real partition state, and
+# csv_output is feature_not_active because -o is not supplied.
+# ---------------------------------------------------------------------------
+scenario_message_stats_bin() {
+    current_scenario="message-stats-bin"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_section -mdm bin -n 3)
+
+    assert_header_present "$out"
+
+    assert_line "$out" \
+        pattern     '^consumer: summary_table$' \
+        asserts     'The summary_table consumer block is emitted in the -V histogram-bin-counters output under -mdm bin (per Issue #287 Commit 4 — summary_table was added to %migrated alongside #34s heatmap_cells/markers and histogram_view/bins).' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — the @consumer_order iteration emits one consumer: block per migrated consumer' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — consumer name string is locked; renames are breaking. features/287-message-stats-bin-counter-data-model.md § R8.1.'
+
+    assert_line "$out" \
+        pattern     '^  path: unified$' \
+        asserts     'Under -mdm bin (no opt-outs), the summary_table consumer reports path: unified — the bin-counter path is running end-to-end on the per-message-key statistics surface.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — path determined by %migrated AND not opted out' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § R10 path vocabulary — unified is the post-migration label.'
+
+    assert_line "$out" \
+        pattern     '^  partition_keying: \(category, log_key\)$' \
+        asserts     'summary_tables partition keying is (category, log_key), distinct from time_bucket and metric_global. This is the F1 keying shape per #189 R3.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — %partition_keying lookup' \
+        contract    'features/189-histogram-bin-counter-primitives.md § R3 — keying shape per consumer is locked; features/287 § R8.1 sets summary_tables shape.'
+
+    assert_line "$out" \
+        pattern     '^  partition_count: [1-9][0-9]*$' \
+        asserts     'partition_count reports a positive integer — at least one (category, log_key) had a duration sample that triggered counter_update and lazily allocated a partition.' \
+        produced_by 'snapshot_counter_telemetry() in ltl, invoked from finalize_message_stats_unified()' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — partition_count field is locked; format is integer.'
+
+    assert_line "$out" \
+        pattern     '^  total_rebin_events: [0-9]+$' \
+        asserts     'total_rebin_events is present and a non-negative integer — the auto-resize lifecycle has either fired zero or more rebins across all partitions.' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — total_rebin_events field is locked; format is integer.'
+
+    assert_line "$out" \
+        pattern     '^  max_partition_bins: [0-9]+$' \
+        asserts     'max_partition_bins is present and a non-negative integer — the high-water-mark bin count across all partitions for this consumer (#187 Decision 5 telemetry).' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — max_partition_bins is locked.'
+
+    assert_line "$out" \
+        pattern     '^  partitions_with_overflow_count: [0-9]+$' \
+        asserts     'partitions_with_overflow_count reports the count of partitions where the overflow counter was non-zero (per #187 Decision 4 / #189 R6). Zero on the test log; non-zero is the audit signal.' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 + § Decision 4 — overflow tally is the audit surface; field name and integer format are locked.'
+
+    assert_line "$out" \
+        pattern     '^  partitions_with_underflow_count: [0-9]+$' \
+        asserts     'partitions_with_underflow_count reports the symmetric tally for underflow per #187 Decision 4. Zero on the test log; non-zero is the audit signal.' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 + § Decision 4 — underflow tally is the audit surface.'
+
+    assert_line "$out" \
+        pattern     '^  counter_memory_bytes: [0-9]+$' \
+        asserts     'counter_memory_bytes is present and a non-negative integer — the Devel::Size measurement of the counter store carrying the empirical-tuning signal for partition-count vs memory.' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — counter_memory_bytes is locked.'
+
+    assert_line "$out" \
+        pattern     '^  rebins_per_partition: p50=[0-9]+ p95=[0-9]+ p99=[0-9]+ max=[0-9]+$' \
+        asserts     'rebins_per_partition reports the percentile distribution of per-partition rebin counts in the locked four-field format (p50, p95, p99, max). The seed-heuristic tuning signal per #187 Decision 5.' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 5 + § Decision 8 — telemetry field name and four-quartile format are locked.'
+
+    assert_line "$out" \
+        pattern     '^  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999$' \
+        asserts     'summary_table emits the 12-quantile ladder per #187 R3 for this surface. Order is fixed: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — %percentile_set{summary_table}' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § R3 — per-consumer percentile set is locked; features/287 § R8.1 sets summary_tables ladder.'
+
+    assert_line "$out" \
+        pattern     '^  out_of_range_bounded: p1=(none|low|high)' \
+        asserts     'out_of_range_bounded emits per-quantile audit code (none|low|high) per #187 Decision 4. Pattern checks at least p1 is reported; subsequent quantiles follow the same triple.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — reads $t->{out_of_range_bounded} populated by finalize_message_stats_unified()' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 4 + § Decision 8 — per-quantile audit code triple is locked.'
+
+    assert_line "$out" \
+        pattern     '^consumer: csv_output$' \
+        asserts     'csv_output consumer block is emitted in the -V histogram-bin-counters output. Without -o, csv_output reports feature_not_active; with -o, it reports the shared-partition short form.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — @consumer_order iteration' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — csv_output consumer is locked.'
+
+    assert_line "$out" \
+        pattern     '^  path: feature_not_active$' \
+        asserts     'Without -o, csv_output reports path: feature_not_active. csv_output is gated on $write_messages_to_csv (the -o flag); when not active, no telemetry block is emitted.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — %feature_active map' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § R10 — feature_not_active is the no-op label.'
+
+    rm -f "$out"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 7b (Issue #287): -mdm bin -o engages both summary_table and
+# csv_output. csv_output is the downstream consumer sharing summary_tables
+# partition store per #189 R7. Assert the shares_partitions_with short-form
+# block is emitted correctly.
+# ---------------------------------------------------------------------------
+scenario_message_stats_csv_shared() {
+    current_scenario="message-stats-csv-shared"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_section -mdm bin -n 3 -o)
+
+    assert_header_present "$out"
+
+    assert_line "$out" \
+        pattern     '^consumer: csv_output$' \
+        asserts     'csv_output consumer block is emitted under -mdm bin -o.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8'
+
+    assert_line "$out" \
+        pattern     '^  shares_partitions_with: summary_table$' \
+        asserts     'Under -mdm bin -o, csv_output reports the locked shares_partitions_with short-form block, declaring that csv_output reads percentile values from the same per-key partition that summary_table populates (no duplicate store).' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — %shares_with map carrying csv_output => summary_table' \
+        contract    'features/189-histogram-bin-counter-primitives.md § R7 — shared partitions across consumers; features/187 § Decision 8 — locked short-form block; features/287 § R8.1.'
+
+    # Cleanup: -o leaves CSV files in the cwd
+    rm -f *MESSAGES-*.csv *STATS-*.csv 2>/dev/null || true
+    rm -f "$out"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 7c (Issue #287): -mdm raw routes summary_table through user_opt_out
+# even though the consumer is migrated, because the user explicitly pinned raw
+# on this surface. The default (no -mdm) also routes through user_opt_out
+# because default is raw on this surface.
+# ---------------------------------------------------------------------------
+scenario_message_stats_raw() {
+    current_scenario="message-stats-raw"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_section -mdm raw -n 3)
+
+    assert_header_present "$out"
+
+    assert_line "$out" \
+        pattern     '^consumer: summary_table$' \
+        asserts     'summary_table consumer block is emitted even under -mdm raw — the consumer is migrated; the path label distinguishes engaged-vs-opt-out.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8'
+
+    assert_line "$out" \
+        pattern     '^  path: user_opt_out$' \
+        asserts     'Under -mdm raw, summary_table reports path: user_opt_out — the consumer is migrated but the user pinned raw on this surface, so the pre-migration code runs. No telemetry block follows.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — %consumer_opted_out_to_raw map (Issue #287 Commit 4)' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § R10 path vocabulary — user_opt_out is the migrated-but-pinned-raw label.'
+
+    assert_no_line "$out" \
+        pattern     '^  partition_count:' \
+        asserts     'Under -mdm raw, no telemetry block follows path: user_opt_out — counter store is empty (producer never fired) and emit logic short-circuits.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — next-after-path-emit short-circuit' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — opt-out blocks emit only the path: line.'
+
+    rm -f "$out"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 8: section is always present under -V histogram-bin-counters
 # even when no percentile-consuming feature is in use
 # ---------------------------------------------------------------------------
 scenario_always_present() {
@@ -345,6 +512,12 @@ echo ""
 scenario_flag_conflict
 echo ""
 scenario_pbpd_out_of_range
+echo ""
+scenario_message_stats_bin
+echo ""
+scenario_message_stats_csv_shared
+echo ""
+scenario_message_stats_raw
 echo ""
 scenario_always_present
 

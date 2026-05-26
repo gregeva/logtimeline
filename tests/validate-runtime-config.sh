@@ -281,6 +281,29 @@ scenario_warning_exact_percentiles_deprecated() {
         contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 + Issue #266 — --exact-percentiles is documented-deprecated and supersession is locked; warning is the user-visible signal of the deprecation status. Anchored at the opening clause because the body advises on replacement flags and may evolve as --data-model evolves.'
 }
 
+# Issue #287: assert that the per-surface data-model selectors surface in
+# -V runtime-config / command-line when supplied by the user. The selectors
+# themselves were wired by #266; this scenario locks the -V row format so
+# the runtime-config -V contract reflects the post-#287 surface state.
+scenario_runtime_config_data_model_selectors() {
+    current_scenario="runtime-config-data-model-selectors"
+    echo "[$current_scenario]"
+
+    run_ltl "rc-dm" -V runtime-config -mdm bin -dm bin "$TEST_LOG"
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^message-stats-data-model: bin$' \
+        asserts     'A user-supplied -mdm bin appears in the runtime-config / command-line sub-section with its resolved value and no annotation, per #266 + #231.' \
+        produced_by 'emit_runtime_config_verbose() in ltl — %resolved_values lookup for message-stats-data-model' \
+        contract    'features/266-data-model-selectors.md § -V runtime-config surfacing + features/287-message-stats-bin-counter-data-model.md § R8.3 — selector row format is locked.'
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^data-model: bin$' \
+        asserts     'A user-supplied omnibus -dm bin appears as the data-model row in the command-line sub-section, alongside any per-surface override.' \
+        produced_by 'emit_runtime_config_verbose() in ltl' \
+        contract    'features/266-data-model-selectors.md § -V runtime-config surfacing.'
+}
+
 scenario_error_unknown_so() {
     current_scenario="error-unknown-so"
     echo "[$current_scenario]"
@@ -387,6 +410,7 @@ scenario_warning_g_non_numeric;                        echo ""
 scenario_warning_hm_non_builtin;                       echo ""
 scenario_warning_pbpd_overrides_pp;                    echo ""
 scenario_warning_exact_percentiles_deprecated;         echo ""
+scenario_runtime_config_data_model_selectors;          echo ""
 scenario_error_unknown_so;                             echo ""
 scenario_error_unknown_du;                             echo ""
 scenario_error_unknown_ru;                             echo ""
