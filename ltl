@@ -527,6 +527,15 @@ my %histogram_data_max;
 # calculate_statistics_bin() and snapshot_counter_telemetry() at end-of-parse.
 my %log_messages_counters;
 
+# Issue #287: per-quantile out_of_range_bounded audit aggregation for the
+# summary_table / csv_output consumers. Updated inside calculate_statistics_bin
+# as it invokes percentile() across all top-N keys. Aggregation rule:
+# 'high' overrides 'low' overrides 'none' (the worst-case-per-quantile-across-
+# all-partitions rule that matches the locked #187 Decision 8 / #189 R6
+# audit semantics). Drained by finalize_message_stats_unified() into
+# %bin_counter_telemetry{summary_table}{out_of_range_bounded}.
+my %message_stats_audit;
+
 # Box drawing character sets for histogram axes (Issue #25)
 my $histogram_box_weight = 'heavy';  # 'heavy' or 'light'
 
@@ -1963,7 +1972,9 @@ sub emit_percentile_algorithm_verbose {
         {
             id              => 'message-stats',
             data_model      => choose_data_model('message-stats') // 'raw',
-            effective_track => 'pinned_raw',
+            # Issue #287: bin reduction now implemented end-to-end; the
+            # effective algorithm tracks the resolved data model.
+            effective_track => 'matches_data_model',
         },
         {
             id              => 'bucket-stats',
@@ -2094,21 +2105,31 @@ sub emit_bin_counter_mode_verbose {
         histogram_bins
     );
 
-    # Consumers migrated to the unified path under #34. The other three
-    # (summary_table, csv_output, time_bucket_stats) are owned by separate
-    # F1 migration tickets and remain on the pre-migration path.
-    my %migrated = map { $_ => 1 } qw(heatmap_cells heatmap_markers histogram_view histogram_bins);
+    # Consumers migrated to the unified path. heatmap_cells / heatmap_markers
+    # / histogram_view / histogram_bins shipped via #34; summary_table /
+    # csv_output shipped via #287. time_bucket_stats remains on the
+    # pre-migration path until its own sibling implementation ticket lands.
+    my %migrated = map { $_ => 1 } qw(
+        heatmap_cells heatmap_markers histogram_view histogram_bins
+        summary_table csv_output
+    );
 
     # Shared-partition topology per #189 R7 / Decision 8 shares_partitions_with.
+    # csv_output reads the same per-(category, log_key) partitions that
+    # summary_table populates — both consumers consume the locked 12-quantile
+    # ladder from the same %log_messages_counters store.
     my %shares_with = (
         heatmap_markers => 'heatmap_cells',
         histogram_bins  => 'histogram_view',
+        csv_output      => 'summary_table',
     );
 
-    # Per-consumer percentile sets (R3 of #34, locked in #187 Decision 8).
+    # Per-consumer percentile sets (R3 of #34 / #287, locked in #187 Decision 8).
     my %percentile_set = (
         heatmap_markers => [qw(p50 p95 p99 p999)],
         histogram_view  => [qw(p1 p10 p25 p50 p75 p90 p95 p99 p999 p9999)],
+        summary_table   => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
+        csv_output      => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
     );
 
     # Per-consumer partition keying (Decision 8 field).
@@ -2117,6 +2138,18 @@ sub emit_bin_counter_mode_verbose {
         heatmap_markers => 'time_bucket',
         histogram_view  => 'metric_global',
         histogram_bins  => 'metric_global',
+        summary_table   => '(category, log_key)',
+    );
+
+    # Issue #287: per-consumer data-model resolution for the path: line.
+    # When the user opted into raw on this consumer's surface via -mdm raw
+    # (or the omnibus -dm raw), the bin path didn't run even though the
+    # consumer is migrated — that maps to user_opt_out per #187 R10.
+    # F2/F3 surfaces use the legacy --exact-percentiles fallback only;
+    # F1 (#287) also honors -mdm.
+    my %consumer_opted_out_to_raw = (
+        summary_table => ($message_stats_capture_mode && $message_stats_capture_mode eq 'raw') ? 1 : 0,
+        csv_output    => ($message_stats_capture_mode && $message_stats_capture_mode eq 'raw') ? 1 : 0,
     );
 
     for my $consumer (@consumer_order) {
@@ -2133,28 +2166,32 @@ sub emit_bin_counter_mode_verbose {
             next;
         }
 
-        if ($exact_percentiles_optout) {
+        if ($exact_percentiles_optout || $consumer_opted_out_to_raw{$consumer}) {
             push @verbose_output, "  path: user_opt_out";
             next;
         }
 
         push @verbose_output, "  path: unified";
 
+        # Look up shared telemetry up front so the audit line can read from
+        # the upstream consumer's snapshot when this consumer is downstream
+        # of a shares_partitions_with relationship (#287's csv_output reads
+        # summary_table's audit aggregation; #34's heatmap_markers and
+        # histogram_bins do not populate audit at all and fall back to 'none').
+        my $t = $bin_counter_telemetry{$consumer} // {};
+
         # Downstream consumer of a shared partition emits a short block.
         if (my $upstream = $shares_with{$consumer}) {
             push @verbose_output, "  shares_partitions_with: $upstream";
             if (my $pset = $percentile_set{$consumer}) {
                 push @verbose_output, "  percentiles_emitted: " . join(' ', @$pset);
-                # out_of_range_bounded reported as 'none' across all quantiles
-                # at default bpd=616 (V8 empirical: no overflow seen on
-                # canonical datasets; safety net per Decision 4).
+                my $audit = $t->{out_of_range_bounded} // {};
                 push @verbose_output, "  out_of_range_bounded: " .
-                    join(' ', map { "$_=none" } @$pset);
+                    join(' ', map { "$_=" . ($audit->{$_} // 'none') } @$pset);
             }
             next;
         }
 
-        my $t = $bin_counter_telemetry{$consumer} // {};
         push @verbose_output, "  partition_keying: $partition_keying{$consumer}";
         push @verbose_output, "  partition_count: "                 . ($t->{partition_count}                 // 0);
         push @verbose_output, "  total_rebin_events: "              . ($t->{total_rebin_events}              // 0);
@@ -2167,8 +2204,9 @@ sub emit_bin_counter_mode_verbose {
             $t->{rebins_p99} // 0, $t->{rebins_max} // 0);
         if (my $pset = $percentile_set{$consumer}) {
             push @verbose_output, "  percentiles_emitted: " . join(' ', @$pset);
+            my $audit = $t->{out_of_range_bounded} // {};
             push @verbose_output, "  out_of_range_bounded: " .
-                join(' ', map { "$_=none" } @$pset);
+                join(' ', map { "$_=" . ($audit->{$_} // 'none') } @$pset);
         }
     }
 
@@ -8132,6 +8170,28 @@ sub calculate_heatmap_buckets_exact {
     return;
 }
 
+sub finalize_message_stats_unified {
+    # Issue #287: snapshot per-message-key bin telemetry for the locked #187
+    # Decision 8 -V output (summary_table + csv_output blocks). Mirrors the
+    # shape of finalize_heatmap_unified / finalize_histogram_unified — runs
+    # after calculate_all_statistics, before emit_bin_counter_mode_verbose
+    # (see MAIN orchestration). No-op under -mdm raw (counter store is
+    # empty because the bin producer never fired).
+    return unless %log_messages_counters;
+
+    $bin_counter_telemetry{summary_table} = snapshot_counter_telemetry(\%log_messages_counters);
+    # csv_output shares partitions with summary_table per #189 R7 — aliased
+    # to the same telemetry hashref so emit_bin_counter_mode_verbose's
+    # short-form shares_partitions_with block reads consistent values.
+    $bin_counter_telemetry{csv_output} = $bin_counter_telemetry{summary_table};
+
+    # Drain the per-quantile audit aggregation (populated inside
+    # calculate_statistics_bin while it walked the top-N keys) into the
+    # telemetry hash so emit_bin_counter_mode_verbose's out_of_range_bounded
+    # line reflects real audit state instead of hard-coding 'none'.
+    $bin_counter_telemetry{summary_table}{out_of_range_bounded} = { %message_stats_audit };
+}
+
 sub finalize_heatmap_unified {
     # F2 finalize per #201: re-bin each streaming partition (bpd=616) into
     # a display-anchored target partition with bin_count = $heatmap_width.
@@ -9183,21 +9243,33 @@ sub calculate_statistics_bin {
     # Percentile ladder. When $counter_entry is undef (the rare case of every
     # observed duration being 0, so counter_update was never called for this
     # key), all percentiles collapse to 0 — matches the raw path's behavior
-    # when @sorted is all-zero.
+    # when @sorted is all-zero. Audit codes from percentile() are aggregated
+    # into %message_stats_audit for the -V out_of_range_bounded report;
+    # finalize_message_stats_unified() drains the aggregation into the
+    # per-consumer telemetry hash.
     my ($p1, $p5, $p10, $p25, $p50, $p75, $p90, $p95, $p99, $p999, $p9999, $p99999);
     if ($counter_entry) {
-        ($p1,     undef) = percentile($counter_entry, 0.01);
-        ($p5,     undef) = percentile($counter_entry, 0.05);
-        ($p10,    undef) = percentile($counter_entry, 0.10);
-        ($p25,    undef) = percentile($counter_entry, 0.25);
-        ($p50,    undef) = percentile($counter_entry, 0.50);
-        ($p75,    undef) = percentile($counter_entry, 0.75);
-        ($p90,    undef) = percentile($counter_entry, 0.90);
-        ($p95,    undef) = percentile($counter_entry, 0.95);
-        ($p99,    undef) = percentile($counter_entry, 0.99);
-        ($p999,   undef) = percentile($counter_entry, 0.999);
-        ($p9999,  undef) = percentile($counter_entry, 0.9999);
-        ($p99999, undef) = percentile($counter_entry, 0.99999);
+        my %a;
+        ($p1,     $a{p1})     = percentile($counter_entry, 0.01);
+        ($p5,     $a{p5})     = percentile($counter_entry, 0.05);
+        ($p10,    $a{p10})    = percentile($counter_entry, 0.10);
+        ($p25,    $a{p25})    = percentile($counter_entry, 0.25);
+        ($p50,    $a{p50})    = percentile($counter_entry, 0.50);
+        ($p75,    $a{p75})    = percentile($counter_entry, 0.75);
+        ($p90,    $a{p90})    = percentile($counter_entry, 0.90);
+        ($p95,    $a{p95})    = percentile($counter_entry, 0.95);
+        ($p99,    $a{p99})    = percentile($counter_entry, 0.99);
+        ($p999,   $a{p999})   = percentile($counter_entry, 0.999);
+        ($p9999,  $a{p9999})  = percentile($counter_entry, 0.9999);
+        ($p99999, $a{p99999}) = percentile($counter_entry, 0.99999);
+        # Aggregate: 'high' wins over 'low' wins over 'none'.
+        for my $q (keys %a) {
+            my $new = $a{$q};
+            my $cur = $message_stats_audit{$q};
+            if    ($new eq 'high')                                 { $message_stats_audit{$q} = 'high'; }
+            elsif ($new eq 'low'  && (!$cur || $cur eq 'none'))    { $message_stats_audit{$q} = 'low';  }
+            elsif (!defined $cur)                                  { $message_stats_audit{$q} = 'none'; }
+        }
     } else {
         # All-zero degenerate case: every percentile equals min (which is 0
         # here because durations are non-negative and we observed only zeros).
@@ -12081,6 +12153,12 @@ calculate_all_statistics();
 $end_time = [gettimeofday];
 $elapsed_calculate_statistics = tv_interval($start_time, $end_time);
 measure_memory_structures();
+
+# Issue #287: snapshot per-message-key bin-counter telemetry before any
+# subsequent stage discards the streaming counter store. Sibling of the
+# finalize_heatmap_unified and finalize_histogram_unified hooks below;
+# no-op under -mdm raw.
+finalize_message_stats_unified();
 
 # CALCULATE HEATMAP BUCKETS (if enabled) #
 if ($heatmap_enabled) {
