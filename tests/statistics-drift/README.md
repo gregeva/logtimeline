@@ -80,20 +80,29 @@ install hint if any are missing — it does not silently skip Layer 3.
 
 Modern Homebrew Python (macOS) and modern Linux distros (Ubuntu 24.04+,
 Debian 12+, Fedora 38+) enforce PEP 668, which blocks `pip3 install`
-against the system-managed Python. Use `--user` to install into your home
-directory without sudo or override flags:
+against the system-managed Python. Use `python3 -m pip install --user`:
+the `--user` flag installs into your home directory without sudo or
+override flags, and the `python3 -m pip` invocation guarantees the
+modules install under the same interpreter that `python3` on PATH
+resolves to (a bare `pip3` may be a sibling binary from a different
+Python version, which silently installs into a Python the harness
+cannot see):
 
 ```bash
 # macOS
 brew install python
-pip3 install --user numpy scipy
+python3 -m pip install --user numpy scipy
 
 # Ubuntu/Linux
 sudo apt-get install python3 python3-pip
-pip3 install --user numpy scipy
+python3 -m pip install --user numpy scipy
 ```
 
-Verify with `python3 -c "import numpy, scipy"`.
+Verify with `python3 -c "import numpy, scipy"` — if both modules import
+under the `python3` the harness will invoke, you are done. If they do
+not import after install, you have a version-mismatch case: re-run the
+install under the explicit interpreter the harness uses (`which python3`
+identifies it).
 
 If you prefer a project-local venv, the harness driver honors the venv's
 Python when invoked with `PATH=$(pwd)/.venv/bin:$PATH`. See the top-level

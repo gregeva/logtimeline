@@ -117,9 +117,13 @@ if [[ $L3_ENABLED -eq 1 ]]; then
         exit 1
     fi
     if ! python3 -c 'import numpy, scipy' >/dev/null 2>&1; then
-        echo "ERROR: Layer 3 requires NumPy and SciPy (one or both missing)." >&2
-        echo "       Install (avoiding PEP 668):" >&2
-        echo "         pip3 install --user numpy scipy" >&2
+        echo "ERROR: Layer 3 requires NumPy and SciPy (one or both missing under $(command -v python3))." >&2
+        echo "       Install (avoiding PEP 668, and targeting the same interpreter the harness uses):" >&2
+        echo "         python3 -m pip install --user numpy scipy" >&2
+        echo "       The 'python3 -m pip' form is important — a bare 'pip3' may target a" >&2
+        echo "       different Python version (e.g. a legacy brew formula) and the install" >&2
+        echo "       lands somewhere this harness cannot see." >&2
+        echo "       Verify: python3 -c 'import numpy, scipy'" >&2
         echo "       See README.md 'Test-harness dependencies' for venv alternative." >&2
         echo "       Or pass --skip-l3 to run without external-oracle validation." >&2
         exit 1
