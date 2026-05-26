@@ -7536,31 +7536,43 @@ sub read_and_process_logs {
                             # consumer-side derivation (Commit 2) has been validated against the
                             # baseline harness.
                             #
-                            # The $duration > 0 guard mirrors the heatmap pattern at ltl:7671 —
-                            # log-spaced partitions cannot bin zero or negative values, so 0-duration
-                            # samples (e.g. Tomcat sub-millisecond responses) are dropped from the
-                            # bin path. The sidecar accumulators are gated the same way so the
-                            # sidecars and the partition stay aligned on the same sample subset;
-                            # Commit 2's per-statistic derivation reads both. Cross-model deviation
-                            # introduced by this drop is covered by tests/statistics-drift's
-                            # cross-model-tolerances.tsv (R9.2 of features/287-*.md), populated in
-                            # Commit 6 once Layer 4 measurement is available.
-                            if ($message_stats_capture_mode eq 'bin' && $duration > 0) {
+                            # The counter_update call is gated on $duration > 0 because log-spaced
+                            # partitions cannot represent zero (mirrors the heatmap pattern at
+                            # ltl:7671). The sidecar/Welford-Pébay updates are NOT gated — they
+                            # must include 0-duration samples so the bin-path exact-value statistics
+                            # (min, mean, std_dev, moments) match raw byte-for-byte per #224
+                            # Layer 4 T1 expectation. Zero-duration samples are therefore visible
+                            # to the sidecar-derived statistics but missing from the percentile
+                            # ladder; the cross-model envelope at tests/statistics-drift/cross-model-
+                            # tolerances.tsv (R9.2 of features/287-*.md) absorbs that divergence,
+                            # populated in Commit 6 once Layer 4 measurement is available.
+                            if ($message_stats_capture_mode eq 'bin') {
                                 my $entry = $log_messages{$category}{$log_key};
-                                counter_update(\%log_messages_counters,
-                                               "$category\x1f$log_key",
-                                               $duration);
-                                # Running min/max sidecars (R2.2).
+
+                                # Percentile-ladder source (the bin partition). Skip zero-valued
+                                # samples — partition's log-spaced geometry cannot bin them.
+                                if ($duration > 0) {
+                                    counter_update(\%log_messages_counters,
+                                                   "$category\x1f$log_key",
+                                                   $duration);
+                                }
+
+                                # Sidecar accumulators (R2.2 of features/287-*.md) — fed on every
+                                # sample including 0, so calculate_statistics_bin can derive min,
+                                # mean, std_dev, skewness, kurtosis, bimodality_coef byte-identical
+                                # to the raw path.
                                 $entry->{min} = $duration
                                     if !defined $entry->{min} || $duration < $entry->{min};
                                 $entry->{max} = $duration
                                     if !defined $entry->{max} || $duration > $entry->{max};
+
                                 # Welford-Pébay online M2/M3/M4 update (Pébay 2008,
                                 # SAND2008-6212). The order matters: M4 reads the old M2 and M3,
                                 # M3 reads the old M2, M2 is updated last. duration_count tracks
                                 # samples that contributed to the moment accumulators; it is
                                 # distinct from {occurrences}, which counts all matched lines
-                                # for this (category, log_key) regardless of duration presence.
+                                # for this (category, log_key) regardless of duration presence,
+                                # and matches the raw path's `scalar @{$bucket_data->{durations}}`.
                                 my $n_old = $entry->{duration_count};
                                 my $n     = $n_old + 1;
                                 if ($n_old == 0) {
@@ -8933,8 +8945,92 @@ sub calculate_statistics {
 # observable output remains byte-identical to -mdm raw. Commit 2 replaces
 # the body with the real sidecar-and-percentile derivation.
 sub calculate_statistics_bin {
+    # Issue #287 Commit 2: real per-statistic derivation. Returns the same
+    # 22-tuple as calculate_statistics(), with derivation per the R3.2 table
+    # in features/287-message-stats-bin-counter-data-model.md:
+    #   min/max:                 sidecar (R2.2; populated unconditionally per
+    #                            sample so 0-duration samples are captured).
+    #   mean:                    total_duration / duration_count (matches the
+    #                            raw path's `scalar @sorted` denominator).
+    #   std_dev/cv:              sum_of_squares accumulator with the same
+    #                            cancellation guard as calculate_statistics
+    #                            at ltl:~8855.
+    #   p1..p99999:              percentile($counter_entry, $q) (#189 R4 at
+    #                            ltl:958) — exponential interpolation within
+    #                            bucket per #187 Decision 1.
+    #   iqr:                     p75 - p25 (cascades).
+    #   skewness/kurtosis/BC:    bias-corrected sample formulas verbatim with
+    #                            the raw path (ltl:~8895), with m2/m3/m4
+    #                            sourced from m2_sum/m3_sum/m4_sum sidecars
+    #                            divided by n (Pébay running M_k = n * m_k).
+    #
+    # Per-quantile out_of_range_bounded audit codes returned by percentile()
+    # are discarded here; Commit 4 of #287 wires them into -V telemetry.
     my ($sidecar_entry, $counter_entry, $aggregated_data) = @_;
-    return calculate_statistics($aggregated_data);
+    return unless $sidecar_entry && ($sidecar_entry->{occurrences} // 0) > 0;
+    my $n = $sidecar_entry->{duration_count} // 0;
+    return unless $n > 0;
+
+    my $min  = $sidecar_entry->{min};
+    my $max  = $sidecar_entry->{max};
+    my $mean = $sidecar_entry->{total_duration} / $n;
+
+    my ($std_dev, $cv);
+    if ($n >= 2) {
+        my $sum_sq_dev = $sidecar_entry->{sum_of_squares} - $n * ($mean ** 2);
+        $sum_sq_dev = 0 if $sum_sq_dev < 0;   # guard floating-point underflow on near-constant data
+        my $variance = $sum_sq_dev / ($n - 1);
+        $std_dev = sqrt($variance);
+        $cv = $mean != 0 ? $std_dev / $mean : undef;
+    }
+
+    # Percentile ladder. When $counter_entry is undef (the rare case of every
+    # observed duration being 0, so counter_update was never called for this
+    # key), all percentiles collapse to 0 — matches the raw path's behavior
+    # when @sorted is all-zero.
+    my ($p1, $p5, $p10, $p25, $p50, $p75, $p90, $p95, $p99, $p999, $p9999, $p99999);
+    if ($counter_entry) {
+        ($p1,     undef) = percentile($counter_entry, 0.01);
+        ($p5,     undef) = percentile($counter_entry, 0.05);
+        ($p10,    undef) = percentile($counter_entry, 0.10);
+        ($p25,    undef) = percentile($counter_entry, 0.25);
+        ($p50,    undef) = percentile($counter_entry, 0.50);
+        ($p75,    undef) = percentile($counter_entry, 0.75);
+        ($p90,    undef) = percentile($counter_entry, 0.90);
+        ($p95,    undef) = percentile($counter_entry, 0.95);
+        ($p99,    undef) = percentile($counter_entry, 0.99);
+        ($p999,   undef) = percentile($counter_entry, 0.999);
+        ($p9999,  undef) = percentile($counter_entry, 0.9999);
+        ($p99999, undef) = percentile($counter_entry, 0.99999);
+    } else {
+        # All-zero degenerate case: every percentile equals min (which is 0
+        # here because durations are non-negative and we observed only zeros).
+        $p1 = $p5 = $p10 = $p25 = $p50 = $p75 = $p90 = $p95 = $p99 = $p999 = $p9999 = $p99999 = ($min // 0);
+    }
+    my $iqr = (defined $p75 && defined $p25) ? $p75 - $p25 : undef;
+
+    # Distribution-shape moments — same downstream formulas as calculate_statistics
+    # at ltl:~8895, with m2/m3/m4 sourced from the Welford-Pébay sidecar
+    # accumulators (M_k_sum / n = m_k central moment).
+    my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
+    if ($n >= 4) {
+        my $m2 = $sidecar_entry->{m2_sum} / $n;
+        my $m3 = $sidecar_entry->{m3_sum} / $n;
+        my $m4 = $sidecar_entry->{m4_sum} / $n;
+        if ($m2 > 0) {
+            my $g1 = $m3 / ($m2 ** 1.5);
+            my $g2 = $m4 / ($m2 ** 2) - 3;
+            $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
+            $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
+            my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
+            $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
+        }
+    }
+
+    return ($min, $mean, $max,
+            $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
+            $std_dev, $cv,
+            $skewness, $kurtosis, $bimodality_coef);
 }
 
 sub initialize_empty_time_windows {
