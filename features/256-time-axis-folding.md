@@ -49,7 +49,33 @@ The non-alt modes follow the ISO convention — week starts Monday, work week is
 - Where folding sits in the processing flow relative to `read_and_process_logs()` and bucket assignment.
 - How the x-axis label engine renders the once-per-day weekday marker within `@x_bucket_labels`.
 - How the folded period interacts with the layout engine at narrow terminal widths (week modes at small `-b` produce many buckets).
-- `-V` / harness contract: which validatable invariants the fold introduces.
+- `-V` / harness contract: which validatable invariants the fold introduces (see Test strategy).
+
+## Test strategy
+
+The feature's correctness splits along the two harness categories `tests/HARNESS-DESIGN.md` defines, so it needs coverage of each. Both kinds of harness are built *with* the implementation, not before it.
+
+### State-observability — excluded-day sample dropping (`-V`)
+
+The core correctness claim that has no visual proxy is that excluded days contribute **zero** samples: under `workweek`/`workday`, no Saturday/Sunday sample lands in any bucket; under the `-alt` variants, no Friday/Saturday sample does. This is computed state and must be asserted through a dedicated, named `-V` section (never by grepping the graph) — the implementation must expose folded bucket membership / per-mode included-vs-dropped sample counts in `-V`. The harness feeds a fixture with known per-weekday sample counts and asserts the dropped-day count equals the input's weekend (or Fri+Sat) total and the surviving buckets sum to the rest. Tracking invariant: `included + dropped = total_matched`.
+
+### Render-invariant — timeline x-axis + summary-table first/last seen
+
+Properties of the rendered terminal surface itself (reference: `tests/validate-duration-display.sh`). Run `ltl` at a pinned `--terminal-width`, strip ANSI, and assert:
+
+- **`day`/`workday`:** x-axis labels are time-only (`09:15`); **no weekday token** (`Mon`, `Sun`, …) appears anywhere on the axis.
+- **`week`/`workweek`:** each weekday name appears **exactly once**, at its day boundary (first bucket of the day); subsequent buckets within that day are time-only.
+- **Week start:** `week` leftmost weekday label is `Mon`; `week-alt` leftmost is `Sun`.
+- **Excluded days:** `workweek`/`workday` render no `Sat`/`Sun` labels; under `-alt`, no `Fri`/`Sat`.
+- **Summary-table first/last seen:** render as folded positions (`Mon 08:30`), not calendar dates.
+
+These assert *invariants*, not frozen output, so they do not duplicate `validate-regression.sh`.
+
+### Fixtures
+
+Like `tests/distribution-shape/generate-anchor.py` (#254), a small seeded synthetic generator emits a log whose timestamps are placed on **known weekdays and hours spanning multiple calendar weeks**, so the expected folded buckets, dropped-day counts, and rendered labels are known a priori. Deterministic generation is what lets the harness assert fixed expectations rather than re-deriving them.
+
+Heatmap-under-fold (`-hm` composed with `-pr`) is expected to work (folding precedes heatmap binning) but is not a required test surface for this issue.
 
 ## Out of scope
 
