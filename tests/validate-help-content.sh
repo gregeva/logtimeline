@@ -216,11 +216,10 @@ perl -ne '
         $long = $parts[0];
     } else {
         # In every two-token GetOptions name in this codebase, the long
-        # form is the longer string. Verified against all 75 entries —
-        # including the five short-first declarations (hgbpd, hgb,
-        # pbpd, pp, ep) where the *full* spelling is on the right of
-        # the pipe but is still the longer string. length-based pick
-        # is robust where the hyphen heuristic was not (e.g., pause|p,
+        # form is the longer string. This holds for the short-first
+        # declarations (e.g. hgb, dmp, ep) where the *full* spelling is on
+        # the right of the pipe but is still the longer string. length-based
+        # pick is robust where the hyphen heuristic was not (e.g., pause|p,
         # start|st, end|et — long forms with no hyphen and length < 6).
         my @sorted = sort { length($b) <=> length($a) } @parts;
         $long  = $sorted[0];

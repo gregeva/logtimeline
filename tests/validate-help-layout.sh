@@ -5,9 +5,7 @@
 # Ensures every option row's description starts at the same column and every
 # wrapped-description continuation line aligns at the same column. Catches
 # layout regressions when a new long-form option name exceeds the available
-# option-text column width without bumping $desc_col — exactly the failure
-# mode that shipped silently before PR #189-3 (which added
-# --histogram-buckets-per-decade and --percentile-buckets-per-decade).
+# option-text column width without bumping $desc_col.
 #
 # Project requirement: every CLI option in ltl exposes both a short and a
 # long form. This test guards the help-output column layout so that the
@@ -394,9 +392,7 @@ assert_pair() {
             detail      "no row matched '^[[:space:]]+${short}, +${long}' in stripped --help output"
     fi
 }
-assert_pair "-pp"    "--percentile-precision"
-assert_pair "-pbpd"  "--percentile-buckets-per-decade"
-assert_pair "-hgbpd" "--histogram-buckets-per-decade"
+assert_pair "-dmp"   "--data-model-precision"
 assert_pair "-hgb"   "--histogram-buckets"
 
 # ---------------------------------------------------------------------------

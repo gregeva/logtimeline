@@ -198,7 +198,7 @@ ltl computes percentiles from one of two data models, each with its own algorith
 
 **Raw values data model.** Every observation is held in memory and the percentile is selected by **nearest-rank** — an actually-observed sample at the computed rank in the sorted array. The returned value is a real request that happened. Scales with observation count.
 
-**Bin counter data model.** Observations are accumulated into log-spaced bins and the percentile is computed by **exponential interpolation within the bucket** — a synthesised value placed inside the bin that contains the target rank, on the log scale spanning the bin's lower and upper edges. The returned value is generally not an observed sample. Bin resolution sets the interpolation tightness — the default of 53 buckets per decade gives roughly 1.3% relative bin width. Scales with partition count rather than observation count.
+**Bin counter data model.** Observations are accumulated into log-spaced bins and the percentile is computed by **exponential interpolation within the bucket** — a synthesised value placed inside the bin that contains the target rank, on the log scale spanning the bin's lower and upper edges. The returned value is generally not an observed sample. Bin resolution sets the interpolation tightness; it is governed by the precision lever (see *Tuning precision* below). Scales with partition count rather than observation count.
 
 **Per-surface defaults.** Four consumer surfaces use percentile output; each has a default data model today:
 
@@ -221,26 +221,22 @@ ltl computes percentiles from one of two data models, each with its own algorith
 
 Per-surface flag overrides `-dm`; `-dm` overrides the per-surface default. Invalid values (anything other than `raw` or `bin`) cause ltl to exit at option-parse time with a clear error. Conflicting flags on the same axis follow standard last-one-wins ordering.
 
-**Tuning the bin counter algorithm.** When a surface uses the bin counter data model, bin resolution determines how tight the within-bucket interpolation is. Raise resolution for tighter values in the tail percentiles (`p999`, `p9999`); lower it to reduce per-partition memory cost. The default (tier 5 / 53 bpd) suits most analyses.
+**Tuning precision.** A single lever sets how finely the bin counter surfaces resolve. Raise it for tighter values in the tail percentiles (`p999`, `p9999`); lower it to reduce per-partition memory cost. The default suits most analyses — you rarely need to touch it.
 
 | Option | Description |
 |--------|-------------|
-| `-pp, --percentile-precision <N>` | Precision tier 1..9 (default: 5). Higher tiers give tighter percentile values at the cost of more memory per partition. |
-| `-pbpd, --percentile-buckets-per-decade <N>` | Buckets per decade directly (default: 53; valid 4..616). Overrides `--percentile-precision` when both supplied. |
+| `-dmp, --data-model-precision <N>` | Precision tier 1..9 (default: 5). Higher tiers give finer resolution on the bin counter surfaces at higher memory cost. |
 
-Per-message-key percentiles are the highest-cost consumer because they fan out to one partition per unique message; tier 1–4 trades resolution for less memory there. The histogram and heatmap surfaces are unaffected — they use their own internal resolution tuned for display rendering and ignore these knobs.
+Precision increases in stages across the surfaces as you raise the tier, so the lever buys fidelity where it costs least first. Above the default, the histogram and heatmap are already at their finest, and the per-time-bucket statistics sharpen ahead of the per-message-key statistics — the per-message surface is the highest-cost consumer (one partition per unique message), so it reaches full resolution last. Below the default, every bin counter surface coarsens, including the histogram and heatmap shape.
 
-Use `-V histogram-bin-counters` to inspect the resolved precision, the source (default, flag, or override), and per-consumer state.
+Use `-V histogram-bin-counters` to inspect the resolved tier and its source, and `-V percentile-algorithm` to see each surface's resolved resolution.
 
 ```bash
 # Default behavior (per-surface defaults above)
 ltl access.log
 
 # Higher precision tier for tight tail-percentile analysis
-ltl -pp 7 access.log
-
-# Direct buckets-per-decade override
-ltl -pbpd 100 access.log
+ltl -dmp 7 access.log
 
 # Pin every surface to the raw values data model
 ltl -dm raw access.log
@@ -310,10 +306,7 @@ Histograms show the overall distribution shape of a metric across the entire tim
 | `-hg, --histogram [metric]` | Show an overall distribution histogram after the bar graph (`duration`, `bytes`, or `count`) |
 | `-hgw, --histogram-width <N>` | Histogram width as percentage of terminal (default: 95) |
 | `-hgh, --histogram-height <N>` | Histogram height in rows (default: 8) |
-| `-hgbpd, --histogram-buckets-per-decade <N>` | Bar resolution: bars per order-of-magnitude of value range (default: 8) |
-| `-hgb, --histogram-buckets <N>` | Override total histogram bucket count (default: 0 = auto-calculate from `-hgbpd`) |
-
-**Bar resolution (`-hgbpd`).** The default of 8 gives roughly the bar density of the legacy histogram and is suitable for most analyses. Raise it (16, 32, 53) when the default's bars look too wide to distinguish distinct modes in the data — each step gives narrower, more numerous bars and a more detailed distribution shape, at the cost of proportionally more memory during analysis. Values above 53 rarely add visible detail at typical histogram heights.
+| `-hgb, --histogram-buckets <N>` | Override total histogram bucket count (default: 0 = auto-calculate) |
 
 ```bash
 # Show duration and bytes histograms side by side
@@ -322,8 +315,6 @@ ltl -hg duration,bytes access.log
 ltl -hg duration -hgh 15 access.log
 # All available metric histograms
 ltl -hg access.log
-# Higher bar resolution to distinguish closely-spaced modes
-ltl -hg duration -hgbpd 16 access.log
 ```
 
 ### User-Defined Metrics
@@ -412,7 +403,6 @@ Section content is governed by per-section stability contracts — additions are
 |---------|---------|
 | `-g <non-numeric>` (e.g. `-g logfile.log`) | The non-numeric value is treated as a positional argument and the default similarity threshold (85) is applied. |
 | `-hm <unknown-metric>` without any `-udm` configured (e.g. `-hm bogus`) | The value is treated as a positional argument and the default heatmap metric (`duration`) is applied. |
-| Both `-pbpd` and `--percentile-precision` supplied | `-pbpd` wins; the warning surfaces the override so it is visible without `-V`. |
 | `--data-model`, `--histogram-data-model`, `--heatmap-data-model`, `--message-stats-data-model`, or `--bucket-stats-data-model` supplied with a value other than `raw` or `bin` | ltl exits with `<flag>: '<value>' is not a valid data model; valid values are 'raw' and 'bin'`. |
 
 To inspect the resolved configuration after warnings have fired, use `-V runtime-config` and read the `command-line` and `environment-variable` sub-sections.
