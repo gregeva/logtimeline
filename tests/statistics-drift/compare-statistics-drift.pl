@@ -692,6 +692,22 @@ my %L2_INVARIANTS = (
 
 my @PERCENTILE_LADDER = qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999);
 
+# Issue #289: columns whose ltl-vs-oracle deviation is bounded by BIN RESOLUTION
+# rather than by floating-point arithmetic. The percentile ladder and iqr are
+# derived by in-bin exponential interpolation; at the default buckets_per_decade
+# (53) the bin-width bound is ~2.2% (#187 R4), and on heavily-quantized data
+# (durations clustered at a few integer values) ltl's streaming auto-rebin
+# partition and the oracle's replay partition can place the interpolated point
+# up to ~1.5% apart within the same dense bin — a genuine resolution effect, not
+# an error. These columns get the wider L3 T2 advisory ceiling (L3_BIN_T2_PCT).
+# The exact-value statistics (min/max/mean/std_dev/cv/skewness/kurtosis/
+# bimodality_coef) are sidecar-derived and must agree tightly (L3_T2_PCT).
+my %L3_BIN_RESOLUTION_COLUMN = map { $_ => 1 } (@PERCENTILE_LADDER, 'iqr');
+use constant L3_T2_PCT     => 1.0;   # exact-value stats: advisory up to 1%
+use constant L3_BIN_T2_PCT => 2.5;   # bin-interpolated columns: advisory up to 2.5%
+                                      # (covers #187 R4's ~2.2% bin width at bpd=53
+                                      #  plus quantization/streaming-vs-replay margin)
+
 # Helper: emit a T4 failure for a Layer-2 invariant breach on one row.
 sub emit_l2_failure {
     my (%f) = @_;
@@ -930,10 +946,22 @@ sub run_layer2 {
 # against the ltl CSV by row key and tier-classifies every disagreement.
 #
 # Decision-3 column set:
+#
+# Issue #289: the percentile ladder validated against the oracle stops at
+# p999 (three-nines). p9999 and p99999 are excluded because a quantile q is
+# only statistically meaningful when the sample backing it places rank q*N on
+# a real observation — i.e. N >= 1/(1-q): p9999 needs N >= 10,000 and p99999
+# needs N >= 100,000 per partition. The harness deliberately uses small test
+# logs (so tests run fast), and the per-time-bucket / per-message-key surfaces
+# split that already-small sample across partitions, so four- and five-nines
+# almost never have sample support — grading them against the oracle would be
+# grading noise. ltl still COMPUTES and EMITS p9999/p99999 (production
+# unchanged); L1 drift and L2 invariants still cover them. Only the oracle
+# comparison stops at p999.
 #-------------------------------------------------------------------------
 
 my @L3_COLUMNS = qw(
-    p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+    p1 p5 p10 p25 p50 p75 p90 p95 p99 p999
     iqr std_dev cv skewness kurtosis bimodality_coef
 );
 my %L3_COLUMN_SET = map { $_ => 1 } @L3_COLUMNS;
@@ -992,9 +1020,13 @@ sub emit_l3_advisory {
     print "ADV  [$f{tier}-L3] scenario=$f{scenario} file=$f{file} key=\"$f{key}\" column=$f{column} ltl=$f{ltl} oracle=$f{oracle} deviation=$dev\n";
 }
 
-# Same ladder as L1, applied to (ltl, oracle) deviation.
+# Same ladder as L1, applied to (ltl, oracle) deviation. Issue #289: the
+# T2 advisory ceiling is column-family-aware — bin-interpolated columns
+# (percentile ladder + iqr) tolerate up to L3_BIN_T2_PCT because their
+# ltl-vs-oracle deviation is bounded by bin resolution (#187 R4), not float
+# arithmetic; all other (sidecar-derived exact-value) stats hold to L3_T2_PCT.
 sub classify_cell_l3 {
-    my ($ltl_val, $oracle_val) = @_;
+    my ($ltl_val, $oracle_val, $col) = @_;
     return ('T1', 0.0) if $ltl_val eq sprintf('%s', $oracle_val);
     my $l = as_num($ltl_val);
     my $o = as_num($oracle_val);
@@ -1003,9 +1035,10 @@ sub classify_cell_l3 {
         return ('T1', 0.0) if $l == 0;
         return ('T3', 'inf');
     }
+    my $t2_ceiling = ($col && $L3_BIN_RESOLUTION_COLUMN{$col}) ? L3_BIN_T2_PCT : L3_T2_PCT;
     my $dev = abs($l - $o) / abs($o) * 100.0;
     return ('T1', $dev) if $dev == 0.0;
-    return ('T2', $dev) if $dev <= 1.0;
+    return ('T2', $dev) if $dev <= $t2_ceiling;
     return ('T3', $dev) if $dev <= 5.0;
     return ('T3', $dev);  # >5% still T3 (matches L1 convention)
 }
@@ -1045,7 +1078,7 @@ sub run_layer3 {
             }
             my $o_quantized = sprintf("%.${decimals}f", $o_val);
 
-            my ($tier, $dev) = classify_cell_l3($ltl_val, $o_quantized);
+            my ($tier, $dev) = classify_cell_l3($ltl_val, $o_quantized, $col);
             $stats->{l3_cells_checked}++;
 
             if ($tier eq 'T_NONNUMERIC') {

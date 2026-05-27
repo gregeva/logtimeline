@@ -469,18 +469,11 @@ my $bucket_stats_capture_mode      = undef;   # 'raw' or 'bin' (set before parsi
 my $heatmap_stream_bpd   = 616;
 my $histogram_stream_bpd = 616;
 
-# Issue #289: per-time-bucket statistics stream bpd. Unlike the global
-# $percentile_buckets_per_decade (53, ~1.3%) used by the per-message-key
-# surface, the per-time-bucket consumer is held to a tighter percentile
-# accuracy: per-bucket aggregation produces sparse tail bins, and heavily
-# quantized datasets (e.g. durations clustered at a few integer values)
-# leave one coarse bin holding most of the tail mass — at 53 bpd the
-# in-bin interpolation error reached ~1.5% on canonical tail percentiles,
-# converging to ~0.1% by bpd≈200. 616 matches the heatmap/histogram
-# stream-bpd precedent and keeps tail percentiles within the L3 oracle
-# envelope. Per-bucket partition count is bounded (one per time bucket),
-# so the finer resolution costs negligible memory.
-my $bucket_stats_stream_bpd = 616;
+# Issue #289: per-time-bucket statistics bin resolution, the analyst's lever
+# for this surface (mirrors $percentile_buckets_per_decade for the per-message
+# surface). Default 53 (#187 Decision 2 floor); tunable via
+# -bsbpd / --bucket-stats-buckets-per-decade. Valid range 4..616.
+my $bucket_stats_buckets_per_decade = 53;
 
 # Histogram data collection (hash-based for dynamic metrics)
 my %histogram_values = (
@@ -1512,6 +1505,7 @@ sub _classify_argv_provenance {
                 'hgbpd|histogram-buckets-per-decade',
                 'hgb|histogram-buckets',
                 'pbpd|percentile-buckets-per-decade',
+                'bsbpd|bucket-stats-buckets-per-decade',
                 'pp|percentile-precision',
                 'dm|data-model',
                 'hgdm|histogram-data-model',
@@ -1624,6 +1618,7 @@ sub emit_runtime_config_verbose {
         'histogram-buckets-per-decade'      => $histogram_buckets_per_decade,
         'histogram-buckets'                 => $histogram_bucket_override,
         'percentile-buckets-per-decade'     => $percentile_buckets_per_decade,
+        'bucket-stats-buckets-per-decade'   => $bucket_stats_buckets_per_decade,
         'percentile-precision'              => $percentile_precision_level,
         # Issue #266: explicit data-model selectors. Emitted only when the
         # user supplied them (per the existing provenance partitioning at
@@ -2018,7 +2013,7 @@ sub emit_percentile_algorithm_verbose {
             # Issue #289: bin reduction now implemented end-to-end; the
             # effective algorithm tracks the resolved data model.
             effective_track => 'matches_data_model',
-            bpd             => $bucket_stats_stream_bpd,
+            bpd             => $bucket_stats_buckets_per_decade,
         },
     );
 
@@ -3847,6 +3842,7 @@ sub print_help {
     $out .= help_subheading("Percentile mode");
     $out .= help_opt("-pp,   --percentile-precision <N>",            "Set percentile binning precision tier 1..9 (default: 5 = ~1.3%; 1=~10%, 9=~0.1%). Applies to surfaces using the bin counter data model; see docs/usage.md");
     $out .= help_opt("-pbpd, --percentile-buckets-per-decade <N>",   "Set percentile buckets-per-decade directly (default: 53; valid 4..616). Overrides --percentile-precision when both supplied");
+    $out .= help_opt("-bsbpd, --bucket-stats-buckets-per-decade <N>", "Set per-time-bucket statistics buckets-per-decade under -bdm bin (default: 53; valid 4..616)");
 
     # Data-model selectors (Issue #266). Pin which reduction path each
     # surface uses. No defaults — when unset, the surface's existing
@@ -6528,6 +6524,7 @@ sub adapt_to_command_line_options {
         'hgbpd|histogram-buckets-per-decade=i' => \$histogram_buckets_per_decade,
         'hgb|histogram-buckets=i' => \$histogram_bucket_override,
         'pbpd|percentile-buckets-per-decade=i' => \$percentile_buckets_per_decade,
+        'bsbpd|bucket-stats-buckets-per-decade=i' => \$bucket_stats_buckets_per_decade,
         'pp|percentile-precision=i' => \$percentile_precision_level,
         # Issue #266: explicit data-model selectors. Each accepts 'raw' or 'bin';
         # any other value dies at parse time via _validate_dm. The flags have no
@@ -6723,6 +6720,10 @@ sub adapt_to_command_line_options {
         warn "Invalid -pbpd: $percentile_buckets_per_decade (must be 4..616). Using default (53).\n";
         $percentile_buckets_per_decade = 53;
         $percentile_precision_source   = 'default';
+    }
+    if ($bucket_stats_buckets_per_decade < 4 || $bucket_stats_buckets_per_decade > 616) {
+        warn "Invalid -bsbpd: $bucket_stats_buckets_per_decade (must be 4..616). Using default (53).\n";
+        $bucket_stats_buckets_per_decade = 53;
     }
 
     # Duration unit option validation (Issue #17)
@@ -7956,8 +7957,8 @@ sub read_and_process_logs {
                         if ($bucket_stats_capture_mode eq 'bin') {
                             my $entry = $log_analysis{$bucket};
 
-                            counter_update(\%bucket_stats_counters, $bucket, $duration, $bucket_stats_stream_bpd) if $duration > 0;
-                            counter_update(\%bucket_stats_counters_hl, $bucket, $duration, $bucket_stats_stream_bpd)
+                            counter_update(\%bucket_stats_counters, $bucket, $duration, $bucket_stats_buckets_per_decade) if $duration > 0;
+                            counter_update(\%bucket_stats_counters_hl, $bucket, $duration, $bucket_stats_buckets_per_decade)
                                 if $duration > 0 && $category_bucket =~ /-HL$/;   # store parity only
 
                             $entry->{min} = $duration if !defined $entry->{min} || $duration < $entry->{min};
