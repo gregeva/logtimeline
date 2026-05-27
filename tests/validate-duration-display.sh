@@ -159,22 +159,22 @@ run_scenario() {
         command     "$PERL '$CHECKER' --render '$render' --resolved-unit '$unit' --check unit" \
         label       "every duration cell carries a unit ($unit source) on both surfaces" \
         asserts     'Every populated duration cell in the summary table (Min/P50/P99.9) and the timeline (P50/P95/P99/P999) renders as <number><unit>; no value prints bare. This is the invariant Bug 2 violated, where small magnitudes (e.g. 58, 166, 1) printed with no unit.' \
-        produced_by 'format_duration() in ltl — the single helper both surfaces route through; always passes through format_time so a unit is always present (no length>=4 bare-number bypass).' \
-        contract    'Issue #292 + tests/HARNESS-DESIGN.md § Render-invariant harnesses. format_duration() is the locked rendering entry point for duration cells.'
+        produced_by 'format_duration() in ltl - the single helper both surfaces route through; always passes through format_time so a unit is always present (no length>=4 bare-number bypass).' \
+        contract    'Issue #292 + tests/HARNESS-DESIGN.md section Render-invariant harnesses. format_duration() is the locked rendering entry point for duration cells.'
 
     assert_command \
         command     "$PERL '$CHECKER' --render '$render' --resolved-unit '$unit' --check zero" \
         label       "zero renders as 0$unit (resolved unit), never bare or auto-scaled" \
         asserts     'A zero duration renders in the resolved source unit (0ms for a ms source), never bare 0 and never auto-scaled down to 0us. format_time would scale 0 to the smallest unit; format_duration special-cases zero to the resolved unit.' \
-        produced_by 'format_duration() in ltl — the `return "0$unit" if $value == 0` zero special-case.' \
-        contract    'Issue #292 + tests/HARNESS-DESIGN.md § Render-invariant harnesses.'
+        produced_by 'format_duration() in ltl - the `return "0$unit" if $value == 0` zero special-case.' \
+        contract    'Issue #292 + tests/HARNESS-DESIGN.md section Render-invariant harnesses.'
 
     assert_command \
         command     "$PERL '$CHECKER' --render '$render' --resolved-unit '$unit' --check precision" \
         label       "<=1 decimal everywhere; 0 decimals when displayed in the source unit ($unit)" \
-        asserts     'Duration cells follow the display precision rule: (a) at most one fractional digit on any cell (ltls one-decimal display convention); (b) zero fractional digits when a cell is displayed in the source resolution unit, since one decimal there fabricates sub-unit precision the input never had (a ms source shows 58ms not 58.2ms — Bug 1). A value that auto-scales to a coarser unit (ms source -> 1.2s; us source -> 47.2ms) legitimately keeps its single decimal. Applies to duration cells only; CV and other columns have their own formatting regime and are not extracted.' \
-        produced_by 'format_duration() in ltl — rounds the ms-valued statistic to %duration_display_decimals{resolved-unit} before format_time auto-scales and applies its single-decimal render.' \
-        contract    'Issue #292 + tests/HARNESS-DESIGN.md § Render-invariant harnesses. The precision rule is a function of displayed-unit vs resolved-unit (read from -V duration_unit_resolved).'
+        asserts     'Duration cells follow the display precision rule: (a) at most one fractional digit on any cell (ltls one-decimal display convention); (b) zero fractional digits when a cell is displayed in the source resolution unit, since one decimal there fabricates sub-unit precision the input never had (a ms source shows 58ms not 58.2ms - Bug 1). A value that auto-scales to a coarser unit (ms source -> 1.2s; us source -> 47.2ms) legitimately keeps its single decimal. Applies to duration cells only; CV and other columns have their own formatting regime and are not extracted.' \
+        produced_by 'format_duration() in ltl - rounds the ms-valued statistic to %duration_display_decimals{resolved-unit} before format_time auto-scales and applies its single-decimal render.' \
+        contract    'Issue #292 + tests/HARNESS-DESIGN.md section Render-invariant harnesses. The precision rule is a function of displayed-unit vs resolved-unit (read from -V duration_unit_resolved).'
 }
 
 echo "Validating duration-statistic display invariants (Issue #292)"

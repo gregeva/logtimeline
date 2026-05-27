@@ -122,12 +122,12 @@ if [[ $L3_ENABLED -eq 1 ]]; then
         echo "       Install command depends on which Python this is:" >&2
         case "$PY" in
             /opt/homebrew/*|/usr/local/Cellar/*|/usr/local/opt/*)
-                echo "         $PY is Homebrew Python — PEP 668 blocks 'pip install --user'." >&2
+                echo "         $PY is Homebrew Python - PEP 668 blocks 'pip install --user'." >&2
                 echo "         Install via brew (numpy and scipy ship as brew formulas):" >&2
                 echo "           brew install numpy scipy" >&2
                 ;;
             /Library/Developer/CommandLineTools/*|/usr/bin/*)
-                echo "         $PY is Apple Command-Line-Tools Python — pip --user works:" >&2
+                echo "         $PY is Apple Command-Line-Tools Python - pip --user works:" >&2
                 echo "           $PY -m pip install --user numpy scipy" >&2
                 ;;
             *)

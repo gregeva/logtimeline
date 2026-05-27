@@ -140,7 +140,7 @@ while IFS=$'\t' read -r scenario logfile options families; do
         echo "        -V csv-output / precision sub-section was empty or absent in ltl stdout" >&2
         echo "        asserts: every -o run must emit -V csv-output / precision when -V csv-output is requested" >&2
         echo "        produced_by: emit_csv_output_verbose() in ltl" >&2
-        echo "        contract: Issue #268 § locked observability surface" >&2
+        echo "        contract: Issue #268 section locked observability surface" >&2
         total_fail=$((total_fail + 1))
         scenarios_run=$((scenarios_run + 1))
         continue

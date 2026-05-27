@@ -122,13 +122,13 @@ scenario_tomcat9_ms() {
         pattern     '^  format: tomcat_access_with_duration$' \
         asserts     'Tomcat 9 access log with %D millisecond duration binds to slug `tomcat_access_with_duration`. Detection regex: ltl:4907 (match_type 3).' \
         produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    '%match_type_to_slug in ltl GLOBALS — slug names are locked; renames are breaking under HARNESS-DESIGN.md § Stability contract'
+        contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
 
     assert_line "$out" \
         pattern     '^  match_type: 3$' \
         asserts     'Tomcat 9 access log binds to internal match_type 3' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #228 — match_type integers are an implementation detail surfaced for diagnostic value; the slug is the user-facing contract'
+        contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type integers are an implementation detail surfaced for diagnostic value; the slug is the user-facing contract'
 
     assert_line "$out" \
         pattern     '^  matched_lines: 5000$' \
@@ -149,15 +149,15 @@ scenario_apache_httpd_us() {
 
     assert_line "$out" \
         pattern     '^  format: tomcat_access_with_duration$' \
-        asserts     'Apache HTTP Server 2.x access log binds to slug `tomcat_access_with_duration` — same regex as Tomcat 9, currently misclassified pending format-registry rewrite (#23)' \
+        asserts     'Apache HTTP Server 2.x access log binds to slug `tomcat_access_with_duration` - same regex as Tomcat 9, currently misclassified pending format-registry rewrite (#23)' \
         produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    'features/225-test-harness-coverage-gaps.md § #228 + ltl GLOBALS comment on Apache misclassification — when #23 splits the formats, this scenario must be updated to expect the new Apache-specific slug'
+        contract    'features/225-test-harness-coverage-gaps.md section #228 + ltl GLOBALS comment on Apache misclassification - when #23 splits the formats, this scenario must be updated to expect the new Apache-specific slug'
 
     assert_line "$out" \
         pattern     '^duration_unit_override: us$' \
         asserts     'When `-du us` is given, the format-detection section reports the override value' \
         produced_by 'emit_format_detection_verbose() in ltl (run-level duration_unit_override field)' \
-        contract    '%match_type_to_slug and emit_format_detection_verbose() in ltl — duration_unit_override is locked field reporting the user-supplied -du value'
+        contract    '%match_type_to_slug and emit_format_detection_verbose() in ltl - duration_unit_override is locked field reporting the user-supplied -du value'
 }
 
 scenario_codebeamer() {
@@ -172,17 +172,17 @@ scenario_codebeamer() {
         pattern     '^  format: tomcat_codebeamer$' \
         asserts     'Codebeamer access log with `[Nms] [Ns]` duration fields binds to slug `tomcat_codebeamer`. Detection regex: ltl:4892 (match_type 12).' \
         produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    '%match_type_to_slug in ltl GLOBALS — slug names are locked; renames are breaking under HARNESS-DESIGN.md § Stability contract'
+        contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
 
     assert_line "$out" \
         pattern     '^  match_type: 12$' \
         asserts     'Codebeamer log binds to internal match_type 12, must precede match_type 3 in cascade order' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #228 — codebeamer regex must remain before tomcat 9 regex in the cascade so it wins for codebeamer-formatted lines'
+        contract    'features/225-test-harness-coverage-gaps.md section #228 - codebeamer regex must remain before tomcat 9 regex in the cascade so it wins for codebeamer-formatted lines'
 
     assert_line "$out" \
         pattern     '^  matched_lines: 741$' \
-        asserts     'Codebeamer fixture (741 lines) parses every line via match_type 12 — no fallthrough to match_type 3' \
+        asserts     'Codebeamer fixture (741 lines) parses every line via match_type 12 - no fallthrough to match_type 3' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
         contract    'A regression in the codebeamer regex would silently fall back to match_type 3; this exact count guards against that'
 }
@@ -199,13 +199,13 @@ scenario_thingworx_standard() {
         pattern     '^  format: thingworx_standard$' \
         asserts     'ThingWorx ApplicationLog binds to slug `thingworx_standard`. Detection regex: ltl:4792 (match_type 1).' \
         produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    '%match_type_to_slug in ltl GLOBALS — slug names are locked'
+        contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked'
 
     assert_line "$out" \
         pattern     '^  match_type: 1$' \
         asserts     'ThingWorx standard log binds to internal match_type 1' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #228 — match_type 1 covers both full ThingWorx and the Logback-style fallback at ltl:4655'
+        contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type 1 covers both full ThingWorx and the Logback-style fallback at ltl:4655'
 }
 
 scenario_thingworx_with_metrics() {
@@ -218,15 +218,15 @@ scenario_thingworx_with_metrics() {
 
     assert_line "$out" \
         pattern     '^  format: thingworx_standard$' \
-        asserts     'ThingWorx ScriptLog with durationMS=/bytes= fields also binds to `thingworx_standard` — the duration/bytes capture happens within match_type 1, not as a separate slug' \
+        asserts     'ThingWorx ScriptLog with durationMS=/bytes= fields also binds to `thingworx_standard` - the duration/bytes capture happens within match_type 1, not as a separate slug' \
         produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    '%match_type_to_slug in ltl GLOBALS — ThingWorx logs with or without metrics share the same slug; metric presence is signaled via is_access_log=yes'
+        contract    '%match_type_to_slug in ltl GLOBALS - ThingWorx logs with or without metrics share the same slug; metric presence is signaled via is_access_log=yes'
 
     assert_line "$out" \
         pattern     '^  is_access_log: yes$' \
         asserts     'A ThingWorx log with durationMS= or bytes= flips is_access_log to yes per ltl:4799-4802' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file is_access_log field)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #228 — is_access_log distinguishes ThingWorx logs that have parseable latency/bytes from ones that do not'
+        contract    'features/225-test-harness-coverage-gaps.md section #228 - is_access_log distinguishes ThingWorx logs that have parseable latency/bytes from ones that do not'
 }
 
 scenario_tw_edge_c_sdk() {
@@ -241,13 +241,13 @@ scenario_tw_edge_c_sdk() {
         pattern     '^  format: tw_edge_c_sdk$' \
         asserts     'ThingWorx Edge C SDK log binds to slug `tw_edge_c_sdk`. Detection regex: ltl:4884 (match_type 11). Format: `LEVEL ts file.cpp:NN message`.' \
         produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    '%match_type_to_slug in ltl GLOBALS — slug names are locked'
+        contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked'
 
     assert_line "$out" \
         pattern     '^  match_type: 11$' \
         asserts     'Edge C SDK log binds to internal match_type 11' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #228 — match_type 11'
+        contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type 11'
 }
 
 scenario_csv_with_udm() {
@@ -264,13 +264,13 @@ scenario_csv_with_udm() {
         pattern     '^  format: csv$' \
         asserts     'CSV file binds to slug `csv` when -udm is supplied. Detection: detect_and_parse_csv_header() invoked at ltl:4744+4935 (match_type 13).' \
         produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    '%match_type_to_slug in ltl GLOBALS — CSV detection requires explicit -udm config; bare ltl on a CSV file gives no matches and is intentional'
+        contract    '%match_type_to_slug in ltl GLOBALS - CSV detection requires explicit -udm config; bare ltl on a CSV file gives no matches and is intentional'
 
     assert_line "$out" \
         pattern     '^  match_type: 13$' \
         asserts     'CSV path uses internal match_type 13' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #228 — match_type 13 is reserved for the CSV path'
+        contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type 13 is reserved for the CSV path'
 }
 
 # ---------- Run -----------------------------------------------------------

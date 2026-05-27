@@ -56,8 +56,8 @@ failures=()
 # Per tests/HARNESS-DESIGN.md § Self-documenting assertions, these three
 # fields are surfaced alongside every failure.
 REGRESSION_ASSERTS='ltl output (after stripping ANSI, timing, memory, and other nondeterministic content) is byte-identical to the captured reference file for this scenario'
-REGRESSION_PRODUCED_BY='print_bar_graph(), print_summary_table(), print_heatmap_row(), and the layout engine in ltl — composite rendered output'
-REGRESSION_CONTRACT='tests/HARNESS-DESIGN.md § Self-documenting assertions + this harness re-runs the commands from capture-regression.sh against tests/reference-output/; rebaselining is a per-release activity, not an automatic remediation'
+REGRESSION_PRODUCED_BY='print_bar_graph(), print_summary_table(), print_heatmap_row(), and the layout engine in ltl - composite rendered output'
+REGRESSION_CONTRACT='tests/HARNESS-DESIGN.md section Self-documenting assertions + this harness re-runs the commands from capture-regression.sh against tests/reference-output/; rebaselining is a per-release activity, not an automatic remediation'
 
 # Emit a regression-suite failure in the self-documenting multi-line form
 # required by tests/HARNESS-DESIGN.md § Self-documenting assertions.

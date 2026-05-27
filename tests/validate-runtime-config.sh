@@ -164,31 +164,31 @@ scenario_runtime_config_command_line() {
         pattern     '^=== runtime-config ===$' \
         asserts     'The runtime-config -V section header is emitted whenever -V runtime-config (or bare -V) is requested.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
-        contract    'tests/HARNESS-DESIGN.md § Reserved section names — runtime-config is stability-contracted'
+        contract    'tests/HARNESS-DESIGN.md section Reserved section names - runtime-config is stability-contracted'
 
     assert_line "$RUN_STDOUT" \
         pattern     '^=== runtime-config / command-line ===$' \
         asserts     'The command-line sub-section is always present per the locked contract; empty body means no flags supplied on the CLI.' \
         produced_by 'emit_runtime_config_verbose() in ltl (Issue #231 section)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — command-line sub-section always emits'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - command-line sub-section always emits'
 
     assert_line "$RUN_STDOUT" \
         pattern     '^bucket-size: 60$' \
         asserts     'A flag supplied on the CLI with a valid value appears in the command-line sub-section with the resolved value and no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl (command-line sub-section body)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — value with no annotation means user-supplied, valid, unchanged'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - value with no annotation means user-supplied, valid, unchanged'
 
     assert_line "$RUN_STDOUT" \
         pattern     '^percentile-precision: 7$' \
         asserts     'Multi-flag invocation surfaces each supplied flag as its own row in command-line sub-section.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231'
+        contract    'features/225-test-harness-coverage-gaps.md section #231'
 
     assert_line "$RUN_STDOUT" \
         pattern     '^=== END runtime-config / command-line ===$' \
-        asserts     'command-line sub-section closes with its END delimiter per HARNESS-DESIGN.md § Delimiter contract.' \
+        asserts     'command-line sub-section closes with its END delimiter per HARNESS-DESIGN.md section Delimiter contract.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
-        contract    'tests/HARNESS-DESIGN.md § Delimiter contract'
+        contract    'tests/HARNESS-DESIGN.md section Delimiter contract'
 }
 
 scenario_runtime_config_env_only() {
@@ -201,13 +201,13 @@ scenario_runtime_config_env_only() {
         pattern     '^=== runtime-config / environment-variable ===$' \
         asserts     'The environment-variable sub-section is always present per the locked contract.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — env-var sub-section always emits'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - env-var sub-section always emits'
 
     assert_line "$TMP_DIR/rc-env.stdout" \
         pattern     '^bucket-size: 30$' \
         asserts     'A flag supplied via LTL_CONFIG with no CLI override appears in the environment-variable sub-section with no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl (environment-variable sub-section body)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231'
+        contract    'features/225-test-harness-coverage-gaps.md section #231'
 }
 
 scenario_runtime_config_env_overridden() {
@@ -220,13 +220,13 @@ scenario_runtime_config_env_overridden() {
         pattern     '^bucket-size: 60$' \
         asserts     'When the same flag appears in both env and CLI, the command-line sub-section row carries the resolved (CLI-supplied) value with no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl (command-line sub-section)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — CLI wins; env-side carries override annotation'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - CLI wins; env-side carries override annotation'
 
     assert_line "$TMP_DIR/rc-over.stdout" \
         pattern     '^bucket-size: 60; overridden$' \
         asserts     'When the same flag appears in both env and CLI, the environment-variable sub-section row carries `; overridden` annotation. (The displayed value is the resolved CLI value; reconstructing the original env value is out of scope.)' \
         produced_by 'emit_runtime_config_verbose() in ltl (environment-variable sub-section)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — annotation grammar uses semicolon-separated `; overridden`'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - annotation grammar uses semicolon-separated `; overridden`'
 }
 
 scenario_warning_g_non_numeric() {
@@ -239,7 +239,7 @@ scenario_warning_g_non_numeric() {
         pattern     "^-g value 'bogus_value' is not numeric; treating as positional argument and using default threshold 85\\.$" \
         asserts     'When -g is given a non-numeric value, ltl now warns to stderr that the value was treated as a positional argument and the default threshold 85 was used. Was previously silent.' \
         produced_by 'adapt_to_command_line_options() in ltl (group-similar non-numeric branch)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — silent-override gap closure'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - silent-override gap closure'
 }
 
 scenario_warning_hm_non_builtin() {
@@ -252,7 +252,7 @@ scenario_warning_hm_non_builtin() {
         pattern     "^-hm value 'bogus_metric' is not a built-in metric \\(duration\\|bytes\\|count\\) and no -udm configs are defined; treating as positional argument and using default metric 'duration'\\.$" \
         asserts     'When -hm is given a value that is neither a built-in metric nor matchable to a -udm config (because no -udm was given), ltl now warns that the value was treated as a positional argument and the default metric was used. Was previously silent.' \
         produced_by 'adapt_to_command_line_options() in ltl (heatmap non-builtin pushback branch)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — silent-override gap closure'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - silent-override gap closure'
 }
 
 scenario_warning_pbpd_overrides_pp() {
@@ -265,7 +265,7 @@ scenario_warning_pbpd_overrides_pp() {
         pattern     '^-pbpd 100 overrides --percentile-precision 7; using 100 buckets per decade\.$' \
         asserts     'When both -pbpd and --percentile-precision are supplied, -pbpd wins. The override is now surfaced on stderr in addition to the -V histogram-bin-counters annotation it already had. Was previously only visible via -V.' \
         produced_by 'adapt_to_command_line_options() in ltl (percentile-precision resolution; -pbpd-wins branch)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — silent-override gap closure'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - silent-override gap closure'
 }
 
 scenario_error_unknown_exact_percentiles() {
@@ -277,13 +277,13 @@ scenario_error_unknown_exact_percentiles() {
     assert_exit "$RUN_EXIT" 1 \
         asserts     '--exact-percentiles is not a known flag; ltl rejects it as an unknown option and exits non-zero. The flag is no longer part of the CLI surface; opt-out is via the per-surface data-model selector (-dm raw / -hgdm raw / -hmdm raw / -mdm raw / -bdm raw) per Issue #266.' \
         produced_by 'Getopt::Long rejecting an unrecognized long option in adapt_to_command_line_options()' \
-        contract    'Issue #266 + Issue #287 — --exact-percentiles was the legacy F2/F3 opt-out; the data-model selectors are the locked replacement.'
+        contract    'Issue #266 + Issue #287 - --exact-percentiles was the legacy F2/F3 opt-out; the data-model selectors are the locked replacement.'
 
     assert_line "$RUN_STDERR" \
         pattern     '^Unknown option: exact-percentiles' \
         asserts     'The user-visible error names the unknown option so the user knows which flag was rejected.' \
         produced_by 'Getopt::Long default error formatter' \
-        contract    'Issue #266 + Issue #287 — flag-removal error surface.'
+        contract    'Issue #266 + Issue #287 - flag-removal error surface.'
 }
 
 # Issue #287: assert that the per-surface data-model selectors surface in
@@ -299,20 +299,20 @@ scenario_runtime_config_data_model_selectors() {
     assert_line "$RUN_STDOUT" \
         pattern     '^message-stats-data-model: bin$' \
         asserts     'A user-supplied -mdm bin appears in the runtime-config / command-line sub-section with its resolved value and no annotation, per #266 + #231.' \
-        produced_by 'emit_runtime_config_verbose() in ltl — %resolved_values lookup for message-stats-data-model' \
-        contract    'features/266-data-model-selectors.md § -V runtime-config surfacing + features/287-message-stats-bin-counter-data-model.md § R8.3 — selector row format is locked.'
+        produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for message-stats-data-model' \
+        contract    'features/266-data-model-selectors.md section -V runtime-config surfacing + features/287-message-stats-bin-counter-data-model.md section R8.3 - selector row format is locked.'
 
     assert_line "$RUN_STDOUT" \
         pattern     '^bucket-stats-data-model: bin$' \
         asserts     'A user-supplied -bdm bin appears in the runtime-config / command-line sub-section with its resolved value and no annotation, per #266 + #231 (Issue #289 honors -bdm bin end-to-end).' \
-        produced_by 'emit_runtime_config_verbose() in ltl — %resolved_values lookup for bucket-stats-data-model' \
-        contract    'features/266-data-model-selectors.md § -V runtime-config surfacing + features/289-bucket-stats-bin-counter-data-model.md — selector row format is locked.'
+        produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for bucket-stats-data-model' \
+        contract    'features/266-data-model-selectors.md section -V runtime-config surfacing + features/289-bucket-stats-bin-counter-data-model.md - selector row format is locked.'
 
     assert_line "$RUN_STDOUT" \
         pattern     '^data-model: bin$' \
         asserts     'A user-supplied omnibus -dm bin appears as the data-model row in the command-line sub-section, alongside any per-surface override.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
-        contract    'features/266-data-model-selectors.md § -V runtime-config surfacing.'
+        contract    'features/266-data-model-selectors.md section -V runtime-config surfacing.'
 }
 
 scenario_error_unknown_so() {
@@ -323,7 +323,7 @@ scenario_error_unknown_so() {
     assert_exit "$RUN_EXIT" 1 \
         asserts     '-so with an unknown enum value is a hard error and exits with code 1.' \
         produced_by 'adapt_to_command_line_options() in ltl (sort-on enum validation), via print_usage() exit 1' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — hard-error paths pin current exit code; exit-code policy normalization is deferred to a separate ticket per scoping decision'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - hard-error paths pin current exit code; exit-code policy normalization is deferred to a separate ticket per scoping decision'
 
     # ltl emits the error banner (including "Error: invalid sort type used") on
     # stdout via print_usage(); only the bare "Died at ..." Perl trace goes to
@@ -332,7 +332,7 @@ scenario_error_unknown_so() {
         pattern     'invalid sort type' \
         asserts     'The user-visible diagnostic (emitted via print_usage to stdout) identifies the failed validation (sort type).' \
         produced_by 'print_usage("invalid sort type used") in adapt_to_command_line_options()' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — pinning current diagnostic surface; new error-format normalization is out of scope'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - pinning current diagnostic surface; new error-format normalization is out of scope'
 }
 
 scenario_error_unknown_du() {
@@ -343,13 +343,13 @@ scenario_error_unknown_du() {
     assert_exit "$RUN_EXIT" 1 \
         asserts     '-du with an unknown enum value is a hard error (exit 1 via print_usage).' \
         produced_by 'adapt_to_command_line_options() in ltl (duration-unit enum validation)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231'
+        contract    'features/225-test-harness-coverage-gaps.md section #231'
 
     assert_line "$RUN_STDOUT" \
         pattern     "Invalid duration unit" \
         asserts     'The user-visible diagnostic (stdout) identifies the failed validation (duration unit).' \
         produced_by 'print_usage("Invalid duration unit ...") in adapt_to_command_line_options()' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231'
+        contract    'features/225-test-harness-coverage-gaps.md section #231'
 }
 
 scenario_error_unknown_ru() {
@@ -360,13 +360,13 @@ scenario_error_unknown_ru() {
     assert_exit "$RUN_EXIT" 1 \
         asserts     '-ru with an unknown enum value is a hard error (exit 1 via print_usage).' \
         produced_by 'adapt_to_command_line_options() in ltl (rate-unit enum validation)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231'
+        contract    'features/225-test-harness-coverage-gaps.md section #231'
 
     assert_line "$RUN_STDOUT" \
         pattern     "Invalid rate unit" \
         asserts     'The user-visible diagnostic (stdout) identifies the failed validation (rate unit).' \
         produced_by 'print_usage("Invalid rate unit ...") in adapt_to_command_line_options()' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231'
+        contract    'features/225-test-harness-coverage-gaps.md section #231'
 }
 
 scenario_error_no_files() {
@@ -381,13 +381,13 @@ scenario_error_no_files() {
     assert_exit "$RUN_EXIT" 2 \
         asserts     'A non-existent file path is a hard error after glob expansion produces no matches (exit 2, distinct from the print_usage exit-1 paths).' \
         produced_by 'adapt_to_command_line_options() in ltl (post-glob @in_files empty check)' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — exit-code disparity (1 vs 2) intentionally pinned; harmonization deferred to a separate ticket'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - exit-code disparity (1 vs 2) intentionally pinned; harmonization deferred to a separate ticket'
 
     assert_line "$RUN_STDOUT" \
         pattern     'unable to open any files' \
         asserts     'The user-visible diagnostic (stdout) surfaces the empty-@in_files condition.' \
         produced_by 'print_usage("unable to open any files") in adapt_to_command_line_options()' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231'
+        contract    'features/225-test-harness-coverage-gaps.md section #231'
 }
 
 scenario_no_warning_on_clean_run() {
@@ -405,7 +405,7 @@ scenario_no_warning_on_clean_run() {
         pattern     "is not numeric|is not a built-in metric|overrides --percentile-precision|--exact-percentiles is deprecated" \
         asserts     'A clean run produces none of the four silent-override warnings. This guards against the warnings firing on inputs they were not designed for.' \
         produced_by 'adapt_to_command_line_options() in ltl' \
-        contract    'features/225-test-harness-coverage-gaps.md § #231 — warnings are gated on specific input shapes'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - warnings are gated on specific input shapes'
 }
 
 # ---------- Run -----------------------------------------------------------
