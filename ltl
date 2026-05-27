@@ -9265,13 +9265,27 @@ sub calculate_all_statistics {
                 #
                 # Stage 1: sort by the metric ALONE (cheap numeric comparison,
                 # no string scan) to order all keys.
-                # Stage 2: take a generous candidate pool (far larger than N) off
-                # the top and apply the full deterministic tiebreaker only to
-                # that pool. The pool is large enough that the displayed top N is
-                # always within it whenever the top N have a distinguishing
-                # metric; among a block of metric-tied keys beyond the pool the
-                # exact order is immaterial (those keys are interchangeable and
-                # are not displayed).
+                # Stage 2: form a candidate pool of exactly the keys that could
+                # occupy a displayed slot, apply the full deterministic
+                # tiebreaker to that pool, then keep the top N.
+                #
+                # Only the top N keys are displayed. A key can reach a displayed
+                # slot only if its metric value is at least as good as the value
+                # at the display cut (rank N). Any key worse than the cut value
+                # can never be displayed regardless of how the tiebreaker falls,
+                # so it is excluded from the pool. Keys that TIE the cut value all
+                # compete for the remaining displayed slots, so the pool includes
+                # every key at the cut value (the tiebreaker decides among them).
+                #
+                # Anchoring at the display cut — not at some larger fixed pool
+                # size — is what keeps this both correct and fast: when the
+                # displayed top N is distinguished by the metric (the common
+                # case, e.g. high-occurrence messages) the pool is just N-ish keys
+                # and the expensive string tiebreaker runs on a handful; only when
+                # the displayed set itself sits inside a large metric-tie (e.g.
+                # -sa landing on all-occurrences-1 keys) does the pool grow to all
+                # tied keys, which is unavoidable to pick the right rows and was
+                # never fast in any version.
                 my @by_metric = sort {
                     my $occurrences_a = $log_messages{$category}{$a}{$sort_key} // 0;
                     my $occurrences_b = $log_messages{$category}{$b}{$sort_key} // 0;
@@ -9280,9 +9294,17 @@ sub calculate_all_statistics {
                         : ($occurrences_b <=> $occurrences_a);
                 } keys %{$log_messages{$category}};
 
-                my $pool_size = $top_n_messages * 100;
-                $pool_size = 1000 if $pool_size < 1000;
-                my @pool = @by_metric[0 .. min($#by_metric, $pool_size - 1)];
+                # Display cut: the last index that can be shown (rank N), clamped
+                # to the available keys.
+                my $cut = min($#by_metric, $top_n_messages - 1);
+                my $cut_val = $log_messages{$category}{$by_metric[$cut]}{$sort_key} // 0;
+                # Extend the pool past the cut through every key tied with the cut
+                # value on the sort metric — those are the only keys beyond rank N
+                # that could still claim a displayed slot via the tiebreaker.
+                my $pool_end = $cut;
+                $pool_end++ while $pool_end < $#by_metric
+                    && (($log_messages{$category}{$by_metric[$pool_end + 1]}{$sort_key} // 0) == $cut_val);
+                my @pool = @by_metric[0 .. $pool_end];
 
                 @sorted_log_keys = sort {
                     my $occurrences_a = $log_messages{$category}{$a}{$sort_key} // 0;
