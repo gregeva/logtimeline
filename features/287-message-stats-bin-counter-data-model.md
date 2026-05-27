@@ -22,8 +22,8 @@ The user-observable effects:
 
 - `-mdm bin` no longer silently falls back to raw. The summary table, MESSAGES CSV, and the per-key terminal statistics columns are computed end-to-end via the bin-counter data model.
 - Under `-mdm raw` (and at default), output is byte-identical to today.
-- Percentile values under `-mdm bin` are derived via Prometheus-style exponential interpolation within bucket (#187 Decision 1, #272's locked algorithm pair); under `-mdm raw` they remain nearest-rank. Per-quantile values differ between the two models by design — this is exactly the divergence the #224 Layer 4 cross-model agreement check measures.
-- The `*-bin-data-model` scenario family in `tests/statistics-drift/scenarios.tsv` becomes meaningful for the MESSAGES surface (today these scenarios silently fall back to raw and Layer 4 reports `T1=OK` as a wiring sanity check per #224 Decision 9; once #287 ships, Layer 4 begins reporting real cross-model deviation against the populated `cross-model-tolerances.tsv` envelope).
+- Percentile values under `-mdm bin` are derived via Prometheus-style exponential interpolation within bucket (#187 Decision 1, #272's locked algorithm pair); under `-mdm raw` they remain nearest-rank. Per-quantile values differ between the two models by design (nearest-rank returns an observed sample; exponential interpolation returns a synthesised in-bin position).
+- The `*-bin-data-model` scenario family in `tests/statistics-drift/scenarios.tsv` becomes meaningful for the MESSAGES surface: once #287 ships, those scenarios exercise the real bin path and the #224 Layer 3 oracle validates the bin-counter percentiles against an algorithm-aware reference (exponential interpolation), rather than the scenarios silently falling back to raw.
 - A new `-V histogram-bin-counters` block reports `path: unified` for `summary_table` and `csv_output` (the latter as `shares_partitions_with: summary_table` per #189 R7), with the locked Decision 8 telemetry fields populated from real partition state.
 
 ## Delivery sequence
@@ -261,22 +261,13 @@ The `bucket-stats` surface entry continues to use `'pinned_raw'` until its own s
 
 The `-mdm` row in `%resolved_values` (`ltl:1592`) is unchanged. The runtime-config section records explicit user configuration; it does not reflect resolved-data-model state for surfaces where the user passed nothing. This matches #266's locked behavior.
 
-### R9 — Test harness contract — #224 Layer 4 cross-model agreement
+### R9 — Test harness contract — #224 Layer 3 oracle validation
 
 #### R9.1 — Re-baselining of `*-bin-data-model` MESSAGES baselines
 
-Today, `tests/statistics-drift/baselines/{apache,tomcat,thingworx,codebeamer}-bin-data-model/messages.csv` are byte-identical to the `*-default/messages.csv` baselines (the Day-one Layer 4 sanity check per #224 Decision 9). When #287 ships, the bin path begins producing real bin-counter percentile values; the MESSAGES CSV baselines for the four `*-bin-data-model` scenarios must be re-captured.
+Before #287, `tests/statistics-drift/baselines/{apache,tomcat,thingworx,codebeamer}-bin-data-model/messages.csv` were byte-identical to the `*-default/messages.csv` baselines (the `-mdm bin` selector silently fell back to raw). When #287 ships, the bin path begins producing real bin-counter percentile values; the MESSAGES CSV baselines for the four `*-bin-data-model` scenarios must be re-captured.
 
-The implementation commit captures the new baselines via `./tests/validate-statistics.sh --capture-baselines` (or the equivalent harness command) and commits them. The STATS CSV baselines for these scenarios remain byte-identical to `*-default/stats.csv` because the bucket-stats migration (surface 4) is out of scope here — `-bdm bin` still silently falls back to raw until the sibling ticket lands.
-
-#### R9.2 — `cross-model-tolerances.tsv` per-column envelopes
-
-`tests/statistics-drift/cross-model-tolerances.tsv` is populated with per-column tolerance overrides for the per-message-key percentile columns. Per #224 Decision 9's tier ladder:
-
-- Exact-value statistics (`min`, `max`, `mean`, `std_dev`, `cv`, `skewness`, `kurtosis`, `bimodality_coef`): default ladder (`0% / 1% / 4% / >4%`). The bin path derives these from sidecars whose accumulation is mathematically identical to the raw path's accumulators, so cross-model deviation should sit at `T1` (bitwise) modulo numerical rounding from the moment-sum order of operations.
-- Percentile ladder (`p1`...`p99999`, `iqr`): per-percentile envelopes matching the bin-resolution bound at `buckets_per_decade=53` (#187 R4 specifies ~2.2% width / ~1.1% midpoint error at the locked default). Initial envelope: T2 at 1%, T3 at 4% (matching the default ladder; the bin path's structural error sits comfortably inside this on canonical datasets). Per-scenario tightening may follow empirical observation on the four canonical datasets.
-
-The exact tolerance values are settled at implementation time based on Layer 4 measurement against the four canonical datasets; the contract here is *that* the envelopes are populated, not the specific numbers.
+The implementation commit captures the new baselines via `./tests/validate-statistics.sh --capture-baselines` (or the equivalent harness command) and commits them. The STATS CSV baselines for these scenarios remained byte-identical to `*-default/stats.csv` because the bucket-stats migration (surface 4) was out of scope here — `-bdm bin` still fell back to raw until the sibling ticket (#289) landed.
 
 #### R9.3 — Layer 3 oracle dispatch already in place
 
@@ -296,7 +287,7 @@ For runs at 10⁵ keys × 1000 samples per key: raw path retains ~800 MB of dura
 
 The bin path is deterministic for a given input per #187 R6. Same input file, filters, and CLI flags produce the same partitions (same lifecycle events in the same order), the same sidecar accumulator state (same arithmetic on the same operands in the same order), and therefore the same statistic values.
 
-The cross-model `T1` (bitwise) tier reported by #224 Layer 4 may not hold for percentile values (the bin path produces interpolated values, the raw path produces sample-indexed values — different outputs by design per #272). Exact-value statistics produced via sidecars *should* hold `T1` modulo the order-of-operations rounding difference between `(((x1−μ1)² + (x2−μ2)²) + …)` (raw path's array-reduction order at `ltl:8800`) and the Welford-Pébay incremental update sequence (bin path's order). When this rounding difference exceeds the `T1` threshold on a real dataset, the `T2` advisory tier (#224 Decision 9) covers it; persistent `T3+` divergence is an algorithmic bug.
+Exact-value statistics produced via sidecars match the raw path modulo the order-of-operations rounding difference between `(((x1−μ1)² + (x2−μ2)²) + …)` (raw path's array-reduction order at `ltl:8800`) and the Welford-Pébay incremental update sequence (bin path's order). The #224 Layer 3 oracle validates each statistic against an algorithm-aware reference; for the exact-value statistics the bin and raw references agree to within float-rounding precision, and persistent divergence beyond that is an algorithmic bug.
 
 ### R12 — `-mdm raw` byte-identity contract
 
@@ -342,7 +333,6 @@ This feature does NOT own:
 | `ltl:1956–2007` (`emit_percentile_algorithm_verbose`) | Change `message-stats` entry's `effective_track` from `'pinned_raw'` to `'matches_data_model'`; remove the override block's effect on `message-stats` (R8.2). |
 | `ltl:2068–2165` (`emit_bin_counter_mode_verbose`) | Add `summary_table` + `csv_output` to `%migrated`; extend `%shares_with` (`csv_output => 'summary_table'`), `%percentile_set` (both consumers), `%partition_keying` (`summary_table => '(category, log_key)'`). The `%bin_counter_telemetry` hash this sub reads is populated by `finalize_message_stats_unified()` above. |
 | `tests/statistics-drift/baselines/{apache,tomcat,thingworx,codebeamer}-bin-data-model/messages.csv` | Re-capture against the new bin path (R9.1). |
-| `tests/statistics-drift/cross-model-tolerances.tsv` | Populate per-column envelopes for the four `*-bin-data-model` MESSAGES scenarios (R9.2). |
 | `docs/usage.md` (the `-mdm` entry) | Update the description: remove "selector resolved but currently only the raw reduction is implemented for this surface; `bin` lands in a follow-up". |
 | `print_help()` | Same update for the `-mdm` help line at `ltl:3773`. |
 | `releases/v0.14.6.md` | One bullet referencing #287 per CLAUDE.md release process. |
@@ -468,8 +458,7 @@ Overflow and underflow counters add directly. No new primitive surface is requir
 ### Test harness
 
 - [ ] Four `*-bin-data-model/messages.csv` baselines re-captured under `tests/statistics-drift/baselines/`.
-- [ ] `cross-model-tolerances.tsv` populated with per-column envelopes for the per-message percentile columns.
-- [ ] `tests/validate-statistics.sh` exits 0 against fresh baselines (no T3/T4 across L1/L2/L3/L4).
+- [ ] `tests/validate-statistics.sh` exits 0 against fresh baselines (no T3/T4 across L1/L2/L3).
 - [ ] `tests/validate-regression.sh` continues to pass (raw path output unchanged).
 - [ ] `tests/validate-csv-output.sh` continues to pass (CSV column structure unchanged).
 - [ ] `tests/validate-runtime-config.sh` continues to pass (`-mdm` row format unchanged).
@@ -482,12 +471,11 @@ Overflow and underflow counters add directly. No new primitive surface is requir
 
 ## Validation
 
-This feature's correctness is validated through the #224 statistics-drift harness; no new harness is introduced. The harness's four layers each apply:
+This feature's correctness is validated through the #224 statistics-drift harness; no new harness is introduced. The harness's three layers each apply:
 
 - **Layer 1 (drift)** — fresh CSVs vs committed baselines. Re-baselining is part of the implementation commit (R9.1); post-baseline, Layer 1 reports `T1` on every cell.
 - **Layer 2 (intra-row arithmetic)** — `mean == duration / occurrences`, `iqr == p75 − p25`, percentile monotonicity. All apply to bin-path output unchanged.
-- **Layer 3 (external NumPy/SciPy oracle)** — dispatches on `-V percentile-algorithm` (#280); R8.2's update makes the oracle's dispatch automatically correct for bin scenarios. The oracle computes `exponential_interpolation_within_bucket` for `-mdm bin` MESSAGES rows and `nearest_rank` for `-mdm raw` MESSAGES rows.
-- **Layer 4 (cross-model agreement)** — pairs `*-default ↔ *-bin-data-model` MESSAGES CSVs and reports per-cell deviation. Pre-#287, this pairing is a wiring sanity check (`T1` on every cell because both runs execute the raw path). Post-#287, it measures real bin-vs-raw deviation against `cross-model-tolerances.tsv` envelopes.
+- **Layer 3 (external NumPy/SciPy oracle)** — dispatches on `-V percentile-algorithm` (#280); R8.2's update makes the oracle's dispatch automatically correct for bin scenarios. The oracle computes `exponential_interpolation_within_bucket` for `-mdm bin` MESSAGES rows and `nearest_rank` for `-mdm raw` MESSAGES rows, building its reference at the surface's `effective_bpd`.
 
 Additionally:
 

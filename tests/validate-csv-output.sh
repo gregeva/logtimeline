@@ -6,7 +6,7 @@
 # correctness, fixed-decimal rules. All checks are pass/fail (no tolerance).
 #
 # Sibling to validate-statistics.sh (#224), which handles numeric drift,
-# intra-row consistency, oracle correctness, and cross-model agreement.
+# intra-row consistency, and oracle correctness.
 # Run this BEFORE the statistics harness — structural correctness is a
 # precondition for meaningful drift comparison.
 #
