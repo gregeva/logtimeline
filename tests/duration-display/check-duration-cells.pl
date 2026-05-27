@@ -11,13 +11,15 @@
 #
 # Usage:
 #   check-duration-cells.pl --render <ansi-stripped-file> \
-#                           --expected-decimals <N> \
 #                           --resolved-unit <us|ms|s|...> \
 #                           --check <unit|zero|precision>
 #
-# Input must already have ANSI escapes stripped. Exits 0 if the requested
-# check passes for every cell on both surfaces; non-zero with a per-cell
-# diagnostic on the first violation.
+# --resolved-unit is the duration unit ltl resolved for the source (read from
+# -V csv-output duration_unit_resolved). The precision rule is a function of
+# the displayed unit vs this resolved unit; no separate decimal count is
+# needed. Input must already have ANSI escapes stripped. Exits 0 if the
+# requested check passes for every cell on both surfaces; non-zero with a
+# per-cell diagnostic on the first violation.
 
 use strict;
 use warnings;
@@ -28,12 +30,11 @@ while (@ARGV) {
     $k =~ s/^--//;
     $arg{$k} = shift @ARGV;
 }
-for my $required (qw(render expected-decimals resolved-unit check)) {
+for my $required (qw(render resolved-unit check)) {
     die "missing --$required\n" unless defined $arg{$required};
 }
 
 my $render_file = $arg{render};
-my $expected_decimals = $arg{'expected-decimals'};
 my $resolved_unit = $arg{'resolved-unit'};
 my $check = $arg{check};
 
@@ -131,18 +132,30 @@ for my $cell (@cells) {
             unless $raw eq "0$resolved_unit";
     }
     elsif ($check eq 'precision') {
-        # Invariant 3: rendered fractional precision must not exceed the
-        # resolved-unit precision read from -V. format_time auto-scales the
-        # unit (ms -> s -> hr) as magnitude grows; a value displayed in a
-        # COARSER unit than the source carries no synthesized precision, so we
-        # only constrain cells still displayed in the resolved (source) unit.
+        # Invariant 3 (duration cells only — CV and other non-duration columns
+        # have their own formatting regime and are never extracted here). Two
+        # rules, derived from the displayed unit vs the resolved source unit:
+        #
+        #  (a) House rule: at most ONE fractional digit on any cell. ltl's
+        #      format functions render a single decimal place; more than one is
+        #      a regression.
+        #  (b) Source-unit floor: a cell DISPLAYED IN the source's own
+        #      resolution unit must show ZERO fractional digits. A ms-resolved
+        #      source shows 58ms, not 58.2ms — one decimal there would fabricate
+        #      sub-millisecond precision the input never had (Bug 1). When the
+        #      value auto-scales to a COARSER unit (ms source shown in s; us
+        #      source shown in ms), one decimal is legitimate real precision and
+        #      is allowed by (a).
         next if $raw eq '';
         next unless $raw =~ /$CELL/;
         my ($num, $unit) = ($1, $2);
-        next unless $unit eq $resolved_unit;            # only the source-unit cells
         my $frac = ($num =~ /\.([0-9]+)$/) ? length($1) : 0;
-        $report->($cell, "shows $frac fractional digit(s) in '$resolved_unit'; resolved precision is $expected_decimals")
-            if $frac > $expected_decimals;
+
+        $report->($cell, "shows $frac fractional digits; the display rule allows at most 1")
+            if $frac > 1;
+
+        $report->($cell, "shows $frac fractional digit(s) while displayed in the resolved source unit '$resolved_unit'; a value at source resolution must render with 0 decimals (no fabricated sub-'$resolved_unit' precision)")
+            if $unit eq $resolved_unit && $frac > 0;
     }
     else {
         die "unknown --check '$check' (expected unit|zero|precision)\n";
