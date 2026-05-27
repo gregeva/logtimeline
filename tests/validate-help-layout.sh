@@ -119,7 +119,7 @@ emit_fail() {
 # ---------------------------------------------------------------------------
 echo "[sanity]"
 SANITY_ASSERTS='The three help-layout column constants ($help_opt_col, $help_short_col, $help_desc_col) extracted from ltl fall within plausible bounds, and $help_desc_col exceeds the long-form column so descriptions cannot overlap the long-form option text'
-SANITY_PRODUCED_BY='print_help() in ltl — module-scope my-declarations of $help_opt_col, $help_short_col, $help_desc_col'
+SANITY_PRODUCED_BY='print_help() in ltl - module-scope my-declarations of $help_opt_col, $help_short_col, $help_desc_col'
 SANITY_CONTRACT='Issue #261 hoisted these constants to module scope so --help, --help statistics, and --explain share one source of truth; bounds here exist to catch typo-class regressions where one is reset to an obviously-wrong value'
 
 if [[ "$DESC_COL" -lt 30 || "$DESC_COL" -gt 80 ]]; then
@@ -290,22 +290,22 @@ elif [[ $rc -eq 2 ]]; then
     emit_fail \
         label       "option-row alignment" \
         asserts     "Every option-row description begins at column \$help_desc_col+1 ($EXPECTED_DESC_COL); a row whose description starts to the right means its option text exceeded the column budget and overflowed silently" \
-        produced_by 'print_help() in ltl — the option-text rendering uses $help_desc_col as the padding target for the description column' \
+        produced_by 'print_help() in ltl - the option-text rendering uses $help_desc_col as the padding target for the description column' \
         contract    'Issue #189-3 root cause: long-form options exceeding the option-text column budget shipped silently because there was no test asserting the column was honored. This assertion is what makes the failure visible.' \
-        detail      "Perl inspector exit code 2 — one or more option rows misaligned (per-row diagnostics printed above)"
+        detail      "Perl inspector exit code 2 - one or more option rows misaligned (per-row diagnostics printed above)"
 elif [[ $rc -eq 3 ]]; then
     emit_fail \
         label       "continuation-row alignment" \
         asserts     'Every wrapped-description continuation line begins at the same column as the description start ($help_desc_col+1)' \
-        produced_by 'print_help() in ltl — wrap continuations are emitted with the same leading indent as the description column' \
-        contract    'Issue #189-3 — the same column-budget bug that misaligns option rows also misaligns their wrap continuations; both must be guarded together' \
-        detail      "Perl inspector exit code 3 — one or more continuation rows misaligned (per-row diagnostics printed above)"
+        produced_by 'print_help() in ltl - wrap continuations are emitted with the same leading indent as the description column' \
+        contract    'Issue #189-3 - the same column-budget bug that misaligns option rows also misaligns their wrap continuations; both must be guarded together' \
+        detail      "Perl inspector exit code 3 - one or more continuation rows misaligned (per-row diagnostics printed above)"
 else
     emit_fail \
         label       "option-row alignment (inspector)" \
         asserts     'The Perl inspector must exit 0, 2, or 3; any other exit code means the inspector itself broke and the test is no longer asserting anything' \
         produced_by 'inline Perl inspector at the top of validate-help-layout.sh' \
-        contract    'tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors — an inspector that cannot run is an unasserted test' \
+        contract    'tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors - an inspector that cannot run is an unasserted test' \
         detail      "Perl inspector exited with unexpected code $rc"
 fi
 
@@ -361,15 +361,15 @@ elif [[ $rc -eq 2 ]]; then
     emit_fail \
         label       "long-form column alignment" \
         asserts     "Every short+long option row places its long form starting at column \$help_opt_col + \$help_short_col + 1 ($EXPECTED_LONG_COL); a short form whose length pushes the long form rightward produces a ragged left margin even though the description column itself can still be honored" \
-        produced_by 'print_help() in ltl — the short-form rendering pads to $help_short_col before emitting the long form' \
-        contract    "Issue #261 — \$help_short_col was sized to accommodate the longest short form; a regression on either side (short form too long, or \$help_short_col bumped down) breaks left-margin alignment" \
-        detail      "Perl inspector exit code 2 — one or more short+long rows misaligned (per-row diagnostics printed above)"
+        produced_by 'print_help() in ltl - the short-form rendering pads to $help_short_col before emitting the long form' \
+        contract    "Issue #261 - \$help_short_col was sized to accommodate the longest short form; a regression on either side (short form too long, or \$help_short_col bumped down) breaks left-margin alignment" \
+        detail      "Perl inspector exit code 2 - one or more short+long rows misaligned (per-row diagnostics printed above)"
 else
     emit_fail \
         label       "long-form column alignment (inspector)" \
         asserts     'The long-form-column Perl inspector must exit 0 or 2; any other exit code means the inspector itself broke' \
         produced_by 'inline Perl inspector in the [long-form column alignment] block of validate-help-layout.sh' \
-        contract    'tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors — an inspector that cannot run is an unasserted test' \
+        contract    'tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors - an inspector that cannot run is an unasserted test' \
         detail      "long-form-column Perl inspector exited with unexpected code $rc"
 fi
 
@@ -389,7 +389,7 @@ assert_pair() {
         emit_fail \
             label       "$short, $long" \
             asserts     "Both the short form ($short) and long form ($long) appear on the same row of --help output, in the canonical 'short, long' order; missing-pair regressions cost the user a discoverable surface (memory: 'short forms required for every CLI option')" \
-            produced_by 'print_help() in ltl — the option-table row that registers this flag emits short+long together' \
+            produced_by 'print_help() in ltl - the option-table row that registers this flag emits short+long together' \
             contract    "MEMORY.md feedback_short_forms_required: every CLI flag in ltl must have both short and long form; 'no short form' decisions are errors that need amending before wiring" \
             detail      "no row matched '^[[:space:]]+${short}, +${long}' in stripped --help output"
     fi

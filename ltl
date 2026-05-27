@@ -12353,12 +12353,12 @@ unless( $group_similar_sensitivity eq "none" ) {
                 my $fp_absorbed = ($s->{fp_p1_s3} // 0) + ($s->{fp_p1_s4_pairwise} // 0) + ($s->{fp_p1_s4_rescan} // 0) + ($s->{fp_p2_s3} // 0);
                 my $combined_patterns = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
                 $final_remaining = $fp_keys - $fp_absorbed - ($s->{fp_p1_s2_ceiling} // 0) + $combined_patterns;
-                push @verbose_output, sprintf("    Reduction: %d → %d (%.1f%%)",
+                push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
                     $keys_seen, $final_remaining,
                     (1 - $final_remaining / ($keys_seen || 1)) * 100);
             } else {
                 $final_remaining = $genuinely_unmatched + $evicted + $ceiling_filtered + $patterns;
-                push @verbose_output, sprintf("    Reduction: %d → %d (%.1f%%)",
+                push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
                     $keys_seen, $final_remaining,
                     (1 - $final_remaining / ($keys_seen || 1)) * 100);
             }

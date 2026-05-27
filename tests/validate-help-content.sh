@@ -232,7 +232,7 @@ perl -ne '
 
 GETOPTS_COUNT=$(wc -l < "$GETOPTS_TSV" | tr -d ' ')
 if [[ "$GETOPTS_COUNT" -lt 50 ]]; then
-    echo "ERROR: parsed only $GETOPTS_COUNT GetOptions entries — parser likely broken"
+    echo "ERROR: parsed only $GETOPTS_COUNT GetOptions entries - parser likely broken"
     head "$GETOPTS_TSV"
     exit 1
 fi
@@ -292,8 +292,8 @@ scenario_A_help_contains_all_visible_longs() {
     assert_all_present "$VISIBLE_LONGS_FILE" "$HELP_LONGS_FILE" \
         label       'every non-hidden GetOptions long-form appears in --help output' \
         asserts     'For every option declared in GetOptions that is NOT annotated `# hidden`, print_help() must document the option by its long name. Drift here means a user-visible flag is documented in code but missing from --help.' \
-        produced_by 'print_help() in ltl — must add a $opt->("-short, --long ...", "description") line for every non-hidden GetOptions entry' \
-        contract    'features/232-help-coverage.md § 3 + § 8 — hidden flags are annotated `# hidden` in GetOptions; everything else must appear in --help'
+        produced_by 'print_help() in ltl - must add a $opt->("-short, --long ...", "description") line for every non-hidden GetOptions entry' \
+        contract    'features/232-help-coverage.md section 3 + section 8 - hidden flags are annotated `# hidden` in GetOptions; everything else must appear in --help'
 }
 
 scenario_B_usage_contains_all_visible_longs() {
@@ -303,8 +303,8 @@ scenario_B_usage_contains_all_visible_longs() {
     assert_all_present "$VISIBLE_LONGS_FILE" "$USAGE_LONGS_FILE" \
         label       'every non-hidden GetOptions long-form appears in docs/usage.md' \
         asserts     'docs/usage.md is the canonical wiki source per CLAUDE.md (overwritten on each release); every non-hidden flag must appear there. The -hgb doc bug found during research (declared, in print_help, missing from usage.md) is exactly this class.' \
-        produced_by 'docs/usage.md option tables — manually maintained, must be updated alongside any non-hidden flag addition' \
-        contract    'CLAUDE.md release-process step 15 (Sync Wiki) + features/232-help-coverage.md § 3 — usage.md is part of the user-facing contract'
+        produced_by 'docs/usage.md option tables - manually maintained, must be updated alongside any non-hidden flag addition' \
+        contract    'CLAUDE.md release-process step 15 (Sync Wiki) + features/232-help-coverage.md section 3 - usage.md is part of the user-facing contract'
 }
 
 scenario_C_help_short_forms_match_getopts() {
@@ -314,8 +314,8 @@ scenario_C_help_short_forms_match_getopts() {
     assert_all_present "$VISIBLE_SHORTS_FILE" "$HELP_SHORTS_FILE" \
         label       'every short form declared in GetOptions appears in --help output' \
         asserts     'When a flag has both -short and --long forms in GetOptions, print_help() must document both. A long form documented without its short form (or vice versa) is content drift.' \
-        produced_by 'print_help() $opt->() call site — first arg should be "-short, --long" not just "--long"' \
-        contract    'features/232-help-coverage.md § 8 — every GetOptions entry with a short form must surface that short form in help'
+        produced_by 'print_help() $opt->() call site - first arg should be "-short, --long" not just "--long"' \
+        contract    'features/232-help-coverage.md section 8 - every GetOptions entry with a short form must surface that short form in help'
 }
 
 scenario_D_dash_v_matches_version_number() {
@@ -332,7 +332,7 @@ scenario_D_dash_v_matches_version_number() {
         echo "        label:       ltl -v exited non-zero ($ec)"
         echo "        asserts:     ltl -v exits 0 and emits the version string"
         echo "        produced_by: print_version() in ltl"
-        echo "        contract:    features/232-help-coverage.md § 4 — -v is one of three in-binary version-emission sites that must agree with \$version_number"
+        echo "        contract:    features/232-help-coverage.md section 4 - -v is one of three in-binary version-emission sites that must agree with \$version_number"
         echo "        (captured in $vout)"
         fail=$((fail + 1))
         failures+=("$current_scenario :: ltl -v non-zero exit")
@@ -343,7 +343,7 @@ scenario_D_dash_v_matches_version_number() {
         pattern     "^Version: ${VERSION_NUMBER}$" \
         asserts     "The -v flag emits 'Version: ${VERSION_NUMBER}' matching the \$version_number literal in ltl source. This is one of three in-binary emission sites; all must agree." \
         produced_by 'print_version() in ltl' \
-        contract    'features/232-help-coverage.md § 4 — version string emission sites are stability-contracted to agree with $version_number'
+        contract    'features/232-help-coverage.md section 4 - version string emission sites are stability-contracted to agree with $version_number'
 }
 
 scenario_E_benchmark_data_section_matches_version_number() {
@@ -360,7 +360,7 @@ scenario_E_benchmark_data_section_matches_version_number() {
         echo "        label:       ltl -V benchmark-data exited non-zero ($ec)"
         echo "        asserts:     ltl -V benchmark-data <log> exits 0 and emits the benchmark-data section"
         echo "        produced_by: print_verbose_output() in ltl (benchmark-data section dispatch)"
-        echo "        contract:    Issue #226 framework + tests/HARNESS-DESIGN.md § Reserved section names — benchmark-data is a reserved section"
+        echo "        contract:    Issue #226 framework + tests/HARNESS-DESIGN.md section Reserved section names - benchmark-data is a reserved section"
         echo "        (captured in $bout)"
         fail=$((fail + 1))
         failures+=("$current_scenario :: ltl -V benchmark-data non-zero exit")
@@ -372,14 +372,14 @@ scenario_E_benchmark_data_section_matches_version_number() {
         pattern     '^=== benchmark-data ===$' \
         asserts     'The benchmark-data section header is emitted when requested via -V benchmark-data' \
         produced_by 'print_verbose_output() in ltl (benchmark-data emitter)' \
-        contract    'tests/HARNESS-DESIGN.md § Delimiter contract + Reserved section names — section header is stability-contracted'
+        contract    'tests/HARNESS-DESIGN.md section Delimiter contract + Reserved section names - section header is stability-contracted'
 
     # End-marker presence check before extracting body (HARNESS-DESIGN.md Trap 3).
     assert_line "$bout" \
         pattern     '^=== END benchmark-data ===$' \
         asserts     'The benchmark-data section is closed with the required end marker per the delimiter contract' \
         produced_by 'print_verbose_output() in ltl (benchmark-data emitter)' \
-        contract    'tests/HARNESS-DESIGN.md § Delimiter contract — end markers are required'
+        contract    'tests/HARNESS-DESIGN.md section Delimiter contract - end markers are required'
 
     # Extract the section body and assert the version row matches.
     local body
@@ -389,7 +389,7 @@ scenario_E_benchmark_data_section_matches_version_number() {
         echo "        label:       benchmark-data body extraction returned empty"
         echo "        asserts:     The body between '=== benchmark-data ===' and '=== END benchmark-data ===' must contain the version TSV row"
         echo "        produced_by: print_verbose_output() in ltl (benchmark-data TSV row writer)"
-        echo "        contract:    features/232-help-coverage.md § 4 + tests/HARNESS-DESIGN.md § Stability contract — version row format is locked"
+        echo "        contract:    features/232-help-coverage.md section 4 + tests/HARNESS-DESIGN.md section Stability contract - version row format is locked"
         echo "        (captured in $bout)"
         fail=$((fail + 1))
         failures+=("$current_scenario :: benchmark-data body empty")
@@ -402,7 +402,7 @@ scenario_E_benchmark_data_section_matches_version_number() {
         pattern     "^version	${VERSION_NUMBER}$" \
         asserts     "The benchmark-data section's 'version' TSV row matches the \$version_number literal. This is the second of three in-binary emission sites; all must agree." \
         produced_by 'print_verbose_output() in ltl (benchmark-data TSV row writer)' \
-        contract    'features/232-help-coverage.md § 4 + tests/HARNESS-DESIGN.md § Stability contract — version row format is locked'
+        contract    'features/232-help-coverage.md section 4 + tests/HARNESS-DESIGN.md section Stability contract - version row format is locked'
 }
 
 scenario_F_description_quality_warnings() {
@@ -449,7 +449,7 @@ scenario_F_description_quality_warnings() {
                     label       "placeholder token in help description: $flags" \
                     asserts     'Help descriptions must not contain placeholder tokens (TODO/FIXME/XXX/undocumented/TBD/tk/???); these indicate unfinished documentation.' \
                     produced_by 'print_help() $opt->() call site for this flag' \
-                    contract    'features/232-help-coverage.md § 5 heuristic 1 — placeholder-token check is locked as a hard signal of unfinished work' \
+                    contract    'features/232-help-coverage.md section 5 heuristic 1 - placeholder-token check is locked as a hard signal of unfinished work' \
                     detail      "flags='$flags' desc='$desc'"
                 ;;
             H2)
@@ -457,7 +457,7 @@ scenario_F_description_quality_warnings() {
                     label       "single-word description: $flags" \
                     asserts     'Help descriptions should be at least two words; single-word descriptions are usually tautological or truncated.' \
                     produced_by 'print_help() $opt->() call site for this flag' \
-                    contract    'features/232-help-coverage.md § 5 heuristic 2 — single-word descriptions are soft signal of drift' \
+                    contract    'features/232-help-coverage.md section 5 heuristic 2 - single-word descriptions are soft signal of drift' \
                     detail      "flags='$flags' desc='$desc'"
                 ;;
         esac

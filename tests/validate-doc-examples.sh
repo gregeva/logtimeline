@@ -207,7 +207,7 @@ run_doc_example() {
             label       "doc example exited $ec" \
             asserts     "Every non-skipped ltl example in user-facing documentation parses its options and runs to completion (exit 0) against a known fixture. A non-zero exit means an option was renamed, removed, or the example was wrong from the start." \
             produced_by 'docs/usage.md (example) + ltl option parser' \
-            contract    'features/225-test-harness-coverage-gaps.md § #234 — docs/usage.md is the canonical wiki source per CLAUDE.md release-process step 15; broken examples ship to the wiki' \
+            contract    'features/225-test-harness-coverage-gaps.md section #234 - docs/usage.md is the canonical wiki source per CLAUDE.md release-process step 15; broken examples ship to the wiki' \
             detail      "command: $LTL $LTL_INJECT $ltl_args ; stderr: $(head -3 "$stderr_file" 2>/dev/null | tr '\n' ' ')"
         return
     fi
@@ -215,9 +215,9 @@ run_doc_example() {
     if [[ ! -s "$stdout_file" ]]; then
         emit_failure \
             label       "doc example produced empty stdout" \
-            asserts     'Successful example runs produce non-empty output. An empty stdout with exit 0 indicates the example silently no-ops (matched 0 lines, filtered everything out) — the example is misleading even if technically functional.' \
+            asserts     'Successful example runs produce non-empty output. An empty stdout with exit 0 indicates the example silently no-ops (matched 0 lines, filtered everything out) - the example is misleading even if technically functional.' \
             produced_by 'docs/usage.md (example) + ltl output writer' \
-            contract    'features/225-test-harness-coverage-gaps.md § #234 — examples must demonstrate something, not just exit cleanly' \
+            contract    'features/225-test-harness-coverage-gaps.md section #234 - examples must demonstrate something, not just exit cleanly' \
             detail      "command: $LTL $LTL_INJECT $ltl_args"
         return
     fi
