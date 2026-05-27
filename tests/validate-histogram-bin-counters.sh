@@ -429,6 +429,133 @@ scenario_message_stats_raw() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario 7d (Issue #289): -bdm bin engages the per-time-bucket bin path.
+# Asserts the time_bucket_stats consumer block emits path: unified plus the
+# locked Decision 8 telemetry fields populated from the real per-bucket
+# partition state. Unlike summary_table/csv_output, time_bucket_stats has a
+# DEDICATED store (it is NOT in %shares_with), so it emits the full telemetry
+# block with partition_keying: time_bucket, not a shares_partitions_with
+# short form. The ThingWorx access log carries duration data, so the
+# per-time-bucket statistics surface is active (no -hm, no -os).
+# ---------------------------------------------------------------------------
+scenario_bucket_stats_bin() {
+    current_scenario="bucket-stats-bin"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_section -bdm bin -bs 240)
+
+    assert_header_present "$out"
+
+    assert_line "$out" \
+        pattern     '^consumer: time_bucket_stats$' \
+        asserts     'The time_bucket_stats consumer block is emitted under -bdm bin (per Issue #289 — time_bucket_stats was added to %migrated alongside the #34/#287 consumers).' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — the @consumer_order iteration emits one consumer: block per migrated consumer' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — consumer name string is locked; renames are breaking. features/289-bucket-stats-bin-counter-data-model.md.'
+
+    assert_line "$out" \
+        pattern     '^  path: unified$' \
+        asserts     'Under -bdm bin (no opt-outs), the time_bucket_stats consumer reports path: unified — the bin-counter path is running end-to-end on the per-time-bucket statistics surface.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — path determined by %migrated AND not opted out' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § R10 path vocabulary — unified is the post-migration label.'
+
+    assert_line "$out" \
+        pattern     '^  partition_keying: time_bucket$' \
+        asserts     'time_bucket_stats partition keying is time_bucket — one partition per time bucket, the same keying #34 uses for heatmap_cells/markers. Distinct from (category, log_key) and metric_global.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — %partition_keying lookup' \
+        contract    'features/189-histogram-bin-counter-primitives.md § R3 — keying shape per consumer is locked; features/289 sets time_bucket_stats shape.'
+
+    assert_line "$out" \
+        pattern     '^  partition_count: [1-9][0-9]*$' \
+        asserts     'partition_count reports a positive integer — at least one time bucket had a duration sample that triggered counter_update and lazily allocated a partition.' \
+        produced_by 'snapshot_counter_telemetry() in ltl, invoked from finalize_bucket_stats_unified()' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — partition_count field is locked; format is integer.'
+
+    assert_line "$out" \
+        pattern     '^  total_rebin_events: [0-9]+$' \
+        asserts     'total_rebin_events is present and a non-negative integer — the auto-resize lifecycle has fired zero or more rebins across all per-bucket partitions.' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — total_rebin_events field is locked; format is integer.'
+
+    assert_line "$out" \
+        pattern     '^  max_partition_bins: [0-9]+$' \
+        asserts     'max_partition_bins is present and a non-negative integer — the high-water-mark bin count across all per-bucket partitions (#187 Decision 5 telemetry).' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — max_partition_bins is locked.'
+
+    assert_line "$out" \
+        pattern     '^  partitions_with_overflow_count: [0-9]+$' \
+        asserts     'partitions_with_overflow_count reports the count of per-bucket partitions where the overflow counter was non-zero (per #187 Decision 4 / #189 R6).' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 + § Decision 4 — overflow tally is the audit surface; field name and integer format are locked.'
+
+    assert_line "$out" \
+        pattern     '^  partitions_with_underflow_count: [0-9]+$' \
+        asserts     'partitions_with_underflow_count reports the symmetric per-bucket underflow tally per #187 Decision 4.' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 + § Decision 4 — underflow tally is the audit surface.'
+
+    assert_line "$out" \
+        pattern     '^  counter_memory_bytes: [0-9]+$' \
+        asserts     'counter_memory_bytes is present and a non-negative integer — the Devel::Size measurement of the dedicated per-time-bucket counter store.' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — counter_memory_bytes is locked.'
+
+    assert_line "$out" \
+        pattern     '^  rebins_per_partition: p50=[0-9]+ p95=[0-9]+ p99=[0-9]+ max=[0-9]+$' \
+        asserts     'rebins_per_partition reports the percentile distribution of per-partition rebin counts in the locked four-field format (p50, p95, p99, max).' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 5 + § Decision 8 — telemetry field name and four-quartile format are locked.'
+
+    assert_line "$out" \
+        pattern     '^  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999$' \
+        asserts     'time_bucket_stats emits the 12-quantile ladder per #187 R3 for this surface. Order is fixed: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — %percentile_set{time_bucket_stats}' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § R3 — per-consumer percentile set is locked; features/289 sets time_bucket_stats ladder.'
+
+    assert_line "$out" \
+        pattern     '^  out_of_range_bounded: p1=(none|low|high)' \
+        asserts     'out_of_range_bounded emits per-quantile audit code (none|low|high) per #187 Decision 4. Pattern checks at least p1 is reported; subsequent quantiles follow the same triple.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — reads $t->{out_of_range_bounded} populated by finalize_bucket_stats_unified() from %bucket_stats_audit' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 4 + § Decision 8 — per-quantile audit code triple is locked.'
+
+    assert_no_line "$out" \
+        pattern     '^  shares_partitions_with: ' \
+        asserts     'time_bucket_stats has a DEDICATED counter store (not in %shares_with), so it emits the full telemetry block — never a shares_partitions_with short form. Inverting the heatmap sharing is a separate follow-up.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — %shares_with map has no time_bucket_stats entry' \
+        contract    'features/289-bucket-stats-bin-counter-data-model.md § dedicated-store decision (divergence 2).'
+
+    rm -f "$out"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 7e (Issue #289): -bdm raw routes time_bucket_stats through
+# user_opt_out even though the consumer is migrated, because the user pinned
+# raw on this surface (also the default). No telemetry block follows.
+# ---------------------------------------------------------------------------
+scenario_bucket_stats_raw() {
+    current_scenario="bucket-stats-raw"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_section -bdm raw -bs 240)
+
+    assert_header_present "$out"
+
+    assert_line "$out" \
+        pattern     '^consumer: time_bucket_stats$' \
+        asserts     'time_bucket_stats consumer block is emitted even under -bdm raw — the consumer is migrated; the path label distinguishes engaged-vs-opt-out.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8'
+
+    assert_line "$out" \
+        pattern     '^  path: user_opt_out$' \
+        asserts     'Under -bdm raw, time_bucket_stats reports path: user_opt_out — the consumer is migrated but the user pinned raw on this surface, so the pre-migration code runs. No telemetry block follows.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl — %consumer_opted_out_to_raw map (Issue #289)' \
+        contract    'features/187-histogram-bin-counter-percentiles.md § R10 path vocabulary — user_opt_out is the migrated-but-pinned-raw label.'
+
+    rm -f "$out"
+}
+
+# ---------------------------------------------------------------------------
 # Scenario 8: section is always present under -V histogram-bin-counters
 # even when no percentile-consuming feature is in use
 # ---------------------------------------------------------------------------
@@ -466,6 +593,10 @@ echo ""
 scenario_message_stats_csv_shared
 echo ""
 scenario_message_stats_raw
+echo ""
+scenario_bucket_stats_bin
+echo ""
+scenario_bucket_stats_raw
 echo ""
 scenario_always_present
 

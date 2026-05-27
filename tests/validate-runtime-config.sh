@@ -294,13 +294,19 @@ scenario_runtime_config_data_model_selectors() {
     current_scenario="runtime-config-data-model-selectors"
     echo "[$current_scenario]"
 
-    run_ltl "rc-dm" -V runtime-config -mdm bin -dm bin "$TEST_LOG"
+    run_ltl "rc-dm" -V runtime-config -mdm bin -bdm bin -dm bin "$TEST_LOG"
 
     assert_line "$RUN_STDOUT" \
         pattern     '^message-stats-data-model: bin$' \
         asserts     'A user-supplied -mdm bin appears in the runtime-config / command-line sub-section with its resolved value and no annotation, per #266 + #231.' \
         produced_by 'emit_runtime_config_verbose() in ltl — %resolved_values lookup for message-stats-data-model' \
         contract    'features/266-data-model-selectors.md § -V runtime-config surfacing + features/287-message-stats-bin-counter-data-model.md § R8.3 — selector row format is locked.'
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^bucket-stats-data-model: bin$' \
+        asserts     'A user-supplied -bdm bin appears in the runtime-config / command-line sub-section with its resolved value and no annotation, per #266 + #231 (Issue #289 honors -bdm bin end-to-end).' \
+        produced_by 'emit_runtime_config_verbose() in ltl — %resolved_values lookup for bucket-stats-data-model' \
+        contract    'features/266-data-model-selectors.md § -V runtime-config surfacing + features/289-bucket-stats-bin-counter-data-model.md — selector row format is locked.'
 
     assert_line "$RUN_STDOUT" \
         pattern     '^data-model: bin$' \
