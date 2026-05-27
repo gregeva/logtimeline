@@ -12,8 +12,13 @@
 # Option families (Decision 6):
 #   default          baseline raw-array data model on both observed surfaces
 #   consolidated     -g 90 changes which samples land in which message bucket
-#   bin-data-model   bin-counter data model on both surfaces (falls back to raw today)
+#   bin-data-model   bin-counter data model on both surfaces (honored end-to-end)
 #   sorted-by-p999   ranks output by p999 (exercises percentile-based ranking)
+#   heatmap-raw / heatmap-bin (Issue #289)   -hm duration replaces the terminal
+#                    per-time-bucket statistics row with the heatmap row, but the
+#                    STATS CSV is a separate render surface — the per-time-bucket
+#                    statistics must still be captured and emitted to -o. These
+#                    pairs guard that render-surface independence on both models.
 #
 # All scenarios pin -mdm and -bdm explicitly (#266 selectors) so the harness
 # never relies on internal defaults.
@@ -35,6 +40,8 @@ tomcat-default	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-0
 tomcat-consolidated	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -g 90 -n 25 -mdm raw -bdm raw
 tomcat-bin-data-model	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -n 25 -mdm bin -bdm bin
 tomcat-sorted-by-p999	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -n 25 -so p999 -mdm raw -bdm raw
+tomcat-heatmap-raw	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -n 25 -hm duration -mdm raw -bdm raw
+tomcat-heatmap-bin	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -n 25 -hm duration -mdm bin -bdm bin
 thingworx-default	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-cp full -bs 240 -n 25 -mdm raw -bdm raw
 thingworx-consolidated	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-cp full -bs 240 -g 90 -n 25 -mdm raw -bdm raw
 thingworx-bin-data-model	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-cp full -bs 240 -n 25 -mdm bin -bdm bin

@@ -111,6 +111,6 @@ what the CSV outputs *should* look like at any release tag.
 |---|---|
 | `validate-regression.sh` | Rendered terminal output byte-identity |
 | `validate-csv-output.sh` (this) | CSV structural & type-wise correctness |
-| `validate-statistics.sh` (#224) | Numeric drift, intra-row consistency, oracle correctness, cross-model agreement |
+| `validate-statistics.sh` (#224) | Numeric drift, intra-row consistency, oracle correctness |
 
 These three layer cleanly: terminal layout, CSV structure, CSV values.

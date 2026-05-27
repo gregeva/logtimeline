@@ -457,6 +457,7 @@ my $data_model_bucket              = undef;   # -bdm  / --bucket-stats-data-mode
 my $histogram_capture_mode         = undef;   # 'raw' or 'bin' (set before parsing loop)
 my $heatmap_capture_mode           = undef;   # 'raw' or 'bin' (set before parsing loop)
 my $message_stats_capture_mode     = undef;   # 'raw' or 'bin' (set before parsing loop) — Issue #287
+my $bucket_stats_capture_mode      = undef;   # 'raw' or 'bin' (set before parsing loop) — Issue #289
 
 # Streaming-partition bpd for display-geometry-bound consumers (#201).
 # Higher than the F1 default (53) because F2/F3 partition counts are bounded
@@ -467,6 +468,12 @@ my $message_stats_capture_mode     = undef;   # 'raw' or 'bin' (set before parsi
 # by #201 V8 at 1.10% / 5.78% worst-case displacement on canonical datasets.
 my $heatmap_stream_bpd   = 616;
 my $histogram_stream_bpd = 616;
+
+# Issue #289: per-time-bucket statistics bin resolution, the analyst's lever
+# for this surface (mirrors $percentile_buckets_per_decade for the per-message
+# surface). Default 53 (#187 Decision 2 floor); tunable via
+# -bsbpd / --bucket-stats-buckets-per-decade. Valid range 4..616.
+my $bucket_stats_buckets_per_decade = 53;
 
 # Histogram data collection (hash-based for dynamic metrics)
 my %histogram_values = (
@@ -535,6 +542,24 @@ my %log_messages_counters;
 # audit semantics). Drained by finalize_message_stats_unified() into
 # %bin_counter_telemetry{summary_table}{out_of_range_bounded}.
 my %message_stats_audit;
+
+# Issue #289: per-time-bucket counter store, keyed by $bucket — same shape #34
+# uses for %heatmap_counters. Populated under $bucket_stats_capture_mode eq 'bin'
+# by counter_update() during the parsing loop, observing $duration. Consumed by
+# calculate_statistics_bin() and snapshot_counter_telemetry() at end-of-parse.
+# %bucket_stats_counters_hl carries the highlight subset for store parity with
+# the heatmap pattern; no highlight statistics are derived from it (the
+# per-time-bucket surface has no highlight statistics — only highlight totals).
+my %bucket_stats_counters;
+my %bucket_stats_counters_hl;
+
+# Issue #289: per-quantile out_of_range_bounded audit aggregation for the
+# time_bucket_stats consumer. Same worst-case-per-quantile rule as
+# %message_stats_audit; kept separate so the two surfaces' -V telemetry do not
+# cross-contaminate when both run bin (e.g. under -dm bin). Drained by
+# finalize_bucket_stats_unified() into
+# %bin_counter_telemetry{time_bucket_stats}{out_of_range_bounded}.
+my %bucket_stats_audit;
 
 # Box drawing character sets for histogram axes (Issue #25)
 my $histogram_box_weight = 'heavy';  # 'heavy' or 'light'
@@ -1480,6 +1505,7 @@ sub _classify_argv_provenance {
                 'hgbpd|histogram-buckets-per-decade',
                 'hgb|histogram-buckets',
                 'pbpd|percentile-buckets-per-decade',
+                'bsbpd|bucket-stats-buckets-per-decade',
                 'pp|percentile-precision',
                 'dm|data-model',
                 'hgdm|histogram-data-model',
@@ -1592,6 +1618,7 @@ sub emit_runtime_config_verbose {
         'histogram-buckets-per-decade'      => $histogram_buckets_per_decade,
         'histogram-buckets'                 => $histogram_bucket_override,
         'percentile-buckets-per-decade'     => $percentile_buckets_per_decade,
+        'bucket-stats-buckets-per-decade'   => $bucket_stats_buckets_per_decade,
         'percentile-precision'              => $percentile_precision_level,
         # Issue #266: explicit data-model selectors. Emitted only when the
         # user supplied them (per the existing provenance partitioning at
@@ -1950,16 +1977,27 @@ sub emit_percentile_algorithm_verbose {
     # and the heatmap/histogram capture-mode resolution at adapt time.
     # The `effective_algorithm` column reports what the code actually
     # ran, not what the resolved data_model implies.
+    # Per-surface bin resolution (buckets_per_decade). Issue #289: 53 is the
+    # global default/floor (#187 Decision 2, OTEP-149 Scale-4 analog); each
+    # surface tunes UP from there by partition cardinality vs memory. The
+    # per-message-key surface (potentially millions of partitions) stays at
+    # the 53 default; the per-time-bucket surface (hundreds of partitions) and
+    # the heatmap/histogram surfaces (bounded partition counts) run finer.
+    # Emitted as `effective_bpd` so the #224 L3 oracle builds its reference
+    # partition at the SAME resolution ltl used (the oracle is parameter-aware
+    # per #280 — it must not hard-code a bpd that diverges from ltl's).
     my @surfaces = (
         {
             id              => 'histogram',
             data_model      => choose_data_model('histogram')   // 'bin',
             effective_track => 'matches_data_model',
+            bpd             => $histogram_stream_bpd,
         },
         {
             id              => 'heatmap',
             data_model      => choose_data_model('heatmap')     // 'bin',
             effective_track => 'matches_data_model',
+            bpd             => $heatmap_stream_bpd,
         },
         {
             id              => 'message-stats',
@@ -1967,11 +2005,15 @@ sub emit_percentile_algorithm_verbose {
             # Issue #287: bin reduction now implemented end-to-end; the
             # effective algorithm tracks the resolved data model.
             effective_track => 'matches_data_model',
+            bpd             => $percentile_buckets_per_decade,
         },
         {
             id              => 'bucket-stats',
             data_model      => choose_data_model('bucket-stats')  // 'raw',
-            effective_track => 'pinned_raw',
+            # Issue #289: bin reduction now implemented end-to-end; the
+            # effective algorithm tracks the resolved data model.
+            effective_track => 'matches_data_model',
+            bpd             => $bucket_stats_buckets_per_decade,
         },
     );
 
@@ -2008,6 +2050,13 @@ sub emit_percentile_algorithm_verbose {
         push @verbose_output, "=== percentile-algorithm / $name ===";
         push @verbose_output, "data_model: $dm";
         push @verbose_output, "effective_algorithm: $effective_alg";
+        # effective_bpd: the bin resolution this surface uses under the bin
+        # data model (Issue #289). Only meaningful for the exponential-
+        # interpolation algorithm; the raw nearest-rank path has no bin
+        # resolution. The #224 L3 oracle reads this to build its reference
+        # partition at the same resolution ltl used.
+        push @verbose_output, "effective_bpd: $s->{bpd}"
+            if $effective_alg eq 'exponential_interpolation_within_bucket';
         push @verbose_output, "formula: $meta->{formula}";
         push @verbose_output, "algorithm_source: $meta->{source}";
         push @verbose_output, "effective_algorithm_note: $note" if defined $note;
@@ -2068,8 +2117,8 @@ sub emit_bin_counter_mode_verbose {
     my %feature_active = (
         summary_table     => 1,
         csv_output        => $write_messages_to_csv ? 1 : 0,
-        time_bucket_stats => ($print_durations && !$omit_durations
-                              && !$omit_stats && !$heatmap_enabled) ? 1 : 0,
+        time_bucket_stats => ($print_durations && !$omit_durations && !$omit_stats
+                              && (!$heatmap_enabled || $write_messages_to_csv)) ? 1 : 0,
         heatmap_markers   => $heatmap_enabled ? 1 : 0,
         heatmap_cells     => $heatmap_enabled ? 1 : 0,
         histogram_view    => $histogram_enabled ? 1 : 0,
@@ -2088,11 +2137,10 @@ sub emit_bin_counter_mode_verbose {
 
     # Consumers migrated to the unified path. heatmap_cells / heatmap_markers
     # / histogram_view / histogram_bins shipped via #34; summary_table /
-    # csv_output shipped via #287. time_bucket_stats remains on the
-    # pre-migration path until its own sibling implementation ticket lands.
+    # csv_output shipped via #287; time_bucket_stats shipped via #289.
     my %migrated = map { $_ => 1 } qw(
         heatmap_cells heatmap_markers histogram_view histogram_bins
-        summary_table csv_output
+        summary_table csv_output time_bucket_stats
     );
 
     # Shared-partition topology per #189 R7 / Decision 8 shares_partitions_with.
@@ -2111,6 +2159,7 @@ sub emit_bin_counter_mode_verbose {
         histogram_view  => [qw(p1 p10 p25 p50 p75 p90 p95 p99 p999 p9999)],
         summary_table   => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
         csv_output      => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
+        time_bucket_stats => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
     );
 
     # Per-consumer partition keying (Decision 8 field).
@@ -2120,6 +2169,7 @@ sub emit_bin_counter_mode_verbose {
         histogram_view  => 'metric_global',
         histogram_bins  => 'metric_global',
         summary_table   => '(category, log_key)',
+        time_bucket_stats => 'time_bucket',
     );
 
     # Per-consumer path determination is uniform across all four data-model
@@ -2134,6 +2184,7 @@ sub emit_bin_counter_mode_verbose {
         heatmap_markers => ($heatmap_capture_mode        && $heatmap_capture_mode        eq 'raw') ? 1 : 0,
         histogram_view  => ($histogram_capture_mode      && $histogram_capture_mode      eq 'raw') ? 1 : 0,
         histogram_bins  => ($histogram_capture_mode      && $histogram_capture_mode      eq 'raw') ? 1 : 0,
+        time_bucket_stats => ($bucket_stats_capture_mode && $bucket_stats_capture_mode   eq 'raw') ? 1 : 0,
     );
 
     for my $consumer (@consumer_order) {
@@ -3791,6 +3842,7 @@ sub print_help {
     $out .= help_subheading("Percentile mode");
     $out .= help_opt("-pp,   --percentile-precision <N>",            "Set percentile binning precision tier 1..9 (default: 5 = ~1.3%; 1=~10%, 9=~0.1%). Applies to surfaces using the bin counter data model; see docs/usage.md");
     $out .= help_opt("-pbpd, --percentile-buckets-per-decade <N>",   "Set percentile buckets-per-decade directly (default: 53; valid 4..616). Overrides --percentile-precision when both supplied");
+    $out .= help_opt("-bsbpd, --bucket-stats-buckets-per-decade <N>", "Set per-time-bucket statistics buckets-per-decade under -bdm bin (default: 53; valid 4..616)");
 
     # Data-model selectors (Issue #266). Pin which reduction path each
     # surface uses. No defaults — when unset, the surface's existing
@@ -3800,7 +3852,7 @@ sub print_help {
     $out .= help_opt("-hgdm, --histogram-data-model <raw|bin>",        "Pin the histogram surface's data model");
     $out .= help_opt("-hmdm, --heatmap-data-model <raw|bin>",          "Pin the heatmap surface's data model");
     $out .= help_opt("-mdm,  --message-stats-data-model <raw|bin>",    "Pin the per-message-key statistics data model (default raw; bin uses HDR-style bin counters with Prometheus-style exponential interpolation)");
-    $out .= help_opt("-bdm,  --bucket-stats-data-model <raw|bin>",     "Pin the per-time-bucket statistics data model (selector resolved but currently always uses raw; bin lands in a follow-up)");
+    $out .= help_opt("-bdm,  --bucket-stats-data-model <raw|bin>",     "Pin the per-time-bucket statistics data model (default raw; bin uses HDR-style bin counters with Prometheus-style exponential interpolation)");
 
     # User-Defined Metrics
     $out .= help_subheading("User-Defined Metrics");
@@ -5959,6 +6011,8 @@ sub measure_memory_structures {
         heatmap_raw_hl         => Devel::Size::total_size(\%heatmap_raw_hl),
         heatmap_counters       => Devel::Size::total_size(\%heatmap_counters),
         heatmap_counters_hl    => Devel::Size::total_size(\%heatmap_counters_hl),
+        bucket_stats_counters    => Devel::Size::total_size(\%bucket_stats_counters),
+        bucket_stats_counters_hl => Devel::Size::total_size(\%bucket_stats_counters_hl),
         histogram_values       => Devel::Size::total_size(\%histogram_values),
         histogram_counters     => Devel::Size::total_size(\%histogram_counters),
         histogram_counters_hl  => Devel::Size::total_size(\%histogram_counters_hl),
@@ -6470,6 +6524,7 @@ sub adapt_to_command_line_options {
         'hgbpd|histogram-buckets-per-decade=i' => \$histogram_buckets_per_decade,
         'hgb|histogram-buckets=i' => \$histogram_bucket_override,
         'pbpd|percentile-buckets-per-decade=i' => \$percentile_buckets_per_decade,
+        'bsbpd|bucket-stats-buckets-per-decade=i' => \$bucket_stats_buckets_per_decade,
         'pp|percentile-precision=i' => \$percentile_precision_level,
         # Issue #266: explicit data-model selectors. Each accepts 'raw' or 'bin';
         # any other value dies at parse time via _validate_dm. The flags have no
@@ -6665,6 +6720,10 @@ sub adapt_to_command_line_options {
         warn "Invalid -pbpd: $percentile_buckets_per_decade (must be 4..616). Using default (53).\n";
         $percentile_buckets_per_decade = 53;
         $percentile_precision_source   = 'default';
+    }
+    if ($bucket_stats_buckets_per_decade < 4 || $bucket_stats_buckets_per_decade > 616) {
+        warn "Invalid -bsbpd: $bucket_stats_buckets_per_decade (must be 4..616). Using default (53).\n";
+        $bucket_stats_buckets_per_decade = 53;
     }
 
     # Duration unit option validation (Issue #17)
@@ -7032,6 +7091,7 @@ sub read_and_process_logs {
     $heatmap_capture_mode       = choose_data_model('heatmap')       // 'bin';
     $histogram_capture_mode     = choose_data_model('histogram')     // 'bin';
     $message_stats_capture_mode = choose_data_model('message-stats') // 'raw';
+    $bucket_stats_capture_mode  = choose_data_model('bucket-stats')  // 'raw';
 
     foreach my $in_file (@in_files) {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
@@ -7837,7 +7897,28 @@ sub read_and_process_logs {
                     $bytes = 0 if !defined( $bytes );
     
                     # Initialize the hash if not already done (don't initialize it all, allowing for lazy population of only the fields we need)
-                    $log_analysis{$bucket} //= {
+                    # Issue #289: under -bdm bin the per-bucket statistics are derived from a
+                    # bin-counter partition (%bucket_stats_counters) plus Welford-Pébay sidecars
+                    # held on this entry, so the raw durations[] array is omitted. The sidecars
+                    # (min/max/duration_count/_running_mean/m2_sum/m3_sum/m4_sum) survive untouched
+                    # to calculate_statistics_bin() at consume time. The raw branch is unchanged.
+                    $log_analysis{$bucket} //= ($bucket_stats_capture_mode eq 'bin' ? {
+                        occurrences => 0,
+                        total_bytes => 0,
+                        total_duration => 0,
+                        # count_sum => 0,
+                        # count_occurrences => 0,
+                        # count_min => undef,
+                        # count_max => undef,
+                        sum_of_squares => 0,
+                        duration_count => 0,
+                        min            => undef,
+                        max            => undef,
+                        _running_mean  => 0,
+                        m2_sum         => 0,
+                        m3_sum         => 0,
+                        m4_sum         => 0,
+                    } : {
                         occurrences => 0,
                         total_bytes => 0,
                         total_duration => 0,
@@ -7847,7 +7928,7 @@ sub read_and_process_logs {
                         # count_max => undef,
                         sum_of_squares => 0,
                         durations => [],
-                    };
+                    });
 
                     $log_analysis{$bucket}{occurrences}++;
 
@@ -7856,8 +7937,57 @@ sub read_and_process_logs {
 
                         $log_analysis{$bucket}{'total_duration-HL'} += $duration if $category_bucket =~ /-HL$/;
                         $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
-                        # Skip collecting individual durations for percentiles when heatmap is enabled (memory optimization)
-                        push @{$log_analysis{$bucket}{durations}}, $duration unless $heatmap_enabled;
+                        # Skip collecting individual durations for percentiles when heatmap is enabled (memory optimization) —
+                        # the terminal bar-graph replaces the per-time-bucket statistics row with the heatmap row.
+                        # Issue #289: but the STATS CSV is a SEPARATE render surface, so when -o is requested the
+                        # per-time-bucket statistics must still be captured and computed even under heatmap. Skip the
+                        # push only when heatmap is active AND no CSV is being written. Also skip under -bdm bin — the
+                        # bin-counter partition + sidecars below carry equivalent information for the consumer.
+                        push @{$log_analysis{$bucket}{durations}}, $duration
+                            unless ($heatmap_enabled && !$write_messages_to_csv)
+                                || $bucket_stats_capture_mode eq 'bin';
+
+                        # Issue #289: under -bdm bin, feed the per-bucket bin-counter store and the
+                        # Welford-Pébay online central-moment sidecars (mirrors the per-message-key
+                        # producer at the -mdm bin site). The counter_update is gated on $duration > 0
+                        # because log-spaced partitions cannot represent zero; the sidecars are fed on
+                        # every sample including 0 (inside the existing $duration >= 0 gate) so
+                        # duration_count exactly equals the raw path's `scalar @{durations}` denominator
+                        # and the exact-value statistics (min/mean/std_dev/moments) match raw byte-for-byte.
+                        if ($bucket_stats_capture_mode eq 'bin') {
+                            my $entry = $log_analysis{$bucket};
+
+                            counter_update(\%bucket_stats_counters, $bucket, $duration, $bucket_stats_buckets_per_decade) if $duration > 0;
+                            counter_update(\%bucket_stats_counters_hl, $bucket, $duration, $bucket_stats_buckets_per_decade)
+                                if $duration > 0 && $category_bucket =~ /-HL$/;   # store parity only
+
+                            $entry->{min} = $duration if !defined $entry->{min} || $duration < $entry->{min};
+                            $entry->{max} = $duration if !defined $entry->{max} || $duration > $entry->{max};
+
+                            # Welford-Pébay online M2/M3/M4 update (Pébay 2008, SAND2008-6212).
+                            # Order matters: M4 reads the old M2 and M3, M3 reads the old M2, M2 last.
+                            my $n_old = $entry->{duration_count};
+                            my $n     = $n_old + 1;
+                            if ($n_old == 0) {
+                                $entry->{_running_mean} = $duration;
+                            } else {
+                                my $mean     = $entry->{_running_mean};
+                                my $delta    = $duration - $mean;
+                                my $delta_n  = $delta / $n;
+                                my $delta_n2 = $delta_n * $delta_n;
+                                my $term1    = $delta * $delta_n * $n_old;
+                                $entry->{_running_mean} = $mean + $delta_n;
+                                $entry->{m4_sum} +=
+                                      $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
+                                    + 6 * $delta_n2 * $entry->{m2_sum}
+                                    - 4 * $delta_n  * $entry->{m3_sum};
+                                $entry->{m3_sum} +=
+                                      $term1 * $delta_n * ($n - 2)
+                                    - 3 * $delta_n * $entry->{m2_sum};
+                                $entry->{m2_sum} += $term1;
+                            }
+                            $entry->{duration_count} = $n;
+                        }
                     }
 
                     if( defined $bytes && $bytes ) {
@@ -8175,6 +8305,25 @@ sub finalize_message_stats_unified {
     # telemetry hash so emit_bin_counter_mode_verbose's out_of_range_bounded
     # line reflects real audit state instead of hard-coding 'none'.
     $bin_counter_telemetry{summary_table}{out_of_range_bounded} = { %message_stats_audit };
+}
+
+sub finalize_bucket_stats_unified {
+    # Issue #289: snapshot per-time-bucket bin telemetry for the locked #187
+    # Decision 8 -V output (time_bucket_stats block). Mirrors
+    # finalize_message_stats_unified — runs after calculate_all_statistics,
+    # before emit_bin_counter_mode_verbose. No-op under -bdm raw (counter
+    # store is empty because the bin producer never fired). The store is
+    # dedicated to this consumer (it is not shared with the heatmap store,
+    # which observes $heatmap_value rather than $duration), so there is no
+    # shares_partitions_with alias.
+    return unless %bucket_stats_counters;
+
+    $bin_counter_telemetry{time_bucket_stats} = snapshot_counter_telemetry(\%bucket_stats_counters);
+
+    # Drain the per-quantile audit aggregation (populated inside
+    # calculate_statistics_bin via the \%bucket_stats_audit reference while it
+    # walked the time buckets) into the telemetry hash.
+    $bin_counter_telemetry{time_bucket_stats}{out_of_range_bounded} = { %bucket_stats_audit };
 }
 
 sub finalize_heatmap_unified {
@@ -8791,7 +8940,11 @@ sub calculate_all_statistics {
         $aggregated_data->{total_duration} += $log_analysis{$bucket}{total_duration};
         $aggregated_data->{total_bytes} += $log_analysis{$bucket}{total_bytes};
         $aggregated_data->{sum_of_squares} += $log_analysis{$bucket}{sum_of_squares};
-        push @{$aggregated_data->{durations}}, @{$log_analysis{$bucket}{durations}};
+        # Issue #289: under -bdm bin no durations[] array was collected (the bin-counter
+        # partition + sidecars carry the data). Skip the aggregation; the bin consumer
+        # reads the sidecars off $log_analysis{$bucket} directly.
+        push @{$aggregated_data->{durations}}, @{$log_analysis{$bucket}{durations}}
+            unless $bucket_stats_capture_mode eq 'bin';
 
         # Aggregate min/max across buckets
         $aggregated_data->{count_min} = $log_analysis{$bucket}{count_min} if defined $log_analysis{$bucket}{count_min} && ( !defined $aggregated_data->{count_min} || $log_analysis{$bucket}{count_min} < $aggregated_data->{count_min} );
@@ -8803,16 +8956,35 @@ sub calculate_all_statistics {
     
         # The duration based statistics won't catch the counts if there are no durations (see else condition below)
         if( $print_durations && !$omit_durations ) {
-            # Issue #266: caller-side data-model dispatch shell. Surface 4
-            # (per-time-bucket statistics). The selector resolves to 'raw',
-            # 'bin', or undef but only the raw reduction is implemented
-            # today — calculate_statistics() is the raw primitive. When the
-            # bin reduction lands, branch on $dm before this call.
+            # Issue #266/#289: caller-side data-model dispatch. Surface 4
+            # (per-time-bucket statistics). Under 'bin' the statistics are
+            # derived from the per-bucket bin-counter partition plus the
+            # Welford-Pébay sidecars held on $log_analysis{$bucket} (shared
+            # 22-tuple derivation with the per-message-key surface via
+            # calculate_statistics_bin); under 'raw' the nearest-rank
+            # primitive runs unchanged. The %log_stats{$bucket} build below is
+            # identical for both paths.
             my $dm = choose_data_model('bucket-stats') // 'raw';
             my ($min, $mean, $max,
                 $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
                 $std_dev, $cv,
-                $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
+                $skewness, $kurtosis, $bimodality_coef);
+            if ($dm eq 'bin') {
+                ($min, $mean, $max,
+                 $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
+                 $std_dev, $cv,
+                 $skewness, $kurtosis, $bimodality_coef) = calculate_statistics_bin(
+                    $log_analysis{$bucket},              # sidecar entry (min/max/duration_count/m*_sum/total_duration/sum_of_squares/occurrences)
+                    $bucket_stats_counters{$bucket},     # counter entry (undef when every duration was 0)
+                    $aggregated_data,
+                    \%bucket_stats_audit,                # per-time-bucket audit aggregation (kept separate from message-stats)
+                );
+            } else {
+                ($min, $mean, $max,
+                 $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
+                 $std_dev, $cv,
+                 $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
+            }
 
             $log_stats{$bucket} = {
                 occurrences   => $aggregated_data->{occurrences},
@@ -9213,7 +9385,13 @@ sub calculate_statistics_bin {
     #
     # Per-quantile out_of_range_bounded audit codes returned by percentile()
     # are discarded here; Commit 4 of #287 wires them into -V telemetry.
-    my ($sidecar_entry, $counter_entry, $aggregated_data) = @_;
+    # Issue #289: $audit_ref selects which per-quantile out_of_range_bounded
+    # aggregation this call feeds. Defaults to \%message_stats_audit so the
+    # #287 per-message-key callers are unchanged; the per-time-bucket caller
+    # passes \%bucket_stats_audit so the two surfaces' -V telemetry stay
+    # separate when both run bin (e.g. under -dm bin).
+    my ($sidecar_entry, $counter_entry, $aggregated_data, $audit_ref) = @_;
+    $audit_ref //= \%message_stats_audit;
     return unless $sidecar_entry && ($sidecar_entry->{occurrences} // 0) > 0;
     my $n = $sidecar_entry->{duration_count} // 0;
     return unless $n > 0;
@@ -9235,9 +9413,9 @@ sub calculate_statistics_bin {
     # observed duration being 0, so counter_update was never called for this
     # key), all percentiles collapse to 0 — matches the raw path's behavior
     # when @sorted is all-zero. Audit codes from percentile() are aggregated
-    # into %message_stats_audit for the -V out_of_range_bounded report;
-    # finalize_message_stats_unified() drains the aggregation into the
-    # per-consumer telemetry hash.
+    # into the caller-selected $audit_ref for the -V out_of_range_bounded
+    # report; the matching finalize_*_unified() drains the aggregation into
+    # the per-consumer telemetry hash.
     my ($p1, $p5, $p10, $p25, $p50, $p75, $p90, $p95, $p99, $p999, $p9999, $p99999);
     if ($counter_entry) {
         my %a;
@@ -9256,10 +9434,10 @@ sub calculate_statistics_bin {
         # Aggregate: 'high' wins over 'low' wins over 'none'.
         for my $q (keys %a) {
             my $new = $a{$q};
-            my $cur = $message_stats_audit{$q};
-            if    ($new eq 'high')                                 { $message_stats_audit{$q} = 'high'; }
-            elsif ($new eq 'low'  && (!$cur || $cur eq 'none'))    { $message_stats_audit{$q} = 'low';  }
-            elsif (!defined $cur)                                  { $message_stats_audit{$q} = 'none'; }
+            my $cur = $audit_ref->{$q};
+            if    ($new eq 'high')                                 { $audit_ref->{$q} = 'high'; }
+            elsif ($new eq 'low'  && (!$cur || $cur eq 'none'))    { $audit_ref->{$q} = 'low';  }
+            elsif (!defined $cur)                                  { $audit_ref->{$q} = 'none'; }
         }
         # Clamp interpolated percentile values to the observed [min, max].
         # The Prometheus formula returns values that can range up to the
@@ -9926,8 +10104,12 @@ sub normalize_data_for_output {
     my $ts_col = (grep { $_->{id} eq 'timestamp' } @column_layout)[0];
     $timestamp_length = $ts_col->{width} + $ts_col->{spacing_before} + $ts_col->{spacing_after};
 
-    # Add CSV output columns for latency stats
-    if ($print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled) {
+    # Add CSV output columns for latency stats. Issue #289: under heatmap the
+    # terminal bar-graph replaces the per-time-bucket statistics row, but the
+    # STATS CSV is a separate render surface — so when -o is requested the stat
+    # columns are still emitted (the data was captured at parse time). @output_columns
+    # drives the CSV header/data only here; the terminal render uses @column_layout.
+    if ($print_durations && !$omit_durations && !$omit_stats && (!$heatmap_enabled || $write_messages_to_csv)) {
         push @output_columns, qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );
     }
 
@@ -10565,21 +10747,20 @@ sub print_bar_graph {
                     my $trend_value = $log_stats{$bucket}{$key};
 
                     if( defined $log_stats{$bucket}{$key} ) {
+                        # Issue #289: this branch now computes $trend_value for terminal
+                        # DISPLAY only. CSV emission of the proportional-metric columns
+                        # moved to the visibility-independent post-loop builder below
+                        # (build_proportional_csv_data), so an auto-hidden or
+                        # heatmap-replaced column no longer drops its CSV value or
+                        # misaligns the row (mirrors the latency-stats block's design).
                         if( $key =~ /^(time|duration)$/i ) {
                             my $time_format = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
                             my $time_space = $time_format eq 'short' ? undef : ' ';
                             $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', $time_format, $time_space );
-                            # CSV: duration_nice (pre-formatted), duration (numeric routed through helper)
-                            push @csv_data, ltrim( $trend_value ), format_csv_value( $log_stats{$bucket}{$key}, 'duration' );
                         } elsif( $key =~ /^bytes$/i ) {
                             $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
-                            push @csv_data, ltrim( $trend_value ), format_csv_value( $log_stats{$bucket}{$key}, 'bytes' );
                         } elsif( $key =~ /^count$/i ) {
                             $trend_value = " " . format_number( $log_stats{$bucket}{$key}, ' ', 2);
-                            foreach my $metric ( qw( occurrences min mean max sum ) ) {
-                                my $key_metric = "${key}_${metric}";
-                                push @csv_data, format_csv_value( $log_stats{$bucket}{$key_metric}, "count_${metric}" );
-                            }
                         } elsif( $key =~ /^udm_(.+)$/ ) {
                             my $metric_name = $1;
                             my ($config) = grep { $_->{name} eq $metric_name } @udm_configs;
@@ -10595,18 +10776,9 @@ sub print_bar_graph {
                                     $trend_value = " " . format_number($log_stats{$bucket}{$key}, ' ', 2);
                                 }
                             }
-                            if ($config && $config->{name} ne $config->{base_name}) {
-                                # Disambiguated metric: single value (#99)
-                                push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
-                            } else {
-                                foreach my $metric ( qw( occurrences min mean max sum ) ) {
-                                    push @csv_data, format_csv_value( $log_stats{$bucket}{"${key}_${metric}"}, "${key}_${metric}" );
-                                }
-                            }
                         } else {
                             my $decimals = $col_w > 10 ? 2 : ($col_w > 8 ? 1 : 0);
                             $trend_value = defined $log_stats{$bucket}{$key} ? " " . format_number( $log_stats{$bucket}{$key}, ' ', $decimals) : "";
-                            push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
                         }
 
                         # Render the metric bar using color from column layout
@@ -10657,13 +10829,54 @@ sub print_bar_graph {
                 print " " x ($col->{spacing_after} // 0);
             }
 
+            # Issue #289: emit the proportional-metric CSV columns independent of
+            # @column_layout render visibility. The previous in-loop pushes only
+            # fired for VISIBLE columns, so a metric column that was auto-hidden
+            # (narrow terminal) or replaced by the heatmap row silently dropped its
+            # CSV value and shifted every subsequent column. This builder walks
+            # @populated_graph_columns in the SAME order as the @output_columns
+            # header build (normalize_data_for_output) so header and data stay
+            # aligned by construction. _nice columns use a stable, width-independent
+            # format (the CSV is not terminal-geometry-bound; the rendered bar still
+            # formats per column width above).
+            foreach my $key (@populated_graph_columns) {
+                if( $key =~ /^(time|duration)$/i ) {
+                    push @csv_data,
+                        (defined $log_stats{$bucket}{$key} ? ltrim(format_time($log_stats{$bucket}{$key}, 'ms', 'medium', ' ')) : undef),
+                        format_csv_value( $log_stats{$bucket}{$key}, 'duration' );
+                } elsif( $key =~ /^bytes$/i ) {
+                    push @csv_data,
+                        (defined $log_stats{$bucket}{$key} ? format_bytes($log_stats{$bucket}{$key}, 'B') : undef),
+                        format_csv_value( $log_stats{$bucket}{$key}, 'bytes' );
+                } elsif( $key =~ /^count$/i ) {
+                    next if $omit_count;
+                    foreach my $metric ( qw( occurrences min mean max sum ) ) {
+                        push @csv_data, format_csv_value( $log_stats{$bucket}{"count_${metric}"}, "count_${metric}" );
+                    }
+                } elsif( $key =~ /^udm_(.+)$/ ) {
+                    my $metric_name = $1;
+                    my ($config) = grep { $_->{name} eq $metric_name } @udm_configs;
+                    if ($config && $config->{name} ne $config->{base_name}) {
+                        # Disambiguated metric: single value column (#99)
+                        push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
+                    } else {
+                        foreach my $metric ( qw( occurrences min mean max sum ) ) {
+                            push @csv_data, format_csv_value( $log_stats{$bucket}{"${key}_${metric}"}, "${key}_${metric}" );
+                        }
+                    }
+                } else {
+                    push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
+                }
+            }
+
             # Append latency stats to CSV data. The header lists these columns
             # when $print_durations && !$omit_durations && !$omit_stats &&
-            # !$heatmap_enabled (see normalize_data_for_output). The push must
-            # use the same gate so rows always match the header regardless of
-            # whether the latency *display column* was auto-hidden by terminal
-            # width. (Issue #263)
-            if( $print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled ) {
+            # (!$heatmap_enabled || $write_messages_to_csv) (see
+            # normalize_data_for_output). The push must use the SAME gate so
+            # rows always match the header regardless of whether the latency
+            # *display column* was auto-hidden by terminal width (Issue #263)
+            # or replaced by the heatmap row on the terminal surface (Issue #289).
+            if( $print_durations && !$omit_durations && !$omit_stats && (!$heatmap_enabled || $write_messages_to_csv) ) {
                 foreach my $stat ( qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef ) ) {
                     push @csv_data, format_csv_value( $log_stats{$bucket}{$stat}, $stat );
                 }
@@ -12164,6 +12377,10 @@ measure_memory_structures();
 # finalize_heatmap_unified and finalize_histogram_unified hooks below;
 # no-op under -mdm raw.
 finalize_message_stats_unified();
+
+# Issue #289: snapshot per-time-bucket bin-counter telemetry. Sibling of the
+# message-stats hook above; no-op under -bdm raw.
+finalize_bucket_stats_unified();
 
 # CALCULATE HEATMAP BUCKETS (if enabled) #
 if ($heatmap_enabled) {
