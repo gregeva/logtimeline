@@ -6361,8 +6361,16 @@ sub format_time {
 # always passes through format_time so the unit is always present — there is no
 # bare-number bypass for small magnitudes.
 my %duration_display_decimals = ( ns => 6, us => 3, ms => 0, s => 0 );
+# Render a millisecond-valued duration for display. With $max_chars set, the
+# result is guaranteed to fit that many characters: if the auto-scaled value
+# carries a fractional digit that pushes it over budget (e.g. "264.4ms" = 7 in
+# a 6-char cell under -du us), the decimal is dropped to fit ("264ms" = 5)
+# rather than clipping the unit and rendering a misleading "264.4m". The
+# fractional digit is the only expendable part — the unit is never truncated.
+# Callers that lay out fixed-width columns (the latency-stats cells) pass their
+# per-cell budget so the column stays aligned regardless of magnitude.
 sub format_duration {
-    my ($value) = @_;
+    my ($value, $max_chars) = @_;
     return "" unless defined $value;
     my $unit = $duration_unit_resolved // 'ms';
     # format_time auto-scales 0 down to the smallest unit (0us); render zero in
@@ -6370,7 +6378,13 @@ sub format_duration {
     return "0$unit" if $value == 0;
     my $decimals = $duration_display_decimals{$unit} // 0;
     my $rounded  = sprintf( "%.${decimals}f", $value );
-    return format_time( $rounded, 'ms', 'short' );
+    my $out = format_time( $rounded, 'ms', 'short' );
+    # Fit the budget by shedding the fractional digit before any clipping.
+    if (defined $max_chars && length($out) > $max_chars && $out =~ /\.\d/) {
+        (my $no_frac = $out) =~ s/\.\d+//;
+        $out = $no_frac if length($no_frac) <= $max_chars;
+    }
+    return $out;
 }
 
 # Issue #268: column-to-family lookup for CSV emit formatting. Mirrors the
@@ -10976,11 +10990,18 @@ sub print_bar_graph {
                     if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{p99} || defined $log_stats{$bucket}{p999} || defined $log_stats{$bucket}{cv} ) {
                         my $cv_color = defined $log_stats{$bucket}{cv} && $log_stats{$bucket}{cv} >= 20 ? 'WARN-HL' : 'white-underline';
 
-                        defined $log_stats{$bucket}{p50} ? printf( "$colors{'cyan'}P50:%-6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p50} ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p95} ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p99} ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-5s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p999} ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", format_cv_display( $log_stats{$bucket}{cv} ) ) : printf ( " " x 7 );
+                        # Each percentile cell occupies a fixed slot so the
+                        # column stays aligned within the reserved latency width
+                        # (P50/P95/P99 = 11 chars: "Pxx:" + 6 value + space;
+                        # P999 = 12: "P999:" + 6 value + space; CV = 7).
+                        # format_duration is given the 6-char value budget so it
+                        # sheds the fractional digit to fit (e.g. 264.4ms -> 264ms)
+                        # rather than overflowing; %-6.6s is the final guard.
+                        defined $log_stats{$bucket}{p50} ? printf( "$colors{'cyan'}P50:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p50}, 6 ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p95}, 6 ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p99}, 6 ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p999}, 6 ) ) : printf( " " x 12 );
+                        defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4.4s$colors{'NC'}", format_cv_display( $log_stats{$bucket}{cv} ) ) : printf ( " " x 7 );
                     }
 
                 } elsif ($col_id eq 'heatmap') {
