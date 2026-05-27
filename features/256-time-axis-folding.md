@@ -11,7 +11,7 @@ Add `-pr`/`--profile <mode>`, which folds the time axis onto a fixed period so t
 
 ## Status
 
-Design locked; not yet implemented. Branch `256-time-axis-folding`.
+In progress on branch `256-time-axis-folding`. Landed: core fold (CLI, `fold_epoch`, bucket remap, labels), the synthetic month-long fixture generator (`tests/profile/generate-profile-log.py`), the `-V profile` observability section, and the state-observability harness (`tests/validate-profile.sh`). Remaining: the render-invariant harness and the user-facing doc sweep (`docs/usage.md`, `README.md`).
 
 ## Problem
 
