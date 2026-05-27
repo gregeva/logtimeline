@@ -318,7 +318,7 @@ This feature does NOT own:
 
 ## Code touch points
 
-| File:line (release/0.14.6 HEAD) | What changes |
+| File:line (release/0.15.0 HEAD) | What changes |
 |---|---|
 | `ltl` GLOBALS (near `%heatmap_counters` / `%histogram_counters` declarations, ~`ltl:250`) | Declare `my %log_messages_counters;` — flat top-level counter store keyed by `"$category\x1f$log_key"` (R2.1). |
 | `ltl:7466–7477` (per-key lazy initializer) | Under bin, extend the `//= { ... }` initializer to allocate sidecar fields `{min => undef, max => undef, m2_sum => 0, m3_sum => 0, m4_sum => 0}` (R2.2). Counter-store entry is materialized lazily by `counter_update` on first observation, not at hash-entry initialization. Under raw, structure unchanged. |
@@ -335,7 +335,7 @@ This feature does NOT own:
 | `tests/statistics-drift/baselines/{apache,tomcat,thingworx,codebeamer}-bin-data-model/messages.csv` | Re-capture against the new bin path (R9.1). |
 | `docs/usage.md` (the `-mdm` entry) | Update the description: remove "selector resolved but currently only the raw reduction is implemented for this surface; `bin` lands in a follow-up". |
 | `print_help()` | Same update for the `-mdm` help line at `ltl:3773`. |
-| `releases/v0.14.6.md` | One bullet referencing #287 per CLAUDE.md release process. |
+| `releases/v0.15.0.md` | One bullet referencing #287 per CLAUDE.md release process. |
 | `CLAUDE.md` | No change unless a release-process surface mentions the surface-3 fallback; sweep to confirm. |
 
 ## Algorithm appendix
@@ -511,4 +511,4 @@ Additionally:
 
 The contract surface (R1–R13) tracks #187's locked unified contract. Changes to the locked contract in #187 cascade here; this feature does not lock decisions independently of #187.
 
-The code touch points table is the technical inventory at the time of writing against `release/0.14.6` HEAD. Line numbers may shift; subroutine names (`calculate_all_statistics`, `calculate_statistics`, `merge_consolidation_stats`, `emit_bin_counter_mode_verbose`, `emit_percentile_algorithm_verbose`, `choose_data_model`) and global identifiers (`%log_messages`, `%bin_counter_telemetry`, `$data_model_message`, `$exact_percentiles_optout`) are the stable anchors.
+The code touch points table is the technical inventory at the time of writing against `release/0.15.0` HEAD. Line numbers may shift; subroutine names (`calculate_all_statistics`, `calculate_statistics`, `merge_consolidation_stats`, `emit_bin_counter_mode_verbose`, `emit_percentile_algorithm_verbose`, `choose_data_model`) and global identifiers (`%log_messages`, `%bin_counter_telemetry`, `$data_model_message`, `$exact_percentiles_optout`) are the stable anchors.

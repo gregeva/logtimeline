@@ -7,7 +7,7 @@ Add `-pr`/`--profile <mode>`, which folds the time axis onto a fixed period so t
 ## GitHub Issue
 
 - #256 — Add `-pr`/`--profile` option to overlay log data onto a single day or week (time-axis folding)
-- Branched off `release/0.14.6`.
+- Branched off `release/0.15.0`.
 
 ## Status
 

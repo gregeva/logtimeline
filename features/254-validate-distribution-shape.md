@@ -7,7 +7,7 @@
 ## GitHub Issue
 
 - #254 — Validate distribution-shape statistics against known-shape synthetic inputs
-- Depends on #222 (the columns being validated), merged into `release/0.14.6`.
+- Depends on #222 (the columns being validated), merged into `release/0.15.0`.
 
 ## Status
 

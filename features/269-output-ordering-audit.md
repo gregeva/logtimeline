@@ -1,6 +1,6 @@
 # Issue #269 — Output Ordering Audit
 
-Branch: `269-output-ordering-non-deterministic` (off `release/0.14.6`)
+Branch: `269-output-ordering-non-deterministic` (off `release/0.15.0`)
 
 ## Scope
 

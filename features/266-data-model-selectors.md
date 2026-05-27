@@ -125,7 +125,7 @@ The `exact-percentiles` row already in `%resolved_values` at `ltl:1504` stays in
 | `docs/usage.md` | Document the five new flags. |
 | `README.md` | Mention in the options reference. |
 | `CLAUDE.md` | No change unless a release-process or helper-tools surface mentions `--exact-percentiles`; sweep to confirm. |
-| `releases/v0.14.6.md` | Add one bullet per the bullets-only rule. |
+| `releases/v0.15.0.md` | Add one bullet per the bullets-only rule. |
 
 ## Implementation notes
 
@@ -171,7 +171,7 @@ All five flags have explicit short forms per the project convention (`feedback_s
 
 1. **Regression** — `tests/validate-regression.sh` passes with no changes.
 2. **CSV structure** — `tests/validate-csv-output.sh` passes for every combination of the five flags.
-3. **Byte-identity at defaults** — Run `ltl -o` on a small Tomcat log and a ThingWorx log without any new flag; output (CSV files used as a convenient observable surface for the per-message-key and per-time-bucket statistics paths) is byte-identical to a baseline captured from `release/0.14.6` before this change.
+3. **Byte-identity at defaults** — Run `ltl -o` on a small Tomcat log and a ThingWorx log without any new flag; output (CSV files used as a convenient observable surface for the per-message-key and per-time-bucket statistics paths) is byte-identical to a baseline captured from `release/0.15.0` before this change.
 4. **Per-surface override** — Run with `-hgdm raw` against a known histogram-mode input; output matches an `--exact-percentiles -hg` invocation on the same input from before this change.
 5. **Omnibus override** — Run with `-dm raw -hg`; same expected result as test 4.
 6. **Surface 3 selector accepted but not honored** — Run with `-mdm bin -o`; ltl exits 0, and the per-message-key statistics (observed via CSV and terminal columns) are byte-identical to the no-flag baseline (raw path executed regardless of the selector).

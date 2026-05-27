@@ -16,7 +16,7 @@ The harness has three independent validation layers, each catching a different c
 
 The CSV is the **observation channel** for this harness, not the thing under test. The harness validates `ltl`'s **internal statistics calculation** — how durations are captured, stored, and reduced into statistics in memory. Wherever this document refers to MESSAGES CSV or STATS CSV, the subject is the underlying calculation surface being observed: per-message-key statistics (observed via MESSAGES CSV) and per-time-bucket statistics (observed via STATS CSV).
 
-## Prerequisites (all merged into `release/0.14.6`)
+## Prerequisites (all merged into `release/0.15.0`)
 
 | Issue | What it shipped | Why #224 needed it |
 |---|---|---|
@@ -393,7 +393,7 @@ The existing scaffolding at `tests/percentile-values/` is renamed wholesale to `
 - [ ] Each harness, when invoked without the orchestration signal, calls `cleanup-test-artifacts.sh` at its own end of run; when invoked with the orchestration signal, it leaves the cache in place.
 - [ ] The orchestration signal (env var or equivalent) is documented in both `validate-csv-output.sh` and `validate-statistics.sh` headers and in `tests/statistics-drift/README.md`.
 - [ ] README.md "Install Dependencies" section lists Python 3, NumPy, and SciPy as test-harness dependencies with install commands for macOS and Ubuntu.
-- [ ] Release notes for v0.14.6 include a bullet referencing #224.
+- [ ] Release notes for v0.15.0 include a bullet referencing #224.
 - [ ] Harness self-validates: exits 0 on freshly captured baselines.
 
 ## Verification
