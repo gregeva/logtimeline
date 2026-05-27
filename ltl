@@ -215,8 +215,9 @@ my %filter_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %result_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %filter_range;
 # Seconds-of-day for any -st/-et bound supplied as a bare time (no date).
-# Under --profile these become a time-of-day window applied to every day,
-# rather than an absolute instant anchored to the first log date. Keys
+# A time-only bound is a time-of-day window applied to every day, rather than
+# an absolute instant on a single date — so "noon to 1pm" means the same
+# window on every day regardless of how the logs are split across files. Keys
 # 'start'/'end' present only for the bounds given in time-only form.
 my %filter_range_tod;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
@@ -3858,8 +3859,8 @@ sub print_help {
     $out .= help_opt("-s,   --seconds",               "Interpret bucket size as seconds instead of minutes");
     $out .= help_opt("-ms,  --milliseconds",          "Switch the -bs <N> bucket width to milliseconds (and render timestamps with .fff precision). Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured.");
     $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto a single day or week so every date overlays into one profile. day/workday show time-of-day only; week/workweek prefix the weekday. workday/workweek keep work days only (Mon-Fri); the -alt variants use a Sunday-anchored week (Sun-Thu work days). Modes: day, week, week-alt, workweek, workweek-alt, workday, workday-alt");
-    $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time (YYYY-MM-DD HH:MM:SS[.mmm])");
-    $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time (HH:MM:SS[.mmm])");
+    $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A full date (YYYY-MM-DD HH:MM:SS[.mmm]) is an absolute cutoff; a bare time (HH:MM[:SS[.mmm]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight.");
+    $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a full date is an absolute cutoff; a bare time applies to every day.");
     $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when auto-detection is not possible (ns, us, ms, s)");
     $out .= help_opt("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: s (second), m (minute, default), h (hour), d (day)");
 
@@ -7680,17 +7681,27 @@ sub read_and_process_logs {
                 }
 
                 ## FILTERING CONDITIONS ##
-                # Under --profile a time-only -st/-et is a time-of-day window
-                # applied to every day (folding overlays all dates, so anchoring
-                # the bound to a single calendar day would defeat it). Compare
-                # the record's seconds-of-day against the time-of-day bounds;
-                # any bound given with a date still applies as an absolute cutoff.
-                if ($profile_mode && %filter_range_tod) {
+                # A bare time-only -st/-et is a time-of-day window applied to
+                # every day: compare the record's seconds-of-day against the
+                # bound rather than an absolute instant. This holds for any
+                # input — a single multi-day file, many files, with or without
+                # --profile — so "noon to 1pm" means the same window on every
+                # day regardless of how the logs are split. A bound given with
+                # a date keeps its absolute cutoff (the per-bound branches below).
+                if (%filter_range_tod) {
                     my $tod = $timestamp_epoch - int($timestamp_epoch / 86400) * 86400;
-                    next if defined $filter_range_tod{'start'} && $tod <  $filter_range_tod{'start'};
-                    next if defined $filter_range_tod{'end'}   && $tod >= $filter_range_tod{'end'};
-                    next if !defined $filter_range_tod{'start'} && $timestamp_epoch <  $filter_range_epoch{'start'};
-                    next if !defined $filter_range_tod{'end'}   && $timestamp_epoch >= $filter_range_epoch{'end'};
+                    my ($tod_s, $tod_e) = @filter_range_tod{qw(start end)};
+                    if (defined $tod_s && defined $tod_e && $tod_s > $tod_e) {
+                        # Window wraps past midnight (e.g. 22:00 to 02:00): keep
+                        # the two segments [start,24h) and [0,end).
+                        next unless $tod >= $tod_s || $tod < $tod_e;
+                    } else {
+                        next if defined $tod_s && $tod <  $tod_s;
+                        next if defined $tod_e && $tod >= $tod_e;
+                        # A bound given with a date (not time-only) stays absolute.
+                        next if !defined $tod_s && $timestamp_epoch <  $filter_range_epoch{'start'};
+                        next if !defined $tod_e && $timestamp_epoch >= $filter_range_epoch{'end'};
+                    }
                 } else {
                     next if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} );
                 }
