@@ -124,11 +124,17 @@ covers every percentile/shape column). What this issue must do:
   `min ≤ p1`, `p99999 ≤ max`, `iqr == p75 − p25`, `mean == duration / occurrences` — these now
   validate real bin values, not raw fallback.
 - **L3 (oracle):** the oracle dispatches `exponential_interpolation_within_bucket` for the
-  `bucket-stats` surface automatically once `effective_algorithm` flips. Correct the stale
-  comment in `validate-statistics.sh` that claims exp-interp has no oracle reference (false
-  since #287). No oracle code change.
-- **L4 (cross-model):** measure default↔bin STATS deviation against `cross-model-tolerances.tsv`;
-  add per-column override rows only if a STATS column empirically exceeds the default T3 envelope.
+  `bucket-stats` surface automatically once `effective_algorithm` flips, and builds its
+  reference partition at the surface's `effective_bpd` (the per-time-bucket surface runs
+  finer than the global 53 default — see "Bin resolution" below). The oracle gains a
+  `--percentile-bpd` argument and the harness reads `effective_bpd` from `-V` and passes it
+  through (with bpd in the oracle cache key). Correct the stale comment in
+  `validate-statistics.sh` about format/algorithm support.
+
+Cross-model comparison (raw output vs bin output) is intentionally not validated: the two
+models use different percentile algorithms by design, so per-model accuracy is covered by the
+algorithm-aware Layer 3 oracle, not by comparing the models to each other (#224 Decision 9
+dissolved).
 
 New observability assertions (the gap #287 left for this issue):
 
@@ -178,6 +184,29 @@ harness assertions land immediately after the state they assert exists.
 6. Docs: `print_help()` `-bdm` text (drop "lands in a follow-up"); `docs/explain` /
    `docs/usage.md` surface-default prose; `--explain` topic prose if changed.
 7. Re-capture STATS baselines; run `validate-csv-output.sh` then `validate-statistics.sh`
-   (both `CI=1`); measure L4, add tolerance rows only if empirically required.
+   (both `CI=1`) — no T3/T4 across L1/L2/L3 on the STATS surface.
 8. `validate-runtime-config.sh` `-bdm bin` row; `validate-explain.sh` coverage.
 9. `validate-regression.sh` green (raw byte-identical).
+
+## Bin resolution (per-surface)
+
+`buckets_per_decade` defaults to 53 (#187 Decision 2, the global floor) and each surface tunes
+up by partition cardinality vs memory. The per-message-key surface (potentially millions of
+partitions) stays at 53; the per-time-bucket surface (hundreds of partitions, bounded) runs at
+a finer dedicated `$bucket_stats_stream_bpd` (616, matching the heatmap/histogram stream-bpd)
+so its tail percentiles are accurate on sparse, heavily-quantized per-bucket data. Each
+surface's effective resolution is exposed as `effective_bpd` in `-V percentile-algorithm`; the
+#224 Layer 3 oracle reads it so its reference partition matches ltl's resolution. (#187's
+Decision 2 is amended to record per-surface upward tuning as sanctioned.)
+
+## Render-surface independence (STATS CSV under heatmap)
+
+The terminal bar-graph replaces the per-time-bucket statistics row with the heatmap row when
+`-hm` is active, but the STATS CSV is a separate render surface: when `-o` is requested the
+per-time-bucket statistics are captured and emitted regardless of heatmap, for both data
+models. This completes #263's principle (CSV content is deterministic per input, independent
+of terminal geometry) for the heatmap-replacement case, and fixed a latent bug where the STATS
+CSV data row was assembled from only the *visible* `@column_layout` columns — so an auto-hidden
+or heatmap-replaced metric column silently dropped its CSV value and misaligned the row. The
+proportional-metric CSV values are now emitted from `%log_stats` in `@output_columns` order,
+independent of render visibility; `_nice` columns use a stable width-independent format.
