@@ -436,38 +436,38 @@ Overflow and underflow counters add directly. No new primitive surface is requir
 
 ### Producer side
 
-- [ ] Under `-mdm bin`, no per-key `durations[]` array is allocated at `ltl:7466`, `ltl:7506`, `ltl:7453`, or `ltl:4583`.
-- [ ] Per-key bin-counter partition is lazily constructed on first observation; auto-resizes via doubling-rebin per #187 Decision 5.
-- [ ] Sidecar accumulators (`min`, `max`, `m2_sum`, `m3_sum`, `m4_sum`) are maintained per-key under `-mdm bin`.
-- [ ] `merge_consolidation_stats` correctly merges two clusters' partitions and sidecars under `-mdm bin`.
-- [ ] Under `-mdm raw` (or unset), every producer write site runs identically to pre-#287 code.
+- [x] Under `-mdm bin`, no per-key `durations[]` array is allocated.
+- [x] Per-key bin-counter partition is lazily constructed on first observation; auto-resizes via doubling-rebin per #187 Decision 5.
+- [x] Sidecar accumulators (`min`, `max`, `m2_sum`, `m3_sum`, `m4_sum`) are maintained per-key under `-mdm bin`.
+- [x] `merge_consolidation_stats` correctly merges two clusters' partitions and sidecars under `-mdm bin`.
+- [x] Under `-mdm raw` (or unset), every producer write site runs identically to pre-#287 code.
 
 ### Consumer side
 
-- [ ] `calculate_all_statistics` dispatch at `ltl:8622` correctly calls `calculate_statistics_bin` under `dm = 'bin'`.
-- [ ] `calculate_statistics_bin` returns the 22-tuple per R3.2 with each statistic derived per the table.
-- [ ] `calculate_statistics` is preserved verbatim; `-mdm raw` and `-ep` output is byte-identical.
+- [x] `calculate_all_statistics` dispatch correctly calls `calculate_statistics_bin` under `dm = 'bin'`.
+- [x] `calculate_statistics_bin` returns the 22-tuple per R3.2 with each statistic derived per the table.
+- [x] `calculate_statistics` is preserved verbatim; `-mdm raw` output is byte-identical. (The `-ep` / `--exact-percentiles` flag was removed in #287, so it no longer factors into this criterion.)
 
 ### `-V` output
 
-- [ ] `=== histogram-bin-counters ===` `summary_table` block reports `path: unified` under `-mdm bin`; `path: pre_migration` under raw/default; `path: user_opt_out` under `-ep`.
-- [ ] `=== histogram-bin-counters ===` `csv_output` block emits `shares_partitions_with: summary_table` short form per #189 R7.
-- [ ] `summary_table` block fields populated from real partition state via `%bin_counter_telemetry`.
-- [ ] `=== percentile-algorithm / message-stats ===` reports `effective_algorithm: exponential_interpolation_within_bucket` under `-mdm bin`; `nearest_rank` otherwise. No `effective_algorithm_note:` line emitted for this surface.
+- [x] `=== histogram-bin-counters ===` `summary_table` block reports `path: unified` under `-mdm bin`; `path: user_opt_out` under `-mdm raw`/default. (Resolves to `user_opt_out`, not the originally-worded `pre_migration`, because #287 added `summary_table` to `%migrated`; the `-ep` opt-out path was removed with the flag.)
+- [x] `=== histogram-bin-counters ===` `csv_output` block emits `shares_partitions_with: summary_table` short form per #189 R7.
+- [x] `summary_table` block fields populated from real partition state via `%bin_counter_telemetry`.
+- [x] `=== percentile-algorithm / message-stats ===` reports `effective_algorithm: exponential_interpolation_within_bucket` under `-mdm bin`; `nearest_rank` otherwise. No `effective_algorithm_note:` line emitted for this surface.
 
 ### Test harness
 
-- [ ] Four `*-bin-data-model/messages.csv` baselines re-captured under `tests/statistics-drift/baselines/`.
-- [ ] `tests/validate-statistics.sh` exits 0 against fresh baselines (no T3/T4 across L1/L2/L3).
-- [ ] `tests/validate-regression.sh` continues to pass (raw path output unchanged).
-- [ ] `tests/validate-csv-output.sh` continues to pass (CSV column structure unchanged).
-- [ ] `tests/validate-runtime-config.sh` continues to pass (`-mdm` row format unchanged).
+- [x] Four `*-bin-data-model/messages.csv` baselines re-captured under `tests/statistics-drift/baselines/`.
+- [x] `tests/validate-statistics.sh` exits 0 against fresh baselines (no T3/T4 across L1/L2/L3).
+- [x] `tests/validate-regression.sh` continues to pass (raw path output unchanged).
+- [x] `tests/validate-csv-output.sh` continues to pass (CSV column structure unchanged).
+- [x] `tests/validate-runtime-config.sh` continues to pass (`-mdm` row format unchanged).
 
 ### Docs
 
-- [ ] `docs/usage.md` `-mdm` row description updated to drop the "falls back" note.
-- [ ] `print_help()` `-mdm` line at `ltl:3773` updated similarly.
-- [ ] Release notes bullet added.
+- [x] `docs/usage.md` `-mdm` row description updated to drop the "falls back" note.
+- [x] `print_help()` `-mdm` line updated similarly.
+- [x] Release notes bullet added.
 
 ## Validation
 
