@@ -108,6 +108,9 @@ my %verbose_section_registry = (
     'percentile-algorithm' => {
         description => 'Per-surface effective percentile algorithm: resolved data model and algorithm name for histogram, heatmap, message-stats, and bucket-stats (Issue #280).',
     },
+    'profile' => {
+        description => 'Timeline folding (--profile): resolved mode, fold period, included weekdays, and included vs dropped sample counts (Issue #256).',
+    },
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
@@ -122,6 +125,7 @@ my @verbose_section_order = qw(
     heatmap-palette
     csv-output
     percentile-algorithm
+    profile
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -2139,6 +2143,50 @@ sub emit_percentile_algorithm_verbose {
     }
 
     push @verbose_output, "=== END percentile-algorithm ===";
+}
+
+# Issue #256: timeline-folding observability. Reports the resolved --profile
+# mode and, when active, the fold geometry and the sample accounting the
+# excluded-day harness asserts against: samples_included + samples_dropped
+# equals the matched-and-folded total, and samples_dropped is exactly the
+# count of lines that fell on a weekday the mode excludes.
+#
+# Locked surface: section name 'profile'; field names profile_active, mode,
+# period_seconds, included_weekdays, samples_included, samples_dropped; the
+# profile_active enum (yes|no). Weekdays are listed in the mode's own axis
+# order (Mon-first for default, Sun-first for -alt), comma-joined.
+sub emit_profile_verbose {
+    return unless section_requested('profile');
+
+    push @verbose_output, "=== profile ===";
+
+    if (!$profile_mode) {
+        push @verbose_output, "profile_active: no";
+        push @verbose_output, "=== END profile ===";
+        return;
+    }
+
+    my $cfg = $profile_modes{$profile_mode};
+    # Render the included weekday set in calendar order: -alt modes start the
+    # week on Sunday (wday 0), the others on Monday (wday 1). Day-period modes
+    # have no week axis, but the list still shows which days they keep, so the
+    # same calendar order applies rather than the epoch-0 fold anchor.
+    my @names = qw(Sun Mon Tue Wed Thu Fri Sat);
+    my $list_start = ($profile_mode =~ /-alt$/) ? 0 : 1;
+    my @included;
+    for my $i (0 .. 6) {
+        my $wday = ($list_start + $i) % 7;
+        next if defined $cfg->{include} && !$cfg->{include}{$wday};
+        push @included, $names[$wday];
+    }
+
+    push @verbose_output, "profile_active: yes";
+    push @verbose_output, "mode: $profile_mode";
+    push @verbose_output, "period_seconds: $cfg->{period}";
+    push @verbose_output, "included_weekdays: " . join(',', @included);
+    push @verbose_output, "samples_included: $profile_included_samples";
+    push @verbose_output, "samples_dropped: $profile_dropped_samples";
+    push @verbose_output, "=== END profile ===";
 }
 
 # Section name, field names, consumer-name strings, and the three-value audit
@@ -12505,6 +12553,8 @@ emit_heatmap_palette_verbose();
 emit_csv_output_verbose();
 
 emit_percentile_algorithm_verbose();
+
+emit_profile_verbose();
 
 print_verbose_output();
 
