@@ -14,10 +14,13 @@ A full calendar month is deliberate: weekdays occur an unequal number of
 times (four or five), so the per-weekday totals differ. The manifest carries
 the exact totals, so this realism costs the harness nothing.
 
-Each request is one line at 09:00 and one at 14:00 UTC per day (two hits/day),
-all sharing one URL so ltl collapses them into a single message key. The hours
-are chosen so day-fold lands them in two distinct hourly buckets and the
-14:00 row exercises the weekday-once-per-boundary suppression.
+Each day emits hits at 09:00 and 14:00 UTC; at each hour one line per entry in
+DURATIONS (a fixed, varied duration/bytes spread), all sharing one URL so ltl
+collapses them into a single message key. The varied durations give each folded
+bucket non-zero variance so the shape statistics are defined. The two hours are
+chosen so day-fold lands them in two distinct hourly buckets and the 14:00 rows
+exercise the weekday-once-per-boundary suppression. Per-weekday and total counts
+are computed and written to the manifest, so consumers never hardcode them.
 
 The month is January 2025 by default (31 days): its weekday counts are
 unequal (Fri occurs five times, Sat and Sun four), so the four work-modes have
@@ -43,10 +46,19 @@ import json
 import os
 import sys
 
-# Hits placed on every day, at these UTC hours. One line per hour.
+# Hits placed on every day, at these UTC hours. Each hour emits several lines
+# (one per duration in DURATIONS) so a folded bucket accumulates enough samples
+# with non-zero variance for the shape statistics (skewness/kurtosis/bimodality)
+# to be defined, not just min/mean/max.
 HITS_HOURS = (9, 14)
 URL = "/api/profile"
-LINE_FMT = ('10.0.0.1 - - [{ts}] "GET ' + URL + ' HTTP/1.1" 200 100 5\n')
+# A fixed, deterministic duration spread (milliseconds). Right-skewed with a
+# couple of tail values so skewness/kurtosis are non-trivial and bimodality_coef
+# is well-defined; same set on every hit so the fold is reproducible without an
+# RNG. Each value also lands in a distinct bytes bucket via BYTES below.
+DURATIONS = (3, 4, 5, 6, 8, 11, 17, 42)
+BYTES = (100, 250, 500, 900, 1500, 3000, 7000, 22000)
+LINE_FMT = ('10.0.0.1 - - [{ts}] "GET ' + URL + ' HTTP/1.1" 200 {bytes} {dur}\n')
 TS_FMT = "%d/%b/%Y:%H:%M:%S +0000"
 
 # Weekday index convention matches Python's date.weekday(): Mon=0 .. Sun=6.
@@ -64,8 +76,9 @@ def build(year, month):
         wd = WEEKDAY_NAMES[d.weekday()]
         for hour in HITS_HOURS:
             ts = dt.datetime(year, month, day, hour, 0, 0)
-            lines.append(LINE_FMT.format(ts=ts.strftime(TS_FMT)))
-            per_weekday[wd] += 1
+            for dur, byts in zip(DURATIONS, BYTES):
+                lines.append(LINE_FMT.format(ts=ts.strftime(TS_FMT), bytes=byts, dur=dur))
+                per_weekday[wd] += 1
 
     total = sum(per_weekday.values())
     # Work-week day sets, by the same Mon=0..Sun=6 convention the modes use.

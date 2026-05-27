@@ -34,6 +34,7 @@ SCENARIOS_TSV="$HARNESS_DIR/scenarios.tsv"
 RULES_MESSAGES="$HARNESS_DIR/rules/messages-columns.tsv"
 RULES_STATS="$HARNESS_DIR/rules/stats-columns.tsv"
 VALIDATOR="$HARNESS_DIR/validate-csv-output.pl"
+PROFILE_GENERATOR="$SCRIPT_DIR/profile/generate-profile-log.py"
 
 # shellcheck source=lib/csv-cache.sh
 source "$SCRIPT_DIR/lib/csv-cache.sh"
@@ -56,12 +57,28 @@ done
 
 # Sanity: required files exist. A missing file would silently skip work and
 # falsely pass, so fail loudly here.
-for f in "$LTL" "$SCENARIOS_TSV" "$RULES_MESSAGES" "$RULES_STATS" "$VALIDATOR"; do
+for f in "$LTL" "$SCENARIOS_TSV" "$RULES_MESSAGES" "$RULES_STATS" "$VALIDATOR" "$PROFILE_GENERATOR"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: required file missing: $f" >&2
         exit 1
     fi
 done
+
+# Profile scenarios reference @PROFILE_LOG@ in scenarios.tsv. Generate the
+# synthetic month-long log (the same fixture the dedicated --profile harnesses
+# use) once into the gitignored artifacts dir, and substitute the marker with
+# its path in the loop. Using the generated fixture — not a real multi-day log
+# — is required: its dates are known a priori, so a week fold genuinely spans
+# all seven weekdays and the folded CSV timestamps are verifiable.
+PROFILE_LOG="$SCRIPT_DIR/.artifacts/profile-csv-fixture.log"
+if grep -q '@PROFILE_LOG@' "$SCENARIOS_TSV"; then
+    mkdir -p "$(dirname "$PROFILE_LOG")"
+    if ! python3 "$PROFILE_GENERATOR" "$PROFILE_LOG" >/dev/null 2>"$SCRIPT_DIR/.artifacts/profile-gen.err"; then
+        echo "ERROR: failed to generate the profile CSV fixture:" >&2
+        sed 's/^/    /' "$SCRIPT_DIR/.artifacts/profile-gen.err" >&2
+        exit 1
+    fi
+fi
 
 total_pass=0
 total_fail=0
@@ -74,6 +91,17 @@ while IFS=$'\t' read -r scenario logfile options families; do
     [[ "$scenario" =~ ^# ]] && continue
     if [[ -n "$ONLY_SCENARIO" && "$scenario" != "$ONLY_SCENARIO" ]]; then
         continue
+    fi
+
+    # Resolve the generated-fixture marker to its absolute path.
+    [[ "$logfile" == "@PROFILE_LOG@" ]] && logfile="$PROFILE_LOG"
+
+    # Derive the --profile mode (if any) from the scenario's options so the
+    # validator can expect the folded timestamp form instead of ISO. Matches
+    # -pr/--profile <mode> anywhere in the options string.
+    profile_mode=""
+    if [[ "$options" =~ (-pr|--profile)[[:space:]]+([a-z-]+) ]]; then
+        profile_mode="${BASH_REMATCH[2]}"
     fi
 
     log_shorthand="$(csv_cache_logfile_shorthand "$logfile")"
@@ -164,7 +192,8 @@ while IFS=$'\t' read -r scenario logfile options families; do
             --scenario "$scenario" \
             --file-kind "$kind" \
             --expected-families "$families" \
-            --v-precision "$v_precision"
+            --v-precision "$v_precision" \
+            --profile-mode "$profile_mode"
         vrc=$?
         set -e
 

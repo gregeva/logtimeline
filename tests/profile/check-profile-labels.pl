@@ -82,10 +82,13 @@ sub timeline_label_rows {
             next;
         }
         # Within the timeline: a row's leading field is either
-        #   "Wkd HH:MM"  (weekday + time), or
+        #   "WKD HH:MM"  (weekday + time; the weekday renders upper-cased for
+        #                 emphasis on day-boundary rows), or
         #   "HH:MM"      (time only / blanked weekday), possibly indented.
-        if ($line =~ /^\s*([A-Z][a-z][a-z])\s+(\d{2}:\d{2})\b/) {
-            push @rows, { weekday => $1, time => $2, raw => $line };
+        # The matched weekday is normalized to mixed case (MON -> Mon) so the
+        # rest of the checks compare against the canonical weekday names.
+        if ($line =~ /^\s*([A-Za-z]{3})\s+(\d{2}:\d{2})\b/) {
+            push @rows, { weekday => ucfirst(lc $1), time => $2, raw => $line };
         } elsif ($line =~ /^\s*(\d{2}:\d{2})\b/) {
             push @rows, { weekday => undef, time => $1, raw => $line };
         }

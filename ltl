@@ -10801,10 +10801,17 @@ sub print_bar_graph {
             } else {
                 $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
             }
+            # Blanking the repeated weekday is a terminal-display affordance only.
+            # The CSV must keep the full folded timestamp on every row so each
+            # row is self-describing (a blanked "    10:00" would be ambiguous to
+            # a consumer), so the blank is applied to a separate display copy and
+            # $bucket_time_str — the value pushed to the CSV row below — is left
+            # whole.
+            my $bucket_time_display = $bucket_time_str;
             if ($profile_week_fold) {
                 my $wday = (gmtime($print_milliseconds ? $bucket / 1000 : $bucket))[6];
                 if (defined $prev_fold_wday && $wday == $prev_fold_wday) {
-                    substr($bucket_time_str, 0, 3) = '   ';   # blank the repeated weekday
+                    substr($bucket_time_display, 0, 3) = '   ';   # blank the repeated weekday
                 }
                 $prev_fold_wday = $wday;
             }
@@ -10888,15 +10895,16 @@ sub print_bar_graph {
 
                 if ($col_id eq 'timestamp') {
                     # Emphasize the weekday token on the day-boundary rows of a
-                    # week/workweek fold (bold + underline), leaving the time and
-                    # the blanked-weekday rows plain. Styling is applied only to
-                    # the printed copy — $bucket_time_str stays clean for the CSV
-                    # row pushed below — and wraps just the 3-char weekday, so the
-                    # visible width (and column alignment) is unchanged.
-                    if ($profile_week_fold && $bucket_time_str =~ /^([A-Z][a-z][a-z])(\s.*)$/) {
-                        print "\033[1;4m$1$colors{'NC'}$2";
+                    # week/workweek fold: bold + upper-cased (MON, TUE, ...),
+                    # leaving the time and the blanked-weekday rows plain. Uses
+                    # the display copy (whose repeated weekday is blanked); the
+                    # full mixed-case $bucket_time_str goes to the CSV. The
+                    # upper-cased token is the same 3 chars, so column alignment
+                    # is unchanged.
+                    if ($profile_week_fold && $bucket_time_display =~ /^([A-Z][a-z][a-z])(\s.*)$/) {
+                        print "\033[1m" . uc($1) . "$colors{'NC'}$2";
                     } else {
-                        print $bucket_time_str;
+                        print $bucket_time_display;
                     }
 
                 } elsif ($col_id eq 'legend') {
