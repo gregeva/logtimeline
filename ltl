@@ -214,6 +214,11 @@ my $filter_range_end_epoch = 0;
 my %filter_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %result_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %filter_range;
+# Seconds-of-day for any -st/-et bound supplied as a bare time (no date).
+# Under --profile these become a time-of-day window applied to every day,
+# rather than an absolute instant anchored to the first log date. Keys
+# 'start'/'end' present only for the bounds given in time-only form.
+my %filter_range_tod;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
@@ -7096,9 +7101,13 @@ sub calculate_start_end_filter_timestamps {
         } elsif ( $value =~ /^\d{4}-\d{1,2}-\d{1,2}/ ) {
             $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d" )->epoch;
         } elsif ( $value =~ /^\d{1,2}:\d{2}:\d{2}/ ) {
-            $epoch_value = $log_date + Time::Piece->strptime( $value, "%H:%M:%S" )->epoch;
+            my $tod = Time::Piece->strptime( $value, "%H:%M:%S" )->epoch;  # seconds since midnight
+            $epoch_value = $log_date + $tod;
+            $filter_range_tod{$key} = $tod + ($fractional_ms / 1000);
         } elsif ( $value =~ /^\d{1,2}:\d{2}/ ) {
-            $epoch_value = $log_date + Time::Piece->strptime( $value, "%H:%M" )->epoch;
+            my $tod = Time::Piece->strptime( $value, "%H:%M" )->epoch;     # seconds since midnight
+            $epoch_value = $log_date + $tod;
+            $filter_range_tod{$key} = $tod + ($fractional_ms / 1000);
         } else {
             print "Warning: unhandled date/time format - option not taken into account\n";
         }
@@ -7671,7 +7680,20 @@ sub read_and_process_logs {
                 }
 
                 ## FILTERING CONDITIONS ##
-                next if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} );
+                # Under --profile a time-only -st/-et is a time-of-day window
+                # applied to every day (folding overlays all dates, so anchoring
+                # the bound to a single calendar day would defeat it). Compare
+                # the record's seconds-of-day against the time-of-day bounds;
+                # any bound given with a date still applies as an absolute cutoff.
+                if ($profile_mode && %filter_range_tod) {
+                    my $tod = $timestamp_epoch - int($timestamp_epoch / 86400) * 86400;
+                    next if defined $filter_range_tod{'start'} && $tod <  $filter_range_tod{'start'};
+                    next if defined $filter_range_tod{'end'}   && $tod >= $filter_range_tod{'end'};
+                    next if !defined $filter_range_tod{'start'} && $timestamp_epoch <  $filter_range_epoch{'start'};
+                    next if !defined $filter_range_tod{'end'}   && $timestamp_epoch >= $filter_range_epoch{'end'};
+                } else {
+                    next if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} );
+                }
 
                 # --profile: fold onto the reference period AFTER range filtering
                 # (filters apply to original timestamps, then we overlay). A line
