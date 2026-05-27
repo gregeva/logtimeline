@@ -141,6 +141,10 @@ my %verbose_sections_requested;   # Populated by adapt_to_command_line_options()
 my %verbose_section_buffer;
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_sessions );
+# Per-category message-key display order, computed once in calculate_all_statistics()
+# and reused by print_message_summary() so the same keys are not sorted twice
+# (Issue #302). Keyed by category ('plain'/'highlight').
+my %message_key_order;
 my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
 my $mask_uuid;									# temporary command line option to mask UUIDs with HASH characters for grouping purposes (to be replaced by more generic group similar feature)
 my @graph_columns = qw( duration bytes count );
@@ -9250,6 +9254,36 @@ sub calculate_all_statistics {
             my (@sorted_log_keys, @top_keys);
 
             if( $sort_key !~ /^(min|mean|max|std_dev|cv|iqr|skewness|kurtosis|bimodality_coef|p1|p5|p10|p25|p50|p75|p90|p95|p99|p999|p9999|p99999)$/ ) {
+                # Two-stage selection (Issue #302). Only the top N keys are ever
+                # displayed, but a deterministic total order (the metric, then a
+                # tiebreaker) is needed to pick them reproducibly. On a
+                # high-cardinality category (hundreds of thousands of keys, most
+                # tied on the metric), fully sorting every key with the
+                # string-key tiebreaker is the dominant cost — it rescans long,
+                # near-identical message keys on every one of the O(n log n)
+                # comparisons.
+                #
+                # Stage 1: sort by the metric ALONE (cheap numeric comparison,
+                # no string scan) to order all keys.
+                # Stage 2: take a generous candidate pool (far larger than N) off
+                # the top and apply the full deterministic tiebreaker only to
+                # that pool. The pool is large enough that the displayed top N is
+                # always within it whenever the top N have a distinguishing
+                # metric; among a block of metric-tied keys beyond the pool the
+                # exact order is immaterial (those keys are interchangeable and
+                # are not displayed).
+                my @by_metric = sort {
+                    my $occurrences_a = $log_messages{$category}{$a}{$sort_key} // 0;
+                    my $occurrences_b = $log_messages{$category}{$b}{$sort_key} // 0;
+                    $sort_ascending
+                        ? ($occurrences_a <=> $occurrences_b)
+                        : ($occurrences_b <=> $occurrences_a);
+                } keys %{$log_messages{$category}};
+
+                my $pool_size = $top_n_messages * 100;
+                $pool_size = 1000 if $pool_size < 1000;
+                my @pool = @by_metric[0 .. min($#by_metric, $pool_size - 1)];
+
                 @sorted_log_keys = sort {
                     my $occurrences_a = $log_messages{$category}{$a}{$sort_key} // 0;
                     my $occurrences_b = $log_messages{$category}{$b}{$sort_key} // 0;
@@ -9257,7 +9291,10 @@ sub calculate_all_statistics {
                         ? ($occurrences_a <=> $occurrences_b)
                         : ($occurrences_b <=> $occurrences_a))
                     || ($a cmp $b);
-                } keys %{$log_messages{$category}};
+                } @pool;
+                # Reuse this ordering in print_message_summary instead of sorting
+                # the same keys a second time (Issue #302).
+                $message_key_order{$category} = \@sorted_log_keys;
                 # Capture only the top N log keys for calculations if possible
                 @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)];
             } else {
@@ -12015,6 +12052,17 @@ sub print_message_summary {
     my %sorted_keys = ( 'highlight' => [], 'plain' => [] );
 
     foreach my $grouping ( qw( highlight plain ) ) {
+        # Reuse the ordering already computed in calculate_all_statistics when the
+        # sort metric is an available field (Issue #302): same keys, same
+        # comparator, same result — re-sorting a high-cardinality category here
+        # is redundant. Only the top N are ever displayed, and that ordering
+        # already selected them. The order is absent only when sorting on a
+        # computed statistic (ordered only after the stats exist), so fall back
+        # to a local sort there.
+        if ($message_key_order{$grouping}) {
+            $sorted_keys{$grouping} = $message_key_order{$grouping};
+            next;
+        }
         my @sorted_keys = sort {
             my $occurrences_a = $log_messages{$grouping}{$a}{$sort_key} // 0;
             my $occurrences_b = $log_messages{$grouping}{$b}{$sort_key} // 0;
