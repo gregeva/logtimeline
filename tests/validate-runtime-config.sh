@@ -5,8 +5,8 @@
 #   1. The runtime-config -V section emits command-line and
 #      environment-variable sub-sections per the locked contract.
 #   2. Silent-override warnings fire on the documented sites
-#      (-g non-numeric, -hm non-built-in without UDM, -pbpd overriding
-#      --percentile-precision, --exact-percentiles deprecation).
+#      (-g non-numeric, -hm non-built-in without UDM,
+#      --exact-percentiles deprecation).
 #   3. Hard-error paths (-du / -ru / -so unknown enums; nonexistent
 #      input file) exit non-zero with the documented diagnostic.
 # Usage: ./tests/validate-runtime-config.sh
@@ -158,7 +158,7 @@ scenario_runtime_config_command_line() {
     current_scenario="runtime-config-command-line"
     echo "[$current_scenario]"
 
-    run_ltl "rc-cli" -V runtime-config -bs 60 -pp 7 "$TEST_LOG"
+    run_ltl "rc-cli" -V runtime-config -bs 60 -dmp 7 "$TEST_LOG"
 
     assert_line "$RUN_STDOUT" \
         pattern     '^=== runtime-config ===$' \
@@ -179,7 +179,7 @@ scenario_runtime_config_command_line() {
         contract    'features/225-test-harness-coverage-gaps.md section #231 - value with no annotation means user-supplied, valid, unchanged'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^percentile-precision: 7$' \
+        pattern     '^data-model-precision: 7$' \
         asserts     'Multi-flag invocation surfaces each supplied flag as its own row in command-line sub-section.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
         contract    'features/225-test-harness-coverage-gaps.md section #231'
@@ -252,19 +252,6 @@ scenario_warning_hm_non_builtin() {
         pattern     "^-hm value 'bogus_metric' is not a built-in metric \\(duration\\|bytes\\|count\\) and no -udm configs are defined; treating as positional argument and using default metric 'duration'\\.$" \
         asserts     'When -hm is given a value that is neither a built-in metric nor matchable to a -udm config (because no -udm was given), ltl now warns that the value was treated as a positional argument and the default metric was used. Was previously silent.' \
         produced_by 'adapt_to_command_line_options() in ltl (heatmap non-builtin pushback branch)' \
-        contract    'features/225-test-harness-coverage-gaps.md section #231 - silent-override gap closure'
-}
-
-scenario_warning_pbpd_overrides_pp() {
-    current_scenario="warning-pbpd-overrides-pp"
-    echo "[$current_scenario]"
-
-    run_ltl "warn-pbpd" -pbpd 100 -pp 7 "$TEST_LOG"
-
-    assert_line "$RUN_STDERR" \
-        pattern     '^-pbpd 100 overrides --percentile-precision 7; using 100 buckets per decade\.$' \
-        asserts     'When both -pbpd and --percentile-precision are supplied, -pbpd wins. The override is now surfaced on stderr in addition to the -V histogram-bin-counters annotation it already had. Was previously only visible via -V.' \
-        produced_by 'adapt_to_command_line_options() in ltl (percentile-precision resolution; -pbpd-wins branch)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - silent-override gap closure'
 }
 
@@ -400,10 +387,10 @@ scenario_no_warning_on_clean_run() {
         produced_by 'normal ltl execution' \
         contract    'baseline'
 
-    # None of the 4 silent-override warnings should fire on a clean run.
+    # None of the silent-override warnings should fire on a clean run.
     assert_no_line "$RUN_STDERR" \
-        pattern     "is not numeric|is not a built-in metric|overrides --percentile-precision|--exact-percentiles is deprecated" \
-        asserts     'A clean run produces none of the four silent-override warnings. This guards against the warnings firing on inputs they were not designed for.' \
+        pattern     "is not numeric|is not a built-in metric|--exact-percentiles is deprecated" \
+        asserts     'A clean run produces none of the silent-override warnings. This guards against the warnings firing on inputs they were not designed for.' \
         produced_by 'adapt_to_command_line_options() in ltl' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - warnings are gated on specific input shapes'
 }
@@ -419,7 +406,6 @@ scenario_runtime_config_env_only;                      echo ""
 scenario_runtime_config_env_overridden;                echo ""
 scenario_warning_g_non_numeric;                        echo ""
 scenario_warning_hm_non_builtin;                       echo ""
-scenario_warning_pbpd_overrides_pp;                    echo ""
 scenario_error_unknown_exact_percentiles;              echo ""
 scenario_runtime_config_data_model_selectors;          echo ""
 scenario_error_unknown_so;                             echo ""

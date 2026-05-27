@@ -415,19 +415,37 @@ my $histogram_legend_spacing = 1;             # Vertical gap between histogram a
 my $histogram_buckets_per_decade = 8;         # Default: ~5% precision (4=10%, 8=5%, 16=2.5%, 32=1%)
 my $histogram_bucket_override = 0;            # If > 0, use this exact bucket count instead of calculating
 
-# Percentile-mode bin-counter primitives (Issue #189). Universal
-# buckets-per-decade for the unified percentile contract, distinct from
-# $histogram_buckets_per_decade (above; histogram-only, default 8). The two
-# flags coexist with documented precedence per:
-#   features/189-bin-counter-primitives-implementation-readiness-audit.md § Bucket C § C7 (option 1)
-# Default values are locked at:
-#   features/187-histogram-bin-counter-percentiles.md § Decision 2 (bpd=53)
+# Bin-counter data-model resolution lever (Issue #293). A single tiered
+# precision knob (--data-model-precision, 1..9, default 5) resolves the
+# bins-per-decade for each bin-counter surface through %TIER_BPD below. The
+# tier is the only resolution control; each surface reads its own row, so one
+# dial governs all surfaces at per-surface fidelity. The default (5)
+# reproduces the established per-surface defaults (histogram/heatmap 616,
+# bucket-stats 53, message-stats 53). Tier table locked at:
+#   features/187-histogram-bin-counter-percentiles.md § Decision 2
+#   features/293-precision-lever-unification.md (per-surface tier table)
+# Partition seed span locked at:
 #   features/187-histogram-bin-counter-percentiles.md § Decision 5 (seed_decades=5)
-# Opt-out is the per-surface -dm / -hgdm / -hmdm / -mdm / -bdm selector
-# resolving to 'raw' (per features/266-data-model-selectors.md).
-my $percentile_buckets_per_decade  = 53;      # ~1.3% precision; tier 5 in the locked precision table
-my $percentile_precision_level     = undef;   # 1..9 tier; resolves to a bpd via the locked precision table
-my $percentile_precision_source    = 'default';  # 'default' | '-pbpd N' | '--percentile-precision N' | '-pbpd N; --percentile-precision N overridden'
+# The data model itself (raw vs bin) is chosen by the per-surface
+# -dm / -hgdm / -hmdm / -mdm / -bdm selectors (features/266-data-model-selectors.md);
+# precision applies only on surfaces resolving to 'bin'.
+my %TIER_BPD = (
+    'histogram'     => [53, 80, 115, 256, 616, 616, 616, 616, 616],
+    'heatmap'       => [53, 80, 115, 256, 616, 616, 616, 616, 616],
+    'bucket-stats'  => [16, 32,  53,  53,  53, 115, 616, 616, 616],
+    'message-stats' => [ 4,  8,  16,  32,  53,  80, 115, 256, 616],
+);
+my $data_model_precision_level  = 5;          # 1..9 tier; index into %TIER_BPD
+my $data_model_precision_source = 'default';  # 'default' | '--data-model-precision N'
+
+# Per-surface bins-per-decade, derived from the tier via bpd_for_surface()
+# during option resolution. Initialised to the tier-5 defaults so any reader
+# before resolution sees the documented default.
+my $percentile_buckets_per_decade   = 53;     # message-stats surface
+my $bucket_stats_buckets_per_decade = 53;     # per-time-bucket surface
+my $heatmap_stream_bpd              = 616;    # heatmap surface (display-geometry bound, #201)
+my $histogram_stream_bpd            = 616;    # histogram surface (display-geometry bound, #201)
+
 my $percentile_seed_decades        = 5;       # partition seeds at 5 decades centered on first value
 
 # Issue #268: CSV output precision. $csv_precision is one of 'default', 'full',
@@ -459,21 +477,13 @@ my $heatmap_capture_mode           = undef;   # 'raw' or 'bin' (set before parsi
 my $message_stats_capture_mode     = undef;   # 'raw' or 'bin' (set before parsing loop) — Issue #287
 my $bucket_stats_capture_mode      = undef;   # 'raw' or 'bin' (set before parsing loop) — Issue #289
 
-# Streaming-partition bpd for display-geometry-bound consumers (#201).
-# Higher than the F1 default (53) because F2/F3 partition counts are bounded
-# (~70 total across all heatmap time buckets + histogram metrics) and the
-# end-of-parse re-bin into a coarser display-anchored partition needs streaming
-# bpd this high to keep boundary-mismatch displacement below the ~11% per-row
-# visibility threshold of a 9-char-tall ASCII histogram. Empirically validated
-# by #201 V8 at 1.10% / 5.78% worst-case displacement on canonical datasets.
-my $heatmap_stream_bpd   = 616;
-my $histogram_stream_bpd = 616;
-
-# Issue #289: per-time-bucket statistics bin resolution, the analyst's lever
-# for this surface (mirrors $percentile_buckets_per_decade for the per-message
-# surface). Default 53 (#187 Decision 2 floor); tunable via
-# -bsbpd / --bucket-stats-buckets-per-decade. Valid range 4..616.
-my $bucket_stats_buckets_per_decade = 53;
+# The heatmap and histogram surfaces are display-geometry bound (#201): their
+# bounded partition counts (~70 total) re-bin at end-of-parse into a coarser
+# display-anchored partition, so a high streaming bpd keeps boundary-mismatch
+# displacement below the ~11% per-row visibility threshold of a 9-char-tall
+# ASCII histogram (#201 V8: 1.10% / 5.78% worst-case on canonical datasets).
+# At the default tier 5 both resolve to 616; lower tiers coarsen them
+# (a deliberate trade against shape fidelity — see %TIER_BPD above).
 
 # Histogram data collection (hash-based for dynamic metrics)
 my %histogram_values = (
@@ -953,6 +963,14 @@ sub bin_assign {
     $i = $p->{bin_count} - 1 if $i >= $p->{bin_count};
     $i = 0                   if $i < 0;
     return ('IN', $i);
+}
+
+sub bpd_for_surface {
+    # Resolve a surface's bins-per-decade from the active precision tier
+    # (Issue #293). The tier is validated to 1..9 before any surface reads it,
+    # so the array index is always in range.
+    my ($surface) = @_;
+    return $TIER_BPD{$surface}[$data_model_precision_level - 1];
 }
 
 sub counter_update {
@@ -1506,7 +1524,7 @@ sub _classify_argv_provenance {
                 'hgb|histogram-buckets',
                 'pbpd|percentile-buckets-per-decade',
                 'bsbpd|bucket-stats-buckets-per-decade',
-                'pp|percentile-precision',
+                'dmp|data-model-precision',
                 'dm|data-model',
                 'hgdm|histogram-data-model',
                 'hmdm|heatmap-data-model',
@@ -1619,7 +1637,7 @@ sub emit_runtime_config_verbose {
         'histogram-buckets'                 => $histogram_bucket_override,
         'percentile-buckets-per-decade'     => $percentile_buckets_per_decade,
         'bucket-stats-buckets-per-decade'   => $bucket_stats_buckets_per_decade,
-        'percentile-precision'              => $percentile_precision_level,
+        'data-model-precision'              => $data_model_precision_level,
         # Issue #266: explicit data-model selectors. Emitted only when the
         # user supplied them (per the existing provenance partitioning at
         # the bottom of this sub) — unset flags emit nothing.
@@ -1977,15 +1995,15 @@ sub emit_percentile_algorithm_verbose {
     # and the heatmap/histogram capture-mode resolution at adapt time.
     # The `effective_algorithm` column reports what the code actually
     # ran, not what the resolved data_model implies.
-    # Per-surface bin resolution (buckets_per_decade). Issue #289: 53 is the
-    # global default/floor (#187 Decision 2, OTEP-149 Scale-4 analog); each
-    # surface tunes UP from there by partition cardinality vs memory. The
-    # per-message-key surface (potentially millions of partitions) stays at
-    # the 53 default; the per-time-bucket surface (hundreds of partitions) and
-    # the heatmap/histogram surfaces (bounded partition counts) run finer.
-    # Emitted as `effective_bpd` so the #224 L3 oracle builds its reference
-    # partition at the SAME resolution ltl used (the oracle is parameter-aware
-    # per #280 — it must not hard-code a bpd that diverges from ltl's).
+    # Per-surface bin resolution. Issue #293: each surface's bins-per-decade
+    # is derived from the single precision tier (--data-model-precision) via
+    # %TIER_BPD — one dial, per-surface fidelity. At the default tier 5 the
+    # surfaces resolve to their established defaults (histogram/heatmap 616,
+    # per-time-bucket 53, per-message-key 53). Emitted as `effective_bpd` so
+    # the #224 L3 oracle builds its reference partition at the SAME resolution
+    # ltl used (the oracle is parameter-aware per #280 — it must not hard-code
+    # a bpd that diverges from ltl's). Meaningful only when the surface's data
+    # model is 'bin'; the raw nearest-rank path has no bin resolution.
     my @surfaces = (
         {
             id              => 'histogram',
@@ -2076,43 +2094,13 @@ sub emit_bin_counter_mode_verbose {
 
     push @verbose_output, "=== histogram-bin-counters ===";
 
-    # Two fields, two annotation styles per the locked Decision 8 contract:
-    #
-    # `percentile_precision: <LEVEL> (<source>)` — reports the
-    # --percentile-precision side of the story. When --percentile-precision
-    # was specified (with or without -pbpd), <LEVEL> is the requested level
-    # (1..9) and <source> is "--percentile-precision N" or, when -pbpd also
-    # specified, "--percentile-precision N; overridden". When no
-    # --percentile-precision was specified, <LEVEL> falls back to the tier
-    # corresponding to the active bpd if any matches, or the literal "n/a"
-    # for non-tier bpd values (locked at audit A5).
-    #
-    # `buckets_per_decade: <N> (<source>)` — reports the active resolved bpd
-    # with the full conflict-annotated source ("default" | "-pbpd N" |
-    # "--percentile-precision N" | "-pbpd N; --percentile-precision M overridden").
-    #
-    # The two fields can carry different <source> strings; only the
-    # buckets_per_decade field's annotation tracks $percentile_precision_source
-    # verbatim from option parsing.
-    my %bpd_to_level = (4=>1, 8=>2, 16=>3, 32=>4, 53=>5, 80=>6, 115=>7, 256=>8, 616=>9);
-    my ($level_label, $level_source);
-    if (defined $percentile_precision_level) {
-        # User supplied --percentile-precision. Report it even when overridden.
-        $level_label  = $percentile_precision_level;
-        $level_source = $percentile_precision_source =~ /^-pbpd /
-            ? "--percentile-precision $percentile_precision_level; overridden"
-            : "--percentile-precision $percentile_precision_level";
-    } else {
-        $level_label  = exists $bpd_to_level{$percentile_buckets_per_decade}
-            ? $bpd_to_level{$percentile_buckets_per_decade}
-            : 'n/a';
-        $level_source = $percentile_precision_source;
-    }
-
+    # `data_model_precision: <TIER> (<source>)` — the single precision lever
+    # (Issue #293). <TIER> is the active tier 1..9; <source> is "default" or
+    # "--data-model-precision N". The per-surface bins-per-decade derived from
+    # the tier are reported per surface as `effective_bpd:` in the
+    # percentile-algorithm section, which is authoritative for resolution.
     push @verbose_output,
-        "percentile_precision: $level_label ($level_source)";
-    push @verbose_output,
-        "buckets_per_decade: $percentile_buckets_per_decade ($percentile_precision_source)";
+        "data_model_precision: $data_model_precision_level ($data_model_precision_source)";
 
     my %feature_active = (
         summary_table     => 1,
@@ -6545,7 +6533,7 @@ sub adapt_to_command_line_options {
         'hgb|histogram-buckets=i' => \$histogram_bucket_override,
         'pbpd|percentile-buckets-per-decade=i' => \$percentile_buckets_per_decade,
         'bsbpd|bucket-stats-buckets-per-decade=i' => \$bucket_stats_buckets_per_decade,
-        'pp|percentile-precision=i' => \$percentile_precision_level,
+        'dmp|data-model-precision=i' => \$data_model_precision_level,
         # Issue #266: explicit data-model selectors. Each accepts 'raw' or 'bin';
         # any other value dies at parse time via _validate_dm. The flags have no
         # defaults — when unset, the surface's existing logic applies.
@@ -6711,40 +6699,26 @@ sub adapt_to_command_line_options {
         }
     }
 
-    # Percentile-mode precision resolution (Issue #189). Resolves the bpd to
-    # use for the unified percentile contract from the CLI flags. The flag
-    # interaction (-pbpd wins over --percentile-precision; the level-to-bpd
-    # tier table; the 4..616 range) is locked at:
+    # Data-model precision resolution (Issue #293). The single tiered lever
+    # (--data-model-precision, 1..9, default 5) resolves a per-surface
+    # bins-per-decade through %TIER_BPD. The tier is the only resolution knob;
+    # each surface derives its own bpd. Contract locked at:
     #   features/187-histogram-bin-counter-percentiles.md § Decision 2
-    # Flags are parsed here but not yet consumed — the first consumer
-    # migration is the first reader of these globals.
-    if (defined $percentile_precision_level && $percentile_buckets_per_decade == 53) {
-        my %level_to_bpd = (1=>4, 2=>8, 3=>16, 4=>32, 5=>53, 6=>80, 7=>115, 8=>256, 9=>616);
-        if (!exists $level_to_bpd{$percentile_precision_level}) {
-            warn "Invalid --percentile-precision: $percentile_precision_level (must be 1..9). Using default (5).\n";
-            $percentile_precision_level = 5;
-        }
-        $percentile_buckets_per_decade = $level_to_bpd{$percentile_precision_level};
-        $percentile_precision_source   = "--percentile-precision $percentile_precision_level";
-    } elsif ($percentile_buckets_per_decade != 53) {
-        $percentile_precision_source = defined $percentile_precision_level
-            ? "-pbpd $percentile_buckets_per_decade; --percentile-precision $percentile_precision_level overridden"
-            : "-pbpd $percentile_buckets_per_decade";
-        # Issue #231: surface the override on stderr too — until now it was
-        # only visible inside the -V histogram-bin-counters section.
-        if (defined $percentile_precision_level) {
-            warn "-pbpd $percentile_buckets_per_decade overrides --percentile-precision $percentile_precision_level; using $percentile_buckets_per_decade buckets per decade.\n";
-        }
+    #   features/293-precision-lever-unification.md (per-surface tier table)
+    if (!$option_provenance{'data-model-precision'}) {
+        $data_model_precision_source = 'default';
+    } elsif ($data_model_precision_level < 1 || $data_model_precision_level > 9) {
+        warn "Invalid --data-model-precision: $data_model_precision_level (must be 1..9). Using default (5).\n";
+        $data_model_precision_level  = 5;
+        $data_model_precision_source = 'default';
+    } else {
+        $data_model_precision_source = "--data-model-precision $data_model_precision_level";
     }
-    if ($percentile_buckets_per_decade < 4 || $percentile_buckets_per_decade > 616) {
-        warn "Invalid -pbpd: $percentile_buckets_per_decade (must be 4..616). Using default (53).\n";
-        $percentile_buckets_per_decade = 53;
-        $percentile_precision_source   = 'default';
-    }
-    if ($bucket_stats_buckets_per_decade < 4 || $bucket_stats_buckets_per_decade > 616) {
-        warn "Invalid -bsbpd: $bucket_stats_buckets_per_decade (must be 4..616). Using default (53).\n";
-        $bucket_stats_buckets_per_decade = 53;
-    }
+    # Derive each surface's bpd from the resolved tier.
+    $percentile_buckets_per_decade   = bpd_for_surface('message-stats');
+    $bucket_stats_buckets_per_decade = bpd_for_surface('bucket-stats');
+    $heatmap_stream_bpd              = bpd_for_surface('heatmap');
+    $histogram_stream_bpd            = bpd_for_surface('histogram');
 
     # Duration unit option validation (Issue #17)
     if (defined $duration_unit_override) {

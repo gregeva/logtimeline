@@ -126,7 +126,7 @@ assert_header_present() {
 }
 
 # ---------------------------------------------------------------------------
-# Scenario 1: default run — no percentile-mode flags
+# Scenario 1: default run — no precision flag
 # ---------------------------------------------------------------------------
 scenario_default() {
     current_scenario="default"
@@ -137,128 +137,125 @@ scenario_default() {
     assert_header_present "$out"
 
     assert_line "$out" \
-        pattern     '^percentile_precision: 5 \(default\)$' \
-        asserts     'With no precision flags, percentile_precision reports tier 5 (the default level in the locked tier table) with source annotation `(default)`' \
+        pattern     '^data_model_precision: 5 \(default\)$' \
+        asserts     'With no precision flag, data_model_precision reports tier 5 (the default level in the locked tier table) with source annotation `(default)`' \
         produced_by 'emit_bin_counter_mode_verbose() in ltl (run-level header block)' \
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 + section Decision 2 - tier 5 is the default level; source annotation form is locked'
-
-    assert_line "$out" \
-        pattern     '^buckets_per_decade: 53 \(default\)$' \
-        asserts     'With no precision flags, buckets_per_decade reports the default 53 (the bpd corresponding to tier 5) with source annotation `(default)`' \
-        produced_by 'emit_bin_counter_mode_verbose() in ltl (run-level header block)' \
-        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 + section Decision 2 - tier 5 -> bpd 53 is locked'
 
     rm -f "$out"
 }
 
 # ---------------------------------------------------------------------------
-# Scenario 3: --percentile-precision 7 (tier override)
+# Scenario 3: --data-model-precision 7 (tier override)
 # ---------------------------------------------------------------------------
 scenario_precision_tier() {
     current_scenario="precision-tier"
     echo "[$current_scenario]"
     local out
-    out=$(run_section --percentile-precision 7)
+    out=$(run_section --data-model-precision 7)
 
     assert_header_present "$out"
 
     assert_line "$out" \
-        pattern     '^percentile_precision: 7 \(--percentile-precision 7\)$' \
-        asserts     'When --percentile-precision N is given without -pbpd, percentile_precision reports N with source annotation `(--percentile-precision N)`' \
-        produced_by 'emit_bin_counter_mode_verbose() in ltl (run-level header block; --percentile-precision branch of source annotation)' \
+        pattern     '^data_model_precision: 7 \(--data-model-precision 7\)$' \
+        asserts     'When --data-model-precision N is given, data_model_precision reports N with source annotation `(--data-model-precision N)`' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl (run-level header block; supplied-flag branch of source annotation)' \
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - source annotation form is locked per branch'
 
-    assert_line "$out" \
-        pattern     '^buckets_per_decade: 115 \(--percentile-precision 7\)$' \
-        asserts     'When --percentile-precision 7 resolves through the tier table, buckets_per_decade reports 115 (the bpd for tier 7) with matching source annotation' \
-        produced_by 'adapt_to_command_line_options() in ltl (tier table %level_to_bpd) + emit_bin_counter_mode_verbose() (source annotation)' \
-        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 2 - tier 7 -> bpd 115 is locked'
-
     rm -f "$out"
 }
 
 # ---------------------------------------------------------------------------
-# Scenario 4: -pbpd 100 (non-tier value -> literal `n/a` per audit A5)
+# Scenario 4: invalid --data-model-precision warns + falls back to default
 # ---------------------------------------------------------------------------
-scenario_pbpd_non_tier() {
-    current_scenario="pbpd-non-tier"
+scenario_precision_out_of_range() {
+    current_scenario="precision-out-of-range"
     echo "[$current_scenario]"
     local out
-    out=$(run_section -pbpd 100)
+    out=$(run_section --data-model-precision 12)
 
     assert_header_present "$out"
 
     assert_line "$out" \
-        pattern     '^percentile_precision: n/a \(-pbpd 100\)$' \
-        asserts     'When -pbpd resolves to a value with no tier-table match, percentile_precision reports the literal string `n/a` (not an integer) with source annotation reflecting the -pbpd source' \
-        produced_by 'emit_bin_counter_mode_verbose() in ltl (run-level header block; bpd-without-tier-match branch)' \
-        contract    'features/189-percentile-mode-audit.md section Bucket A section A5 - literal `n/a` rendering for non-tier bpd values is locked'
+        pattern     'Invalid --data-model-precision: 12 \(must be 1\.\.9\)' \
+        asserts     'When --data-model-precision is outside the locked 1..9 range, ltl emits a warning to stderr naming the invalid value' \
+        produced_by 'adapt_to_command_line_options() in ltl (tier range-check branch)' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 2 - valid tier range is locked at 1..9'
 
     assert_line "$out" \
-        pattern     '^buckets_per_decade: 100 \(-pbpd 100\)$' \
-        asserts     'When -pbpd N is given, buckets_per_decade reports N with source annotation `(-pbpd N)`' \
-        produced_by 'adapt_to_command_line_options() in ltl (-pbpd branch) + emit_bin_counter_mode_verbose() (source annotation)' \
-        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - source annotation form is locked'
-
-    rm -f "$out"
-}
-
-# ---------------------------------------------------------------------------
-# Scenario 5: -pbpd + --percentile-precision conflict (-pbpd wins)
-# ---------------------------------------------------------------------------
-scenario_flag_conflict() {
-    current_scenario="flag-conflict"
-    echo "[$current_scenario]"
-    local out
-    out=$(run_section -pbpd 100 --percentile-precision 4)
-
-    assert_header_present "$out"
-
-    assert_line "$out" \
-        pattern     '^percentile_precision: 4 \(--percentile-precision 4; overridden\)$' \
-        asserts     'When both -pbpd and --percentile-precision are given, percentile_precision reports the *requested* level from --percentile-precision with `; overridden` suffix indicating -pbpd won' \
-        produced_by 'emit_bin_counter_mode_verbose() in ltl (run-level header block; conflict branch of $level_source)' \
-        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - conflict annotation form is locked'
-
-    assert_line "$out" \
-        pattern     '^buckets_per_decade: 100 \(-pbpd 100; --percentile-precision 4 overridden\)$' \
-        asserts     'When both flags conflict, buckets_per_decade reports the *active* bpd from -pbpd with full conflict annotation showing both flags and which one was overridden' \
-        produced_by 'adapt_to_command_line_options() in ltl ($percentile_precision_source assembly)' \
-        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - full conflict annotation is locked'
-
-    rm -f "$out"
-}
-
-# ---------------------------------------------------------------------------
-# Scenario 6: invalid -pbpd value warns + falls back to default
-# ---------------------------------------------------------------------------
-scenario_pbpd_out_of_range() {
-    current_scenario="pbpd-out-of-range"
-    echo "[$current_scenario]"
-    local out
-    out=$(run_section -pbpd 9999)
-
-    assert_header_present "$out"
-
-    assert_line "$out" \
-        pattern     'Invalid -pbpd: 9999' \
-        asserts     'When -pbpd is outside the locked 4..616 range, ltl emits a warning to stderr naming the invalid value' \
-        produced_by 'adapt_to_command_line_options() in ltl (-pbpd range-check branch)' \
-        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 2 - valid range is locked at 4..616'
-
-    assert_line "$out" \
-        pattern     '^percentile_precision: 5 \(default\)$' \
-        asserts     'When -pbpd is out of range, percentile_precision falls back to the default tier 5 (not the invalid value)' \
+        pattern     '^data_model_precision: 5 \(default\)$' \
+        asserts     'When the tier is out of range, data_model_precision falls back to the default tier 5 with source annotation reset to `(default)`' \
         produced_by 'adapt_to_command_line_options() in ltl (range-check fallback) + emit_bin_counter_mode_verbose() (source annotation)' \
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 2 - fallback to default is locked behavior'
 
-    assert_line "$out" \
-        pattern     '^buckets_per_decade: 53 \(default\)$' \
-        asserts     'When -pbpd is out of range, buckets_per_decade falls back to 53 with source annotation reset to `(default)`' \
-        produced_by 'adapt_to_command_line_options() in ltl (range-check fallback resets $percentile_precision_source to "default")' \
-        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 2 - fallback resets source annotation'
-
     rm -f "$out"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario T: the per-surface tier table (Issue #293). The single precision
+# tier resolves each bin-counter surface's effective_bpd; this asserts the
+# table cells end-to-end via -V percentile-algorithm. message-stats and
+# bucket-stats are pinned to the bin model so their effective_bpd is emitted
+# (the raw nearest-rank path has no bin resolution). Histogram and heatmap are
+# bin by default. Expected cells per surface row:
+#   tier 1 -> histogram 53,  heatmap 53,  bucket-stats 16,  message-stats 4
+#   tier 5 -> histogram 616, heatmap 616, bucket-stats 53,  message-stats 53
+#   tier 7 -> histogram 616, heatmap 616, bucket-stats 616, message-stats 115
+#   tier 9 -> histogram 616, heatmap 616, bucket-stats 616, message-stats 616
+# ---------------------------------------------------------------------------
+run_pa_section() {
+    # Capture -V percentile-algorithm with all four surfaces on the bin model.
+    local outfile
+    outfile=$(mktemp)
+    "$LTL" --disable-progress -V percentile-algorithm -hg -hm \
+        -mdm bin -bdm bin "$@" "$ACCESS_LOG" > "$outfile" 2>&1 || true
+    echo "$outfile"
+}
+
+# Assert one surface's effective_bpd within its percentile-algorithm block.
+assert_surface_bpd() {
+    local outfile="$1" surface="$2" expected="$3"
+    local actual
+    actual=$(sed -nE "/^=== percentile-algorithm \/ ${surface} ===$/,/^=== END percentile-algorithm \/ ${surface} ===$/p" "$outfile" \
+        | sed -nE 's/^effective_bpd: ([0-9]+)$/\1/p' | head -1)
+    if [[ "$actual" == "$expected" ]]; then
+        echo "  PASS  $current_scenario :: ${surface} effective_bpd=$expected"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario"
+        echo "        surface:     $surface"
+        echo "        expected:    effective_bpd=$expected"
+        echo "        actual:      effective_bpd=${actual:-<absent>}"
+        echo "        asserts:     The precision tier resolves this surface to its locked per-surface bpd via %TIER_BPD."
+        echo "        produced_by: bpd_for_surface() in ltl -> per-surface globals -> @surfaces array in emit_percentile_algorithm_verbose()"
+        echo "        contract:    features/293-precision-lever-unification.md (per-surface tier table) + features/187 section Decision 2"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: ${surface} effective_bpd expected=$expected got=${actual:-<absent>}")
+    fi
+}
+
+scenario_tier_table() {
+    current_scenario="tier-table"
+    echo "[$current_scenario]"
+    local out tier cells hg hm bs ms
+    # Each row: "histogram heatmap bucket-stats message-stats" for the tier.
+    for tier in 1 5 7 9; do
+        case "$tier" in
+            1) cells="53 53 16 4" ;;
+            5) cells="616 616 53 53" ;;
+            7) cells="616 616 616 115" ;;
+            9) cells="616 616 616 616" ;;
+        esac
+        read -r hg hm bs ms <<< "$cells"
+        out=$(run_pa_section --data-model-precision "$tier")
+        current_scenario="tier-table[dmp=$tier]"
+        assert_surface_bpd "$out" histogram     "$hg"
+        assert_surface_bpd "$out" heatmap       "$hm"
+        assert_surface_bpd "$out" bucket-stats  "$bs"
+        assert_surface_bpd "$out" message-stats "$ms"
+        rm -f "$out"
+    done
+    current_scenario="tier-table"
 }
 
 # ---------------------------------------------------------------------------
@@ -582,11 +579,9 @@ scenario_default
 echo ""
 scenario_precision_tier
 echo ""
-scenario_pbpd_non_tier
+scenario_precision_out_of_range
 echo ""
-scenario_flag_conflict
-echo ""
-scenario_pbpd_out_of_range
+scenario_tier_table
 echo ""
 scenario_message_stats_bin
 echo ""
