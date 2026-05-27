@@ -77,7 +77,7 @@ ltl -hg duration,bytes access.log             # multiple histograms in one invoc
 ltl -hg duration -hgw 50 access.log           # narrow histogram (50% of terminal)
 ltl -hg duration -hgh 16 access.log           # taller histogram (16 rows vs default 8)
 ltl -hg duration -h "/api/v2/" access.log     # overlay highlight of matching entries
-ltl -hg duration -pp 7 access.log             # tighter percentile precision (slower)
+ltl -hg duration -dmp 7 access.log            # tighter precision (slower)
 ```
 
 ---
@@ -93,7 +93,7 @@ ltl -hg duration -pp 7 access.log             # tighter percentile precision (sl
 
 ## How ltl renders this
 
-The histogram uses log-spaced bins with HDR-histogram-style precision. Default precision (53 buckets per decade, controlled by `-pbpd`) gives ~1.3% resolution. The histogram width (default 95% of terminal) and height (default 8 rows) are tunable via `-hgw` and `-hgh`. Highlight overlays (`-h regex`) render colored sub-bars within each main bar, showing the proportion of highlighted entries at each value range. The percentile tick marks on the baseline are computed from the same observations as the summary-table p99/p999 values, so the visual ticks and the numeric statistics agree by construction.
+The histogram uses log-spaced bins with HDR-histogram-style precision. Bin-counter resolution is controlled by `--data-model-precision` (tier 1..9, default 5); higher tiers give finer resolution. The histogram width (default 95% of terminal) and height (default 8 rows) are tunable via `-hgw` and `-hgh`. Highlight overlays (`-h regex`) render colored sub-bars within each main bar, showing the proportion of highlighted entries at each value range. The percentile tick marks on the baseline are computed from the same observations as the summary-table p99/p999 values, so the visual ticks and the numeric statistics agree by construction.
 
 ---
 
@@ -103,4 +103,4 @@ The histogram uses log-spaced bins with HDR-histogram-style precision. Default p
 - `ltl --explain percentiles` — what p50, p95, p99, p999, p9999, p99999 mean and how to read them
 - `ltl --explain iqr` — the body-spread statistic that pairs with p25/p75
 - `ltl --explain skewness`, `ltl --explain kurtosis`, `ltl --explain bimodality_coef` — distribution-shape statistics that quantify what the histogram shows
-- Flags: `-hg`, `-hgw`, `-hgh`, `-pbpd`, `-pp`, `-ep`
+- Flags: `-hg`, `-hgw`, `-hgh`, `-dmp`
