@@ -158,13 +158,19 @@ fi
 # raw and bin scenarios on the same logfile don't collide.
 ORACLE_CACHE_DIR="$SCRIPT_DIR/.artifacts/oracle"
 oracle_json_for_logfile() {
-    # Args: logfile_path, bucket_size_seconds, duration_unit, format, algorithm
+    # Args: logfile_path, bucket_size_seconds, duration_unit, format, algorithm, bpd
     # Echoes the resolved oracle JSON path on stdout; produces it if not
     # cached. Returns non-zero if the oracle invocation fails.
-    local logfile="$1" bs_sec="$2" du_unit="$3" fmt="$4" algorithm="$5"
+    #
+    # Issue #289: the bpd is part of the cache key AND passed to the oracle.
+    # Surfaces run at different bin resolutions (bucket-stats finer than
+    # message-stats), so two oracle runs on the same logfile+algorithm but
+    # different bpd must not collide, and the oracle must build its reference
+    # partition at the resolution ltl actually used (read from -V effective_bpd).
+    local logfile="$1" bs_sec="$2" du_unit="$3" fmt="$4" algorithm="$5" bpd="$6"
     local log_shorthand
     log_shorthand="$(csv_cache_logfile_shorthand "$logfile")"
-    local cache_name="${fmt}_${log_shorthand}_bs${bs_sec}_du${du_unit}_${algorithm}.json"
+    local cache_name="${fmt}_${log_shorthand}_bs${bs_sec}_du${du_unit}_${algorithm}_bpd${bpd}.json"
     local cache_path="$ORACLE_CACHE_DIR/$cache_name"
     if [[ -f "$cache_path" ]]; then
         echo "$cache_path"
@@ -183,6 +189,7 @@ oracle_json_for_logfile() {
             --duration-unit "$du_unit" \
             --format "$fmt" \
             --percentile-algorithm "$algorithm" \
+            --percentile-bpd "$bpd" \
             > "$cache_path" 2>"$cache_path.stderr"; then
         echo "ERROR: oracle failed for $logfile (see $cache_path.stderr)" >&2
         rm -f "$cache_path"
@@ -257,6 +264,32 @@ pa_algorithm_for_surface() {
         return 1
     fi
     echo "$algo"
+    return 0
+}
+
+# Read the effective_bpd for one surface out of a captured -V
+# percentile-algorithm dump (Issue #289). effective_bpd is emitted only when
+# the surface runs the exponential-interpolation algorithm (the raw nearest-
+# rank path has no bin resolution), so absence is not an error: echo the
+# global default (53) so the caller has a value to pass for the
+# nearest-rank case where the oracle ignores it. Echoes the bpd on success.
+pa_bpd_for_surface() {
+    local capture_file="$1" surface="$2"
+    if ! grep -qE "^=== percentile-algorithm / ${surface} ===$" "$capture_file"; then
+        echo "ERROR: missing '=== percentile-algorithm / ${surface} ===' anchor in $capture_file" >&2
+        return 1
+    fi
+    local bpd
+    bpd="$(
+        sed -n "/^=== percentile-algorithm \/ ${surface} ===$/,/^=== END percentile-algorithm \/ ${surface} ===$/p" \
+            "$capture_file" \
+            | sed -nE 's/^effective_bpd: ([0-9]+)$/\1/p' \
+            | head -1
+    )"
+    # effective_bpd absent → surface is on nearest_rank; the oracle ignores
+    # bpd in that case, so default to 53 (the global floor).
+    [[ -z "$bpd" ]] && bpd=53
+    echo "$bpd"
     return 0
 }
 
@@ -365,15 +398,17 @@ while IFS=$'\t' read -r scenario logfile options; do
         fi
 
         # Layer 3: resolve oracle JSON per-logfile (cached). The oracle
-        # only supports tomcat-access in Phase F; other formats skip L3
-        # (engine reports L3=N/A via absence of --oracle-json). The
-        # percentile algorithm is read from ltl's
-        # `-V percentile-algorithm` capture per the Issue #280 contract;
+        # supports every format in oracle_format_for_logfile (tomcat-access,
+        # apache-http2, codebeamer-access, thingworx-scriptlog); a format with
+        # no parser skips L3 (engine reports L3=N/A via absence of
+        # --oracle-json). The oracle implements BOTH percentile algorithms —
+        # nearest_rank and exponential_interpolation_within_bucket — so bin
+        # scenarios are validated, not skipped. The algorithm AND the bin
+        # resolution are read from ltl's `-V percentile-algorithm` capture per
+        # the Issue #280/#289 contract (effective_algorithm + effective_bpd);
         # the surface is selected by file-kind (messages → message-stats,
-        # stats → bucket-stats). When the effective algorithm has no
-        # oracle reference implementation yet (i.e.
-        # exponential_interpolation_within_bucket), L3 is skipped for
-        # that scenario+kind with no diagnostic noise.
+        # stats → bucket-stats), and the oracle builds its reference partition
+        # at the same per-surface bpd ltl used.
         if [[ $L3_ENABLED -eq 1 ]]; then
             fmt="$(oracle_format_for_logfile "$logfile")"
             if [[ -n "$fmt" ]]; then
@@ -398,13 +433,25 @@ while IFS=$'\t' read -r scenario logfile options; do
                             # The oracle implements both nearest_rank and
                             # exponential_interpolation_within_bucket; dispatch
                             # to whichever the surface resolves to per #280.
+                            # Issue #289: also read the surface's effective_bpd
+                            # so the oracle builds its reference partition at the
+                            # SAME resolution ltl used (surfaces tune bpd per
+                            # cardinality; bucket-stats runs finer than the 53
+                            # default). Without this the oracle false-fails the
+                            # finer surface against a coarse reference.
                             set +e
-                            oracle_json="$(oracle_json_for_logfile \
-                                "$logfile" "$bs_sec" "$du_unit" "$fmt" "$pa_algorithm")"
-                            orc=$?
+                            pa_bpd="$(pa_bpd_for_surface "$pa_capture" "$pa_surface")"
+                            pabc=$?
                             set -e
-                            if [[ $orc -eq 0 && -n "$oracle_json" ]]; then
-                                engine_args+=(--oracle-json "$oracle_json")
+                            if [[ $pabc -eq 0 && -n "$pa_bpd" ]]; then
+                                set +e
+                                oracle_json="$(oracle_json_for_logfile \
+                                    "$logfile" "$bs_sec" "$du_unit" "$fmt" "$pa_algorithm" "$pa_bpd")"
+                                orc=$?
+                                set -e
+                                if [[ $orc -eq 0 && -n "$oracle_json" ]]; then
+                                    engine_args+=(--oracle-json "$oracle_json")
+                                fi
                             fi
                         fi
                     fi

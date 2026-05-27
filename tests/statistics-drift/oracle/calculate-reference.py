@@ -690,14 +690,17 @@ class _BinPartition:
         return self._boundary(self.bin_count)
 
 
-def _ltl_exp_interp(samples, q_fraction):
+def _ltl_exp_interp(samples, q_fraction, bpd=_BIN_BPD):
     """Replicate ltl's bin-counter exponential-interpolation derivation
     end-to-end against the raw sample stream:
 
       1. Build a partition matching ltl's #189 primitives (lazy seed at
          5 decades centered on first positive value, HdrHistogram-style
-         doubling rebin, bpd=53). Zero samples are excluded from the
-         partition (mirrors ltl's $duration > 0 guard).
+         doubling rebin, at the surface's effective bpd — passed in by the
+         caller from ltl's -V `effective_bpd`, not hard-coded, so the
+         reference matches the resolution ltl actually used; Issue #289).
+         Zero samples are excluded from the partition (mirrors ltl's
+         $duration > 0 guard).
       2. Apply the Prometheus HistogramQuantile formula (#187 Decision 1)
          to derive the percentile value from the partition's bin counts.
       3. Clamp the result to the observed [min, max] from ALL samples
@@ -714,7 +717,7 @@ def _ltl_exp_interp(samples, q_fraction):
     # multi-element numpy arrays.
     if len(samples) == 0:
         return None
-    p = _BinPartition()
+    p = _BinPartition(bpd=bpd)
     for v in samples:
         p.update(float(v))
     observed_min = float(min(samples))
@@ -732,20 +735,21 @@ def _ltl_exp_interp(samples, q_fraction):
     return value
 
 
-def _percentile_value(arr, sorted_arr, q_fraction, algorithm):
+def _percentile_value(arr, sorted_arr, q_fraction, algorithm, bpd=_BIN_BPD):
     """Compute one percentile using the requested algorithm."""
     if algorithm == ALGO_NEAREST_RANK:
         return _ltl_nearest_rank(sorted_arr, q_fraction)
     if algorithm == ALGO_EXP_INTERP:
         # Build the bin partition from samples and apply the Prometheus
-        # in-bucket interpolation formula. arr carries the same data as
-        # samples but as a numpy array; we iterate samples (Python list)
-        # directly for clarity — the partition build is O(n) regardless.
-        return _ltl_exp_interp(arr, q_fraction)
+        # in-bucket interpolation formula at the surface's effective bpd.
+        # arr carries the same data as samples but as a numpy array; we
+        # iterate samples (Python list) directly for clarity — the
+        # partition build is O(n) regardless.
+        return _ltl_exp_interp(arr, q_fraction, bpd)
     raise ValueError(f"unknown percentile algorithm: {algorithm}")
 
 
-def _produced_by(q_fraction, algorithm):
+def _produced_by(q_fraction, algorithm, bpd=_BIN_BPD):
     """Return the citation string emitted in the JSON's produced_by field.
 
     The engine surfaces this verbatim in L3 failure messages, so it must
@@ -760,7 +764,7 @@ def _produced_by(q_fraction, algorithm):
     if algorithm == ALGO_EXP_INTERP:
         return (
             f"ltl exponential_interpolation_within_bucket reference at q={q_fraction} "
-            "(bin partition with bpd=53/seed_decades=5 per features/187-... § "
+            f"(bin partition with bpd={bpd}/seed_decades=5 per features/187-... § "
             "Decisions 2/5; Prometheus formula per § Decision 1; "
             "post-percentile clamp to observed [min, max]; "
             "oracle: _ltl_exp_interp + _BinPartition)"
@@ -768,7 +772,7 @@ def _produced_by(q_fraction, algorithm):
     return f"unknown algorithm: {algorithm}"
 
 
-def compute_oracle_stats(samples, algorithm):
+def compute_oracle_stats(samples, algorithm, bpd=_BIN_BPD):
     """Compute Decision-3 statistics for one sample list.
 
     The percentile family (p1..p99999, iqr) is dispatched on `algorithm`
@@ -788,22 +792,23 @@ def compute_oracle_stats(samples, algorithm):
 
     out = {}
 
-    # Percentiles — dispatched on the requested algorithm (Issue #280).
+    # Percentiles — dispatched on the requested algorithm (Issue #280) at
+    # the surface's effective bin resolution (Issue #289).
     for name, q_pct in PERCENTILES.items():
         q_fraction = q_pct / 100.0
-        v = _percentile_value(arr, sorted_arr, q_fraction, algorithm)
+        v = _percentile_value(arr, sorted_arr, q_fraction, algorithm, bpd)
         out[name] = {
             "value": _finite_or_none(v),
-            "produced_by": _produced_by(q_fraction, algorithm),
+            "produced_by": _produced_by(q_fraction, algorithm, bpd),
         }
 
     # IQR — derived from p25/p75 under the same algorithm.
-    p25 = _percentile_value(arr, sorted_arr, 0.25, algorithm)
-    p75 = _percentile_value(arr, sorted_arr, 0.75, algorithm)
+    p25 = _percentile_value(arr, sorted_arr, 0.25, algorithm, bpd)
+    p75 = _percentile_value(arr, sorted_arr, 0.75, algorithm, bpd)
     out["iqr"] = {
         "value": _finite_or_none(p75 - p25),
         "produced_by": (
-            f"{_produced_by(0.75, algorithm)} - {_produced_by(0.25, algorithm)}"
+            f"{_produced_by(0.75, algorithm, bpd)} - {_produced_by(0.25, algorithm, bpd)}"
         ),
     }
 
@@ -906,6 +911,21 @@ def main():
             "observed [min, max])."
         ),
     )
+    ap.add_argument(
+        "--percentile-bpd",
+        type=int,
+        default=_BIN_BPD,
+        help=(
+            "Bin resolution (buckets_per_decade) for the "
+            "exponential_interpolation_within_bucket reference. Must match the "
+            "`effective_bpd:` value emitted by ltl's `-V percentile-algorithm` "
+            "section for the surface being validated (Issue #289). The "
+            "per-time-bucket surface runs finer than the global 53 default, so "
+            "the oracle must build its reference partition at the SAME "
+            "resolution or it will report false disagreements. Ignored for "
+            "nearest_rank (no bin resolution)."
+        ),
+    )
     args = ap.parse_args()
 
     # Group samples by (row_key, bucket_epoch).
@@ -987,7 +1007,7 @@ def main():
             "message":  row_message,
             "bucket":   bucket_label(be),
             "occurrences": len(samples),
-            "stats":    compute_oracle_stats(samples, algorithm),
+            "stats":    compute_oracle_stats(samples, algorithm, args.percentile_bpd),
         })
 
     # MESSAGES CSV: one row per (category, message) aggregated across buckets.
@@ -999,7 +1019,7 @@ def main():
             "message":  row_message,
             "bucket":   "",   # MESSAGES rows are not bucket-keyed
             "occurrences": len(samples),
-            "stats":    compute_oracle_stats(samples, algorithm),
+            "stats":    compute_oracle_stats(samples, algorithm, args.percentile_bpd),
         })
 
     # STATS CSV: one row per bucket, aggregated across all messages (the
@@ -1013,7 +1033,7 @@ def main():
             "message":  "",
             "bucket":   bucket_label(be),
             "occurrences": len(samples),
-            "stats":    compute_oracle_stats(samples, algorithm),
+            "stats":    compute_oracle_stats(samples, algorithm, args.percentile_bpd),
         })
 
     out = {
