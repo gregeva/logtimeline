@@ -108,6 +108,9 @@ my %verbose_section_registry = (
     'percentile-algorithm' => {
         description => 'Per-surface effective percentile algorithm: resolved data model and algorithm name for histogram, heatmap, message-stats, and bucket-stats (Issue #280).',
     },
+    'profile' => {
+        description => 'Timeline folding (--profile): resolved mode, fold period, included weekdays, and included vs dropped sample counts (Issue #256).',
+    },
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
@@ -122,6 +125,7 @@ my @verbose_section_order = qw(
     heatmap-palette
     csv-output
     percentile-algorithm
+    profile
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -210,9 +214,36 @@ my $filter_range_end_epoch = 0;
 my %filter_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %result_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %filter_range;
+# Seconds-of-day for any -st/-et bound supplied as a bare time (no date).
+# A time-only bound is a time-of-day window applied to every day, rather than
+# an absolute instant on a single date — so "noon to 1pm" means the same
+# window on every day regardless of how the logs are split across files. Keys
+# 'start'/'end' present only for the bounds given in time-only form.
+my %filter_range_tod;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
+
+# --profile|-pr: fold the timeline onto one canonical day or week. Each mode
+# maps a timestamp to a synthetic epoch inside one reference period, so the
+# whole pipeline (bucket keys, stats, heatmap, the strftime label path)
+# collapses onto that period unchanged. gmtime(epoch 0) is a Thursday, so the
+# first Monday is at +4 days (345600) and the first Sunday at +3 days (259200).
+#   period:   length of the fold window in seconds
+#   anchor:   synthetic epoch the window starts at (so gmtime yields the right wday)
+#   include:  wday set (0=Sun..6=Sat) kept; undef = all days; others are dropped
+#   format:   strftime label format ('%H:%M' time-only, '%a %H:%M' weekday+time)
+my $profile_mode = '';
+my %profile_modes = (
+    'day'          => { period => 86400,  anchor => 0,      include => undef,            format => '%H:%M' },
+    'workday'      => { period => 86400,  anchor => 0,      include => { 1,1,2,1,3,1,4,1,5,1 }, format => '%H:%M' },
+    'workday-alt'  => { period => 86400,  anchor => 0,      include => { 0,1,1,1,2,1,3,1,4,1 }, format => '%H:%M' },
+    'week'         => { period => 604800, anchor => 345600, include => undef,            format => '%a %H:%M' },
+    'week-alt'     => { period => 604800, anchor => 259200, include => undef,            format => '%a %H:%M' },
+    'workweek'     => { period => 604800, anchor => 345600, include => { 1,1,2,1,3,1,4,1,5,1 }, format => '%a %H:%M' },
+    'workweek-alt' => { period => 604800, anchor => 259200, include => { 0,1,1,1,2,1,3,1,4,1 }, format => '%a %H:%M' },
+);
+my ( $profile_dropped_samples, $profile_included_samples ) = ( 0, 0 );
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
 my( $include_filter, $exclude_filter, $highlight_filter );  # Compiled filter matchers (Issue #117)
 my( @exclude_args, @include_args, @highlight_args, @threadpool_activity_args );
@@ -1434,6 +1465,40 @@ sub _validate_dm {
     die "--$flag_name: '" . (defined $value ? $value : '') . "' is not a valid data model; valid values are 'raw' and 'bin'\n";
 }
 
+# --profile|-pr: accept only the known fold modes; die at parse time otherwise.
+sub _validate_profile {
+    my ($value) = @_;
+    return if defined $value && exists $profile_modes{$value};
+    my $valid = join(', ', sort keys %profile_modes);
+    die "--profile: '" . (defined $value ? $value : '') . "' is not a valid profile mode; valid values are $valid\n";
+}
+
+# Fold a timestamp onto its position within the mode's reference period.
+# Returns the synthetic epoch (anchor + within-period offset), or undef when
+# the timestamp falls on a day the mode excludes (so the caller drops the line).
+# Operates on integer seconds; the millisecond fraction is reapplied by the
+# caller, so sub-second precision survives the fold.
+sub fold_epoch {
+    my ($epoch, $mode) = @_;
+    my $cfg = $profile_modes{$mode} or return $epoch;
+    my @t = gmtime($epoch);
+    if (defined $cfg->{include} && !$cfg->{include}{ $t[6] }) {  # $t[6] = wday (0=Sun)
+        return undef;
+    }
+    # Seconds since 00:00 UTC of this day, then position within day or week.
+    my $sec_of_day = $t[2] * 3600 + $t[1] * 60 + $t[0];
+    my $offset;
+    if ($cfg->{period} == 86400) {
+        $offset = $sec_of_day;
+    } else {
+        # Days since the anchor weekday: anchor 345600 is Monday, 259200 Sunday.
+        my $anchor_wday = (gmtime($cfg->{anchor}))[6];
+        my $days_from_anchor = ($t[6] - $anchor_wday + 7) % 7;
+        $offset = $days_from_anchor * 86400 + $sec_of_day;
+    }
+    return $cfg->{anchor} + $offset;
+}
+
 # Issue #266: resolve the user-supplied data-model selector for a surface.
 # Returns 'raw', 'bin', or undef. undef means the user supplied neither the
 # per-surface flag nor the omnibus -dm/--data-model; callers fall back to
@@ -2084,6 +2149,50 @@ sub emit_percentile_algorithm_verbose {
     }
 
     push @verbose_output, "=== END percentile-algorithm ===";
+}
+
+# Issue #256: timeline-folding observability. Reports the resolved --profile
+# mode and, when active, the fold geometry and the sample accounting the
+# excluded-day harness asserts against: samples_included + samples_dropped
+# equals the matched-and-folded total, and samples_dropped is exactly the
+# count of lines that fell on a weekday the mode excludes.
+#
+# Locked surface: section name 'profile'; field names profile_active, mode,
+# period_seconds, included_weekdays, samples_included, samples_dropped; the
+# profile_active enum (yes|no). Weekdays are listed in the mode's own axis
+# order (Mon-first for default, Sun-first for -alt), comma-joined.
+sub emit_profile_verbose {
+    return unless section_requested('profile');
+
+    push @verbose_output, "=== profile ===";
+
+    if (!$profile_mode) {
+        push @verbose_output, "profile_active: no";
+        push @verbose_output, "=== END profile ===";
+        return;
+    }
+
+    my $cfg = $profile_modes{$profile_mode};
+    # Render the included weekday set in calendar order: -alt modes start the
+    # week on Sunday (wday 0), the others on Monday (wday 1). Day-period modes
+    # have no week axis, but the list still shows which days they keep, so the
+    # same calendar order applies rather than the epoch-0 fold anchor.
+    my @names = qw(Sun Mon Tue Wed Thu Fri Sat);
+    my $list_start = ($profile_mode =~ /-alt$/) ? 0 : 1;
+    my @included;
+    for my $i (0 .. 6) {
+        my $wday = ($list_start + $i) % 7;
+        next if defined $cfg->{include} && !$cfg->{include}{$wday};
+        push @included, $names[$wday];
+    }
+
+    push @verbose_output, "profile_active: yes";
+    push @verbose_output, "mode: $profile_mode";
+    push @verbose_output, "period_seconds: $cfg->{period}";
+    push @verbose_output, "included_weekdays: " . join(',', @included);
+    push @verbose_output, "samples_included: $profile_included_samples";
+    push @verbose_output, "samples_dropped: $profile_dropped_samples";
+    push @verbose_output, "=== END profile ===";
 }
 
 # Section name, field names, consumer-name strings, and the three-value audit
@@ -3749,8 +3858,9 @@ sub print_help {
     $out .= help_opt("-bs,  --bucket-size <N>",       "Set the width of each time bucket on the timeline (default unit: minutes; -s switches to seconds, -ms switches to milliseconds)");
     $out .= help_opt("-s,   --seconds",               "Interpret bucket size as seconds instead of minutes");
     $out .= help_opt("-ms,  --milliseconds",          "Switch the -bs <N> bucket width to milliseconds (and render timestamps with .fff precision). Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured.");
-    $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time (YYYY-MM-DD HH:MM:SS[.mmm])");
-    $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time (HH:MM:SS[.mmm])");
+    $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto a single day or week so every date overlays into one profile. day/workday show time-of-day only; week/workweek prefix the weekday. workday/workweek keep work days only (Mon-Fri); the -alt variants use a Sunday-anchored week (Sun-Thu work days). Modes: day, week, week-alt, workweek, workweek-alt, workday, workday-alt");
+    $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A full date (YYYY-MM-DD HH:MM:SS[.mmm]) is an absolute cutoff; a bare time (HH:MM[:SS[.mmm]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight.");
+    $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a full date is an absolute cutoff; a bare time applies to every day.");
     $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when auto-detection is not possible (ns, us, ms, s)");
     $out .= help_opt("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: s (second), m (minute, default), h (hour), d (day)");
 
@@ -6251,8 +6361,16 @@ sub format_time {
 # always passes through format_time so the unit is always present — there is no
 # bare-number bypass for small magnitudes.
 my %duration_display_decimals = ( ns => 6, us => 3, ms => 0, s => 0 );
+# Render a millisecond-valued duration for display. With $max_chars set, the
+# result is guaranteed to fit that many characters: if the auto-scaled value
+# carries a fractional digit that pushes it over budget (e.g. "264.4ms" = 7 in
+# a 6-char cell under -du us), the decimal is dropped to fit ("264ms" = 5)
+# rather than clipping the unit and rendering a misleading "264.4m". The
+# fractional digit is the only expendable part — the unit is never truncated.
+# Callers that lay out fixed-width columns (the latency-stats cells) pass their
+# per-cell budget so the column stays aligned regardless of magnitude.
 sub format_duration {
-    my ($value) = @_;
+    my ($value, $max_chars) = @_;
     return "" unless defined $value;
     my $unit = $duration_unit_resolved // 'ms';
     # format_time auto-scales 0 down to the smallest unit (0us); render zero in
@@ -6260,7 +6378,13 @@ sub format_duration {
     return "0$unit" if $value == 0;
     my $decimals = $duration_display_decimals{$unit} // 0;
     my $rounded  = sprintf( "%.${decimals}f", $value );
-    return format_time( $rounded, 'ms', 'short' );
+    my $out = format_time( $rounded, 'ms', 'short' );
+    # Fit the budget by shedding the fractional digit before any clipping.
+    if (defined $max_chars && length($out) > $max_chars && $out =~ /\.\d/) {
+        (my $no_frac = $out) =~ s/\.\d+//;
+        $out = $no_frac if length($no_frac) <= $max_chars;
+    }
+    return $out;
 }
 
 # Issue #268: column-to-family lookup for CSV emit formatting. Mirrors the
@@ -6536,6 +6660,7 @@ sub adapt_to_command_line_options {
         'hmdm|heatmap-data-model=s'        => sub { _validate_dm('heatmap-data-model',         $_[1]); $data_model_heatmap   = $_[1]; },
         'mdm|message-stats-data-model=s'   => sub { _validate_dm('message-stats-data-model',   $_[1]); $data_model_message   = $_[1]; },
         'bdm|bucket-stats-data-model=s'    => sub { _validate_dm('bucket-stats-data-model',    $_[1]); $data_model_bucket    = $_[1]; },
+        'profile|pr=s'                     => sub { _validate_profile($_[1]); $profile_mode = $_[1]; },
         'terminal-width|tw=i' => \$terminal_width,                                  # hidden
         'no-auto-hide|nah' => \$no_auto_hide,
         'debug-layout' => \$debug_layout,                                           # hidden
@@ -6931,6 +7056,14 @@ sub adapt_to_command_line_options {
         }
     }
 
+    # Under --profile the calendar date is folded away: day/workday render
+    # time-of-day only (%H:%M), week/workweek prefix the weekday (%a %H:%M).
+    # The format ends at the minute here; the :%S append below adds second
+    # precision within the folded period when -s/-ms is set, same as normal mode.
+    if ($profile_mode) {
+        $output_timestamp_format = $profile_modes{$profile_mode}{format};
+    }
+
     $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
     my %argv_hash = map { $_ => 1 } @ARGV;
     my $skip_next = 0;
@@ -6983,9 +7116,13 @@ sub calculate_start_end_filter_timestamps {
         } elsif ( $value =~ /^\d{4}-\d{1,2}-\d{1,2}/ ) {
             $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d" )->epoch;
         } elsif ( $value =~ /^\d{1,2}:\d{2}:\d{2}/ ) {
-            $epoch_value = $log_date + Time::Piece->strptime( $value, "%H:%M:%S" )->epoch;
+            my $tod = Time::Piece->strptime( $value, "%H:%M:%S" )->epoch;  # seconds since midnight
+            $epoch_value = $log_date + $tod;
+            $filter_range_tod{$key} = $tod + ($fractional_ms / 1000);
         } elsif ( $value =~ /^\d{1,2}:\d{2}/ ) {
-            $epoch_value = $log_date + Time::Piece->strptime( $value, "%H:%M" )->epoch;
+            my $tod = Time::Piece->strptime( $value, "%H:%M" )->epoch;     # seconds since midnight
+            $epoch_value = $log_date + $tod;
+            $filter_range_tod{$key} = $tod + ($fractional_ms / 1000);
         } else {
             print "Warning: unhandled date/time format - option not taken into account\n";
         }
@@ -7558,7 +7695,47 @@ sub read_and_process_logs {
                 }
 
                 ## FILTERING CONDITIONS ##
-                next if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} );
+                # A bare time-only -st/-et is a time-of-day window applied to
+                # every day: compare the record's seconds-of-day against the
+                # bound rather than an absolute instant. This holds for any
+                # input — a single multi-day file, many files, with or without
+                # --profile — so "noon to 1pm" means the same window on every
+                # day regardless of how the logs are split. A bound given with
+                # a date keeps its absolute cutoff (the per-bound branches below).
+                if (%filter_range_tod) {
+                    my $tod = $timestamp_epoch - int($timestamp_epoch / 86400) * 86400;
+                    my ($tod_s, $tod_e) = @filter_range_tod{qw(start end)};
+                    if (defined $tod_s && defined $tod_e && $tod_s > $tod_e) {
+                        # Window wraps past midnight (e.g. 22:00 to 02:00): keep
+                        # the two segments [start,24h) and [0,end).
+                        next unless $tod >= $tod_s || $tod < $tod_e;
+                    } else {
+                        next if defined $tod_s && $tod <  $tod_s;
+                        next if defined $tod_e && $tod >= $tod_e;
+                        # A bound given with a date (not time-only) stays absolute.
+                        next if !defined $tod_s && $timestamp_epoch <  $filter_range_epoch{'start'};
+                        next if !defined $tod_e && $timestamp_epoch >= $filter_range_epoch{'end'};
+                    }
+                } else {
+                    next if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} );
+                }
+
+                # --profile: fold onto the reference period AFTER range filtering
+                # (filters apply to original timestamps, then we overlay). A line
+                # on an excluded day folds to undef and is dropped here, before
+                # any per-file selection accounting. $timestamp_epoch keeps its
+                # real value for the index file; $bucket_epoch carries the folded
+                # value used for bucket keys and the displayed min/max range.
+                my $bucket_epoch = $timestamp_epoch;
+                if ($profile_mode) {
+                    my $folded = fold_epoch($timestamp_epoch, $profile_mode);
+                    if (!defined $folded) {
+                        $profile_dropped_samples++;
+                        next;
+                    }
+                    $bucket_epoch = $folded + ($fractional_ms / 1000);
+                }
+
                 next if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) );
                 next if( defined( $include_filter )         && !match_filter($_, $include_filter) );
                 next if( defined( $filter_duration_min )    && ( !defined( $duration )  || $duration <= $filter_duration_min ));		# skip if duration value is below specified minimum filter
@@ -7606,22 +7783,25 @@ sub read_and_process_logs {
                     $category = 'plain';
                 }
 
-                # sets earliest and latest timestamp values being displayed (after the range filtering selection)
-                $output_timestamp_min = $timestamp_epoch if $output_timestamp_min == 0 || $output_timestamp_min > $timestamp_epoch;
-                $output_timestamp_max = $timestamp_epoch if $output_timestamp_max == 0 || $output_timestamp_max < $timestamp_epoch;
+                # sets earliest and latest timestamp values being displayed (after the range filtering selection).
+                # Under --profile these are folded positions within the reference period, so the displayed range
+                # and the summary first/last-seen read as folded positions rather than calendar dates.
+                $output_timestamp_min = $bucket_epoch if $output_timestamp_min == 0 || $output_timestamp_min > $bucket_epoch;
+                $output_timestamp_max = $bucket_epoch if $output_timestamp_max == 0 || $output_timestamp_max < $bucket_epoch;
 
                 my $bucket;
                 if ($print_milliseconds) {
                     # Use integer milliseconds for bucket keys to avoid floating-point precision issues
-                    my $epoch_ms = int($timestamp_epoch * 1000 + 0.5);
+                    my $epoch_ms = int($bucket_epoch * 1000 + 0.5);
                     my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);
                     $bucket = int($epoch_ms / $bucket_size_ms) * $bucket_size_ms;
                 } else {
-                    $bucket = int($timestamp_epoch / $bucket_size_seconds) * $bucket_size_seconds;
+                    $bucket = int($bucket_epoch / $bucket_size_seconds) * $bucket_size_seconds;
                 }
 
                 $log_occurrences{$bucket}{$category_bucket}{occurrences}++;
                 $total_lines_included++;
+                $profile_included_samples++ if $profile_mode;
 
                 if( defined( $message ) ) {
                     my $log_key = "";
@@ -10606,6 +10786,12 @@ sub print_bar_graph {
         print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
         $lines_printed++;
 
+        # Under a week/workweek profile, the weekday name prefixes only the
+        # first bucket of each day; repeated rows within the same day blank it
+        # (replaced with equal-width spaces so the column stays aligned), acting
+        # as a date-change marker. %a is 3 chars wide; the format is "%a %H:%M".
+        my $profile_week_fold = ($profile_mode && $output_timestamp_format =~ /%a/) ? 1 : 0;
+        my $prev_fold_wday;
         foreach my $bucket (sort { $a <=> $b } keys %log_occurrences) {
             my $bucket_time_str;
             if ($print_milliseconds) {
@@ -10614,6 +10800,20 @@ sub print_bar_graph {
                 $bucket_time_str .= sprintf ".%03d", $bucket % 1000;
             } else {
                 $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
+            }
+            # Blanking the repeated weekday is a terminal-display affordance only.
+            # The CSV must keep the full folded timestamp on every row so each
+            # row is self-describing (a blanked "    10:00" would be ambiguous to
+            # a consumer), so the blank is applied to a separate display copy and
+            # $bucket_time_str — the value pushed to the CSV row below — is left
+            # whole.
+            my $bucket_time_display = $bucket_time_str;
+            if ($profile_week_fold) {
+                my $wday = (gmtime($print_milliseconds ? $bucket / 1000 : $bucket))[6];
+                if (defined $prev_fold_wday && $wday == $prev_fold_wday) {
+                    substr($bucket_time_display, 0, 3) = '   ';   # blank the repeated weekday
+                }
+                $prev_fold_wday = $wday;
             }
             my $total_occurrences = 0;
 
@@ -10694,7 +10894,18 @@ sub print_bar_graph {
                 print " " x ($col->{spacing_before} // 0);
 
                 if ($col_id eq 'timestamp') {
-                    print $bucket_time_str;
+                    # Emphasize the weekday token on the day-boundary rows of a
+                    # week/workweek fold: bold + upper-cased (MON, TUE, ...),
+                    # leaving the time and the blanked-weekday rows plain. Uses
+                    # the display copy (whose repeated weekday is blanked); the
+                    # full mixed-case $bucket_time_str goes to the CSV. The
+                    # upper-cased token is the same 3 chars, so column alignment
+                    # is unchanged.
+                    if ($profile_week_fold && $bucket_time_display =~ /^([A-Z][a-z][a-z])(\s.*)$/) {
+                        print "\033[1m" . uc($1) . "$colors{'NC'}$2";
+                    } else {
+                        print $bucket_time_display;
+                    }
 
                 } elsif ($col_id eq 'legend') {
                     print $log_details unless $omit_values;
@@ -10797,11 +11008,18 @@ sub print_bar_graph {
                     if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50} || defined $log_stats{$bucket}{p95} || defined $log_stats{$bucket}{p99} || defined $log_stats{$bucket}{p999} || defined $log_stats{$bucket}{cv} ) {
                         my $cv_color = defined $log_stats{$bucket}{cv} && $log_stats{$bucket}{cv} >= 20 ? 'WARN-HL' : 'white-underline';
 
-                        defined $log_stats{$bucket}{p50} ? printf( "$colors{'cyan'}P50:%-6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p50} ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p95} ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p99} ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-5s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p999} ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4s$colors{'NC'}", format_cv_display( $log_stats{$bucket}{cv} ) ) : printf ( " " x 7 );
+                        # Each percentile cell occupies a fixed slot so the
+                        # column stays aligned within the reserved latency width
+                        # (P50/P95/P99 = 11 chars: "Pxx:" + 6 value + space;
+                        # P999 = 12: "P999:" + 6 value + space; CV = 7).
+                        # format_duration is given the 6-char value budget so it
+                        # sheds the fractional digit to fit (e.g. 264.4ms -> 264ms)
+                        # rather than overflowing; %-6.6s is the final guard.
+                        defined $log_stats{$bucket}{p50} ? printf( "$colors{'cyan'}P50:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p50}, 6 ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p95}, 6 ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p99}, 6 ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p999}, 6 ) ) : printf( " " x 12 );
+                        defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4.4s$colors{'NC'}", format_cv_display( $log_stats{$bucket}{cv} ) ) : printf ( " " x 7 );
                     }
 
                 } elsif ($col_id eq 'heatmap') {
@@ -11684,7 +11902,9 @@ sub print_summary_table {
     push @file_details, "\n";
 
     # Wrap heading text if it exceeds available width
-    my $heading_text = "These file(s) were processed with analysis including results between $min_timestamp_str and $max_timestamp_str";
+    my $heading_text = $profile_mode
+        ? "These file(s) were processed with analysis folded onto a single $profile_mode profile, spanning $min_timestamp_str to $max_timestamp_str"
+        : "These file(s) were processed with analysis including results between $min_timestamp_str and $max_timestamp_str";
     my $heading_content_width = $file_detail_width - length($column_padding) - length($padding);
     if ($heading_content_width > 20) {
         my @heading_lines = wrap_text($heading_text, $heading_content_width);
@@ -12405,6 +12625,8 @@ emit_heatmap_palette_verbose();
 emit_csv_output_verbose();
 
 emit_percentile_algorithm_verbose();
+
+emit_profile_verbose();
 
 print_verbose_output();
 

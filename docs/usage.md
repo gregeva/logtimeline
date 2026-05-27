@@ -29,8 +29,9 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 | `-bs, --bucket-size <N>` | Set the width of each time bucket on the timeline (default unit: minutes; `-s` switches the unit to seconds, `-ms` switches it to milliseconds) |
 | `-s, --seconds` | Interpret bucket size as seconds instead of minutes |
 | `-ms, --milliseconds` | Switch the `-bs <N>` bucket width to milliseconds (and render timestamps with `.fff` precision). Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured. |
-| `-st, --start <timestamp>` | Only process log lines at or after this time (`YYYY-MM-DD HH:MM:SS[.mmm]`) |
-| `-et, --end <timestamp>` | Only process log lines before this time (`HH:MM:SS[.mmm]`) |
+| `-pr, --profile <mode>` | Fold the timeline onto a single day or week so every date overlays into one profile view — e.g. what a typical Tuesday at 09:15 looks like across weeks of logs. `day` and `workday` collapse to a 24-hour axis (time-of-day labels only); `week` and `workweek` collapse to a weekday axis (the weekday is shown once per day, in bold). `workday`/`workweek` keep only work days (Mon–Fri); the `-alt` variants use a Sunday-anchored week and a Sun–Thu work week. Composes with `-bs` (granularity within the period) and the `-st`/`-et`, `-i`/`-e` filters, which apply to the original timestamps before folding. Modes: `day`, `week`, `week-alt`, `workweek`, `workweek-alt`, `workday`, `workday-alt`. |
+| `-st, --start <timestamp>` | Only process log lines at or after this time. A full date (`YYYY-MM-DD HH:MM:SS[.mmm]`) is an absolute cutoff; a bare time (`HH:MM[:SS[.mmm]]`) is a time-of-day window applied to every day, regardless of how the logs are split across files. A bare-time start later than the end wraps past midnight. |
+| `-et, --end <timestamp>` | Only process log lines before this time. Same forms as `-st`: a full date is an absolute cutoff; a bare time applies to every day. |
 | `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when auto-detection is not possible (`ns`, `us`, `ms`, `s`) |
 | `-ru, --rate-unit <unit>` | Set the time unit for rate normalization: `s` (second), `m` (minute, default), `h` (hour), `d` (day) |
 
@@ -41,6 +42,10 @@ ltl -bs 5 access.log
 ltl -s -bs 30 access.log
 # 100ms-wide buckets, zoomed into a 5-minute window (sub-second timestamp rendering enabled)
 ltl -ms -bs 100 -st "2025-05-05 08:15:00.000" -et "2025-05-05 08:20:00.000" app.log
+# Weekly profile: overlay every date onto a single Mon–Sun week, hourly buckets
+ltl -bs 60 -pr week access.log
+# Workday-morning profile: only the 09:00–11:00 window, work days, folded onto one 24h axis
+ltl -bs 15 -pr workday -st 09:00 -et 11:00 access.log
 ```
 
 ### Filtering

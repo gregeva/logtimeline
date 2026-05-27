@@ -6,3 +6,5 @@ precision-default-us	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navi
 precision-full	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -cp full	bytes,duration,percentile,shape,level
 precision-n4	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -cp 4	bytes,duration,percentile,shape,level
 heatmap-duration	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -hm duration	bytes,duration,percentile,shape,level
+profile-week	@PROFILE_LOG@	-bs 60 -n 25 -pr week	duration,percentile,shape,bytes
+profile-day	@PROFILE_LOG@	-bs 60 -n 25 -pr day	duration,percentile,shape,bytes

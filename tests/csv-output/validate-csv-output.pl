@@ -28,11 +28,13 @@ GetOptions(
     'file-kind=s'          => \$opt{file_kind},
     'expected-families=s'  => \$opt{expected_families},
     'v-precision=s'        => \$opt{v_precision},
+    'profile-mode=s'       => \$opt{profile_mode},   # optional: '' = none; else a --profile mode
 ) or die "bad args\n";
 
 for my $k (qw(rules csv scenario file_kind expected_families v_precision)) {
     die "missing --$k\n" unless defined $opt{$k};
 }
+$opt{profile_mode} //= '';
 
 my %active_family = map { $_ => 1 } split /,/, $opt{expected_families};
 
@@ -355,7 +357,32 @@ sub check_type_and_decimals {
         }
     }
     elsif ($type eq 'timestamp') {
-        if ($val !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?/) {
+        if ($opt{profile_mode} ne '') {
+            # Under --profile the timestamp is a folded position, not a calendar
+            # date: week/workweek modes prefix the weekday on EVERY row (the CSV
+            # carries the full label, not the terminal's once-per-day blank), so
+            # the column reads coherently with the timeline. day/workday modes
+            # render time-of-day only.
+            my $is_week = $opt{profile_mode} =~ /^(week|workweek)/ ? 1 : 0;
+            my $ok = $is_week
+                ? $val =~ /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{2}:\d{2}(:\d{2}(\.\d+)?)?$/
+                : $val =~ /^\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
+            if (!$ok) {
+                emit_fail({
+                    scenario => $opt{scenario}, file => $opt{file_kind}, row => $row_num,
+                    column => $col_name,
+                    asserts => "under --profile $opt{profile_mode}, column '$col_name' must be a folded position"
+                             . ($is_week ? " carrying the weekday on every row (Wkd HH:MM)" : " in time-of-day form (HH:MM)"),
+                    produced_by => producer($opt{file_kind}) . ' under --profile (print_bar_graph builds $bucket_time_str; the CSV keeps the full folded label, terminal-only weekday blanking excluded)',
+                    contract => 'Issue #223 § Data-type correctness + Issue #256 § CSV coherence (folded timestamp on every row)',
+                    expected => $is_week ? 'Wkd HH:MM[:SS[.fff]]' : 'HH:MM[:SS[.fff]]',
+                    actual => $val,
+                    rule => "type=timestamp,profile=$opt{profile_mode}",
+                });
+                $f++;
+            }
+        }
+        elsif ($val !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?/) {
             emit_fail({
                 scenario => $opt{scenario}, file => $opt{file_kind}, row => $row_num,
                 column => $col_name,
