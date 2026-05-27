@@ -16,7 +16,9 @@ The rules in this document exist to prevent each of those failure modes. They re
 
 ## Application-observability contract
 
-When a test harness needs to assert against internal application state, the application exposes that state via a dedicated, named section of `-V` output. Harnesses do not grep rendered analytical output (the bar graph, the summary table, the histogram). Rendered output exists for humans and changes when humans want it to; observability output exists for harnesses and is governed by the stability contract below.
+When a test harness needs to assert against internal application state, the application exposes that state via a dedicated, named section of `-V` output. Harnesses do not grep rendered analytical output (the bar graph, the summary table, the histogram) to obtain internal state. Rendered output exists for humans and changes when humans want it to; observability output exists for harnesses and is governed by the stability contract below.
+
+**This prohibition is about *what the harness treats as the system under test*.** When the value being asserted is internal state — a computed percentile, a bin count, a resolved config — the render is an unstable proxy and `-V` is mandatory. When the value being asserted is *a property of the rendered surface itself* — that every duration cell carries a unit, that columns align, that no ANSI escape bleeds past its cell — the render **is** the system under test, and asserting on it is correct. That second category is governed by [Render-invariant harnesses](#render-invariant-harnesses) below, not by this prohibition.
 
 The contract is two-way:
 
@@ -24,6 +26,30 @@ The contract is two-way:
 - The application commits to keeping that section's content under the stability contract: additions are non-breaking; renames and removals are breaking changes that require updating every consumer in the same commit.
 
 This avoids the anti-pattern where harnesses scrape display output and break every time the display layout shifts. It also keeps `-V` itself comprehensible: each section is owned by one or more harnesses (or by the user for interactive debugging) with a clear purpose.
+
+## Render-invariant harnesses
+
+A render-invariant harness asserts that the *rendered terminal output* obeys the rules required for visual consistency and determinism — properties that exist only in the rendered surface and have no internal-state equivalent to read from `-V`. For these harnesses, grepping the (ANSI-stripped) display output is the correct and required approach: the rendered surface is the system under test, not a proxy for it.
+
+This is distinct from a state-observability harness (the kind the contract above governs), which asserts on *computed values* and must read `-V`. The two are not interchangeable:
+
+| | State-observability harness | Render-invariant harness |
+|---|---|---|
+| System under test | Internal computed state | The rendered terminal surface |
+| Reads from | A named `-V` section | ANSI-stripped display output |
+| Example assertion | "p99 for this bucket equals 224" | "every duration cell carries a unit suffix" |
+| Fails when | The computation regresses | The rendering becomes inconsistent |
+
+**A render-invariant harness asserts invariants, not frozen values.** It must not duplicate the snapshot regression harness (`validate-regression.sh`), which freezes exact output and fails on any change. A render-invariant assertion is a *property* that holds across runs regardless of the specific data — "matches `<number><unit>`", "no two adjacent columns overlap" — so that buggy-but-stable output (the failure mode that motivated this category) cannot pass.
+
+**Obligations specific to this category:**
+
+- **Pin the layout.** Run `ltl` at an explicit `--terminal-width` so the rendered surface is deterministic; width-dependent layout must not make the assertion flaky.
+- **Strip ANSI before asserting.** Color/escape sequences are not part of the invariant; strip them first (`sed -E 's/\x1b\[[0-9;]*m//g'`) so the assertion sees the glyphs a human reads.
+- **`-V` may still supply the *expected* value.** A render-invariant assertion may read internal state from `-V` to compute what the render *should* show, then compare it against what the render *does* show. This is the legitimate intersection: `-V` provides the expected (internal precision, resolved unit); the stripped render provides the actual; the assertion compares the two. Reading `-V` for the *expected* side does not make this a state-observability harness — the *asserted* side is still the rendered surface.
+- **Same self-documenting-assertion contract.** Every assertion declares `asserts` / `produced_by` / `contract` and surfaces all three on failure, exactly as the [Self-documenting assertions](#self-documenting-assertions) section requires. `produced_by` names the rendering function (e.g. `format_duration() in ltl`).
+
+The reference implementation is `tests/validate-duration-display.sh` (Issue #292): it asserts that every duration value rendered in the summary table and the timeline carries a unit, that zero renders in the resolved unit, and that displayed fractional precision matches the resolved-unit precision read from `-V`.
 
 ## Selectivity and grep work together
 
@@ -422,6 +448,8 @@ A CLAUDE.md rule points to this section for any contributor (human or LLM-driven
 ## When this document changes
 
 The rules above are derived from incidents. Add new rules when an incident reveals a class of failure not yet covered; remove rules only when the incident class no longer applies (and record why, in the commit message).
+
+Render-invariant harnesses (the category above) were added after Issue #292: three duration-display bugs shipped — values rendered with no unit (`58` instead of `58ms`), zero rendered without a unit, and synthesized sub-millisecond precision on a millisecond-resolution source — because the only display coverage was snapshot regression, which freezes output and cannot catch a buggy-but-stable value. No harness asserted the *invariants* the rendered surface must hold to, so the snapshots simply froze the bugs as "correct."
 
 ## See also
 
