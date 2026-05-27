@@ -46,9 +46,7 @@ re-decided before planning. **The issue body must be amended to match before clo
    holds the wrong samples, and it is not populated at all when heatmap is off (the default).
    Sharing would give wrong or absent bucket-stats data in the common cases. **Decision:** add
    a dedicated `%bucket_stats_counters` (+ `_hl`) keyed by `time_bucket`, observing `$duration`.
-   A **follow-up issue** inverts the sharing in the correct direction — have the heatmap reuse
-   the bucket-stats time-bucket store when its metric is duration — so the memory-convergence
-   optimization the issue wanted lands where it is actually correct. (See "Follow-up" below.)
+   The dedicated store is the settled design; the two surfaces keep independent stores.
 
 ### Producer (parse-time accumulation)
 
@@ -149,15 +147,6 @@ New observability assertions (the gap #287 left for this issue):
 
 Regression guards that must continue to pass: `validate-csv-output.sh` (structure unchanged),
 `validate-regression.sh` (raw path byte-identical).
-
-## Follow-up (separate issue, to be filed)
-
-Invert the store-sharing in the correct direction: when the heatmap metric resolves to
-`duration` and both surfaces are in bin mode, have the heatmap consumer reuse the bucket-stats
-`time_bucket`-keyed store rather than allocating its own `%heatmap_counters`. This realizes the
-single-allocation memory convergence the #289 issue body wanted, but keyed off the surface that
-always observes `$duration` (bucket-stats) instead of the surface whose samples vary by
-`-hm metric` (heatmap).
 
 ## Out of scope
 
