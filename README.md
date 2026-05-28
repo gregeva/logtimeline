@@ -51,6 +51,48 @@ cpanm PAR::Packer
 cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
 ```
 
+#### Test-harness dependencies
+
+Some test harnesses require Python 3, NumPy, and SciPy. A harness that needs one of these fails fast with an install hint if it is missing — it does not silently skip the work that depends on it.
+
+The right install command depends on which `python3` your harness will invoke. Run `which python3` from the shell that will run the harness (a non-interactive shell — PATH ordering can differ from your interactive shell), and pick the matching path below:
+
+**macOS — Homebrew Python (`/opt/homebrew/bin/python3` or `/usr/local/bin/python3`):**
+Homebrew Python enforces [PEP 668](https://peps.python.org/pep-0668/), which blocks `pip install --user`. Use brew (NumPy and SciPy ship as brew formulas):
+```bash
+brew install numpy scipy
+```
+
+**macOS — Apple Command-Line-Tools Python (`/Library/Developer/CommandLineTools/usr/bin/python3`):**
+No PEP 668; `pip --user` works:
+```bash
+/Library/Developer/CommandLineTools/usr/bin/python3 -m pip install --user numpy scipy
+```
+
+**Ubuntu/Linux — older distributions (pre-PEP-668):**
+```bash
+sudo apt-get install python3 python3-pip
+python3 -m pip install --user numpy scipy
+```
+
+**Ubuntu/Linux — modern PEP-668 distributions (Ubuntu 24.04+, Debian 12+, Fedora 38+) and any system where the above hits `error: externally-managed-environment`:**
+Use a project-local venv:
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install numpy scipy
+# Then run the harness with the venv's Python on PATH:
+PATH=$(pwd)/.venv/bin:$PATH ./tests/validate-statistics.sh
+```
+
+Verify the install landed in the right place by running, in the harness's shell environment:
+```bash
+python3 -c "import numpy, scipy"
+```
+
+If this still fails after installing, you have a PATH-mismatch case: a bare `pip3` (or even `python3` in your interactive shell) targeted a different interpreter than the one `python3` resolves to in the harness's non-interactive shell. Re-run the install using the **full path** that `which python3` reports — e.g. `/opt/homebrew/bin/python3 -m pip install …`. The PATH-resolution variation is the most common failure mode.
+
+Do not use `--break-system-packages` unless you understand the consequence — it can break your system Python.
+
 ### Build Static Binaries
 
 ```bash

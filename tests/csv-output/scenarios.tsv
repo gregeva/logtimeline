@@ -1,0 +1,10 @@
+scenario	logfile	options	expected_families
+access-bytes-duration	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25	bytes,duration,percentile,shape,level
+thingworx-script	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 240 -n 25	duration,count,percentile,shape,level
+thingworx-application	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	-bs 240 -n 25	level
+precision-default-us	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us	bytes,duration,percentile,shape,level
+precision-full	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -cp full	bytes,duration,percentile,shape,level
+precision-n4	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -cp 4	bytes,duration,percentile,shape,level
+heatmap-duration	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -hm duration	bytes,duration,percentile,shape,level
+profile-week	@PROFILE_LOG@	-bs 60 -n 25 -pr week	duration,percentile,shape,bytes
+profile-day	@PROFILE_LOG@	-bs 60 -n 25 -pr day	duration,percentile,shape,bytes

@@ -166,7 +166,7 @@ for my $si (values %subs) {
 
 # --- Parse verbose file ---
 # Extracts machine-readable counters from ltl -V output.
-# The BENCHMARK DATA block covers performance regression metrics (lines_read, timing, memory).
+# The benchmark-data section covers performance regression metrics (lines_read, timing, memory).
 # Feature-specific flow counters (fc_calls, S1-S5, etc.) live in their own sections.
 my %v;  # verbose metrics
 my @verbose_lines;  # all lines, for regex-based extraction by checks file
@@ -176,8 +176,8 @@ if (defined $verbose_file && -f $verbose_file) {
     while (<$fh>) {
         chomp;
         push @verbose_lines, $_;
-        if (/^=== BENCHMARK DATA ===/) { $in_benchmark = 1; next }
-        if (/^=== END BENCHMARK DATA ===/) { $in_benchmark = 0; next }
+        if (/^=== benchmark-data ===/)      { $in_benchmark = 1; next }
+        if (/^=== END benchmark-data ===/)  { $in_benchmark = 0; next }
         if ($in_benchmark) {
             if (/^lines_read\t(\d+)/)       { $v{lines_read}  = $1 }
             if (/^TIMING\ttotal\t([\d.]+)/) { $v{total_time}  = $1 }

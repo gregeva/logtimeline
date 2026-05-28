@@ -22,6 +22,7 @@ logs/
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 220MB | Secondary Tomcat 9 access log test |
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 148MB | Smaller Tomcat 9 access log test |
 | `localhost_access_log.2025-03-21.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 2.6MB | Small access log for quick tests |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 1.0MB | 5k-line slice from 05-05 log; used by `tests/validate-index-read-back.sh`. Regenerate via `tests/fixtures/regenerate-index-readback-fixtures.sh` |
 | `really-big/*` | Tomcat 10 | milliseconds (%D) | duration, bytes | 8.5GB | Really big access logs from 4 servers over 28 days |
 
 **Format**: Apache combined log with duration at end (units vary by server)
@@ -34,7 +35,7 @@ logs/
 ```
 Fields: IP, -, -, [timestamp], "method path protocol", status_code, bytes, duration
 
-**Note**: Apache HTTP Server uses `%D` for microseconds, while Tomcat uses `%D` for milliseconds. The ltl tool auto-detects the unit based on value ranges.
+**Note**: Apache HTTP Server uses `%D` for microseconds, while Tomcat uses `%D` for milliseconds. The detection regex is the same for both servers, so ltl resolves both to the same internal format (`tomcat_access_with_duration`) and assumes milliseconds. For Apache HTTP Server logs, pass `-du us` to convert microsecond durations into milliseconds for statistics; without it, durations are reported in the wrong unit by a factor of 1000. (Value-range autodetection is tracked separately by issues #17 and #23.)
 
 ---
 
@@ -134,6 +135,7 @@ These logs contain `durationMS=`, `result bytes=`, and `result count=` fields en
 | File | Metrics | Size | Use Case |
 |------|---------|------|----------|
 | `ScriptLog-DPMExtended-clean.log` | duration, bytes, count | 29MB | Cleaned DPM ScriptLog - ideal for all heatmap types |
+| `ScriptLog-DPMExtended-clean-5k.log` | duration, bytes, count | 1.1MB | 5k-line slice from DPMExtended-clean; used by `tests/validate-index-read-back.sh`. Regenerate via `tests/fixtures/regenerate-index-readback-fixtures.sh` |
 | `ScriptLog.2025-04-09.1.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
 | `ScriptLog.2025-04-09.2.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
 | `ScriptLog.2025-04-09.3.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |

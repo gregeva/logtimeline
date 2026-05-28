@@ -1,0 +1,52 @@
+# Statistics-drift scenarios (Issue #224).
+# One scenario per row. Tab-separated. Lines starting with # are comments.
+#
+# Columns:
+#   scenario  — short id (used for baseline directory name and cache filenames)
+#   logfile   — path relative to repo root
+#   options   — ltl options (excluding --disable-progress and -o; the cache
+#               helper appends -o <logfile> itself when invoking ltl)
+#
+# Decision 6 matrix: 4 golden log files x 4 option families = 16 scenarios.
+#
+# Option families (Decision 6):
+#   default          baseline raw-array data model on both observed surfaces
+#   consolidated     -g 90 changes which samples land in which message bucket
+#   bin-data-model   bin-counter data model on both surfaces (honored end-to-end)
+#   sorted-by-p999   ranks output by p999 (exercises percentile-based ranking)
+#   heatmap-raw / heatmap-bin (Issue #289)   -hm duration replaces the terminal
+#                    per-time-bucket statistics row with the heatmap row, but the
+#                    STATS CSV is a separate render surface — the per-time-bucket
+#                    statistics must still be captured and emitted to -o. These
+#                    pairs guard that render-surface independence on both models.
+#
+# All scenarios pin -mdm and -bdm explicitly (#266 selectors) so the harness
+# never relies on internal defaults.
+#
+# All scenarios use -cp full (#268) so percentile, shape, and aggregate columns
+# emit precise floats. The harness validates against those precise values; the
+# human-facing default rounding (-cp default) is not what the harness sees.
+#
+# Apache HTTP2 scenarios prepend -du us because its access log records duration
+# in microseconds and auto-detection cannot infer this. Without -du us every
+# statistic is wrong by 10^k.
+#
+# scenario	logfile	options
+apache-default	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-du us -cp full -bs 240 -n 25 -mdm raw -bdm raw
+apache-consolidated	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-du us -cp full -bs 240 -g 90 -n 25 -mdm raw -bdm raw
+apache-bin-data-model	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-du us -cp full -bs 240 -n 25 -mdm bin -bdm bin
+apache-sorted-by-p999	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-du us -cp full -bs 240 -n 25 -so p999 -mdm raw -bdm raw
+tomcat-default	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -n 25 -mdm raw -bdm raw
+tomcat-consolidated	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -g 90 -n 25 -mdm raw -bdm raw
+tomcat-bin-data-model	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -n 25 -mdm bin -bdm bin
+tomcat-sorted-by-p999	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -n 25 -so p999 -mdm raw -bdm raw
+tomcat-heatmap-raw	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -n 25 -hm duration -mdm raw -bdm raw
+tomcat-heatmap-bin	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -n 25 -hm duration -mdm bin -bdm bin
+thingworx-default	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-cp full -bs 240 -n 25 -mdm raw -bdm raw
+thingworx-consolidated	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-cp full -bs 240 -g 90 -n 25 -mdm raw -bdm raw
+thingworx-bin-data-model	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-cp full -bs 240 -n 25 -mdm bin -bdm bin
+thingworx-sorted-by-p999	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-cp full -bs 240 -n 25 -so p999 -mdm raw -bdm raw
+codebeamer-default	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-cp full -bs 240 -n 25 -mdm raw -bdm raw
+codebeamer-consolidated	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-cp full -bs 240 -g 90 -n 25 -mdm raw -bdm raw
+codebeamer-bin-data-model	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-cp full -bs 240 -n 25 -mdm bin -bdm bin
+codebeamer-sorted-by-p999	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-cp full -bs 240 -n 25 -so p999 -mdm raw -bdm raw

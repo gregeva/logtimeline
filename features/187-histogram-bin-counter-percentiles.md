@@ -41,7 +41,7 @@ The locked decisions in this file (see *Locked decisions from research* for the 
 
 - **F1 — Design philosophy**: ltl is the query-time analyzer; precision is a user-tunable lever; rank-in-bin information is used because ltl has it (pre-aggregated systems don't).
 - **Decision 1 + 1A — In-bin interpolation**: Prometheus native-exponential `histogram_quantile()` formula, verified verbatim against `promql/quantile.go` lines 331–353.
-- **Decision 2 — Precision lever**: `buckets_per_decade` default 53 (OTEP-149 Scale-4 analog); two CLI flags exposing the lever (`-pbpd` numeric, `--percentile-precision 1..9` tiered); valid range 4-616; `-pbpd` wins on conflict.
+- **Decision 2 — Precision lever**: `buckets_per_decade` default 53 (OTEP-149 Scale-4 analog); two CLI flags exposing the lever (`-pbpd` numeric, `--percentile-precision 1..9` tiered); valid range 4-616; `-pbpd` wins on conflict. 53 is the global default/floor; a consumer surface with bounded partition cardinality may pin a finer per-surface resolution (the per-time-bucket surface does so via `-bsbpd` / `--bucket-stats-buckets-per-decade`, #289). Per-surface upward tuning is sanctioned and does not constitute a forbidden per-consumer variant — the algorithm, lifecycle, in-bin rule, and out-of-range handling remain uniform.
 - **Decision 4 — Out-of-range handling**: Prometheus `+Inf` convention adopted verbatim for high end; symmetric `-Inf`-equivalent for low end; separate counters; overflow/underflow contribute to total N; R4 returns the partition's edge boundary if target rank lands in overflow/underflow; `out_of_range_bounded: high|low|none` audit field per quantile in `-V`.
 - **Decision 5 — Partition lifecycle**: HdrHistogram-style auto-resize per partition (per-key for the summary table; per-time-bucket for the heatmap; global for the histogram view); seeded with full-default-span centered on first value; HdrHistogram-convention doubling on rebin. No precedent run or `#179` index dependency for partition sizing. Per-partition rebin telemetry exposed in `-V` so the seeding heuristic is empirically tunable.
 
@@ -1122,6 +1122,21 @@ Non-binding guidance for #189's implementation — the contract above is what mu
 
 **Rationale**: derived from F1 (analyst's-lever framing) and the source-grounded options in D3 § Decision 2. At ~1.1% midpoint error, distinguishes a 5% real regression from bin noise — the SRE-grade single-point-reporting and run-to-run regression-detection sweet spot. Below OTEP-149 the bin-resolution error is coarse for that use; above OTEP-149 the memory cost grows substantially without proportionate analyst benefit in typical interactive triage. The two-level CLI lever exposes those higher-precision regimes for analysts who want them.
 
+**Per-surface resolution (amended 2026-05-27, #289).** The default 53 is the global **floor**, appropriate for unbounded-cardinality surfaces (the per-message-key surface can hold millions of partitions, where 53 keeps memory bounded). A surface with bounded partition cardinality may pin a finer resolution through its own lever without violating the uniform contract: only the *algorithm, lifecycle, in-bin rule, and out-of-range handling* are uniform across consumers (per F1 / Decisions 1, 4, 5) — the precision parameter is explicitly an analyst's lever and is therefore legitimately per-surface. The per-time-bucket statistics surface (#289) exposes `-bsbpd` / `--bucket-stats-buckets-per-decade` (same `=i` form, 4..616 range, mirroring `-pbpd`). Its memory-vs-accuracy sweep on the canonical datasets kept the per-time-bucket **default at 53** — finer resolution costs ~linear memory (53→616 ≈ 6.5× per partition) while measurably improving only p99/p999 on heavily-quantized data, and the worst tail gaps there are the algorithmic nearest-rank-vs-interpolation difference that finer bins cannot close — so finer is the analyst's opt-in for SRE precision work, not the default. Each surface's effective resolution is observable as `effective_bpd` in the `-V percentile-algorithm` section.
+
+> **Amendment 2026-05-27 (#293) — single precision lever, per-surface tier table. This supersedes the two-flag surface and the per-surface raw flags below.** The resolution knob is now a **single tiered lever**, `--data-model-precision` / `-dmp` (1..9, default 5). Per-surface fidelity is no longer set by separate raw flags; instead one tier resolves a per-surface bins-per-decade through a locked table (source of truth: `features/293-precision-lever-unification.md`):
+>
+> | Surface | 1 | 2 | 3 | 4 | **5** | 6 | 7 | 8 | 9 |
+> |---|--|--|--|--|--|--|--|--|--|
+> | Histogram | 53 | 80 | 115 | 256 | **616** | 616 | 616 | 616 | 616 |
+> | Heatmap | 53 | 80 | 115 | 256 | **616** | 616 | 616 | 616 | 616 |
+> | Bucket-stats | 16 | 32 | 53 | 53 | **53** | 115 | 616 | 616 | 616 |
+> | Per-message | 4 | 8 | 16 | 32 | **53** | 80 | 115 | 256 | 616 |
+>
+> Tier 5 (default) reproduces the established per-surface defaults (histogram/heatmap 616, bucket-stats 53, per-message 53), so the default is behavior-neutral. Above tier 5 the bounded-cardinality surfaces sharpen faster than the unbounded per-message surface (bucket-stats reaches 616 at tier 7; per-message at tier 9), giving the SRE "sharp per-time-bucket, finely-tunable per-message" without a second flag. Below tier 5 every bin surface coarsens, including histogram/heatmap (a deliberate trade against shape fidelity — turning the dial down is an explicit choice).
+>
+> The removed raw flags — `-pbpd` / `--percentile-buckets-per-decade`, `-bsbpd` / `--bucket-stats-buckets-per-decade`, and the legacy display knob `-hgbpd` / `--histogram-buckets-per-decade` — no longer exist. There is no `-pbpd`-wins conflict logic (no competing flags remain). The histogram's visual bar density is unchanged (fixed internal display geometry, distinct from the data-model resolution this lever governs). Validation is the tier range 1..9 (out-of-range warns and resets to 5). The per-surface `effective_bpd` in `-V percentile-algorithm` remains authoritative for each surface's resolved resolution.
+
 **CLI flag surface (contract)**:
 
 1. **Numeric lever** (development/testing/research):
@@ -1477,6 +1492,12 @@ Non-binding.
 ### Decision 8 — `-V` reporting verbosity and format — **LOCKED (2026-05-19); section name amended 2026-05-20**
 
 > **Amendment 2026-05-20 (#34 Phase 2)**: section name changed from `=== PERCENTILE MODE ===` to `=== BIN-COUNTER MODE ===`. The substrate is HdrHistogram-style histogram bin counters; percentiles are one of three derivations from it, alongside bin counts (`histogram_bins`) and cell colors (`heatmap_cells`), which are not percentiles. The original name described the output of one consumer family; the amended name describes the substrate the entire contract is built on. Function name in code amended from `emit_percentile_mode_verbose` to `emit_bin_counter_mode_verbose` for the same reason. The user-facing `--exact-percentiles` / `-ep` flag is unchanged — it correctly names the user's choice rather than the substrate. All field names, consumer-name strings, and per-consumer field-name lockings within Decision 8 remain in effect verbatim.
+
+> **Amendment 2026-05-27 (#293) — run-level precision lines.** The single precision lever (Decision 2 #293 amendment) re-locks the two run-level lines below:
+> - The `percentile_precision:` line is **renamed** to `data_model_precision: <TIER> (<source>)`, where `<TIER>` is 1..9 and `<source>` is `default` or `--data-model-precision N`. The `n/a` rendering (for non-tier `-pbpd` values) is dissolved — with only the tiered lever, every value maps to a tier, so `n/a` can no longer occur. The `; overridden` source annotation is dissolved — no competing flag remains.
+> - The run-level `buckets_per_decade:` line is **removed**. Resolution is now per-surface (one tier yields a different bpd per surface), so a single run-level bpd would be ambiguous. The authoritative per-surface resolution is the `effective_bpd:` line in the `=== percentile-algorithm ===` section, one per surface.
+>
+> All other Decision 8 field names, consumer-name strings, and per-consumer lockings remain in effect verbatim.
 
 #### Contract
 

@@ -12,6 +12,10 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 REF_DIR="${1:-$SCRIPT_DIR/reference-output}"
 TMP_DIR=$(mktemp -d)
+# Cleanup is unconditional — if the script aborts mid-run (under set -e),
+# the explicit `rm -rf` at the end never runs. Per tests/HARNESS-DESIGN.md,
+# harnesses must not leave temp artifacts behind.
+trap 'rm -rf "$TMP_DIR"' EXIT
 
 # Common options: suppress progress, summary table, and limit top messages
 COMMON="--disable-progress -osum -n 1"
@@ -19,6 +23,12 @@ COMMON="--disable-progress -osum -n 1"
 # Test log files
 ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log.2025-03-21.txt"
 SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
+# Issue #235 — additional fixtures for the extended heatmap/histogram tests
+# below. APACHE_LOG is the canonical clean Apache HTTP2 access log; it ships
+# bytes + microsecond-%D durations and is small (~100 KB), keeping capture
+# time tight. Per repo memory (feedback_test_logs.md), new fixtures must NOT
+# use logs/AccessLogs/localhost_access_log.2025-03-21.txt due to corrupt lines.
+APACHE_LOG="$REPO_DIR/logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
 
 # Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin
 strip_nondeterministic() {
@@ -36,12 +46,46 @@ fi
 pass=0
 fail=0
 skip=0
+failures=()
+
+# Self-documenting fields shared across every run_test assertion. The
+# assertion shape is uniform across this harness: a byte-stable rendering
+# of `ltl` output (after stripping nondeterministic content) must match
+# the captured reference file. The test-name dimension is what varies;
+# the invariant, producer, and contract are the same for every case.
+# Per tests/HARNESS-DESIGN.md § Self-documenting assertions, these three
+# fields are surfaced alongside every failure.
+REGRESSION_ASSERTS='ltl output (after stripping ANSI, timing, memory, and other nondeterministic content) is byte-identical to the captured reference file for this scenario'
+REGRESSION_PRODUCED_BY='print_bar_graph(), print_summary_table(), print_heatmap_row(), and the layout engine in ltl - composite rendered output'
+REGRESSION_CONTRACT='tests/HARNESS-DESIGN.md section Self-documenting assertions + this harness re-runs the commands from capture-regression.sh against tests/reference-output/; rebaselining is a per-release activity, not an automatic remediation'
+
+# Emit a regression-suite failure in the self-documenting multi-line form
+# required by tests/HARNESS-DESIGN.md § Self-documenting assertions.
+# Args: $1 scenario name, $2 short cause line, $3 (optional) path to a
+# file whose contents should be appended as an indented diagnostic body.
+emit_regression_fail() {
+    local name="$1"
+    local cause="$2"
+    local body_file="${3:-}"
+    echo "  FAIL  $name"
+    echo "        cause:       $cause"
+    echo "        asserts:     $REGRESSION_ASSERTS"
+    echo "        produced_by: $REGRESSION_PRODUCED_BY"
+    echo "        contract:    $REGRESSION_CONTRACT"
+    if [[ -n "$body_file" && -s "$body_file" ]]; then
+        sed 's/^/        /' "$body_file"
+    fi
+    fail=$((fail + 1))
+    failures+=("$name :: $cause")
+}
 
 run_test() {
     local name="$1"
     shift
     local reffile="$REF_DIR/$name.txt"
     local tmpfile="$TMP_DIR/$name.txt"
+    local stderrfile="$TMP_DIR/$name.stderr"
+    local difffile="$TMP_DIR/$name.diff"
 
     if [[ ! -f "$reffile" ]]; then
         echo "  SKIP  $name (no reference file)"
@@ -49,16 +93,35 @@ run_test() {
         return
     fi
 
-    "$@" 2>/dev/null | strip_nondeterministic > "$tmpfile"
+    # Run ltl, capturing stdout to tmpfile (after filtering) and stderr
+    # separately. Per tests/HARNESS-DESIGN.md, we DO NOT swallow stderr —
+    # a silent failure here would produce an empty tmpfile that diffs
+    # against an empty reffile and falsely PASSes.
+    set +e
+    "$@" 2>"$stderrfile" | strip_nondeterministic > "$tmpfile"
+    local pipe_status=("${PIPESTATUS[@]}")
+    set -e
+
+    if [[ "${pipe_status[0]}" -ne 0 ]]; then
+        emit_regression_fail "$name" "ltl exited ${pipe_status[0]} (stderr below)" "$stderrfile"
+        return
+    fi
+    if [[ ! -s "$tmpfile" ]]; then
+        emit_regression_fail "$name" "captured output is empty (regression target produced nothing; stderr below)" "$stderrfile"
+        return
+    fi
 
     if diff -q "$reffile" "$tmpfile" > /dev/null 2>&1; then
         echo "  PASS  $name"
         pass=$((pass + 1))
     else
-        echo "  FAIL  $name"
-        diff --unified=3 "$reffile" "$tmpfile" | head -30
-        echo "  ..."
-        fail=$((fail + 1))
+        # diff returns 1 on differences (intentional); pipefail would propagate
+        # that and abort the harness before printing the Results summary.
+        # Per tests/HARNESS-DESIGN.md, intentional non-zero exits in a
+        # diagnostic pipeline must be neutralized so the harness can complete.
+        { diff --unified=3 "$reffile" "$tmpfile" || true; } | head -30 > "$difffile"
+        echo "  ..."  >> "$difffile"
+        emit_regression_fail "$name" "rendered output differs from reference (unified diff below, truncated to 30 lines)" "$difffile"
     fi
 }
 
@@ -81,14 +144,14 @@ for w in 160 200; do
 done
 
 # --- Heatmap modes at width 160 ---
-# --exact-percentiles pins these to the sort-and-index path so the reference
+# -dm raw pins these to the sort-and-index path so the reference
 # stays byte-stable. The unified bin-counter path (#34/#201) is approximate
 # within bin-resolution bound (well below visibility threshold per #201 V8)
 # but not byte-identical, which would make this layout/rendering regression
 # suite fragile to precision tweaks. Layout coverage is what we want here;
-# bin-counter accuracy is covered by tests/validate-percentile-mode.sh.
+# bin-counter accuracy is covered by tests/validate-histogram-bin-counters.sh.
 for mode in duration bytes count; do
-    run_test "heatmap-${mode}-w160" "$LTL" $COMMON --exact-percentiles --terminal-width 160 -hm "$mode" "$SCRIPT_LOG"
+    run_test "heatmap-${mode}-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm "$mode" "$SCRIPT_LOG"
 done
 
 # --- Omit flags at width 160 ---
@@ -101,18 +164,69 @@ run_test "omit-ov-or-w160" "$LTL" $COMMON --terminal-width 160 -ov -or "$ACCESS_
 run_test "autohide-w80" "$LTL" $COMMON --terminal-width 80 "$ACCESS_LOG"
 run_test "autohide-w100" "$LTL" $COMMON --terminal-width 100 "$ACCESS_LOG"
 run_test "noautohide-w80" "$LTL" $COMMON --terminal-width 80 --no-auto-hide "$ACCESS_LOG"
-run_test "autohide-hm-w120" "$LTL" $COMMON --exact-percentiles --terminal-width 120 -hm duration "$SCRIPT_LOG"
+run_test "autohide-hm-w120" "$LTL" $COMMON -dm raw --terminal-width 120 -hm duration "$SCRIPT_LOG"
 
 # --- Millisecond precision ---
 run_test "ms-w160" "$LTL" $COMMON --terminal-width 160 -ms -bs 1000 -st 00:00 -et 00:05 "$ACCESS_LOG"
 
+# ---------------------------------------------------------------------------
+# Issue #235 — extended heatmap and histogram rendering coverage
+# ---------------------------------------------------------------------------
+# All -dm raw for the same reason as the original heatmap tests
+# above: pins to the sort-and-index path so byte-identical fixtures survive
+# precision tweaks. Light-background auto-detection is inert under shell
+# redirection (ltl:2722 checks -t STDOUT before doing OSC 11 query); no
+# environment override needed. Issue #250 tracks the missing
+# --no-light-background flag if a future change perturbs that.
+#
+# Fixtures use APACHE_LOG (clean Apache HTTP2 access log) for histogram
+# scenarios that benefit from access-log style data, and SCRIPT_LOG (the
+# DPM ScriptLog, already in use above) for heatmap and count-axis scenarios.
+
+# --- Heatmap at narrow widths (autohide interaction) ---
+run_test "heatmap-duration-w80"  "$LTL" $COMMON -dm raw --terminal-width 80  -hm duration "$SCRIPT_LOG"
+run_test "heatmap-duration-w100" "$LTL" $COMMON -dm raw --terminal-width 100 -hm duration "$SCRIPT_LOG"
+run_test "heatmap-bytes-w120"    "$LTL" $COMMON -dm raw --terminal-width 120 -hm bytes    "$SCRIPT_LOG"
+run_test "heatmap-count-w100"    "$LTL" $COMMON -dm raw --terminal-width 100 -hm count    "$SCRIPT_LOG"
+
+# --- Light-background heatmap ---
+run_test "heatmap-lbg-duration-w160" "$LTL" $COMMON -dm raw --light-background --terminal-width 160 -hm duration "$SCRIPT_LOG"
+
+# --- Custom heatmap width ---
+run_test "heatmap-hmw30-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hmw 30 "$SCRIPT_LOG"
+run_test "heatmap-hmw80-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hmw 80 "$SCRIPT_LOG"
+
+# --- Histogram single-metric across widths ---
+run_test "hg-duration-w80"  "$LTL" $COMMON -dm raw --terminal-width 80  -hg duration "$APACHE_LOG"
+run_test "hg-duration-w120" "$LTL" $COMMON -dm raw --terminal-width 120 -hg duration "$APACHE_LOG"
+run_test "hg-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration "$APACHE_LOG"
+
+# --- Histogram per metric (axis formatters) ---
+run_test "hg-bytes-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg bytes "$APACHE_LOG"
+run_test "hg-count-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg count "$SCRIPT_LOG"
+
+# --- Multi-histogram stacked panels ---
+run_test "hg-multi-duration-bytes-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration,bytes        "$APACHE_LOG"
+run_test "hg-multi-all-w160"            "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration,bytes,count "$SCRIPT_LOG"
+
+# --- Custom histogram dimensions ---
+run_test "hg-hgw30-duration-w160"     "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration       -hgw 30 "$APACHE_LOG"
+run_test "hg-hgw50-multi-w160"        "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration,bytes -hgw 50 "$APACHE_LOG"
+run_test "hg-hgh4-duration-w160"      "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration       -hgh 4  "$APACHE_LOG"
+run_test "hg-hgh16-duration-w160"     "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration       -hgh 16 "$APACHE_LOG"
+
+# --- Composition: heatmap + histogram together ---
+run_test "hm-hg-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hg duration "$SCRIPT_LOG"
+
 echo ""
 echo "Results: $pass passed, $fail failed, $skip skipped"
-
-# Cleanup
-rm -rf "$TMP_DIR"
+# TMP_DIR cleanup handled by EXIT trap at top of script
 
 if [[ $fail -gt 0 ]]; then
+    echo "Failures:"
+    for f in "${failures[@]}"; do
+        echo "  - $f"
+    done
     echo "REGRESSION DETECTED"
     exit 1
 else

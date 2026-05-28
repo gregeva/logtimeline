@@ -14,6 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 4. **Small steps with confirmation.** Present one idea or change at a time. Wait for confirmation before proceeding.
 5. **No unsolicited implementation.** Do not write production code until explicitly asked.
 6. **Dialog over monologue.** Keep responses concise. If writing more than a few paragraphs, stop and ask a clarifying question instead.
+7. **Do exactly what was asked — no more.** Treat every instruction as literal scope, not as a hint toward a larger goal. "Commit" means commit, not commit+push+PR. "Push" means push, not push+open-PR. "Create the branch" means create the branch, not branch+commit+push. "File the issue" means file the issue, not file+cross-link+update-related. When the next step seems obvious, ask — don't take it. The user is the architect; inferring "what they really wanted" is overreach, even when the inference is correct.
 
 ### Anti-patterns to Avoid
 
@@ -21,6 +22,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Making architectural decisions independently then defending them
 - Lengthy explanations when a question would suffice
 - Trying to solve everything in one pass instead of iterating
+- Extending an instruction past its literal scope (e.g., committing → also pushing → also opening a PR when only "commit" was asked)
+- Treating "the natural next step" as implicit permission. The natural next step is for the user to direct, not for Claude to take.
+- Acting on the inferred larger goal when only a specific narrow step was requested. If the user asks for step 3 of a 10-step plan, do step 3 and stop — even if step 4 looks trivial.
 
 ### Continuous Improvement
 
@@ -37,19 +41,49 @@ Track observations for process improvement. After releases, review what worked a
 - 2026-03-08: CRITICAL - Output files (benchmark results, analysis reports, comparisons) are DELIVERABLES, not temp files. NEVER overwrite them for testing/debugging. Always use a separate label or temp copy. Back up before any destructive operation.
 - 2026-02-05: When updating issues with fix completion, always include the commit hash and branch name.
 - 2026-02-07: When adding or modifying CLI options, update `print_help()` in ltl and the options reference in README.md.
+- 2026-05-22: CRITICAL - REPEATED VIOLATION - Do NOT embed change history in code, comments, or script headers. NEVER write "renamed from X to Y under Issue #N", "filename was previously X", "section was originally called X then Y then Z", "this used to be X", or any equivalent narrative explaining what something *was* before the current state. Comments describe the *current* state of the code: what it does, why it does it, what contract it asserts against. Change history belongs in git: commit messages, `git blame`, `git log`, the PR description, and the GitHub issue. A reader running `git blame` on a renamed file or a renamed identifier already sees the rename in the commit history. Embedding the rename in a code comment duplicates that information, ages immediately (the comment outlives the relevance of the rename), and clutters the file. This applies to: script header comments, sub/function header comments, inline comments next to changed code, and reserved-name registries. Violated repeatedly during #226 (2026-05-22) — embedded rename narratives in `ltl`, `tests/validate-histogram-bin-counters.sh`, `tests/validate-index-read-back.sh`, and HARNESS-DESIGN.md.
+- 2026-05-23: CRITICAL - Do NOT leak internal implementation details into user-facing documentation. User-facing text (`--help`, `--explain` topic prose, `docs/usage.md`, `docs/explain/*.md`, Wiki pages, error messages, CSV column descriptions) must describe what the user observes and what it means to them — never the internal mechanism. Forbidden in user prose: Perl identifiers (hash names like `%column_colors`, sub names, global variables), GitHub issue numbers (`#187`, `#220`, `#222`, etc.), internal jargon (`bin-counter substrate`, `Decision 8`, `locked-decision`, `HARNESS-DESIGN`), and references to external tool internals (`OpenTelemetry's Scale-4 analog`, etc.) unless they have direct operational value to the reader. Implementation details belong in source-code comments, feature docs (`features/*.md`), issue bodies, and PR descriptions — places future developers look, not places users look. Violated during #261 phase 2 in five `--explain` topic paragraphs (iqr, percentiles, kurtosis, bimodality_coef, histogram) and four `docs/explain/statistics.md` sections; user caught it in the heatmap topic, sweep applied to the rest.
+- 2026-05-26: CRITICAL — CAPTURE-ONCE GATE. Before running ANY test/harness/command whose output you will inspect more than once, ask: "will I look at this output more than once?" If yes (almost always): run it ONCE with `> /tmp/<tag>.out 2>&1`, then `grep`/`head`/`tail`/`sed`/`diff`/`python3` against THAT FILE as many times as needed. NEVER re-run the same command for a different output slice ("next line", "other scenario", "what the failure was", "another column") — that information is already in the file. The checklist:
+  1. Capture full output to `/tmp/<tag>.out` ONCE.
+  2. Inspect by grepping the FILE — repeat freely, zero extra runs.
+  3. Failing subprocess (oracle/helper/child) → invoke it DIRECTLY on minimal input (ms/iteration), not via the parent harness (min/iteration).
+  4. Iterating a harness → use `--scenario <name>` / single-test selectors.
+  5. Re-run the FULL harness only as the final go/no-go gate.
+  6. Generating CSVs to inspect → generate ONCE into a temp dir; parse with `python3 csv` (never naive `split /,/` on quoted CSV — it misaligns columns and fabricates phantom "bugs").
+  Runtimes that make re-running expensive: `validate-statistics.sh` ~3 min, `validate-histogram-bin-counters.sh` ~2 min, `validate-doc-examples.sh` ~40s. Long-running harnesses are NOT debuggers. Violated repeatedly in #287 (ran `validate-statistics.sh` ~8× in one debug cycle = ~25 min for ~80s of fix work) AND again throughout #289 (re-ran `validate-histogram-bin-counters.sh` 3×, re-ran `ltl` CSV generation many× with one-off greps) despite this entry already existing — loading the rule is not consulting it; treat it as a mechanical pre-Bash gate.
 
 ## Repository Hygiene
 
 This is a public repository. After cloning, run `./build/setup-hooks.sh` once to activate the tracked pre-commit guard at `.githooks/pre-commit`. The guard blocks commits that stage `.claude/`, `.env*`, `*.pem`/`*.key`/`*.p12`/`*.pfx`/`*.kdbx`, `id_rsa*`/`id_ed25519*`, `.netrc`, `.npmrc`, `secrets/`, `credentials*`, or content matching common token patterns (AWS, GitHub, OpenAI, Slack, PEM private keys). `.gitignore` is the primary defense; the hook is a backstop. If you genuinely need to override, use `git commit --no-verify` and explain in the commit message.
 
+## Test harness contract — MANDATORY
+
+**Before performing any of the following actions, you MUST first read `tests/HARNESS-DESIGN.md`.** That document defines the rules; this section is the trigger.
+
+The following actions require a HARNESS-DESIGN.md consultation:
+
+- Renaming or removing a `-V` section or sub-section header
+- Renaming, removing, or modifying the format of any content key inside any `-V` section
+- Adding a new `-V` section to the registry in `ltl`
+- Creating any file under `tests/validate-*.sh`
+- Renaming any file under `tests/validate-*.sh`
+- Modifying assertion behavior in any harness (the regex itself, the helper functions, or the failure output)
+
+Hard rules that have already cost time in this repository when violated:
+
+- **Harness file names track the section they validate.** A harness for the `histogram-bin-counters` section lives in `tests/validate-histogram-bin-counters.sh`. When a section is renamed, the harness file is `git mv`'d to match **in the same commit**. Verify spelling matches the section's CLI name exactly (e.g., `index-read-back` not `index-readback`).
+- **`-V` section and key renames are breaking changes.** Discover every consumer with `grep -r "=== name ===" tests/` (or the equivalent for content keys). Update every consumer in the same commit. Then **execute each affected harness and confirm it still asserts** — exit code 0 is insufficient; assertion lines must actually match.
+- **Harness assertions must self-document.** Every assertion declares `asserts` (the application invariant), `produced_by` (where in `ltl` it is produced — function name, not line number), and `contract` (the stability source). All three are surfaced on failure. Reference implementation: `tests/validate-histogram-bin-counters.sh`.
+- **A grep that matches nothing is a failure, not a pass.** Every harness must treat a zero-match anchor lookup as a hard failure.
+
+If any of these rules conflict with what you're about to do, stop and read HARNESS-DESIGN.md before continuing. Do not improvise.
+
 ## Project Overview
 
 LogTimeLine (ltl) is a Perl-based command-line log analysis tool that identifies hotspots in large log files through statistical analysis and time-bucket visualization. It displays horizontal bar graphs with color-coded performance bands and calculates percentile latency statistics (P1 through P99.9).
 
-The repository contains three tools:
+The repository contains one tool:
 - **ltl** - Main analysis tool (single Perl script, ~2,500 lines)
-- **cleanlogs** - Bash helper that removes stack traces, partial lines, and health probes
-- **twxsummarize** - ThingWorx-specific log summarizer
 
 ## Build Commands
 
@@ -78,28 +112,38 @@ GitHub Actions builds all platforms on version tags (`v*`). See `.github/workflo
 
 **CRITICAL: Follow these steps exactly. Do not skip steps or change the order.**
 
-### Pre-release (for each feature/bugfix branch)
+### Per-feature workflow (every feature/bugfix branch — MANDATORY post-merge)
+
+When a feature/bugfix branch lands via PR into the release branch, complete the following in order. **Do not skip steps.** These are per-feature obligations, not release-cutting tasks:
+
 1. Commit all changes to feature branch
 2. Push feature branch: `git push origin {feature-branch}`
-3. Update GitHub issue with completion comment
+3. Create PR into the active release branch: `gh pr create --base release/X.Y.Z --head {feature-branch}`
+4. Merge the PR: `gh pr merge {PR#} --merge`
+5. Verify the release branch picked up the merge: `git log origin/release/X.Y.Z --oneline -3`
+6. Update `releases/v{version}.md` directly on the release branch: add ONE bullet per merged issue with `(#NNN)` reference. No prose, no metacommentary. Commit + push directly to the release branch (this is the canonical exception to "no direct commits" — release-notes maintenance is release-process work, not issue work).
+7. Add a completion comment to the GitHub issue: commit hash, branch name, PR #, merge commit, summary of what shipped.
+8. Close the issue: `gh issue close {number} --reason completed`. The issue is addressed when it makes it into a release branch — it does not need to wait for the release to ship.
 
-### Create Release
-4. Switch to main: `git checkout main && git pull origin main`
-5. Create release branch: `git checkout -b release/X.Y.Z` (no `v` prefix)
-6. Merge each feature/bugfix branch: `git merge {branch-name} --no-edit` (repeat for all branches going into this release)
-7. Update version in `ltl` (`$version_number` near top of GLOBALS section)
-8. **Run benchmarks**: `./tests/baseline/run-benchmark.sh full --label vX.Y.Z` — captures baseline for this release
-9. **Compare benchmarks** (if previous baseline exists): `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv` — saves full report to `tests/baseline/results/`.
-10. Create release notes: `releases/v{version}.md` — **keep it concise**: one bullet per feature/fix with issue reference. Include benchmark comparison table (from step 9) if available. No usage examples, no file lists, no "Breaking Changes: None", no "Known Issues", no root cause analysis. See `releases/TEMPLATE.md`.
-11. Commit: `git commit -am "Release vX.Y.Z"`
-12. Push release branch: `git push -u origin release/X.Y.Z`
-13. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
+### Cutting the release
+
+By the time you cut the release, every feature/bugfix issue has already been comment-and-closed under the per-feature workflow above, and `releases/v{version}.md` already contains all the bullets. This phase finalizes versioning, benchmarks, tagging, and the merge back to main.
+
+9. Switch to the release branch: `git checkout release/X.Y.Z && git pull origin release/X.Y.Z`
+10. Update version in `ltl` (`$version_number` near top of GLOBALS section)
+11. **Validate CSV output structure**: `CI=1 ./tests/validate-csv-output.sh` — must exit 0 before proceeding. Structural regressions in `-o` CSV outputs (column presence, ordering, population, family group consistency, data types, decimal precision) block the release. `CI=1` preserves the shared CSV cache for the next harness step.
+12. **Validate statistics**: `CI=1 ./tests/validate-statistics.sh` — must exit 0 (no T3/T4 failures across any of the three layers: L1 drift against committed baselines, L2 intra-row arithmetic invariants, L3 algorithm-aware NumPy/SciPy oracle) before proceeding. T1/T2 advisories are non-blocking; review to confirm any drift is intentional. Reuses cached CSVs from step 11. Then run `./tests/cleanup-test-artifacts.sh` to remove the shared scratch directory.
+13. **Run benchmarks**: `./tests/baseline/run-benchmark.sh full --label vX.Y.Z` — captures baseline for this release
+14. **Compare benchmarks** (if previous baseline exists): `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv` — saves full report to `tests/baseline/results/`.
+15. Finalize `releases/v{version}.md` — verify all per-feature bullets are present, append benchmark comparison table (from step 14) if available. No usage examples, no file lists, no "Breaking Changes: None", no "Known Issues", no root cause analysis. See `releases/TEMPLATE.md`.
+16. Commit: `git commit -am "Release vX.Y.Z"`
+17. Push release branch: `git push -u origin release/X.Y.Z`
+18. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
 
 ### Post-release
-14. **Merge to main via PR (NEVER direct merge):** `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` (do NOT use `--delete-branch` — release branches must be preserved)
-15. **Sync Wiki:** `git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cp docs/purpose.md /tmp/ltl-wiki/Purpose-and-Design-Philosophy.md && cd /tmp/ltl-wiki && git add Home.md Purpose-and-Design-Philosophy.md && git commit -m "Sync wiki docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki` — `docs/usage.md` and `docs/purpose.md` are the single sources of truth; the wiki is overwritten on each release.
-16. Close all issues included in release: `gh issue close {number} --reason completed`
-17. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each, NOT the release branch)
+19. **Merge to main via PR (NEVER direct merge):** `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` (do NOT use `--delete-branch` — release branches must be preserved)
+20. **Sync Wiki:** `git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cp docs/purpose.md /tmp/ltl-wiki/Purpose-and-Design-Philosophy.md && cp docs/explain/statistics.md /tmp/ltl-wiki/Statistics-Reference.md && cp docs/explain/heatmap.md /tmp/ltl-wiki/Heatmap-Reference.md && cp docs/explain/histogram.md /tmp/ltl-wiki/Histogram-Reference.md && cd /tmp/ltl-wiki && git add Home.md Purpose-and-Design-Philosophy.md Statistics-Reference.md Heatmap-Reference.md Histogram-Reference.md && git commit -m "Sync wiki docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki` — `docs/usage.md`, `docs/purpose.md`, `docs/explain/statistics.md`, `docs/explain/heatmap.md`, and `docs/explain/histogram.md` are the single sources of truth; the wiki is overwritten on each release.
+21. **Delete all merged feature branches**: `git branch -d {branch} && git push origin --delete {branch}` (repeat for each, NOT the release branch)
 
 ### Run Directly
 ```bash
@@ -146,12 +190,30 @@ Hidden CLI options: `--disable-progress` (ALWAYS use from Claude Code), `--termi
 
 ## Development Workflow
 
-Each issue gets its own branch: `{issue-number}-{short-description}`. **CRITICAL: Verify branch before making code changes.** Do not write production code until implementation plan is approved.
+### Branch Naming (MANDATORY)
+
+Each issue gets its own branch named `{issue-number}-{semantic-slug-from-issue-title}`. The slug MUST be derived from the GitHub issue's title (kebab-cased, semantically tight) — **never** from the activity being performed on the branch.
+
+**Why this matters:** Branches outlive their initial purpose. A branch named after the current activity becomes misleading once it grows into other work. A branch named after the issue stays accurate through the whole lifecycle.
+
+**Examples:**
+- Issue #224 "Percentile-value regression test harness with tiered tolerance" → `224-percentile-value-harness` ✓
+- Issue #225 "Test-harness coverage gaps: high-priority additions..." → `225-test-harness-coverage-gaps` ✓
+
+**Anti-patterns — DO NOT use:**
+- `225-research` / `225-research-deliverables` — activity name, not issue title
+- `225-scaffolding` / `225-grounding` / `225-cleanup` — activity names
+- `225-fix-it` — vague activity description
+- Issue number without any slug — ambiguous
+
+If multiple branches are genuinely needed for one issue (rare), differentiate with a numeric suffix like `225-test-harness-coverage-gaps-2`, **not** with an activity name.
 
 ### Branch Verification (MANDATORY FIRST STEP)
 ```bash
-git branch --show-current  # Must match issue number
+git branch --show-current  # Must start with the issue number AND match the issue's semantic title
 ```
+
+**CRITICAL:** Verify branch before making code changes. Do not write production code until implementation plan is approved.
 
 ### GitHub Issue Updates (MANDATORY)
 Update issues throughout development: when starting, during investigation, on design decisions, and when complete. Close with `gh issue close <number> --reason completed`.

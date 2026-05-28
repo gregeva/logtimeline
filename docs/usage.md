@@ -26,11 +26,12 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 
 | Option | Description |
 |--------|-------------|
-| `-bs, --bucket-size <N>` | Set the width of each time bucket on the timeline (default unit: minutes; see `-s`, `-ms`) |
+| `-bs, --bucket-size <N>` | Set the width of each time bucket on the timeline (default unit: minutes; `-s` switches the unit to seconds, `-ms` switches it to milliseconds) |
 | `-s, --seconds` | Interpret bucket size as seconds instead of minutes |
-| `-ms, --milliseconds` | Enable sub-second timestamp parsing and allow bucket sizes down to 100ms |
-| `-st, --start <timestamp>` | Only process log lines at or after this time (`YYYY-MM-DD HH:MM:SS[.mmm]`) |
-| `-et, --end <timestamp>` | Only process log lines before this time (`HH:MM:SS[.mmm]`) |
+| `-ms, --milliseconds` | Switch the `-bs <N>` bucket width to milliseconds (and render timestamps with `.fff` precision). Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured. |
+| `-pr, --profile <mode>` | Fold the timeline onto a single day or week so every date overlays into one profile view — e.g. what a typical Tuesday at 09:15 looks like across weeks of logs. `day` and `workday` collapse to a 24-hour axis (time-of-day labels only); `week` and `workweek` collapse to a weekday axis (the weekday is shown once per day, in bold). `workday`/`workweek` keep only work days (Mon–Fri); the `-alt` variants use a Sunday-anchored week and a Sun–Thu work week. Composes with `-bs` (granularity within the period) and the `-st`/`-et`, `-i`/`-e` filters, which apply to the original timestamps before folding. Modes: `day`, `week`, `week-alt`, `workweek`, `workweek-alt`, `workday`, `workday-alt`. |
+| `-st, --start <timestamp>` | Only process log lines at or after this time. A full date (`YYYY-MM-DD HH:MM:SS[.mmm]`) is an absolute cutoff; a bare time (`HH:MM[:SS[.mmm]]`) is a time-of-day window applied to every day, regardless of how the logs are split across files. A bare-time start later than the end wraps past midnight. |
+| `-et, --end <timestamp>` | Only process log lines before this time. Same forms as `-st`: a full date is an absolute cutoff; a bare time applies to every day. |
 | `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when auto-detection is not possible (`ns`, `us`, `ms`, `s`) |
 | `-ru, --rate-unit <unit>` | Set the time unit for rate normalization: `s` (second), `m` (minute, default), `h` (hour), `d` (day) |
 
@@ -39,8 +40,12 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 ltl -bs 5 access.log
 # 30-second buckets
 ltl -s -bs 30 access.log
-# Millisecond precision, 100ms buckets, zoomed into a 5-minute window
+# 100ms-wide buckets, zoomed into a 5-minute window (sub-second timestamp rendering enabled)
 ltl -ms -bs 100 -st "2025-05-05 08:15:00.000" -et "2025-05-05 08:20:00.000" app.log
+# Weekly profile: overlay every date onto a single Mon–Sun week, hourly buckets
+ltl -bs 60 -pr week access.log
+# Workday-morning profile: only the 09:00–11:00 window, work days, folded onto one 24h axis
+ltl -bs 15 -pr workday -st 09:00 -et 11:00 access.log
 ```
 
 ### Filtering
@@ -127,12 +132,13 @@ ltl -g 80 -iqs -is access.log
 
 ### Display & Output
 
-These options control what is shown and how. After the timeline bar graph, logtimeline prints a summary table ranking the top contributing messages — `-n` controls how many entries appear, and `-osum` suppresses it entirely. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. The light background mode (`-lbg`) switches color gradients for white or light terminal backgrounds. The pause option (`-p`) is useful when output exceeds the terminal height.
+These options control what is shown and how. After the timeline bar graph, logtimeline prints a summary table ranking the top contributing messages — `-n` controls how many entries appear, and `-osum` suppresses it entirely. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. The light background mode (`-lbg`) switches color gradients for white or light terminal backgrounds. The dark background mode (`-dbg`) forces the dark gradients and overrides `-lbg` if both are passed. The pause option (`-p`) is useful when output exceeds the terminal height.
 
 | Option | Description |
 |--------|-------------|
 | `-n, --top-messages <N>` | Number of unique messages to show in the summary table (default: 10) |
 | `-o, --output-csv` | Write all extracted data to a CSV file for external analysis |
+| `-cp, --csv-precision <mode>` | Control CSV decimal precision: `default` (per-family decimals derived from `-du`), `full` (raw precise floats), or an integer N (cap all numeric columns at N decimals) |
 | `-osum, --omit-summary` | Hide the summary table printed after the bar graph |
 | `-hl, --hide-legend` | Hide the legend column (category breakdowns and rates) |
 | `-ho, --hide-occurrences` | Hide the occurrences bar graph column, freeing space for other metric columns |
@@ -142,9 +148,10 @@ These options control what is shown and how. After the timeline bar graph, logti
 | `-hs, --hide-session` | Hide the Sessions column that automatically appears when session IDs are found in the log data |
 | `-hst, --hide-stats` | Hide the latency statistics or heatmap column |
 | `-lbg, --light-background` | Use pale-to-bright color gradients suited for light/white terminal backgrounds |
+| `-dbg, --dark-background` | Force dark-background color gradients; overrides `-lbg` and disables auto-detect |
 | `-nah, --no-auto-hide` | Disable automatic column hiding at narrow terminal widths (squeeze all columns instead) |
 | `-p, --pause` | Wait for a keypress between pages of output |
-| `-V, --verbose` | Print detailed processing information including regex matches and parsing decisions |
+| `-V, --verbose [<section>...]` | Emit diagnostic sections. Bare `-V` emits all; `-V <name>[,<name>...]` or repeated `-V` selects sections; `-V list` prints known sections. See "Verbose output (`-V`)" section below |
 
 ```bash
 # Show top 50 messages in the summary table
@@ -155,58 +162,127 @@ ltl -o access.log
 ltl -osum access.log
 # Use color gradients suited for light terminal backgrounds
 ltl -lbg access.log
+# Force dark-background gradients (overrides auto-detect and -lbg)
+ltl -dbg access.log
 ```
 
 ### Sorting
 
-The summary table is sorted by occurrence count by default. Use `-so` to rank messages by a different metric — total duration, min/max/mean latency, standard deviation, bytes, count, impact (occurrences × mean duration), or coefficient of variation. Use `-sa` to reverse the sort order.
+The summary table is sorted by occurrence count by default. Use `-so` to rank messages by a different metric — total duration, latency statistics (min/max/mean/stddev/cv), per-percentile latency (p1–p99999), distribution-shape moments (iqr/skewness/kurtosis/bimodality_coef), bytes, count, or impact (occurrences × mean duration). Use `-sa` to reverse the sort order.
 
 | Option | Description |
 |--------|-------------|
-| `-so, --sort-on <field>` | Choose which metric to rank messages by in the summary (`occurrences`, `duration`, `min`, `mean`, `max`, `stddev`, `bytes`, `count`, `impact`, `cv`) |
+| `-so, --sort-on <field>` | Choose which metric to rank messages by in the summary. Valid values are grouped below. |
 | `-sa, --sort-ascending` | Reverse the sort order to show lowest values first |
+
+| Group | Values |
+|-------|--------|
+| Aggregates | `occurrences`, `duration` (alias `time`), `bytes` (alias `size`), `mean_bytes`, `count`, `count_occurrences`, `count_min`, `count_mean`, `count_max`, `impact` |
+| Latency stats | `min`, `mean` (alias `avg`), `max`, `stddev` (alias `std_dev`), `cv` |
+| Percentile latency | `p1`, `p5`, `p10`, `p25`, `p50`, `p75`, `p90`, `p95`, `p99`, `p999`, `p9999`, `p99999` |
+| Distribution shape | `iqr`, `skewness`, `kurtosis`, `bimodality_coef` |
 
 ```bash
 # Rank messages by total duration (heaviest hitters)
 ltl -so duration access.log
 # Find messages with the highest max latency
 ltl -so max access.log
+# Find the worst tail-latency offenders
+ltl -so p999 access.log
+# Surface likely multimodal distributions (cache-hit vs cache-miss patterns)
+ltl -so bimodality_coef access.log
 # Find the least frequent messages
 ltl -so occurrences -sa access.log
 ```
 
-### Percentile mode
+Percentile and shape metrics require a sufficient sample size to be statistically meaningful: `p999` ≥ ~1k, `p9999` ≥ ~100k, `p99999` ≥ ~1M. `bimodality_coef` is a *screening* statistic — at n < 100 small-sample noise can produce false positives. Skewness/kurtosis/bimodality_coef are undefined (blank in CSV, treated as 0 for sort ordering) when n < 4.
 
-ltl computes latency percentiles for the summary table, CSV output, per-time-bucket statistics, heatmap markers, and histogram indicators. Under the unified percentile contract (issue [#187](https://github.com/gregeva/logtimeline/issues/187)), these consumers share a single bin-counter substrate with log-spaced bin geometry and HdrHistogram-style auto-resize. Bin precision is tunable; the locked default (53 buckets per decade, ~1.3% precision) matches OpenTelemetry's Scale-4 analog and is appropriate for the vast majority of analyses.
+### Percentile data model and algorithm
 
-When this matters: at the default precision, percentile values like P50 / P99 are within ~1.3% of their true sort-based values. Increasing precision reduces binning error proportionally at the cost of memory per partition (~2.1 KB per partition at default precision; scales linearly with bpd).
+ltl computes percentiles from one of two data models, each with its own algorithm. The two models produce different values for the same input, particularly in the tail; this is the data model, not a precision deviation. See `ltl --explain percentiles` for the deeper explanation, when to use which, and the trade-offs.
+
+**Raw values data model.** Every observation is held in memory and the percentile is selected by **nearest-rank** — an actually-observed sample at the computed rank in the sorted array. The returned value is a real request that happened. Scales with observation count.
+
+**Bin counter data model.** Observations are accumulated into log-spaced bins and the percentile is computed by **exponential interpolation within the bucket** — a synthesised value placed inside the bin that contains the target rank, on the log scale spanning the bin's lower and upper edges. The returned value is generally not an observed sample. Bin resolution sets the interpolation tightness; it is governed by the precision lever (see *Tuning precision* below). Scales with partition count rather than observation count.
+
+**Per-surface defaults.** Four consumer surfaces use percentile output; each has a default data model today:
+
+| # | Surface | Default Data Model |
+|---|---|---|
+| 1 | Histogram statistics (consumed by `-hg`) | bin counter |
+| 2 | Heatmap statistics (consumed by `-hm`) | bin counter |
+| 3 | Per-message-key statistics | raw values |
+| 4 | Per-time-bucket statistics | raw values |
+
+**Pinning the data model.** The selectors below override the per-surface default when you need certainty (test harnesses, reproducibility, A/B comparison). The omnibus `-dm` flag pins every surface; per-surface flags override `-dm` for their surface.
 
 | Option | Description |
 |--------|-------------|
-| `-pp, --percentile-precision <N>` | Precision tier 1..9 (default: 5). Higher tiers give tighter percentile values at the cost of more memory per partition. |
-| `-pbpd, --percentile-buckets-per-decade <N>` | Buckets per decade directly (default: 53; valid 4..616). Overrides `--percentile-precision` when both supplied. |
-| `-ep, --exact-percentiles` | Revert to exact sort-based percentile computation. Deprecated; safety net retained from the bin-counter migration. |
+| `-dm, --data-model <raw\|bin>` | Pin the data model for every surface (overridden by any per-surface flag below). |
+| `-hgdm, --histogram-data-model <raw\|bin>` | Pin the histogram surface's data model. |
+| `-hmdm, --heatmap-data-model <raw\|bin>` | Pin the heatmap surface's data model. |
+| `-mdm, --message-stats-data-model <raw\|bin>` | Pin the per-message-key statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters plus Welford-Pébay sidecar accumulators for exact-value statistics. Default is `raw`. |
+| `-bdm, --bucket-stats-data-model <raw\|bin>` | Pin the per-time-bucket statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters plus Welford-Pébay sidecar accumulators for exact-value statistics. Default is `raw`. |
 
-**Precision (`-pp` / `-pbpd`).** The default (tier 5 / 53 bpd) is appropriate for the vast majority of analyses — percentile values land very close to their true sort-based values. Raise it (tier 6–9, or `-pbpd` values up to 616) when you need tighter precision on tail percentiles (P99.9, P99.99) or when comparing two runs whose true percentiles differ by very small amounts; lower it (tier 1–4) to trade percentile precision for less memory on per-message percentile computation (summary table, CSV output), which fans out to one partition per unique message and so scales with message diversity. The histogram and heatmap consumers are unaffected — they use their own internal precision tuned for display rendering and ignore this knob.
+Per-surface flag overrides `-dm`; `-dm` overrides the per-surface default. Invalid values (anything other than `raw` or `bin`) cause ltl to exit at option-parse time with a clear error. Conflicting flags on the same axis follow standard last-one-wins ordering.
 
-Use `-V` to inspect the active settings. The `=== BIN-COUNTER MODE ===` section reports the resolved precision, the source annotation (default, flag, or override), per-consumer state, and per-quantile audit codes (`out_of_range_bounded: pN=none|low|high`).
+**Tuning precision.** A single lever sets how finely the bin counter surfaces resolve. Raise it for tighter values in the tail percentiles (`p999`, `p9999`); lower it to reduce per-partition memory cost. The default suits most analyses — you rarely need to touch it.
+
+| Option | Description |
+|--------|-------------|
+| `-dmp, --data-model-precision <N>` | Precision tier 1..9 (default: 5). Higher tiers give finer resolution on the bin counter surfaces at higher memory cost. |
+
+Precision increases in stages across the surfaces as you raise the tier, so the lever buys fidelity where it costs least first. Above the default, the histogram and heatmap are already at their finest, and the per-time-bucket statistics sharpen ahead of the per-message-key statistics — the per-message surface is the highest-cost consumer (one partition per unique message), so it reaches full resolution last. Below the default, every bin counter surface coarsens, including the histogram and heatmap shape.
+
+Use `-V histogram-bin-counters` to inspect the resolved tier and its source, and `-V percentile-algorithm` to see each surface's resolved resolution.
 
 ```bash
-# Default precision (5 / 53 bpd)
+# Default behavior (per-surface defaults above)
 ltl access.log
 
-# Higher precision tier for tight outlier analysis
-ltl -pp 7 access.log
+# Higher precision tier for tight tail-percentile analysis
+ltl -dmp 7 access.log
 
-# Direct buckets-per-decade override
-ltl -pbpd 100 access.log
+# Pin every surface to the raw values data model
+ltl -dm raw access.log
 
-# Inspect the resolved settings
-ltl -V access.log | grep -A 5 'BIN-COUNTER MODE'
+# Override just the histogram surface; leave the heatmap on its default
+ltl -hgdm raw -hm duration -hg access.log
 
-# Opt out to exact (sort-based) percentiles for byte-exact comparison
-ltl -ep access.log
+# Inspect resolved settings
+ltl -V histogram-bin-counters access.log
 ```
+
+```bash
+# Pin every surface to the raw reduction path
+ltl -dm raw access.log
+
+# Override just the histogram surface; leave the heatmap on its default
+ltl -hgdm raw -hm duration -hg access.log
+
+# Inspect which selectors are active for this run
+ltl -V runtime-config -dm raw -hgdm bin access.log
+```
+
+### Distribution shape (CSV columns)
+
+The `-o` CSV outputs (MESSAGES and STATS) carry three distribution-shape statistics alongside the percentile columns, enabling characterization of a latency distribution's *shape* — not just its quantile values:
+
+| Column | Range | Interpretation |
+|---|---|---|
+| `skewness` | typically -3 to +3 | Distribution asymmetry. 0 = symmetric (e.g. Gaussian); positive = right tail heavier (typical for latencies); negative = left tail heavier. |
+| `kurtosis` | typically -2 to ~30 | Excess kurtosis (normal = 0). Positive = heavier tails than a Gaussian; high values (> 10) indicate extreme outliers dominate. |
+| `bimodality_coef` | 0 to 1 | Sarle's bimodality coefficient. **Values > 5/9 ≈ 0.555 flag suspect multimodal distributions** (e.g. cache-hit vs. cache-miss populations within a single API). |
+
+Sample-size requirements:
+- All three statistics require `n ≥ 4`; emitted blank otherwise (BC denominator requires `n > 3`).
+- `bimodality_coef` is a *screening* statistic, not a test. At `n < 100` small-sample noise can produce false positives — treat low-sample bimodality flags as exploratory.
+- `p9999` is meaningful at `n ≥ ~100,000`; below that, it collapses toward `max`.
+- `p99999` is meaningful at `n ≥ ~1,000,000`; below that, it collapses toward `max` and carries no signal independent of `p9999`.
+
+The body percentiles `p5`, `p10`, and `p25` and the precomputed interquartile range `iqr` (= `p75 − p25`) are emitted in both CSV files, completing the body/tail percentile pairing recommended in the Google SRE book.
+
+For detailed explanations of every statistic ltl emits — including interpretation tables, operational use cases, and worked examples — run `ltl --explain <topic>` (e.g. `ltl --explain kurtosis`, `ltl --explain bimodality_coef`, `ltl --explain percentiles`). The full reference is also available on the [Statistics Reference](Statistics-Reference) wiki page. Use `ltl --help statistics` for a one-line index of all statistics, or `ltl --explain` (no argument) for the list of available `--explain` topics.
 
 ### Heatmap
 
@@ -235,9 +311,7 @@ Histograms show the overall distribution shape of a metric across the entire tim
 | `-hg, --histogram [metric]` | Show an overall distribution histogram after the bar graph (`duration`, `bytes`, or `count`) |
 | `-hgw, --histogram-width <N>` | Histogram width as percentage of terminal (default: 95) |
 | `-hgh, --histogram-height <N>` | Histogram height in rows (default: 8) |
-| `-hgbpd, --histogram-buckets-per-decade <N>` | Bar resolution: bars per order-of-magnitude of value range (default: 8) |
-
-**Bar resolution (`-hgbpd`).** The default of 8 gives roughly the bar density of the legacy histogram and is suitable for most analyses. Raise it (16, 32, 53) when the default's bars look too wide to distinguish distinct modes in the data — each step gives narrower, more numerous bars and a more detailed distribution shape, at the cost of proportionally more memory during analysis. Values above 53 rarely add visible detail at typical histogram heights.
+| `-hgb, --histogram-buckets <N>` | Override total histogram bucket count (default: 0 = auto-calculate) |
 
 ```bash
 # Show duration and bytes histograms side by side
@@ -246,8 +320,6 @@ ltl -hg duration,bytes access.log
 ltl -hg duration -hgh 15 access.log
 # All available metric histograms
 ltl -hg access.log
-# Higher bar resolution to distinguish closely-spaced modes
-ltl -hg duration -hgbpd 16 access.log
 ```
 
 ### User-Defined Metrics
@@ -295,6 +367,50 @@ ltl -tpas app.log
 # Track multiple thread pools
 ltl -tpa "http-" -tpa "async-" app.log
 ```
+
+### Verbose output (`-V`)
+
+The `-V` flag emits diagnostic sections describing internal state — effective configuration (CLI + environment), index pre-seed lookups, bin-counter feature state, message-grouping statistics, log-format detection, heatmap palette resolution, benchmark data. Each section is named and bracketed by `=== <name> ===` / `=== END <name> ===` markers so it can be extracted by `grep`, `sed`, or `awk`.
+
+| Form | Behavior |
+|------|----------|
+| `-V` (no argument) | Emit all known sections |
+| `-V all` | Same as bare `-V` (explicit) |
+| `-V list` | Print known section names + descriptions, exit 0 |
+| `-V <name>` | Emit only the named section |
+| `-V <a>,<b>,<c>` | Emit a comma-separated list of sections |
+| `-V <a> -V <b>` | Repeat the flag — equivalent to `-V a,b` |
+| `-V <unknown>` | Warn to stderr, continue with remaining valid sections |
+
+Section names are stable across releases — renames are breaking changes governed by `tests/HARNESS-DESIGN.md`. Discover the current set with `ltl -V list`.
+
+```bash
+# Inspect the bin-counter feature state for a run
+ltl -V histogram-bin-counters access.log
+
+# Capture benchmark TSV for a regression run
+ltl -V benchmark-data access.log
+
+# Capture two sections at once
+ltl -V runtime-config,benchmark-data access.log
+
+# Discover the available sections
+ltl -V list
+```
+
+Section content is governed by per-section stability contracts — additions are non-breaking, renames and removals are breaking. Test harnesses consume these sections; see `tests/HARNESS-DESIGN.md` for the contributor-facing contract.
+
+### Stderr warnings
+
+`ltl` emits warnings to stderr when an input is accepted but resolved in a way that may surprise the user. These do not affect exit codes — the run proceeds — but pipelines that capture stderr may need to filter them. The warnings exist to make previously-silent overrides observable; suppressing them by default would defeat the purpose.
+
+| Trigger | Warning |
+|---------|---------|
+| `-g <non-numeric>` (e.g. `-g logfile.log`) | The non-numeric value is treated as a positional argument and the default similarity threshold (85) is applied. |
+| `-hm <unknown-metric>` without any `-udm` configured (e.g. `-hm bogus`) | The value is treated as a positional argument and the default heatmap metric (`duration`) is applied. |
+| `--data-model`, `--histogram-data-model`, `--heatmap-data-model`, `--message-stats-data-model`, or `--bucket-stats-data-model` supplied with a value other than `raw` or `bin` | ltl exits with `<flag>: '<value>' is not a valid data model; valid values are 'raw' and 'bin'`. |
+
+To inspect the resolved configuration after warnings have fired, use `-V runtime-config` and read the `command-line` and `environment-variable` sub-sections.
 
 ## Environment
 
