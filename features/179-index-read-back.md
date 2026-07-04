@@ -127,9 +127,13 @@ The section content must be sufficient for an external test to assert that read-
 === INDEX READ-BACK ===
 index_used: yes|no
 index_filter_signature: <serialized filters or "-">
+heatmap_preseed_min: <value or "-">    (only when a heatmap is active)
+heatmap_preseed_max: <value or "-">    (only when a heatmap is active)
 ```
 
 `index_filter_signature` is the run's filter signature. Always emitted. Lets tests confirm the run was identified with the expected filter context.
+
+`heatmap_preseed_min` / `heatmap_preseed_max` are the live heatmap bounds after any index pre-seed, emitted only when a heatmap is active. They are the values that scale the heatmap axis, and let tests confirm that a filtered run is never seeded with a whole-file (Tier-2) maximum.
 
 #### Layer 2 — Per-file lookup result
 
@@ -210,7 +214,9 @@ Each input file is checked independently for tier matching and freshness. Pre-se
 
 Filters are the *primary* reason this feature has tiered lookup. A filtered run looks for a Tier 1 selection entry matching `(file_path, filter_signature)`. This is the most-specific match and the most accurate pre-seed.
 
-Filter signature comparison is exact-string against the value produced by the existing serialization. Different filter values → different signatures → different selection entries. The signature is alphabetically sorted and URL-encoded by the existing write side; read-back reproduces the same signature for the current run and compares as exact strings.
+Filter signature comparison is exact-string against the value produced by the existing serialization. Different filter values → different signatures → different selection entries. The signature is alphabetically sorted and URL-encoded by the existing write side; read-back reproduces the same signature for the current run and compares as exact strings. Repeated multi-value filter flags are canonicalized by sorting the values within each flag, so the same logical selection produces one identical signature regardless of the order the values were given on the command line (e.g. `-e A -e B` and `-e B -e A` match the same selection entry).
+
+A filtered run that does not find a matching selection entry falls back to the file entry (Tier 2). The file entry's bounds describe the *whole file*, which over-states a filtered population, so a filtered Tier-2 run is **not** pre-seeded from the file entry's bounds for heatmap scaling — the live pass discovers the filtered bounds directly, exactly as an un-indexed run would. (An unfiltered run's file bounds equal its filtered bounds, so unfiltered Tier-2 pre-seeding is retained.)
 
 ### With unfiltered runs
 
@@ -225,6 +231,7 @@ An unfiltered run has filter signature `-`. Per the multi-file rule, an unfilter
 | `ltl-index.csv` present but malformed (CSV parse error / truncated) | Warn to stderr; no pre-seed; do not crash. End-of-run write proceeds as today (the existing write logic handles the corrupt case by overwriting). |
 | Index entry missing one or more bound columns (`-` placeholder) | Treat the missing column as "no pre-seed for that bound"; pre-seed any other columns that are present. |
 | Filter signature differs by encoding-equivalent strings (e.g., legacy non-encoded entry) | Treat as no Tier 1 match — fall through to Tier 2. The on-disk entry will be replaced on next write. |
+| Selection entry written before intra-flag value canonicalization (its `filters` key used the pre-canonicalization value order) | No longer matches the canonical signature — falls through to Tier 2 (which is now safe for filtered runs) and is rebuilt in canonical form on the next end-of-run write. Self-healing; no migration needed. |
 | File mtime changes between startup read and end-of-run write | The on-disk file changed mid-run. Today's write side captures live `file_mtime` at write time, so the index reflects actual file state. Drift detection unaffected (it compares pre-seed vs live, not against on-disk mtime). |
 | Extremely fast run where mtime resolution doesn't change | Freshness passes correctly because `file_size` is also compared. |
 | User deletes `ltl-index.csv` during the run | End-of-run write recreates it as today. No special handling needed. |

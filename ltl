@@ -1145,11 +1145,15 @@ sub serialize_filters {
     push @parts, "-cmin=$filter_count_min"        if defined $filter_count_min;
     push @parts, "-dmax=$filter_duration_max"    if defined $filter_duration_max;
     push @parts, "-dmin=$filter_duration_min"     if defined $filter_duration_min;
-    push @parts, "-e=" . $url_encode->(join(',', @exclude_args))   if @exclude_args;
-    push @parts, "-ef=" . $url_encode->(join(',', @exclude_files)) if @exclude_files;
-    push @parts, "-et=" . $url_encode->($filter_range_end)         if $filter_range_end ne "";
-    push @parts, "-i=" . $url_encode->(join(',', @include_args))   if @include_args;
-    push @parts, "-if=" . $url_encode->(join(',', @include_files)) if @include_files;
+    # Sort the values within each repeated flag so the same logical selection
+    # always produces one identical signature regardless of the order the
+    # values were given on the command line (Issue #310). Cross-flag order is
+    # already fixed by the push order above.
+    push @parts, "-e=" . $url_encode->(join(',', sort @exclude_args))   if @exclude_args;
+    push @parts, "-ef=" . $url_encode->(join(',', sort @exclude_files)) if @exclude_files;
+    push @parts, "-et=" . $url_encode->($filter_range_end)              if $filter_range_end ne "";
+    push @parts, "-i=" . $url_encode->(join(',', sort @include_args))   if @include_args;
+    push @parts, "-if=" . $url_encode->(join(',', sort @include_files)) if @include_files;
     push @parts, "-st=" . $url_encode->($filter_range_start)       if $filter_range_start ne "";
     return join(';', @parts);
 }
@@ -1352,7 +1356,19 @@ sub read_index_file {
         elsif ($heatmap_metric eq 'count')    { $hm_metric_col = 'count';    }
         # UDM heatmap metrics are not in the index schema; skip.
     }
-    if ($hm_metric_col
+    # Only pre-seed the live heatmap bounds when the served bounds are
+    # population-correct for THIS run (Issue #310). The selection tier stores
+    # bounds over the filtered population; an unfiltered run's file bounds
+    # equal its filtered bounds. A FILTERED run that fell back to the file
+    # (Tier-2) row would otherwise be seeded with the whole-file max, which
+    # over-states the filtered population — and because the parse pass only
+    # grows the max, that inflated value would survive onto the heatmap axis.
+    # In that case skip the copy and let the live pass discover the filtered
+    # max cold (identical to a no-index run).
+    my $preseed_bounds_population_correct =
+        ($active_tier eq 'tier_1_selection') || ($index_filter_sig eq '-');
+    if ($preseed_bounds_population_correct
+        && $hm_metric_col
         && defined $index_aggregated{"${hm_metric_col}_min"}
         && defined $index_aggregated{"${hm_metric_col}_max"}) {
         $heatmap_min = $index_aggregated{"${hm_metric_col}_min"}{value} + 0;
@@ -1790,6 +1806,15 @@ sub emit_index_readback_verbose {
     push @verbose_output, "=== index-read-back ===";
     push @verbose_output, "index_used: " . ($index_used ? "yes" : "no");
     push @verbose_output, "index_filter_signature: $index_filter_sig";
+
+    # Issue #310: the live heatmap bounds after any index pre-seed. This is the
+    # value that scales the heatmap axis; exposing it lets a harness assert that
+    # a filtered run is never seeded with a whole-file (Tier-2) maximum. Emitted
+    # only when the heatmap is active (otherwise these globals are unused).
+    if ($heatmap_enabled) {
+        push @verbose_output, "heatmap_preseed_min: " . (defined $heatmap_min ? $heatmap_min : '-');
+        push @verbose_output, "heatmap_preseed_max: " . (defined $heatmap_max ? $heatmap_max : '-');
+    }
 
     # Per-file lookup blocks (always emitted under -V, in input order).
     for my $file (@in_files) {

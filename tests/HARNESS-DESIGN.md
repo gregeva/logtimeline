@@ -97,7 +97,7 @@ This list prevents collisions across parallel work. Update it when adding a new 
 
 **Implemented:**
 - `runtime-config` — effective runtime configuration: LTL_CONFIG and merged include/exclude/highlight/threadpool regexes
-- `index-read-back` — index pre-seed lookups, freshness, aggregated bounds, drift detection (Issue #179)
+- `index-read-back` — index pre-seed lookups, freshness, aggregated bounds, drift detection (Issue #179); `heatmap_preseed_min`/`heatmap_preseed_max` expose the live post-preseed heatmap bounds when a heatmap is active (Issue #310)
 - `histogram-array` — raw-array histogram dimensions; active when a surface resolves to the raw values data model
 - `histogram-bin-counters` — HDR-style bin-counter histogram state and finalized histogram dimensions (Issue #187)
 - `message-grouping` — fuzzy message consolidation (Issue #96)

@@ -965,6 +965,90 @@ scenario_expired_selection_entry() {
         contract    'features/179-index-read-back.md section Interactions with existing features section "With write side (#46)" - expiration semantics delegated to #46; section Behavior - read-back does not expire'
 }
 
+scenario_signature_canonicalization() {
+    current_scenario="signature-canonicalization"
+    echo "[$current_scenario]"
+
+    # The same logical selection expressed with the values of a repeated flag
+    # in a different order must produce one identical filter signature, so the
+    # selection row written by the first run re-matches (Tier 1) on the second.
+    # Use exclude values that actually match rows in the log so a selection row
+    # is written and can be re-matched.
+    local outA outB sigA sigB
+    outA=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -e GET -e POST "$ACCESS_LOG")
+    sigA=$(extract_v_value "$outA" 'index_filter_signature')
+
+    outB=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -e POST -e GET "$ACCESS_LOG")
+    sigB=$(extract_v_value "$outB" 'index_filter_signature')
+
+    assert_command \
+        command     "[ \"$sigA\" = \"$sigB\" ]" \
+        label       "permuted intra-flag order yields identical signature ($sigA)" \
+        asserts     'serialize_filters() sorts the values within each repeated flag, so the same logical selection produces one byte-identical filter signature regardless of the order the values were given on the command line' \
+        produced_by 'serialize_filters() in ltl (intra-flag value sort), surfaced as index_filter_signature by emit_index_readback_verbose()' \
+        contract    'features/179-index-read-back.md section "With filtered runs" - signature is canonical and compared as exact strings; Issue #310 Fix B'
+
+    assert_line "$outB" \
+        pattern     '^  lookup: tier_1_selection$' \
+        asserts     'The second run, with the same selection in a different value order, re-matches the selection row written by the first run (Tier 1) rather than falling through to the file row' \
+        produced_by 'read_index_file() in ltl (selection-row match on canonical signature)' \
+        contract    'features/179-index-read-back.md section "With filtered runs"; Issue #310 Fix B'
+}
+
+scenario_filtered_tier2_no_leak() {
+    current_scenario="filtered-tier2-no-leak"
+    echo "[$current_scenario]"
+
+    # A filtered run that falls back to Tier 2 (file row) must NOT be pre-seeded
+    # with the whole-file maximum. Force Tier 2 by removing the -dmin=50
+    # selection row, then inflate the file row's duration_max far above the
+    # filtered population's true max. The served heatmap max must be the
+    # filtered max, not the inflated file-row value, and must be deterministic.
+    seed_from_fixture
+
+    # The true filtered max for -dmin=50 is stored on the -dmin=50 selection
+    # row (1297 in the fixture). Read it BEFORE deleting that row, using the
+    # harness's CSV reader helper.
+    local filtered_max
+    filtered_max=$(read_index_column duration_max "entry_type=selection AND filters=-dmin=50 AND file_path=$ACCESS_LOG")
+
+    delete_index_rows "entry_type=selection AND filters=-dmin=50"
+    edit_index_row "entry_type=file AND file_path=$ACCESS_LOG" "duration_max=999999999"
+
+    # Both runs must fall back to Tier 2. Because each run's end-of-run write
+    # would append a -dmin=50 selection row (making the next run hit Tier 1),
+    # re-delete that selection row and re-inflate the file row before the
+    # second run so it exercises the same Tier-2 path.
+    local out1 out2 max1 max2
+    out1=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -hm duration -dmin 50 "$ACCESS_LOG")
+    max1=$(extract_v_value "$out1" 'heatmap_preseed_max')
+
+    delete_index_rows "entry_type=selection AND filters=-dmin=50"
+    edit_index_row "entry_type=file AND file_path=$ACCESS_LOG" "duration_max=999999999"
+    out2=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -hm duration -dmin 50 "$ACCESS_LOG")
+    max2=$(extract_v_value "$out2" 'heatmap_preseed_max')
+
+    assert_line "$out1" \
+        pattern     '^  lookup: tier_2_file$' \
+        asserts     'The filtered run genuinely falls back to the file row (Tier 2), so this scenario exercises the leak path - the fix suppresses the leak without changing the tier' \
+        produced_by 'read_index_file() in ltl (Tier 2 fallback when no matching selection row)' \
+        contract    'features/179-index-read-back.md section Behavior - Pre-seeded values (Tier 2 fallback)'
+
+    assert_command \
+        command     "[ \"$max1\" = \"$filtered_max\" ]" \
+        label       "filtered Tier-2 heatmap max is the filtered max ($max1), not the inflated file-row value" \
+        asserts     'A filtered run that falls back to Tier 2 is NOT pre-seeded with the whole-file maximum; the live pass discovers the filtered max cold, so the served heatmap max equals the filtered population max even when the file row holds a much larger (unfiltered or stale) value' \
+        produced_by 'read_index_file() in ltl (tier-gated heatmap pre-seed) + emit_index_readback_verbose() (heatmap_preseed_max)' \
+        contract    'features/179-index-read-back.md section Motivation - file-entry bounds over-state a filtered run; Issue #310 Fix A'
+
+    assert_command \
+        command     "[ \"$max1\" = \"$max2\" ]" \
+        label       "served heatmap max is deterministic across runs ($max1)" \
+        asserts     'The served heatmap max is identical across repeated invocations under hash-order perturbation, so the same filtered command reproduces the same auto-scaled maximum every run' \
+        produced_by 'read_index_file() in ltl (tier-gated pre-seed) + live parse pass' \
+        contract    'Issue #310 - the heatmap auto-scaled maximum must be deterministic for identical input'
+}
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -995,6 +1079,8 @@ for s in \
     scenario_malformed_index \
     scenario_missing_bound_column \
     scenario_expired_selection_entry \
+    scenario_signature_canonicalization \
+    scenario_filtered_tier2_no_leak \
     ; do
     echo ""
     in_scenario_dir "$s"
