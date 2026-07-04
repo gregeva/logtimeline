@@ -42,7 +42,7 @@ use POSIX qw(strftime floor);
 use Time::Piece;
 use Time::Local qw(timegm);
 use Term::ReadKey;
-use Getopt::Long qw(:config no_ignore_case);
+use Getopt::Long qw(:config no_ignore_case no_auto_abbrev);
 use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
 use Devel::Size qw(total_size);
@@ -3974,10 +3974,13 @@ sub print_help {
 
     # INFO
     $out .= help_heading("INFO");
-    $out .= help_opt("-v,   --version",       "Print the version number and exit");
+    $out .= help_opt("-v,   --version",       "Print the version number and exit. Takes precedence over normal processing: prints and exits without reading any file.");
     $out .= help_opt("      --help [<topic>]","Show this help screen and exit. With 'statistics', shows the grouped index of statistics emitted in the summary and CSV.");
     $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic. Bare --explain lists available topics. Aliases shared with -so (avg, stddev, p1..p99999).");
     $out .= help_opt("-mem, --memory-usage",  "Display memory consumption statistics after processing completes");
+    $out .= "\n";
+    $out .= help_wrap("--help, --explain, and --version print their output and exit immediately, before any file is read or any other option is validated. When more than one is given, --help wins over --explain, which wins over --version.", indent => 2, first_indent => 2) . "\n";
+    $out .= help_wrap("Options must be given by their full long name or a documented short form; unique-prefix abbreviations of long options are not accepted.", indent => 2, first_indent => 2) . "\n";
 
     $out .= help_heading("EXAMPLES");
     my $ex_desc_col = 68;  # description column for examples (commands are longer than options)
@@ -6566,6 +6569,132 @@ sub handle_histogram_option {
     # If no specific metrics given, will default to all available after parsing
 }
 
+# Informational options (--help, --explain, --version) print their output and
+# exit immediately. They are dispatched from a raw-@ARGV scan BEFORE GetOptions
+# so they take precedence over option parsing and over every downstream
+# validation — a malformed companion option cannot suppress them. When more
+# than one is present the fixed priority is help > explain > version,
+# independent of command-line position; the first match in that order wins and
+# the process exits.
+sub dispatch_informational_options {
+    my ($argv) = @_;
+    my @args = @$argv;   # scan a copy; never mutate the caller's @ARGV
+
+    # The only recognized --help topic keyword; anything else after a bare
+    # --help is a positional (e.g. a logfile), not a topic.
+    my %help_topics = ( statistics => 1 );
+
+    my ($want_help, $help_topic)       = (0, '');
+    my ($want_explain, $explain_topic) = (0, '');
+    my $want_version                   = 0;
+
+    for (my $i = 0; $i < @args; $i++) {
+        my $tok = $args[$i];
+
+        # --help / -help, with optional =topic or a following topic token.
+        if ($tok eq '--help' || $tok eq '-help') {
+            $want_help = 1;
+            # Help has exactly one valid topic keyword (statistics); a bare
+            # following word is consumed as a topic ONLY when it is that
+            # keyword, otherwise it is left as a positional. This is what makes
+            # `--help <logfile>` render full help instead of erroring.
+            my $next = $args[$i + 1];
+            if (defined $next && $next !~ /^-/ && $help_topics{$next}) {
+                $help_topic = $next;
+            }
+        }
+        elsif ($tok =~ /^--help=(.*)$/s) {
+            $want_help  = 1;
+            $help_topic = $1;
+        }
+        # --explain / -ex, with optional =topic or a following topic token.
+        elsif ($tok eq '--explain' || $tok eq '-ex') {
+            $want_explain = 1;
+            # Explain's topic namespace is large (all -so/-explain aliases), so
+            # a bare following non-flag word is treated as a topic candidate and
+            # validated below (unknown -> error), matching existing behavior.
+            my $next = $args[$i + 1];
+            if (defined $next && $next !~ /^-/) {
+                $explain_topic = $next;
+            }
+        }
+        elsif ($tok =~ /^(?:--explain|-ex)=(.*)$/s) {
+            $want_explain  = 1;
+            $explain_topic = $1;
+        }
+        # --version / -v (case-sensitive: -v only, never -V).
+        elsif ($tok eq '--version' || $tok eq '-v') {
+            $want_version = 1;
+        }
+    }
+
+    # Fixed priority: help > explain > version.
+    if ($want_help) {
+        if ($help_topic eq '') {
+            print_help();            # already paginated internally
+        }
+        elsif ($help_topic eq 'statistics') {
+            my $out = print_help_statistics();
+            $out =~ s/^\n+//;
+            pipe_to_pager($out);
+        }
+        else {
+            die print_usage("unknown --help topic '$help_topic' (try: statistics)");
+        }
+        exit 0;
+    }
+    if ($want_explain) {
+        my $out;
+        if ($explain_topic eq '') {
+            $out = print_explain_registry();
+        }
+        else {
+            my $topic = resolve_explain_topic($explain_topic);
+            if (!defined $topic) {
+                die print_usage("unknown --explain topic '$explain_topic' (try: 'ltl --explain' for the list)");
+            }
+            $out = print_explain_topic($topic);
+        }
+        $out =~ s/^\n+//;
+        pipe_to_pager($out);
+        exit 0;
+    }
+    if ($want_version) {
+        print_version();
+        exit 0;
+    }
+
+    return;
+}
+
+# Turn Getopt::Long's captured parse-failure diagnostics into a single,
+# specific, user-facing message that names the offending option/value. Getopt
+# reports the option name without dashes; _dash_prefix restores the form the
+# user typed. The generic "required options not provided" wording survives only
+# as the no-match fallback, so it is no longer shown for the common
+# unknown-option case (where the required options were in fact provided).
+sub _dash_prefix {
+    my ($name) = @_;
+    return (length($name) == 1 ? "-$name" : "--$name");
+}
+
+sub classify_option_error {
+    my ($warnings) = @_;
+    for my $w (@{ $warnings || [] }) {
+        if ($w =~ /^Unknown option:\s+(\S+)/) {
+            return "unknown option '" . _dash_prefix($1) . "'";
+        }
+        if ($w =~ /^Option\s+(\S+)\s+requires an argument/) {
+            return "option '" . _dash_prefix($1) . "' requires a value";
+        }
+        if ($w =~ /^Option\s+(\S+)\s+is ambiguous/) {
+            # Should not fire once no_auto_abbrev is set; kept as a safety net.
+            return "unknown option '" . _dash_prefix($1) . "'";
+        }
+    }
+    return "required options not provided";
+}
+
 sub adapt_to_command_line_options {
     @ORIGINAL_ARGV = @ARGV;
 
@@ -6586,7 +6715,22 @@ sub adapt_to_command_line_options {
 
     @ARGV = map { ($_ eq '-?' || $_ eq '/help' || $_ eq '/?') ? '--help' : $_ } @ARGV;
 
-    GetOptions(
+    # Informational options (--help, --explain, --version) print their output
+    # and exit immediately, taking precedence over option parsing and over any
+    # other validation. Dispatching here — before GetOptions — means a
+    # malformed companion option (e.g. `--version -b 5`) cannot suppress the
+    # informational output. When more than one is present, the fixed priority
+    # is help > explain > version, independent of command-line position.
+    dispatch_informational_options(\@ARGV);
+
+    # Capture Getopt::Long's own diagnostics (which it would otherwise warn
+    # straight to stderr) so a parse failure can be reported as a specific,
+    # named error rather than the misleading generic "required options not
+    # provided". See classify_option_error().
+    my @getopt_warnings;
+    my $getopt_ok = do {
+        local $SIG{__WARN__} = sub { push @getopt_warnings, $_[0]; };
+        GetOptions(
         'bucket-size|bs=i' => \$time_bucket_size,
         'pause|p' => \$pause_output,
         'start|st=s' => \$filter_range_start,
@@ -6671,7 +6815,11 @@ sub adapt_to_command_line_options {
         'validate-layout' => \$validate_layout,                                     # hidden
         'help:s'       => \$show_help,                                              # hidden — special-cased; legacy aliases -?/--help via PreProcessor. Optional arg: '' = full help; 'statistics' = stats index; other = error (Issue #261).
         'explain|ex:s' => \$explain_arg,                                            # Issue #261: optional arg: '' = topic registry; <topic> = long-form explanation. Aliases shared with -so (avg, stddev, p1..p99999).
-    ) or die print_usage( "required options not provided" );
+        );
+    };
+    unless ($getopt_ok) {
+        die print_usage( classify_option_error(\@getopt_warnings) );
+    }
 
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
     # GetOptions :s@) into %verbose_sections_requested. See HARNESS-DESIGN.md
@@ -6922,49 +7070,9 @@ sub adapt_to_command_line_options {
     # features/225-test-harness-coverage-gaps.md § #231.
     emit_runtime_config_verbose();
 
-    if( $print_version ) {
-        print_version();
-        exit;
-    }
-
-    # --help dispatch (Issue #261). $show_help is defined when --help was
-    # given (bare = ''; --help statistics = 'statistics'; --help <other> = error).
-    # All help variants pipe through the pager so long output (esp. the
-    # percentiles topic) is browsable. The leading newline emitted by
-    # help_heading is stripped to avoid double-blanks against the banner.
-    if ( defined $show_help ) {
-        if ( $show_help eq '' ) {
-            print_help();         # already paginated internally
-            exit 0;
-        }
-        elsif ( $show_help eq 'statistics' ) {
-            my $out = print_help_statistics();
-            $out =~ s/^\n+//;     # strip leading blank lines (Issue #261)
-            pipe_to_pager($out);
-            exit 0;
-        }
-        else {
-            die print_usage("unknown --help topic '$show_help' (try: statistics)");
-        }
-    }
-
-    # --explain dispatch (Issue #261). $explain_arg is defined when --explain
-    # was given (bare = ''; --explain <topic> = topic name).
-    if ( defined $explain_arg ) {
-        my $out;
-        if ( $explain_arg eq '' ) {
-            $out = print_explain_registry();
-        } else {
-            my $topic = resolve_explain_topic($explain_arg);
-            if ( !defined $topic ) {
-                die print_usage("unknown --explain topic '$explain_arg' (try: 'ltl --explain' for the list)");
-            }
-            $out = print_explain_topic($topic);
-        }
-        $out =~ s/^\n+//;         # strip leading blank lines (Issue #261)
-        pipe_to_pager($out);
-        exit 0;
-    }
+    # --help, --explain, and --version are handled by
+    # dispatch_informational_options() before GetOptions runs; $show_help,
+    # $explain_arg, and $print_version are populated here but no longer read.
 
     foreach my $pattern (@ARGV) {									# do in process file globbing for common experience across environments (Windows doesn't glob in the shell, passes in the parameters)
         push @in_files, glob($pattern);
