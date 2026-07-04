@@ -2512,11 +2512,21 @@ sub print_title {
 }
 
 sub print_usage {
-    my ( $error_reason ) = @_;
-    print "Usage: ltl [-bs <N>] [-n <N>] [-i <regex>] [-e <regex>] [-h <regex>] [-st <time>] [-et <time>]\n";
-    print "           [-ov] [-or] [-ru <unit>] [-osum] [-so <field>] [-hm [metric]] [-hg [metric]] <logfile> ...\n";
-    print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
-    print "Try 'ltl --help' for more information.\n\n";
+    my ( $error_reason, $parser_text ) = @_;
+    # All command-line diagnostics go to STDERR so both the parser's own
+    # message and ltl's error line appear together as one block, out of any
+    # piped data stream. Layout: usage paragraph, one blank line, the error
+    # block (the raw parser line if any, then ltl's Error line), one blank
+    # line, then the help pointer.
+    print STDERR "Usage: ltl [-bs <N>] [-n <N>] [-i <regex>] [-e <regex>] [-h <regex>] [-st <time>] [-et <time>]\n";
+    print STDERR "           [-ov] [-or] [-ru <unit>] [-osum] [-so <field>] [-hm [metric]] [-hg [metric]] <logfile> ...\n";
+    print STDERR "\n";
+    # The raw parser line is printed verbatim and un-bolded so it stays
+    # escape-free at line start regardless of colour settings.
+    print STDERR $parser_text if defined $parser_text && $parser_text ne '';
+    print STDERR bs_bold("Error: $error_reason") . "\n" if defined $error_reason;
+    print STDERR "\n";
+    print STDERR "Try 'ltl --help' for more information.\n";
     return;
 }
 
@@ -6639,7 +6649,8 @@ sub dispatch_informational_options {
             pipe_to_pager($out);
         }
         else {
-            die print_usage("unknown --help topic '$help_topic' (try: statistics)");
+            print_usage("unknown --help topic '$help_topic' (try: statistics)");
+            exit 1;
         }
         exit 0;
     }
@@ -6651,7 +6662,8 @@ sub dispatch_informational_options {
         else {
             my $topic = resolve_explain_topic($explain_topic);
             if (!defined $topic) {
-                die print_usage("unknown --explain topic '$explain_topic' (try: 'ltl --explain' for the list)");
+                print_usage("unknown --explain topic '$explain_topic' (try: 'ltl --explain' for the list)");
+                exit 1;
             }
             $out = print_explain_topic($topic);
         }
@@ -6818,7 +6830,8 @@ sub adapt_to_command_line_options {
         );
     };
     unless ($getopt_ok) {
-        die print_usage( classify_option_error(\@getopt_warnings) );
+        print_usage( classify_option_error(\@getopt_warnings), join('', @getopt_warnings) );
+        exit 1;
     }
 
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
@@ -6988,16 +7001,16 @@ sub adapt_to_command_line_options {
 
     # Duration unit option validation (Issue #17)
     if (defined $duration_unit_override) {
-        die print_usage("Invalid duration unit '$duration_unit_override'. Valid values: ns, us, ms, s")
+        do { print_usage("Invalid duration unit '$duration_unit_override'. Valid values: ns, us, ms, s"); exit 1; }
             unless $duration_unit_override =~ /^(ns|us|ms|s)$/;
     }
 
     # Rate unit option validation (Issue #122)
-    die print_usage("Invalid rate unit '$rate_unit'. Valid values: s, m, h, d")
+    do { print_usage("Invalid rate unit '$rate_unit'. Valid values: s, m, h, d"); exit 1; }
         unless $rate_unit =~ /^(s|m|h|d)$/;
 
     # CSV precision option validation (Issue #268)
-    die print_usage("Invalid --csv-precision value '$csv_precision'. Valid values: default, full, or a non-negative integer.")
+    do { print_usage("Invalid --csv-precision value '$csv_precision'. Valid values: default, full, or a non-negative integer."); exit 1; }
         unless $csv_precision eq 'default' || $csv_precision eq 'full' || $csv_precision =~ /^\d+$/;
 
     # Resolve duration unit for CSV emission (Issue #268). When -du is set,
@@ -7080,8 +7093,8 @@ sub adapt_to_command_line_options {
 
 	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
 
-    die print_usage( "unable to open any files" ) unless @in_files;
-    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw(
+    do { print_usage( "unable to open any files" ); exit 2; } unless @in_files;
+    do { print_usage( "invalid sort type used" ); exit 1; } unless grep { $_ eq $sort_type } qw(
         occurrences total duration time bytes size mean_bytes impact cv
         count count_occurrences count_total count_sum count_min count_mean count_avg count_max
         std_dev stddev min mean avg max
