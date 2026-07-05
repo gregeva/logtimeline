@@ -263,14 +263,14 @@ scenario_error_unknown_exact_percentiles() {
 
     assert_exit "$RUN_EXIT" 1 \
         asserts     '--exact-percentiles is not a known flag; ltl rejects it as an unknown option and exits non-zero. The flag is no longer part of the CLI surface; opt-out is via the per-surface data-model selector (-dm raw / -hgdm raw / -hmdm raw / -mdm raw / -bdm raw) per Issue #266.' \
-        produced_by 'Getopt::Long rejecting an unrecognized long option in adapt_to_command_line_options()' \
+        produced_by 'GetOptions parse failure classified by classify_option_error() in adapt_to_command_line_options()' \
         contract    'Issue #266 + Issue #287 - --exact-percentiles was the legacy F2/F3 opt-out; the data-model selectors are the locked replacement.'
 
     assert_line "$RUN_STDERR" \
-        pattern     '^Unknown option: exact-percentiles' \
-        asserts     'The user-visible error names the unknown option so the user knows which flag was rejected.' \
-        produced_by 'Getopt::Long default error formatter' \
-        contract    'Issue #266 + Issue #287 - flag-removal error surface.'
+        pattern     "unknown option '--exact-percentiles'" \
+        asserts     'The user-visible error names the unknown option, using the specific unknown-option message (not the generic "required options not provided"), so the user knows which flag was rejected.' \
+        produced_by 'classify_option_error() in ltl, rendered via print_usage() to stderr' \
+        contract    'Issue #309 - option-error classification names each error case; Issue #308 co-locates the error block on stderr.'
 }
 
 # Issue #287: assert that the per-surface data-model selectors surface in
@@ -312,14 +312,15 @@ scenario_error_unknown_so() {
         produced_by 'adapt_to_command_line_options() in ltl (sort-on enum validation), via print_usage() exit 1' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - hard-error paths pin current exit code; exit-code policy normalization is deferred to a separate ticket per scoping decision'
 
-    # ltl emits the error banner (including "Error: invalid sort type used") on
-    # stdout via print_usage(); only the bare "Died at ..." Perl trace goes to
-    # stderr. The harness asserts against the user-visible diagnostic, hence stdout.
-    assert_line "$RUN_STDOUT" \
+    # ltl emits the error block (including "Error: invalid sort type used") on
+    # stderr via print_usage(); print_usage exits directly, so there is no
+    # "Died at ..." Perl trace. The harness asserts against the user-visible
+    # diagnostic, hence stderr.
+    assert_line "$RUN_STDERR" \
         pattern     'invalid sort type' \
-        asserts     'The user-visible diagnostic (emitted via print_usage to stdout) identifies the failed validation (sort type).' \
+        asserts     'The user-visible diagnostic (emitted via print_usage to stderr) identifies the failed validation (sort type).' \
         produced_by 'print_usage("invalid sort type used") in adapt_to_command_line_options()' \
-        contract    'features/225-test-harness-coverage-gaps.md section #231 - pinning current diagnostic surface; new error-format normalization is out of scope'
+        contract    'features/225-test-harness-coverage-gaps.md section #231 - pinning current diagnostic surface; Issue #308 routes the error block to stderr'
 }
 
 scenario_error_unknown_du() {
@@ -332,11 +333,11 @@ scenario_error_unknown_du() {
         produced_by 'adapt_to_command_line_options() in ltl (duration-unit enum validation)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231'
 
-    assert_line "$RUN_STDOUT" \
+    assert_line "$RUN_STDERR" \
         pattern     "Invalid duration unit" \
-        asserts     'The user-visible diagnostic (stdout) identifies the failed validation (duration unit).' \
+        asserts     'The user-visible diagnostic (stderr) identifies the failed validation (duration unit).' \
         produced_by 'print_usage("Invalid duration unit ...") in adapt_to_command_line_options()' \
-        contract    'features/225-test-harness-coverage-gaps.md section #231'
+        contract    'features/225-test-harness-coverage-gaps.md section #231; Issue #308 routes the error block to stderr'
 }
 
 scenario_error_unknown_ru() {
@@ -349,11 +350,11 @@ scenario_error_unknown_ru() {
         produced_by 'adapt_to_command_line_options() in ltl (rate-unit enum validation)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231'
 
-    assert_line "$RUN_STDOUT" \
+    assert_line "$RUN_STDERR" \
         pattern     "Invalid rate unit" \
-        asserts     'The user-visible diagnostic (stdout) identifies the failed validation (rate unit).' \
+        asserts     'The user-visible diagnostic (stderr) identifies the failed validation (rate unit).' \
         produced_by 'print_usage("Invalid rate unit ...") in adapt_to_command_line_options()' \
-        contract    'features/225-test-harness-coverage-gaps.md section #231'
+        contract    'features/225-test-harness-coverage-gaps.md section #231; Issue #308 routes the error block to stderr'
 }
 
 scenario_error_no_files() {
@@ -370,11 +371,11 @@ scenario_error_no_files() {
         produced_by 'adapt_to_command_line_options() in ltl (post-glob @in_files empty check)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - exit-code disparity (1 vs 2) intentionally pinned; harmonization deferred to a separate ticket'
 
-    assert_line "$RUN_STDOUT" \
+    assert_line "$RUN_STDERR" \
         pattern     'unable to open any files' \
-        asserts     'The user-visible diagnostic (stdout) surfaces the empty-@in_files condition.' \
+        asserts     'The user-visible diagnostic (stderr) surfaces the empty-@in_files condition.' \
         produced_by 'print_usage("unable to open any files") in adapt_to_command_line_options()' \
-        contract    'features/225-test-harness-coverage-gaps.md section #231'
+        contract    'features/225-test-harness-coverage-gaps.md section #231; Issue #308 routes the error block to stderr'
 }
 
 scenario_no_warning_on_clean_run() {
@@ -395,6 +396,57 @@ scenario_no_warning_on_clean_run() {
         contract    'features/225-test-harness-coverage-gaps.md section #231 - warnings are gated on specific input shapes'
 }
 
+scenario_info_version_wins_over_parse_error() {
+    current_scenario="info-version-wins-over-parse-error"
+    echo "[$current_scenario]"
+
+    run_ltl "info-ver" --version -b 5 "$TEST_LOG"
+    assert_exit "$RUN_EXIT" 0 \
+        asserts     'An informational option (--version) short-circuits before GetOptions runs, so an otherwise-fatal malformed companion option (-b, unknown post no_auto_abbrev) never triggers a parse error; the version prints and the process exits 0.' \
+        produced_by 'dispatch_informational_options() in adapt_to_command_line_options() in ltl (pre-parse @ARGV scan)' \
+        contract    'Issue #309 - informational options take precedence over option parsing and validation.'
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^Version: ' \
+        asserts     'The version line is printed despite the malformed companion option.' \
+        produced_by 'print_version() dispatched from dispatch_informational_options()' \
+        contract    'Issue #309 - informational-option precedence.'
+}
+
+scenario_info_help_beats_version() {
+    current_scenario="info-help-beats-version"
+    echo "[$current_scenario]"
+
+    run_ltl "info-help-ver" --help --version "$TEST_LOG"
+    assert_exit "$RUN_EXIT" 0 \
+        asserts     'When multiple informational options are given, the fixed priority is help > explain > version regardless of command-line position; --help --version prints help and exits 0.' \
+        produced_by 'dispatch_informational_options() in ltl (fixed help>explain>version priority)' \
+        contract    'Issue #309 - informational-option precedence order.'
+
+    assert_line "$RUN_STDOUT" \
+        pattern     'USAGE' \
+        asserts     'The help body (which contains the USAGE heading) is printed, proving help won over version.' \
+        produced_by 'print_help() dispatched from dispatch_informational_options()' \
+        contract    'Issue #309 - informational-option precedence order.'
+}
+
+scenario_error_unknown_short_b() {
+    current_scenario="error-unknown-short-b"
+    echo "[$current_scenario]"
+
+    run_ltl "err-b" -b 5 "$TEST_LOG"
+    assert_exit "$RUN_EXIT" 1 \
+        asserts     'With no_auto_abbrev, -b is no longer a unique-prefix abbreviation of any long option; it is a clean unknown option (not "ambiguous", not silently accepted) and exits 1.' \
+        produced_by 'GetOptions parse failure classified by classify_option_error() in ltl' \
+        contract    'Issue #309 - no_auto_abbrev + option-error classification.'
+
+    assert_line "$RUN_STDERR" \
+        pattern     "unknown option '-b'" \
+        asserts     'The user-visible error names the specific unknown option (-b), not the generic "required options not provided".' \
+        produced_by 'classify_option_error() in ltl, rendered via print_usage() to stderr' \
+        contract    'Issue #309 - option-error classification; Issue #308 co-locates the error block on stderr.'
+}
+
 # ---------- Run -----------------------------------------------------------
 
 echo "Validating runtime-config -V section + CLI validation paths (issue #231)"
@@ -412,6 +464,9 @@ scenario_error_unknown_so;                             echo ""
 scenario_error_unknown_du;                             echo ""
 scenario_error_unknown_ru;                             echo ""
 scenario_error_no_files;                               echo ""
+scenario_info_version_wins_over_parse_error;           echo ""
+scenario_info_help_beats_version;                      echo ""
+scenario_error_unknown_short_b;                        echo ""
 scenario_no_warning_on_clean_run
 
 echo ""

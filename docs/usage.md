@@ -427,8 +427,13 @@ Version, help, and diagnostic options.
 | Option | Description |
 |--------|-------------|
 | `-v, --version` | Print the version number and exit |
-| `--help` | Show the help screen and exit |
+| `--help [<topic>]` | Show the help screen and exit; `--help statistics` shows the grouped statistics index |
+| `-ex, --explain [<topic>]` | Show long-form documentation for a statistic; bare `--explain` lists topics |
 | `-mem, --memory-usage` | Display memory consumption statistics after processing completes |
+
+`--help`, `--explain`, and `--version` print their output and exit immediately, before any file is read or any other option is validated. When more than one is given, `--help` takes precedence over `--explain`, which takes precedence over `--version`.
+
+Options must be given by their full long name or a documented short form; unique-prefix abbreviations of long options are not accepted.
 
 ## Alternate Names
 

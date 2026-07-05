@@ -42,7 +42,7 @@ use POSIX qw(strftime floor);
 use Time::Piece;
 use Time::Local qw(timegm);
 use Term::ReadKey;
-use Getopt::Long qw(:config no_ignore_case);
+use Getopt::Long qw(:config no_ignore_case no_auto_abbrev);
 use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
 use Devel::Size qw(total_size);
@@ -61,7 +61,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.15.0";
+my $version_number = "0.15.1";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -1145,11 +1145,15 @@ sub serialize_filters {
     push @parts, "-cmin=$filter_count_min"        if defined $filter_count_min;
     push @parts, "-dmax=$filter_duration_max"    if defined $filter_duration_max;
     push @parts, "-dmin=$filter_duration_min"     if defined $filter_duration_min;
-    push @parts, "-e=" . $url_encode->(join(',', @exclude_args))   if @exclude_args;
-    push @parts, "-ef=" . $url_encode->(join(',', @exclude_files)) if @exclude_files;
-    push @parts, "-et=" . $url_encode->($filter_range_end)         if $filter_range_end ne "";
-    push @parts, "-i=" . $url_encode->(join(',', @include_args))   if @include_args;
-    push @parts, "-if=" . $url_encode->(join(',', @include_files)) if @include_files;
+    # Sort the values within each repeated flag so the same logical selection
+    # always produces one identical signature regardless of the order the
+    # values were given on the command line (Issue #310). Cross-flag order is
+    # already fixed by the push order above.
+    push @parts, "-e=" . $url_encode->(join(',', sort @exclude_args))   if @exclude_args;
+    push @parts, "-ef=" . $url_encode->(join(',', sort @exclude_files)) if @exclude_files;
+    push @parts, "-et=" . $url_encode->($filter_range_end)              if $filter_range_end ne "";
+    push @parts, "-i=" . $url_encode->(join(',', sort @include_args))   if @include_args;
+    push @parts, "-if=" . $url_encode->(join(',', sort @include_files)) if @include_files;
     push @parts, "-st=" . $url_encode->($filter_range_start)       if $filter_range_start ne "";
     return join(';', @parts);
 }
@@ -1352,7 +1356,19 @@ sub read_index_file {
         elsif ($heatmap_metric eq 'count')    { $hm_metric_col = 'count';    }
         # UDM heatmap metrics are not in the index schema; skip.
     }
-    if ($hm_metric_col
+    # Only pre-seed the live heatmap bounds when the served bounds are
+    # population-correct for THIS run (Issue #310). The selection tier stores
+    # bounds over the filtered population; an unfiltered run's file bounds
+    # equal its filtered bounds. A FILTERED run that fell back to the file
+    # (Tier-2) row would otherwise be seeded with the whole-file max, which
+    # over-states the filtered population — and because the parse pass only
+    # grows the max, that inflated value would survive onto the heatmap axis.
+    # In that case skip the copy and let the live pass discover the filtered
+    # max cold (identical to a no-index run).
+    my $preseed_bounds_population_correct =
+        ($active_tier eq 'tier_1_selection') || ($index_filter_sig eq '-');
+    if ($preseed_bounds_population_correct
+        && $hm_metric_col
         && defined $index_aggregated{"${hm_metric_col}_min"}
         && defined $index_aggregated{"${hm_metric_col}_max"}) {
         $heatmap_min = $index_aggregated{"${hm_metric_col}_min"}{value} + 0;
@@ -1790,6 +1806,15 @@ sub emit_index_readback_verbose {
     push @verbose_output, "=== index-read-back ===";
     push @verbose_output, "index_used: " . ($index_used ? "yes" : "no");
     push @verbose_output, "index_filter_signature: $index_filter_sig";
+
+    # Issue #310: the live heatmap bounds after any index pre-seed. This is the
+    # value that scales the heatmap axis; exposing it lets a harness assert that
+    # a filtered run is never seeded with a whole-file (Tier-2) maximum. Emitted
+    # only when the heatmap is active (otherwise these globals are unused).
+    if ($heatmap_enabled) {
+        push @verbose_output, "heatmap_preseed_min: " . (defined $heatmap_min ? $heatmap_min : '-');
+        push @verbose_output, "heatmap_preseed_max: " . (defined $heatmap_max ? $heatmap_max : '-');
+    }
 
     # Per-file lookup blocks (always emitted under -V, in input order).
     for my $file (@in_files) {
@@ -2512,11 +2537,21 @@ sub print_title {
 }
 
 sub print_usage {
-    my ( $error_reason ) = @_;
-    print "Usage: ltl [-bs <N>] [-n <N>] [-i <regex>] [-e <regex>] [-h <regex>] [-st <time>] [-et <time>]\n";
-    print "           [-ov] [-or] [-ru <unit>] [-osum] [-so <field>] [-hm [metric]] [-hg [metric]] <logfile> ...\n";
-    print "\n  $colors{'red'}Error: $error_reason$colors{'NC'}\n\n" if defined $error_reason;
-    print "Try 'ltl --help' for more information.\n\n";
+    my ( $error_reason, $parser_text ) = @_;
+    # All command-line diagnostics go to STDERR so both the parser's own
+    # message and ltl's error line appear together as one block, out of any
+    # piped data stream. Layout: usage paragraph, one blank line, the error
+    # block (the raw parser line if any, then ltl's Error line), one blank
+    # line, then the help pointer.
+    print STDERR "Usage: ltl [-bs <N>] [-n <N>] [-i <regex>] [-e <regex>] [-h <regex>] [-st <time>] [-et <time>]\n";
+    print STDERR "           [-ov] [-or] [-ru <unit>] [-osum] [-so <field>] [-hm [metric]] [-hg [metric]] <logfile> ...\n";
+    print STDERR "\n";
+    # The raw parser line is printed verbatim and un-bolded so it stays
+    # escape-free at line start regardless of colour settings.
+    print STDERR $parser_text if defined $parser_text && $parser_text ne '';
+    print STDERR bs_bold("Error: $error_reason") . "\n" if defined $error_reason;
+    print STDERR "\n";
+    print STDERR "Try 'ltl --help' for more information.\n";
     return;
 }
 
@@ -3974,10 +4009,13 @@ sub print_help {
 
     # INFO
     $out .= help_heading("INFO");
-    $out .= help_opt("-v,   --version",       "Print the version number and exit");
+    $out .= help_opt("-v,   --version",       "Print the version number and exit. Takes precedence over normal processing: prints and exits without reading any file.");
     $out .= help_opt("      --help [<topic>]","Show this help screen and exit. With 'statistics', shows the grouped index of statistics emitted in the summary and CSV.");
     $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic. Bare --explain lists available topics. Aliases shared with -so (avg, stddev, p1..p99999).");
     $out .= help_opt("-mem, --memory-usage",  "Display memory consumption statistics after processing completes");
+    $out .= "\n";
+    $out .= help_wrap("--help, --explain, and --version print their output and exit immediately, before any file is read or any other option is validated. When more than one is given, --help wins over --explain, which wins over --version.", indent => 2, first_indent => 2) . "\n";
+    $out .= help_wrap("Options must be given by their full long name or a documented short form; unique-prefix abbreviations of long options are not accepted.", indent => 2, first_indent => 2) . "\n";
 
     $out .= help_heading("EXAMPLES");
     my $ex_desc_col = 68;  # description column for examples (commands are longer than options)
@@ -6566,6 +6604,134 @@ sub handle_histogram_option {
     # If no specific metrics given, will default to all available after parsing
 }
 
+# Informational options (--help, --explain, --version) print their output and
+# exit immediately. They are dispatched from a raw-@ARGV scan BEFORE GetOptions
+# so they take precedence over option parsing and over every downstream
+# validation — a malformed companion option cannot suppress them. When more
+# than one is present the fixed priority is help > explain > version,
+# independent of command-line position; the first match in that order wins and
+# the process exits.
+sub dispatch_informational_options {
+    my ($argv) = @_;
+    my @args = @$argv;   # scan a copy; never mutate the caller's @ARGV
+
+    # The only recognized --help topic keyword; anything else after a bare
+    # --help is a positional (e.g. a logfile), not a topic.
+    my %help_topics = ( statistics => 1 );
+
+    my ($want_help, $help_topic)       = (0, '');
+    my ($want_explain, $explain_topic) = (0, '');
+    my $want_version                   = 0;
+
+    for (my $i = 0; $i < @args; $i++) {
+        my $tok = $args[$i];
+
+        # --help / -help, with optional =topic or a following topic token.
+        if ($tok eq '--help' || $tok eq '-help') {
+            $want_help = 1;
+            # Help has exactly one valid topic keyword (statistics); a bare
+            # following word is consumed as a topic ONLY when it is that
+            # keyword, otherwise it is left as a positional. This is what makes
+            # `--help <logfile>` render full help instead of erroring.
+            my $next = $args[$i + 1];
+            if (defined $next && $next !~ /^-/ && $help_topics{$next}) {
+                $help_topic = $next;
+            }
+        }
+        elsif ($tok =~ /^--help=(.*)$/s) {
+            $want_help  = 1;
+            $help_topic = $1;
+        }
+        # --explain / -ex, with optional =topic or a following topic token.
+        elsif ($tok eq '--explain' || $tok eq '-ex') {
+            $want_explain = 1;
+            # Explain's topic namespace is large (all -so/-explain aliases), so
+            # a bare following non-flag word is treated as a topic candidate and
+            # validated below (unknown -> error), matching existing behavior.
+            my $next = $args[$i + 1];
+            if (defined $next && $next !~ /^-/) {
+                $explain_topic = $next;
+            }
+        }
+        elsif ($tok =~ /^(?:--explain|-ex)=(.*)$/s) {
+            $want_explain  = 1;
+            $explain_topic = $1;
+        }
+        # --version / -v (case-sensitive: -v only, never -V).
+        elsif ($tok eq '--version' || $tok eq '-v') {
+            $want_version = 1;
+        }
+    }
+
+    # Fixed priority: help > explain > version.
+    if ($want_help) {
+        if ($help_topic eq '') {
+            print_help();            # already paginated internally
+        }
+        elsif ($help_topic eq 'statistics') {
+            my $out = print_help_statistics();
+            $out =~ s/^\n+//;
+            pipe_to_pager($out);
+        }
+        else {
+            print_usage("unknown --help topic '$help_topic' (try: statistics)");
+            exit 1;
+        }
+        exit 0;
+    }
+    if ($want_explain) {
+        my $out;
+        if ($explain_topic eq '') {
+            $out = print_explain_registry();
+        }
+        else {
+            my $topic = resolve_explain_topic($explain_topic);
+            if (!defined $topic) {
+                print_usage("unknown --explain topic '$explain_topic' (try: 'ltl --explain' for the list)");
+                exit 1;
+            }
+            $out = print_explain_topic($topic);
+        }
+        $out =~ s/^\n+//;
+        pipe_to_pager($out);
+        exit 0;
+    }
+    if ($want_version) {
+        print_version();
+        exit 0;
+    }
+
+    return;
+}
+
+# Turn Getopt::Long's captured parse-failure diagnostics into a single,
+# specific, user-facing message that names the offending option/value. Getopt
+# reports the option name without dashes; _dash_prefix restores the form the
+# user typed. The generic "required options not provided" wording survives only
+# as the no-match fallback, so it is no longer shown for the common
+# unknown-option case (where the required options were in fact provided).
+sub _dash_prefix {
+    my ($name) = @_;
+    return (length($name) == 1 ? "-$name" : "--$name");
+}
+
+sub classify_option_error {
+    my ($warnings) = @_;
+    for my $w (@{ $warnings || [] }) {
+        if ($w =~ /^Unknown option:\s+(\S+)/) {
+            return "unknown option '" . _dash_prefix($1) . "'";
+        }
+        if ($w =~ /^Option\s+(\S+)\s+requires an argument/) {
+            return "option '" . _dash_prefix($1) . "' requires a value";
+        }
+        if ($w =~ /^Option\s+(\S+)\s+is ambiguous/) {
+            # Should not fire once no_auto_abbrev is set; kept as a safety net.
+            return "unknown option '" . _dash_prefix($1) . "'";
+        }
+    }
+    return "required options not provided";
+}
+
 sub adapt_to_command_line_options {
     @ORIGINAL_ARGV = @ARGV;
 
@@ -6586,7 +6752,22 @@ sub adapt_to_command_line_options {
 
     @ARGV = map { ($_ eq '-?' || $_ eq '/help' || $_ eq '/?') ? '--help' : $_ } @ARGV;
 
-    GetOptions(
+    # Informational options (--help, --explain, --version) print their output
+    # and exit immediately, taking precedence over option parsing and over any
+    # other validation. Dispatching here — before GetOptions — means a
+    # malformed companion option (e.g. `--version -b 5`) cannot suppress the
+    # informational output. When more than one is present, the fixed priority
+    # is help > explain > version, independent of command-line position.
+    dispatch_informational_options(\@ARGV);
+
+    # Capture Getopt::Long's own diagnostics (which it would otherwise warn
+    # straight to stderr) so a parse failure can be reported as a specific,
+    # named error rather than the misleading generic "required options not
+    # provided". See classify_option_error().
+    my @getopt_warnings;
+    my $getopt_ok = do {
+        local $SIG{__WARN__} = sub { push @getopt_warnings, $_[0]; };
+        GetOptions(
         'bucket-size|bs=i' => \$time_bucket_size,
         'pause|p' => \$pause_output,
         'start|st=s' => \$filter_range_start,
@@ -6671,7 +6852,12 @@ sub adapt_to_command_line_options {
         'validate-layout' => \$validate_layout,                                     # hidden
         'help:s'       => \$show_help,                                              # hidden — special-cased; legacy aliases -?/--help via PreProcessor. Optional arg: '' = full help; 'statistics' = stats index; other = error (Issue #261).
         'explain|ex:s' => \$explain_arg,                                            # Issue #261: optional arg: '' = topic registry; <topic> = long-form explanation. Aliases shared with -so (avg, stddev, p1..p99999).
-    ) or die print_usage( "required options not provided" );
+        );
+    };
+    unless ($getopt_ok) {
+        print_usage( classify_option_error(\@getopt_warnings), join('', @getopt_warnings) );
+        exit 1;
+    }
 
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
     # GetOptions :s@) into %verbose_sections_requested. See HARNESS-DESIGN.md
@@ -6840,16 +7026,16 @@ sub adapt_to_command_line_options {
 
     # Duration unit option validation (Issue #17)
     if (defined $duration_unit_override) {
-        die print_usage("Invalid duration unit '$duration_unit_override'. Valid values: ns, us, ms, s")
+        do { print_usage("Invalid duration unit '$duration_unit_override'. Valid values: ns, us, ms, s"); exit 1; }
             unless $duration_unit_override =~ /^(ns|us|ms|s)$/;
     }
 
     # Rate unit option validation (Issue #122)
-    die print_usage("Invalid rate unit '$rate_unit'. Valid values: s, m, h, d")
+    do { print_usage("Invalid rate unit '$rate_unit'. Valid values: s, m, h, d"); exit 1; }
         unless $rate_unit =~ /^(s|m|h|d)$/;
 
     # CSV precision option validation (Issue #268)
-    die print_usage("Invalid --csv-precision value '$csv_precision'. Valid values: default, full, or a non-negative integer.")
+    do { print_usage("Invalid --csv-precision value '$csv_precision'. Valid values: default, full, or a non-negative integer."); exit 1; }
         unless $csv_precision eq 'default' || $csv_precision eq 'full' || $csv_precision =~ /^\d+$/;
 
     # Resolve duration unit for CSV emission (Issue #268). When -du is set,
@@ -6922,49 +7108,9 @@ sub adapt_to_command_line_options {
     # features/225-test-harness-coverage-gaps.md § #231.
     emit_runtime_config_verbose();
 
-    if( $print_version ) {
-        print_version();
-        exit;
-    }
-
-    # --help dispatch (Issue #261). $show_help is defined when --help was
-    # given (bare = ''; --help statistics = 'statistics'; --help <other> = error).
-    # All help variants pipe through the pager so long output (esp. the
-    # percentiles topic) is browsable. The leading newline emitted by
-    # help_heading is stripped to avoid double-blanks against the banner.
-    if ( defined $show_help ) {
-        if ( $show_help eq '' ) {
-            print_help();         # already paginated internally
-            exit 0;
-        }
-        elsif ( $show_help eq 'statistics' ) {
-            my $out = print_help_statistics();
-            $out =~ s/^\n+//;     # strip leading blank lines (Issue #261)
-            pipe_to_pager($out);
-            exit 0;
-        }
-        else {
-            die print_usage("unknown --help topic '$show_help' (try: statistics)");
-        }
-    }
-
-    # --explain dispatch (Issue #261). $explain_arg is defined when --explain
-    # was given (bare = ''; --explain <topic> = topic name).
-    if ( defined $explain_arg ) {
-        my $out;
-        if ( $explain_arg eq '' ) {
-            $out = print_explain_registry();
-        } else {
-            my $topic = resolve_explain_topic($explain_arg);
-            if ( !defined $topic ) {
-                die print_usage("unknown --explain topic '$explain_arg' (try: 'ltl --explain' for the list)");
-            }
-            $out = print_explain_topic($topic);
-        }
-        $out =~ s/^\n+//;         # strip leading blank lines (Issue #261)
-        pipe_to_pager($out);
-        exit 0;
-    }
+    # --help, --explain, and --version are handled by
+    # dispatch_informational_options() before GetOptions runs; $show_help,
+    # $explain_arg, and $print_version are populated here but no longer read.
 
     foreach my $pattern (@ARGV) {									# do in process file globbing for common experience across environments (Windows doesn't glob in the shell, passes in the parameters)
         push @in_files, glob($pattern);
@@ -6972,8 +7118,8 @@ sub adapt_to_command_line_options {
 
 	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
 
-    die print_usage( "unable to open any files" ) unless @in_files;
-    die print_usage( "invalid sort type used" ) unless grep { $_ eq $sort_type } qw(
+    do { print_usage( "unable to open any files" ); exit 2; } unless @in_files;
+    do { print_usage( "invalid sort type used" ); exit 1; } unless grep { $_ eq $sort_type } qw(
         occurrences total duration time bytes size mean_bytes impact cv
         count count_occurrences count_total count_sum count_min count_mean count_avg count_max
         std_dev stddev min mean avg max
@@ -12221,9 +12367,9 @@ sub print_message_summary {
                     if( $print_durations && !$omit_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", format_duration( $min ) ) . " " x $table_padding_inner;
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", format_duration( $p50 ) ) . " " x $table_padding_inner;
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", format_duration( $p999 ) ) . " " x $table_padding_inner;
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", format_duration( $min, $col_width{3} ) ) . " " x $table_padding_inner;
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", format_duration( $p50, $col_width{4} ) ) . " " x $table_padding_inner;
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", format_duration( $p999, $col_width{5} ) ) . " " x $table_padding_inner;
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", format_cv_display( $cv ) ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", defined $total_duration ? $total_duration : "" ) . " " x $table_padding_inner; 
                     } else {
