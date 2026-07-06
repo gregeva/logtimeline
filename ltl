@@ -6639,10 +6639,6 @@ sub dispatch_informational_options {
     my ($argv) = @_;
     my @args = @$argv;   # scan a copy; never mutate the caller's @ARGV
 
-    # The only recognized --help topic keyword; anything else after a bare
-    # --help is a positional (e.g. a logfile), not a topic.
-    my %help_topics = ( statistics => 1 );
-
     my ($want_help, $help_topic)       = (0, '');
     my ($want_explain, $explain_topic) = (0, '');
     my $want_version                   = 0;
@@ -6657,12 +6653,11 @@ sub dispatch_informational_options {
                 $help_topic = $info->{topic};      # from =TOPIC suffix
             }
             else {
-                # Bare help: a following word is consumed as a topic ONLY when it
-                # is the one valid keyword (statistics); otherwise it stays a
-                # positional. This is what makes `--help <logfile>` render full
-                # help instead of erroring.
+                # Bare help: a following non-flag word is treated as a topic
+                # candidate and validated below (unknown -> error), the same way
+                # --explain handles its topic argument.
                 my $next = $args[$i + 1];
-                if (defined $next && $next !~ /^-/ && $help_topics{$next}) {
+                if (defined $next && $next !~ /^-/) {
                     $help_topic = $next;
                 }
             }
@@ -6775,6 +6770,22 @@ sub adapt_to_command_line_options {
     %option_provenance = _classify_argv_provenance(\@cli_argv, \@env_args);
 
     @ARGV = map { ($_ eq '-?' || $_ eq '/help' || $_ eq '/?') ? '--help' : $_ } @ARGV;
+
+    # Resolve the terminal-width override before dispatching informational
+    # options so --help/--explain/--version output reflows to the requested
+    # width. This is a deliberately narrow, non-fatal pre-parse: pass_through
+    # leaves every other token (including malformed companion options) untouched
+    # and runs no other option's parsing or validation, so informational options
+    # still short-circuit before full option parsing.
+    {
+        my @argv_copy = @ARGV;
+        my $tw_pre;
+        local $SIG{__WARN__} = sub {};
+        Getopt::Long::Configure('pass_through');
+        Getopt::Long::GetOptionsFromArray(\@argv_copy, 'terminal-width|tw=i' => \$tw_pre);
+        Getopt::Long::Configure('no_pass_through');
+        $terminal_width = $tw_pre if defined $tw_pre;
+    }
 
     # Informational options (--help, --explain, --version) print their output
     # and exit immediately, taking precedence over option parsing and over any

@@ -203,7 +203,11 @@ GETOPTS_TSV="$TMP_DIR/getopts.tsv"
 perl -ne '
     BEGIN { $in_block = 0 }
     if (/GetOptions\(/)         { $in_block = 1; next }
-    if ($in_block && /\)\s*or\s+die/) { $in_block = 0; next }
+    # End of the GetOptions(...) call: either a trailing `) or die ...` or the
+    # closing `);` on its own line (the call is wrapped in a warning-capturing
+    # do-block). Mid-line `);` inside single-line option callbacks is not at
+    # line start, so `^\s*\);` only matches the real close.
+    if ($in_block && (/\)\s*or\s+die/ || /^\s*\);\s*$/)) { $in_block = 0; next }
     next unless $in_block;
     next if /^\s*$/ || /^\s*#/;
     next unless /^\s*[\x27"]([^\x27"]+)[\x27"]\s*=>/;
