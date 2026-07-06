@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 5. **No unsolicited implementation.** Do not write production code until explicitly asked.
 6. **Dialog over monologue.** Keep responses concise. If writing more than a few paragraphs, stop and ask a clarifying question instead.
 7. **Do exactly what was asked — no more.** Treat every instruction as literal scope, not as a hint toward a larger goal. "Commit" means commit, not commit+push+PR. "Push" means push, not push+open-PR. "Create the branch" means create the branch, not branch+commit+push. "File the issue" means file the issue, not file+cross-link+update-related. When the next step seems obvious, ask — don't take it. The user is the architect; inferring "what they really wanted" is overreach, even when the inference is correct.
+8. **Reference IDs always carry context.** When referring to any ledger reference ID in communication with the user — issue ID, task ID, decision ID, test case ID, PR number, commit hash, etc. — ALWAYS append a short parenthesized description expressing the semantic context of the referenced entry. Example: `#312 (numeric criteria as highlight, not just filter)`, never a bare `#312`. The user should never have to look up what an ID refers to.
 
 ### Anti-patterns to Avoid
 
