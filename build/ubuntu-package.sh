@@ -80,9 +80,9 @@ docker run --rm --platform=linux/$architecture \
     echo ""
 
     # Test execution
-    echo "Testing executable with -version flag..."
+    echo "Testing executable with --version flag..."
     set +e
-    VERSION_OUTPUT=$(./${PACKAGE_NAME} -version 2>&1)
+    VERSION_OUTPUT=$(./${PACKAGE_NAME} --version 2>&1)
     EXIT_CODE=$?
     set -e
     echo "Exit code: ${EXIT_CODE}"

@@ -148,10 +148,10 @@ docker run --rm --platform=linux/$architecture \
 
     # Verify executable runs and outputs version
     echo ""
-    echo "Testing executable with -version flag..."
+    echo "Testing executable with --version flag..."
     # Capture both stdout and stderr, and show exit code
     set +e
-    VERSION_OUTPUT=$(wine "../${PACKAGE_NAME}.exe" -version 2>&1)
+    VERSION_OUTPUT=$(wine "../${PACKAGE_NAME}.exe" --version 2>&1)
     WINE_EXIT=$?
     set -e
     echo "Wine exit code: ${WINE_EXIT}"

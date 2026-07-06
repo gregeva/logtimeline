@@ -37,7 +37,7 @@ jobs:
       - name: Verify build
         run: |
           echo "Verifying ltl_static-binary_macos-arm64..."
-          ./ltl_static-binary_macos-arm64 -version
+          ./ltl_static-binary_macos-arm64 --version
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -77,7 +77,7 @@ jobs:
             file ltl_static-binary_ubuntu-${{ matrix.arch }}
             echo "[info] ARM64 binary verified via file type (execution requires ARM64 host)"
           else
-            ./ltl_static-binary_ubuntu-${{ matrix.arch }} -version
+            ./ltl_static-binary_ubuntu-${{ matrix.arch }} --version
           fi
 
       - name: Upload artifact
