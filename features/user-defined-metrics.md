@@ -54,6 +54,8 @@ Delta state is reset between files to avoid spurious deltas at file boundaries.
 - **`max`**: Maximum value in the bucket
 - **`avg`**: Average (mean) of all values in the bucket
 
+Counting aggregations (`count`, `distinct`, `ratio`, `rate`, `drate`) are specified in this same function field — see the Counting Aggregations section below.
+
 #### Combining transforms and aggregations
 
 Transforms and aggregations can be combined using function-call syntax: `aggregation(transform)`. The transform is applied first to each line, then the aggregation is applied to the resulting values within each time bucket.
@@ -238,6 +240,74 @@ When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from t
 - ~~Same metric name with different aggregation functions~~ — Resolved (#99): duplicate names are auto-disambiguated with `:aggregation` suffix (e.g., `request_size:min`, `request_size:avg`, `request_size:max`)
 
 **Epoch timestamps** (Issue #98): Numeric epoch timestamps (e.g., `1771078373.207929`) are auto-detected on the first CSV data line. No new flags needed. The `-du` flag overrides the epoch unit if values aren't seconds (`-du ms` for milliseconds, `-du us` for microseconds, `-du ns` for nanoseconds).
+
+## Counting Aggregations (Issue #313)
+
+### Status
+- **Issue**: #313
+- **Branch**: `313-udm-count-distinct-aggregations`
+- **Target release**: v0.16.0
+- **Phase**: Planned — decisions locked, implementation not started. Standing sections above describe shipped behavior; this section is folded into them as implementation lands.
+
+### Overview
+
+Adds counting aggregation functions to the UDM function field: `count` (occurrences per bucket), `distinct` (distinct extracted values per bucket), and three derived arithmetic aggregations — `ratio` (distinct ÷ occurrences, the repetition factor), `rate` (occurrences ÷ bucket seconds), `drate` (distinct ÷ bucket seconds). Motivating case: a log line with no session ID but an embedded user ID (`userId=abc123`) — a distinct-count UDM turns those IDs into a load-shape metric per time bucket, exactly as the built-in sessions column does for session IDs.
+
+### Requirements
+
+1. `count` displays the number of extracted occurrences per bucket.
+2. `distinct` displays the number of distinct raw extracted values per bucket — **string values fully supported** (IDs, tokens), not just numbers.
+3. `ratio`, `rate`, `drate` derive from the same data with display-time arithmetic.
+4. Highlight behavior follows the sessions pattern: every line's value enters the bucket's total set; `-HL`-tagged lines (regex or numeric highlight, #312) additionally enter the highlight set. Example: `userId=123 ... bytes=15024` under `-udm "userId::distinct" -hbmin 10000` → `123` counts in the bucket's total distinct AND highlight distinct.
+5. Memory: per-bucket distinct sets follow the sessions free-after-count lifecycle.
+6. **No new naming or output schemes anywhere** — existing header and CSV patterns unchanged; only new functions are added.
+
+### Decisions (locked 2026-07-06, user-approved)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Keywords | `count`, `distinct`, `ratio`, `rate`, `drate`, plus alias map `dcount`/`unique` → `distinct`, `mean` → `avg` (small `%udm_agg_aliases` normalization before the parse regex) | SQL-familiar; the alias map also makes the docs/usage.md aggregation-alias claim true (no alias resolution exists in the parser today) |
+| Distinct semantics | Per-bucket distinct count (sessions-column semantics); no cumulative variant | Cumulative needs a never-freed global set, violating the memory lifecycle |
+| Value types | Raw extracted **string** preserved for counting aggs: skip numeric coercion (`+0`), unit conversion, and transforms | The motivating userId case is a string; numeric pipeline is meaningless for cardinality |
+| Transform combinations | `distinct(delta)` etc. rejected at parse: warn + skip config | Transforms are numeric-only concepts |
+| Unit field with counting agg | Warn + ignore unit | Matches the existing unknown-unit warn-and-continue tone |
+| Column headers | Today's rule unchanged: header = user-chosen name; `:agg` suffix only on duplicate-name collision (#99) | Same pattern for all aggregations; user controls the name; sessions precedent (label the meaning, not the mechanism) |
+| STATS CSV | Single value column per counting UDM (`name_count`, `name_distinct`, `name_ratio`, `name_rate`, `name_drate`) via the existing #99 single-column code path | The 5-stat family is meaningless for cardinality; the single-column path already exists |
+| MESSAGES CSV | `count` → occurrences; `distinct`/`ratio`/`rate`/`drate` → blank, documented | Per-message distinct is not tracked (would need per-key sets plus set-union in consolidation merges) |
+| Default pattern for counting configs | Token capture, form-1 only: `\bname\s*[=:]\s*([^\s,;"']+)` | The numeric default patterns can never match `userId=abc123`; the reversed form-2 pattern is too greedy for arbitrary tokens |
+| Deferred | `mode`/`first`/`last`/top-N (need a string-display column render model), cumulative distinct | Follow-up issues if wanted |
+
+### Design
+
+- New `agg_kind => 'numeric' | 'counting'` field on the UDM config hash; parse alternation extended, aliases normalized first.
+- New `%udm_distinct{$bucket}{$name}{plain|highlight}{$value}` mirroring `%log_sessions` exactly: populate during bucket accumulation (plain always; highlight additionally when `$category_bucket =~ /-HL$/`); count via `scalar keys` in `calculate_all_statistics`; delete each bucket's sets immediately after counting; add to the `-mem` Devel::Size report.
+- `count` display value = the existing `udm_${name}_occurrences` counter (already accumulated); `ratio`/`rate`/`drate` are display-time arithmetic over occurrences/distinct/bucket-seconds.
+- String guard on every numeric consumer of `%udm_values`: per-message stats seed, per-message accumulation, bucket accumulation (skip `_sum/_min/_max` for counting configs), heatmap capture, histogram capture (raw + streaming). `-hg`/`-hm` naming a counting UDM is rejected with a warning — a per-line distribution over string events is meaningless.
+- Fuzzy-consolidation merge helpers currently key on `defined "udm_${name}_sum"` and would silently drop counting-UDM occurrences on merge — add an `agg_kind` branch merging `_occurrences` only.
+- Render: counting values format as integers/short decimals (0-decimal branch before the unit_type formatter dispatch) — no `5.00`.
+- Highlight display values: `count` → `_occurrences-HL` (proportional bright prefix, like `sum`); `distinct` → `scalar keys` of the highlight sub-hash; `ratio`/`rate`/`drate` → arithmetic over the highlight counterparts.
+
+### Test strategy
+
+- **Sessions oracle** (strongest check): a distinct UDM extracting the ThingWorx `[S: …]` session field must equal the built-in sessions column per bucket.
+- Motivating string case on the `[U: …]` user field; `count` cross-checked against `_occurrences` in a numeric-UDM STATS CSV with the same pattern.
+- Validation paths: `distinct(delta)` (warn+skip), unit+distinct (unit warning), `-hg`/`-hm` on a counting UDM (rejection), duplicate names `u::count` + `u::distinct` (headers `u:count`/`u:distinct` via #99).
+- New string-ID fixture under `tests/fixtures/` exercising the counting default token pattern (no custom regex).
+- First-ever UDM coverage in `tests/csv-output/`: a UDM scenario in scenarios.tsv plus column rules in rules/stats-columns.tsv and rules/messages-columns.tsv (read `tests/HARNESS-DESIGN.md` first).
+- `-g` consolidation run with counting UDMs (merge branch); `-mem` on a large log observing `%udm_distinct` size and free-after-count.
+- Suites: validate-help-content (add `-udm` function-list assertion), validate-help-layout, validate-csv-output, validate-doc-examples (new usage.md example is executed), validate-regression.
+- Docs in the same commit as help changes (CLAUDE.md alignment rule): `print_help()` `-udm` function list, docs/usage.md spec table + example + alias table, README.
+
+### Risks
+
+- **Memory**: distinct sets live for the read phase (buckets × distinct values) — same worst case as sessions; mitigated by free-after-count and `-mem` visibility. High-cardinality IDs over multi-GB files with small buckets is the stress case.
+- **String leakage into numeric sites**: any missed `%udm_values` consumer produces Perl "isn't numeric" warnings — grep every consumer during implementation.
+- **Consolidation merge**: unbranched `_sum` guards silently drop counting occurrences.
+- **CSV shape**: single-value columns vary header shape by aggregation — harness rules must accommodate (precedent: #99 disambiguated columns).
+
+### Lessons Learned
+
+*(to be filled during implementation)*
 
 ## Future Enhancements (Out of Scope)
 
