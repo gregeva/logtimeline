@@ -21,8 +21,6 @@ For more on the design philosophy and intended workflow, see [Purpose and Design
 ltl [options] <logfile> [logfile2 ...]
 ```
 
-`--help`, `--explain`, and `--version` print their output and exit immediately, before any file is read or any other option is validated (with `--help` taking precedence over `--explain`, then `--version`). Options must be given by their full long name or a documented short form; unique-prefix abbreviations are not accepted.
-
 ## Documentation
 
 See the [Usage Reference](https://github.com/gregeva/logtimeline/wiki) for the full options reference, feature explanations, and examples.

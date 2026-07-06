@@ -61,7 +61,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.15.1";
+my $version_number = "0.15.2";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -4009,13 +4009,10 @@ sub print_help {
 
     # INFO
     $out .= help_heading("INFO");
-    $out .= help_opt("-v,   --version",       "Print the version number and exit. Takes precedence over normal processing: prints and exits without reading any file.");
-    $out .= help_opt("      --help [<topic>]","Show this help screen and exit. With 'statistics', shows the grouped index of statistics emitted in the summary and CSV.");
-    $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic. Bare --explain lists available topics. Aliases shared with -so (avg, stddev, p1..p99999).");
+    $out .= help_opt("-v,   --version",       "Print the version number and exit");
+    $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic (e.g. 'statistics') shows that topic's index.");
+    $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic; with no topic, lists available topics.");
     $out .= help_opt("-mem, --memory-usage",  "Display memory consumption statistics after processing completes");
-    $out .= "\n";
-    $out .= help_wrap("--help, --explain, and --version print their output and exit immediately, before any file is read or any other option is validated. When more than one is given, --help wins over --explain, which wins over --version.", indent => 2, first_indent => 2) . "\n";
-    $out .= help_wrap("Options must be given by their full long name or a documented short form; unique-prefix abbreviations of long options are not accepted.", indent => 2, first_indent => 2) . "\n";
 
     $out .= help_heading("EXAMPLES");
     my $ex_desc_col = 68;  # description column for examples (commands are longer than options)
@@ -6604,6 +6601,33 @@ sub handle_histogram_option {
     # If no specific metrics given, will default to all available after parsing
 }
 
+# Classify a single raw @ARGV token as an informational-option invocation, or
+# return undef for anything else. Recognizes both single-dash and double-dash
+# long forms (so -help, -version, -explain behave the same as --help,
+# --version, --explain), the documented short forms (-v, -ex), and the legacy
+# help aliases (-?, /help, /?). Returns { kind => 'help'|'explain'|'version',
+# topic => T }, where topic is the value of an =TOPIC suffix or undef for a bare
+# token (the caller may then consume a following token as the topic). This is
+# the single source of truth shared by dispatch_informational_options() and the
+# banner-suppression check in MAIN, so the two can never disagree about what
+# counts as an informational invocation.
+sub classify_informational_arg {
+    my ($tok) = @_;
+    return undef unless defined $tok;
+
+    if ($tok =~ m{^(?:--?help|-\?|/help|/\?)(?:=(.*))?$}s) {
+        return { kind => 'help', topic => $1 };
+    }
+    if ($tok =~ m{^(?:--?explain|--?ex)(?:=(.*))?$}s) {
+        return { kind => 'explain', topic => $1 };
+    }
+    # Version takes no topic; case-sensitive so -V (--verbose) never matches.
+    if ($tok =~ m{^--?version$} || $tok eq '-v') {
+        return { kind => 'version' };
+    }
+    return undef;
+}
+
 # Informational options (--help, --explain, --version) print their output and
 # exit immediately. They are dispatched from a raw-@ARGV scan BEFORE GetOptions
 # so they take precedence over option parsing and over every downstream
@@ -6615,50 +6639,45 @@ sub dispatch_informational_options {
     my ($argv) = @_;
     my @args = @$argv;   # scan a copy; never mutate the caller's @ARGV
 
-    # The only recognized --help topic keyword; anything else after a bare
-    # --help is a positional (e.g. a logfile), not a topic.
-    my %help_topics = ( statistics => 1 );
-
     my ($want_help, $help_topic)       = (0, '');
     my ($want_explain, $explain_topic) = (0, '');
     my $want_version                   = 0;
 
     for (my $i = 0; $i < @args; $i++) {
-        my $tok = $args[$i];
+        my $info = classify_informational_arg($args[$i]);
+        next unless $info;
 
-        # --help / -help, with optional =topic or a following topic token.
-        if ($tok eq '--help' || $tok eq '-help') {
+        if ($info->{kind} eq 'help') {
             $want_help = 1;
-            # Help has exactly one valid topic keyword (statistics); a bare
-            # following word is consumed as a topic ONLY when it is that
-            # keyword, otherwise it is left as a positional. This is what makes
-            # `--help <logfile>` render full help instead of erroring.
-            my $next = $args[$i + 1];
-            if (defined $next && $next !~ /^-/ && $help_topics{$next}) {
-                $help_topic = $next;
+            if (defined $info->{topic}) {
+                $help_topic = $info->{topic};      # from =TOPIC suffix
+            }
+            else {
+                # Bare help: a following non-flag word is treated as a topic
+                # candidate and validated below (unknown -> error), the same way
+                # --explain handles its topic argument.
+                my $next = $args[$i + 1];
+                if (defined $next && $next !~ /^-/) {
+                    $help_topic = $next;
+                }
             }
         }
-        elsif ($tok =~ /^--help=(.*)$/s) {
-            $want_help  = 1;
-            $help_topic = $1;
-        }
-        # --explain / -ex, with optional =topic or a following topic token.
-        elsif ($tok eq '--explain' || $tok eq '-ex') {
+        elsif ($info->{kind} eq 'explain') {
             $want_explain = 1;
-            # Explain's topic namespace is large (all -so/-explain aliases), so
-            # a bare following non-flag word is treated as a topic candidate and
-            # validated below (unknown -> error), matching existing behavior.
-            my $next = $args[$i + 1];
-            if (defined $next && $next !~ /^-/) {
-                $explain_topic = $next;
+            if (defined $info->{topic}) {
+                $explain_topic = $info->{topic};   # from =TOPIC suffix
+            }
+            else {
+                # Explain's topic namespace is large (all -so/-explain aliases),
+                # so a bare following non-flag word is treated as a topic
+                # candidate and validated below (unknown -> error).
+                my $next = $args[$i + 1];
+                if (defined $next && $next !~ /^-/) {
+                    $explain_topic = $next;
+                }
             }
         }
-        elsif ($tok =~ /^(?:--explain|-ex)=(.*)$/s) {
-            $want_explain  = 1;
-            $explain_topic = $1;
-        }
-        # --version / -v (case-sensitive: -v only, never -V).
-        elsif ($tok eq '--version' || $tok eq '-v') {
+        elsif ($info->{kind} eq 'version') {
             $want_version = 1;
         }
     }
@@ -6751,6 +6770,22 @@ sub adapt_to_command_line_options {
     %option_provenance = _classify_argv_provenance(\@cli_argv, \@env_args);
 
     @ARGV = map { ($_ eq '-?' || $_ eq '/help' || $_ eq '/?') ? '--help' : $_ } @ARGV;
+
+    # Resolve the terminal-width override before dispatching informational
+    # options so --help/--explain/--version output reflows to the requested
+    # width. This is a deliberately narrow, non-fatal pre-parse: pass_through
+    # leaves every other token (including malformed companion options) untouched
+    # and runs no other option's parsing or validation, so informational options
+    # still short-circuit before full option parsing.
+    {
+        my @argv_copy = @ARGV;
+        my $tw_pre;
+        local $SIG{__WARN__} = sub {};
+        Getopt::Long::Configure('pass_through');
+        Getopt::Long::GetOptionsFromArray(\@argv_copy, 'terminal-width|tw=i' => \$tw_pre);
+        Getopt::Long::Configure('no_pass_through');
+        $terminal_width = $tw_pre if defined $tw_pre;
+    }
 
     # Informational options (--help, --explain, --version) print their output
     # and exit immediately, taking precedence over option parsing and over any
@@ -12577,20 +12612,17 @@ sub print_threadpool_summary {
 
 ## MAIN ##
 
-# Skip the banner when --help or --explain is being dispatched -- those
-# views render the banner inside their own pager-piped content so the
-# title appears at the top of the less buffer instead of being scrolled
-# off-screen by less (Issue #261). Includes the legacy --help aliases
-# remapped at the top of adapt_to_command_line_options (-?, /help, /?).
+# Skip the banner when a --help or --explain view is being dispatched -- those
+# views render the banner inside their own pager-piped content so the title
+# appears at the top of the less buffer instead of being scrolled off-screen by
+# less (Issue #261). Classification is shared with dispatch_informational_options()
+# so the two always agree on what counts as an informational invocation. Version
+# is not suppressed: --version keeps the normal title banner. This runs before
+# the -?/help alias remap in adapt_to_command_line_options(), so it relies on the
+# classifier recognizing the raw -?, /help, /? aliases directly.
 my $_help_or_explain_invoked = grep {
-       $_ eq '--help'
-    || $_ eq '--explain'
-    || $_ eq '-ex'
-    || $_ eq '-?'
-    || $_ eq '/help'
-    || $_ eq '/?'
-    || /^--help=/
-    || /^--explain=/
+    my $info = classify_informational_arg($_);
+    $info && ($info->{kind} eq 'help' || $info->{kind} eq 'explain');
 } @ARGV;
 print_title() unless $_help_or_explain_invoked;
 adapt_to_command_line_options();
