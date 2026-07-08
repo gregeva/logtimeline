@@ -17,6 +17,7 @@ Today the numeric threshold options (`-dmin`/`-dmax`, `-bmin`/`-bmax`, `-cmin`/`
 3. Numeric highlight must compose with the existing hard filters (e.g. trim noise with `-dmin 100` while highlighting the slow tail with `-hdmin 1000` in one run).
 4. Numeric highlight must compose with the regex highlight (see decisions).
 5. Runs without numeric highlight options must pay essentially zero additional per-line cost.
+6. The per-file highlight indicator in the file legend must reflect numeric-only highlight matches identically to regex matches, so the reader can tell whether highlighted results came from one file or all.
 
 ## Decisions (locked 2026-07-06, user-approved)
 
@@ -28,7 +29,9 @@ Today the numeric threshold options (`-dmin`/`-dmax`, `-bmin`/`-bmax`, `-cmin`/`
 | Regex highlight × numeric | AND (intersection): a record is highlighted iff the text matcher matches (any of its OR'd patterns/file lines) AND all numeric criteria are satisfied. Either family alone decides when the other is absent. | Cross-family *filters* already compose with AND (`-i "api" -dmin 100`); enables "requests to endpoint X slower than 1s", which regex alone cannot express |
 | Undefined metric | A record missing the metric never satisfies a criterion on it — renders plain | Highlight analog of the existing filter behavior (records with undefined metrics are dropped when the corresponding filter is set) |
 | Boundary normalization (in scope) | `-dmin`/`-dmax` change from boundary-exclusive to **inclusive**, matching `-bmin`/`-bmax`/`-cmin`/`-cmax`. All six filters and all six highlight options use the closed-interval convention: kept/highlighted iff `defined(metric) && metric >= MIN && metric <= MAX` (each bound only when given). | Pre-existing inconsistency; fixing it here keeps filter and highlight semantics identical. Behavior change to `-dmin`/`-dmax` (records exactly at the threshold are now kept) — requires its own release-note bullet. |
-| CSV exposure of highlight | Out of scope | No highlight representation exists in `-o` CSV outputs today; adding one is a new surface — proposed as a follow-up issue |
+| CSV exposure of highlight | Out of scope | No highlight representation exists in the STATS CSV today; adding one is a new surface — proposed as a follow-up issue. Distinct from the MESSAGES CSV `category` column (`plain`/`highlight`), which already exists, is populated automatically through the tag point, and serves as the primary test substrate (see Test strategy) |
+| Inverted range (`min > max`, both bounds given) | Out of scope here — #322 (inverted numeric range, silent empty output) is extended to cover all twelve range options: the six filters and these six highlight options, warning that the range is unsatisfiable | One implementation addresses the whole inverted-range problem at once; #322 carries the scope note |
+| Per-file highlight indicator | In scope: a numeric-only highlight match sets the per-file highlighted state at the tag point (`$in_files_matched{$in_file} = 2`), so the file legend marks which files contained highlighted lines | The indicator answers "where did the highlighted results come from" and must not silently depend on a regex being present |
 
 ## Design
 
@@ -40,6 +43,7 @@ All rendering machinery for "highlighted subset within a bucket" already exists 
 - Six new `GetOptions` entries beside the filter options, `=i` typed.
 - Boundary normalization: the duration filter comparisons flip from `<=`/`>=` to `<`/`>` in the hard-drop guards, making them identical to bytes/count.
 - Hot-loop discipline: the numeric predicate is evaluated only when `$numeric_highlight_active`; runs without these options pay one falsy check per line.
+- The restructured tag-point condition must keep the per-file highlight state update (`$in_files_matched{$in_file} = 2`, feeding the file-legend indicator) inside the unified highlight branch, so numeric-only matches mark their file identically to regex matches.
 
 ### The `defined $highlight_regex` gate sweep
 
@@ -70,28 +74,66 @@ Script-header TODO sketching this feature (`-hdmin` idea, ~ltl:17) is resolved a
 - `docs/usage.md`: Filtering prose and options table (~:51-80); a runnable example (doc examples are executed by `validate-doc-examples.sh`).
 - `README.md`: filtering prose only if wording implies highlight is regex-only.
 - `--explain` histogram/heatmap texts referencing "Highlight overlays (`-h regex`)" and their mirrors in `docs/explain/histogram.md` — widen to cover numeric criteria.
+- `docs/usage.md` UDM-counting paragraph (~:355, added by #313): "Highlighting (`-h`) works as it does for the sessions column…" — widen to cover numeric criteria.
 - `releases/v0.16.0.md`: one bullet for the feature, one for the `-dmin`/`-dmax` boundary change.
 
-## Test strategy
+## Test strategy (placement decided 2026-07-08 after a full HARNESS-DESIGN.md read)
 
 - **Read `tests/HARNESS-DESIGN.md` before touching or creating any harness** (mandatory trigger).
-- Regenerate index-read-back fixture (boundary fix); run `validate-index-read-back.sh` and confirm assertions match (exit 0 is insufficient).
+- **Data-partition coverage (primary) — `validate-csv-output.sh`.** The MESSAGES CSV `category` column (`plain`/`highlight`) is already a contracted surface of this harness (`tests/csv-output/rules/messages-columns.tsv` types it `enum:plain,highlight`) and is populated directly from the tag point via `%log_messages` — asserting on it verifies the highlight partitioning at the data layer. Add a small crafted fixture with known durations/bytes/counts placed exactly at and around the boundaries, plus per-scenario expected-category assertions. This extends the validator — today it checks structure only — so the harness charter widens from "structural" to "structural + categorical content" (header comment updated accordingly; self-documenting `asserts`/`produced_by`/`contract` fields on every new assertion). Enumerated cases, each asserting which message keys land in `highlight` vs `plain` rows:
+  1. Numeric-only highlight, one scenario per family (duration, bytes, count)
+  2. Boundary inclusivity at min AND max for each family — a record exactly at the bound is highlighted (locks the `-dmin`/`-dmax` fix, freezes the already-inclusive bytes/count behavior)
+  3. Undefined metric never highlights (e.g. `-hbmin` against lines lacking bytes)
+  4. Cross-metric AND (`-hdmin` + `-hbmin`)
+  5. Regex × numeric AND (`-h` + `-hdmin`)
+  6. Regex-only regression (partitioning unchanged with no numeric criteria)
+- **Rendering coverage — `validate-regression.sh` / `capture-regression.sh`.** The swept gates are render gates; the CSV cannot see them (a missed gate leaves the CSV correct while the terminal silently renders nothing). New snapshot scenarios at pinned `--terminal-width`s: regex-only (baseline), numeric-only, and combined highlight, across the bar graph with `HIGHLIGHTED` summary row, heatmap (`-hm`), and histogram (`-hg`). Captured references are checked against the manual-verification list below at capture time, then guard every future gate regression. Specific files and commands are pinned in the fixture table below.
+- **No cross-feature test with #313 counting UDM.** The chain is numeric predicate → single `-HL` tag point → all consumers. `validate-udm-counting.sh` already proves the consumer link (with `-h`); the CSV cases above prove the predicate link; there is no code unique to the combination. A combined test could only fail if an already-tested link fails, and would couple the UDM harness to this feature's options. The cross-feature note below stays as documentation only; `validate-udm-counting.sh` is untouched.
+- Regenerate index-read-back fixture (boundary fix); run `validate-index-read-back.sh` and confirm assertions match (exit 0 is insufficient). Given the changes in this area, expect previously stored test artifacts to surface failing assertions; repairing those in the test infrastructure is in scope for this feature.
 - `validate-statistics.sh` / `validate-csv-output.sh`: committed baselines verified unaffected (no scenario uses numeric filters) — run as gates anyway.
 - `validate-help-content.sh` / `validate-help-layout.sh` after help edits (help-content enforces help/usage.md option parity).
-- New coverage: prefer extending an existing harness with a numeric-only highlight scenario (asserts the `HIGHLIGHTED` summary row appears without `-h`) and a boundary-inclusivity check on a crafted fixture; decide final placement after the HARNESS-DESIGN read.
-- Manual verification (all `--disable-progress`, log `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-4.2026-01-26.txt`):
+
+### Fixture selection (log inventory characterized 2026-07-08; exact distributions computed from raw lines)
+
+File shorthand used below:
+- **APACHE** = `logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` — 677 lines, duration (µs, needs `-du us`) on every line, bytes numeric on 669 (8 are `-`), no count. Duration median 47 ms / p99 5,262 ms. Already the regression harness's `APACHE_LOG`.
+- **CODEBEAMER** = `logs/Codebeamber/codebeamer_access_log.2025-10-29.txt` — 741 lines, duration (ms) on every line (median 5 / p99 1,921), bytes on 733, **no ` count=` token ever** (count stays undefined for the whole file).
+- **PLOTLOG** = `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log` — 2,992 lines, mixed metric presence: `durationMS=` on only 220 lines (median 17,070 ms / max 153,921), count (first ` count=N` token — matches both `result count=` and `events to be processed count=N`) on 220 lines, `result bytes=` on 73 (median 1.7 MB).
+- **DPM5K** = `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log` — 5,000 lines, `durationMS=` on every line (median 5 / p90 963 / max 92,452 ms); bytes/count too sparse to use (n=5). Deterministic slice; also an index-read-back fixture.
+
+Note: count *extraction* is on by default (`-oc` disables it); `-ic` only makes the count column visible. `-hcmin`/`-hcmax` therefore work without `-ic`, but scenarios include `-ic` so the highlighted count is visible in the rendered output.
+
+| Test case | File(s) | Options (all with `--disable-progress`) | Expected split |
+|---|---|---|---|
+| Regex-only baseline (snapshot) | APACHE | `-du us -h "BomTransformation"` | 34/677 lines highlighted |
+| Numeric-only duration (snapshot + CSV) | APACHE | `-du us -hdmin 100` | 154/677 = 22.7% |
+| Numeric-only bytes (snapshot + CSV) | APACHE | `-du us -hbmin 5000` | 113/677 = 16.7%; the 8 bytes-`-` lines must stay plain |
+| Regex × numeric AND (snapshot + CSV) | APACHE | `-du us -h "BomTransformation" -hdmin 100` | 19 of the 34 pattern-matched lines |
+| Numeric-only count (snapshot + CSV) | PLOTLOG | `-ic -hcmin 45000` | ~15 lines of the 220 count-carrying |
+| Min+max band (CSV) | CODEBEAMER | `-hdmin 32 -hdmax 300` | 55/741 = 7.4% |
+| Cross-metric AND (CSV) | APACHE | `-du us -hdmin 100 -hbmin 5000` | intersection of the two subsets above |
+| Undefined metric, mixed presence (CSV) | PLOTLOG | `-hdmin 20000` | 44 highlighted; all 2,772 duration-less lines stay plain |
+| Undefined metric, absent from format (CSV) | CODEBEAMER | `-ic -hcmin 1` | zero highlighted rows — count never extracted from this format |
+| Heatmap HL overlay (snapshot) | DPM5K | `-dm raw -hm duration -hdmin 963` | ≈10% highlighted |
+| Histogram HL overlay (snapshot) | APACHE | `-dm raw -du us -hg duration -hdmin 100` | 22.7% highlighted |
+| File-legend indicator, two files (snapshot) | DPM5K + PLOTLOG | `-hdmin 100000` | only PLOTLOG (max 153,921 ms) carries the highlight indicator; DPM5K max is 92,452 ms |
+
+Boundary-inclusivity cases are NOT run against these real logs — no real file guarantees records exactly at a chosen bound; they run against the crafted fixture described above.
+
+- Manual verification (all `--disable-progress`; primary log `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-4.2026-01-26.txt` — 517,684 lines, duration median 35 ms / p99 3,720 ms, bytes median 378 / heavy file-download tail, session IDs present, no count metric in this format):
   1. Regex-only regression: `-h "POST"` — surfaces unchanged
-  2. Numeric-only: `-hdmin 1000` — HIGHLIGHTED row, bar prefixes, TOP HIGHLIGHTED MESSAGES all appear with no `-h`
-  3. AND composition: `-h "/Thingworx/Things" -hdmin 1000`
+  2. Numeric-only: `-hdmin 1000` — HIGHLIGHTED row, bar prefixes, TOP HIGHLIGHTED MESSAGES all appear with no `-h` (18,878 lines = 3.65%)
+  3. AND composition: `-h "/Thingworx/Subsystems/RemoteAccessSubsystem" -hdmin 1000` — pattern matches 11,080 lines, 68% of them ≥ 1000 ms, so the highlight visibly shrinks when the numeric criterion is added
   4. Filter + highlight: `-dmin 100 -hdmin 1000`
   5. Boundary: `-dmin 0` includes exact-0 durations (INCLUDED count rises vs pre-change)
   6. Overlays: `-hg duration -hdmin 1000` and `-hm duration -hdmin 1000`
   7. Index signature: `-V runtime-config,index-read-back -hdmin 1000` — index CSV contains no highlight options
-  8. Bytes/count variants: `-hbmin 100000`; `-ic -hcmin 5`
+  8. Bytes variant: `-hbmin 100000` (32,483 lines = 6.41%). Count variant on PLOTLOG (this format has no count): `-ic -hcmin 45000`
+  9. File legend: DPM5K + PLOTLOG with `-hdmin 100000` — only PLOTLOG carries the highlight indicator
 
 ## Cross-feature note (with #313)
 
-Because numeric highlighting feeds the same `-HL` tag as regex highlighting, it drives the #313 counting-aggregation highlight behavior with zero integration code. Canonical example: line `userId=123 ... bytes=15024` under `-udm "userId::distinct" -hbmin 10000` → tagged `-HL` → `123` counts in the bucket's total distinct set AND its highlight distinct set; the distinct column renders total with the highlighted-distinct bright prefix.
+Because numeric highlighting feeds the same `-HL` tag as regex highlighting, it drives the #313 counting-aggregation highlight behavior with zero integration code. Canonical example: line `userId=123 ... bytes=15024` under `-udm "userId::distinct" -hbmin 10000` → tagged `-HL` → `123` counts in the bucket's total distinct set AND its highlight distinct set; the distinct column renders total with the highlighted-distinct bright prefix. This integration is documented behavior, not a test surface — see Test strategy (no combined test).
 
 ## Risks
 
@@ -102,7 +144,7 @@ Because numeric highlighting feeds the same `-HL` tag as regex highlighting, it 
 
 ## Related findings (tracked separately, not in this feature's scope)
 
-Three pre-existing inconsistencies discovered during planning are being filed as separate issues: the ineffective `-HL$` exclusion alternative in the `$total_occurrences` accumulation regex; the undocumented dropping of records lacking the filtered metric entirely; the silent empty result from an inverted range (`-dmin 500 -dmax 100`).
+Three pre-existing inconsistencies discovered during planning were filed as separate issues: #320 (ineffective `-HL$` exclusion alternative in the `$total_occurrences` accumulation regex), #321 (numeric filters silently drop records lacking the filtered metric entirely), and #322 (silent empty result from an inverted range, e.g. `-dmin 500 -dmax 100`). #322's scope is extended to cover the six highlight options introduced here, so the inverted-range warning lands once for all twelve range options.
 
 ## Lessons Learned
 
