@@ -4,7 +4,7 @@
 - **Issue**: #312
 - **Branch**: `312-numeric-criteria-highlight-selection`
 - **Target release**: v0.16.0
-- **Phase**: Planned — decisions locked, implementation not started
+- **Phase**: Implemented on the feature branch — all harnesses green, manual verification complete; not yet merged
 
 ## Overview
 
@@ -148,4 +148,10 @@ Three pre-existing inconsistencies discovered during planning were filed as sepa
 
 ## Lessons Learned
 
-*(to be filled during implementation)*
+- The gate sweep was exactly the six render sites the plan predicted (plus the declaration, the matcher resolution, and the regex-only runtime-config line). Grep-counting `highlight_regex` before touching anything made the sweep mechanical and verifiable (`grep` after: three intentional survivors).
+- The single-tag-point design held: no per-surface integration code was needed. Every downstream surface (bars, summary row, message table, overlays, per-file indicator, UDM highlight arithmetic) lit up from the one predicate.
+- The csv-output family-consistency rules assume messages with multiple occurrences and full metric coverage. Single-occurrence messages (impact populated while std_dev/cv/skewness/kurtosis/bimodality_coef are empty) and messages lacking a metric (duration/duration_nice populated with zeros while min/mean/max are empty) trip the shape and duration family checks. These are pre-existing emission traits first exercised by this feature's fixture; the new scenarios declare only the families that hold (bytes, count, level). A follow-up on the emission inconsistency may be warranted.
+- The regression-harness strip filter missed three timing rows (HEATMAP STATISTICS, HISTOGRAM STATISTICS, GROUP SIMILAR MESSAGES) because no prior scenario captured the summary table. Keeping the summary in a capture surfaces every timing row; the filter now covers all of them.
+- `tests/fixtures/ltl-index-readback.csv` is generated on demand and gitignored (`*.csv`), not committed as planned text assumed. Regeneration was still required for the inclusive `-dmin` boundary (match counts 889→891 / 1102→1103, min durations now exactly 50) but produced no repo diff.
+- The per-file highlight indicator is a color-only distinction (green √ vs green √ on green background); ANSI-stripped snapshots cannot lock it. It was verified against raw output at capture time; the snapshot locks the layout and the `-HL` category legend rows around it.
+- Crafted log fixtures must not use a `.log` extension — the repo gitignores `*.log`; the `.txt` convention of `udm-counting-tokens.txt` is what makes fixtures committable.
