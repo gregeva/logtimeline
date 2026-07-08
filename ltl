@@ -111,6 +111,9 @@ my %verbose_section_registry = (
     'profile' => {
         description => 'Timeline folding (--profile): resolved mode, fold period, included weekdays, and included vs dropped sample counts (Issue #256).',
     },
+    'udm-counting' => {
+        description => 'Per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313).',
+    },
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
@@ -126,6 +129,7 @@ my @verbose_section_order = qw(
     csv-output
     percentile-algorithm
     profile
+    udm-counting
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -2223,6 +2227,52 @@ sub emit_profile_verbose {
     push @verbose_output, "samples_included: $profile_included_samples";
     push @verbose_output, "samples_dropped: $profile_dropped_samples";
     push @verbose_output, "=== END profile ===";
+}
+
+sub emit_udm_counting_verbose {
+    return unless section_requested('udm-counting');
+
+    push @verbose_output, "=== udm-counting ===";
+
+    my @counting = grep { $_->{agg_kind} eq 'counting' } @udm_configs;
+    if (!@counting) {
+        push @verbose_output, "counting_udms: none";
+        push @verbose_output, "=== END udm-counting ===";
+        return;
+    }
+
+    push @verbose_output, "counting_udms: " . scalar(@counting);
+    for my $config (@counting) {
+        push @verbose_output, "metric: $config->{name}  aggregation: $config->{aggregation}  base_name: $config->{base_name}";
+    }
+
+    for my $bucket (sort keys %log_stats) {
+        for my $config (@counting) {
+            my $name = $config->{name};
+            next unless defined $log_stats{$bucket}{"udm_${name}_occurrences"};
+            push @verbose_output, join('  ',
+                "bucket: $bucket",
+                "metric: $name",
+                "occurrences: "    . ($log_stats{$bucket}{"udm_${name}_occurrences"}    // 0),
+                "occurrences_hl: " . ($log_stats{$bucket}{"udm_${name}_occurrences-HL"} // 0),
+                "distinct: "       . ($log_stats{$bucket}{"udm_${name}_distinct"}       // 0),
+                "distinct_hl: "    . ($log_stats{$bucket}{"udm_${name}_distinct-HL"}    // 0),
+                "value: "    . ($log_stats{$bucket}{"udm_$name"}    // ''),
+                "value_hl: " . ($log_stats{$bucket}{"udm_$name-HL"} // ''),
+            );
+        }
+        # Sessions oracle reference: lets a harness compare a distinct UDM on the
+        # session token against the built-in sessions column, per bucket
+        if ($session_data_found && defined $log_stats{$bucket}{sessions}) {
+            push @verbose_output, join('  ',
+                "bucket: $bucket",
+                "sessions: $log_stats{$bucket}{sessions}",
+                "sessions_hl: " . ($log_stats{$bucket}{'sessions-HL'} // 0),
+            );
+        }
+    }
+
+    push @verbose_output, "=== END udm-counting ===";
 }
 
 # Section name, field names, consumer-name strings, and the three-value audit
@@ -9480,6 +9530,9 @@ sub calculate_all_statistics {
                                 ? scalar keys %{$udm_distinct{$bucket}{$name}{highlight}} : 0;
 
                 $log_stats{$bucket}{"udm_${name}_occurrences"} = $occ;
+                $log_stats{$bucket}{"udm_${name}_occurrences-HL"} = $occ_hl;
+                $log_stats{$bucket}{"udm_${name}_distinct"} = $distinct;
+                $log_stats{$bucket}{"udm_${name}_distinct-HL"} = $distinct_hl;
 
                 my ($display_value, $hl_value);
                 if (defined $occ && $occ > 0) {
@@ -13001,6 +13054,8 @@ emit_csv_output_verbose();
 emit_percentile_algorithm_verbose();
 
 emit_profile_verbose();
+
+emit_udm_counting_verbose();
 
 print_verbose_output();
 
