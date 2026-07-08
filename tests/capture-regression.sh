@@ -28,9 +28,14 @@ SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtend
 # time tight. Per repo memory (feedback_test_logs.md), new fixtures must NOT
 # use logs/AccessLogs/localhost_access_log.2025-03-21.txt due to corrupt lines.
 APACHE_LOG="$REPO_DIR/logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
+# Issue #312 — numeric-highlight rendering fixtures. PLOT_LOG has sparse metric
+# presence (durationMS/count on 220 of 2,992 lines); DPM5K_LOG is the
+# deterministic 5k-line ScriptLog slice with durationMS on every line.
+PLOT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log"
+DPM5K_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
 
 # Verify test files exist
-for f in "$ACCESS_LOG" "$SCRIPT_LOG" "$APACHE_LOG"; do
+for f in "$ACCESS_LOG" "$SCRIPT_LOG" "$APACHE_LOG" "$PLOT_LOG" "$DPM5K_LOG"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: Test file not found: $f"
         exit 1
@@ -40,7 +45,7 @@ done
 # Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin
 strip_nondeterministic() {
     perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[0-9.]+\]/log timeline [VERSION]/' \
-    | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|SCALE DATA/i'
+    | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA/i'
 }
 
 # Create output directory
@@ -181,6 +186,27 @@ run_test "hg-hgh16-duration-w160"     "$LTL" $COMMON -dm raw --terminal-width 16
 
 echo "Composition (heatmap + histogram together):"
 run_test "hm-hg-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hg duration "$SCRIPT_LOG"
+
+# ---------------------------------------------------------------------------
+# Issue #312 — numeric highlight criteria rendering coverage
+# ---------------------------------------------------------------------------
+# Mirror of the additions made to tests/validate-regression.sh; both files
+# move in lockstep. HL_COMMON keeps the summary table (no -osum) so the
+# HIGHLIGHTED row is part of the captured surface, alongside the bar-prefix
+# rendering, the TOP HIGHLIGHTED MESSAGES block, the per-file highlight
+# indicator in the file legend, and the histogram/heatmap HL overlays.
+# -dm raw on overlay scenarios for the same byte-stability reason as above.
+HL_COMMON="--disable-progress -n 1"
+
+echo "Numeric highlight criteria (Issue #312):"
+run_test "hl-regex-only-w160"      "$LTL" $HL_COMMON --terminal-width 160 -du us -h BomTransformation "$APACHE_LOG"
+run_test "hl-hdmin-w160"           "$LTL" $HL_COMMON --terminal-width 160 -du us -hdmin 100 "$APACHE_LOG"
+run_test "hl-hbmin-w160"           "$LTL" $HL_COMMON --terminal-width 160 -du us -hbmin 5000 "$APACHE_LOG"
+run_test "hl-regex-hdmin-w160"     "$LTL" $HL_COMMON --terminal-width 160 -du us -h BomTransformation -hdmin 100 "$APACHE_LOG"
+run_test "hl-hcmin-plotlog-w160"   "$LTL" $HL_COMMON --terminal-width 160 -ic -hcmin 45000 "$PLOT_LOG"
+run_test "hl-heatmap-hdmin-w160"   "$LTL" $HL_COMMON -dm raw --terminal-width 160 -hm duration -hdmin 963 "$DPM5K_LOG"
+run_test "hl-histogram-hdmin-w160" "$LTL" $HL_COMMON -dm raw --terminal-width 160 -du us -hg duration -hdmin 100 "$APACHE_LOG"
+run_test "hl-filelegend-two-files-w160" "$LTL" $HL_COMMON --terminal-width 160 -hdmin 100000 "$DPM5K_LOG" "$PLOT_LOG"
 
 echo ""
 echo "Captured $count reference files to: $REF_DIR"
