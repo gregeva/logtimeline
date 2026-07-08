@@ -295,12 +295,15 @@ Adds counting aggregation functions to the UDM function field: `count` (occurren
 
 ### Test strategy
 
-- **Sessions oracle** (strongest check): a distinct UDM extracting the ThingWorx `[S: …]` session field must equal the built-in sessions column per bucket.
-- Motivating string case on the `[U: …]` user field; `count` cross-checked against `_occurrences` in a numeric-UDM STATS CSV with the same pattern.
+- **Sessions oracle** (strongest check): a distinct UDM extracting the session ID must equal the built-in sessions column per bucket. Log survey (2026-07-08): every ThingWorx-format log in `logs/` has an empty `[S:]` field — the populated session source is the Tomcat access-log trailing positional field. File: `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-4.2026-01-26.txt` (107 MB, 2,149 unique 32-hex session IDs, 76,641 sessionless `-` lines exercising the no-value path), custom regex on the trailing hex field; `localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt` (191 sessions) for fast harness runs.
+- **Highlight oracle**: the sessions-oracle run repeated with a `-h` URL regex — the distinct UDM's highlight value must equal the built-in `sessions-HL` count per bucket (same oracle, highlight dimension).
+- **Derived-aggregation highlight arithmetic**: on the new string-ID fixture (highlighted subset known by construction), assert `count`-HL is the proportional occurrences-HL value and `ratio`/`rate`/`drate` compute over the highlight counterparts, not the totals.
+- Motivating string case on the `[U: …]` user field via custom regex: `logs/ThingworxLogs/ApplicationLog.2025-05-06.0.log` (6.5 MB, 167 distinct users) or `ScriptLog.2025-05-05.0.log` (13 MB, 51 users); `count` cross-checked against `_occurrences` in a numeric-UDM STATS CSV with the same pattern.
+- Default token pattern on real logs (no custom regex): `JavaException` in `logs/ThingworxLogs/ScriptLog.2025-05-05.0.log` — 19,750 `JavaException: <class>` occurrences across 4 distinct class strings (hand-verifiable distinct/ratio); CONN_MON `Local=`/`Peer=` in `logs/UDM/rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log` for the degenerate 1-2-distinct edge.
 - Validation paths: `distinct(delta)` (warn+skip), unit+distinct (unit warning), `-hg`/`-hm` on a counting UDM (rejection), duplicate names `u::count` + `u::distinct` (headers `u:count`/`u:distinct` via #99).
 - Alias/canonical paths: `mean(delta)` and `x::avg` both parse; duplicate names `x::avg` + `x::max` produce headers `x:mean`/`x:max` (input written with the alias, output in canonical form).
 - Rate unit: the same rate UDM under default `-ru` and `-ru s`/`-ru h` — value scales by `%rate_multiplier`, terminal suffix and CSV header suffix (`name_rate_min` vs `name_rate_sec`) follow.
-- Folding: the sessions-oracle comparison repeated under a `-pr` mode — distinct UDM must still equal the sessions column per folded bucket.
+- Folding: the sessions-oracle comparison repeated under a `-pr` mode — distinct UDM must still equal the sessions column per folded bucket. Multi-day input by passing consecutive files together: `localhost_access_log-twx01-twx-thingworx-0.2025-05-05/-06/-07.txt` (986/953/720 unique sessions; 148-277 MB each — one-off validation scale, not a per-commit harness case).
 - New string-ID fixture under `tests/fixtures/` exercising the counting default token pattern (no custom regex).
 - First-ever UDM coverage in `tests/csv-output/`: a UDM scenario in scenarios.tsv plus column rules in rules/stats-columns.tsv and rules/messages-columns.tsv (read `tests/HARNESS-DESIGN.md` first).
 - `-g` consolidation run with counting UDMs (merge branch); `-mem` on a large log observing `%udm_distinct` size and free-after-count.
