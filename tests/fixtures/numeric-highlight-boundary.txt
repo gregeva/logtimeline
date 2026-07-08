@@ -1,0 +1,19 @@
+2026-01-26 10:00:01.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-dur-below executed durationMS=99 bytes=1000 count=10
+2026-01-26 10:00:02.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-dur-at-min executed durationMS=100 bytes=1000 count=10
+2026-01-26 10:00:03.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-dur-inside executed durationMS=150 bytes=1000 count=10
+2026-01-26 10:00:04.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-dur-at-max executed durationMS=200 bytes=1000 count=10
+2026-01-26 10:00:05.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-dur-above executed durationMS=201 bytes=1000 count=10
+2026-01-26 10:00:06.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-dur-missing executed bytes=1000 count=10
+2026-01-26 10:00:11.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-bytes-below executed durationMS=10 bytes=4999 count=10
+2026-01-26 10:00:12.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-bytes-at-min executed durationMS=10 bytes=5000 count=10
+2026-01-26 10:00:13.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-bytes-inside executed durationMS=10 bytes=5500 count=10
+2026-01-26 10:00:14.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-bytes-at-max executed durationMS=10 bytes=6000 count=10
+2026-01-26 10:00:15.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-bytes-above executed durationMS=10 bytes=6001 count=10
+2026-01-26 10:00:16.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-bytes-missing executed durationMS=10 count=10
+2026-01-26 10:00:21.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-count-below executed durationMS=10 bytes=1000 count=44
+2026-01-26 10:00:22.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-count-at-min executed durationMS=10 bytes=1000 count=45
+2026-01-26 10:00:23.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-count-inside executed durationMS=10 bytes=1000 count=47
+2026-01-26 10:00:24.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-count-at-max executed durationMS=10 bytes=1000 count=50
+2026-01-26 10:00:25.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-count-above executed durationMS=10 bytes=1000 count=51
+2026-01-26 10:00:26.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-count-missing executed durationMS=10 bytes=1000
+2026-01-26 10:00:31.000+0000 [L: INFO] [O: BoundaryFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] BD-cross-both executed durationMS=150 bytes=5500 count=10

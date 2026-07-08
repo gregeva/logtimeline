@@ -3,15 +3,26 @@
 # CSV-output integrity validator (Issue #223)
 #
 # Categorical, pass/fail validation of -o CSV output: column structure,
-# population, group consistency, data-type correctness, fixed-decimal rules.
+# population, group consistency, data-type correctness, fixed-decimal rules,
+# and — when a scenario declares an expected-categories file — categorical
+# content: which MESSAGES rows land in category `highlight` vs `plain`, and
+# which are absent from the output entirely (dropped by a hard filter).
 #
 # Sibling to validate-statistics.sh (#224), which handles numeric drift.
-# This validator never checks numeric drift — only structural/type integrity.
+# This validator never checks numeric drift — only structural/type/categorical
+# integrity.
 #
 # Usage:
 #   validate-csv-output.pl --rules <rules.tsv> --csv <file.csv>
 #                          --scenario <name> --file-kind messages|stats
 #                          --expected-families <comma-list>
+#                          [--expected-categories <expected.tsv>]
+#
+# Expected-categories TSV (messages kind only): header `message_match\texpected`,
+# one row per assertion. `message_match` is a fixed substring matched against
+# the message column; `expected` is `highlight`, `plain`, or `absent` (no row
+# may match). A directive row `@no_highlight_rows` asserts the file contains
+# no highlight-category rows at all.
 #
 # Exit 0 on success, 1 on any FAIL.
 
@@ -29,6 +40,7 @@ GetOptions(
     'expected-families=s'  => \$opt{expected_families},
     'v-precision=s'        => \$opt{v_precision},
     'profile-mode=s'       => \$opt{profile_mode},   # optional: '' = none; else a --profile mode
+    'expected-categories=s' => \$opt{expected_categories},  # optional: messages-kind categorical content assertions
 ) or die "bad args\n";
 
 for my $k (qw(rules csv scenario file_kind expected_families v_precision)) {
@@ -43,6 +55,15 @@ my %active_family = map { $_ => 1 } split /,/, $opt{expected_families};
 my %vp = load_v_precision($opt{v_precision});
 
 my @rules = load_rules($opt{rules});
+
+my @expected_categories;
+if (defined $opt{expected_categories}) {
+    die "expected-categories is only valid for --file-kind messages\n"
+        unless $opt{file_kind} eq 'messages';
+    @expected_categories = load_expected_categories($opt{expected_categories});
+    die "expected-categories file has no assertions: $opt{expected_categories}\n"
+        unless @expected_categories;
+}
 
 my $csv = Text::CSV->new({ binary => 1 });
 open my $fh, '<', $opt{csv} or die "open $opt{csv}: $!";
@@ -69,9 +90,20 @@ for my $i (0 .. $#$header_row) {
 }
 
 # --- Phase 2: per-row checks ---
+my @message_rows;  # (row, category, message) collected for expected-categories checks
 my $row_num = 1;  # header is row 1; first data row is 2
 while (my $row = $csv->getline($fh)) {
     $row_num++;
+
+    if (@expected_categories
+        && exists $col_index{category} && exists $col_index{message}
+        && scalar(@$row) == scalar(@$header_row)) {
+        push @message_rows, {
+            row      => $row_num,
+            category => $row->[$col_index{category}] // '',
+            message  => $row->[$col_index{message}] // '',
+        };
+    }
 
     # alignment: row column count must match header
     if (scalar(@$row) != scalar(@$header_row)) {
@@ -164,6 +196,14 @@ while (my $row = $csv->getline($fh)) {
     }
 }
 close $fh;
+
+# --- Phase 3: expected-categories checks (messages kind, opt-in per scenario) ---
+if (@expected_categories) {
+    for my $exp (@expected_categories) {
+        $checks++;
+        $fails += check_expected_category($exp, \@message_rows);
+    }
+}
 
 # --- Summary ---
 my $status = $fails == 0 ? 'PASS' : 'FAIL';
@@ -425,6 +465,96 @@ sub check_type_and_decimals {
 sub producer {
     my ($kind) = @_;
     return $kind eq 'messages' ? 'print_message_summary' : 'print_bar_graph';
+}
+
+sub load_expected_categories {
+    my ($path) = @_;
+    open my $fh, '<', $path or die "open expected-categories $path: $!";
+    my $header = <$fh>;
+    my @exps;
+    while (my $line = <$fh>) {
+        chomp $line;
+        next if $line =~ /^\s*$/;
+        next if $line =~ /^#/;
+        if ($line =~ /^\@no_highlight_rows\s*$/) {
+            push @exps, { directive => 'no_highlight_rows' };
+            next;
+        }
+        my ($match, $expected) = split /\t/, $line, -1;
+        die "bad expected-categories row (need message_match<TAB>expected): $line\n"
+            unless defined $match && $match ne ''
+                && defined $expected && $expected =~ /^(highlight|plain|absent)$/;
+        push @exps, { match => $match, expected => $expected };
+    }
+    close $fh;
+    return @exps;
+}
+
+sub check_expected_category {
+    my ($exp, $rows) = @_;
+
+    if (($exp->{directive} // '') eq 'no_highlight_rows') {
+        my @hl = grep { $_->{category} eq 'highlight' } @$rows;
+        return 0 unless @hl;
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => $hl[0]{row},
+            column => 'category',
+            asserts => 'no MESSAGES row may carry category=highlight — the highlight criterion can never be satisfied in this scenario (metric absent from the log format)',
+            produced_by => 'read_and_process_logs() highlight tag point in ltl',
+            contract => 'features/312-numeric-criteria-highlight-selection.md § Decisions — a record missing the metric never satisfies a criterion on it',
+            expected => '0 highlight rows',
+            actual => scalar(@hl) . ' highlight rows (first: ' . $hl[0]{message} . ')',
+            rule => '@no_highlight_rows',
+        });
+        return 1;
+    }
+
+    my @matched = grep { index($_->{message}, $exp->{match}) >= 0 } @$rows;
+
+    if ($exp->{expected} eq 'absent') {
+        return 0 unless @matched;
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => $matched[0]{row},
+            column => 'message',
+            asserts => "no MESSAGES row may match '$exp->{match}' — the record is outside the hard-filter range (or lacks the filtered metric) and must be dropped",
+            produced_by => 'read_and_process_logs() numeric filter drop guards in ltl',
+            contract => 'features/312-numeric-criteria-highlight-selection.md § Decisions — closed-interval filter bounds (boundary normalization)',
+            expected => 'no matching row',
+            actual => scalar(@matched) . ' matching rows (first: ' . $matched[0]{message} . ')',
+            rule => "expected=absent match='$exp->{match}'",
+        });
+        return 1;
+    }
+
+    # expected highlight|plain: the anchor must exist (zero matches is a hard
+    # failure per HARNESS-DESIGN.md), and every matching row must carry the
+    # expected category.
+    if (!@matched) {
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => '-',
+            column => 'message',
+            asserts => "a MESSAGES row matching '$exp->{match}' must exist with category=$exp->{expected}",
+            produced_by => 'print_message_summary() MESSAGES CSV emission in ltl',
+            contract => 'tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors',
+            expected => "row matching '$exp->{match}'",
+            actual => 'no matching row',
+            rule => "expected=$exp->{expected} match='$exp->{match}'",
+        });
+        return 1;
+    }
+    my @wrong = grep { $_->{category} ne $exp->{expected} } @matched;
+    return 0 unless @wrong;
+    emit_fail({
+        scenario => $opt{scenario}, file => $opt{file_kind}, row => $wrong[0]{row},
+        column => 'category',
+        asserts => "every MESSAGES row matching '$exp->{match}' must carry category=$exp->{expected} under this scenario's highlight/filter options",
+        produced_by => 'read_and_process_logs() highlight tag point in ltl',
+        contract => 'features/312-numeric-criteria-highlight-selection.md § Decisions — inclusive bands, AND across metrics and with the regex highlight, undefined metric never highlights',
+        expected => $exp->{expected},
+        actual => $wrong[0]{category} . " (row $wrong[0]{row}: $wrong[0]{message})",
+        rule => "expected=$exp->{expected} match='$exp->{match}'",
+    });
+    return 1;
 }
 
 sub emit_fail {
