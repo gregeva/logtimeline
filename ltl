@@ -4279,6 +4279,8 @@ sub parse_udm_configs {
     my %time_units = map { $_ => 1 } qw( ns us ms s m h );
     my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );
     my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );
+    my %udm_agg_aliases = ( avg => 'mean', dcount => 'distinct', unique => 'distinct' );
+    my %counting_aggs = map { $_ => 1 } qw( count distinct ratio rate drate );
 
     # Case normalization: map lowercase variants to canonical forms
     my %byte_unit_canonical = map { lc($_) => $_ } keys %byte_units;
@@ -4302,34 +4304,52 @@ sub parse_udm_configs {
             @patterns = ($custom_pattern);
         }
 
-        # Split remaining on : to get name, unit, function
-        my @fields = split(/:/, $arg, 3);
+        # Split remaining on : to get name, unit, function, token key
+        my @fields = split(/:/, $arg, 4);
         $name = $fields[0];
         $unit = (defined $fields[1] && $fields[1] ne '') ? $fields[1] : undef;
         $function = (defined $fields[2] && $fields[2] ne '') ? $fields[2] : undef;
+        my $token_key = (defined $fields[3] && $fields[3] ne '') ? $fields[3] : undef;
 
         unless (defined $name && $name ne '') {
             print STDERR "Warning: -udm requires a metric name: '$raw_arg'\n";
             next;
         }
 
+        if (defined $token_key && defined $custom_pattern) {
+            print STDERR "Warning: -udm '$raw_arg' supplies both a token key and a /pattern/ - use one or the other, skipping\n";
+            next;
+        }
+
         # Parse function field into transform and aggregation
         my ($transform, $aggregation);
         if (defined $function) {
-            if ($function =~ /^(sum|min|max|avg)\((delta|idelta)\)$/) {
+            # Normalize aggregation aliases, including inside combined forms
+            $function =~ s/^(\w+)/exists $udm_agg_aliases{$1} ? $udm_agg_aliases{$1} : $1/e;
+            if ($function =~ /^(count|distinct|ratio|rate|drate)\(/) {
+                print STDERR "Warning: Counting aggregation '$1' cannot be combined with a transform in -udm '$raw_arg', skipping\n";
+                next;
+            } elsif ($function =~ /^(sum|min|max|mean)\((delta|idelta)\)$/) {
                 $aggregation = $1;
                 $transform = $2;
             } elsif ($function =~ /^(delta|idelta)$/) {
                 $transform = $1;
                 $aggregation = 'sum';
-            } elsif ($function =~ /^(sum|min|max|avg)$/) {
+            } elsif ($function =~ /^(sum|min|max|mean|count|distinct|ratio|rate|drate)$/) {
                 $aggregation = $1;
             } else {
-                print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: sum, min, max, avg, delta, idelta, or combined e.g. max(delta))\n";
+                print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: sum, min, max, mean, count, distinct, ratio, rate, drate, delta, idelta, or combined e.g. max(delta))\n";
                 next;
             }
         }
         $aggregation //= 'sum';
+        my $agg_kind = $counting_aggs{$aggregation} ? 'counting' : 'numeric';
+
+        # Counting aggregations operate on raw extracted strings: units do not apply
+        if ($agg_kind eq 'counting' && defined $unit) {
+            print STDERR "Warning: Unit '$unit' ignored for counting aggregation '$aggregation' in -udm '$raw_arg'\n";
+            $unit = undef;
+        }
 
         # Normalize unit case: SI units checked case-sensitively first
         # (m = minutes, M = mega), then lowercase lookups for time/byte
@@ -4372,11 +4392,17 @@ sub parse_udm_configs {
             $formatter = \&format_number;
         }
 
-        # Build default patterns if no custom pattern provided
+        # Build default patterns if no custom pattern provided; the token key
+        # (when given) is the extraction anchor, leaving the name as pure label
         if (!@patterns) {
-            my $escaped_name = quotemeta($name);
-            push @patterns, qr/\b${escaped_name}\s*[=:]\s*(${number})/;
-            push @patterns, qr/(${number})\s*[=:]?\s*${escaped_name}\b/;
+            my $escaped_key = quotemeta($token_key // $name);
+            if ($agg_kind eq 'counting') {
+                # Token capture: any run of characters that cannot end a field
+                push @patterns, qr/\b${escaped_key}\s*[=:]\s*([^\s,;"'\])]+)/;
+            } else {
+                push @patterns, qr/\b${escaped_key}\s*[=:]\s*(${number})/;
+                push @patterns, qr/(${number})\s*[=:]?\s*${escaped_key}\b/;
+            }
         }
 
         push @udm_configs, {
@@ -4386,6 +4412,8 @@ sub parse_udm_configs {
             function    => $function,
             transform   => $transform,
             aggregation => $aggregation,
+            agg_kind    => $agg_kind,
+            token_key   => $token_key,
             patterns    => \@patterns,
             unit_type   => $unit_type,
             converter   => $converter,
@@ -9406,7 +9434,7 @@ sub calculate_all_statistics {
             if    ($agg eq 'sum') { $display_value = $log_analysis{$bucket}{"udm_${name}_sum"}; }
             elsif ($agg eq 'min') { $display_value = $log_analysis{$bucket}{"udm_${name}_min"}; }
             elsif ($agg eq 'max') { $display_value = $log_analysis{$bucket}{"udm_${name}_max"}; }
-            elsif ($agg eq 'avg') { $display_value = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef; }
+            elsif ($agg eq 'mean') { $display_value = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef; }
             $log_stats{$bucket}{"udm_$name"} = $display_value;
 
             # Aggregation-aware highlight value
@@ -9421,7 +9449,7 @@ sub calculate_all_statistics {
                 # Highlight entire bar if the highlighted max equals the overall max
                 my $hl_max = $log_analysis{$bucket}{"udm_${name}_max-HL"};
                 $hl_value = (defined $hl_max && defined $display_value && $hl_max == $display_value) ? $display_value : undef;
-            } elsif ($agg eq 'avg') {
+            } elsif ($agg eq 'mean') {
                 $hl_value = undef;  # No meaningful highlight for averages
             }
             $log_stats{$bucket}{"udm_$name-HL"} = $hl_value;
@@ -12419,8 +12447,7 @@ sub print_message_summary {
                             my $name = $config->{name};
                             if ($config->{name} ne $config->{base_name}) {
                                 # Disambiguated metric: single aggregated value (#99)
-                                my $agg = $config->{aggregation};
-                                my $stat_key = $agg eq 'avg' ? 'mean' : $agg;
+                                my $stat_key = $config->{aggregation};
                                 push @udm_csv_values, $log_messages{$grouping}{$key}{"udm_${name}_${stat_key}"};
                             } else {
                                 push @udm_csv_values,
