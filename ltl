@@ -253,6 +253,7 @@ my( $include_filter, $exclude_filter, $highlight_filter );  # Compiled filter ma
 my( @exclude_args, @include_args, @highlight_args, @threadpool_activity_args );
 my $ltl_config_raw = '';                                 # Raw LTL_CONFIG env var string for display
 my ( @udm_configs, @udm_raw_args, %udm_last_value );
+my %udm_distinct;                           # Per-bucket distinct value sets for counting aggregations (Issue #313), freed after counting like %log_sessions
 my ( $csv_separator_override, @udm_csv_message_col_names );
 my ( $csv_detected, $csv_separator, $csv_timestamp_col, %csv_col_index );
 my ( @csv_udm_col_indices, @csv_message_col_indices );
@@ -6167,6 +6168,7 @@ sub measure_memory_structures {
         log_sessions           => Devel::Size::total_size(\%log_sessions),
         threadpool_activity    => Devel::Size::total_size(\%threadpool_activity),
         udm_last_value         => Devel::Size::total_size(\%udm_last_value),
+        udm_distinct           => Devel::Size::total_size(\%udm_distinct),
         heatmap_data           => Devel::Size::total_size(\%heatmap_data),
         heatmap_data_hl        => Devel::Size::total_size(\%heatmap_data_hl),
         heatmap_raw            => Devel::Size::total_size(\%heatmap_raw),
@@ -7232,7 +7234,11 @@ sub adapt_to_command_line_options {
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
         my ($match) = grep { $_->{name} eq $heatmap_metric } @udm_configs;
         ($match) = grep { $_->{base_name} eq $heatmap_metric } @udm_configs if !$match;
-        if ($match) {
+        if ($match && $match->{agg_kind} eq 'counting') {
+            # A per-line distribution over counting (string) values is meaningless
+            print STDERR "Warning: Heatmap metric '$heatmap_metric' uses counting aggregation '$match->{aggregation}' - heatmap disabled\n";
+            $heatmap_enabled = 0;
+        } elsif ($match) {
             $heatmap_udm_config = $match;
             $heatmap_metric_map{$heatmap_metric} = { column => undef };
         } else {
@@ -7251,7 +7257,12 @@ sub adapt_to_command_line_options {
                 ($match) = grep { $_->{base_name} eq $metric } @udm_configs;
                 $histogram_metrics{$match->{name}} = 1 if $match;
             }
-            if ($match) {
+            if ($match && $match->{agg_kind} eq 'counting') {
+                # A per-line distribution over counting (string) values is meaningless
+                print STDERR "Warning: Histogram metric '$metric' uses counting aggregation '$match->{aggregation}' - skipping\n";
+                delete $histogram_metrics{$metric};
+                delete $histogram_metrics{$match->{name}};
+            } elsif ($match) {
                 push @histogram_udm_configs, $match;
                 # Colors resolved from @column_layout in normalize_data_for_output()
             } else {
@@ -7261,9 +7272,9 @@ sub adapt_to_command_line_options {
         }
     }
 
-    # Bare -hg: include all UDM metrics
+    # Bare -hg: include all UDM metrics (counting UDMs carry no per-line distribution)
     if ($histogram_enabled && !%histogram_metrics && @udm_configs) {
-        @histogram_udm_configs = @udm_configs;
+        @histogram_udm_configs = grep { $_->{agg_kind} ne 'counting' } @udm_configs;
         for my $cfg (@udm_configs) {
             # Colors resolved from @column_layout in normalize_data_for_output()
         }
@@ -7764,6 +7775,14 @@ sub read_and_process_logs {
                     }
                     next unless defined $matched_value;
 
+                    # Counting aggregations keep the raw extracted string:
+                    # numeric coercion, transforms, and unit conversion do not apply
+                    if ($config->{agg_kind} eq 'counting') {
+                        $udm_values{$name} = $matched_value;
+                        $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13;
+                        next;
+                    }
+
                     my $raw_value = $matched_value + 0;  # Ensure numeric
 
                     # Apply delta/idelta transform on raw value before conversion
@@ -8168,6 +8187,11 @@ sub read_and_process_logs {
                             my $name = $config->{name};
                             next unless defined $udm_values{$name};
                             my $value = $udm_values{$name};
+                            if ($config->{agg_kind} eq 'counting') {
+                                # Only occurrences are tracked per message; distinct is bucket-scoped
+                                $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
+                                next;
+                            }
                             $log_messages{$category}{$log_key}{"udm_${name}_sum"} += $value;
                             $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
                             $log_messages{$category}{$log_key}{"udm_${name}_min"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_min"} || $value < $log_messages{$category}{$log_key}{"udm_${name}_min"};
@@ -8387,6 +8411,17 @@ sub read_and_process_logs {
                         my $name = $config->{name};
                         next unless defined $udm_values{$name};
                         my $value = $udm_values{$name};
+                        if ($config->{agg_kind} eq 'counting') {
+                            # Counting aggregations (Issue #313): occurrences plus a distinct
+                            # value set per bucket, mirroring the %log_sessions pattern
+                            $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
+                            $udm_distinct{$bucket}{$name}{plain}{$value} += 1;
+                            if ($category_bucket =~ /-HL$/) {
+                                $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
+                                $udm_distinct{$bucket}{$name}{highlight}{$value} += 1;
+                            }
+                            next;
+                        }
                         $log_analysis{$bucket}{"udm_${name}_sum"} += $value;
                         $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
                         if ($category_bucket =~ /-HL$/) {
