@@ -10588,7 +10588,13 @@ sub normalize_data_for_output {
             } elsif ($key =~ /^udm_/) {
                 (my $csv_key = $key) =~ s/^udm_//;
                 my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
-                if ($cfg && $cfg->{name} ne $cfg->{base_name}) {
+                if ($cfg && $cfg->{agg_kind} eq 'counting') {
+                    # Counting aggregation (Issue #313): single value column with
+                    # the aggregation as the stat; rate columns carry the -ru suffix
+                    my $col = "$cfg->{base_name}_$cfg->{aggregation}";
+                    $col .= $rate_csv_suffix{$rate_unit} if $cfg->{aggregation} =~ /^(rate|drate)$/;
+                    push @output_columns, $col;
+                } elsif ($cfg && $cfg->{name} ne $cfg->{base_name}) {
                     # Disambiguated metric: single value column (#99)
                     my $csv_prefix = $cfg->{unit} ? "${csv_key}_$cfg->{unit}" : $csv_key;
                     push @output_columns, $csv_prefix;
@@ -11399,8 +11405,9 @@ sub print_bar_graph {
                 } elsif( $key =~ /^udm_(.+)$/ ) {
                     my $metric_name = $1;
                     my ($config) = grep { $_->{name} eq $metric_name } @udm_configs;
-                    if ($config && $config->{name} ne $config->{base_name}) {
-                        # Disambiguated metric: single value column (#99)
+                    if ($config && ($config->{agg_kind} eq 'counting' || $config->{name} ne $config->{base_name})) {
+                        # Single value column: counting aggregation (#313) or
+                        # disambiguated metric (#99)
                         push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
                     } else {
                         foreach my $metric ( qw( occurrences min mean max sum ) ) {
@@ -12519,7 +12526,13 @@ sub print_message_summary {
                         my @udm_csv_values;
                         foreach my $config (@udm_configs) {
                             my $name = $config->{name};
-                            if ($config->{name} ne $config->{base_name}) {
+                            if ($config->{agg_kind} eq 'counting') {
+                                # count -> per-message occurrences; distinct/ratio/rate/drate
+                                # have no per-message value (distinct sets are bucket-scoped)
+                                push @udm_csv_values, $config->{aggregation} eq 'count'
+                                    ? $log_messages{$grouping}{$key}{"udm_${name}_occurrences"}
+                                    : undef;
+                            } elsif ($config->{name} ne $config->{base_name}) {
                                 # Disambiguated metric: single aggregated value (#99)
                                 my $stat_key = $config->{aggregation};
                                 push @udm_csv_values, $log_messages{$grouping}{$key}{"udm_${name}_${stat_key}"};
@@ -13005,7 +13018,13 @@ if( $write_messages_to_csv ) {                     # If write to CSV enabled, op
     foreach my $config (@udm_configs) {
         my $name = $config->{name};
         my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
-        if ($config->{name} ne $config->{base_name}) {
+        if ($config->{agg_kind} eq 'counting') {
+            # Counting aggregation (Issue #313): single value column with
+            # the aggregation as the stat; rate columns carry the -ru suffix
+            my $col = "$config->{base_name}_$config->{aggregation}";
+            $col .= $rate_csv_suffix{$rate_unit} if $config->{aggregation} =~ /^(rate|drate)$/;
+            push @udm_csv_headers, $col;
+        } elsif ($config->{name} ne $config->{base_name}) {
             # Disambiguated metric: single value column (#99)
             push @udm_csv_headers, $csv_prefix;
         } else {
