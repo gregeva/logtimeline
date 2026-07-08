@@ -3491,7 +3491,7 @@ my $explain_histogram_layout = q{The histogram has a dual Y-axis: the LEFT axis 
 
 my $explain_histogram_reading = q{The histogram is the chart for answering "what does the distribution actually look like?" Read it as you would any frequency chart, but two ltl-specific patterns deserve special attention. First, log-scale tail interpretation: a small bar at the far right represents a small number of very large values -- those bars are diagnostically valuable even when short, because the X-axis is exponential. Second, percentile-tick alignment: P50 should fall on or near the tallest bar (the mode). When P50 is far from the peak, the distribution is highly skewed and the mean is unreliable. When P95 and P99 are far apart on the X-axis (multiple decades), the tail is fat -- common signature of GC pauses, lock contention, or retry storms. When P99 and P99.9 are visually adjacent, the worst-case is dominated by a small cluster of consistent outliers; when far apart, the worst-case is dominated by one or two extreme events.};
 
-my $explain_histogram_compute = q{The histogram uses log-spaced bins with HDR-histogram-style precision. Bin-counter resolution is controlled by `--data-model-precision` (tier 1..9, default 5); higher tiers give finer resolution. The histogram width (default 95% of terminal) and height (default 8 rows) are tunable via `-hgw` and `-hgh`. Highlight overlays (`-h regex`) render colored sub-bars within each main bar, showing the proportion of highlighted entries at each value range. The percentile tick marks on the baseline are computed from the same observations as the summary-table p99/p999 values, so the visual ticks and the numeric statistics agree by construction.};
+my $explain_histogram_compute = q{The histogram uses log-spaced bins with HDR-histogram-style precision. Bin-counter resolution is controlled by `--data-model-precision` (tier 1..9, default 5); higher tiers give finer resolution. The histogram width (default 95% of terminal) and height (default 8 rows) are tunable via `-hgw` and `-hgh`. Highlight overlays (`-h regex`, or numeric criteria such as `-hdmin`) render colored sub-bars within each main bar, showing the proportion of highlighted entries at each value range. The percentile tick marks on the baseline are computed from the same observations as the summary-table p99/p999 values, so the visual ticks and the numeric statistics agree by construction.};
 
 # Synthetic histogram example chart. Mirrors the real ltl layout precisely:
 # - Top border (┌─...─┐)
@@ -3656,7 +3656,7 @@ my $explain_histogram_flags = <<'END';
     ltl -hg duration -dmp 7 access.log            # tighter precision (slower)
 END
 
-my $explain_histogram_notes = q{The X-axis log scale means that visual distance between bars represents an exponential, not linear, gap in actual value. Two bars that look the same width apart on the screen could represent a 10x difference at one part of the chart and a 100x difference at another. When -hg is invoked alongside the bar graph (default), the histogram renders as an additional panel below the timeline. When -hg is invoked with multiple metrics (-hg duration,bytes), each metric gets its own histogram panel stacked vertically. Highlight overlays (-h pattern) draw colored sub-bars within each main bar showing the proportion of matched entries; the highlight percentile legend appears below the main legend in highlight color. Color rendering depends on terminal support: modern Unix terminals and Windows Terminal display the gradient correctly; legacy Windows CMD with `more` shows monochrome bars (the layout and percentile ticks remain readable).};
+my $explain_histogram_notes = q{The X-axis log scale means that visual distance between bars represents an exponential, not linear, gap in actual value. Two bars that look the same width apart on the screen could represent a 10x difference at one part of the chart and a 100x difference at another. When -hg is invoked alongside the bar graph (default), the histogram renders as an additional panel below the timeline. When -hg is invoked with multiple metrics (-hg duration,bytes), each metric gets its own histogram panel stacked vertically. Highlight overlays (-h pattern, or numeric criteria such as -hdmin) draw colored sub-bars within each main bar showing the proportion of highlighted entries; the highlight percentile legend appears below the main legend in highlight color. Color rendering depends on terminal support: modern Unix terminals and Windows Terminal display the gradient correctly; legacy Windows CMD with `more` shows monochrome bars (the layout and percentile ticks remain readable).};
 
 sub populate_explain_topics {
     %explain_topics = (
@@ -3975,14 +3975,20 @@ sub print_help {
     $out .= help_opt("-if,  --include-file <file>",   "Load include patterns from a file (one pattern per line)");
     $out .= help_opt("-ef,  --exclude-file <file>",   "Load exclude patterns from a file (one pattern per line)");
     $out .= help_opt("-hf,  --highlight-file <file>", "Load highlight patterns from a file (one pattern per line)");
-    $out .= help_opt("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold");
-    $out .= help_opt("-dmax, --duration-max <N>",     "Hide log entries with duration above this threshold");
-    $out .= help_opt("-bmin, --bytes-min <N>",        "Hide log entries with response size below this threshold");
-    $out .= help_opt("-bmax, --bytes-max <N>",        "Hide log entries with response size above this threshold");
-    $out .= help_opt("-cmin, --count-min <N>",        "Hide log entries with count below this threshold");
-    $out .= help_opt("-cmax, --count-max <N>",        "Hide log entries with count above this threshold");
+    $out .= help_opt("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept)");
+    $out .= help_opt("-dmax, --duration-max <N>",     "Hide log entries with duration above this threshold (inclusive: entries exactly at N are kept)");
+    $out .= help_opt("-bmin, --bytes-min <N>",        "Hide log entries with response size below this threshold (inclusive)");
+    $out .= help_opt("-bmax, --bytes-max <N>",        "Hide log entries with response size above this threshold (inclusive)");
+    $out .= help_opt("-cmin, --count-min <N>",        "Hide log entries with count below this threshold (inclusive)");
+    $out .= help_opt("-cmax, --count-max <N>",        "Hide log entries with count above this threshold (inclusive)");
+    $out .= help_opt("-hdmin, --highlight-duration-min <N>", "Highlight log entries with duration at or above this value, without filtering anything out");
+    $out .= help_opt("-hdmax, --highlight-duration-max <N>", "Highlight log entries with duration at or below this value, without filtering anything out");
+    $out .= help_opt("-hbmin, --highlight-bytes-min <N>",    "Highlight log entries with response size at or above this value, without filtering anything out");
+    $out .= help_opt("-hbmax, --highlight-bytes-max <N>",    "Highlight log entries with response size at or below this value, without filtering anything out");
+    $out .= help_opt("-hcmin, --highlight-count-min <N>",    "Highlight log entries with count at or above this value, without filtering anything out");
+    $out .= help_opt("-hcmax, --highlight-count-max <N>",    "Highlight log entries with count at or below this value, without filtering anything out");
     $out .= "\n";
-    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population.";
+    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Highlight criteria (-h/-hf and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric.";
     $out .= help_wrap($note_text, indent => $help_opt_col, first_indent => $help_opt_col) . "\n";
 
     # Recording & Processing

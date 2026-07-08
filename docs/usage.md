@@ -52,7 +52,9 @@ ltl -bs 15 -pr workday -st 09:00 -et 11:00 access.log
 
 Filtering is the core of logtimeline's investigative power. Three operations — include, exclude, and highlight — drive an iterative analysis loop. **Include** isolates lines matching a pattern, discarding everything else. **Exclude** removes matching lines, keeping everything else. **Highlight** renders matching lines as a separate colored bar alongside the main bar in every time bucket, allowing visual comparison of a subset against the full population. All three accept regex, can be specified multiple times, and support `&` for AND logic within a single pattern.
 
-The typical workflow is subtractive: start with all data, exclude known noise, narrow with includes until the signal is clear, then highlight to see your target in the context of the full population. Pattern files (`-if`, `-ef`, `-hf`) allow reusable sets of patterns for common scenarios. Numeric threshold filters (`-dmin`, `-dmax`, `-bmin`, `-bmax`, `-cmin`, `-cmax`) complement regex filtering by selecting entries based on metric values rather than text content.
+The typical workflow is subtractive: start with all data, exclude known noise, narrow with includes until the signal is clear, then highlight to see your target in the context of the full population. Pattern files (`-if`, `-ef`, `-hf`) allow reusable sets of patterns for common scenarios. Numeric threshold filters (`-dmin`, `-dmax`, `-bmin`, `-bmax`, `-cmin`, `-cmax`) complement regex filtering by selecting entries based on metric values rather than text content; all bounds are inclusive (an entry exactly at the threshold is kept).
+
+Highlighting is available on the same numeric criteria: `-hdmin`/`-hdmax`, `-hbmin`/`-hbmax`, and `-hcmin`/`-hcmax` mark entries whose duration, response size, or count falls inside the given inclusive range — without removing anything from the analysis. This keeps the full timeline in view while a slow tail, oversized responses, or unusual counts light up in context. Numeric highlight criteria combine freely with the hard filters (trim noise with `-dmin` while highlighting the extreme cases with `-hdmin`) and with the regex highlight: when both `-h` and numeric criteria are given, an entry is highlighted only if it matches the pattern *and* satisfies every numeric criterion. An entry that carries no value for a metric is never highlighted by a criterion on that metric.
 
 | Option | Description |
 |--------|-------------|
@@ -62,12 +64,18 @@ The typical workflow is subtractive: start with all data, exclude known noise, n
 | `-if, --include-file <file>` | Load include patterns from a file (one pattern per line) |
 | `-ef, --exclude-file <file>` | Load exclude patterns from a file (one pattern per line) |
 | `-hf, --highlight-file <file>` | Load highlight patterns from a file (one pattern per line) |
-| `-dmin, --duration-min <N>` | Hide log entries with duration below this threshold |
-| `-dmax, --duration-max <N>` | Hide log entries with duration above this threshold |
-| `-bmin, --bytes-min <N>` | Hide log entries with response size below this threshold |
-| `-bmax, --bytes-max <N>` | Hide log entries with response size above this threshold |
-| `-cmin, --count-min <N>` | Hide log entries with count below this threshold |
-| `-cmax, --count-max <N>` | Hide log entries with count above this threshold |
+| `-dmin, --duration-min <N>` | Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept) |
+| `-dmax, --duration-max <N>` | Hide log entries with duration above this threshold (inclusive: entries exactly at N are kept) |
+| `-bmin, --bytes-min <N>` | Hide log entries with response size below this threshold (inclusive) |
+| `-bmax, --bytes-max <N>` | Hide log entries with response size above this threshold (inclusive) |
+| `-cmin, --count-min <N>` | Hide log entries with count below this threshold (inclusive) |
+| `-cmax, --count-max <N>` | Hide log entries with count above this threshold (inclusive) |
+| `-hdmin, --highlight-duration-min <N>` | Highlight log entries with duration at or above this value, without filtering anything out |
+| `-hdmax, --highlight-duration-max <N>` | Highlight log entries with duration at or below this value, without filtering anything out |
+| `-hbmin, --highlight-bytes-min <N>` | Highlight log entries with response size at or above this value, without filtering anything out |
+| `-hbmax, --highlight-bytes-max <N>` | Highlight log entries with response size at or below this value, without filtering anything out |
+| `-hcmin, --highlight-count-min <N>` | Highlight log entries with count at or above this value, without filtering anything out |
+| `-hcmax, --highlight-count-max <N>` | Highlight log entries with count at or below this value, without filtering anything out |
 ```bash
 # Only show POST requests, exclude health checks
 ltl -i "POST" -e healthcheck access.log
@@ -75,9 +83,13 @@ ltl -i "POST" -e healthcheck access.log
 ltl -h "/api/v2/orders" access.log
 # Only show requests slower than 5 seconds
 ltl -dmin 5000 access.log
+# Keep everything in view, highlight requests slower than 5 seconds
+ltl -hdmin 5000 access.log
+# Highlight slow requests to one API within the full population
+ltl -h "/api/v2/orders" -hdmin 5000 access.log
 ```
 
-> **Note:** Filters affect all computed statistics. For example, `-dmin 1000` will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population of data in the file.
+> **Note:** Filters affect all computed statistics. For example, `-dmin 1000` will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population of data in the file. Highlight criteria (`-h`/`-hf` and the `-h*min`/`-h*max` options) never change which entries are analyzed — they only mark a subset within the full population.
 
 ### Recording & Processing
 
@@ -352,7 +364,7 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 | `rate` | Occurrences per rate unit (see `-ru`; default per-minute) |
 | `drate` | Unique values per rate unit (see `-ru`; default per-minute) |
 
-Counting metrics ignore the `unit` field and cannot be combined with `delta`/`idelta` transforms. Highlighting (`-h`) works as it does for the sessions column: highlighted lines contribute to both the bucket total and the highlight value. In the STATS CSV, each counting metric emits one column named `name_function` (e.g. `users_distinct`), with the rate-unit suffix appended for `rate`/`drate` (e.g. `logins_rate_min`); in the MESSAGES CSV, `count` carries per-message occurrences while `distinct`/`ratio`/`rate`/`drate` are blank — unique values are counted per time bucket, not per message.
+Counting metrics ignore the `unit` field and cannot be combined with `delta`/`idelta` transforms. Highlighting — whether by pattern (`-h`) or by numeric criteria (`-hdmin` and friends) — works as it does for the sessions column: highlighted lines contribute to both the bucket total and the highlight value. In the STATS CSV, each counting metric emits one column named `name_function` (e.g. `users_distinct`), with the rate-unit suffix appended for `rate`/`drate` (e.g. `logins_rate_min`); in the MESSAGES CSV, `count` carries per-message occurrences while `distinct`/`ratio`/`rate`/`drate` are blank — unique values are counted per time bucket, not per message.
 
 ```bash
 # Track max value of a raw numeric field per bucket
