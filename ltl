@@ -9457,6 +9457,42 @@ sub calculate_all_statistics {
             my $agg  = $config->{aggregation};
             my $occ  = $log_analysis{$bucket}{"udm_${name}_occurrences"};
 
+            # Counting aggregations (Issue #313): cardinality from the distinct
+            # sets plus display-time arithmetic; occurrences > 0 implies
+            # distinct >= 1, so the divisions are safe
+            if ($config->{agg_kind} eq 'counting') {
+                my $occ_hl      = $log_analysis{$bucket}{"udm_${name}_occurrences-HL"};
+                my $distinct    = exists $udm_distinct{$bucket}{$name}{plain}
+                                ? scalar keys %{$udm_distinct{$bucket}{$name}{plain}} : 0;
+                my $distinct_hl = exists $udm_distinct{$bucket}{$name}{highlight}
+                                ? scalar keys %{$udm_distinct{$bucket}{$name}{highlight}} : 0;
+
+                $log_stats{$bucket}{"udm_${name}_occurrences"} = $occ;
+
+                my ($display_value, $hl_value);
+                if (defined $occ && $occ > 0) {
+                    if    ($agg eq 'count')    { $display_value = $occ; }
+                    elsif ($agg eq 'distinct') { $display_value = $distinct; }
+                    elsif ($agg eq 'ratio')    { $display_value = $occ / $distinct; }
+                    elsif ($agg eq 'rate')     { $display_value = $occ / $bucket_size_seconds * $rate_multiplier{$rate_unit}; }
+                    elsif ($agg eq 'drate')    { $display_value = $distinct / $bucket_size_seconds * $rate_multiplier{$rate_unit}; }
+                }
+                if (defined $occ_hl && $occ_hl > 0) {
+                    if    ($agg eq 'count')    { $hl_value = $occ_hl; }
+                    elsif ($agg eq 'distinct') { $hl_value = $distinct_hl; }
+                    elsif ($agg eq 'ratio')    { $hl_value = $occ_hl / $distinct_hl; }
+                    elsif ($agg eq 'rate')     { $hl_value = $occ_hl / $bucket_size_seconds * $rate_multiplier{$rate_unit}; }
+                    elsif ($agg eq 'drate')    { $hl_value = $distinct_hl / $bucket_size_seconds * $rate_multiplier{$rate_unit}; }
+                }
+                $log_stats{$bucket}{"udm_$name"} = $display_value;
+                $log_stats{$bucket}{"udm_$name-HL"} = $hl_value;
+
+                # Free this bucket's distinct sets immediately after counting,
+                # following the %log_sessions memory lifecycle
+                delete $udm_distinct{$bucket}{$name};
+                next;
+            }
+
             # Always populate all raw stats for CSV/summary
             $log_stats{$bucket}{"udm_${name}_occurrences"} = $occ;
             $log_stats{$bucket}{"udm_${name}_min"}  = $log_analysis{$bucket}{"udm_${name}_min"};
@@ -9489,6 +9525,7 @@ sub calculate_all_statistics {
             }
             $log_stats{$bucket}{"udm_$name-HL"} = $hl_value;
         }
+        delete $udm_distinct{$bucket};
     }
 
     ## STATS FOR TOP LOG MESSAGES ##
@@ -11271,6 +11308,8 @@ sub print_bar_graph {
                                     $trend_value = " " . format_bytes($log_stats{$bucket}{$key}, 'B');
                                 } else {
                                     $trend_value = " " . format_number($log_stats{$bucket}{$key}, ' ', 2);
+                                    $trend_value .= $rate_suffix{$rate_unit}
+                                        if $config->{aggregation} =~ /^(rate|drate)$/;
                                 }
                             }
                         } else {
