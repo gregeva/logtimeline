@@ -4861,6 +4861,12 @@ sub group_similar_messages {
             # Copy UDM stats
             foreach my $config (@udm_configs) {
                 my $name = $config->{name};
+                if ($config->{agg_kind} eq 'counting') {
+                    # Counting UDMs carry per-message occurrences only (Issue #313)
+                    $entry->{"udm_${name}_occurrences"} = $cluster->{"udm_${name}_occurrences"}
+                        if defined $cluster->{"udm_${name}_occurrences"};
+                    next;
+                }
                 my $sum_key = "udm_${name}_sum";
                 next unless defined $cluster->{$sum_key};
                 $entry->{$sum_key} = $cluster->{$sum_key};
@@ -5410,6 +5416,12 @@ sub merge_consolidation_stats {
     # UDM stats
     foreach my $config (@udm_configs) {
         my $name = $config->{name};
+        if ($config->{agg_kind} eq 'counting') {
+            # Counting UDMs carry per-message occurrences only (Issue #313)
+            $target->{"udm_${name}_occurrences"} = ($target->{"udm_${name}_occurrences"} // 0) + $source->{"udm_${name}_occurrences"}
+                if defined $source->{"udm_${name}_occurrences"};
+            next;
+        }
         my $sum_key = "udm_${name}_sum";
         next unless defined $source->{$sum_key};
         $target->{$sum_key} = ($target->{$sum_key} // 0) + $source->{$sum_key};
