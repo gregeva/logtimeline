@@ -302,6 +302,37 @@ scenario_runtime_config_data_model_selectors() {
         contract    'features/266-data-model-selectors.md section -V runtime-config surfacing.'
 }
 
+scenario_runtime_config_numeric_highlight() {
+    current_scenario="runtime-config-numeric-highlight"
+    echo "[$current_scenario]"
+
+    run_ltl "rc-hl" -V runtime-config -hdmin 100 -hbmax 5000 -hcmin 2 "$TEST_LOG"
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^highlight-duration-min: 100$' \
+        asserts     'A user-supplied -hdmin appears in the runtime-config / command-line sub-section with its resolved value and no annotation.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for highlight-duration-min' \
+        contract    'features/312-numeric-criteria-highlight-selection.md section -V runtime-config - the six highlight criteria join the resolved-values registry'
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^highlight-bytes-max: 5000$' \
+        asserts     'A user-supplied -hbmax appears in the runtime-config / command-line sub-section with its resolved value and no annotation.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for highlight-bytes-max' \
+        contract    'features/312-numeric-criteria-highlight-selection.md section -V runtime-config'
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^highlight-count-min: 2$' \
+        asserts     'A user-supplied -hcmin appears in the runtime-config / command-line sub-section with its resolved value and no annotation.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for highlight-count-min' \
+        contract    'features/312-numeric-criteria-highlight-selection.md section -V runtime-config'
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^highlight \(merged\): \(not set\)$' \
+        asserts     'The merged highlight regex line reports (not set) when only numeric highlight criteria are given - numeric criteria do not synthesize a regex.' \
+        produced_by 'emit_runtime_config_verbose() in ltl (merged-regex display line)' \
+        contract    'features/312-numeric-criteria-highlight-selection.md section The defined-highlight_regex gate sweep - the runtime-config merged line stays regex-only'
+}
+
 scenario_error_unknown_so() {
     current_scenario="error-unknown-so"
     echo "[$current_scenario]"
@@ -460,6 +491,7 @@ scenario_warning_g_non_numeric;                        echo ""
 scenario_warning_hm_non_builtin;                       echo ""
 scenario_error_unknown_exact_percentiles;              echo ""
 scenario_runtime_config_data_model_selectors;          echo ""
+scenario_runtime_config_numeric_highlight;             echo ""
 scenario_error_unknown_so;                             echo ""
 scenario_error_unknown_du;                             echo ""
 scenario_error_unknown_ru;                             echo ""
