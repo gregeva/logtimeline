@@ -53,3 +53,8 @@ cv	*	float	conditional:duration	5	shape
 skewness	*	float	conditional:duration	5	shape
 kurtosis	*	float	conditional:duration	5	shape
 bimodality_coef	*	float	conditional:duration	5	shape
+users_distinct	*	int	conditional:udm-counting	0	udm-counting
+actions_count	*	int	conditional:udm-counting	0	udm-counting
+repeat_ratio	*	float	conditional:udm-counting	5	udm-counting
+urate_rate_min	*	float	conditional:udm-counting	5	udm-counting
+udrate_drate_min	*	float	conditional:udm-counting	5	udm-counting

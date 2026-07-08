@@ -34,3 +34,8 @@ bimodality_coef	32	float	conditional:duration	5	shape
 duration	33	float	conditional:duration	9	duration
 duration_nice	34	nice	conditional:duration	n/a	duration
 impact	35	float	conditional:duration	5	shape
+users_distinct	*	int	no	0	udm-counting
+actions_count	*	int	conditional:udm-counting	0	udm-counting
+repeat_ratio	*	float	no	5	udm-counting
+urate_rate_min	*	float	no	5	udm-counting
+udrate_drate_min	*	float	no	5	udm-counting

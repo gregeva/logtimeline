@@ -111,6 +111,9 @@ my %verbose_section_registry = (
     'profile' => {
         description => 'Timeline folding (--profile): resolved mode, fold period, included weekdays, and included vs dropped sample counts (Issue #256).',
     },
+    'udm-counting' => {
+        description => 'Per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313).',
+    },
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
@@ -126,6 +129,7 @@ my @verbose_section_order = qw(
     csv-output
     percentile-algorithm
     profile
+    udm-counting
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -253,6 +257,7 @@ my( $include_filter, $exclude_filter, $highlight_filter );  # Compiled filter ma
 my( @exclude_args, @include_args, @highlight_args, @threadpool_activity_args );
 my $ltl_config_raw = '';                                 # Raw LTL_CONFIG env var string for display
 my ( @udm_configs, @udm_raw_args, %udm_last_value );
+my %udm_distinct;                           # Per-bucket distinct value sets for counting aggregations (Issue #313), freed after counting like %log_sessions
 my ( $csv_separator_override, @udm_csv_message_col_names );
 my ( $csv_detected, $csv_separator, $csv_timestamp_col, %csv_col_index );
 my ( @csv_udm_col_indices, @csv_message_col_indices );
@@ -2224,6 +2229,52 @@ sub emit_profile_verbose {
     push @verbose_output, "=== END profile ===";
 }
 
+sub emit_udm_counting_verbose {
+    return unless section_requested('udm-counting');
+
+    push @verbose_output, "=== udm-counting ===";
+
+    my @counting = grep { $_->{agg_kind} eq 'counting' } @udm_configs;
+    if (!@counting) {
+        push @verbose_output, "counting_udms: none";
+        push @verbose_output, "=== END udm-counting ===";
+        return;
+    }
+
+    push @verbose_output, "counting_udms: " . scalar(@counting);
+    for my $config (@counting) {
+        push @verbose_output, "metric: $config->{name}  aggregation: $config->{aggregation}  base_name: $config->{base_name}";
+    }
+
+    for my $bucket (sort keys %log_stats) {
+        for my $config (@counting) {
+            my $name = $config->{name};
+            next unless defined $log_stats{$bucket}{"udm_${name}_occurrences"};
+            push @verbose_output, join('  ',
+                "bucket: $bucket",
+                "metric: $name",
+                "occurrences: "    . ($log_stats{$bucket}{"udm_${name}_occurrences"}    // 0),
+                "occurrences_hl: " . ($log_stats{$bucket}{"udm_${name}_occurrences-HL"} // 0),
+                "distinct: "       . ($log_stats{$bucket}{"udm_${name}_distinct"}       // 0),
+                "distinct_hl: "    . ($log_stats{$bucket}{"udm_${name}_distinct-HL"}    // 0),
+                "value: "    . ($log_stats{$bucket}{"udm_$name"}    // ''),
+                "value_hl: " . ($log_stats{$bucket}{"udm_$name-HL"} // ''),
+            );
+        }
+        # Sessions oracle reference: lets a harness compare a distinct UDM on the
+        # session token against the built-in sessions column, per bucket
+        if ($session_data_found && defined $log_stats{$bucket}{sessions}) {
+            push @verbose_output, join('  ',
+                "bucket: $bucket",
+                "sessions: $log_stats{$bucket}{sessions}",
+                "sessions_hl: " . ($log_stats{$bucket}{'sessions-HL'} // 0),
+            );
+        }
+    }
+
+    push @verbose_output, "=== END udm-counting ===";
+}
+
 # Section name, field names, consumer-name strings, and the three-value audit
 # enum (none|low|high) are locked at:
 #   features/187-histogram-bin-counter-percentiles.md § Decision 8
@@ -3990,11 +4041,13 @@ sub print_help {
 
     # User-Defined Metrics
     $out .= help_subheading("User-Defined Metrics");
-    $out .= help_opt("-udm, --user-defined-metrics <spec>", "Extract a custom numeric metric from each log line. Format: name[:unit[:function]][:/regex/]");
-    $out .= help_opt("      name",                   "Metric name; also matches \"name=value\" or \"name: value\" in log lines");
-    $out .= help_opt("      unit",                   "Time: ns, us, ms, s, m, h. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T. Omit for raw numbers.");
-    $out .= help_opt("      function",               "Aggregations: sum (default), min, max, avg. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), avg(delta), max(idelta), etc.");
-    $out .= help_opt("      /regex/",                "Custom extraction pattern with one capture group around the numeric value to extract. Overrides default name=value matching.");
+    $out .= help_opt("-udm, --user-defined-metrics <spec>", "Extract a custom metric from each log line. Format: name[:unit[:function]][:key|:/regex/]");
+    $out .= help_opt("      name",                   "Metric name and column label; also matches \"name=value\" or \"name: value\" in log lines when no key or /regex/ is given");
+    $out .= help_opt("      unit",                   "Time: ns, us, ms, s, m, h. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T. Omit for raw numbers. Ignored for counting aggregations.");
+    $out .= help_opt("      function",               "Aggregations: sum (default), min, max, mean (alias avg). Counting: count, distinct (alias dcount, unique), ratio, rate, drate. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), mean(delta), max(idelta), etc.");
+    $out .= help_opt("      key",                    "Token key: builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. exception_variety::distinct:JavaException");
+    $out .= help_opt("      /regex/",                "Custom extraction pattern with one capture group around the value to extract. Overrides default name/key matching.");
+    $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru).");
     $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
     $out .= help_opt("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter when using -ucm (default: comma)");
 
@@ -4279,6 +4332,8 @@ sub parse_udm_configs {
     my %time_units = map { $_ => 1 } qw( ns us ms s m h );
     my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );
     my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );
+    my %udm_agg_aliases = ( avg => 'mean', dcount => 'distinct', unique => 'distinct' );
+    my %counting_aggs = map { $_ => 1 } qw( count distinct ratio rate drate );
 
     # Case normalization: map lowercase variants to canonical forms
     my %byte_unit_canonical = map { lc($_) => $_ } keys %byte_units;
@@ -4302,34 +4357,52 @@ sub parse_udm_configs {
             @patterns = ($custom_pattern);
         }
 
-        # Split remaining on : to get name, unit, function
-        my @fields = split(/:/, $arg, 3);
+        # Split remaining on : to get name, unit, function, token key
+        my @fields = split(/:/, $arg, 4);
         $name = $fields[0];
         $unit = (defined $fields[1] && $fields[1] ne '') ? $fields[1] : undef;
         $function = (defined $fields[2] && $fields[2] ne '') ? $fields[2] : undef;
+        my $token_key = (defined $fields[3] && $fields[3] ne '') ? $fields[3] : undef;
 
         unless (defined $name && $name ne '') {
             print STDERR "Warning: -udm requires a metric name: '$raw_arg'\n";
             next;
         }
 
+        if (defined $token_key && defined $custom_pattern) {
+            print STDERR "Warning: -udm '$raw_arg' supplies both a token key and a /pattern/ - use one or the other, skipping\n";
+            next;
+        }
+
         # Parse function field into transform and aggregation
         my ($transform, $aggregation);
         if (defined $function) {
-            if ($function =~ /^(sum|min|max|avg)\((delta|idelta)\)$/) {
+            # Normalize aggregation aliases, including inside combined forms
+            $function =~ s/^(\w+)/exists $udm_agg_aliases{$1} ? $udm_agg_aliases{$1} : $1/e;
+            if ($function =~ /^(count|distinct|ratio|rate|drate)\(/) {
+                print STDERR "Warning: Counting aggregation '$1' cannot be combined with a transform in -udm '$raw_arg', skipping\n";
+                next;
+            } elsif ($function =~ /^(sum|min|max|mean)\((delta|idelta)\)$/) {
                 $aggregation = $1;
                 $transform = $2;
             } elsif ($function =~ /^(delta|idelta)$/) {
                 $transform = $1;
                 $aggregation = 'sum';
-            } elsif ($function =~ /^(sum|min|max|avg)$/) {
+            } elsif ($function =~ /^(sum|min|max|mean|count|distinct|ratio|rate|drate)$/) {
                 $aggregation = $1;
             } else {
-                print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: sum, min, max, avg, delta, idelta, or combined e.g. max(delta))\n";
+                print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: sum, min, max, mean, count, distinct, ratio, rate, drate, delta, idelta, or combined e.g. max(delta))\n";
                 next;
             }
         }
         $aggregation //= 'sum';
+        my $agg_kind = $counting_aggs{$aggregation} ? 'counting' : 'numeric';
+
+        # Counting aggregations operate on raw extracted strings: units do not apply
+        if ($agg_kind eq 'counting' && defined $unit) {
+            print STDERR "Warning: Unit '$unit' ignored for counting aggregation '$aggregation' in -udm '$raw_arg'\n";
+            $unit = undef;
+        }
 
         # Normalize unit case: SI units checked case-sensitively first
         # (m = minutes, M = mega), then lowercase lookups for time/byte
@@ -4372,11 +4445,17 @@ sub parse_udm_configs {
             $formatter = \&format_number;
         }
 
-        # Build default patterns if no custom pattern provided
+        # Build default patterns if no custom pattern provided; the token key
+        # (when given) is the extraction anchor, leaving the name as pure label
         if (!@patterns) {
-            my $escaped_name = quotemeta($name);
-            push @patterns, qr/\b${escaped_name}\s*[=:]\s*(${number})/;
-            push @patterns, qr/(${number})\s*[=:]?\s*${escaped_name}\b/;
+            my $escaped_key = quotemeta($token_key // $name);
+            if ($agg_kind eq 'counting') {
+                # Token capture: any run of characters that cannot end a field
+                push @patterns, qr/\b${escaped_key}\s*[=:]\s*([^\s,;"'\])]+)/;
+            } else {
+                push @patterns, qr/\b${escaped_key}\s*[=:]\s*(${number})/;
+                push @patterns, qr/(${number})\s*[=:]?\s*${escaped_key}\b/;
+            }
         }
 
         push @udm_configs, {
@@ -4386,6 +4465,8 @@ sub parse_udm_configs {
             function    => $function,
             transform   => $transform,
             aggregation => $aggregation,
+            agg_kind    => $agg_kind,
+            token_key   => $token_key,
             patterns    => \@patterns,
             unit_type   => $unit_type,
             converter   => $converter,
@@ -4832,6 +4913,12 @@ sub group_similar_messages {
             # Copy UDM stats
             foreach my $config (@udm_configs) {
                 my $name = $config->{name};
+                if ($config->{agg_kind} eq 'counting') {
+                    # Counting UDMs carry per-message occurrences only (Issue #313)
+                    $entry->{"udm_${name}_occurrences"} = $cluster->{"udm_${name}_occurrences"}
+                        if defined $cluster->{"udm_${name}_occurrences"};
+                    next;
+                }
                 my $sum_key = "udm_${name}_sum";
                 next unless defined $cluster->{$sum_key};
                 $entry->{$sum_key} = $cluster->{$sum_key};
@@ -5381,6 +5468,12 @@ sub merge_consolidation_stats {
     # UDM stats
     foreach my $config (@udm_configs) {
         my $name = $config->{name};
+        if ($config->{agg_kind} eq 'counting') {
+            # Counting UDMs carry per-message occurrences only (Issue #313)
+            $target->{"udm_${name}_occurrences"} = ($target->{"udm_${name}_occurrences"} // 0) + $source->{"udm_${name}_occurrences"}
+                if defined $source->{"udm_${name}_occurrences"};
+            next;
+        }
         my $sum_key = "udm_${name}_sum";
         next unless defined $source->{$sum_key};
         $target->{$sum_key} = ($target->{$sum_key} // 0) + $source->{$sum_key};
@@ -6139,6 +6232,7 @@ sub measure_memory_structures {
         log_sessions           => Devel::Size::total_size(\%log_sessions),
         threadpool_activity    => Devel::Size::total_size(\%threadpool_activity),
         udm_last_value         => Devel::Size::total_size(\%udm_last_value),
+        udm_distinct           => Devel::Size::total_size(\%udm_distinct),
         heatmap_data           => Devel::Size::total_size(\%heatmap_data),
         heatmap_data_hl        => Devel::Size::total_size(\%heatmap_data_hl),
         heatmap_raw            => Devel::Size::total_size(\%heatmap_raw),
@@ -7204,7 +7298,11 @@ sub adapt_to_command_line_options {
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
         my ($match) = grep { $_->{name} eq $heatmap_metric } @udm_configs;
         ($match) = grep { $_->{base_name} eq $heatmap_metric } @udm_configs if !$match;
-        if ($match) {
+        if ($match && $match->{agg_kind} eq 'counting') {
+            # A per-line distribution over counting (string) values is meaningless
+            print STDERR "Warning: Heatmap metric '$heatmap_metric' uses counting aggregation '$match->{aggregation}' - heatmap disabled\n";
+            $heatmap_enabled = 0;
+        } elsif ($match) {
             $heatmap_udm_config = $match;
             $heatmap_metric_map{$heatmap_metric} = { column => undef };
         } else {
@@ -7223,7 +7321,12 @@ sub adapt_to_command_line_options {
                 ($match) = grep { $_->{base_name} eq $metric } @udm_configs;
                 $histogram_metrics{$match->{name}} = 1 if $match;
             }
-            if ($match) {
+            if ($match && $match->{agg_kind} eq 'counting') {
+                # A per-line distribution over counting (string) values is meaningless
+                print STDERR "Warning: Histogram metric '$metric' uses counting aggregation '$match->{aggregation}' - skipping\n";
+                delete $histogram_metrics{$metric};
+                delete $histogram_metrics{$match->{name}};
+            } elsif ($match) {
                 push @histogram_udm_configs, $match;
                 # Colors resolved from @column_layout in normalize_data_for_output()
             } else {
@@ -7233,9 +7336,9 @@ sub adapt_to_command_line_options {
         }
     }
 
-    # Bare -hg: include all UDM metrics
+    # Bare -hg: include all UDM metrics (counting UDMs carry no per-line distribution)
     if ($histogram_enabled && !%histogram_metrics && @udm_configs) {
-        @histogram_udm_configs = @udm_configs;
+        @histogram_udm_configs = grep { $_->{agg_kind} ne 'counting' } @udm_configs;
         for my $cfg (@udm_configs) {
             # Colors resolved from @column_layout in normalize_data_for_output()
         }
@@ -7736,6 +7839,14 @@ sub read_and_process_logs {
                     }
                     next unless defined $matched_value;
 
+                    # Counting aggregations keep the raw extracted string:
+                    # numeric coercion, transforms, and unit conversion do not apply
+                    if ($config->{agg_kind} eq 'counting') {
+                        $udm_values{$name} = $matched_value;
+                        $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13;
+                        next;
+                    }
+
                     my $raw_value = $matched_value + 0;  # Ensure numeric
 
                     # Apply delta/idelta transform on raw value before conversion
@@ -8140,6 +8251,11 @@ sub read_and_process_logs {
                             my $name = $config->{name};
                             next unless defined $udm_values{$name};
                             my $value = $udm_values{$name};
+                            if ($config->{agg_kind} eq 'counting') {
+                                # Only occurrences are tracked per message; distinct is bucket-scoped
+                                $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
+                                next;
+                            }
                             $log_messages{$category}{$log_key}{"udm_${name}_sum"} += $value;
                             $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
                             $log_messages{$category}{$log_key}{"udm_${name}_min"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_min"} || $value < $log_messages{$category}{$log_key}{"udm_${name}_min"};
@@ -8359,6 +8475,17 @@ sub read_and_process_logs {
                         my $name = $config->{name};
                         next unless defined $udm_values{$name};
                         my $value = $udm_values{$name};
+                        if ($config->{agg_kind} eq 'counting') {
+                            # Counting aggregations (Issue #313): occurrences plus a distinct
+                            # value set per bucket, mirroring the %log_sessions pattern
+                            $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
+                            $udm_distinct{$bucket}{$name}{plain}{$value} += 1;
+                            if ($category_bucket =~ /-HL$/) {
+                                $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
+                                $udm_distinct{$bucket}{$name}{highlight}{$value} += 1;
+                            }
+                            next;
+                        }
                         $log_analysis{$bucket}{"udm_${name}_sum"} += $value;
                         $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
                         if ($category_bucket =~ /-HL$/) {
@@ -9394,6 +9521,45 @@ sub calculate_all_statistics {
             my $agg  = $config->{aggregation};
             my $occ  = $log_analysis{$bucket}{"udm_${name}_occurrences"};
 
+            # Counting aggregations (Issue #313): cardinality from the distinct
+            # sets plus display-time arithmetic; occurrences > 0 implies
+            # distinct >= 1, so the divisions are safe
+            if ($config->{agg_kind} eq 'counting') {
+                my $occ_hl      = $log_analysis{$bucket}{"udm_${name}_occurrences-HL"};
+                my $distinct    = exists $udm_distinct{$bucket}{$name}{plain}
+                                ? scalar keys %{$udm_distinct{$bucket}{$name}{plain}} : 0;
+                my $distinct_hl = exists $udm_distinct{$bucket}{$name}{highlight}
+                                ? scalar keys %{$udm_distinct{$bucket}{$name}{highlight}} : 0;
+
+                $log_stats{$bucket}{"udm_${name}_occurrences"} = $occ;
+                $log_stats{$bucket}{"udm_${name}_occurrences-HL"} = $occ_hl;
+                $log_stats{$bucket}{"udm_${name}_distinct"} = $distinct;
+                $log_stats{$bucket}{"udm_${name}_distinct-HL"} = $distinct_hl;
+
+                my ($display_value, $hl_value);
+                if (defined $occ && $occ > 0) {
+                    if    ($agg eq 'count')    { $display_value = $occ; }
+                    elsif ($agg eq 'distinct') { $display_value = $distinct; }
+                    elsif ($agg eq 'ratio')    { $display_value = $occ / $distinct; }
+                    elsif ($agg eq 'rate')     { $display_value = $occ / $bucket_size_seconds * $rate_multiplier{$rate_unit}; }
+                    elsif ($agg eq 'drate')    { $display_value = $distinct / $bucket_size_seconds * $rate_multiplier{$rate_unit}; }
+                }
+                if (defined $occ_hl && $occ_hl > 0) {
+                    if    ($agg eq 'count')    { $hl_value = $occ_hl; }
+                    elsif ($agg eq 'distinct') { $hl_value = $distinct_hl; }
+                    elsif ($agg eq 'ratio')    { $hl_value = $occ_hl / $distinct_hl; }
+                    elsif ($agg eq 'rate')     { $hl_value = $occ_hl / $bucket_size_seconds * $rate_multiplier{$rate_unit}; }
+                    elsif ($agg eq 'drate')    { $hl_value = $distinct_hl / $bucket_size_seconds * $rate_multiplier{$rate_unit}; }
+                }
+                $log_stats{$bucket}{"udm_$name"} = $display_value;
+                $log_stats{$bucket}{"udm_$name-HL"} = $hl_value;
+
+                # Free this bucket's distinct sets immediately after counting,
+                # following the %log_sessions memory lifecycle
+                delete $udm_distinct{$bucket}{$name};
+                next;
+            }
+
             # Always populate all raw stats for CSV/summary
             $log_stats{$bucket}{"udm_${name}_occurrences"} = $occ;
             $log_stats{$bucket}{"udm_${name}_min"}  = $log_analysis{$bucket}{"udm_${name}_min"};
@@ -9406,7 +9572,7 @@ sub calculate_all_statistics {
             if    ($agg eq 'sum') { $display_value = $log_analysis{$bucket}{"udm_${name}_sum"}; }
             elsif ($agg eq 'min') { $display_value = $log_analysis{$bucket}{"udm_${name}_min"}; }
             elsif ($agg eq 'max') { $display_value = $log_analysis{$bucket}{"udm_${name}_max"}; }
-            elsif ($agg eq 'avg') { $display_value = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef; }
+            elsif ($agg eq 'mean') { $display_value = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef; }
             $log_stats{$bucket}{"udm_$name"} = $display_value;
 
             # Aggregation-aware highlight value
@@ -9421,11 +9587,12 @@ sub calculate_all_statistics {
                 # Highlight entire bar if the highlighted max equals the overall max
                 my $hl_max = $log_analysis{$bucket}{"udm_${name}_max-HL"};
                 $hl_value = (defined $hl_max && defined $display_value && $hl_max == $display_value) ? $display_value : undef;
-            } elsif ($agg eq 'avg') {
+            } elsif ($agg eq 'mean') {
                 $hl_value = undef;  # No meaningful highlight for averages
             }
             $log_stats{$bucket}{"udm_$name-HL"} = $hl_value;
         }
+        delete $udm_distinct{$bucket};
     }
 
     ## STATS FOR TOP LOG MESSAGES ##
@@ -10488,7 +10655,13 @@ sub normalize_data_for_output {
             } elsif ($key =~ /^udm_/) {
                 (my $csv_key = $key) =~ s/^udm_//;
                 my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
-                if ($cfg && $cfg->{name} ne $cfg->{base_name}) {
+                if ($cfg && $cfg->{agg_kind} eq 'counting') {
+                    # Counting aggregation (Issue #313): single value column with
+                    # the aggregation as the stat; rate columns carry the -ru suffix
+                    my $col = "$cfg->{base_name}_$cfg->{aggregation}";
+                    $col .= $rate_csv_suffix{$rate_unit} if $cfg->{aggregation} =~ /^(rate|drate)$/;
+                    push @output_columns, $col;
+                } elsif ($cfg && $cfg->{name} ne $cfg->{base_name}) {
                     # Disambiguated metric: single value column (#99)
                     my $csv_prefix = $cfg->{unit} ? "${csv_key}_$cfg->{unit}" : $csv_key;
                     push @output_columns, $csv_prefix;
@@ -11208,6 +11381,8 @@ sub print_bar_graph {
                                     $trend_value = " " . format_bytes($log_stats{$bucket}{$key}, 'B');
                                 } else {
                                     $trend_value = " " . format_number($log_stats{$bucket}{$key}, ' ', 2);
+                                    $trend_value .= $rate_suffix{$rate_unit}
+                                        if $config->{aggregation} =~ /^(rate|drate)$/;
                                 }
                             }
                         } else {
@@ -11297,8 +11472,9 @@ sub print_bar_graph {
                 } elsif( $key =~ /^udm_(.+)$/ ) {
                     my $metric_name = $1;
                     my ($config) = grep { $_->{name} eq $metric_name } @udm_configs;
-                    if ($config && $config->{name} ne $config->{base_name}) {
-                        # Disambiguated metric: single value column (#99)
+                    if ($config && ($config->{agg_kind} eq 'counting' || $config->{name} ne $config->{base_name})) {
+                        # Single value column: counting aggregation (#313) or
+                        # disambiguated metric (#99)
                         push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
                     } else {
                         foreach my $metric ( qw( occurrences min mean max sum ) ) {
@@ -12417,10 +12593,15 @@ sub print_message_summary {
                         my @udm_csv_values;
                         foreach my $config (@udm_configs) {
                             my $name = $config->{name};
-                            if ($config->{name} ne $config->{base_name}) {
+                            if ($config->{agg_kind} eq 'counting') {
+                                # count -> per-message occurrences; distinct/ratio/rate/drate
+                                # have no per-message value (distinct sets are bucket-scoped)
+                                push @udm_csv_values, $config->{aggregation} eq 'count'
+                                    ? $log_messages{$grouping}{$key}{"udm_${name}_occurrences"}
+                                    : undef;
+                            } elsif ($config->{name} ne $config->{base_name}) {
                                 # Disambiguated metric: single aggregated value (#99)
-                                my $agg = $config->{aggregation};
-                                my $stat_key = $agg eq 'avg' ? 'mean' : $agg;
+                                my $stat_key = $config->{aggregation};
                                 push @udm_csv_values, $log_messages{$grouping}{$key}{"udm_${name}_${stat_key}"};
                             } else {
                                 push @udm_csv_values,
@@ -12876,6 +13057,8 @@ emit_percentile_algorithm_verbose();
 
 emit_profile_verbose();
 
+emit_udm_counting_verbose();
+
 print_verbose_output();
 
 if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
@@ -12904,7 +13087,13 @@ if( $write_messages_to_csv ) {                     # If write to CSV enabled, op
     foreach my $config (@udm_configs) {
         my $name = $config->{name};
         my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
-        if ($config->{name} ne $config->{base_name}) {
+        if ($config->{agg_kind} eq 'counting') {
+            # Counting aggregation (Issue #313): single value column with
+            # the aggregation as the stat; rate columns carry the -ru suffix
+            my $col = "$config->{base_name}_$config->{aggregation}";
+            $col .= $rate_csv_suffix{$rate_unit} if $config->{aggregation} =~ /^(rate|drate)$/;
+            push @udm_csv_headers, $col;
+        } elsif ($config->{name} ne $config->{base_name}) {
             # Disambiguated metric: single value column (#99)
             push @udm_csv_headers, $csv_prefix;
         } else {
