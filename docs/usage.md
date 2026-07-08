@@ -48,9 +48,9 @@ ltl -bs 60 -pr week access.log
 ltl -bs 15 -pr workday -st 09:00 -et 11:00 access.log
 ```
 
-### Filtering
+### Filtering & Highlighting
 
-Filtering is the core of logtimeline's investigative power. Three operations — include, exclude, and highlight — drive an iterative analysis loop. **Include** isolates lines matching a pattern, discarding everything else. **Exclude** removes matching lines, keeping everything else. **Highlight** renders matching lines as a separate colored bar alongside the main bar in every time bucket, allowing visual comparison of a subset against the full population. All three accept regex, can be specified multiple times, and support `&` for AND logic within a single pattern.
+logtimeline's investigative power comes from combining filtering and highlighting: filter criteria shape the population being analyzed, while highlight criteria visually isolate a subset within that population. One set of conditions controls what is measured; an independent set controls what stands out — and both kinds accept text patterns or numeric thresholds. **Include** isolates lines matching a pattern, discarding everything else. **Exclude** removes matching lines, keeping everything else. **Highlight** renders matching lines as a separate colored bar alongside the main bar in every time bucket, allowing visual comparison of a subset against the full population. All three accept regex, can be specified multiple times, and support `&` for AND logic within a single pattern.
 
 The typical workflow is subtractive: start with all data, exclude known noise, narrow with includes until the signal is clear, then highlight to see your target in the context of the full population. Pattern files (`-if`, `-ef`, `-hf`) allow reusable sets of patterns for common scenarios. Numeric threshold filters (`-dmin`, `-dmax`, `-bmin`, `-bmax`, `-cmin`, `-cmax`) complement regex filtering by selecting entries based on metric values rather than text content; all bounds are inclusive (an entry exactly at the threshold is kept).
 

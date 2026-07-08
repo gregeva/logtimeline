@@ -3140,7 +3140,7 @@ sub print_help_statistics {
     my $out = '';
     $out .= get_title_string();
     $out .= help_wrap(
-        "Statistics emitted in the summary table and -o CSV. Use 'ltl --explain <topic>' for a detailed explanation of any individual statistic.",
+        "Statistics ltl computes for every message entry. A few appear as columns in the top-messages table; all of them can rank that table via -so <statistic> and are exported in full with -o CSV. Use 'ltl --explain <topic>' for a detailed explanation of any individual statistic.",
         indent       => 0,
         first_indent => 0,
     ) . "\n";
@@ -3214,7 +3214,7 @@ sub print_explain_topic {
     my $out = '';
     $out .= get_title_string();
     $out .= help_wrap(
-        "Long-form documentation for one of the statistics ltl emits in the summary table and -o CSV outputs. For an index of all statistics, run 'ltl --help statistics'. For the list of explainable topics, run 'ltl --explain'.",
+        "Long-form documentation for one of the statistics ltl computes for every message entry — usable to rank the top-messages table via -so and exported in full with -o CSV; a subset also appears as table columns. For an index of all statistics, run 'ltl --help statistics'. For the list of explainable topics, run 'ltl --explain'.",
         indent       => 0,
         first_indent => 0,
     ) . "\n";
@@ -3968,7 +3968,7 @@ sub print_help {
     $out .= help_opt("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: s (second), m (minute, default), h (hour), d (day)");
 
     # Filtering
-    $out .= help_subheading("Filtering");
+    $out .= help_subheading("Filtering & Highlighting");
     $out .= help_opt("-i,   --include <regex>",       "Only process lines matching this pattern, discard everything else. Can be specified multiple times; patterns are combined with OR. Use & for AND: \"A&B\" matches lines containing both A and B. && for literal &. & binds tighter than |.");
     $out .= help_opt("-e,   --exclude <regex>",       "Discard lines matching this pattern before analysis. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
     $out .= help_opt("-h,   --highlight <regex>",     "Show matching lines as a separate colored bar alongside the main bar for visual comparison. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
