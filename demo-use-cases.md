@@ -110,12 +110,14 @@ ThingWorx platform logs (ApplicationLog, ScriptLog) carry no session ID — the 
 
 ```bash
 ltl -udm "U::distinct" ./logs/ThingworxLogs/ApplicationLog.2025-05-06.0.log
-ltl -udm "U::distinct" -udm "U::ratio" ./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log
+ltl -udm "active_users::distinct:/\[U: ([^\]]+)\]/" -udm "actions_per_user::ratio:/\[U: ([^\]]+)\]/" ./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log
 ltl -udm "O::distinct" ./logs/ThingworxLogs/ApplicationLog.2025-05-06.0.log
 ```
 
-- `U::distinct` recreates a sessions-like concurrency curve from user identity alone — distinct active users per time window. This is the general trick for any log with an identity token but no session (the same works for `userId=abc123` style tokens in arbitrary logs).
-- `U::ratio` adds intensity: how many log-generating actions the average active user performed per window. Distinct up + ratio flat = more users, same behavior (organic growth). Distinct flat + ratio up = the same users hammering harder (batch job, runaway client, noisy neighbor).
+Note the naming trade-off: the default token pattern is derived from the metric name, so the zero-regex form necessarily displays the raw field letter (`U`, `O`) as the column header. When combining metrics or presenting to others, choose an intention-revealing name (`active_users`, `actions_per_user`) and supply the extraction pattern explicitly — the column headers then explain themselves.
+
+- `U::distinct` / `active_users` recreates a sessions-like concurrency curve from user identity alone — distinct active users per time window. This is the general trick for any log with an identity token but no session (the same works for `userId=abc123` style tokens in arbitrary logs).
+- `actions_per_user` adds intensity: how many log-generating actions the average active user performed per window. Distinct up + ratio flat = more users, same behavior (organic growth). Distinct flat + ratio up = the same users hammering harder (batch job, runaway client, noisy neighbor).
 - `O::distinct` applies the identical trick to the `[O: java.class]` origin field — the breadth of subsystems active per window. A narrow O-distinct during an incident points at the misbehaving component; the same idea extends to any Java-class-shaped token.
 
 Demo files: `./logs/ThingworxLogs/ApplicationLog.2025-05-06.0.log` (6.5 MB, 167 distinct users) and `./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log` (13 MB, 51 distinct users).
