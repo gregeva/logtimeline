@@ -324,7 +324,7 @@ ltl -hg access.log
 
 ### User-Defined Metrics
 
-User-defined metrics allow extraction of arbitrary numeric values from log lines using regex patterns or named field matching. Extracted values are tracked across time buckets and displayed as additional bar graph columns alongside the built-in duration, bytes, and count metrics. This enables ad-hoc exploratory analysis of application-specific data — queue depths, row counts, cache sizes, connection pools, or any numeric value that appears in the log — without requiring a dedicated log format parser. Units, aggregation functions, and delta transforms can be specified to control how values are converted, accumulated, and displayed.
+User-defined metrics allow extraction of arbitrary values from log lines using regex patterns or named field matching. Extracted values are tracked across time buckets and displayed as additional bar graph columns alongside the built-in duration, bytes, and count metrics. This enables ad-hoc exploratory analysis of application-specific data — queue depths, row counts, cache sizes, connection pools, or any value that appears in the log — without requiring a dedicated log format parser. Units, aggregation functions, and delta transforms can be specified to control how numeric values are converted, accumulated, and displayed. Counting aggregations work on text tokens too — user IDs, session tokens, exception class names — turning identity-like fields into per-bucket activity metrics (how many distinct users were active, how often the average value repeated) the same way the built-in sessions column does for session IDs.
 
 | Option | Description |
 |--------|-------------|
@@ -332,14 +332,27 @@ User-defined metrics allow extraction of arbitrary numeric values from log lines
 | `-ucm, --udm-csv-message <cols>` | Treat the message field as CSV and name the columns for use with `-udm` |
 | `-ucs, --udm-csv-separator <sep>` | Set the CSV field delimiter when using `-ucm` (default: comma) |
 
-**UDM spec format:** `name[:unit[:function]][:/regex/]`
+**UDM spec format:** `name[:unit[:function]][:key|:/regex/]`
 
 | Part | Description |
 |------|-------------|
-| `name` | Metric name — also used as default pattern to match `name=value` or `name: value` |
-| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — omit for raw numbers |
-| `function` | **Aggregations:** `sum` (default), `min`, `max`, `avg` — **Transforms:** `delta` (clamped ≥0), `idelta` (unclamped) — **Combined:** `sum(delta)`, `avg(delta)`, `max(idelta)`, etc. |
-| `/regex/` | Custom extraction pattern with one capture group around the numeric value to extract (overrides default name matching). e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |
+| `name` | Metric name and column label — also used as default pattern to match `name=value` or `name: value` when no `key` or `/regex/` is given |
+| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — omit for raw numbers. Ignored for counting aggregations |
+| `function` | **Aggregations:** `sum` (default), `min`, `max`, `mean` (alias `avg`) — **Counting:** `count`, `distinct` (alias `dcount`, `unique`), `ratio`, `rate`, `drate` — **Transforms:** `delta` (clamped ≥0), `idelta` (unclamped) — **Combined:** `sum(delta)`, `mean(delta)`, `max(idelta)`, etc. |
+| `key` | Token key — builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. `exception_variety::distinct:JavaException` extracts the `JavaException:` token but labels the column `exception_variety` |
+| `/regex/` | Custom extraction pattern with one capture group around the value to extract (overrides default name/key matching). e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |
+
+**Counting aggregations** count extracted values per time bucket instead of doing arithmetic on them, and fully support text tokens (IDs, usernames, class names):
+
+| Function | Per-bucket value |
+|----------|------------------|
+| `count` | Number of extracted occurrences |
+| `distinct` | Number of unique extracted values |
+| `ratio` | Occurrences per unique value — the repetition factor: how many times the average value repeated |
+| `rate` | Occurrences per rate unit (see `-ru`; default per-minute) |
+| `drate` | Unique values per rate unit (see `-ru`; default per-minute) |
+
+Counting metrics ignore the `unit` field and cannot be combined with `delta`/`idelta` transforms. Highlighting (`-h`) works as it does for the sessions column: highlighted lines contribute to both the bucket total and the highlight value. In the STATS CSV, each counting metric emits one column named `name_function` (e.g. `users_distinct`), with the rate-unit suffix appended for `rate`/`drate` (e.g. `logins_rate_min`); in the MESSAGES CSV, `count` carries per-message occurrences while `distinct`/`ratio`/`rate`/`drate` are blank — unique values are counted per time bucket, not per message.
 
 ```bash
 # Track max value of a raw numeric field per bucket
@@ -348,6 +361,9 @@ ltl -udm "Send-Q::max" app.log
 ltl -udm "busy:ms:sum(delta)" app.log
 # Extract a custom metric by regex pattern
 ltl -udm "rows:/(\d+) rows processed/" app.log
+# Count distinct active users per bucket from an identity token,
+# with an intention-revealing column label via the token key
+ltl -udm "active_users::distinct:U" -udm "actions_per_user::ratio:U" app.log
 ```
 
 ### Thread Pool Activity
@@ -443,4 +459,5 @@ That said, logtimeline accepts conventional alternates for convenience. These al
 | `bytes` | `size` |
 | `occurrences` | `total` |
 | `mean` | `avg` |
+| `distinct` | `dcount`, `unique` |
 | `stddev` | `std_dev` |

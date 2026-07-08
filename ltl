@@ -4041,11 +4041,13 @@ sub print_help {
 
     # User-Defined Metrics
     $out .= help_subheading("User-Defined Metrics");
-    $out .= help_opt("-udm, --user-defined-metrics <spec>", "Extract a custom numeric metric from each log line. Format: name[:unit[:function]][:/regex/]");
-    $out .= help_opt("      name",                   "Metric name; also matches \"name=value\" or \"name: value\" in log lines");
-    $out .= help_opt("      unit",                   "Time: ns, us, ms, s, m, h. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T. Omit for raw numbers.");
-    $out .= help_opt("      function",               "Aggregations: sum (default), min, max, avg. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), avg(delta), max(idelta), etc.");
-    $out .= help_opt("      /regex/",                "Custom extraction pattern with one capture group around the numeric value to extract. Overrides default name=value matching.");
+    $out .= help_opt("-udm, --user-defined-metrics <spec>", "Extract a custom metric from each log line. Format: name[:unit[:function]][:key|:/regex/]");
+    $out .= help_opt("      name",                   "Metric name and column label; also matches \"name=value\" or \"name: value\" in log lines when no key or /regex/ is given");
+    $out .= help_opt("      unit",                   "Time: ns, us, ms, s, m, h. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T. Omit for raw numbers. Ignored for counting aggregations.");
+    $out .= help_opt("      function",               "Aggregations: sum (default), min, max, mean (alias avg). Counting: count, distinct (alias dcount, unique), ratio, rate, drate. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), mean(delta), max(idelta), etc.");
+    $out .= help_opt("      key",                    "Token key: builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. exception_variety::distinct:JavaException");
+    $out .= help_opt("      /regex/",                "Custom extraction pattern with one capture group around the value to extract. Overrides default name/key matching.");
+    $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru).");
     $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
     $out .= help_opt("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter when using -ucm (default: comma)");
 
