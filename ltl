@@ -14,7 +14,6 @@
 # - new command line options for "show-bytes and show-counts" to add these columns to the message table instead of the duration statistics (plan forward for unknown custom metric as well)
 # - add total counts for duration and bytes; what makes this harder to fit in is that there should obviously also be seperate counters for "highlight" (bottom of table makes sense, also summary table, or both)
 # - Add AND match possibility for include and exclude using RegEx lookahead (?=.*word)
-# - Add the ability to highlight based on numerical condition matching example -dmin => -hdmin would keep rows smaller, but highlight rows above or something like that.  Need to think carefully about the terminology and naming so that there is coherence between the include/exclude/minimum/maximum/highlight concepts across the tool.
 # - Second graph (throughput): outbound throughput based on bytes returned
 # - need to save X-axis charaters with all the information - when terminal width < X and all time windows on same day, omit printing the date on each line (instead print it at the start or end) - this saves 10 chars
 # - add a soft memory limit (after having made most of the tweaks) to avoid accidents in production reading large files with 100k's of different messages - will need to optimize performance of memory checking
@@ -207,6 +206,11 @@ my $explain_arg;   # --explain [<topic>]: undef = not given; '' = bare; non-empt
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
 my ( $filter_count_min, $filter_count_max );
+my ( $highlight_duration_min, $highlight_duration_max );
+my ( $highlight_bytes_min, $highlight_bytes_max );
+my ( $highlight_count_min, $highlight_count_max );
+my $numeric_highlight_active = 0;   # any numeric highlight bound given
+my $highlight_active = 0;           # regex/file highlight OR numeric highlight given; gates all highlight rendering
 my $top_n_messages = 10;
 my ( $write_messages_to_csv, $csv, $csv_fh, $csv_file_args ) = ( 0, undef, undef, "" );
 my $total_lines_read = 0;
@@ -6938,6 +6942,12 @@ sub adapt_to_command_line_options {
         'bytes-max|bmax=i' => \$filter_bytes_max,
         'count-min|cmin=i' => \$filter_count_min,
         'count-max|cmax=i' => \$filter_count_max,
+        'highlight-duration-min|hdmin=i' => \$highlight_duration_min,
+        'highlight-duration-max|hdmax=i' => \$highlight_duration_max,
+        'highlight-bytes-min|hbmin=i' => \$highlight_bytes_min,
+        'highlight-bytes-max|hbmax=i' => \$highlight_bytes_max,
+        'highlight-count-min|hcmin=i' => \$highlight_count_min,
+        'highlight-count-max|hcmax=i' => \$highlight_count_max,
 	    'memory-usage|mem' => \$show_memory,
         'disable-progress' => \$disable_progress,                                   # hidden
         'output-csv|o' => \$write_messages_to_csv,
@@ -7230,6 +7240,14 @@ sub adapt_to_command_line_options {
     $include_regex   = $include_filter->{regex}   if $include_filter;
     $exclude_regex   = $exclude_filter->{regex}   if $exclude_filter;
     $highlight_regex = $highlight_filter->{regex}  if $highlight_filter;
+
+    # Highlight activation: numeric criteria and the regex matcher each activate
+    # highlighting on their own; when both are given a line must satisfy both (AND).
+    $numeric_highlight_active = ( grep { defined }
+        $highlight_duration_min, $highlight_duration_max,
+        $highlight_bytes_min, $highlight_bytes_max,
+        $highlight_count_min, $highlight_count_max ) ? 1 : 0;
+    $highlight_active = ( defined($highlight_filter) || $numeric_highlight_active ) ? 1 : 0;
 
     # Verbose output: runtime-config section (Issues #19, #21, #56, #226, #231).
     # Extended in #231 to surface per-flag resolution under three sub-sections
@@ -8034,8 +8052,8 @@ sub read_and_process_logs {
 
                 next if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) );
                 next if( defined( $include_filter )         && !match_filter($_, $include_filter) );
-                next if( defined( $filter_duration_min )    && ( !defined( $duration )  || $duration <= $filter_duration_min ));		# skip if duration value is below specified minimum filter
-                next if( defined( $filter_duration_max )    && ( !defined( $duration )  || $duration >= $filter_duration_max ));		# skip if duration value is above specified maximum filter
+                next if( defined( $filter_duration_min )    && ( !defined( $duration )  || $duration < $filter_duration_min ));			# skip if duration value is below specified minimum filter
+                next if( defined( $filter_duration_max )    && ( !defined( $duration )  || $duration > $filter_duration_max ));			# skip if duration value is above specified maximum filter
                 next if( defined( $filter_bytes_min )       && ( !defined( $bytes )     || $bytes < $filter_bytes_min ));				# skip if bytes value is below specified minimum filter
                 next if( defined( $filter_bytes_max )       && ( !defined( $bytes )     || $bytes > $filter_bytes_max ));				# skip if bytes value is above specified maximum filter
                 next if( defined( $filter_count_min )       && ( !defined( $count )     || $count < $filter_count_min ));				# skip if count value is below specified minimum filter
@@ -8070,8 +8088,19 @@ sub read_and_process_logs {
                     }
                 }
 
-                # determine if this line should be highlighted (matches in result search)
-                if( defined( $highlight_filter ) && match_filter($_, $highlight_filter) ) {
+                # determine if this line should be highlighted: the regex matcher and the numeric
+                # criteria are independent constraints — when both families are given, a line must
+                # satisfy both (AND); either family alone decides when the other is absent.
+                # A line missing a metric never satisfies a numeric criterion on that metric.
+                if( $highlight_active
+                    && ( !defined( $highlight_filter ) || match_filter($_, $highlight_filter) )
+                    && ( !$numeric_highlight_active || (
+                           ( !defined( $highlight_duration_min ) || ( defined( $duration ) && $duration >= $highlight_duration_min ) )
+                        && ( !defined( $highlight_duration_max ) || ( defined( $duration ) && $duration <= $highlight_duration_max ) )
+                        && ( !defined( $highlight_bytes_min )    || ( defined( $bytes )    && $bytes >= $highlight_bytes_min ) )
+                        && ( !defined( $highlight_bytes_max )    || ( defined( $bytes )    && $bytes <= $highlight_bytes_max ) )
+                        && ( !defined( $highlight_count_min )    || ( defined( $count )    && $count >= $highlight_count_min ) )
+                        && ( !defined( $highlight_count_max )    || ( defined( $count )    && $count <= $highlight_count_max ) ) ) ) ) {
                     $category_bucket .= '-HL';
                     $category = 'highlight';
                     $in_files_matched{$in_file} = 2 unless $in_files_matched{$in_file} == 2;
@@ -9044,7 +9073,7 @@ sub calculate_histogram_buckets_exact {
 
         # Issue #42: Calculate highlight buckets and stats (using same boundaries)
         my $hl_values_ref = $histogram_values_hl{$metric};
-        if (defined $highlight_regex && defined $hl_values_ref && @$hl_values_ref > 0) {
+        if ($highlight_active && defined $hl_values_ref && @$hl_values_ref > 0) {
             # Initialize highlight bucket counts
             @{$histogram_buckets_hl{$metric}} = (0) x $bucket_count;
 
@@ -9195,7 +9224,7 @@ sub finalize_histogram_unified {
         # Highlight subset: parallel partition, project onto SAME finalized
         # geometry so bars overlay column-for-column.
         my $src_hl = $histogram_counters_hl{$metric};
-        if (defined $highlight_regex && $src_hl) {
+        if ($highlight_active && $src_hl) {
             my $n_hl = 0;
             $n_hl += ($_ // 0) for @{$src_hl->{bins}};
             $n_hl += ($src_hl->{overflow} // 0) + ($src_hl->{underflow} // 0);
@@ -10938,7 +10967,7 @@ sub print_heatmap_row {
 
         if ($is_percentile) {
             # Percentile marker - use | character with bright-black (gray) for differentiation from data
-            if ($density_hl > 0 && defined $highlight_regex) {
+            if ($density_hl > 0 && $highlight_active) {
                 print "\033[48;5;${highlight_bg}m$colors{'bright-black'}|$colors{'NC'}";
             } else {
                 print "$colors{'bright-black'}|$colors{'NC'}";
@@ -10957,7 +10986,7 @@ sub print_heatmap_row {
 
             my $fg_color = $gradient[$color_index];
 
-            if ($density_hl > 0 && defined $highlight_regex) {
+            if ($density_hl > 0 && $highlight_active) {
                 # Highlighted cell: use metric's column color as background
                 print "\033[48;5;${highlight_bg}m\033[38;5;${fg_color}m$blocks{$default_chart_block}\033[0m";
             } else {
@@ -11568,7 +11597,7 @@ sub print_histograms {
         # Issue #42: Calculate highlight display buckets if highlight data exists
         my @display_buckets_hl = ();
         my $stats_hl = undef;
-        if (defined $highlight_regex && @{$histogram_buckets_hl{$metric}}) {
+        if ($highlight_active && @{$histogram_buckets_hl{$metric}}) {
             @display_buckets_hl = calculate_histogram_display_buckets($histogram_buckets_hl{$metric}, $bar_width);
             $stats_hl = $histogram_stats_hl{$metric};
         }
@@ -12273,7 +12302,7 @@ sub print_summary_table {
     }
 
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
-    push @summary_table, sprintf( $table_format, "HIGHLIGHTED", $total_lines_highlighted ) if defined $highlight_regex;
+    push @summary_table, sprintf( $table_format, "HIGHLIGHTED", $total_lines_highlighted ) if $highlight_active;
     push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
     push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FILE PROCESSING TIME", format_time( $elapsed_read_files, 's', 'medium', " " ) );
@@ -12398,7 +12427,7 @@ sub print_message_summary {
     my $truncate_chars = 2;
     my @column_list = ( "message", "occurrences", "min", "p50", "p999", "cv", "time" );
     my @header_title_text = (
-        "TOP HIGHLIGHTED MESSAGES (highlighted based on RegEx pattern match)",
+        "TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)",
         "TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)"
     );
 
