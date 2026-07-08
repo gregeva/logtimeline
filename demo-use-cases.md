@@ -90,15 +90,15 @@ Analysis thoughts and approaches:
 
 A ScriptLog full of stack traces makes error *volume* obvious, but volume alone can't answer the first triage question: is this one problem repeating, or many different things breaking at once? The occurrences bar tells you a spike happened; the *variety* of exceptions inside the spike tells you what kind of incident you have.
 
-The `JavaException: <class>` token that ThingWorx writes into script error messages is exactly the right handle, and the default token pattern picks it up with no regex at all:
+The `JavaException: <class>` token that ThingWorx writes into script error messages is exactly the right handle. Naming the token as the key (fourth field) keeps extraction zero-regex while the metric name stays an intention-revealing column label:
 
 ```bash
-ltl -udm "JavaException::distinct" ./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log
-ltl -udm "JavaException::ratio"    ./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log
+ltl -udm "exception_variety::distinct:JavaException"   ./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log
+ltl -udm "exception_repetition::ratio:JavaException"   ./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log
 ```
 
-- `distinct` plots how many *different* exception classes fired per time window. Flat and low while occurrences spike = one failure mode hammering (in this file: 19,750 JavaException lines but only 4 distinct classes — a monoculture). Climbing distinct = diverse breakage, likely something systemic underneath (dependency down, resource exhaustion).
-- `ratio` plots the repetition factor — how many times the average exception class repeated per window. A ratio in the thousands says "one bug in a loop"; a ratio near 1 says "everything failing once each".
+- `exception_variety` plots how many *different* exception classes fired per time window. Flat and low while occurrences spike = one failure mode hammering (in this file: 19,750 JavaException lines but only 4 distinct classes — a monoculture). Climbing variety = diverse breakage, likely something systemic underneath (dependency down, resource exhaustion).
+- `exception_repetition` plots the repetition factor — how many times the average exception class repeated per window. A value in the thousands says "one bug in a loop"; a value near 1 says "everything failing once each".
 
 Demo file: `./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log` (13 MB, 4 distinct exception classes over ~20k error lines — a clean monoculture story).
 
@@ -109,15 +109,15 @@ Demo file: `./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log` (13 MB, 4 distinct 
 ThingWorx platform logs (ApplicationLog, ScriptLog) carry no session ID — the `[S:]` field is empty — so the built-in sessions column can't show concurrency. But every line carries `[U: username]`, and the bracket fields are directly readable by the default token pattern (field names are single letters, and `]` is excluded from the captured token), so no regex is needed:
 
 ```bash
-ltl -udm "U::distinct" ./logs/ThingworxLogs/ApplicationLog.2025-05-06.0.log
-ltl -udm "active_users::distinct:/\[U: ([^\]]+)\]/" -udm "actions_per_user::ratio:/\[U: ([^\]]+)\]/" ./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log
-ltl -udm "O::distinct" ./logs/ThingworxLogs/ApplicationLog.2025-05-06.0.log
+ltl -udm "active_users::distinct:U" ./logs/ThingworxLogs/ApplicationLog.2025-05-06.0.log
+ltl -udm "active_users::distinct:U" -udm "actions_per_user::ratio:U" ./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log
+ltl -udm "active_subsystems::distinct:O" ./logs/ThingworxLogs/ApplicationLog.2025-05-06.0.log
 ```
 
-Note the naming trade-off: the default token pattern is derived from the metric name, so the zero-regex form necessarily displays the raw field letter (`U`, `O`) as the column header. When combining metrics or presenting to others, choose an intention-revealing name (`active_users`, `actions_per_user`) and supply the extraction pattern explicitly — the column headers then explain themselves.
+The fourth field is the token key: extraction stays zero-regex (the `U`/`O` bracket fields are captured by the default token pattern) while the metric name is a pure display label, so the column headers explain themselves.
 
-- `U::distinct` / `active_users` recreates a sessions-like concurrency curve from user identity alone — distinct active users per time window. This is the general trick for any log with an identity token but no session (the same works for `userId=abc123` style tokens in arbitrary logs).
+- `active_users` recreates a sessions-like concurrency curve from user identity alone — distinct active users per time window. This is the general trick for any log with an identity token but no session (the same works for `userId=abc123` style tokens in arbitrary logs).
 - `actions_per_user` adds intensity: how many log-generating actions the average active user performed per window. Distinct up + ratio flat = more users, same behavior (organic growth). Distinct flat + ratio up = the same users hammering harder (batch job, runaway client, noisy neighbor).
-- `O::distinct` applies the identical trick to the `[O: java.class]` origin field — the breadth of subsystems active per window. A narrow O-distinct during an incident points at the misbehaving component; the same idea extends to any Java-class-shaped token.
+- `active_subsystems` applies the identical trick to the `[O: java.class]` origin field — the breadth of subsystems active per window. A narrow spread during an incident points at the misbehaving component; the same idea extends to any Java-class-shaped token.
 
 Demo files: `./logs/ThingworxLogs/ApplicationLog.2025-05-06.0.log` (6.5 MB, 167 distinct users) and `./logs/ThingworxLogs/ScriptLog.2025-05-05.0.log` (13 MB, 51 distinct users).
