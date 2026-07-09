@@ -39,3 +39,8 @@ actions_count	*	int	conditional:udm-counting	0	udm-counting
 repeat_ratio	*	float	no	5	udm-counting
 urate_rate_min	*	float	no	5	udm-counting
 udrate_drate_min	*	float	no	5	udm-counting
+job_ms_ms_occurrences	*	int	conditional:udm-numeric	0	udm-numeric
+job_ms_ms_min	*	float	conditional:udm-numeric	5	udm-numeric
+job_ms_ms_mean	*	float	conditional:udm-numeric	5	udm-numeric
+job_ms_ms_max	*	float	conditional:udm-numeric	5	udm-numeric
+job_ms_ms_sum	*	float	conditional:udm-numeric	5	udm-numeric

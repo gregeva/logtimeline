@@ -12681,26 +12681,32 @@ sub print_message_summary {
 
                     # Separated conditions for CSV output from printed column data
                     if( $write_messages_to_csv && defined $csv_fh ) {
+                        # Issue #268: UDM values route through format_csv_value()
+                        # like every other numeric column at this emission site.
+                        # Column names mirror the MESSAGES header construction so
+                        # each value resolves to the same precision family as its
+                        # header column.
                         my @udm_csv_values;
                         foreach my $config (@udm_configs) {
                             my $name = $config->{name};
+                            my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
                             if ($config->{agg_kind} eq 'counting') {
                                 # count -> per-message occurrences; distinct/ratio/rate/drate
                                 # have no per-message value (distinct sets are bucket-scoped)
+                                my $col = "$config->{base_name}_$config->{aggregation}";
+                                $col .= $rate_csv_suffix{$rate_unit} if $config->{aggregation} =~ /^(rate|drate)$/;
                                 push @udm_csv_values, $config->{aggregation} eq 'count'
-                                    ? $log_messages{$grouping}{$key}{"udm_${name}_occurrences"}
+                                    ? format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_occurrences"}, $col)
                                     : undef;
                             } elsif ($config->{name} ne $config->{base_name}) {
                                 # Disambiguated metric: single aggregated value (#99)
                                 my $stat_key = $config->{aggregation};
-                                push @udm_csv_values, $log_messages{$grouping}{$key}{"udm_${name}_${stat_key}"};
+                                push @udm_csv_values, format_csv_value(
+                                    $log_messages{$grouping}{$key}{"udm_${name}_${stat_key}"}, $csv_prefix);
                             } else {
                                 push @udm_csv_values,
-                                    $log_messages{$grouping}{$key}{"udm_${name}_occurrences"},
-                                    $log_messages{$grouping}{$key}{"udm_${name}_min"},
-                                    $log_messages{$grouping}{$key}{"udm_${name}_mean"},
-                                    $log_messages{$grouping}{$key}{"udm_${name}_max"},
-                                    $log_messages{$grouping}{$key}{"udm_${name}_sum"};
+                                    map { format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_$_"}, "${csv_prefix}_$_") }
+                                        qw(occurrences min mean max sum);
                             }
                         }
                         # Issue #268: format each numeric column per the resolved
