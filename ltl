@@ -11286,8 +11286,12 @@ sub print_bar_graph {
                     my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
                     my $color = $colors{$category_bucket} // $colors{'NC'};
 
-                    # Always accumulate total occurrences for CSV output, regardless of display options
-                    $total_occurrences += $occurrences if $category_bucket !~ /^(err-rate|msg-rate|empty|-HL$)/;
+                    # Always accumulate total occurrences for CSV output, regardless of display options.
+                    # Highlighted lines are counted only under their '-HL' key (the suffix replaces
+                    # the key at the highlight tag point), so plain and '-HL' keys partition the
+                    # bucket: both must be summed for the total to equal all lines in the bucket.
+                    # Only the derived rate rows and the normalization placeholder are excluded.
+                    $total_occurrences += $occurrences if $category_bucket !~ /^(err-rate|msg-rate|empty)$/;
 
                     next if $omit_values && $category_bucket !~ /^(err-rate|msg-rate)$/;	# we don't want to count data that won't be printed
                     next if $category_bucket =~ /^(err|msg)-rate$/ && $log_occurrences{$bucket}{'err-rate'}{occurrences} == 0 && $log_occurrences{$bucket}{'msg-rate'}{occurrences} == 0;

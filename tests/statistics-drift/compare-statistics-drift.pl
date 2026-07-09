@@ -688,7 +688,16 @@ my %L2_INVARIANTS = (
         produced_by => 'calculate_percentiles_for_bucket() in ltl',
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 4 — IQR derivation',
     },
+    level_partition => {
+        asserts     => 'occurrences equals the sum of all populated level columns (plain and -HL): highlighted and plain keys partition the bucket lines (Issue #320)',
+        produced_by => 'print_bar_graph() in ltl (per-bucket $total_occurrences accumulation)',
+        contract    => 'features/224-validate-statistics-test-harness.md § Decision 4 — level partition',
+    },
 );
+
+# STATS-only level columns (Decision 5), plus their '-HL' highlighted
+# variants, form the partition that level_partition sums over.
+my $LEVEL_COLUMN_RE = qr/^(?:FORCE|ERROR|WARN|INFO|DEBUG|TRACE|DATA|[1-5]xx|Pause Young|Pause Full)(?:-HL)?$/;
 
 my @PERCENTILE_LADDER = qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999);
 
@@ -924,6 +933,30 @@ sub check_layer2_row {
                 contract => $inv->{contract},
                 rule => 'iqr == p75 - p25 (tolerance 1e-9, float precision)',
             );
+        }
+    }
+
+    # Level partition (STATS rows only): occurrences == sum of populated
+    # level columns. Skipped when no level column is populated (e.g. -ov
+    # omits level counts from the CSV while occurrences remains full).
+    if ($file_kind eq 'stats' && defined $occ && $occ > 0) {
+        my @populated = grep { $_ =~ $LEVEL_COLUMN_RE && defined $row->{$_} && $row->{$_} ne '' } keys %$row;
+        if (@populated) {
+            my $sum = 0;
+            $sum += as_num($row->{$_}) // 0 for @populated;
+            if (abs($sum - $occ) > ORDERING_EPS) {
+                $stats->{T4}++;
+                my $inv = $L2_INVARIANTS{level_partition};
+                emit_l2_failure(
+                    scenario => $scenario, file => $file_kind, key => $k,
+                    invariant => "level_partition ($side)",
+                    observed => sprintf("occurrences=%s level_sum=%s (columns: %s)", $occ, $sum, join(',', sort @populated)),
+                    asserts => $inv->{asserts},
+                    produced_by => $inv->{produced_by},
+                    contract => $inv->{contract},
+                    rule => 'occurrences == sum(level columns, plain + -HL)',
+                );
+            }
         }
     }
 }

@@ -1,19 +1,33 @@
 column	position	type	required	max_decimals	family
 timestamp	1	timestamp	yes	n/a	meta
 ERROR	*	int	no	0	level
+ERROR-HL	*	int	no	0	level
 WARN	*	int	no	0	level
+WARN-HL	*	int	no	0	level
 INFO	*	int	no	0	level
+INFO-HL	*	int	no	0	level
 DEBUG	*	int	no	0	level
+DEBUG-HL	*	int	no	0	level
 TRACE	*	int	no	0	level
+TRACE-HL	*	int	no	0	level
 FORCE	*	int	no	0	level
+FORCE-HL	*	int	no	0	level
 DATA	*	int	no	0	level
+DATA-HL	*	int	no	0	level
 5xx	*	int	no	0	level
+5xx-HL	*	int	no	0	level
 4xx	*	int	no	0	level
+4xx-HL	*	int	no	0	level
 3xx	*	int	no	0	level
+3xx-HL	*	int	no	0	level
 2xx	*	int	no	0	level
+2xx-HL	*	int	no	0	level
 1xx	*	int	no	0	level
+1xx-HL	*	int	no	0	level
 Pause Young	*	int	no	0	level
+Pause Young-HL	*	int	no	0	level
 Pause Full	*	int	no	0	level
+Pause Full-HL	*	int	no	0	level
 err-rate_sec	*	float	no	1	level
 err-rate_min	*	float	no	1	level
 err-rate_hr	*	float	no	1	level
