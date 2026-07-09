@@ -13,7 +13,7 @@ count_sum	11	float	conditional:count	5	count
 min	12	float	conditional:duration	5	duration
 mean	13	float	conditional:duration	5	duration
 max	14	float	conditional:duration	5	duration
-std_dev	15	float	conditional:duration	5	shape
+std_dev	15	float	conditional:duration	5	dispersion
 p1	16	float	conditional:duration	5	percentile
 p5	17	float	conditional:duration	5	percentile
 p10	18	float	conditional:duration	5	percentile
@@ -27,13 +27,13 @@ p99	25	float	conditional:duration	5	percentile
 p999	26	float	conditional:duration	5	percentile
 p9999	27	float	conditional:duration	5	percentile
 p99999	28	float	conditional:duration	5	percentile
-cv	29	float	conditional:duration	5	shape
+cv	29	float	conditional:duration	5	dispersion
 skewness	30	float	conditional:duration	5	shape
 kurtosis	31	float	conditional:duration	5	shape
 bimodality_coef	32	float	conditional:duration	5	shape
 duration	33	float	conditional:duration	9	duration
 duration_nice	34	nice	conditional:duration	n/a	duration
-impact	35	float	conditional:duration	5	shape
+impact	35	float	conditional:duration	5	duration
 users_distinct	*	int	no	0	udm-counting
 actions_count	*	int	conditional:udm-counting	0	udm-counting
 repeat_ratio	*	float	no	5	udm-counting

@@ -49,7 +49,7 @@ count_sum	*	float	conditional:count	5	count
 min	*	float	conditional:duration	5	duration
 mean	*	float	conditional:duration	5	duration
 max	*	float	conditional:duration	5	duration
-std_dev	*	float	conditional:duration	5	shape
+std_dev	*	float	conditional:duration	5	dispersion
 p1	*	float	conditional:duration	5	percentile
 p5	*	float	conditional:duration	5	percentile
 p10	*	float	conditional:duration	5	percentile
@@ -63,7 +63,7 @@ p99	*	float	conditional:duration	5	percentile
 p999	*	float	conditional:duration	5	percentile
 p9999	*	float	conditional:duration	5	percentile
 p99999	*	float	conditional:duration	5	percentile
-cv	*	float	conditional:duration	5	shape
+cv	*	float	conditional:duration	5	dispersion
 skewness	*	float	conditional:duration	5	shape
 kurtosis	*	float	conditional:duration	5	shape
 bimodality_coef	*	float	conditional:duration	5	shape
