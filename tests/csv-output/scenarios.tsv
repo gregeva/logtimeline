@@ -9,6 +9,7 @@ heatmap-duration	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate
 profile-week	@PROFILE_LOG@	-bs 60 -n 25 -pr week	duration,percentile,shape,bytes
 profile-day	@PROFILE_LOG@	-bs 60 -n 25 -pr day	duration,percentile,shape,bytes
 udm-counting	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	-bs 240 -n 25 -udm users::distinct:U -udm actions::count:U -udm repeat::ratio:U -udm urate::rate:U -udm udrate::drate:U	level,udm-counting
+udm-numeric	logs/ThingworxLogs/ScriptLog.2025-05-05.0.log	-bs 240 -n 25 -udm job_ms:ms:max:durationMS	duration,count,percentile,shape,level,udm-numeric
 numeric-highlight-duration-band	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hdmin 100 -hdmax 200	bytes,count,level	expected/numeric-highlight-duration-band.tsv
 numeric-highlight-bytes-band	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hbmin 5000 -hbmax 6000	bytes,count,level	expected/numeric-highlight-bytes-band.tsv
 numeric-highlight-count-band	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hcmin 45 -hcmax 50	bytes,count,level	expected/numeric-highlight-count-band.tsv
