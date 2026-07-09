@@ -206,6 +206,7 @@ my $explain_arg;   # --explain [<topic>]: undef = not given; '' = bare; non-empt
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
 my ( $filter_count_min, $filter_count_max );
+my %numeric_filter_no_metric;	# per-metric tally of lines a numeric filter dropped because the line carried no value for that metric
 my ( $highlight_duration_min, $highlight_duration_max );
 my ( $highlight_bytes_min, $highlight_bytes_max );
 my ( $highlight_count_min, $highlight_count_max );
@@ -3988,7 +3989,7 @@ sub print_help {
     $out .= help_opt("-hcmin, --highlight-count-min <N>",    "Highlight log entries with count at or above this value, without filtering anything out");
     $out .= help_opt("-hcmax, --highlight-count-max <N>",    "Highlight log entries with count at or below this value, without filtering anything out");
     $out .= "\n";
-    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Highlight criteria (-h/-hf and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric.";
+    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded; ltl reports how many entries were excluded this way. Highlight criteria (-h/-hf and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric.";
     $out .= help_wrap($note_text, indent => $help_opt_col, first_indent => $help_opt_col) . "\n";
 
     # Recording & Processing
@@ -8067,12 +8068,26 @@ sub read_and_process_logs {
 
                 next if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) );
                 next if( defined( $include_filter )         && !match_filter($_, $include_filter) );
-                next if( defined( $filter_duration_min )    && ( !defined( $duration )  || $duration < $filter_duration_min ));			# skip if duration value is below specified minimum filter
-                next if( defined( $filter_duration_max )    && ( !defined( $duration )  || $duration > $filter_duration_max ));			# skip if duration value is above specified maximum filter
-                next if( defined( $filter_bytes_min )       && ( !defined( $bytes )     || $bytes < $filter_bytes_min ));				# skip if bytes value is below specified minimum filter
-                next if( defined( $filter_bytes_max )       && ( !defined( $bytes )     || $bytes > $filter_bytes_max ));				# skip if bytes value is above specified maximum filter
-                next if( defined( $filter_count_min )       && ( !defined( $count )     || $count < $filter_count_min ));				# skip if count value is below specified minimum filter
-                next if( defined( $filter_count_max )       && ( !defined( $count )     || $count > $filter_count_max ));				# skip if count value is above specified maximum filter
+                # Numeric threshold filters. A line that carries no value for the
+                # filtered metric can never satisfy a numeric criterion on that
+                # metric (same semantics as the numeric highlight criteria), so it
+                # is dropped — and counted, so the exclusion is reported after
+                # processing instead of silently shrinking the totals.
+                if( defined( $filter_duration_min ) || defined( $filter_duration_max ) ) {
+                    if( !defined( $duration ) ) { $numeric_filter_no_metric{duration}++; next; }
+                    next if( defined( $filter_duration_min ) && $duration < $filter_duration_min );	# skip if duration value is below specified minimum filter
+                    next if( defined( $filter_duration_max ) && $duration > $filter_duration_max );	# skip if duration value is above specified maximum filter
+                }
+                if( defined( $filter_bytes_min ) || defined( $filter_bytes_max ) ) {
+                    if( !defined( $bytes ) ) { $numeric_filter_no_metric{bytes}++; next; }
+                    next if( defined( $filter_bytes_min ) && $bytes < $filter_bytes_min );		# skip if bytes value is below specified minimum filter
+                    next if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max );		# skip if bytes value is above specified maximum filter
+                }
+                if( defined( $filter_count_min ) || defined( $filter_count_max ) ) {
+                    if( !defined( $count ) ) { $numeric_filter_no_metric{count}++; next; }
+                    next if( defined( $filter_count_min ) && $count < $filter_count_min );		# skip if count value is below specified minimum filter
+                    next if( defined( $filter_count_max ) && $count > $filter_count_max );		# skip if count value is above specified maximum filter
+                }
 
                 # take note if any results were found in this file
                 $in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
@@ -8706,6 +8721,16 @@ sub read_and_process_logs {
         print "\r$colors{'bright-green'}Processing completed.$colors{'NC'}";
         print " " x ( $terminal_width - length( "Processing completed." ) );
         print "\n";
+    }
+
+    # Surface how many lines a numeric filter removed solely because the line
+    # carried no value for the filtered metric; without this the totals shrink
+    # by far more than the thresholds explain, with no indication why.
+    for my $metric (qw(duration bytes count)) {
+        next unless $numeric_filter_no_metric{$metric};
+        print STDERR "Note: " . format_number( $numeric_filter_no_metric{$metric} )
+            . " lines carried no $metric value and were excluded by the $metric filter"
+            . " (numeric filters only keep lines that carry the filtered metric)\n";
     }
 
     return;
