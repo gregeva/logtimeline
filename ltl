@@ -7592,6 +7592,7 @@ sub read_and_process_logs {
         @csv_udm_col_indices = ();
         @csv_message_col_indices = ();
         my $potential_csv_header;
+        my $csv_skipped_timestamp_rows = 0;
 
         while (<$fh>) {
             s/[\r\n]+$//;                                   # Remove Windows line endings (CRLF) or Unix line endings (LF) if present
@@ -7980,6 +7981,18 @@ sub read_and_process_logs {
                 } elsif ($csv_epoch_timestamp) {
                     # Epoch already parsed above, skip timegm()
                 } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 || $match_type == 7 || $match_type == 8 || $match_type == 10 || $match_type == 11 || $match_type == 13 ) {
+                    # CSV rows (match_type 13) carry arbitrary column text where the
+                    # regex-matched formats guarantee timestamp shape. A value that is
+                    # neither epoch (handled above) nor ISO would feed garbage into the
+                    # fixed-offset substr extraction and die inside timegm(), so skip
+                    # the row instead (Issue #328).
+                    if ($match_type == 13 && (!defined $timestamp_str || $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/)) {
+                        $csv_skipped_timestamp_rows++;
+                        if ($csv_skipped_timestamp_rows == 1) {
+                            print STDERR "Warning: $in_file line $line_number: CSV timestamp '" . (defined $timestamp_str ? $timestamp_str : '') . "' is neither epoch nor ISO (YYYY-MM-DD HH:MM:SS) - skipping row (further rows in this file skipped silently)\n";
+                        }
+                        next;
+                    }
                     if (exists $timestamp_cache{$timestamp_str}) {
                         $timestamp = $timestamp_cache{$timestamp_str};
                     } else {
@@ -8720,6 +8733,10 @@ sub read_and_process_logs {
         }
 
         close $fh;
+
+        if ($csv_skipped_timestamp_rows > 1) {
+            print STDERR "Warning: $in_file: skipped $csv_skipped_timestamp_rows CSV rows with unparseable timestamps\n";
+        }
 
         # Index file: finalize per-file counters (Issue #46)
         $index_file_data{$in_file}{line_count} = $line_number;
