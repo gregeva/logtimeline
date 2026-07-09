@@ -124,7 +124,7 @@ while (my $row = $csv->getline($fh)) {
     # per-cell type + decimal checks
     for my $col_name (keys %col_index) {
         my $rule = $rule_by_name{$col_name};
-        next unless $rule;  # unknown column already flagged in structure phase
+        next unless $rule;  # unknown column already failed hard in check_column_structure()
         my $idx = $col_index{$col_name};
         my $val = $row->[$idx];
         $val = '' unless defined $val;
@@ -238,6 +238,27 @@ sub check_column_structure {
     my ($header, $rules) = @_;
     my $fails = 0;
     my %header_set = map { $_ => 1 } @$header;
+
+    # Unknown columns are a hard failure: a CSV column with no rules-TSV
+    # entry means ltl grew an output surface without a spec update. The
+    # drift engine refuses such files outright (Decision 5 all-or-nothing
+    # coverage); both consumers of the shared rules TSVs must enforce the
+    # same strictness or the weaker one defines the effective contract.
+    my %known_column = map { $_->{column} => 1 } @$rules;
+    for my $i (0 .. $#$header) {
+        next if $known_column{$header->[$i]};
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => 1,
+            column => $header->[$i],
+            asserts => "every column emitted in the CSV header must have an entry in the rules TSV",
+            produced_by => producer($opt{file_kind}),
+            contract => 'features/224-validate-statistics-test-harness.md § Decision 5 — all-or-nothing column coverage; the rules spec tracks the application, not the scenarios',
+            expected => "rules-TSV entry for '" . $header->[$i] . "'",
+            actual => "no entry (header position " . ($i + 1) . ")",
+            rule => "unknown column",
+        });
+        $fails++;
+    }
 
     # Fixed-position columns must appear at the expected position
     for my $r (@$rules) {
