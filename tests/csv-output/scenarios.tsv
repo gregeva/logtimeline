@@ -1,20 +1,20 @@
 scenario	logfile	options	expected_families	expected_categories
-access-bytes-duration	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25	bytes,duration,percentile,shape,level
-thingworx-script	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 240 -n 25	duration,count,percentile,shape,level
+access-bytes-duration	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25	bytes,duration,percentile,dispersion,shape,level
+thingworx-script	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 240 -n 25	duration,count,percentile,dispersion,shape,level
 thingworx-application	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	-bs 240 -n 25	level
-precision-default-us	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us	bytes,duration,percentile,shape,level
-precision-full	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -cp full	bytes,duration,percentile,shape,level
-precision-n4	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -cp 4	bytes,duration,percentile,shape,level
-heatmap-duration	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -hm duration	bytes,duration,percentile,shape,level
-profile-week	@PROFILE_LOG@	-bs 60 -n 25 -pr week	duration,percentile,shape,bytes
-profile-day	@PROFILE_LOG@	-bs 60 -n 25 -pr day	duration,percentile,shape,bytes
+precision-default-us	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us	bytes,duration,percentile,dispersion,shape,level
+precision-full	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -cp full	bytes,duration,percentile,dispersion,shape,level
+precision-n4	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -cp 4	bytes,duration,percentile,dispersion,shape,level
+heatmap-duration	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -hm duration	bytes,duration,percentile,dispersion,shape,level
+profile-week	@PROFILE_LOG@	-bs 60 -n 25 -pr week	duration,percentile,dispersion,shape,bytes
+profile-day	@PROFILE_LOG@	-bs 60 -n 25 -pr day	duration,percentile,dispersion,shape,bytes
 udm-counting	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	-bs 240 -n 25 -udm users::distinct:U -udm actions::count:U -udm repeat::ratio:U -udm urate::rate:U -udm udrate::drate:U	level,udm-counting
-udm-numeric	logs/ThingworxLogs/ScriptLog.2025-05-05.0.log	-bs 240 -n 25 -udm job_ms:ms:max:durationMS	duration,count,percentile,shape,level,udm-numeric
-numeric-highlight-duration-band	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hdmin 100 -hdmax 200	bytes,count,level	expected/numeric-highlight-duration-band.tsv
-numeric-highlight-bytes-band	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hbmin 5000 -hbmax 6000	bytes,count,level	expected/numeric-highlight-bytes-band.tsv
-numeric-highlight-count-band	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hcmin 45 -hcmax 50	bytes,count,level	expected/numeric-highlight-count-band.tsv
-numeric-highlight-cross-metric	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hdmin 100 -hbmin 5000	bytes,count,level	expected/numeric-highlight-cross-metric.tsv
-numeric-highlight-regex-and-numeric	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -h BD-dur- -hdmin 100	bytes,count,level	expected/numeric-highlight-regex-and-numeric.tsv
-numeric-highlight-regex-only	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -h BD-bytes-	bytes,count,level	expected/numeric-highlight-regex-only.tsv
-numeric-filter-boundary-inclusive	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -dmin 100 -dmax 200	bytes,count,level	expected/numeric-filter-boundary-inclusive.tsv
-numeric-highlight-count-absent-format	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-bs 240 -n 25 -ic -hcmin 1	bytes,duration,percentile,level	expected/numeric-highlight-count-absent-format.tsv
+udm-numeric	logs/ThingworxLogs/ScriptLog.2025-05-05.0.log	-bs 240 -n 25 -udm job_ms:ms:max:durationMS	duration,count,percentile,dispersion,shape,level,udm-numeric
+numeric-highlight-duration-band	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hdmin 100 -hdmax 200	duration,percentile,dispersion,shape,bytes,count,level	expected/numeric-highlight-duration-band.tsv
+numeric-highlight-bytes-band	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hbmin 5000 -hbmax 6000	duration,percentile,dispersion,shape,bytes,count,level	expected/numeric-highlight-bytes-band.tsv
+numeric-highlight-count-band	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hcmin 45 -hcmax 50	duration,percentile,dispersion,shape,bytes,count,level	expected/numeric-highlight-count-band.tsv
+numeric-highlight-cross-metric	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hdmin 100 -hbmin 5000	duration,percentile,dispersion,shape,bytes,count,level	expected/numeric-highlight-cross-metric.tsv
+numeric-highlight-regex-and-numeric	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -h BD-dur- -hdmin 100	duration,percentile,dispersion,shape,bytes,count,level	expected/numeric-highlight-regex-and-numeric.tsv
+numeric-highlight-regex-only	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -h BD-bytes-	duration,percentile,dispersion,shape,bytes,count,level	expected/numeric-highlight-regex-only.tsv
+numeric-filter-boundary-inclusive	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -dmin 100 -dmax 200	duration,percentile,dispersion,shape,bytes,count,level	expected/numeric-filter-boundary-inclusive.tsv
+numeric-highlight-count-absent-format	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-bs 240 -n 25 -ic -hcmin 1	bytes,duration,percentile,dispersion,shape,level	expected/numeric-highlight-count-absent-format.tsv

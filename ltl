@@ -9787,7 +9787,19 @@ sub calculate_all_statistics {
                 $aggregated_data->{occurrences} += $log_messages{$category}{$log_key}{occurrences};
                 $aggregated_data->{total_bytes} += $log_messages{$category}{$log_key}{total_bytes} if defined $log_messages{$category}{$log_key}{total_bytes};
 
-                if( defined $log_messages{$category}{$log_key}{total_duration} && !$omit_durations ) {
+                # total_duration is initialized to 0 for every message key, so
+                # "defined" cannot distinguish "no duration ever observed" from
+                # "durations observed summing to zero" — a consumer of the
+                # MESSAGES CSV must be able to tell them apart (Issue #330).
+                # Gate on actual observations: the raw durations list or the
+                # bin-mode observation counter, with a positive total as a
+                # fallback for any path that accumulated without either.
+                my $duration_observed = $message_stats_capture_mode eq 'bin'
+                    ? ( ($log_messages{$category}{$log_key}{duration_count} // 0) > 0 )
+                    : ( scalar @{ $log_messages{$category}{$log_key}{durations} // [] } > 0 );
+                $duration_observed ||= ( ($log_messages{$category}{$log_key}{total_duration} // 0) > 0 );
+
+                if( $duration_observed && !$omit_durations ) {
                     $aggregated_data->{total_duration} += $log_messages{$category}{$log_key}{total_duration};
                     $aggregated_data->{sum_of_squares} += $log_messages{$category}{$log_key}{sum_of_squares};
                     # Issue #287 Commit 5: under -mdm bin the per-key durations[] no
@@ -9798,6 +9810,13 @@ sub calculate_all_statistics {
                     # would auto-vivify it as an empty arrayref. Skip the push.
                     push @{$aggregated_data->{durations}}, @{$log_messages{$category}{$log_key}{durations}}
                         unless $message_stats_capture_mode eq 'bin';
+                } elsif ( !$omit_durations ) {
+                    # No duration was ever observed for this key: clear the
+                    # 0-initialized accumulator so duration-total consumers
+                    # (summary table, MESSAGES CSV duration/duration_nice)
+                    # emit blank rather than a zero indistinguishable from a
+                    # measured total of zero (Issue #330).
+                    delete $log_messages{$category}{$log_key}{total_duration};
                 }
 
                 if( defined $aggregated_data->{total_duration} && !$omit_durations ) {

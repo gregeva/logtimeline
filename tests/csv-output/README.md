@@ -64,7 +64,12 @@ One row per column:
 | `type` | `int`, `float`, `nice`, `string`, `timestamp`, `enum:a,b,c` |
 | `required` | `yes`, `no`, or `conditional:<family>` |
 | `max_decimals` | Integer 0–5, or `n/a` for non-numeric types |
-| `family` | `meta`, `duration`, `bytes`, `count`, `percentile`, `shape`, `level`, `udm` |
+| `family` | `meta`, `duration`, `bytes`, `count`, `percentile`, `dispersion`, `shape`, `level`, `udm` |
+
+Family membership follows populate conditions, not statistical theme: `dispersion`
+(`std_dev`, `cv`) populates at n≥2 observations, `shape` (`skewness`, `kurtosis`,
+`bimodality_coef`) at n≥4 per the locked `--explain` compute contracts, and `impact`
+belongs to `duration` because it populates whenever `mean` does (Issue #330).
 
 `conditional:<family>` columns are required to be populated when the family
 is declared active in the scenario; the group-consistency check then enforces
