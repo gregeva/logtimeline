@@ -3989,7 +3989,7 @@ sub print_help {
     $out .= help_opt("-hcmin, --highlight-count-min <N>",    "Highlight log entries with count at or above this value, without filtering anything out");
     $out .= help_opt("-hcmax, --highlight-count-max <N>",    "Highlight log entries with count at or below this value, without filtering anything out");
     $out .= "\n";
-    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded; ltl reports how many entries were excluded this way. Highlight criteria (-h/-hf and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric.";
+    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded; ltl reports how many entries were excluded this way. An inverted range (minimum above maximum) is unsatisfiable and warns up front. Highlight criteria (-h/-hf and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric.";
     $out .= help_wrap($note_text, indent => $help_opt_col, first_indent => $help_opt_col) . "\n";
 
     # Recording & Processing
@@ -7264,6 +7264,24 @@ sub adapt_to_command_line_options {
         $highlight_bytes_min, $highlight_bytes_max,
         $highlight_count_min, $highlight_count_max ) ? 1 : 0;
     $highlight_active = ( defined($highlight_filter) || $numeric_highlight_active ) ? 1 : 0;
+
+    # An inverted numeric range (minimum above maximum) is unsatisfiable: no
+    # line can ever pass the filter pair, and no line can ever be highlighted
+    # by the highlight pair. Warn up front so the resulting empty selection
+    # (or highlight-less run) is explained rather than silent.
+    for my $range (
+        [ $filter_duration_min,    $filter_duration_max,    '-dmin',  '-dmax',  'no log entries can match'         ],
+        [ $filter_bytes_min,       $filter_bytes_max,       '-bmin',  '-bmax',  'no log entries can match'         ],
+        [ $filter_count_min,       $filter_count_max,       '-cmin',  '-cmax',  'no log entries can match'         ],
+        [ $highlight_duration_min, $highlight_duration_max, '-hdmin', '-hdmax', 'no log entries can be highlighted' ],
+        [ $highlight_bytes_min,    $highlight_bytes_max,    '-hbmin', '-hbmax', 'no log entries can be highlighted' ],
+        [ $highlight_count_min,    $highlight_count_max,    '-hcmin', '-hcmax', 'no log entries can be highlighted' ],
+    ) {
+        my ($min, $max, $min_opt, $max_opt, $consequence) = @$range;
+        if (defined $min && defined $max && $min > $max) {
+            print STDERR "Warning: $min_opt $min is greater than $max_opt $max - the range is unsatisfiable, $consequence\n";
+        }
+    }
 
     # Verbose output: runtime-config section (Issues #19, #21, #56, #226, #231).
     # Extended in #231 to surface per-flag resolution under three sub-sections
