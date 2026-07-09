@@ -96,13 +96,14 @@ End markers are required. They exist so harnesses can use range extraction (`sed
 This list prevents collisions across parallel work. Update it when adding a new section.
 
 **Implemented:**
-- `runtime-config` — effective runtime configuration: LTL_CONFIG and merged include/exclude/highlight/threadpool regexes
+- `runtime-config` — effective runtime configuration: LTL_CONFIG, merged include/exclude/highlight/threadpool regexes, and per-flag resolved values (including the numeric highlight criteria, Issue #312)
 - `index-read-back` — index pre-seed lookups, freshness, aggregated bounds, drift detection (Issue #179); `heatmap_preseed_min`/`heatmap_preseed_max` expose the live post-preseed heatmap bounds when a heatmap is active (Issue #310)
 - `histogram-array` — raw-array histogram dimensions; active when a surface resolves to the raw values data model
 - `histogram-bin-counters` — HDR-style bin-counter histogram state and finalized histogram dimensions (Issue #187)
 - `message-grouping` — fuzzy message consolidation (Issue #96)
 - `heatmap-palette` — heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250)
 - `profile` — timeline folding (--profile): resolved mode, fold period, included weekdays, included vs dropped sample counts (Issue #256)
+- `udm-counting` — per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313)
 - `benchmark-data` — machine-parseable TSV: version, files, line counts, timings, memory, structure counts
 
 **Reserved by sub-issues, not yet implemented:**
@@ -123,6 +124,32 @@ A section's name and content are a contract with the harnesses that consume it.
 3. Updating this document's reserved-names list and any per-feature reference (CLAUDE.md, docs/usage.md, README.md, print_help).
 
 This rule exists because of a specific class of failure observed in this repository: a section header was renamed without updating the harness that asserted on it. The harness's assertions for that header failed loudly, but the failure was not noticed because the harness was not re-run after the rename. The "run each affected harness and confirm it still asserts" step is what catches that.
+
+## Shared specification files
+
+Some harnesses consume a shared machine-readable specification of application output — today, the column-rules TSVs under `tests/csv-output/rules/` consumed by both `validate-csv-output.pl` and `compare-statistics-drift.pl`. Three rules govern these files; all three were derived from one incident (Issue #320 uncovered 14 emitted-but-unspecified `-HL` level columns; the enforcement asymmetry that let them ship — the structural validator silently accepting columns the drift engine refuses — was closed under Issue #335, which made an unknown CSV column a hard failure in `check_column_structure()`).
+
+**Completeness tracks the application, not the scenarios.** The spec must cover every column (or key) the application *can* emit — including conditional and dynamic variants (`-HL` highlight columns, rate-unit suffixes, UDM families) — not merely the columns current scenarios happen to produce. When ltl gains a new output column or a new dynamic variant of an existing one, its spec rows land **in the same commit**. A spec that only covers exercised output makes every unexercised surface silently un-testable: the first scenario that touches it fails (or worse, passes unasserted) for reasons unrelated to what that scenario tests.
+
+**Every consumer enforces the same strictness.** When two harnesses read one spec, they must agree on what a violation is. If one refuses unknown columns and the other silently accepts them, the weaker consumer defines the effective contract and drift ships through it. When adding a consumer, match the strictest existing consumer's behavior; when that is not possible, document the asymmetry in both consumers and open a ticket to close it.
+
+**Enforcement lives in code, not comments.** A comment asserting that "X is already checked elsewhere" is not a check. Before writing `next unless $rule;  # unknown column already flagged...`, verify the flagging exists — and if the referenced check is in another phase or file, name the function that performs it so the claim is verifiable. This is the spec-file analog of the missing-anchor rule: a claimed-but-absent check produces false confidence, which is worse than no check.
+
+## A gate only guards surfaces a scenario exercises
+
+A strict validation gate (all-or-nothing column coverage, refuse-on-unknown, format checks) asserts nothing about surfaces no scenario traverses. The bin-counter drift engine would always have refused a highlight-bearing STATS CSV — but since no statistics-drift scenario used highlights, the gate's incompatibility with a whole feature surface went unnoticed until #320.
+
+When adding a strict gate, enumerate the application surfaces it constrains and confirm at least one scenario traverses each; where a surface has no scenario, either add one or record the gap explicitly (a `log()`-style note in the harness header or a tracked ticket). "The gate has never fired" must be distinguishable between "the invariant holds" and "nothing ever put the invariant under test."
+
+## Proving a new assertion can fail
+
+Exit code 0 on a healthy input is not evidence that an assertion works — an assertion with a wrong anchor, a wrong file, or an over-permissive pattern also exits 0. Every **new** assertion (and every assertion whose anchor or logic changes) must be demonstrated to fail before it is trusted to pass:
+
+1. Construct a minimal input that violates the invariant (a hand-crafted CSV row with a broken partition, a doctored render, a fixture line with the metric removed).
+2. Run the assertion against it — directly against the checker/engine where possible, not through the full harness — and confirm it fails *with the expected diagnostic* (the asserts/produced_by/contract triple surfaces, the exit code is non-zero).
+3. Then run the healthy path and confirm it passes.
+
+This is the same discipline the stability contract requires after renames ("confirm it still asserts"), applied at authoring time. The sabotage probe for Issue #320's `level_partition` invariant is the reference example: probing with a deliberately broken CSV is what exposed that the rules TSV could not even represent the columns the invariant needed.
 
 ## Harnesses must fail on missing anchors
 
@@ -364,6 +391,29 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 ```
 
 Add the trap on the *same logical line* as the `mktemp` so it can't be forgotten between declaration and use. If the harness uses multiple temp dirs, set the trap to clean all of them: `trap 'rm -rf "$DIR1" "$DIR2"' EXIT`.
+
+## Runtime-warning cleanliness
+
+Every harness that invokes `ltl` MUST capture the invocation's stderr and fail the run if it contains a Perl runtime warning. A runtime warning (uninitialized value, substr outside of string, non-numeric argument, out-of-range date field, ...) is an unguarded data path — a bug that has not yet found the input that makes it fatal or wrong — and a harness that discards stderr certifies code it never looked at.
+
+**The discriminator:** interpreter-emitted warnings always carry the suffix ` at <file> line <N>`; intentional `ltl` diagnostics printed to stderr never do. The check is:
+
+```bash
+if grep -qE ' at .+ line [0-9]+' "$stderr_capture"; then
+    # hard failure — surface the deduplicated warnings plus the
+    # asserts/produced_by/contract triple
+fi
+```
+
+`produced_by` for this assertion is "whichever ltl code path the warning text names" — the warning itself carries the emitting line, so the failure output should include the (deduplicated, counted) warning lines.
+
+**Obligations:**
+
+- New harnesses include this check from the first commit; it is part of the capture step, not an optional extra assertion.
+- Shared capture helpers (e.g. `tests/lib/csv-cache.sh`) perform the check once at the point of capture so individual harnesses don't re-implement it.
+- Discarding stderr (`2>/dev/null`) in a harness is prohibited for the same reason as Trap 1 above — and this section extends that rule: even *captured-but-uninspected* stderr is a gap.
+
+The reference implementation is the `perl-runtime-warnings-on-stderr` check in `tests/validate-csv-output.sh`. The rule exists because the `udm-counting` csv-output scenario exercised the exact code path of a per-message uninitialized-division bug and emitted 125 warnings on every run — invisibly, because no harness read stderr. Retrofitting the remaining harnesses is tracked by Issue #341.
 
 ## Self-documenting assertions
 

@@ -86,14 +86,14 @@ ltl -hg duration -dmp 7 access.log            # tighter precision (slower)
 
 - The X-axis log scale means that visual distance between bars represents an exponential, not linear, gap in actual value. Two bars that look the same width apart on the screen could represent a 10× difference at one part of the chart and a 100× difference at another.
 - When `-hg` is invoked alongside the bar graph (default), the histogram renders as an additional panel below the timeline. When `-hg` is invoked with multiple metrics (`-hg duration,bytes`), each metric gets its own histogram panel stacked vertically.
-- **Highlight overlays** (`-h pattern`) draw colored sub-bars within each main bar showing the proportion of matched entries. The highlight percentile legend appears below the main legend in highlight color.
+- **Highlight overlays** (`-h pattern`, or numeric criteria such as `-hdmin`) draw colored sub-bars within each main bar showing the proportion of highlighted entries. The highlight percentile legend appears below the main legend in highlight color.
 - **Color rendering depends on terminal support.** Modern Unix terminals and Windows Terminal display the gradient correctly. Legacy Windows CMD with `more` shows monochrome bars; the layout and percentile ticks remain readable.
 
 ---
 
 ## How ltl renders this
 
-The histogram uses log-spaced bins with HDR-histogram-style precision. Bin-counter resolution is controlled by `--data-model-precision` (tier 1..9, default 5); higher tiers give finer resolution. The histogram width (default 95% of terminal) and height (default 8 rows) are tunable via `-hgw` and `-hgh`. Highlight overlays (`-h regex`) render colored sub-bars within each main bar, showing the proportion of highlighted entries at each value range. The percentile tick marks on the baseline are computed from the same observations as the summary-table p99/p999 values, so the visual ticks and the numeric statistics agree by construction.
+The histogram uses log-spaced bins with HDR-histogram-style precision. Bin-counter resolution is controlled by `--data-model-precision` (tier 1..9, default 5); higher tiers give finer resolution. The histogram width (default 95% of terminal) and height (default 8 rows) are tunable via `-hgw` and `-hgh`. Highlight overlays (`-h regex`, or numeric criteria such as `-hdmin`) render colored sub-bars within each main bar, showing the proportion of highlighted entries at each value range. The percentile tick marks on the baseline are computed from the same observations as the summary-table p99/p999 values, so the visual ticks and the numeric statistics agree by construction.
 
 ---
 

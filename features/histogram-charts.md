@@ -29,6 +29,8 @@ Add ASCII terminal histogram charts that visualize the value distribution of key
 
 Multiple uses of command line options for -hg should be additive in case the overall environment states displaying -hg duration, and the user adds -hg bytes then both duration and bytes should be included.
 
+Metric-name operands for `-hg` and `-hm` resolve through a single shared surface — `builtin_metric_name()` (canonical built-in lookup, safe at option-parse time) and `resolve_metric_operand()` (full resolution including UDM names, after `parse_udm_configs()`), with `available_metric_names()` supplying the vocabulary named in unknown-metric errors. The contract: built-in names `duration`/`time`/`bytes`/`count` match case-insensitively (`time` is an alias for `duration`); user-defined metric names are case-sensitive, matched by name then by base_name for disambiguated metrics. Any new option accepting metric-name operands must resolve through these subs, not its own parsing (Issue #327 — the two options previously parsed independently and diverged twice).
+
 ### Verbose Output (-V flag)
 
 When the `-V` (verbose) flag is used with histograms enabled, output bucket calculation details for each metric:

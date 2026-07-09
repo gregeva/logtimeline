@@ -48,11 +48,13 @@ ltl -bs 60 -pr week access.log
 ltl -bs 15 -pr workday -st 09:00 -et 11:00 access.log
 ```
 
-### Filtering
+### Filtering & Highlighting
 
-Filtering is the core of logtimeline's investigative power. Three operations — include, exclude, and highlight — drive an iterative analysis loop. **Include** isolates lines matching a pattern, discarding everything else. **Exclude** removes matching lines, keeping everything else. **Highlight** renders matching lines as a separate colored bar alongside the main bar in every time bucket, allowing visual comparison of a subset against the full population. All three accept regex, can be specified multiple times, and support `&` for AND logic within a single pattern.
+logtimeline's investigative power comes from combining filtering and highlighting: filter criteria shape the population being analyzed, while highlight criteria visually isolate a subset within that population. One set of conditions controls what is measured; an independent set controls what stands out — and both kinds accept text patterns or numeric thresholds. **Include** isolates lines matching a pattern, discarding everything else. **Exclude** removes matching lines, keeping everything else. **Highlight** renders matching lines as a separate colored bar alongside the main bar in every time bucket, allowing visual comparison of a subset against the full population. All three accept regex, can be specified multiple times, and support `&` for AND logic within a single pattern.
 
-The typical workflow is subtractive: start with all data, exclude known noise, narrow with includes until the signal is clear, then highlight to see your target in the context of the full population. Pattern files (`-if`, `-ef`, `-hf`) allow reusable sets of patterns for common scenarios. Numeric threshold filters (`-dmin`, `-dmax`, `-bmin`, `-bmax`, `-cmin`, `-cmax`) complement regex filtering by selecting entries based on metric values rather than text content.
+The typical workflow is subtractive: start with all data, exclude known noise, narrow with includes until the signal is clear, then highlight to see your target in the context of the full population. Pattern files (`-if`, `-ef`, `-hf`) allow reusable sets of patterns for common scenarios. Numeric threshold filters (`-dmin`, `-dmax`, `-bmin`, `-bmax`, `-cmin`, `-cmax`) complement regex filtering by selecting entries based on metric values rather than text content; all bounds are inclusive (an entry exactly at the threshold is kept). Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded — ltl reports how many entries were excluded this way after processing. An inverted range (minimum above maximum) is unsatisfiable — whether on a filter pair or a highlight pair — and ltl warns up front instead of producing a silently empty selection.
+
+Highlighting is available on the same numeric criteria: `-hdmin`/`-hdmax`, `-hbmin`/`-hbmax`, and `-hcmin`/`-hcmax` mark entries whose duration, response size, or count falls inside the given inclusive range — without removing anything from the analysis. This keeps the full timeline in view while a slow tail, oversized responses, or unusual counts light up in context. Numeric highlight criteria combine freely with the hard filters (trim noise with `-dmin` while highlighting the extreme cases with `-hdmin`) and with the regex highlight: when both `-h` and numeric criteria are given, an entry is highlighted only if it matches the pattern *and* satisfies every numeric criterion. An entry that carries no value for a metric is never highlighted by a criterion on that metric.
 
 | Option | Description |
 |--------|-------------|
@@ -62,12 +64,18 @@ The typical workflow is subtractive: start with all data, exclude known noise, n
 | `-if, --include-file <file>` | Load include patterns from a file (one pattern per line) |
 | `-ef, --exclude-file <file>` | Load exclude patterns from a file (one pattern per line) |
 | `-hf, --highlight-file <file>` | Load highlight patterns from a file (one pattern per line) |
-| `-dmin, --duration-min <N>` | Hide log entries with duration below this threshold |
-| `-dmax, --duration-max <N>` | Hide log entries with duration above this threshold |
-| `-bmin, --bytes-min <N>` | Hide log entries with response size below this threshold |
-| `-bmax, --bytes-max <N>` | Hide log entries with response size above this threshold |
-| `-cmin, --count-min <N>` | Hide log entries with count below this threshold |
-| `-cmax, --count-max <N>` | Hide log entries with count above this threshold |
+| `-dmin, --duration-min <N>` | Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept) |
+| `-dmax, --duration-max <N>` | Hide log entries with duration above this threshold (inclusive: entries exactly at N are kept) |
+| `-bmin, --bytes-min <N>` | Hide log entries with response size below this threshold (inclusive) |
+| `-bmax, --bytes-max <N>` | Hide log entries with response size above this threshold (inclusive) |
+| `-cmin, --count-min <N>` | Hide log entries with count below this threshold (inclusive) |
+| `-cmax, --count-max <N>` | Hide log entries with count above this threshold (inclusive) |
+| `-hdmin, --highlight-duration-min <N>` | Highlight log entries with duration at or above this value, without filtering anything out |
+| `-hdmax, --highlight-duration-max <N>` | Highlight log entries with duration at or below this value, without filtering anything out |
+| `-hbmin, --highlight-bytes-min <N>` | Highlight log entries with response size at or above this value, without filtering anything out |
+| `-hbmax, --highlight-bytes-max <N>` | Highlight log entries with response size at or below this value, without filtering anything out |
+| `-hcmin, --highlight-count-min <N>` | Highlight log entries with count at or above this value, without filtering anything out |
+| `-hcmax, --highlight-count-max <N>` | Highlight log entries with count at or below this value, without filtering anything out |
 ```bash
 # Only show POST requests, exclude health checks
 ltl -i "POST" -e healthcheck access.log
@@ -75,9 +83,13 @@ ltl -i "POST" -e healthcheck access.log
 ltl -h "/api/v2/orders" access.log
 # Only show requests slower than 5 seconds
 ltl -dmin 5000 access.log
+# Keep everything in view, highlight requests slower than 5 seconds
+ltl -hdmin 5000 access.log
+# Highlight slow requests to one API within the full population
+ltl -h "/api/v2/orders" -hdmin 5000 access.log
 ```
 
-> **Note:** Filters affect all computed statistics. For example, `-dmin 1000` will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population of data in the file.
+> **Note:** Filters affect all computed statistics. For example, `-dmin 1000` will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population of data in the file. Numeric filters only keep entries that carry the filtered metric; entries with no value for it are excluded and their count is reported. Highlight criteria (`-h`/`-hf` and the `-h*min`/`-h*max` options) never change which entries are analyzed — they only mark a subset within the full population.
 
 ### Recording & Processing
 
@@ -290,7 +302,7 @@ Heatmap mode replaces the per-bucket latency statistics with a color-intensity v
 
 | Option | Description |
 |--------|-------------|
-| `-hm, --heatmap [metric]` | Replace statistics with a color-intensity histogram showing value distribution per time bucket (`duration`, `bytes`, or `count`) |
+| `-hm, --heatmap [metric]` | Replace statistics with a color-intensity histogram showing value distribution per time bucket (`duration`, `bytes`, `count`, or a `-udm` metric name; UDM names are case-sensitive) |
 | `-hmw, --heatmap-width <N>` | Number of columns for the heatmap display (default: 52) |
 
 ```bash
@@ -308,7 +320,7 @@ Histograms show the overall distribution shape of a metric across the entire tim
 
 | Option | Description |
 |--------|-------------|
-| `-hg, --histogram [metric]` | Show an overall distribution histogram after the bar graph (`duration`, `bytes`, or `count`) |
+| `-hg, --histogram [metric]` | Show an overall distribution histogram after the bar graph (`duration`, `bytes`, `count`, or a `-udm` metric name; UDM names are case-sensitive) |
 | `-hgw, --histogram-width <N>` | Histogram width as percentage of terminal (default: 95) |
 | `-hgh, --histogram-height <N>` | Histogram height in rows (default: 8) |
 | `-hgb, --histogram-buckets <N>` | Override total histogram bucket count (default: 0 = auto-calculate) |
@@ -324,7 +336,7 @@ ltl -hg access.log
 
 ### User-Defined Metrics
 
-User-defined metrics allow extraction of arbitrary numeric values from log lines using regex patterns or named field matching. Extracted values are tracked across time buckets and displayed as additional bar graph columns alongside the built-in duration, bytes, and count metrics. This enables ad-hoc exploratory analysis of application-specific data — queue depths, row counts, cache sizes, connection pools, or any numeric value that appears in the log — without requiring a dedicated log format parser. Units, aggregation functions, and delta transforms can be specified to control how values are converted, accumulated, and displayed.
+User-defined metrics allow extraction of arbitrary values from log lines using regex patterns or named field matching. Extracted values are tracked across time buckets and displayed as additional bar graph columns alongside the built-in duration, bytes, and count metrics. This enables ad-hoc exploratory analysis of application-specific data — queue depths, row counts, cache sizes, connection pools, or any value that appears in the log — without requiring a dedicated log format parser. Units, aggregation functions, and delta transforms can be specified to control how numeric values are converted, accumulated, and displayed. Counting aggregations work on text tokens too — user IDs, session tokens, exception class names — turning identity-like fields into per-bucket activity metrics (how many distinct users were active, how often the average value repeated) the same way the built-in sessions column does for session IDs.
 
 | Option | Description |
 |--------|-------------|
@@ -332,14 +344,27 @@ User-defined metrics allow extraction of arbitrary numeric values from log lines
 | `-ucm, --udm-csv-message <cols>` | Treat the message field as CSV and name the columns for use with `-udm` |
 | `-ucs, --udm-csv-separator <sep>` | Set the CSV field delimiter when using `-ucm` (default: comma) |
 
-**UDM spec format:** `name[:unit[:function]][:/regex/]`
+**UDM spec format:** `name[:unit[:function]][:key|:/regex/]`
 
 | Part | Description |
 |------|-------------|
-| `name` | Metric name — also used as default pattern to match `name=value` or `name: value` |
-| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — omit for raw numbers |
-| `function` | **Aggregations:** `sum` (default), `min`, `max`, `avg` — **Transforms:** `delta` (clamped ≥0), `idelta` (unclamped) — **Combined:** `sum(delta)`, `avg(delta)`, `max(idelta)`, etc. |
-| `/regex/` | Custom extraction pattern with one capture group around the numeric value to extract (overrides default name matching). e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |
+| `name` | Metric name and column label — also used as default pattern to match `name=value` or `name: value` when no `key` or `/regex/` is given |
+| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — omit for raw numbers. Ignored for counting aggregations |
+| `function` | **Aggregations:** `sum` (default), `min`, `max`, `mean` (alias `avg`) — **Counting:** `count`, `distinct` (alias `dcount`, `unique`), `ratio`, `rate`, `drate` — **Transforms:** `delta` (clamped ≥0), `idelta` (unclamped) — **Combined:** `sum(delta)`, `mean(delta)`, `max(idelta)`, etc. |
+| `key` | Token key — builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. `exception_variety::distinct:JavaException` extracts the `JavaException:` token but labels the column `exception_variety` |
+| `/regex/` | Custom extraction pattern with one capture group around the value to extract (overrides default name/key matching). e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |
+
+**Counting aggregations** count extracted values per time bucket instead of doing arithmetic on them, and fully support text tokens (IDs, usernames, class names):
+
+| Function | Per-bucket value |
+|----------|------------------|
+| `count` | Number of extracted occurrences |
+| `distinct` | Number of unique extracted values |
+| `ratio` | Occurrences per unique value — the repetition factor: how many times the average value repeated |
+| `rate` | Occurrences per rate unit (see `-ru`; default per-minute) |
+| `drate` | Unique values per rate unit (see `-ru`; default per-minute) |
+
+Counting metrics ignore the `unit` field and cannot be combined with `delta`/`idelta` transforms. Highlighting — whether by pattern (`-h`) or by numeric criteria (`-hdmin` and friends) — works as it does for the sessions column: highlighted lines contribute to both the bucket total and the highlight value. In the STATS CSV, each counting metric emits one column named `name_function` (e.g. `users_distinct`), with the rate-unit suffix appended for `rate`/`drate` (e.g. `logins_rate_min`); in the MESSAGES CSV, `count` carries per-message occurrences while `distinct`/`ratio`/`rate`/`drate` are blank — unique values are counted per time bucket, not per message.
 
 ```bash
 # Track max value of a raw numeric field per bucket
@@ -348,6 +373,9 @@ ltl -udm "Send-Q::max" app.log
 ltl -udm "busy:ms:sum(delta)" app.log
 # Extract a custom metric by regex pattern
 ltl -udm "rows:/(\d+) rows processed/" app.log
+# Count distinct active users per bucket from an identity token,
+# with an intention-revealing column label via the token key
+ltl -udm "active_users::distinct:U" -udm "actions_per_user::ratio:U" app.log
 ```
 
 ### Thread Pool Activity
@@ -443,4 +471,5 @@ That said, logtimeline accepts conventional alternates for convenience. These al
 | `bytes` | `size` |
 | `occurrences` | `total` |
 | `mean` | `avg` |
+| `distinct` | `dcount`, `unique` |
 | `stddev` | `std_dev` |

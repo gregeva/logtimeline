@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # validate-csv-output.sh — Categorical CSV-output integrity harness (Issue #223)
 #
-# Validates structural correctness of -o CSV outputs (MESSAGES and STATS):
-# column presence, ordering, population, family group consistency, data-type
-# correctness, fixed-decimal rules. All checks are pass/fail (no tolerance).
+# Validates structural and categorical correctness of -o CSV outputs
+# (MESSAGES and STATS): column presence, ordering, population, family group
+# consistency, data-type correctness, fixed-decimal rules, and — for scenarios
+# that declare an expected-categories file (Issue #312) — which MESSAGES rows
+# land in category highlight vs plain, and which are absent (dropped by a
+# hard filter). All checks are pass/fail (no tolerance).
 #
 # Sibling to validate-statistics.sh (#224), which handles numeric drift,
 # intra-row consistency, and oracle correctness.
@@ -86,7 +89,7 @@ scenarios_run=0
 
 # Single loop fed by process substitution so counter mutations stay in the
 # parent shell. Skip the header line of the TSV.
-while IFS=$'\t' read -r scenario logfile options families; do
+while IFS=$'\t' read -r scenario logfile options families expected_categories; do
     [[ -z "$scenario" ]] && continue
     [[ "$scenario" =~ ^# ]] && continue
     if [[ -n "$ONLY_SCENARIO" && "$scenario" != "$ONLY_SCENARIO" ]]; then
@@ -157,6 +160,21 @@ while IFS=$'\t' read -r scenario logfile options families; do
         continue
     fi
 
+    # Perl runtime warnings (interpreter-emitted, always suffixed
+    # " at <file> line <N>") are unguarded-data-path bugs, not noise.
+    # Intentional ltl diagnostics printed to stderr never carry that
+    # suffix, so the pattern separates the two cleanly.
+    if grep -qE ' at .+ line [0-9]+' "$v_capture_dir/ltl.stderr"; then
+        echo "FAIL  scenario=$scenario perl-runtime-warnings-on-stderr" >&2
+        grep -E ' at .+ line [0-9]+' "$v_capture_dir/ltl.stderr" | sort | uniq -c | sort -rn | head -5 | sed 's/^/        /' >&2
+        echo "        asserts: a scenario run emits no Perl runtime warnings (uninitialized value, substr outside of string, non-numeric argument, ...) on stderr" >&2
+        echo "        produced_by: whichever ltl code path the warning text names (the warning carries the emitting line)" >&2
+        echo "        contract: ltl must run warning-free on supported inputs; a runtime warning is an unguarded data path (Issue #326)" >&2
+        total_fail=$((total_fail + 1))
+        scenarios_run=$((scenarios_run + 1))
+        continue
+    fi
+
     # Extract -V csv-output / precision sub-section into a file the
     # validator reads. Anchored by the 'precision' sub-section markers
     # so the parent 'csv-output' wrapper is filtered out. (#268)
@@ -174,15 +192,33 @@ while IFS=$'\t' read -r scenario logfile options families; do
         continue
     fi
 
+    # Expected-categories file (optional 5th scenario column, Issue #312):
+    # categorical content assertions against the MESSAGES CSV. Path is
+    # relative to the harness dir; a declared-but-missing file is a hard
+    # failure, not a silent skip.
+    expected_args=()
+    if [[ -n "${expected_categories:-}" ]]; then
+        expected_path="$HARNESS_DIR/$expected_categories"
+        if [[ ! -f "$expected_path" ]]; then
+            echo "FAIL  scenario=$scenario expected-categories file missing: $expected_path" >&2
+            total_fail=$((total_fail + 1))
+            scenarios_run=$((scenarios_run + 1))
+            continue
+        fi
+        expected_args=(--expected-categories "$expected_path")
+    fi
+
     scen_fail=0
 
     for kind in messages stats; do
         if [[ "$kind" == "messages" ]]; then
             rules="$RULES_MESSAGES"
             csv="$msg_csv"
+            kind_expected_args=("${expected_args[@]+"${expected_args[@]}"}")
         else
             rules="$RULES_STATS"
             csv="$stats_csv"
+            kind_expected_args=()
         fi
 
         set +e
@@ -193,7 +229,8 @@ while IFS=$'\t' read -r scenario logfile options families; do
             --file-kind "$kind" \
             --expected-families "$families" \
             --v-precision "$v_precision" \
-            --profile-mode "$profile_mode"
+            --profile-mode "$profile_mode" \
+            "${kind_expected_args[@]+"${kind_expected_args[@]}"}"
         vrc=$?
         set -e
 

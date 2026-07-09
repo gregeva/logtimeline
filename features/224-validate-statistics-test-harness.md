@@ -153,6 +153,10 @@ All invariants below apply within a single row. Failure of any is a T4. Toleranc
 - **Bounded by min/max**: `min ≤ p1` and `p99999 ≤ max`.
 - **IQR derivation**: `iqr == p75 − p25`.
 
+### Level family (STATS rows only)
+
+- **Partition**: `occurrences` equals the sum of all populated level columns, both plain and `-HL` (Issue #320). Highlighted lines are counted only under their `-HL` key, so plain and `-HL` columns partition the bucket's lines; only the derived rate columns and the normalization placeholder sit outside the partition. Skipped when no level column is populated in the row (e.g. under `-ov`, which omits level counts from the CSV while `occurrences` remains full).
+
 Each invariant is documented in the harness with its three self-documenting fields (`asserts`, `produced_by`, `contract`) so a failure surfaces both the arithmetic mismatch and the contract that says the arithmetic must hold.
 
 ## Decision 5 — Column-set scope (all-or-nothing)

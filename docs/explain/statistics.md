@@ -1,6 +1,6 @@
 # LogTimeLine Statistics Reference
 
-This page is the canonical reference for the statistics ltl emits in the summary table and the `-o` CSV outputs. Each section below mirrors the content of `ltl --explain <topic>` for the same statistic.
+This page is the canonical reference for the statistics ltl computes for every message entry. A few appear as columns in the top-messages table; all of them can rank that table via `-so <statistic>` and are exported in full with the `-o` CSV outputs. Each section below mirrors the content of `ltl --explain <topic>` for the same statistic.
 
 For a one-line index of all statistics, use `ltl --help statistics`. For the long-form per-statistic explanation directly from the terminal, use `ltl --explain <topic>`.
 
