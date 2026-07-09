@@ -146,6 +146,8 @@ Because numeric highlighting feeds the same `-HL` tag as regex highlighting, it 
 
 Three pre-existing inconsistencies discovered during planning were filed as separate issues: #320 (ineffective `-HL$` exclusion alternative in the `$total_occurrences` accumulation regex), #321 (numeric filters silently drop records lacking the filtered metric entirely), and #322 (silent empty result from an inverted range, e.g. `-dmin 500 -dmax 100`). #322's scope is extended to cover the six highlight options introduced here, so the inverted-range warning lands once for all twelve range options.
 
+Resolution of #320: investigation confirmed the runtime behavior was already correct — plain and `-HL` keys partition each bucket (the highlight tag point replaces the key), so summing both is the documented "total number of log entries matched" (`docs/usage.md` metric-naming section). The dead `-HL$` alternative was removed and the exclusion anchored to exactly the derived rows (`err-rate`, `msg-rate`, `empty`); the partition invariant is now stated in a comment at the accumulation site. No behavior change; verified empirically (STATS CSV `occurrences` equals the sum of all level columns including `-HL` across 174 buckets with highlights active).
+
 ## Lessons Learned
 
 - The gate sweep was exactly the six render sites the plan predicted (plus the declaration, the matcher resolution, and the regex-only runtime-config line). Grep-counting `highlight_regex` before touching anything made the sweep mechanical and verifiable (`grep` after: three intentional survivors).
