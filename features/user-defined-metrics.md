@@ -277,6 +277,7 @@ When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from t
 - All transforms (`delta`, `idelta`) and aggregations (`min`, `max`, `avg`) work with CSV input
 - CSV lines use fixed category `DATA` (no log levels in CSV)
 - Without `-ucm`, all CSV rows group under a single "CSV data" message
+- Rows whose timestamp column is neither epoch nor ISO (`YYYY-MM-DD HH:MM:SS`) are skipped, never fed to the fixed-offset substr/`timegm()` parse: the first such row in a file warns with file, line, and offending value; a per-file total is reported at end of file (Issue #328 — a quoted-timestamp CSV from a previous `ltl -o` run swept into a multi-file glob previously died fatally with `Month '-1' out of range`). Covered by `tests/validate-csv-input.sh`.
 
 **Limitations:**
 - No support for quoted fields with embedded separators (uses simple `split()`)
