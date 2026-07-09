@@ -125,6 +125,32 @@ A section's name and content are a contract with the harnesses that consume it.
 
 This rule exists because of a specific class of failure observed in this repository: a section header was renamed without updating the harness that asserted on it. The harness's assertions for that header failed loudly, but the failure was not noticed because the harness was not re-run after the rename. The "run each affected harness and confirm it still asserts" step is what catches that.
 
+## Shared specification files
+
+Some harnesses consume a shared machine-readable specification of application output — today, the column-rules TSVs under `tests/csv-output/rules/` consumed by both `validate-csv-output.pl` and `compare-statistics-drift.pl`. Three rules govern these files; all three were derived from one incident (Issue #320 uncovered 14 emitted-but-unspecified `-HL` level columns, and Issue #335 tracks the enforcement asymmetry that let them ship).
+
+**Completeness tracks the application, not the scenarios.** The spec must cover every column (or key) the application *can* emit — including conditional and dynamic variants (`-HL` highlight columns, rate-unit suffixes, UDM families) — not merely the columns current scenarios happen to produce. When ltl gains a new output column or a new dynamic variant of an existing one, its spec rows land **in the same commit**. A spec that only covers exercised output makes every unexercised surface silently un-testable: the first scenario that touches it fails (or worse, passes unasserted) for reasons unrelated to what that scenario tests.
+
+**Every consumer enforces the same strictness.** When two harnesses read one spec, they must agree on what a violation is. If one refuses unknown columns and the other silently accepts them, the weaker consumer defines the effective contract and drift ships through it. When adding a consumer, match the strictest existing consumer's behavior; when that is not possible, document the asymmetry in both consumers and open a ticket to close it.
+
+**Enforcement lives in code, not comments.** A comment asserting that "X is already checked elsewhere" is not a check. Before writing `next unless $rule;  # unknown column already flagged...`, verify the flagging exists — and if the referenced check is in another phase or file, name the function that performs it so the claim is verifiable. This is the spec-file analog of the missing-anchor rule: a claimed-but-absent check produces false confidence, which is worse than no check.
+
+## A gate only guards surfaces a scenario exercises
+
+A strict validation gate (all-or-nothing column coverage, refuse-on-unknown, format checks) asserts nothing about surfaces no scenario traverses. The bin-counter drift engine would always have refused a highlight-bearing STATS CSV — but since no statistics-drift scenario used highlights, the gate's incompatibility with a whole feature surface went unnoticed until #320.
+
+When adding a strict gate, enumerate the application surfaces it constrains and confirm at least one scenario traverses each; where a surface has no scenario, either add one or record the gap explicitly (a `log()`-style note in the harness header or a tracked ticket). "The gate has never fired" must be distinguishable between "the invariant holds" and "nothing ever put the invariant under test."
+
+## Proving a new assertion can fail
+
+Exit code 0 on a healthy input is not evidence that an assertion works — an assertion with a wrong anchor, a wrong file, or an over-permissive pattern also exits 0. Every **new** assertion (and every assertion whose anchor or logic changes) must be demonstrated to fail before it is trusted to pass:
+
+1. Construct a minimal input that violates the invariant (a hand-crafted CSV row with a broken partition, a doctored render, a fixture line with the metric removed).
+2. Run the assertion against it — directly against the checker/engine where possible, not through the full harness — and confirm it fails *with the expected diagnostic* (the asserts/produced_by/contract triple surfaces, the exit code is non-zero).
+3. Then run the healthy path and confirm it passes.
+
+This is the same discipline the stability contract requires after renames ("confirm it still asserts"), applied at authoring time. The sabotage probe for Issue #320's `level_partition` invariant is the reference example: probing with a deliberately broken CSV is what exposed that the rules TSV could not even represent the columns the invariant needed.
+
 ## Harnesses must fail on missing anchors
 
 A harness that greps for a section header, key name, or other anchor and finds zero matches MUST exit non-zero. A grep that matches nothing is not a passing test — it is an unasserted test, which is worse than no test at all because it produces false confidence.
