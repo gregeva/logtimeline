@@ -302,7 +302,7 @@ Heatmap mode replaces the per-bucket latency statistics with a color-intensity v
 
 | Option | Description |
 |--------|-------------|
-| `-hm, --heatmap [metric]` | Replace statistics with a color-intensity histogram showing value distribution per time bucket (`duration`, `bytes`, or `count`) |
+| `-hm, --heatmap [metric]` | Replace statistics with a color-intensity histogram showing value distribution per time bucket (`duration`, `bytes`, `count`, or a `-udm` metric name; UDM names are case-sensitive) |
 | `-hmw, --heatmap-width <N>` | Number of columns for the heatmap display (default: 52) |
 
 ```bash
@@ -320,7 +320,7 @@ Histograms show the overall distribution shape of a metric across the entire tim
 
 | Option | Description |
 |--------|-------------|
-| `-hg, --histogram [metric]` | Show an overall distribution histogram after the bar graph (`duration`, `bytes`, or `count`) |
+| `-hg, --histogram [metric]` | Show an overall distribution histogram after the bar graph (`duration`, `bytes`, `count`, or a `-udm` metric name; UDM names are case-sensitive) |
 | `-hgw, --histogram-width <N>` | Histogram width as percentage of terminal (default: 95) |
 | `-hgh, --histogram-height <N>` | Histogram height in rows (default: 8) |
 | `-hgb, --histogram-buckets <N>` | Override total histogram bucket count (default: 0 = auto-calculate) |

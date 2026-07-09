@@ -4037,12 +4037,12 @@ sub print_help {
 
     # Heatmap
     $out .= help_subheading("Heatmap");
-    $out .= help_opt("-hm,  --heatmap [metric]",      "Replace statistics with a color-intensity histogram showing value distribution per time bucket (duration, bytes, or count)");
+    $out .= help_opt("-hm,  --heatmap [metric]",      "Replace statistics with a color-intensity histogram showing value distribution per time bucket (duration, bytes, count, or a -udm metric name; UDM names are case-sensitive)");
     $out .= help_opt("-hmw, --heatmap-width <N>",     "Number of columns for the heatmap display (default: 52)");
 
     # Histogram
     $out .= help_subheading("Histogram");
-    $out .= help_opt("-hg,  --histogram [metric]",    "Show an overall distribution histogram after the bar graph (duration, bytes, or count)");
+    $out .= help_opt("-hg,  --histogram [metric]",    "Show an overall distribution histogram after the bar graph (duration, bytes, count, or a -udm metric name; UDM names are case-sensitive)");
     $out .= help_opt("-hgw, --histogram-width <N>",   "Histogram width as percentage of terminal (default: 95)");
     $out .= help_opt("-hgh, --histogram-height <N>",  "Histogram height in rows (default: 8)");
     $out .= help_opt("-hgb,  --histogram-buckets <N>",             "Override total histogram bucket count (default: 0 = auto-calculate)");
@@ -6696,12 +6696,15 @@ sub handle_histogram_option {
             return;
         }
 
-        # Parse comma-separated metrics, additive behavior
+        # Parse comma-separated metrics, additive behavior. Built-in metric
+        # names match case-insensitively; UDM names are case-sensitive, so
+        # the original (trimmed) token is preserved for them.
         for my $metric (split /,/, $opt_value) {
-            $metric = lc(trim($metric));
-            if ($metric =~ /^(duration|bytes|count)$/) {
-                $histogram_metrics{$metric} = 1;
-            } elsif ($metric =~ /^time$/) {
+            $metric = trim($metric);
+            my $metric_lc = lc $metric;
+            if ($metric_lc =~ /^(duration|bytes|count)$/) {
+                $histogram_metrics{$metric_lc} = 1;
+            } elsif ($metric_lc eq 'time') {
                 # 'time' is an alias for 'duration' for consistency
                 $histogram_metrics{'duration'} = 1;
             } elsif (@udm_raw_args) {
