@@ -6671,6 +6671,43 @@ sub trim  { my $s = shift; $s =~ s/^\s+|\s+$//g; return $s }
 # Handler for -hg/--histogram option (Issue #25)
 # Supports: -hg (all metrics), -hg duration, -hg bytes, -hg count, -hg duration,bytes
 # Multiple uses are additive
+# Single resolution surface for display-metric operands (-hm, -hg). Both
+# options accept the same vocabulary and MUST resolve it identically:
+# built-in names match case-insensitively ('time' is an alias for
+# 'duration'); user-defined metric names match case-sensitively by name,
+# then by base_name for disambiguated metrics (#104).
+
+# Canonical built-in name for a token, or undef. Safe to call at option
+# parse time, before parse_udm_configs() has run.
+sub builtin_metric_name {
+    my ($token) = @_;
+    return undef unless defined $token;
+    my $lc = lc trim($token);
+    return 'duration' if $lc eq 'duration' || $lc eq 'time';
+    return $lc        if $lc eq 'bytes' || $lc eq 'count';
+    return undef;
+}
+
+# Full resolution including UDM names; must run after parse_udm_configs().
+# Returns { kind => 'builtin', name => canonical } |
+#         { kind => 'udm', config => $cfg } | undef (unknown token).
+sub resolve_metric_operand {
+    my ($token) = @_;
+    return undef unless defined $token;
+    $token = trim($token);
+    my $builtin = builtin_metric_name($token);
+    return { kind => 'builtin', name => $builtin } if defined $builtin;
+    my ($match) = grep { $_->{name} eq $token } @udm_configs;
+    ($match) = grep { $_->{base_name} eq $token } @udm_configs if !$match;
+    return { kind => 'udm', config => $match } if $match;
+    return undef;
+}
+
+# The metric vocabulary named in every unknown-metric diagnostic.
+sub available_metric_names {
+    return (qw(duration bytes count), map { $_->{name} } @udm_configs);
+}
+
 sub handle_histogram_option {
     my ($opt_name, $opt_value) = @_;
     $histogram_enabled = 1;
@@ -6679,15 +6716,7 @@ sub handle_histogram_option {
         # Check if the value looks like a filename (not a valid metric)
         # This handles the case where -hg is followed by a filename
         my @parts = split /,/, $opt_value;
-        my $has_valid_metric = 0;
-
-        for my $part (@parts) {
-            my $metric = lc(trim($part));
-            if ($metric =~ /^(duration|time|bytes|count)$/) {
-                $has_valid_metric = 1;
-                last;
-            }
-        }
+        my $has_valid_metric = grep { defined builtin_metric_name($_) } @parts;
 
         if (!$has_valid_metric && !@udm_raw_args) {
             # Value doesn't contain any valid metrics and no UDM args - it's likely a filename
@@ -6696,19 +6725,16 @@ sub handle_histogram_option {
             return;
         }
 
-        # Parse comma-separated metrics, additive behavior. Built-in metric
-        # names match case-insensitively; UDM names are case-sensitive, so
-        # the original (trimmed) token is preserved for them.
+        # Parse comma-separated metrics, additive behavior. Built-in tokens
+        # canonicalize through builtin_metric_name(); anything else is kept
+        # verbatim as a potential UDM name (case-sensitive) and resolved by
+        # resolve_metric_operand() after parse_udm_configs().
         for my $metric (split /,/, $opt_value) {
             $metric = trim($metric);
-            my $metric_lc = lc $metric;
-            if ($metric_lc =~ /^(duration|bytes|count)$/) {
-                $histogram_metrics{$metric_lc} = 1;
-            } elsif ($metric_lc eq 'time') {
-                # 'time' is an alias for 'duration' for consistency
-                $histogram_metrics{'duration'} = 1;
+            my $builtin = builtin_metric_name($metric);
+            if (defined $builtin) {
+                $histogram_metrics{$builtin} = 1;
             } elsif (@udm_raw_args) {
-                # Could be a UDM metric name — store it, validate after parse_udm_configs()
                 $histogram_metrics{$metric} = 1;
             } else {
                 warn "Unknown histogram metric: $metric (valid: duration, time, bytes, count)\n";
@@ -7110,23 +7136,19 @@ sub adapt_to_command_line_options {
     if (defined $heatmap_metric) {
         $heatmap_enabled = 1;
         # Handle case where -hm is followed by a filename (GetOptions captures it as optional value)
-        if ($heatmap_metric eq '' || !grep { $_ eq $heatmap_metric } qw(duration time bytes count)) {
-            # If the value doesn't match a known built-in metric, it could be a UDM name or a filename
-            if ($heatmap_metric ne '' && $heatmap_metric !~ /^(duration|time|bytes|count)$/) {
-                if (@udm_raw_args) {
-                    # UDM args exist — keep the value, validate after parse_udm_configs()
-                } else {
-                    # No UDM args — it's likely a filename, push it back.
-                    # Issue #231: surface this previously-silent pushback.
-                    warn "-hm value '$heatmap_metric' is not a built-in metric (duration|bytes|count) and no -udm configs are defined; treating as positional argument and using default metric 'duration'.\n";
-                    unshift @ARGV, $heatmap_metric;
-                    $heatmap_metric = 'duration';  # Default metric
-                }
-            } else {
-                $heatmap_metric = 'duration';  # Default metric (empty string case)
-            }
-        } elsif( $heatmap_metric =~ /^time$/i ) {
-            $heatmap_metric = 'duration';  # time is allowed for consistency, but what is really meant is duration
+        my $builtin = builtin_metric_name($heatmap_metric);
+        if ($heatmap_metric eq '') {
+            $heatmap_metric = 'duration';  # Default metric (empty string case)
+        } elsif (defined $builtin) {
+            $heatmap_metric = $builtin;    # canonical form ('time' resolves to 'duration')
+        } elsif (@udm_raw_args) {
+            # Potential UDM name — resolve via resolve_metric_operand() after parse_udm_configs()
+        } else {
+            # No UDM args — it's likely a filename, push it back.
+            # Issue #231: surface this previously-silent pushback.
+            warn "-hm value '$heatmap_metric' is not a built-in metric (duration|bytes|count) and no -udm configs are defined; treating as positional argument and using default metric 'duration'.\n";
+            unshift @ARGV, $heatmap_metric;
+            $heatmap_metric = 'duration';  # Default metric
         }
 
         # -dbg wins over -lbg regardless of CLI order: force dark and skip auto-detect
@@ -7351,31 +7373,28 @@ sub adapt_to_command_line_options {
 
     # Validate UDM heatmap metric name (must run after parse_udm_configs)
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
-        my ($match) = grep { $_->{name} eq $heatmap_metric } @udm_configs;
-        ($match) = grep { $_->{base_name} eq $heatmap_metric } @udm_configs if !$match;
-        if ($match && $match->{agg_kind} eq 'counting') {
+        my $resolved = resolve_metric_operand($heatmap_metric);
+        if ($resolved && $resolved->{kind} eq 'udm' && $resolved->{config}{agg_kind} eq 'counting') {
             # A per-line distribution over counting (string) values is meaningless
-            print STDERR "Warning: Heatmap metric '$heatmap_metric' uses counting aggregation '$match->{aggregation}' - heatmap disabled\n";
+            print STDERR "Warning: Heatmap metric '$heatmap_metric' uses counting aggregation '$resolved->{config}{aggregation}' - heatmap disabled\n";
             $heatmap_enabled = 0;
-        } elsif ($match) {
-            $heatmap_udm_config = $match;
+        } elsif ($resolved && $resolved->{kind} eq 'udm') {
+            $heatmap_udm_config = $resolved->{config};
             $heatmap_metric_map{$heatmap_metric} = { column => undef };
         } else {
-            my @available = (qw(duration bytes count), map { $_->{name} } @udm_configs);
-            die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', @available) . "\n";
+            die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', available_metric_names()) . "\n";
         }
     }
 
     # Validate UDM histogram metric names (must run after parse_udm_configs)
     if ($histogram_enabled && %histogram_metrics) {
         for my $metric (keys %histogram_metrics) {
-            next if $metric =~ /^(duration|bytes|count)$/;
-            my ($match) = grep { $_->{name} eq $metric } @udm_configs;
-            # Fallback: match against base_name for disambiguated metrics (#104)
-            if (!$match) {
-                ($match) = grep { $_->{base_name} eq $metric } @udm_configs;
-                $histogram_metrics{$match->{name}} = 1 if $match;
-            }
+            my $resolved = resolve_metric_operand($metric);
+            next if $resolved && $resolved->{kind} eq 'builtin';
+            my $match = $resolved ? $resolved->{config} : undef;
+            # base_name resolution for disambiguated metrics (#104): register
+            # the canonical name alongside the token the user supplied.
+            $histogram_metrics{$match->{name}} = 1 if $match && $match->{name} ne $metric;
             if ($match && $match->{agg_kind} eq 'counting') {
                 # A per-line distribution over counting (string) values is meaningless
                 print STDERR "Warning: Histogram metric '$metric' uses counting aggregation '$match->{aggregation}' - skipping\n";
@@ -7385,8 +7404,7 @@ sub adapt_to_command_line_options {
                 push @histogram_udm_configs, $match;
                 # Colors resolved from @column_layout in normalize_data_for_output()
             } else {
-                my @available = (qw(duration bytes count), map { $_->{name} } @udm_configs);
-                die "Error: Unknown histogram metric '$metric'. Available: " . join(', ', @available) . "\n";
+                die "Error: Unknown histogram metric '$metric'. Available: " . join(', ', available_metric_names()) . "\n";
             }
         }
     }
