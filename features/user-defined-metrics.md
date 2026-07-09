@@ -188,7 +188,10 @@ $log_messages{$cat}{$key}{"udm_${name}_sum"}
 $log_messages{$cat}{$key}{"udm_${name}_occurrences"}
 $log_messages{$cat}{$key}{"udm_${name}_min"}
 $log_messages{$cat}{$key}{"udm_${name}_max"}
+$log_messages{$cat}{$key}{"udm_${name}_mean"}   # numeric aggregations only
 ```
+
+The per-message mean is derived in `calculate_all_statistics()` as `sum / occurrences` and exists only for numeric aggregations. Counting aggregations (`count`, `distinct`, `ratio`, `rate`, `drate`) track `udm_${name}_occurrences` without ever writing `udm_${name}_sum`, so the mean derivation skips `agg_kind eq 'counting'` configs entirely and guards against an undefined sum (Issue #326).
 
 ### Statistics (`%log_stats`)
 ```
@@ -232,6 +235,7 @@ This implementation serves as a proving ground for Issue #23's derived metrics a
 
 ### Resolved
 
+- **Counting aggregations triggered uninitialized-value warnings in the per-message mean loop (Issue #326)**: the per-message mean derivation divided `udm_${name}_sum` by occurrences for every UDM config, but counting aggregations never populate `_sum`, producing one `Use of uninitialized value in division` warning per message key. Fixed by skipping counting configs in the mean loop and guarding on a defined sum. The csv-output harness now fails any scenario whose stderr carries Perl runtime warnings, so this class of unguarded data path can no longer pass silently.
 - **Non-access-log formats silently discarded UDM values**: The UDM storage blocks were inside `if ($is_access_log)` gates. Log formats that don't set `$is_access_log` (e.g., match_type 11 — ThingWorx Edge C SDK trace logs) would capture UDM values but never store them. Fixed by setting `$is_access_log = 1` when `%udm_values` is populated, and making `$print_durations` conditional on actual duration/bytes/count data to avoid empty latency columns.
 
 ## Next Steps
