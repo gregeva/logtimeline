@@ -9845,9 +9845,11 @@ sub calculate_all_statistics {
 
                 # Calculate UDM per-message mean (Issue #22)
                 foreach my $config (@udm_configs) {
+                    next if $config->{agg_kind} eq 'counting';    # counting aggregations track occurrences without a numeric sum
                     my $name = $config->{name};
                     my $occ = $log_messages{$category}{$log_key}{"udm_${name}_occurrences"};
-                    $log_messages{$category}{$log_key}{"udm_${name}_mean"} = (defined $occ && $occ > 0) ? $log_messages{$category}{$log_key}{"udm_${name}_sum"} / $occ : undef;
+                    my $sum = $log_messages{$category}{$log_key}{"udm_${name}_sum"};
+                    $log_messages{$category}{$log_key}{"udm_${name}_mean"} = (defined $sum && defined $occ && $occ > 0) ? $sum / $occ : undef;
                 }
 
                 # 2026-01-04 TO DO: free up the memory from the data structure as it is no longer needed (don't think that below logic was actually working as intended)
