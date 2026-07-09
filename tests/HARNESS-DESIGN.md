@@ -392,6 +392,29 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 Add the trap on the *same logical line* as the `mktemp` so it can't be forgotten between declaration and use. If the harness uses multiple temp dirs, set the trap to clean all of them: `trap 'rm -rf "$DIR1" "$DIR2"' EXIT`.
 
+## Runtime-warning cleanliness
+
+Every harness that invokes `ltl` MUST capture the invocation's stderr and fail the run if it contains a Perl runtime warning. A runtime warning (uninitialized value, substr outside of string, non-numeric argument, out-of-range date field, ...) is an unguarded data path — a bug that has not yet found the input that makes it fatal or wrong — and a harness that discards stderr certifies code it never looked at.
+
+**The discriminator:** interpreter-emitted warnings always carry the suffix ` at <file> line <N>`; intentional `ltl` diagnostics printed to stderr never do. The check is:
+
+```bash
+if grep -qE ' at .+ line [0-9]+' "$stderr_capture"; then
+    # hard failure — surface the deduplicated warnings plus the
+    # asserts/produced_by/contract triple
+fi
+```
+
+`produced_by` for this assertion is "whichever ltl code path the warning text names" — the warning itself carries the emitting line, so the failure output should include the (deduplicated, counted) warning lines.
+
+**Obligations:**
+
+- New harnesses include this check from the first commit; it is part of the capture step, not an optional extra assertion.
+- Shared capture helpers (e.g. `tests/lib/csv-cache.sh`) perform the check once at the point of capture so individual harnesses don't re-implement it.
+- Discarding stderr (`2>/dev/null`) in a harness is prohibited for the same reason as Trap 1 above — and this section extends that rule: even *captured-but-uninspected* stderr is a gap.
+
+The reference implementation is the `perl-runtime-warnings-on-stderr` check in `tests/validate-csv-output.sh`. The rule exists because the `udm-counting` csv-output scenario exercised the exact code path of a per-message uninitialized-division bug and emitted 125 warnings on every run — invisibly, because no harness read stderr. Retrofitting the remaining harnesses is tracked by Issue #341.
+
 ## Self-documenting assertions
 
 **Every assertion must answer three questions at the moment of failure, without the reader leaving the harness output:**
