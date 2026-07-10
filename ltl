@@ -1264,7 +1264,13 @@ sub read_index_file {
         1;
     };
     unless ($parse_ok) {
-        warn "ltl-index.csv malformed; skipping read-back ($@)";
+        # Intentional diagnostic: chomp the captured error and terminate with
+        # "\n" so Perl does not append an " at <file> line <N>" suffix — that
+        # suffix is reserved for genuine runtime warnings (the discriminator
+        # tests/HARNESS-DESIGN.md section Runtime-warning cleanliness relies on).
+        my $err = $@ // '';
+        chomp $err;
+        warn "ltl-index.csv malformed; skipping read-back ($err)\n";
         # Discard any partial parse — spec §"Edge cases" requires no pre-seed.
         %file_entries = ();
         %selection_entries = ();
@@ -1458,6 +1464,11 @@ sub detect_index_drift {
             my ($metric, $live_key, $direction) = @$m;
             my $preseed_v = $pre->{$metric};
             next unless defined $preseed_v && $preseed_v ne '' && $preseed_v ne '-';
+            # The index file is an external input: a numeric metric column may
+            # carry a non-numeric token (e.g. from a corrupt log line). Such a
+            # value cannot be compared; skip it — the end-of-run write
+            # refreshes the row with clean values.
+            next if $metric !~ /timestamp/ && $preseed_v !~ /^-?[0-9]+(?:\.[0-9]+)?$/;
 
             my $live_v = $live->{$live_key};
             next unless defined $live_v;
@@ -7969,6 +7980,12 @@ sub read_and_process_logs {
                 $fdd->{is_access_log} = 1 if $is_access_log;
 
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
+
+                # A duration capture that is not a plain decimal number (e.g. an
+                # IP-like multi-dot token matched off a corrupt/concatenated line)
+                # is not a duration; treat it as unobserved rather than letting it
+                # reach arithmetic or unit conversion.
+                $duration = undef if defined $duration && $duration !~ /^[0-9]+(?:\.[0-9]+)?$/;
 
                 # Duration unit conversion (Issue #17) - convert to milliseconds if user specified a unit
                 if (defined $duration && defined $duration_unit_override) {

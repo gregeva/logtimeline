@@ -23,6 +23,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
+
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 TEST_LOG="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
 
 TMP_DIR=$(mktemp -d)
@@ -150,6 +153,21 @@ run_ltl() {
     "$LTL" --disable-progress "$@" > "$RUN_STDOUT" 2> "$RUN_STDERR"
     RUN_EXIT=$?
     set -e
+    check_stderr_warnings "$RUN_STDERR"
+}
+
+# Runtime-warning cleanliness at the point of capture (HARNESS-DESIGN.md
+# section Runtime-warning cleanliness). The intentional diagnostics this
+# harness asserts (print_usage error blocks, silent-override warnings)
+# never carry the ` at <file> line <N>` suffix, so the check and the
+# stderr assertions coexist on the same capture. Runs in the main shell
+# so the fail counters persist.
+check_stderr_warnings() {
+    local stderr_file="$1"
+    if ! assert_no_runtime_warnings "$stderr_file" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
 }
 
 # ---------- Scenarios -----------------------------------------------------
@@ -196,6 +214,7 @@ scenario_runtime_config_env_only() {
     echo "[$current_scenario]"
 
     LTL_CONFIG='-bs 30' "$LTL" --disable-progress -V runtime-config "$TEST_LOG" > "$TMP_DIR/rc-env.stdout" 2> "$TMP_DIR/rc-env.stderr" || true
+    check_stderr_warnings "$TMP_DIR/rc-env.stderr"
 
     assert_line "$TMP_DIR/rc-env.stdout" \
         pattern     '^=== runtime-config / environment-variable ===$' \
@@ -215,6 +234,7 @@ scenario_runtime_config_env_overridden() {
     echo "[$current_scenario]"
 
     LTL_CONFIG='-bs 30' "$LTL" --disable-progress -V runtime-config -bs 60 "$TEST_LOG" > "$TMP_DIR/rc-over.stdout" 2> "$TMP_DIR/rc-over.stderr" || true
+    check_stderr_warnings "$TMP_DIR/rc-over.stderr"
 
     assert_line "$TMP_DIR/rc-over.stdout" \
         pattern     '^bucket-size: 60$' \

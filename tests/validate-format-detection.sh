@@ -25,6 +25,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 # Temp dir for captured outputs; cleaned up on EXIT per HARNESS-DESIGN.md Trap 10.
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -74,6 +77,18 @@ assert_line() {
     fi
 }
 
+# Runtime-warning cleanliness for a run_format_detection capture (its stderr
+# lives beside the captured stdout as <capture>.stderr). Runs in the main
+# shell so the fail counters persist - a command-substitution subshell could
+# not update them. HARNESS-DESIGN.md section Runtime-warning cleanliness.
+check_capture_warnings() {
+    local capture="$1"
+    if ! assert_no_runtime_warnings "$capture.stderr" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
+}
+
 # Helper: run ltl -V format-detection against $1 (log path), forward
 # any extra args ($2..) before the log. Output captured to a temp file
 # whose path is echoed for the caller.
@@ -117,6 +132,7 @@ scenario_tomcat9_ms() {
     local log="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
     local out
     out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: tomcat_access_with_duration$' \
@@ -146,6 +162,7 @@ scenario_apache_httpd_us() {
     # Run with -du us per the documented workaround. Apache HTTP %D is
     # microseconds; without -du us, durations are 1000x off.
     out=$(run_format_detection "$log" -du us)
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: tomcat_access_with_duration$' \
@@ -167,6 +184,7 @@ scenario_codebeamer() {
     local log="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
     local out
     out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: tomcat_codebeamer$' \
@@ -194,6 +212,7 @@ scenario_thingworx_standard() {
     local log="$REPO_DIR/logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log"
     local out
     out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: thingworx_standard$' \
@@ -215,6 +234,7 @@ scenario_thingworx_with_metrics() {
     local log="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
     local out
     out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: thingworx_standard$' \
@@ -236,6 +256,7 @@ scenario_tw_edge_c_sdk() {
     local log="$REPO_DIR/logs/UDM/rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log"
     local out
     out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: tw_edge_c_sdk$' \
@@ -259,6 +280,7 @@ scenario_csv_with_udm() {
     # CSV detection requires at least one -udm flag for the CSV path to
     # be reached; otherwise ltl treats every CSV line as unmatched log content.
     out=$(run_format_detection "$log" -udm latency_ms)
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: csv$' \

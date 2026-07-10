@@ -23,6 +23,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
+
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log.2025-03-21.txt"
 
 if [[ ! -x "$LTL" ]]; then
@@ -199,7 +202,10 @@ test_single_width() {
 
     local out
     out=$(mktemp)
-    "$LTL" --disable-progress --terminal-width 200 -hg duration -hgw "$hgw" "$ACCESS_LOG" > "$out" 2>&1 || true
+    "$LTL" --disable-progress --terminal-width 200 -hg duration -hgw "$hgw" "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
+    if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
+        fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
+    fi
 
     local report
     report=$(inspect_output "$out")
@@ -266,7 +272,10 @@ test_multi_histogram() {
 
     local out
     out=$(mktemp)
-    "$LTL" --disable-progress --terminal-width 200 -hg duration,bytes -hgw 95 "$ACCESS_LOG" > "$out" 2>&1 || true
+    "$LTL" --disable-progress --terminal-width 200 -hg duration,bytes -hgw 95 "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
+    if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
+        fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
+    fi
 
     local report
     report=$(inspect_output "$out")

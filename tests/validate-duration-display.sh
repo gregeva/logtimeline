@@ -32,6 +32,9 @@ APACHE_LOG="$REPO_DIR/logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Nav
 PERL="${PERL:-/opt/homebrew/bin/perl}"
 command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
 fi
@@ -76,6 +79,12 @@ capture_render() {
         echo "  FAIL  $current_scenario :: rendered output is empty" >&2
         fail=$((fail + 1)); failures+=("$current_scenario :: empty render"); return 1
     fi
+    # Runtime-warning cleanliness (HARNESS-DESIGN.md section Runtime-warning
+    # cleanliness). capture_render runs in the main shell, so the counters
+    # persist. Silent when clean.
+    if ! assert_no_runtime_warnings "$stderrfile" "$current_scenario"; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); return 1
+    fi
 }
 
 # Read the resolved duration unit from the csv-output -V section. -o is
@@ -86,7 +95,7 @@ capture_render() {
 read_resolved_unit() {
     local fixture="$1"; shift
     local vfile="$TMP_DIR/csv-output.v"
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress -V csv-output "$@" -o "$fixture" ) > "$vfile" 2>&1 || true
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -V csv-output "$@" -o "$fixture" ) > "$vfile" 2>"$vfile.stderr" || true
 
     local unit
     unit=$(grep -aE '^duration_unit_resolved:' "$vfile" | awk '{print $2}')
@@ -151,6 +160,14 @@ run_scenario() {
 
     local unit
     unit=$(read_resolved_unit "$fixture" "${model_args[@]}") || return 0
+    # Runtime-warning cleanliness for the resolved-unit probe. The check runs
+    # here in the main shell because read_resolved_unit executes in a
+    # command-substitution subshell where counter updates would be lost; it
+    # writes its stderr capture to the deterministic path checked below
+    # (HARNESS-DESIGN.md section Runtime-warning cleanliness).
+    if ! assert_no_runtime_warnings "$TMP_DIR/csv-output.v.stderr" "$current_scenario :: resolved-unit probe"; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr (resolved-unit probe)")
+    fi
 
     local render="$TMP_DIR/render-$tag.txt"
     capture_render "$render" "$fixture" "${model_args[@]}" --terminal-width "$width" || return 0

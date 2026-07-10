@@ -11,6 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 REF_DIR="${1:-$SCRIPT_DIR/reference-output}"
+
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 TMP_DIR=$(mktemp -d)
 # Cleanup is unconditional — if the script aborts mid-run (under set -e),
 # the explicit `rm -rf` at the end never runs. Per tests/HARNESS-DESIGN.md,
@@ -109,6 +112,14 @@ run_test() {
 
     if [[ "${pipe_status[0]}" -ne 0 ]]; then
         emit_regression_fail "$name" "ltl exited ${pipe_status[0]} (stderr below)" "$stderrfile"
+        return
+    fi
+    # Runtime-warning cleanliness (HARNESS-DESIGN.md section Runtime-warning
+    # cleanliness): a byte-stable render can still be produced by a warning-
+    # emitting data path; the stderr capture is inspected, not just kept.
+    if ! assert_no_runtime_warnings "$stderrfile" "$name"; then
+        fail=$((fail + 1))
+        failures+=("$name :: perl-runtime-warnings-on-stderr")
         return
     fi
     if [[ ! -s "$tmpfile" ]]; then

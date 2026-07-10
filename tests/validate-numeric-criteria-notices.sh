@@ -22,6 +22,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
+
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # Boundary fixture: exactly one line lacks a duration value (BD-dur-missing),
 # one lacks bytes (BD-bytes-missing), one lacks count (BD-count-missing);
 # every other line carries all three metrics.
@@ -66,6 +69,14 @@ capture_stderr() {
     if [[ ! -s "$stdoutfile" ]]; then
         echo "  FAIL  $current_scenario :: ltl produced no output" >&2
         fail=$((fail + 1)); failures+=("$current_scenario :: empty ltl output"); return 1
+    fi
+    # Runtime-warning cleanliness at the point of capture (HARNESS-DESIGN.md
+    # section Runtime-warning cleanliness). The intentional notices this
+    # harness asserts never carry the ` at <file> line <N>` suffix, so the
+    # check and the notice assertions coexist on the same capture. Counted
+    # as a failure but does not block the scenario's notice assertions.
+    if ! assert_no_runtime_warnings "$errfile" "$current_scenario"; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
     fi
 }
 

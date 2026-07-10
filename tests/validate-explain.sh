@@ -24,6 +24,9 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 EXPLAIN_MD="$REPO_DIR/docs/explain/statistics.md"
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 # Temp dir for captured outputs (HARNESS-DESIGN.md Trap 10).
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -48,19 +51,38 @@ strip_decoration() {
     sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g; s/.\x08//g' "$1"
 }
 
-# Run ltl with the given args. Captures stdout+stderr to a temp file,
-# echoes the path. Suppresses pipefail-style aborts so the harness can
-# inspect non-zero exits in scenarios that expect them.
+# Run ltl with the given args. Captures stdout to a temp file (stderr goes
+# to a sibling <label>.stderr capture), echoes the path. Suppresses
+# pipefail-style aborts so the harness can inspect non-zero exits in
+# scenarios that expect them.
 run_ltl() {
     local label="$1"; shift
     local out="$TMP_DIR/$label.raw"
     local stripped="$TMP_DIR/$label.txt"
     set +e
-    "$LTL" "$@" > "$out" 2>&1
+    "$LTL" "$@" > "$out" 2>"$TMP_DIR/$label.stderr"
     local ec=$?
     set -e
     strip_decoration "$out" > "$stripped"
     echo "$ec:$stripped"
+}
+
+# Runtime-warning cleanliness for a captured ltl stderr file
+# (HARNESS-DESIGN.md section Runtime-warning cleanliness, issue #341).
+# Runs in the main shell so the fail counters persist - a
+# command-substitution subshell could not update them. Silent when clean.
+check_stderr_warnings() {
+    local stderr_file="$1"
+    if ! assert_no_runtime_warnings "$stderr_file" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
+}
+
+# Same check for a run_ltl capture, addressed by the stripped-stdout path
+# run_ltl echoes; the stderr capture lives beside it as <label>.stderr.
+check_capture_warnings() {
+    check_stderr_warnings "${1%.txt}.stderr"
 }
 
 # Self-documenting assertion: a line matching `pattern` must be present.
@@ -315,6 +337,7 @@ scenario_all_topics_render() {
         result=$(run_ltl "topic-$topic" --explain "$topic")
         local ec="${result%%:*}"
         local out="${result#*:}"
+        check_capture_warnings "$out"
 
         assert_exit "$ec" 0 \
             asserts     "ltl --explain <known-topic> exits 0 after emitting the topic" \
@@ -359,6 +382,8 @@ scenario_aliases() {
     local r1 r2
     r1=$(run_ltl "alias-mean" --explain mean)
     r2=$(run_ltl "alias-avg"  --explain avg)
+    check_capture_warnings "${r1#*:}"
+    check_capture_warnings "${r2#*:}"
     assert_outputs_equal "${r1#*:}" "${r2#*:}" \
         asserts     "ltl --explain avg produces output identical to ltl --explain mean" \
         produced_by 'resolve_explain_topic() in ltl (consults %explain_aliases hash)' \
@@ -368,6 +393,8 @@ scenario_aliases() {
     echo "[$current_scenario]"
     r1=$(run_ltl "alias-std_dev" --explain std_dev)
     r2=$(run_ltl "alias-stddev"  --explain stddev)
+    check_capture_warnings "${r1#*:}"
+    check_capture_warnings "${r2#*:}"
     assert_outputs_equal "${r1#*:}" "${r2#*:}" \
         asserts     "ltl --explain stddev produces output identical to ltl --explain std_dev" \
         produced_by 'resolve_explain_topic() in ltl (consults %explain_aliases hash)' \
@@ -377,6 +404,8 @@ scenario_aliases() {
     echo "[$current_scenario]"
     r1=$(run_ltl "alias-percentiles" --explain percentiles)
     r2=$(run_ltl "alias-p95"          --explain p95)
+    check_capture_warnings "${r1#*:}"
+    check_capture_warnings "${r2#*:}"
     assert_outputs_equal "${r1#*:}" "${r2#*:}" \
         asserts     "ltl --explain p95 produces output identical to ltl --explain percentiles" \
         produced_by 'resolve_explain_topic() in ltl (every percentile slug routes to the shared topic)' \
@@ -386,6 +415,8 @@ scenario_aliases() {
     echo "[$current_scenario]"
     r1=$(run_ltl "alias-percentiles" --explain percentiles)
     r2=$(run_ltl "alias-p99999"      --explain p99999)
+    check_capture_warnings "${r1#*:}"
+    check_capture_warnings "${r2#*:}"
     assert_outputs_equal "${r1#*:}" "${r2#*:}" \
         asserts     "ltl --explain p99999 produces output identical to ltl --explain percentiles" \
         produced_by 'resolve_explain_topic() in ltl' \
@@ -400,6 +431,7 @@ scenario_registry() {
     result=$(run_ltl "registry" --explain)
     local ec="${result%%:*}"
     local out="${result#*:}"
+    check_capture_warnings "$out"
 
     assert_exit "$ec" 0 \
         asserts     "ltl --explain (no argument) exits 0 after printing the topic registry" \
@@ -459,13 +491,16 @@ scenario_unknown_topic() {
     result=$(run_ltl "unknown-explain" --explain nope)
     local ec="${result%%:*}"
     local out="${result#*:}"
+    check_capture_warnings "$out"
 
     assert_exit "$ec" 1 \
         asserts     "ltl --explain <unknown-topic> exits 1 with an error" \
         produced_by 'adapt_to_command_line_options() in ltl (die print_usage on unknown topic)' \
         contract    'Issue #261: unknown topics are a hard error, not silent fall-through'
 
-    assert_line "$out" \
+    # The usage/error diagnostic is an intentional stderr emission, so the
+    # assertion targets the stderr capture, not the stdout capture.
+    assert_line "${out%.txt}.stderr" \
         pattern     "unknown --explain topic 'nope'" \
         asserts     "Error message identifies the unknown topic name" \
         produced_by 'print_usage("unknown --explain topic ...") in ltl' \
@@ -480,6 +515,7 @@ scenario_help_statistics() {
     result=$(run_ltl "help-stats" --help statistics)
     local ec="${result%%:*}"
     local out="${result#*:}"
+    check_capture_warnings "$out"
 
     assert_exit "$ec" 0 \
         asserts     "ltl --help statistics exits 0 after printing the index" \
@@ -547,13 +583,16 @@ scenario_help_unknown() {
     result=$(run_ltl "unknown-help" --help bogus)
     local ec="${result%%:*}"
     local out="${result#*:}"
+    check_capture_warnings "$out"
 
     assert_exit "$ec" 1 \
         asserts     "ltl --help <unknown-topic> exits 1 with an error" \
         produced_by 'adapt_to_command_line_options() in ltl (die print_usage on unknown --help topic)' \
         contract    'Issue #261: unknown --help topics are a hard error'
 
-    assert_line "$out" \
+    # The usage/error diagnostic is an intentional stderr emission, so the
+    # assertion targets the stderr capture, not the stdout capture.
+    assert_line "${out%.txt}.stderr" \
         pattern     "unknown --help topic 'bogus'" \
         asserts     "Error message identifies the unknown --help topic name" \
         produced_by 'print_usage("unknown --help topic ...") in ltl' \
@@ -568,6 +607,7 @@ scenario_help_bare() {
     result=$(run_ltl "help-bare" --help)
     local ec="${result%%:*}"
     local out="${result#*:}"
+    check_capture_warnings "$out"
 
     assert_exit "$ec" 0 \
         asserts     "Bare ltl --help still exits 0 and prints full help (backward-compatibility)" \
@@ -596,6 +636,7 @@ scenario_reflow() {
         result=$(run_ltl "reflow-$w" --tw "$w" --explain kurtosis)
         local ec="${result%%:*}"
         local out="${result#*:}"
+        check_capture_warnings "$out"
 
         assert_exit "$ec" 0 \
             asserts     "ltl --tw $w --explain kurtosis exits 0" \
@@ -617,6 +658,7 @@ scenario_box_drawing() {
         local result
         result=$(run_ltl "box-$topic" --explain "$topic")
         local out="${result#*:}"
+        check_capture_warnings "$out"
 
         assert_line "$out" \
             pattern     '┌' \
@@ -656,8 +698,9 @@ scenario_table_border_alignment() {
         # apples-to-apples.
         local raw="$TMP_DIR/border-align-$topic.raw"
         set +e
-        FORCE_COLOR=1 "$LTL" --explain "$topic" > "$raw" 2>&1
+        FORCE_COLOR=1 "$LTL" --explain "$topic" > "$raw" 2>"$raw.stderr"
         set -e
+        check_stderr_warnings "$raw.stderr"
 
         # Run a Perl probe that finds each top-border line and verifies
         # the column positions of ┌ ┬ ┐ align with the verticals on the
@@ -780,6 +823,8 @@ scenario_short_alias() {
     local r1 r2
     r1=$(run_ltl "short-explain" --explain mean)
     r2=$(run_ltl "short-ex"      -ex mean)
+    check_capture_warnings "${r1#*:}"
+    check_capture_warnings "${r2#*:}"
     assert_outputs_equal "${r1#*:}" "${r2#*:}" \
         asserts     "ltl -ex mean produces output identical to ltl --explain mean" \
         produced_by 'GetOptions wiring in ltl (--explain|ex:s)' \
@@ -800,8 +845,9 @@ scenario_ascii_and_ansi_modes() {
     echo "[$current_scenario]"
     local out_ascii="$TMP_DIR/mode-ascii.raw"
     set +e
-    NO_COLOR=1 "$LTL" --explain mean > "$out_ascii" 2>&1
+    NO_COLOR=1 "$LTL" --explain mean > "$out_ascii" 2>"$out_ascii.stderr"
     set -e
+    check_stderr_warnings "$out_ascii.stderr"
 
     # No ANSI bold/underline SGR codes should appear anywhere.
     # SGR 1 (bold), SGR 22 (no-bold), SGR 4 (underline), SGR 24 (no-underline).
@@ -845,8 +891,9 @@ scenario_ascii_and_ansi_modes() {
     echo "[$current_scenario]"
     local out_ansi="$TMP_DIR/mode-ansi.raw"
     set +e
-    FORCE_COLOR=1 "$LTL" --explain mean > "$out_ansi" 2>&1
+    FORCE_COLOR=1 "$LTL" --explain mean > "$out_ansi" 2>"$out_ansi.stderr"
     set -e
+    check_stderr_warnings "$out_ansi.stderr"
 
     # Bold ANSI escape (SGR 1) must appear -- the MEAN heading is bolded.
     # NOTE: exit(($match) ? 0 : 1) -- the outer parens are required to
@@ -905,8 +952,9 @@ scenario_visualization_charts() {
         local raw_file="$TMP_DIR/viz-$topic.raw"
         # Run ltl WITHOUT decoration stripping so ANSI bytes are visible.
         set +e
-        "$LTL" --explain "$topic" > "$raw_file" 2>&1
+        "$LTL" --explain "$topic" > "$raw_file" 2>"$raw_file.stderr"
         set -e
+        check_stderr_warnings "$raw_file.stderr"
 
         # Use Perl to count ANSI CSI sequences in the captured raw output.
         local ansi_count
@@ -1022,6 +1070,7 @@ scenario_data_model_aware_prose() {
     local out
     out=$(run_ltl "prose-min" --explain min)
     out="${out#*:}"
+    check_capture_warnings "$out"
     assert_line "$out" \
         pattern     'bin counter path maintains a running min sidecar' \
         asserts     "--explain min compute section describes the bin-path sidecar source post-#287; previously said 'first element of the sorted duration array' which is raw-only language" \
@@ -1032,6 +1081,7 @@ scenario_data_model_aware_prose() {
     echo "[$current_scenario]"
     out=$(run_ltl "prose-max" --explain max)
     out="${out#*:}"
+    check_capture_warnings "$out"
     assert_line "$out" \
         pattern     'bin counter path maintains a running max sidecar' \
         asserts     "--explain max compute section describes the bin-path sidecar source post-#287" \
@@ -1043,6 +1093,7 @@ scenario_data_model_aware_prose() {
     echo "[$current_scenario]"
     out=$(run_ltl "prose-iqr" --explain iqr)
     out="${out#*:}"
+    check_capture_warnings "$out"
     assert_line "$out" \
         pattern     'bin-width interpolation' \
         asserts     "--explain iqr describes the data-model dependency of its precision; bin-width interpolation language identifies the bin-counter path" \
@@ -1054,6 +1105,7 @@ scenario_data_model_aware_prose() {
     echo "[$current_scenario]"
     out=$(run_ltl "prose-percentiles" --explain percentiles)
     out="${out#*:}"
+    check_capture_warnings "$out"
     assert_line "$out" \
         pattern     'exponential interpolation within the bucket' \
         asserts     "--explain percentiles names the bin-counter algorithm by its locked term per #272 + #187 Decision 1" \
@@ -1091,6 +1143,7 @@ scenario_data_model_aware_prose() {
     echo "[$current_scenario]"
     out=$(run_ltl "prose-skewness" --explain skewness)
     out="${out#*:}"
+    check_capture_warnings "$out"
     assert_line "$out" \
         pattern     'Welford-Pébay' \
         asserts     "--explain skewness names the online central-moment accumulator family used under the bin path post-#287" \
@@ -1101,6 +1154,7 @@ scenario_data_model_aware_prose() {
     echo "[$current_scenario]"
     out=$(run_ltl "prose-kurtosis" --explain kurtosis)
     out="${out#*:}"
+    check_capture_warnings "$out"
     assert_line "$out" \
         pattern     'Welford-Pébay' \
         asserts     "--explain kurtosis names the online central-moment accumulator family used under the bin path post-#287" \

@@ -25,6 +25,9 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 FIXTURE="$REPO_DIR/tests/fixtures/udm-counting-tokens.txt"
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
@@ -44,12 +47,29 @@ current_scenario=""
 
 CONTRACT='features/user-defined-metrics.md section Counting Aggregations (Issue #313) - decisions locked 2026-07-06/2026-07-08; section content stability-contracted per tests/HARNESS-DESIGN.md'
 
-# Run ltl with the given args against the fixture; capture combined output.
+# Run ltl with the given args against the fixture; capture stdout to the
+# echoed file and stderr beside it as <capture>.stderr.
 run_ltl() {
     local outfile
     outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
-    "$LTL" --disable-progress "$@" "$FIXTURE" > "$outfile" 2>&1 || true
+    "$LTL" --disable-progress "$@" "$FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
+}
+
+# Runtime-warning cleanliness for an ltl stderr capture. Runs in the main
+# shell so the fail counters persist - a command-substitution subshell could
+# not update them. HARNESS-DESIGN.md section Runtime-warning cleanliness.
+check_stderr_warnings() {
+    local stderr_file="$1"
+    if ! assert_no_runtime_warnings "$stderr_file" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
+}
+
+# Convenience for run_ltl captures (stderr lives beside stdout as <capture>.stderr).
+check_capture_warnings() {
+    check_stderr_warnings "$1.stderr"
 }
 
 assert_line() {
@@ -147,6 +167,7 @@ scenario_fixture_values() {
         -udm "urate::rate:userId" \
         -udm "udrate::drate:userId" \
         -udm 'sess::distinct:/ ([0-9A-F]{32})$/')
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
@@ -203,7 +224,7 @@ scenario_fixture_values() {
         produced_by 'read_and_process_logs() (%udm_distinct vs %log_sessions accumulation) + calculate_all_statistics() in ltl' \
         contract    "$CONTRACT"
 
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -217,6 +238,7 @@ scenario_token_key() {
     out=$(run_ltl -bs 1 -V udm-counting -n 5 \
         -udm "who::distinct:userId" \
         -udm "userId::distinct")
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
@@ -227,7 +249,7 @@ scenario_token_key() {
         produced_by 'parse_udm_configs() in ltl (token_key field and default-pattern construction)' \
         contract    "$CONTRACT"
 
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -240,6 +262,7 @@ scenario_rate_unit() {
     out=$(run_ltl -bs 1 -ru h -V udm-counting -n 5 \
         -udm "urate::rate:userId" \
         -udm "udrate::drate:userId")
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
@@ -255,7 +278,7 @@ scenario_rate_unit() {
         produced_by 'calculate_all_statistics() counting branch in ltl (%rate_multiplier lookup)' \
         contract    "$CONTRACT"
 
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -266,53 +289,61 @@ scenario_validation_warnings() {
     echo "[$current_scenario]"
     local out
 
+    # The intentional rejection/guard diagnostics are printed to stderr, so
+    # each assertion reads the stderr capture (runtime-warning split, #341).
     out=$(run_ltl -bs 1 -n 1 -udm "u::distinct(delta)")
-    assert_line "$out" \
+    check_capture_warnings "$out"
+    assert_line "$out.stderr" \
         pattern     "Warning: Counting aggregation 'distinct' cannot be combined with a transform" \
         asserts     'Counting aggregations combined with a transform are rejected at parse with a warning and the config is skipped' \
         produced_by 'parse_udm_configs() in ltl (counting-transform rejection branch)' \
         contract    "$CONTRACT"
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 
     out=$(run_ltl -bs 1 -n 1 -udm "u:ms:distinct:userId")
-    assert_line "$out" \
+    check_capture_warnings "$out"
+    assert_line "$out.stderr" \
         pattern     "Warning: Unit 'ms' ignored for counting aggregation 'distinct'" \
         asserts     'A unit combined with a counting aggregation warns and the unit is ignored (counting operates on raw strings)' \
         produced_by 'parse_udm_configs() in ltl (counting unit guard)' \
         contract    "$CONTRACT"
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 
     out=$(run_ltl -bs 1 -n 1 -udm 'u::count:key:/foo=(\d+)/')
-    assert_line "$out" \
+    check_capture_warnings "$out"
+    assert_line "$out.stderr" \
         pattern     'supplies both a token key and a /pattern/' \
         asserts     'Supplying both a token key and a /pattern/ warns and skips the config' \
         produced_by 'parse_udm_configs() in ltl (token-key/pattern conflict check)' \
         contract    "$CONTRACT"
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 
     out=$(run_ltl -bs 1 -n 1 -udm "u::distinct:userId" -hm u)
-    assert_line "$out" \
+    check_capture_warnings "$out"
+    assert_line "$out.stderr" \
         pattern     "Warning: Heatmap metric 'u' uses counting aggregation 'distinct'" \
         asserts     '-hm naming a counting UDM warns and disables the heatmap (a per-line distribution over string events is meaningless)' \
         produced_by 'adapt_to_command_line_options() in ltl (heatmap UDM metric validation)' \
         contract    "$CONTRACT"
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 
     out=$(run_ltl -bs 1 -n 1 -udm "u::distinct:userId" -hg u)
-    assert_line "$out" \
+    check_capture_warnings "$out"
+    assert_line "$out.stderr" \
         pattern     "Warning: Histogram metric 'u' uses counting aggregation 'distinct'" \
         asserts     '-hg naming a counting UDM warns and skips that metric' \
         produced_by 'adapt_to_command_line_options() in ltl (histogram UDM metric validation)' \
         contract    "$CONTRACT"
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 
     out=$(run_ltl -bs 1 -n 1 -udm "u::median")
-    assert_line "$out" \
+    check_capture_warnings "$out"
+    assert_line "$out.stderr" \
         pattern     'valid: sum, min, max, mean, count, distinct, ratio, rate, drate, delta, idelta' \
         asserts     'An unknown aggregation keyword lists the full valid set, including the counting keywords and canonical mean' \
         produced_by 'parse_udm_configs() in ltl (function parse fallthrough)' \
         contract    "$CONTRACT"
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -328,6 +359,7 @@ scenario_alias_canonical() {
     out=$(run_ltl -bs 1 -V udm-counting -n 5 \
         -udm "a::dcount:userId" \
         -udm "b::unique:userId")
+    check_capture_warnings "$out"
     assert_header_present "$out"
     assert_line "$out" \
         pattern     '^metric: a  aggregation: distinct  base_name: a$' \
@@ -339,7 +371,7 @@ scenario_alias_canonical() {
         asserts     'The unique alias is normalized to the canonical distinct keyword before parsing' \
         produced_by 'parse_udm_configs() in ltl (%udm_agg_aliases normalization)' \
         contract    "$CONTRACT"
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 
     # avg -> mean canonicalization on the #99 collision suffix, observed in the
     # STATS CSV header (input written with the alias, output in canonical form)
@@ -348,7 +380,8 @@ scenario_alias_canonical() {
     ( cd "$csvdir" && "$LTL" --disable-progress -bs 1 -n 5 -o \
         -udm 'x::avg:/ (\d+\.\d+) pool/' \
         -udm 'x::max:/ (\d+\.\d+) pool/' \
-        "$FIXTURE" > run.out 2>&1 || true )
+        "$FIXTURE" > run.out 2>run.stderr || true )
+    check_stderr_warnings "$csvdir/run.stderr"
     assert_command \
         command     "head -1 \"\$(ls $csvdir/*STATS*.csv)\" | grep -q 'x:mean' && head -1 \"\$(ls $csvdir/*STATS*.csv)\" | grep -qv 'x:avg'" \
         label       'duplicate x::avg + x::max produce STATS CSV column x:mean (canonical), never x:avg' \
@@ -370,7 +403,8 @@ scenario_csv_columns() {
         -udm "users::distinct:userId" \
         -udm "actions::count:userId" \
         -udm "urate::rate:userId" \
-        "$FIXTURE" > run.out 2>&1 || true )
+        "$FIXTURE" > run.out 2>run.stderr || true )
+    check_stderr_warnings "$csvdir/run.stderr"
 
     assert_command \
         command     "head -1 \"\$(ls $csvdir/*STATS*.csv)\" | grep -q 'users_distinct' && head -1 \"\$(ls $csvdir/*STATS*.csv)\" | grep -q 'actions_count' && head -1 \"\$(ls $csvdir/*STATS*.csv)\" | grep -q 'urate_rate_min'" \
@@ -407,7 +441,8 @@ scenario_consolidation() {
     mkdir -p "$csvdir"
     ( cd "$csvdir" && "$LTL" --disable-progress -bs 1 -n 100 -o -g 70 \
         -udm "actions::count:userId" \
-        "$FIXTURE" > run.out 2>&1 || true )
+        "$FIXTURE" > run.out 2>run.stderr || true )
+    check_stderr_warnings "$csvdir/run.stderr"
 
     assert_command \
         command     "python3 -c \"
@@ -433,13 +468,14 @@ scenario_mem() {
     echo "[$current_scenario]"
     local out
     out=$(run_ltl -bs 1 -mem -n 1 -udm "users::distinct:userId")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     'udm_distinct' \
         asserts     'The per-bucket distinct value sets are tracked in the -mem structure report' \
         produced_by 'measure_memory_structures() in ltl' \
         contract    "$CONTRACT"
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------

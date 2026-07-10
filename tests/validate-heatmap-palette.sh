@@ -27,6 +27,9 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
@@ -61,12 +64,24 @@ current_scenario=""
 run_section() {
     local outfile
     outfile=$(mktemp)
-    "$LTL" --disable-progress -V heatmap-palette "$@" "$SCRIPT_LOG" > "$outfile" 2>&1 || true
+    "$LTL" --disable-progress -V heatmap-palette "$@" "$SCRIPT_LOG" > "$outfile" 2>"$outfile.stderr" || true
     if [[ ! -s "$outfile" ]]; then
         echo "FAIL: captured output is empty for: $LTL --disable-progress -V heatmap-palette $* $SCRIPT_LOG" >&2
         exit 1
     fi
     echo "$outfile"
+}
+
+# Runtime-warning cleanliness for a run_section capture (its stderr lives
+# beside the captured stdout as <capture>.stderr). Runs in the main shell so
+# the fail counters persist - a command-substitution subshell could not
+# update them. HARNESS-DESIGN.md section Runtime-warning cleanliness.
+check_capture_warnings() {
+    local capture="$1"
+    if ! assert_no_runtime_warnings "$capture.stderr" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
 }
 
 # Self-documenting assertion: a line matching `pattern` must be present.
@@ -127,6 +142,7 @@ scenario_no_heatmap() {
     echo "[$current_scenario]"
     local out
     out=$(run_section)
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
@@ -174,6 +190,7 @@ scenario_palette() {
     local out
     # shellcheck disable=SC2086
     out=$(run_section $ltl_args)
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 

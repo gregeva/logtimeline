@@ -41,6 +41,9 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 GENERATOR="$SCRIPT_DIR/profile/generate-profile-log.py"
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 PRODUCED_BY='emit_profile_verbose() in ltl (sample counts accumulated in read_and_process_logs() via fold_epoch(); included on the all-filters-passed path, dropped on the excluded-weekday path).'
 CONTRACT='Issue #256 + tests/HARNESS-DESIGN.md reserved-names list. The profile section name and field names (profile_active, mode, period_seconds, included_weekdays, samples_included, samples_dropped) are stability-contracted; renames are breaking. Expected values come from the generator manifest, the single source of truth for the fixture.'
 
@@ -85,6 +88,17 @@ current_mode=""
 
 strip_ansi() { sed -E 's/\x1b\[[0-9;]*m//g'; }
 
+# Runtime-warning cleanliness for an ltl stderr capture. Called from functions
+# running in the main shell so the fail counters persist.
+# HARNESS-DESIGN.md section Runtime-warning cleanliness.
+check_stderr_warnings() {
+    local stderr_file="$1"
+    if ! assert_no_runtime_warnings "$stderr_file" "$current_mode"; then
+        fail=$((fail + 1))
+        failures+=("$current_mode :: perl-runtime-warnings-on-stderr")
+    fi
+}
+
 # Generate the fixture log + manifest ONCE (capture-once). Hard-fail on any
 # breakdown so a broken setup can never present as a passing assertion.
 if ! python3 "$GENERATOR" "$LOGFILE" --manifest "$MANIFEST" 2>"$TMP_ROOT/gen.err"; then
@@ -128,6 +142,7 @@ capture_section() {
         sed 's/^/        /' "$TMP_ROOT/$mode.err" >&2
         fail=$((fail + 1)); failures+=("$current_mode :: ltl failed"); return 1
     fi
+    check_stderr_warnings "$TMP_ROOT/$mode.err"
     strip_ansi < "$raw" | sed -n '/^=== profile ===$/,/^=== END profile ===$/p' > "$outfile"
     if [[ ! -s "$outfile" ]]; then
         echo "  FAIL  $current_mode :: '=== profile ===' section not found in -V output" >&2
@@ -259,6 +274,7 @@ run_off_case() {
         sed 's/^/        /' "$TMP_ROOT/off.err" >&2
         fail=$((fail + 1)); failures+=("$current_mode :: ltl failed"); return
     fi
+    check_stderr_warnings "$TMP_ROOT/off.err"
     strip_ansi < "$raw" | sed -n '/^=== profile ===$/,/^=== END profile ===$/p' > "$section"
     if [[ ! -s "$section" ]]; then
         echo "  FAIL  $current_mode :: '=== profile ===' section not found in -V output"
