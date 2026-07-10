@@ -194,6 +194,50 @@ run_scenario() {
         contract    'Issue #292 + tests/HARNESS-DESIGN.md section Render-invariant harnesses. The precision rule is a function of displayed-unit vs resolved-unit (read from -V duration_unit_resolved).'
 }
 
+# No-duration source: when the input carries no duration values at all (a
+# standard/common access log — %h %l %u %t "%r" %s %b), no latency surface may
+# render: no timeline latency column, no latency columns in the messages table.
+# The fixture is derived on the fly from ACCESS_LOG by stripping the trailing
+# %D field, so it always mirrors the corpus the positive scenarios use.
+# Issue #345 (bytes-triggered latency display + fabricated 0ms percentiles).
+run_no_duration_scenario() {
+    current_scenario="no-duration-w200"
+    echo "[$current_scenario]"
+
+    local fixture="$TMP_DIR/access-common-no-duration.txt"
+    awk '{NF=NF-1; print}' "$ACCESS_LOG" > "$fixture"
+    if [[ ! -s "$fixture" ]]; then
+        echo "  FAIL  $current_scenario :: could not derive no-duration fixture from $ACCESS_LOG" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: fixture derivation failed"); return 0
+    fi
+
+    local render="$TMP_DIR/render-no-duration.txt"
+    capture_render "$render" "$fixture" --terminal-width 200 || return 0
+
+    # Guard against a silently empty/underparsed render: the surfaces that must
+    # be present (occurrences graph, messages table) anchor the absence checks.
+    assert_command \
+        command     "grep -q 'TOP OVERALL MESSAGES' '$render' && grep -q 'occurrences' '$render'" \
+        label       "render contains the occurrences surfaces (anchor for the absence assertions)" \
+        asserts     'The no-duration source still renders the timeline occurrences graph and the messages table; the absence assertions below are meaningful only if these anchor surfaces exist.' \
+        produced_by 'print_bar_graph() and print_summary_table() in ltl' \
+        contract    'tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors - a zero-match absence check over an empty render would pass vacuously'
+
+    assert_command \
+        command     "! grep -qE 'latency statistics|P50:' '$render'" \
+        label       "no timeline latency column renders when the source has no duration values" \
+        asserts     'A source with no observed durations must not render the timeline latency statistics column, and no fabricated P50/P95/P99/P999 cells (previously rendered as P50:0ms from zero-defaulted samples) may appear.' \
+        produced_by 'build_column_layout() in ltl (show_latency gate on $durations_observed) and the duration-observation gate in read_and_process_logs()' \
+        contract    'docs/usage.md section Metric extraction - columns appear only for metrics detected in the data; issue #345'
+
+    assert_command \
+        command     "grep 'TOP OVERALL MESSAGES' '$render' | grep -qvE 'P99\\.9|CV %'" \
+        label       "messages table renders the occurrences-only variant (no Min/P50/P99.9/CV/Duration columns)" \
+        asserts     'The messages-table header for a no-duration source is the occurrences-only variant; the latency-column variant (Min/P50/P99.9/CV %/Duration captions) must not be selected.' \
+        produced_by 'print_summary_table() in ltl (messages-table variant gate on $durations_observed)' \
+        contract    'docs/usage.md section Metric extraction - columns appear only for metrics detected in the data; issue #345'
+}
+
 echo "Validating duration-statistic display invariants (Issue #292)"
 echo "Surfaces: timeline rows (P50/P95/P99/P999) + summary table (Min/P50/P99.9)"
 echo ""
@@ -216,6 +260,10 @@ done
 # auto-scale to a coarser display unit (ms) carry no synthesized precision and
 # must NOT be flagged, even though the source unit permits 6 decimals.
 run_scenario "du-us-bin-w200" "$APACHE_LOG" 200 -dm bin -du us
+echo ""
+
+# Absence invariants for a source with no duration values at all (issue #345).
+run_no_duration_scenario
 echo ""
 
 echo "Results: $pass passed, $fail failed"
