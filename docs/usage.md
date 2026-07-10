@@ -93,12 +93,12 @@ ltl -h "/api/v2/orders" -hdmin 5000 access.log
 
 ### Recording & Processing
 
-These options control which metrics logtimeline extracts and computes during processing. By default, it detects and processes everything it finds — durations, byte sizes, and counts. The omit options suppress extraction entirely, so the data is never computed and the corresponding columns do not appear. Use `-ic` to opt in to count tracking, which is off by default.
+These options control which metrics logtimeline extracts and computes during processing. By default, it detects and processes everything it finds — durations, byte sizes, and counts. The omit options suppress extraction entirely, so the data is never computed and the corresponding columns do not appear. The deprecated `-os` is the exception: it only hides the statistics panel (like `-hst, --hide-stats`), and statistics are still computed for any other active consumer — with `-o`, the STATS CSV carries its statistics columns regardless of `-os`/`-hst`. Use `-ic` to opt in to count tracking, which is off by default.
 
 | Option | Description |
 |--------|-------------|
 | `-ov, --omit-values` | Hide the per-bucket numeric values on the bar graph |
-| `-os, --omit-stats` | Hide the statistics columns (min/avg/max/stddev/etc.) |
+| `-os, --omit-stats` | Deprecated: use `-od, --omit-durations` to skip capturing durations, or `-hst, --hide-stats` to hide the statistics panel |
 | `-oe, --omit-empty` | Skip time buckets that contain zero log entries |
 | `-or, --omit-rate` | Hide the error/message rate from the legend |
 | `-od, --omit-durations` | Suppress duration extraction and related columns (significantly reduces memory and processing time on large files) |

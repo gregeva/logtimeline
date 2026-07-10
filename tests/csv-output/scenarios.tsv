@@ -18,3 +18,4 @@ numeric-highlight-regex-and-numeric	tests/fixtures/numeric-highlight-boundary.tx
 numeric-highlight-regex-only	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -h BD-bytes-	duration,percentile,dispersion,shape,bytes,count,level	expected/numeric-highlight-regex-only.tsv
 numeric-filter-boundary-inclusive	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -dmin 100 -dmax 200	duration,percentile,dispersion,shape,bytes,count,level	expected/numeric-filter-boundary-inclusive.tsv
 numeric-highlight-count-absent-format	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-bs 240 -n 25 -ic -hcmin 1	bytes,duration,percentile,dispersion,shape,level	expected/numeric-highlight-count-absent-format.tsv
+omit-stats-csv-decoupling	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -os	bytes,duration,percentile,dispersion,shape,level
