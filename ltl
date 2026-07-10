@@ -25,7 +25,7 @@
 # BUGS
 # - message based sorting and statistics seems to be occurring after the timeline is printed, not during all of the calculation and reading stages
 # - Line printing that heatmap calculation is being processed is not overwritten with a green message stating that it is complete like the other stages (it dissappears)
-# - print_durations=0 initiated by --omit-stats should not impeed statistical calculation of statistics for CSV output file
+# - durations_observed=0 initiated by --omit-stats should not impeed statistical calculation of statistics for CSV output file
 # BUG 2026-01-04 : stats calculations and output need to be decoupled from what is printed to the console.  Here, specifying to not print duration stats will not output them either.
 
 # NOT PRIORITY BACKLOG
@@ -201,7 +201,7 @@ my @column_colors = (
       gradient_light => [189, 183, 177, 171, 135, 134, 93, 55] },
 );
 my %column_color_lookup = map { $_->{name} => $_ } @column_colors;
-my ( $print_durations, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, undef );
+my ( $durations_observed, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, undef );
 my $explain_arg;   # --explain [<topic>]: undef = not given; '' = bare; non-empty = topic name (Issue #261)
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -2310,7 +2310,7 @@ sub emit_bin_counter_mode_verbose {
     my %feature_active = (
         summary_table     => 1,
         csv_output        => $write_messages_to_csv ? 1 : 0,
-        time_bucket_stats => ($print_durations && !$omit_durations && !$omit_stats
+        time_bucket_stats => ($durations_observed && !$omit_durations && !$omit_stats
                               && (!$heatmap_enabled || $write_messages_to_csv)) ? 1 : 0,
         heatmap_markers   => $heatmap_enabled ? 1 : 0,
         heatmap_cells     => $heatmap_enabled ? 1 : 0,
@@ -7729,6 +7729,22 @@ sub read_and_process_logs {
                 $message =~ s/\?.+$// unless $include_query_string;				# chop off the query string from the URI
                 $message = "[$session] $message" if defined $session && $include_session;	# include session if we found it in the logs
 
+            ## Apache Tomcat Standard/Common Access Log Format (no duration field) ##
+            # Anchored to end-of-line after the bytes field so it wins over the broader
+            # with-duration pattern below; a line with anything after bytes (duration,
+            # thread, session) falls through to match_type 3.
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$/ ) {
+                $is_line_match = 1;
+                $match_type = 4;			# this is matching Tomcat/Apache common access log format (no duration) 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626
+                $is_access_log = 1;
+                $status_code = $category_bucket;
+                $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
+                $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
+                undef $bytes if $bytes eq "-";
+
+                $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
+                $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
+
             ## Apache Tomcat Access Log with Service Execution Time (%D), and optionally thread (%I) and session (%S) ##
             } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?/ ) {
                 $is_line_match = 1;
@@ -7742,21 +7758,6 @@ sub read_and_process_logs {
                 $message =~ s/ HTTP\/\d\.\d$//;							# chop off the HTTP protocol and version
                 $message =~ s/\?.+$// unless $include_query_string;				# chop off the query string from the URI
                 $message = "[$session] $message" if defined $session && $include_session;	# include session if we found it in the logs
-
-            ## Apache Tomcat Standard/Common Access Log Format ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$/ ) {    # added $ to end to differentiate from later pattern
-                $is_line_match = 1;
-                $match_type = 4;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626
-                					# this is matching Nginx ingress access log format 3.133.31.181 - - [18/Nov/2024:14:19:55 +0000] "GET / HTTP/1.1" 404 431 "-" "WizDynamicScanner/1.0"
-                $is_access_log = 1;
-                $status_code = $category_bucket;
-                $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
-                $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
-                undef $bytes if $bytes eq "-";
-
-                $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
-                $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
-# TO DO - update RegEx to pull out message, thread name (2025-04-23 not sure what this implies as match type 3 picks up thread name and session if present)
 
             ## ThingWorx Connection Server JSON Formatted Logs ##
             } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^{"\@timestamp":"([^"]*).*"level":"([^"]*)/ ) {
@@ -8466,7 +8467,13 @@ sub read_and_process_logs {
 
                 ## CAPTURE TIME-WINDOWS BASED STATISTICS DATA ##
                 if( $is_access_log  ) {
-                    $print_durations = 1 if $print_durations != 1 && (defined $duration || defined $bytes || defined $count);
+                    # Latency-statistics surfaces (timeline latency column, stats CSV
+                    # columns, messages-table latency variant) activate only when a
+                    # duration value was actually observed in the data. A source that
+                    # carries bytes or counts but no durations (e.g. common access log
+                    # format) must not present duration statistics.
+                    my $duration_observed = defined $duration;
+                    $durations_observed = 1 if $durations_observed != 1 && $duration_observed;
 
                     ## STATISTICAL DATA CAPTURE ##
                     $duration = 0 if !defined( $duration );
@@ -8508,7 +8515,10 @@ sub read_and_process_logs {
 
                     $log_analysis{$bucket}{occurrences}++;
 
-                    if( defined $duration && !$omit_durations && $duration >= 0 ) {
+                    # Gate on the pre-coercion observation, not defined-ness: the
+                    # zero-default above makes `defined $duration` vacuously true, and
+                    # a line with no duration must not contribute a fabricated 0 sample.
+                    if( $duration_observed && !$omit_durations && $duration >= 0 ) {
                         $log_analysis{$bucket}{total_duration} += $duration;
 
                         $log_analysis{$bucket}{'total_duration-HL'} += $duration if $category_bucket =~ /-HL$/;
@@ -9556,7 +9566,7 @@ sub calculate_all_statistics {
         delete $log_analysis{$bucket}{durations};
     
         # The duration based statistics won't catch the counts if there are no durations (see else condition below)
-        if( $print_durations && !$omit_durations ) {
+        if( $durations_observed && !$omit_durations ) {
             # Issue #266/#289: caller-side data-model dispatch. Surface 4
             # (per-time-bucket statistics). Under 'bin' the statistics are
             # derived from the per-bucket bin-counter partition plus the
@@ -9722,7 +9732,7 @@ sub calculate_all_statistics {
     }
 
     ## STATS FOR TOP LOG MESSAGES ##
-    # if( $print_durations ) {
+    # if( $durations_observed ) {
         foreach my $category (sort keys %log_messages) {
             # Collect and sort the log keys based on the count within each log_key
             my (@sorted_log_keys, @top_keys);
@@ -10243,7 +10253,7 @@ sub initialize_empty_time_windows {
 # Returns an ordered array of column definition hashes.
 sub build_column_layout {
     my $show_legend  = !($omit_values && $omit_rate);
-    my $show_latency = $print_durations && !$omit_durations && !$omit_stats && !$heatmap_enabled;
+    my $show_latency = $durations_observed && !$omit_durations && !$omit_stats && !$heatmap_enabled;
     my $show_heatmap = $heatmap_enabled;
     my $timestamp_w  = length(strftime($output_timestamp_format, gmtime(0))) + ($print_milliseconds ? 4 : 0);
     my $latency_w    = $show_heatmap ? $heatmap_width : 52;
@@ -10832,7 +10842,7 @@ sub normalize_data_for_output {
     # STATS CSV is a separate render surface — so when -o is requested the stat
     # columns are still emitted (the data was captured at parse time). @output_columns
     # drives the CSV header/data only here; the terminal render uses @column_layout.
-    if ($print_durations && !$omit_durations && !$omit_stats && (!$heatmap_enabled || $write_messages_to_csv)) {
+    if ($durations_observed && !$omit_durations && !$omit_stats && (!$heatmap_enabled || $write_messages_to_csv)) {
         push @output_columns, qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );
     }
 
@@ -11638,13 +11648,13 @@ sub print_bar_graph {
             }
 
             # Append latency stats to CSV data. The header lists these columns
-            # when $print_durations && !$omit_durations && !$omit_stats &&
+            # when $durations_observed && !$omit_durations && !$omit_stats &&
             # (!$heatmap_enabled || $write_messages_to_csv) (see
             # normalize_data_for_output). The push must use the SAME gate so
             # rows always match the header regardless of whether the latency
             # *display column* was auto-hidden by terminal width (Issue #263)
             # or replaced by the heatmap row on the terminal surface (Issue #289).
-            if( $print_durations && !$omit_durations && !$omit_stats && (!$heatmap_enabled || $write_messages_to_csv) ) {
+            if( $durations_observed && !$omit_durations && !$omit_stats && (!$heatmap_enabled || $write_messages_to_csv) ) {
                 foreach my $stat ( qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef ) ) {
                     push @csv_data, format_csv_value( $log_stats{$bucket}{$stat}, $stat );
                 }
@@ -12518,7 +12528,7 @@ sub print_message_summary {
 
     print "\n";
 
-    if( $print_durations && !$omit_durations ) {
+    if( $durations_observed && !$omit_durations ) {
         %col_relative_size = (
             1 => 65,
             2 => 6,
@@ -12650,7 +12660,7 @@ sub print_message_summary {
             if( $grouping eq "highlight" ) {
                 $header_title = " " x $table_padding_outer . "$colors{'bright-yellow-HL'}" . " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $header_title_text[0] ) . " " x $table_padding_inner;
 
-                if( $print_durations && !$omit_durations ) {
+                if( $durations_observed && !$omit_durations ) {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $col_names{'occurrences'} ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", $col_names{'min'} ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", $col_names{'p50'} ) . " " x $table_padding_inner; 
@@ -12665,7 +12675,7 @@ sub print_message_summary {
             } elsif( $grouping eq "plain" ) {
                 $header_title = " " x $table_padding_outer . "$colors{'bright-cyan-HL'}" . " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $header_title_text[1] ) . " " x $table_padding_inner;
 
-                if( $print_durations && !$omit_durations ) {
+                if( $durations_observed && !$omit_durations ) {
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $col_names{'occurrences'} ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", $col_names{'min'} ) . " " x $table_padding_inner; 
                     $header_title .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", $col_names{'p50'} ) . " " x $table_padding_inner; 
@@ -12726,7 +12736,7 @@ sub print_message_summary {
                     my $total_duration_num = $log_messages{$grouping}{$key}{total_duration_num};
                     my $total_duration = $log_messages{$grouping}{$key}{total_duration};
 
-                    if( $print_durations && !$omit_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
+                    if( $durations_observed && !$omit_durations && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", format_duration( $min, $col_width{3} ) ) . " " x $table_padding_inner;

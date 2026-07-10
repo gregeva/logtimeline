@@ -8,11 +8,13 @@
 # -V format-detection on a specific log, parses the resulting section,
 # and asserts the expected slug, match_type, and matched_lines.
 #
-# Scope: 7 of 14 slugs have committed fixtures. The remaining 7 slugs
-# (thingworx_rac_client, connection_server_json, java_gc_log,
-# tw_analytics_v2, tw_analytics_worker, jboss_access, connection_server_standard,
-# tomcat_access_common) are out of scope until fixtures exist or until
-# the format-registry rewrite (#23) lands.
+# Scope: slugs with fixtures under logs/ are asserted directly;
+# tomcat_access_common is asserted against a fixture derived on the fly
+# from the Tomcat 9 log (duration field stripped, issue #345). The
+# remaining slugs (thingworx_rac_client, connection_server_json,
+# java_gc_log, tw_analytics_v2, tw_analytics_worker, jboss_access,
+# connection_server_standard) are out of scope until fixtures exist or
+# until the format-registry rewrite (#23) lands.
 #
 # Implements the self-documenting-assertion design from
 # tests/HARNESS-DESIGN.md. Reference: tests/validate-histogram-bin-counters.sh.
@@ -135,6 +137,44 @@ scenario_tomcat9_ms() {
         asserts     '5k-line Tomcat 9 fixture parses every line as match_type 3 (no fallthroughs)' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
         contract    'Fixture is hand-truncated to exactly 5000 lines; if the fixture changes, the expected count must change in the same commit'
+}
+
+scenario_tomcat_common() {
+    current_scenario="tomcat-common"
+    echo "[$current_scenario]"
+
+    # Standard/common access log format (%h %l %u %t "%r" %s %b — no duration
+    # field). Derived on the fly from the canonical Tomcat 9 fixture by
+    # stripping the trailing %D field, so the two scenarios cannot drift
+    # apart and no near-duplicate corpus file is needed. Issue #345.
+    local src="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+    local log="$TMP_DIR/tomcat-access-common-5k.txt"
+    awk '{NF=NF-1; print}' "$src" > "$log"
+    if [[ ! -s "$log" ]]; then
+        echo "FAIL: could not derive common-format fixture from $src" >&2
+        exit 1
+    fi
+
+    local out
+    out=$(run_format_detection "$log")
+
+    assert_line "$out" \
+        pattern     '^  format: tomcat_access_common$' \
+        asserts     'A standard/common access log (no duration field) binds to slug `tomcat_access_common`, not to `tomcat_access_with_duration`. The end-anchored match_type 4 regex is ordered before the broader match_type 3 regex so duration-less lines cannot be claimed by the with-duration branch.' \
+        produced_by 'emit_format_detection_verbose() in ltl; detection cascade in read_and_process_logs() (match_type 4 branch, `$`-anchored after the bytes field)' \
+        contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
+
+    assert_line "$out" \
+        pattern     '^  match_type: 4$' \
+        asserts     'Common access log binds to internal match_type 4' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
+        contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type integers are an implementation detail surfaced for diagnostic value; the slug is the user-facing contract'
+
+    assert_line "$out" \
+        pattern     '^  matched_lines: 5000$' \
+        asserts     'Every line of the derived common-format fixture parses as match_type 4 (no fallthroughs to other branches)' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
+        contract    'Derived 1:1 from the hand-truncated 5000-line Tomcat 9 fixture; if that fixture changes, the expected count changes in the same commit'
 }
 
 scenario_apache_httpd_us() {
@@ -280,6 +320,7 @@ echo "  ltl:       $LTL"
 echo ""
 
 scenario_tomcat9_ms;            echo ""
+scenario_tomcat_common;         echo ""
 scenario_apache_httpd_us;       echo ""
 scenario_codebeamer;            echo ""
 scenario_thingworx_standard;    echo ""
