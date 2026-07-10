@@ -6247,6 +6247,7 @@ sub measure_memory_structures {
         log_occurrences        => Devel::Size::total_size(\%log_occurrences),
         log_analysis           => Devel::Size::total_size(\%log_analysis),
         log_messages           => Devel::Size::total_size(\%log_messages),
+        log_messages_counters  => Devel::Size::total_size(\%log_messages_counters),
         log_stats              => Devel::Size::total_size(\%log_stats),
         log_threadpools        => Devel::Size::total_size(\%log_threadpools),
         log_sessions           => Devel::Size::total_size(\%log_sessions),
