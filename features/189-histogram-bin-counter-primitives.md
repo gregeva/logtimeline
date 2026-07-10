@@ -605,3 +605,57 @@ Tests that exercise multiple consumers sharing primitives in the same run (e.g.,
 The primitive contract (R1–R11) tracks the locked #187 unified contract. Changes to the locked contract in #187 cascade to #189's requirements; #189 does not lock decisions independently of #187. If prototype validation surfaces a need to revise a locked #187 decision, the revision is recorded in #187 first, then propagated to #189.
 
 The **Audit findings** section is the technical inventory of ltl call sites at the time of writing. Line numbers may shift with subsequent refactors; subroutine names and global-variable identifiers are the stable anchors. Adding a consumer to R12 (in #187) is not a contract change for #189; the parameterization in R3 already accommodates new keying shapes.
+
+## Investigation — dynamic bins-per-decade by message occurrence count (#323)
+
+**Question investigated**: should the per-message bin-counter partition (`summary_table` consumer, `%log_messages_counters`) use a smaller bins-per-decade (BPD) for messages with few observations and the full BPD only for messages with many, on the premise that sparse messages waste memory on empty bins?
+
+**Recommendation: do not implement.** The skew premise is confirmed and extreme, but the memory motivation does not hold — sparse partitions are already cheap under the shipped sparse-array representation, so dynamic BPD saves little while adding a per-occurrence-count tiering surface and (for post-collection tiering) a rebin pass. The fidelity intuition is correct but yields no observable benefit at sparse N.
+
+### Grounding
+
+All measurements from `-mdm bin -V` (and a BPD tier sweep via `--data-model-precision`) on a 112 MB high-cardinality Tomcat access log with the default (no fuzzy consolidation) grouping. The `summary_table` partition store held 21,103 partitions.
+
+**Occurrence-count distribution (the skew):**
+
+| occurrences | # messages | % of messages | % of all samples |
+|---|---|---|---|
+| 1 | 48,826 | 95.2% | 9.4% |
+| 2–5 | 1,051 | 2.0% | 0.6% |
+| 6–20 | 788 | 1.5% | 1.7% |
+| 21–100 | 381 | 0.7% | 3.4% |
+| 101–1000 | 151 | 0.3% | 6.7% |
+| 1001+ | 102 | 0.2% | 78.3% |
+
+95.2% of messages occur exactly once; 97.2% occur ≤5 times yet carry ~10% of samples; the top 0.2% carry 78.3%. Median occurrence count = 1. The skew is a power law and is stronger than the issue hypothesized.
+
+**Counter-store memory vs. BPD (tier sweep, same 21,103 partitions):**
+
+| precision tier | BPD | `counter_memory_bytes` | total max memory |
+|---|---|---|---|
+| 1 | 4 | 28.4 MB | 142 MB |
+| 5 (default) | 53 | 52.8 MB | 175 MB |
+| 9 | 616 | 324.6 MB | 471 MB |
+
+Least-squares fit over the sweep: `counter_memory ≈ 26.9 MB + 483 KB × bpd`, i.e. a fixed **~1,274 bytes/partition** (BPD-independent) plus ~22.9 bytes/partition per unit BPD.
+
+### Why dynamic BPD does not pay off
+
+The per-partition memory cost is driven by **populated bins, not `bin_count`.** A single-occurrence partition stores exactly one populated bin in a sparse Perl array; its footprint is essentially the same at BPD 4 or BPD 53 (only the `bin_count` scalar differs). The BPD-driven growth in the sweep comes almost entirely from the dense 0.2% of partitions that legitimately populate hundreds of bins — precisely the partitions #323 would *keep* at full BPD.
+
+Consequently, the fixed ~1.3 KB/partition term dominates the sparse tail's cost, and that term is BPD-independent. Lowering the sparse 95% from BPD 53 to BPD 4 removes only their small share of the ~22.9 bytes/partition/BPD marginal term, not the dominant fixed overhead. The achievable saving is far below a naïve "95% × 52.8 MB" estimate.
+
+### Answers to the issue's investigation questions
+
+1. **Thresholds** — moot given the recommendation; the distribution would support tiers (e.g. 1, 2–20, 21+) if pursued, but see the memory finding.
+2. **Timing of the decision** — BPD is baked into the partition at `partition_new` on the **first observation**, before occurrence count is known. Choosing BPD by occurrence count is therefore inherently an end-of-parse decision.
+3. **Rebinning cost** — `partition_rebin` already re-projects a populated partition into a caller-chosen geometry, so a post-collection down-tier is mechanically available. But rebinning a sparse partition *down* saves negligible memory (one populated bin either way) while costing CPU per partition across the 95% tail — net-negative.
+4. **Memory impact** — quantified above: the sparse tail is already cheap; the BPD lever does not target the fixed per-partition overhead that dominates it.
+5. **Output fidelity** — a message with ≤5 samples populates ≤5 bins regardless of BPD; percentiles over so few points have low inherent precision and are unaffected by reduced BPD. Reduced BPD on sparse messages is safe — and, per (4), nearly free of benefit.
+6. **Implementation shape** — would require either per-partition BPD chosen at first observation (impossible: count unknown) or an end-of-parse rebin tier pass over `%log_messages_counters`. The existing structures accommodate the latter, but (3)/(4) make it not worthwhile.
+
+### Surfaced adjacent findings
+
+- **Filed as #346** — `-mem` omits `%log_messages_counters` from its measurement map, undercounting reported memory by the full counter-store size (~53 MB here) under `-mdm bin`. Discovered while grounding this investigation.
+- **The real sparse-tail lever is the fixed ~1.3 KB/partition overhead** (partition hash, metadata, `"\x1f"`-joined string keys × 21,103 partitions ≈ 27 MB), not BPD. A leaner per-partition representation would beat dynamic BPD on the sparse tail. Recorded here as a candidate direction, not a committed one.
+- **`log_messages` raw sidecar (~30 MB) is the larger memory ceiling** and is BPD-independent — separate territory from the bin-counter store.
