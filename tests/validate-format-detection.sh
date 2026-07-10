@@ -173,6 +173,7 @@ scenario_tomcat_common() {
 
     local out
     out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: tomcat_access_common$' \
