@@ -26,16 +26,24 @@ LTL="$REPO_DIR/ltl"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
-ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log.2025-03-21.txt"
+# shellcheck source=lib/fixtures.sh
+source "$SCRIPT_DIR/lib/fixtures.sh"
+
+# Transient files (derived fixture) live in a temp directory cleaned on EXIT
+# per HARNESS-DESIGN.md Trap 10.
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+# ACCESS_LOG is derived deterministically from the clean full-day 2025-05-07
+# corpus (see tests/lib/fixtures.sh): full-range duration/bytes spread for the
+# log-scale tick assertions.
+ACCESS_LOG="$TMP_DIR/access-sampled.txt"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
 fi
-if [[ ! -f "$ACCESS_LOG" ]]; then
-    echo "ERROR: ACCESS_LOG not found: $ACCESS_LOG"
-    exit 1
-fi
+derive_sampled_access_log "$ACCESS_LOG"
 
 pass=0
 fail=0
