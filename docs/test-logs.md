@@ -21,7 +21,7 @@ logs/
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 277MB | Primary Tomcat 9 access log test |
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 220MB | Secondary Tomcat 9 access log test |
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 148MB | Smaller Tomcat 9 access log test |
-| `localhost_access_log.2025-03-21.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 2.6MB | Small access log for quick tests |
+| `localhost_access_log.2025-03-21.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 2.6MB | **CORRUPT — do not use for clean-output testing.** Contains concatenated records (two log lines merged on one line), so field captures pick up fragments of the following record (e.g. an IP fragment where the duration belongs). Useful only as adversarial malformed input; ltl treats such non-numeric duration captures as unobserved (#341, #345). No harness uses this file (the regression/ticks fixture is derived from the 2025-05-07 corpus via `tests/lib/fixtures.sh`) |
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 1.0MB | 5k-line slice from 05-05 log; used by `tests/validate-index-read-back.sh`. Regenerate via `tests/fixtures/regenerate-index-readback-fixtures.sh` |
 | `really-big/*` | Tomcat 10 | milliseconds (%D) | duration, bytes | 8.5GB | Really big access logs from 4 servers over 28 days |
 
@@ -190,7 +190,7 @@ request_timestamp,response_timestamp,latency_ms,request_size,response_size,reque
 ./ltl -n 5 logs/ThingworxLogs/ApplicationLog.2025-12-12.282-Windows.log
 
 # Quick test with small access log
-./ltl -n 10 logs/AccessLogs/localhost_access_log.2025-03-21.txt
+./ltl -n 10 logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt
 
 # Error analysis
 ./ltl -n 20 logs/ThingworxLogs/ErrorLog.2025-05-05.1.log
@@ -213,5 +213,6 @@ request_timestamp,response_timestamp,latency_ms,request_size,response_size,reque
 | **Error analysis** | `ThingworxLogs/ErrorLog.*`, `ThingworxLogs/ScriptErrorLog.*` |
 | **Security events** | `ThingworxLogs/SecurityLog.*`, `ThingworxLogs/AuthLog.*` |
 | **Database issues** | `ThingworxLogs/DatabaseLog.*` |
-| **Quick tests (small files)** | `AccessLogs/localhost_access_log.2025-03-21.txt`, `Codebeamber/*`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log` |
+| **Quick tests (small files)** | `AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt`, `Codebeamber/*`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log` |
+| **Adversarial/malformed input** | `AccessLogs/localhost_access_log.2025-03-21.txt` (corrupt concatenated records — see AccessLogs table note) |
 | **Large file stress tests** | `AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.*.log` |

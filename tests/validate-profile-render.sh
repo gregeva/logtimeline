@@ -42,6 +42,9 @@ CHECKER="$SCRIPT_DIR/profile/check-profile-labels.pl"
 PERL="${PERL:-/opt/homebrew/bin/perl}"
 command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 WIDTH=120
 
 PRODUCED_BY='print_bar_graph() in ltl renders the timestamp column from $output_timestamp_format (set in adapt_to_command_line_options() to %H:%M or %a %H:%M under --profile) and blanks a repeated weekday at the day boundary; the summary heading is built in print_summary_table(). Bucket keys are folded by fold_epoch() in read_and_process_logs().'
@@ -65,6 +68,17 @@ failures=()
 current_scenario=""
 
 strip_ansi() { sed -E 's/\x1b\[[0-9;]*m//g'; }
+
+# Runtime-warning cleanliness for an ltl stderr capture. Called from functions
+# running in the main shell so the fail counters persist.
+# HARNESS-DESIGN.md section Runtime-warning cleanliness.
+check_stderr_warnings() {
+    local stderr_file="$1"
+    if ! assert_no_runtime_warnings "$stderr_file" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
+}
 
 # Generate the fixture ONCE (capture-once). This harness asserts on the render,
 # not the counts, so the manifest is not needed — discard the generator's stdout
@@ -92,6 +106,7 @@ render_mode() {
         sed 's/^/        /' "$stderrfile" >&2
         fail=$((fail + 1)); failures+=("$current_scenario :: ltl render failed"); return 1
     fi
+    check_stderr_warnings "$stderrfile"
     [[ -s "$outfile" ]] || { echo "  FAIL  $current_scenario :: rendered output empty" >&2; fail=$((fail+1)); failures+=("$current_scenario :: empty render"); return 1; }
 }
 

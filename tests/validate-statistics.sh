@@ -236,6 +236,12 @@ pa_capture_for_scenario() {
         rm -f "$tmp" "$tmp.stderr"
         return 1
     fi
+    # Runtime-warning cleanliness (shared check sourced via csv-cache.sh;
+    # HARNESS-DESIGN.md section Runtime-warning cleanliness).
+    if ! assert_no_runtime_warnings "$tmp.stderr" "percentile-algorithm capture scenario=$scenario"; then
+        rm -f "$tmp" "$tmp.stderr"
+        return 1
+    fi
     mv "$tmp" "$cache_path"
     rm -f "$tmp.stderr"
     echo "$cache_path"

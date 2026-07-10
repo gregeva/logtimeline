@@ -11,6 +11,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 REF_DIR="${1:-$SCRIPT_DIR/reference-output}"
+
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+# shellcheck source=lib/fixtures.sh
+source "$SCRIPT_DIR/lib/fixtures.sh"
 TMP_DIR=$(mktemp -d)
 # Cleanup is unconditional — if the script aborts mid-run (under set -e),
 # the explicit `rm -rf` at the end never runs. Per tests/HARNESS-DESIGN.md,
@@ -20,14 +25,16 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 # Common options: suppress progress, summary table, and limit top messages
 COMMON="--disable-progress -osum -n 1"
 
-# Test log files
-ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log.2025-03-21.txt"
+# Test log files. ACCESS_LOG is derived deterministically from the clean
+# full-day 2025-05-07 corpus (see tests/lib/fixtures.sh) so the exact fixture
+# the references were captured against is reproduced on every run.
+ACCESS_LOG="$TMP_DIR/access-sampled.txt"
+derive_sampled_access_log "$ACCESS_LOG"
 SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
 # Issue #235 — additional fixtures for the extended heatmap/histogram tests
 # below. APACHE_LOG is the canonical clean Apache HTTP2 access log; it ships
 # bytes + microsecond-%D durations and is small (~100 KB), keeping capture
-# time tight. Per repo memory (feedback_test_logs.md), new fixtures must NOT
-# use logs/AccessLogs/localhost_access_log.2025-03-21.txt due to corrupt lines.
+# time tight.
 APACHE_LOG="$REPO_DIR/logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
 # Issue #312 — numeric-highlight rendering fixtures. PLOT_LOG has sparse metric
 # presence (durationMS/count on 220 of 2,992 lines); DPM5K_LOG is the
@@ -109,6 +116,14 @@ run_test() {
 
     if [[ "${pipe_status[0]}" -ne 0 ]]; then
         emit_regression_fail "$name" "ltl exited ${pipe_status[0]} (stderr below)" "$stderrfile"
+        return
+    fi
+    # Runtime-warning cleanliness (HARNESS-DESIGN.md section Runtime-warning
+    # cleanliness): a byte-stable render can still be produced by a warning-
+    # emitting data path; the stderr capture is inspected, not just kept.
+    if ! assert_no_runtime_warnings "$stderrfile" "$name"; then
+        fail=$((fail + 1))
+        failures+=("$name :: perl-runtime-warnings-on-stderr")
         return
     fi
     if [[ ! -s "$tmpfile" ]]; then

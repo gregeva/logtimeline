@@ -50,6 +50,9 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 GENERATOR="$SCRIPT_DIR/distribution-shape/generate-anchor.py"
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 ONLY_ANCHOR=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -127,6 +130,19 @@ generate_and_run() {
         exit 1
     fi
     echo "$csv"
+}
+
+# Runtime-warning cleanliness for the ltl run inside generate_and_run (its
+# stderr capture is $TMP_ROOT/<anchor>.ltl.err). generate_and_run executes in
+# a command-substitution subshell where counter updates would be lost, so the
+# check runs here in the main shell right after each call site
+# (HARNESS-DESIGN.md section Runtime-warning cleanliness). Silent when clean.
+check_capture_warnings() {
+    local anchor="$1"
+    if ! assert_no_runtime_warnings "$TMP_ROOT/$anchor.ltl.err" "$anchor"; then
+        fail=$((fail + 1))
+        failures+=("$anchor :: perl-runtime-warnings-on-stderr")
+    fi
 }
 
 # Self-documenting numeric-band assertion. Extracts one column from the
@@ -227,6 +243,7 @@ anchor_normal() {
     current_anchor="normal"
     echo "[$current_anchor]"
     local csv; csv=$(generate_and_run normal)
+    check_capture_warnings normal
 
     assert_in_band csv "$csv" column skewness lo -0.1 hi 0.1 \
         asserts     'A normal (symmetric) distribution has skewness ~0; ltl must report near-zero skewness for N(100,10)' \
@@ -250,6 +267,7 @@ anchor_exponential() {
     current_anchor="exponential"
     echo "[$current_anchor]"
     local csv; csv=$(generate_and_run exponential)
+    check_capture_warnings exponential
 
     assert_in_band csv "$csv" column skewness lo 1.8 hi 2.2 \
         asserts     'An exponential distribution has skewness 2.0 (analytic); ltl must report ~2.0 for Exp(1)' \
@@ -269,6 +287,7 @@ anchor_bimodal() {
     current_anchor="bimodal"
     echo "[$current_anchor]"
     local csv; csv=$(generate_and_run bimodal)
+    check_capture_warnings bimodal
 
     assert_in_band csv "$csv" column bimodality_coef lo 0.5550001 hi 1.0 \
         asserts     'A clearly bimodal distribution (two separated modes) has bimodality_coef above the 0.555 Sarle cutoff; ltl must flag it as suspect multimodal' \

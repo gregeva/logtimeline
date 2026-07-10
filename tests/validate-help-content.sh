@@ -31,6 +31,9 @@ USAGE_MD="$REPO_DIR/docs/usage.md"
 # log is the smallest clean fixture available.
 TEST_LOG="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 # Temp dir for captured outputs; cleaned up on EXIT (HARNESS-DESIGN.md Trap 10).
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -53,6 +56,18 @@ fail=0
 warn=0
 failures=()
 current_scenario=""
+
+# Runtime-warning cleanliness for a captured ltl stderr file
+# (HARNESS-DESIGN.md section Runtime-warning cleanliness, issue #341).
+# Silent when clean; the shared helper prints the failure block.
+check_stderr_warnings() {
+    local stderr_file="$1"
+    local context="$2"
+    if ! assert_no_runtime_warnings "$stderr_file" "$context"; then
+        fail=$((fail + 1))
+        failures+=("$context :: perl-runtime-warnings-on-stderr")
+    fi
+}
 
 # Self-documenting assertion: a line matching `pattern` must be present.
 # Required named fields: pattern, asserts, produced_by, contract.
@@ -273,6 +288,7 @@ if [[ ! -s "$HELP_OUT" ]]; then
     echo "ERROR: ltl --help produced empty output"
     exit 1
 fi
+check_stderr_warnings "$TMP_DIR/help.stderr" "capture:--help"
 
 # Strip ANSI escapes from the help output (print_help colorizes).
 perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$HELP_OUT"
@@ -327,9 +343,10 @@ scenario_D_dash_v_matches_version_number() {
 
     local vout="$TMP_DIR/dash-v.txt"
     set +e
-    "$LTL" --disable-progress -v > "$vout" 2>&1
+    "$LTL" --disable-progress -v > "$vout" 2>"$vout.stderr"
     local ec=$?
     set -e
+    check_stderr_warnings "$vout.stderr" "$current_scenario"
     if [[ "$ec" -ne 0 ]]; then
         echo "  FAIL  $current_scenario"
         echo "        label:       ltl -v exited non-zero ($ec)"
@@ -355,9 +372,10 @@ scenario_E_benchmark_data_section_matches_version_number() {
 
     local bout="$TMP_DIR/benchmark-data.txt"
     set +e
-    "$LTL" --disable-progress -V benchmark-data "$TEST_LOG" > "$bout" 2>&1
+    "$LTL" --disable-progress -V benchmark-data "$TEST_LOG" > "$bout" 2>"$bout.stderr"
     local ec=$?
     set -e
+    check_stderr_warnings "$bout.stderr" "$current_scenario"
     if [[ "$ec" -ne 0 ]]; then
         echo "  FAIL  $current_scenario"
         echo "        label:       ltl -V benchmark-data exited non-zero ($ec)"
@@ -487,7 +505,8 @@ scenario_G_udm_function_list_parity() {
     # Wide fixed width so description text is not wrapped mid-phrase; the
     # assertions below match single unwrapped lines.
     local help_out="$TMP_DIR/help-full.txt"
-    "$LTL" --terminal-width 400 --help > "$help_out" 2>&1 || true
+    "$LTL" --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
 
     assert_line "$help_out" \
         pattern     'Counting: count, distinct \(alias dcount, unique\), ratio, rate, drate' \

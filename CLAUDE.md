@@ -244,12 +244,7 @@ The `patterns/` directory contains filter patterns for `-if`, `-ef`, and `-hf` o
 
 ## Test Log Files
 
-See `docs/test-logs.md` for detailed documentation of available test files.
-
-**Quick reference:**
-- **Quick tests**: `logs/AccessLogs/localhost_access_log.2025-03-21.txt` (2.6MB)
-- **Heatmap tests**: `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log`
-- **Large file tests**: `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` (277MB)
+See `docs/test-logs.md` for the documentation of available test files and which to use per use case. It is the single source of truth — do not cite specific log files here.
 
 ## Heatmap Feature
 

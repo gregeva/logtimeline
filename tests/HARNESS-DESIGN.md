@@ -410,10 +410,12 @@ fi
 **Obligations:**
 
 - New harnesses include this check from the first commit; it is part of the capture step, not an optional extra assertion.
-- Shared capture helpers (e.g. `tests/lib/csv-cache.sh`) perform the check once at the point of capture so individual harnesses don't re-implement it.
+- The check is implemented once in `tests/lib/runtime-warnings.sh` (`assert_no_runtime_warnings <stderr_file> <context>`); harnesses source that library rather than re-implementing the pattern. Shared capture helpers (`tests/lib/csv-cache.sh`) perform the check at the point of capture so their consumers don't repeat it.
 - Discarding stderr (`2>/dev/null`) in a harness is prohibited for the same reason as Trap 1 above — and this section extends that rule: even *captured-but-uninspected* stderr is a gap.
+- When a capture helper is invoked via command substitution (`out=$(run_xxx ...)`), the check must run at the call site in the main shell — counters incremented inside the substituted function are lost with the subshell. The helper writes `<capture>.stderr`; the caller checks it (see `check_capture_warnings()` in `tests/validate-histogram-bin-counters.sh`).
+- Splitting a previously merged (`2>&1`) capture relocates *intentional* ltl diagnostics out of the stdout capture: any assertion that greps for an intentional stderr message must be re-pointed at the stderr capture in the same change.
 
-The reference implementation is the `perl-runtime-warnings-on-stderr` check in `tests/validate-csv-output.sh`. The rule exists because the `udm-counting` csv-output scenario exercised the exact code path of a per-message uninitialized-division bug and emitted 125 warnings on every run — invisibly, because no harness read stderr. Retrofitting the remaining harnesses is tracked by Issue #341.
+The rule exists because the `udm-counting` csv-output scenario exercised the exact code path of a per-message uninitialized-division bug and emitted 125 warnings on every run — invisibly, because no harness read stderr (Issue #326). The sweep that brought every harness under the check was Issue #341.
 
 ## Self-documenting assertions
 

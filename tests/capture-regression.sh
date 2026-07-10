@@ -19,14 +19,25 @@ REF_DIR="${1:-$SCRIPT_DIR/reference-output}"
 # Common options: suppress progress, summary table, and limit top messages
 COMMON="--disable-progress -osum -n 1"
 
-# Test log files
-ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log.2025-03-21.txt"
+# shellcheck source=lib/fixtures.sh
+source "$SCRIPT_DIR/lib/fixtures.sh"
+
+# Transient files (derived fixture, stderr captures) live in a temp directory
+# cleaned up unconditionally on exit. They MUST NOT be written into the
+# deliverable reference-output directory.
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+# Test log files. ACCESS_LOG is derived deterministically from the clean
+# full-day 2025-05-07 corpus (see tests/lib/fixtures.sh); validate-regression.sh
+# derives the identical fixture, so captured references replay byte-for-byte.
+ACCESS_LOG="$TMP_DIR/access-sampled.txt"
+derive_sampled_access_log "$ACCESS_LOG"
 SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
 # Issue #235 — additional fixtures for the extended heatmap/histogram tests
 # below. APACHE_LOG is the canonical clean Apache HTTP2 access log; it ships
 # bytes + microsecond-%D durations and is small (~100 KB), keeping capture
-# time tight. Per repo memory (feedback_test_logs.md), new fixtures must NOT
-# use logs/AccessLogs/localhost_access_log.2025-03-21.txt due to corrupt lines.
+# time tight.
 APACHE_LOG="$REPO_DIR/logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
 # Issue #312 — numeric-highlight rendering fixtures. PLOT_LOG has sparse metric
 # presence (durationMS/count on 220 of 2,992 lines); DPM5K_LOG is the
@@ -52,11 +63,8 @@ strip_nondeterministic() {
 mkdir -p "$REF_DIR"
 
 count=0
-# Transient stderr captures live in a temp directory and are cleaned up
-# unconditionally on exit. They MUST NOT be written into the deliverable
-# reference-output directory.
-STDERR_DIR=$(mktemp -d)
-trap 'rm -rf "$STDERR_DIR"' EXIT
+# Stderr captures share the transient temp directory declared above.
+STDERR_DIR="$TMP_DIR"
 
 run_test() {
     local name="$1"
