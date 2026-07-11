@@ -659,3 +659,62 @@ Consequently, the fixed ~1.3 KB/partition term dominates the sparse tail's cost,
 - **Filed as #346** — `-mem` omits `%log_messages_counters` from its measurement map, undercounting reported memory by the full counter-store size (~53 MB here) under `-mdm bin`. Discovered while grounding this investigation.
 - **The real sparse-tail lever is the fixed ~1.3 KB/partition overhead** (partition hash, metadata, `"\x1f"`-joined string keys × 21,103 partitions ≈ 27 MB), not BPD. A leaner per-partition representation would beat dynamic BPD on the sparse tail. Recorded here as a candidate direction, not a committed one.
 - **`log_messages` raw sidecar (~30 MB) is the larger memory ceiling** and is BPD-independent — separate territory from the bin-counter store.
+
+## Investigation (second direction) — raw-first, promote-to-histogram under memory pressure (#323)
+
+**Status: BLOCKED on #346 — hypotheses formed, not proven.** The analysis below is an unfinished investigation. It develops a coherent design (raw-first representation with budget-driven promotion) and grounds the *per-entry* costs with real `Devel::Size` measurements, but the load-bearing claim — that this yields a worthwhile memory reduction at production scale — has **not** been empirically demonstrated. The one test that would prove or disprove it requires observing the `%log_messages_counters` store's memory during a real large-log run, and that observation is impossible today because **`-mem` does not measure this store (#346)**. This ticket is paused until #346 is fixed and `-mem` becomes an instrument we can point at the store. Do not treat any recommendation here as a decision; treat it as a hypothesis awaiting evidence.
+
+### Question investigated
+
+Instead of allocating a histogram bin-counter partition on a message's *first* observation, start each message as a **raw array of observed values** (exact, lossless) and convert to a partition only under memory pressure. Does this beat the shipped all-partition model on memory, and at what fidelity cost?
+
+### What is established (measured, stands)
+
+Per-representation costs measured with `Devel::Size::total_size` on Homebrew Perl 5.42, entry shapes faithful to `ltl`'s streaming `counter_update` write path (sparse `bins` array extended only to the highest assigned index; `partition_new` seeded 5 decades, BPD 53):
+
+| representation | N=1 | N=20 | N≈88 | marginal / extra value |
+|---|---|---|---|---|
+| partition entry `{partition,bins,overflow,underflow}` | 2,524 B | 3,452 B | ~2,884 B (clustered) | — |
+| raw bare arrayref `[v, …]` | 96 B | 704 B | ~2,624 B | **32 B** |
+
+- **Single-occurrence partition floor ≈ 2,524 B**, of which 1,152 B is a `bins` array pre-extended to ~133 slots (a lone value lands at the geometric centre, bin ~132 of 265). This cross-checks the first direction's anchor three ways (52.8 MB ÷ 21,103 = 2,502 B; measured 2,524 B; LSQ `1,274 + 22.9×53` = 2,488 B). The "~1.3 KB" first-direction headline is the BPD-*independent* intercept; the real floor at BPD 53 is ~2.5 KB.
+- **Memory crossover ≈ N=88** (with realistically clustered per-message latencies): below it a raw array is *both smaller and exact*; above it the partition is the cheaper container.
+- **Fidelity ordering is unconditional**: for every percentile ltl reports, nearest-rank over the raw values is exact and a partition only ever approximates. A histogram is *never* more faithful than the raw data — its only justification is memory. (Separately, ltl's own sample-size rule notes high-nines are statistically meaningless below ~10/(1−q) samples regardless of representation; that is neutral to the raw-vs-partition choice, not an argument for promoting.)
+- **Promotion replay is cheap** (~4–27 µs per promoted message; it *defers* bin-assign work rather than adding it) and a code inventory found **five consumers** that would need entry-kind branching if the store became heterogeneous (percentile path, `-V` telemetry snapshot, three fuzzy-consolidation merge subs), plus two uniform pass-throughs. These are structural facts about the code, independent of the memory question.
+
+### What is hypothesized (NOT proven — needs testing)
+
+1. **That raw-first produces a large net memory saving at production scale.** An analytic model over one occurrence distribution projected a ~90% counter-store reduction, but **that number is a projection, not a measurement**, and it was derived from a single synthetic distribution. It has not been observed on a real run.
+2. **A budget-driven promotion policy** — keep everything raw, sample a memory budget once (candidate `B = 0.25 × available_RAM` for this store specifically), and under pressure promote the largest raw arrays first until back under budget. This is a design sketch, not a validated mechanism.
+
+### The two distinct memory edges — and why the testing so far was insufficient
+
+Late in the investigation it became clear the store has **two independent memory-pressure edges that need histograms for opposite reasons**, and they must be tested separately:
+
+- **Edge A — high cardinality.** Millions of *distinct* messages, each a tiny raw array (often a single value). Here promotion is **structurally powerless**: a 1-sample raw array is already far smaller than any partition, so converting it *increases* memory. The only lever is **cardinality reduction** — coarser fuzzy grouping (auto `-g`), applied to the invisible tail and gated by whatever the user has asked to see (`-dmin`/`-dmax`, occurrence/sort options, include/exclude filters — the exact gating boundary is itself follow-up research). A warning must announce any auto-consolidation.
+- **Edge B — high duration occurrences.** A *few* messages accumulating *enormous* raw arrays (a hot endpoint hit millions of times across a multi-day multi-node log). **This is where histograms win decisively** — a multi-megabyte raw array collapses to a ~3.6 KB partition. This edge is the entire memory case for raw-first-with-promotion, and **it was never validly tested.**
+
+**Why the empirical work to date does not count as proof:**
+- The analytic memory model (the ~90% figure) is a projection over one hand-built distribution, not a measurement of the running tool.
+- A synthetic in-Perl harness was built to simulate the store under a ratcheting-promotion policy. It (a) capped "hot" keys at ~4,000 values over a 200,000-line stream — **orders of magnitude too small to exercise Edge B**, where the payoff lives; and (b) went through two broken iterations (a no-op ratchet that performed zero promotions, then an infinite loop that ran ~4 hours at 100% CPU before being killed). Even once corrected, 200k lines is toy scale; it confirmed only the *qualitative* Edge-A finding (promotion cannot rescue high cardinality; grouping is the lever) and cannot speak to Edge B at all.
+- The real instrument is the tool itself on the real `really-big` access-log set (~7.9 GB, ~40M lines, 5 nodes × ~28 days) — the only data with the volume to build Edge-B-scale arrays. Running it requires `-mem` to report `%log_messages_counters`, which it does not (#346).
+
+### Blocker and go-forward
+
+**Blocked on #346.** `measure_memory_structures()` (`ltl`, the `%current_sizes` map) measures every sibling counter store (`bucket_stats_counters`, `heatmap_counters`, `histogram_counters`, …) **but omits `%log_messages_counters`** — verified in the current tree. Until that store is in the map, `-mem -mdm bin` cannot observe the memory this investigation is about, so no tangible before/after can be produced.
+
+When #346 lands, the go-forward test that would convert these hypotheses into a proven stance:
+1. Run real `ltl -mdm bin -mem` (with `--disable-progress`, wrapped in `caffeinate`, at a scale confirmed with the architect per the benchmarking rules) over the `really-big` set, using ltl's *own* message grouping — not an external proxy — to get the true occurrence distribution and the real `%log_messages_counters` high-water mark.
+2. Measure the actual raw-array footprint of the Edge-B hot keys vs. their partition equivalents at true scale — the missing Edge-B evidence.
+3. Only then decide raw-first's disposition, the promotion policy shape, and its relationship to grouping (#96/`-g`), eviction (#347), the memory ceiling (#2), and the source-file heuristics (#44).
+
+### Dependencies
+
+- **#346 (`-mem` omits `%log_messages_counters`)** — **hard blocker.** No measurement of this investigation's target store is possible until it is fixed. This ticket is paused pending #346.
+- **#2 (memory-ceiling auto-detection)**, **#44 (source-file heuristics / bootloader)** — the natural homes for budget detection and up-front memory estimation *if* the budget-driven hypothesis survives testing. Relationship to be settled after evidence, not before.
+- **#96 / `-g` (fuzzy consolidation)** — the Edge-A lever (coarser grouping); auto-application and intent-gating are follow-up research.
+- **#347 (bin-counter-mode eviction)** — overlaps the memory-pressure territory; whether raw-first complements or replaces it is a post-evidence decision, deliberately not concluded here.
+
+### Other surfaced findings
+
+- The **single-sample inline producer** (`read_and_process_logs`, the `%tmp` `_single` path) is a second place entry-kind would be minted; any raw-first implementation must route it through the same promotion policy as the main write path.
