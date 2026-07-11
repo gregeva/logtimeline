@@ -662,7 +662,7 @@ Consequently, the fixed ~1.3 KB/partition term dominates the sparse tail's cost,
 
 ## Investigation (second direction) — raw-first, promote-to-histogram under memory pressure (#323)
 
-**Status: BLOCKED on #346 — hypotheses formed, not proven.** The analysis below is an unfinished investigation. It develops a coherent design (raw-first representation with budget-driven promotion) and grounds the *per-entry* costs with real `Devel::Size` measurements, but the load-bearing claim — that this yields a worthwhile memory reduction at production scale — has **not** been empirically demonstrated. The one test that would prove or disprove it requires observing the `%log_messages_counters` store's memory during a real large-log run, and that observation is impossible today because **`-mem` does not measure this store (#346)**. This ticket is paused until #346 is fixed and `-mem` becomes an instrument we can point at the store. Do not treat any recommendation here as a decision; treat it as a hypothesis awaiting evidence.
+**Status: IN PROGRESS — hypotheses formed, empirical validation now unblocked (#346 resolved).** The analysis below develops a coherent design (raw-first representation with budget-driven promotion) and grounds the *per-entry* costs with real `Devel::Size` measurements, but the load-bearing claim — that this yields a worthwhile memory reduction at production scale — has **not yet** been empirically demonstrated. Proving or disproving it requires observing the `%log_messages_counters` store's memory during a real large-log run. That instrument now exists: **#346 (`-mem` omits `%log_messages_counters`) is fixed and shipped** (PR #350, commit `33eb132`, on `release/0.16.0`; present on this branch after rebase — `measure_memory_structures()` now measures the store). The go-forward test (below) can now run. Until it does, treat the recommendations here as hypotheses awaiting evidence, not decisions.
 
 ### Question investigated
 
@@ -697,20 +697,20 @@ Late in the investigation it became clear the store has **two independent memory
 **Why the empirical work to date does not count as proof:**
 - The analytic memory model (the ~90% figure) is a projection over one hand-built distribution, not a measurement of the running tool.
 - A synthetic in-Perl harness was built to simulate the store under a ratcheting-promotion policy. It (a) capped "hot" keys at ~4,000 values over a 200,000-line stream — **orders of magnitude too small to exercise Edge B**, where the payoff lives; and (b) went through two broken iterations (a no-op ratchet that performed zero promotions, then an infinite loop that ran ~4 hours at 100% CPU before being killed). Even once corrected, 200k lines is toy scale; it confirmed only the *qualitative* Edge-A finding (promotion cannot rescue high cardinality; grouping is the lever) and cannot speak to Edge B at all.
-- The real instrument is the tool itself on the real `really-big` access-log set (~7.9 GB, ~40M lines, 5 nodes × ~28 days) — the only data with the volume to build Edge-B-scale arrays. Running it requires `-mem` to report `%log_messages_counters`, which it does not (#346).
+- The real instrument is the tool itself on the real `really-big` access-log set (~7.9 GB, ~40M lines, 5 nodes × ~28 days) — the only data with the volume to build Edge-B-scale arrays. Running it requires `-mem` to report `%log_messages_counters`, which — as of #346 — it now does.
 
-### Blocker and go-forward
+### Go-forward (now unblocked)
 
-**Blocked on #346.** `measure_memory_structures()` (`ltl`, the `%current_sizes` map) measures every sibling counter store (`bucket_stats_counters`, `heatmap_counters`, `histogram_counters`, …) **but omits `%log_messages_counters`** — verified in the current tree. Until that store is in the map, `-mem -mdm bin` cannot observe the memory this investigation is about, so no tangible before/after can be produced.
+`measure_memory_structures()` (`ltl`, the `%current_sizes` map) measured every sibling counter store (`bucket_stats_counters`, `heatmap_counters`, `histogram_counters`, …) **but omitted `%log_messages_counters`**. **#346 fixed this** — the store is now in the map (`ltl`, `log_messages_counters => Devel::Size::total_size(\%log_messages_counters)`), so `-mem -mdm bin` can observe the memory this investigation is about and a tangible before/after can be produced.
 
-When #346 lands, the go-forward test that would convert these hypotheses into a proven stance:
+The go-forward test that would convert these hypotheses into a proven stance:
 1. Run real `ltl -mdm bin -mem` (with `--disable-progress`, wrapped in `caffeinate`, at a scale confirmed with the architect per the benchmarking rules) over the `really-big` set, using ltl's *own* message grouping — not an external proxy — to get the true occurrence distribution and the real `%log_messages_counters` high-water mark.
 2. Measure the actual raw-array footprint of the Edge-B hot keys vs. their partition equivalents at true scale — the missing Edge-B evidence.
 3. Only then decide raw-first's disposition, the promotion policy shape, and its relationship to grouping (#96/`-g`), eviction (#347), the memory ceiling (#2), and the source-file heuristics (#44).
 
 ### Dependencies
 
-- **#346 (`-mem` omits `%log_messages_counters`)** — **hard blocker.** No measurement of this investigation's target store is possible until it is fixed. This ticket is paused pending #346.
+- **#346 (`-mem` omits `%log_messages_counters`)** — **resolved** (PR #350, commit `33eb132`). Was the hard blocker on measurement; the store is now in the `-mem` map, unblocking the go-forward test.
 - **#2 (memory-ceiling auto-detection)**, **#44 (source-file heuristics / bootloader)** — the natural homes for budget detection and up-front memory estimation *if* the budget-driven hypothesis survives testing. Relationship to be settled after evidence, not before.
 - **#96 / `-g` (fuzzy consolidation)** — the Edge-A lever (coarser grouping); auto-application and intent-gating are follow-up research.
 - **#347 (bin-counter-mode eviction)** — overlaps the memory-pressure territory; whether raw-first complements or replaces it is a post-evidence decision, deliberately not concluded here.
