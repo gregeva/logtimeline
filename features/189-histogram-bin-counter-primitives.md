@@ -735,7 +735,7 @@ Raw-first's *premise* is validated but its *shape* is corrected. The win is **no
 
 ### Also surfaced — untracked `-mem` memory
 
-Even after #346, summing every `-mem`-reported structure leaves **~0.81 GB (9% of the 8.64 GB peak RSS) untracked** in the bin run (0.19 GB / 4% in the raw run). A `Devel::Size` sweep of the 75 unmapped file-scope structures found **no single large holder** (only `message_key_order` ≈ 4 MB above 100 KB) — so the gap is diffuse/transient allocation (Perl arena fragmentation, the `-n 2000000` per-message percentile scratch), not one missing hash to add to the map. Recorded here; not yet its own ticket.
+Even after #346, summing every `-mem`-reported structure leaves **~0.81 GB (9% of the 8.64 GB peak RSS) untracked** in the bin run (0.19 GB / 4% in the raw run). A `Devel::Size` sweep of the 75 unmapped file-scope structures found **no single large holder** (only `message_key_order` ≈ 4 MB above 100 KB) — so the gap is diffuse/transient allocation (Perl arena fragmentation, the `-n 2000000` per-message percentile scratch), not one missing hash to add to the map. **Filed as #356.**
 
 ### Next steps (to bring this back to a go-forward stance)
 
@@ -752,4 +752,5 @@ Even after #346, summing every `-mem`-reported structure leaves **~0.81 GB (9% o
 - **#96 / `-g`** — the Edge-A cardinality lever (the dominant remaining cost).
 - **#2 / #44** — budget detection / up-front memory estimation, relevant only if a budget-driven promotion policy is pursued; deferred pending the head/body-split design.
 - **#347 (bin-counter eviction)** — adjacent memory lever for the same store; relationship still a post-design decision.
+- **#356 (`-mem` untracked residual)** — the ~9%-of-RSS gap surfaced while reconciling these measurements; `-mem` should attribute or explicitly surface it so the memory account closes.
 - The **single-sample inline producer** (`read_and_process_logs`, `%tmp` `_single` path) is a second place entry-kind is minted; any head/body implementation must route it through the same policy as the main write path.
