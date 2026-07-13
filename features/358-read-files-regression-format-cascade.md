@@ -192,6 +192,30 @@ Accepted residuals (deliberate, documented above):
 - Spaces inside the host/ident/authuser prefix fields are no longer tolerated (see
   § Deterministic-prefix validation behavioral delta).
 
+## Cascade reorder for match_type 9 reachability (#365, 2026-07-13)
+
+Issue #365 resolved finding 3 above: the match_type 9 `elsif` block was moved to sit
+immediately before the match_type 3 block, making the access-log family order
+**12 → 4 → 9 → 3**. match_type 9 is end-anchored and strictly more specific than
+match_type 3 (it requires quoted referrer + quoted user-agent + trailing duration
+after numeric bytes), so it cannot claim genuine match_type 3 lines; enhanced/JBoss
+lines now bind to `jboss_access` with their trailing duration captured instead of
+being claimed by match_type 3 with duration=undef.
+
+Cost, measured on the 57 MB probe (median of 3): read_files 4.005 s → 4.326 s
+(**+0.32 s, ~+1.2 µs/line**) — every ordinary with-duration line now pays a second
+cheap failed anchored attempt (match_type 9, deterministic prefix), the same
+accepted-residual class as match_type 4's. Output remains byte-identical on the 5k
+Tomcat sample and the Apache HTTP2 Windchill log (timing/memory block aside).
+Regression coverage: `scenario_jboss_enhanced` in `validate-format-detection.sh`
+(classification) and `run_jboss_duration_scenario` in `validate-duration-display.sh`
+(latency-surface presence), both proven to fail against the pre-reorder binary.
+
+Known limitation (by format definition, not a defect): an enhanced-format line whose
+bytes field is `-` does not match match_type 9 (its bytes group is `(\d+)`) and falls
+through to match_type 3, losing its duration. No such lines exist in the fixtures;
+revisit under the format-registry rewrite (#23) if real corpora surface them.
+
 ## Measurement hygiene notes
 
 - `tests/baseline/results/305-post.tsv` totals are poisoned by this regression (noted
