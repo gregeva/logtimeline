@@ -8093,6 +8093,23 @@ sub read_and_process_logs {
                 $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
                 $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
 
+            ## JBoss/Jersey Enhanced Access Log Format: quoted referrer, quoted user-agent, then execution time ##
+            # Anchored to end-of-line after the trailing duration so it wins over the
+            # broader with-duration pattern below; that pattern's all-optional tail
+            # would otherwise claim these lines with duration=undef and junk
+            # thread/session captures from the quoted fields.
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, undef, undef, $duration) = $_ =~ /^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$/ ) {
+            # access logs # 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
+                $is_line_match = 1;
+                $match_type = 9;			# this is matching Jboss access log format with service execution time 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
+                $is_access_log = 1;
+                $status_code = $category_bucket;
+                $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
+                $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
+
+                $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
+                $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
+
             ## Apache Tomcat Access Log with Service Execution Time (%D), and optionally thread (%I) and session (%S) ##
             } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?/ ) {
                 $is_line_match = 1;
@@ -8143,19 +8160,7 @@ sub read_and_process_logs {
                 $timestamp_str =~ tr/T/ /;
                 $message =~ s/\s+$//g;
 
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, undef, undef, $duration) = $_ =~ /^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$/ ) {
-            # access logs # 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
-                $is_line_match = 1;
-                $match_type = 9;			# this is matching Jboss access log format with service execution time 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
-                $is_access_log = 1;
-                $status_code = $category_bucket;
-                $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
-                $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
-
-                $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
-                $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
-
-            } elsif ( ( $category_bucket, $timestamp_str, $message ) = $_ =~ /^([^ ]+) (\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}[,.]\d+) (.*)/ ) {  
+            } elsif ( ( $category_bucket, $timestamp_str, $message ) = $_ =~ /^([^ ]+) (\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}[,.]\d+) (.*)/ ) {
                 $is_line_match = 1;
                 $match_type = 11;			# this is matching ThingWorx Edge C SDK format # FORCE 2025-08-09 18:27:18,40 8012 twx_connection.cpp:246 Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed]
                 chop $message;
