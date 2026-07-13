@@ -8058,7 +8058,12 @@ sub read_and_process_logs {
                 $timestamp_str =~ tr/T/ /;
 
             ## Apache Tomcat Access Log with CodeBeamer format for Service Execution Time in ms ([%Dms]) and seconds ([%Ts])  ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, undef) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.]+)ms\] \[(.+)s\]/ ) {
+            # The ([^ ]+ ){3} host/ident/authuser prefix in the access-log family
+            # must remain backtracking-free: these patterns are attempted (and most
+            # fail) on every access-log line, and a lazy prefix makes each failed
+            # attempt ~10x more expensive because the engine retries every field
+            # partition before giving up.
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, undef) = $_ =~ /^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.]+)ms\] \[(.+)s\]/ ) {
                 $is_line_match = 1;
                 $match_type = 12;			# matching Tomcat access log CodeBeamer format 192.168.223.1 - - [29/Oct/2025:08:52:11 +0000] "GET /urlversioned/202510290803/images/newskin/login_page/icon_qa.png HTTP/1.1" 200 20097 [5ms] [0.005s]
 
@@ -8076,7 +8081,7 @@ sub read_and_process_logs {
             # Anchored to end-of-line after the bytes field so it wins over the broader
             # with-duration pattern below; a line with anything after bytes (duration,
             # thread, session) falls through to match_type 3.
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$/ ) {
                 $is_line_match = 1;
                 $match_type = 4;			# this is matching Tomcat/Apache common access log format (no duration) 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626
                 $is_access_log = 1;
@@ -8089,7 +8094,7 @@ sub read_and_process_logs {
                 $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
 
             ## Apache Tomcat Access Log with Service Execution Time (%D), and optionally thread (%I) and session (%S) ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?/ ) {
                 $is_line_match = 1;
                 $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
                 $is_access_log = 1;
@@ -8138,7 +8143,7 @@ sub read_and_process_logs {
                 $timestamp_str =~ tr/T/ /;
                 $message =~ s/\s+$//g;
 
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, undef, undef, $duration) = $_ =~ /^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$/ ) {
+            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, undef, undef, $duration) = $_ =~ /^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$/ ) {
             # access logs # 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
                 $is_line_match = 1;
                 $match_type = 9;			# this is matching Jboss access log format with service execution time 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
