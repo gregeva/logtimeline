@@ -238,6 +238,50 @@ run_no_duration_scenario() {
         contract    'docs/usage.md section Metric extraction - columns appear only for metrics detected in the data; issue #345'
 }
 
+# Enhanced/JBoss source: when the input is the enhanced access-log format
+# (quoted referrer, quoted user-agent, trailing duration — match_type 9), the
+# observed durations must activate the latency surfaces: timeline latency
+# column and the latency-column messages-table variant. This is the presence
+# mirror of run_no_duration_scenario: the format's duration sits after the
+# quoted fields, and a cascade-ordering regression that lets the broader
+# with-duration pattern claim these lines captures duration=undef and
+# silently deactivates every latency surface. Issue #365.
+run_jboss_duration_scenario() {
+    current_scenario="jboss-duration-w200"
+    echo "[$current_scenario]"
+
+    local fixture="$TMP_DIR/jboss-enhanced-access.txt"
+    awk '$(NF-1) ~ /^[0-9]+$/ {dur=$NF; $NF="\"-\" \"Jersey/2.37 (HttpUrlConnection 11.0.22)\" " dur; print}' "$ACCESS_LOG" > "$fixture"
+    if [[ ! -s "$fixture" ]]; then
+        echo "  FAIL  $current_scenario :: could not derive enhanced-format fixture from $ACCESS_LOG" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: fixture derivation failed"); return 0
+    fi
+
+    local render="$TMP_DIR/render-jboss-duration.txt"
+    capture_render "$render" "$fixture" --terminal-width 200 || return 0
+
+    assert_command \
+        command     "grep -q 'TOP OVERALL MESSAGES' '$render' && grep -q 'occurrences' '$render'" \
+        label       "render contains the occurrences surfaces (anchor for the presence assertions)" \
+        asserts     'The enhanced-format source renders the timeline occurrences graph and the messages table; the presence assertions below are meaningful only if these anchor surfaces exist.' \
+        produced_by 'print_bar_graph() and print_summary_table() in ltl' \
+        contract    'tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors - a presence check over an empty render would fail for the wrong reason'
+
+    assert_command \
+        command     "grep -qE 'latency statistics|P50:' '$render'" \
+        label       "timeline latency column renders for the enhanced-format source (durations observed)" \
+        asserts     'A source whose every line carries a trailing duration (enhanced/JBoss access-log format, match_type 9) must render the timeline latency statistics column. If the broader with-duration pattern (match_type 3) claims these lines first, it captures duration=undef and no latency surface activates despite every line carrying a duration.' \
+        produced_by 'detection cascade in read_and_process_logs() (match_type 9 branch ordered before match_type 3) and build_column_layout() in ltl (show_latency gate on $durations_observed)' \
+        contract    'docs/usage.md section Metric extraction - columns appear only for metrics detected in the data; issue #365'
+
+    assert_command \
+        command     "grep 'TOP OVERALL MESSAGES' '$render' | grep -qE 'P99\\.9'" \
+        label       "messages table renders the latency-column variant (Min/P50/P99.9 captions present)" \
+        asserts     'The messages-table header for the enhanced-format source is the latency-column variant; the occurrences-only variant means the observed durations were lost during format detection.' \
+        produced_by 'print_summary_table() in ltl (messages-table variant gate on $durations_observed)' \
+        contract    'docs/usage.md section Metric extraction - columns appear only for metrics detected in the data; issue #365'
+}
+
 echo "Validating duration-statistic display invariants (Issue #292)"
 echo "Surfaces: timeline rows (P50/P95/P99/P999) + summary table (Min/P50/P99.9)"
 echo ""
@@ -264,6 +308,10 @@ echo ""
 
 # Absence invariants for a source with no duration values at all (issue #345).
 run_no_duration_scenario
+echo ""
+
+# Presence invariants for the enhanced/JBoss format's trailing duration (issue #365).
+run_jboss_duration_scenario
 echo ""
 
 echo "Results: $pass passed, $fail failed"

@@ -10,9 +10,11 @@
 #
 # Scope: slugs with fixtures under logs/ are asserted directly;
 # tomcat_access_common is asserted against a fixture derived on the fly
-# from the Tomcat 9 log (duration field stripped, issue #345). The
+# from the Tomcat 9 log (duration field stripped, issue #345), and
+# jboss_access against a fixture derived from the same log (quoted
+# referrer/user-agent + trailing duration appended, issue #365). The
 # remaining slugs (thingworx_rac_client, connection_server_json,
-# java_gc_log, tw_analytics_v2, tw_analytics_worker, jboss_access,
+# java_gc_log, tw_analytics_v2, tw_analytics_worker,
 # connection_server_standard) are out of scope until fixtures exist or
 # until the format-registry rewrite (#23) lands.
 #
@@ -194,6 +196,54 @@ scenario_tomcat_common() {
         contract    'Derived 1:1 from the hand-truncated 5000-line Tomcat 9 fixture; if that fixture changes, the expected count changes in the same commit'
 }
 
+scenario_jboss_enhanced() {
+    current_scenario="jboss-enhanced"
+    echo "[$current_scenario]"
+
+    # JBoss/Jersey enhanced access log format (%h %l %u %t "%r" %s %b
+    # "%{Referer}i" "%{User-Agent}i" %D). Derived on the fly from the canonical
+    # Tomcat 9 fixture by rewriting the trailing %D field into quoted referrer +
+    # quoted user-agent + duration, so the scenarios cannot drift apart and no
+    # near-duplicate corpus file is needed. Lines with "-" bytes are excluded:
+    # the match_type 9 regex requires numeric bytes, and such lines fall through
+    # to match_type 3 by design. Issue #365.
+    local src="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+    local log="$TMP_DIR/jboss-enhanced-access.txt"
+    awk '$(NF-1) ~ /^[0-9]+$/ {dur=$NF; $NF="\"-\" \"Jersey/2.37 (HttpUrlConnection 11.0.22)\" " dur; print}' "$src" > "$log"
+    if [[ ! -s "$log" ]]; then
+        echo "FAIL: could not derive enhanced-format fixture from $src" >&2
+        exit 1
+    fi
+    local expected_lines
+    expected_lines=$(wc -l < "$log" | tr -d ' ')
+    if [[ -z "$expected_lines" || "$expected_lines" -eq 0 ]]; then
+        echo "FAIL: derived enhanced-format fixture is empty" >&2
+        exit 1
+    fi
+
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^  format: jboss_access$' \
+        asserts     'An enhanced/JBoss access log (quoted referrer, quoted user-agent, trailing duration) binds to slug `jboss_access`, not to `tomcat_access_with_duration`. The end-anchored match_type 9 regex is ordered before the broader match_type 3 regex, whose all-optional tail would otherwise claim these lines with duration=undef and junk thread/session captures (issue #365).' \
+        produced_by 'emit_format_detection_verbose() in ltl; detection cascade in read_and_process_logs() (match_type 9 branch, `$`-anchored after the trailing duration field)' \
+        contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
+
+    assert_line "$out" \
+        pattern     '^  match_type: 9$' \
+        asserts     'Enhanced/JBoss access log binds to internal match_type 9' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
+        contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type integers are an implementation detail surfaced for diagnostic value; the slug is the user-facing contract'
+
+    assert_line "$out" \
+        pattern     "^  matched_lines: $expected_lines\$" \
+        asserts     'Every line of the derived enhanced-format fixture parses as match_type 9 (no fallthroughs to match_type 3 or other branches)' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
+        contract    'Derived from the hand-truncated Tomcat 9 fixture (numeric-bytes lines only); the expected count is computed from the derived file so the assertion tracks the fixture'
+}
+
 scenario_apache_httpd_us() {
     current_scenario="apache-httpd-us"
     echo "[$current_scenario]"
@@ -344,6 +394,7 @@ echo ""
 
 scenario_tomcat9_ms;            echo ""
 scenario_tomcat_common;         echo ""
+scenario_jboss_enhanced;        echo ""
 scenario_apache_httpd_us;       echo ""
 scenario_codebeamer;            echo ""
 scenario_thingworx_standard;    echo ""
