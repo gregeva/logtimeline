@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # validate-statistics-demand.sh — Validate the statistics-demand `-V` section:
 # per-store statistics-group demand resolution with raising consumers, the
-# shape-moment pass execution counters, and the per-store moment source
-# (Issue #305).
+# per-store moment source, and the per-store statistics-calculation counters
+# (stats_calls invocations plus per-group computed/skipped_demand/ineligible)
+# (Issues #305, #303).
 # Usage: ./tests/validate-statistics-demand.sh
 #
 # Follows the self-documenting assertion design from tests/HARNESS-DESIGN.md
@@ -38,7 +39,7 @@ WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 cd "$WORKDIR"
 
-CONTRACT='features/305-shape-moment-extended-percentile-demand.md § -V statistics-demand section contract — stability-contracted; renames are breaking'
+CONTRACT='features/duration-statistics.md § -V statistics-demand section contract — stability-contracted; renames are breaking'
 
 pass=0
 fail=0
@@ -158,14 +159,14 @@ extract_section() {
 }
 
 # Extract the per-store sub-block (lines from `store: <name>` up to the next
-# `store:` or the shape_pass line) so per-store assertions cannot match the
-# other store's lines.
+# `store:` or the section end marker) so per-store assertions cannot match
+# the other store's lines.
 extract_store() {
     local body="$1" store="$2"
     local out="$body.$store"
     awk -v store="$store" '
         $0 == "store: " store { inside=1; print; next }
-        inside && (/^store: / || /^shape_pass: / || /^=== END /) { inside=0 }
+        inside && (/^store: / || /^=== END /) { inside=0 }
         inside { print }
     ' "$body" > "$out"
     echo "$out"
@@ -205,11 +206,27 @@ if body=$(extract_section "$out"); then
             asserts     "With shape_moments undemanded the $store store reports moment_source none" \
             produced_by 'emit_statistics_demand_verbose() in ltl' \
             contract    "$CONTRACT"
+        assert_line "$sb" \
+            pattern     '^  stats_calls: [1-9][0-9]*$' \
+            asserts     "The $store store reports a non-zero count of statistics-primitive invocations on a demanded store (every call is counted, including no-duration early returns)" \
+            produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (stats_calls in %stats_demand_telemetry)' \
+            contract    "$CONTRACT"
+        assert_line "$sb" \
+            pattern     '^  group_calc terminal_core: computed=[1-9][0-9]* skipped_demand=0 ineligible=0$' \
+            asserts     "terminal_core is derived on every non-early-returned invocation of the $store store's statistics primitive (never demand-skipped: terminal_core demand equals store demand)" \
+            produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (group_calc counters)' \
+            contract    "$CONTRACT"
+        assert_line "$sb" \
+            pattern     '^  group_calc shape_moments: computed=0 skipped_demand=[0-9]+ ineligible=[0-9]+$' \
+            asserts     "On a terminal-only run the $store store's shape-moment derivation never runs — eligible (n>=4) calls are demand-skipped and n<4 calls are counted ineligible, so every invocation is accounted for" \
+            produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (group_calc counters)' \
+            contract    "$CONTRACT"
     done
-    assert_line "$body" \
-        pattern     '^shape_pass: executed=0 skipped=[1-9][0-9]*$' \
-        asserts     'On a terminal-only run the raw O(n) shape-moment pass never executes and is skipped for every key/bucket with n>=4 — the observable proof that demand gating fires' \
-        produced_by 'calculate_statistics() in ltl (shape_pass counters in %stats_demand_telemetry)' \
+    sm=$(extract_store "$body" message)
+    assert_line "$sm" \
+        pattern     '^  group_calc shape_moments: computed=0 skipped_demand=[1-9][0-9]* ineligible=[0-9]+$' \
+        asserts     'On a terminal-only run the message store demand-skips the shape derivation for every eligible key — the observable proof that demand gating fires' \
+        produced_by 'calculate_statistics() in ltl (group_calc counters in %stats_demand_telemetry)' \
         contract    "$CONTRACT"
 fi
 echo
@@ -242,10 +259,16 @@ if body=$(extract_section "$out"); then
         asserts     'Under the default raw data model with shape demanded, the message store reports moment_source second_pass' \
         produced_by 'emit_statistics_demand_verbose() in ltl' \
         contract    "$CONTRACT"
-    assert_line "$body" \
-        pattern     '^shape_pass: executed=[1-9][0-9]* skipped=0$' \
-        asserts     'With every group demanded the shape pass executes for every eligible key/bucket and nothing is skipped — output parity with the pre-gating behavior' \
-        produced_by 'calculate_statistics() in ltl (shape_pass counters)' \
+    assert_line "$sm" \
+        pattern     '^  group_calc shape_moments: computed=[1-9][0-9]* skipped_demand=0 ineligible=[0-9]+$' \
+        asserts     'With every group demanded the message store derives shape moments for every eligible key and demand-skips nothing — output parity with the pre-gating behavior' \
+        produced_by 'calculate_statistics() in ltl (group_calc counters)' \
+        contract    "$CONTRACT"
+    assert_command \
+        command     "calls=\$(awk '/^  stats_calls: /{print \$2; exit}' '$sm'); tc=\$(grep -oE '^  group_calc terminal_core: computed=[0-9]+' '$sm' | grep -oE '[0-9]+\$'); [[ -n \"\$calls\" && -n \"\$tc\" && \"\$calls\" -ge \"\$tc\" ]]" \
+        label       'message stats_calls >= terminal_core computed (early-returned calls are counted as invocations)' \
+        asserts     'stats_calls counts every statistics-primitive invocation, so it is always >= the terminal_core computed count (the difference is the early-returned no-duration calls)' \
+        produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (stats_calls vs group_calc counters)' \
         contract    "$CONTRACT"
 fi
 echo
@@ -272,6 +295,11 @@ if body=$(extract_section "$out"); then
         pattern     '^  moment_source: second_pass$' \
         asserts     'The message store computes shape moments (via the raw second pass) when demanded by the sort key alone' \
         produced_by 'emit_statistics_demand_verbose() in ltl' \
+        contract    "$CONTRACT"
+    assert_line "$sm" \
+        pattern     '^  group_calc shape_moments: computed=[1-9][0-9]* skipped_demand=0 ineligible=[0-9]+$' \
+        asserts     'A statistic sort computes the sort statistic for the entire eligible key population — the population-wide cost #303 targets, measured by stats_calls and the per-group computed counts' \
+        produced_by 'calculate_statistics() in ltl (group_calc counters; all-keys path in calculate_all_statistics)' \
         contract    "$CONTRACT"
 fi
 echo
