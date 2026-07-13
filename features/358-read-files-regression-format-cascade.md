@@ -79,8 +79,11 @@ $duration;`, or anything else in the #345 diff.
 3. With-duration output must remain byte-identical (verified across Tomcat 9, Apache
    HTTP2, CodeBeamer logs in #345).
 
-## Candidate fix directions (not implemented, not evaluated beyond feasibility)
+## Candidate fix directions (not implemented)
 
+- **Deterministic prefix (validated — see below):** replace the `(.+? ){3}` prefix
+  with `([^ ]+ ){3}` in both access-log patterns so a failed attempt dies linearly
+  instead of backtracking. Keeps both patterns and #345's ordering/classification.
 - **Single combined pattern, classify by capture presence:** run only the broad
   with-duration pattern and set match_type 3 vs 4 based on `defined $duration` (and
   thread/session captures). Removes the failing attempt entirely; likely restores the
@@ -91,9 +94,38 @@ $duration;`, or anything else in the #345 diff.
   end in `" (\d{3}) (\d+|-)` followed by more fields) or reordering back with the
   anchored pattern second plus explicit reclassification of broad matches that
   captured no duration.
-- **Kill the backtracking in the anchored pattern:** atomic/possessive grouping or an
-  unrolled prefix so a failed attempt is linear. Lower risk of classification changes,
-  but keeps two patterns scanning every line.
+- **Per-file format lock-in (strategic, separate issue):** after the first N lines of
+  a file classify as one match_type, dispatch straight to that pattern. Collapses the
+  cascade to ~one regex per line for homogeneous files; overlaps with
+  `features/log-format-registry.md`.
+
+## Deterministic-prefix validation (2026-07-13, micro-benchmark)
+
+Replacing `(.+? ){3}` with `([^ ]+ ){3}` in both access-log patterns, same 276,209-line
+probe file, pure-Perl loop applying the #345 pattern order (anchored first):
+
+| prefix | wall time (3 trials) | matches |
+|---|---|---|
+| `(.+? ){3}` (current) | 3.119 / 3.118 / 3.113 s | A=0 B=276,209 |
+| `([^ ]+ ){3}` (fix) | 0.557 / 0.559 / 0.559 s | A=0 B=276,209 |
+
+5.6x faster on the scan; projected read_files on the probe ~6.51 s → ~3.9 s (removes
+~90% of the regression). A residual ~+0.3 s (~1 µs/line: the now-cheap failed anchored
+attempt on every with-duration line) remains vs the pre-#345 3.64 s baseline; only the
+single-pattern or format-lock-in directions eliminate it.
+
+Capture-equivalence checked on both patterns across: with-duration + thread + session,
+duration-only, common format, dash bytes, and Nginx ingress quoted referrer/user-agent
+lines — all byte-identical between current and hardened prefixes.
+
+**One behavioral delta:** the lazy `.+?` prefix tolerates spaces *inside* the three
+leading fields (host, ident, authuser) — e.g. `10.2.3.4 - John Smith [date] ...`
+matches today but is NOMATCH with the deterministic prefix (the line falls through the
+access-log branches and continues down the cascade). This tolerance is inherently a
+product of the backtracking being removed; atomic grouping loses it identically. CLF
+permits spaces in authuser, but servers typically log `-` or encode; zero such lines
+exist in the probe corpus, and Tomcat/ThingWorx always emit `-`. Accepting this
+narrowing is a disposition decision for the fix.
 
 ## Measurement hygiene notes
 
