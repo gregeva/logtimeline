@@ -757,5 +757,5 @@ Even after #346, summing every `-mem`-reported structure leaves **~0.81 GB (9% o
 - **#96 / `-g`** — the Edge-A cardinality lever (the dominant remaining cost).
 - **#347 (bin-counter eviction)** — closed as not planned: prevention (never allocate sparse partitions, per the #354 fix direction) supersedes evicting them. Residual eviction scope (raw-side synthesized residue) belongs to #2's contract if ever needed.
 - **#362** — resolved; reframes the peak-RSS figures above (see Sequencing item 4).
-- **#356 (`-mem` untracked residual)** — the ~9%-of-RSS gap surfaced while reconciling these measurements; `-mem` should attribute or explicitly surface it so the memory account closes.
+- **#356 (`-mem` untracked residual)** — resolved (merged into `release/0.16.0`); the memory account closes, so `-mem`-based re-measurements in this line are trustworthy.
 - The **single-sample inline producer** (`read_and_process_logs`, `%tmp` `_single` path) is a second place entry-kind is minted; any head/body implementation must route it through the same policy as the main write path.
