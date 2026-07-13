@@ -1,0 +1,414 @@
+test_name	options	metric_type	metric_name	value
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	version	0.15.2
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-02.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-03.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-04.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-05.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-06.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-07.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-08.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-09.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-10.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-11.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-12.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-13.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-14.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-15.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-16.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-17.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-18.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-19.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-20.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-21.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-22.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-23.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-24.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-25.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-26.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-27.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-28.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-29.txt	1633537993
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	lines_read	7749167
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	lines_included	7749167
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	TIMING	read_files	276.712
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	TIMING	initialize_buckets	0.000
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	TIMING	group_similar	72.372
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	TIMING	calculate_statistics	2.865
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	TIMING	heatmap_statistics	0.061
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	TIMING	histogram_statistics	0.011
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	TIMING	normalize_data	0.003
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	TIMING	total	352.025
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	rss_peak	1359691776
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	bucket_stats_counters	120
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	bucket_stats_counters_hl	120
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	consolidation_clusters	531863079
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	consolidation_key_message	2590878
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	consolidation_key_trigrams	38447857
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	consolidation_key_trigrams_norm	30842346
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	consolidation_ngram_index	37691548
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	consolidation_patterns	289782
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	consolidation_posting_size	996979
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	consolidation_unmatched	1629563
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	heatmap_counters	2516532
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	heatmap_counters_hl	232
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	heatmap_data	85118
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	heatmap_data_hl	120
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	heatmap_raw	120
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	heatmap_raw_hl	120
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	histogram_counters	302693
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	histogram_counters_hl	120
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	histogram_values	576
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	log_analysis	15661
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	log_messages	594583089
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	log_messages_counters	120
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	log_occurrences	37445
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	log_sessions	2319606
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	log_stats	30277
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	log_threadpools	232
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	threadpool_activity	762
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	udm_distinct	120
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY	udm_last_value	120
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY_FINAL	log_messages	594583089
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY_FINAL	log_analysis	12594
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY_FINAL	consolidation_clusters	531863079
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY_FINAL	consolidation_patterns	248469
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY_FINAL	consolidation_key_message	131128
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY_FINAL	consolidation_unmatched	424
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY_FINAL	consolidation_ngram_index	120
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY_FINAL	consolidation_key_trigrams	65592
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	MEMORY_FINAL	consolidation_key_trigrams_norm	65592
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	COUNTS	log_messages_entries	1317
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	COUNTS	log_occurrences_entries	28
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	COUNTS	log_stats_entries	28
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	CONFIG	terminal_width	200
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	CONFIG	terminal_height	24
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	CONFIG	max_log_message_length	200
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	CONFIG	time_bucket_size	1440
+month-single-server-access-logs-heatmap-histogram-consolidate	-bs 1440 -hm -hg -g	CONFIG	bucket_size_seconds	86400.00
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	version	0.15.2
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-02.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-03.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-04.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-05.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-06.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-07.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-08.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-09.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-10.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-11.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-12.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-13.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-14.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-15.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-16.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-17.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-18.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-19.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-20.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-21.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-22.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-23.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-24.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-25.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-26.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-27.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-28.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-29.txt	1633537993
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	lines_read	7749167
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	lines_included	7749167
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	TIMING	read_files	242.199
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	TIMING	initialize_buckets	0.000
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	TIMING	group_similar	0.000
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	TIMING	calculate_statistics	2.053
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	TIMING	heatmap_statistics	0.061
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	TIMING	histogram_statistics	0.007
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	TIMING	normalize_data	0.002
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	TIMING	total	244.323
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	rss_peak	2267709440
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	bucket_stats_counters	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	bucket_stats_counters_hl	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	consolidation_clusters	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	consolidation_key_message	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	consolidation_key_trigrams	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	consolidation_key_trigrams_norm	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	consolidation_ngram_index	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	consolidation_patterns	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	consolidation_posting_size	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	consolidation_unmatched	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	heatmap_counters	2516532
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	heatmap_counters_hl	232
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	heatmap_data	85630
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	heatmap_data_hl	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	heatmap_raw	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	heatmap_raw_hl	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	histogram_counters	302693
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	histogram_counters_hl	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	histogram_values	576
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	log_analysis	15661
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	log_messages	1704450545
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	log_messages_counters	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	log_occurrences	37637
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	log_sessions	2319606
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	log_stats	30277
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	log_threadpools	232
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	threadpool_activity	762
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	udm_distinct	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY	udm_last_value	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY_FINAL	log_messages	1704450545
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY_FINAL	log_analysis	12594
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY_FINAL	consolidation_clusters	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY_FINAL	consolidation_patterns	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY_FINAL	consolidation_key_message	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY_FINAL	consolidation_unmatched	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY_FINAL	consolidation_ngram_index	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY_FINAL	consolidation_key_trigrams	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	MEMORY_FINAL	consolidation_key_trigrams_norm	120
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	COUNTS	log_messages_entries	1212275
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	COUNTS	log_occurrences_entries	28
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	COUNTS	log_stats_entries	28
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	CONFIG	terminal_width	200
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	CONFIG	terminal_height	24
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	CONFIG	max_log_message_length	200
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	CONFIG	time_bucket_size	1440
+month-single-server-access-logs-heatmap-histogram	-bs 1440 -hm -hg	CONFIG	bucket_size_seconds	86400.00
+month-single-server-access-logs-histogram	-bs 1440 -hg	version	0.15.2
+month-single-server-access-logs-histogram	-bs 1440 -hg	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-02.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-03.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-04.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-05.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-06.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-07.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-08.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-09.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-10.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-11.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-12.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-13.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-14.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-15.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-16.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-17.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-18.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-19.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-20.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-21.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-22.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-23.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-24.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-25.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-26.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-27.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-28.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-29.txt	1633537993
+month-single-server-access-logs-histogram	-bs 1440 -hg	lines_read	7749167
+month-single-server-access-logs-histogram	-bs 1440 -hg	lines_included	7749167
+month-single-server-access-logs-histogram	-bs 1440 -hg	TIMING	read_files	235.739
+month-single-server-access-logs-histogram	-bs 1440 -hg	TIMING	initialize_buckets	0.000
+month-single-server-access-logs-histogram	-bs 1440 -hg	TIMING	group_similar	0.000
+month-single-server-access-logs-histogram	-bs 1440 -hg	TIMING	calculate_statistics	4.934
+month-single-server-access-logs-histogram	-bs 1440 -hg	TIMING	heatmap_statistics	0.000
+month-single-server-access-logs-histogram	-bs 1440 -hg	TIMING	histogram_statistics	0.007
+month-single-server-access-logs-histogram	-bs 1440 -hg	TIMING	normalize_data	0.002
+month-single-server-access-logs-histogram	-bs 1440 -hg	TIMING	total	240.682
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	rss_peak	2657894400
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	bucket_stats_counters	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	bucket_stats_counters_hl	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	consolidation_clusters	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	consolidation_key_message	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	consolidation_key_trigrams	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	consolidation_key_trigrams_norm	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	consolidation_ngram_index	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	consolidation_patterns	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	consolidation_posting_size	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	consolidation_unmatched	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	heatmap_counters	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	heatmap_counters_hl	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	heatmap_data	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	heatmap_data_hl	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	heatmap_raw	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	heatmap_raw_hl	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	histogram_counters	302565
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	histogram_counters_hl	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	histogram_values	576
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	log_analysis	594859077
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	log_messages	1626865705
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	log_messages_counters	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	log_occurrences	37445
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	log_sessions	2319606
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	log_stats	44643
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	log_threadpools	232
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	threadpool_activity	762
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	udm_distinct	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY	udm_last_value	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY_FINAL	log_messages	1626865705
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY_FINAL	log_analysis	13010
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY_FINAL	consolidation_clusters	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY_FINAL	consolidation_patterns	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY_FINAL	consolidation_key_message	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY_FINAL	consolidation_unmatched	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY_FINAL	consolidation_ngram_index	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY_FINAL	consolidation_key_trigrams	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	MEMORY_FINAL	consolidation_key_trigrams_norm	120
+month-single-server-access-logs-histogram	-bs 1440 -hg	COUNTS	log_messages_entries	1212275
+month-single-server-access-logs-histogram	-bs 1440 -hg	COUNTS	log_occurrences_entries	28
+month-single-server-access-logs-histogram	-bs 1440 -hg	COUNTS	log_stats_entries	28
+month-single-server-access-logs-histogram	-bs 1440 -hg	CONFIG	terminal_width	200
+month-single-server-access-logs-histogram	-bs 1440 -hg	CONFIG	terminal_height	24
+month-single-server-access-logs-histogram	-bs 1440 -hg	CONFIG	max_log_message_length	200
+month-single-server-access-logs-histogram	-bs 1440 -hg	CONFIG	time_bucket_size	1440
+month-single-server-access-logs-histogram	-bs 1440 -hg	CONFIG	bucket_size_seconds	86400.00
+month-single-server-access-logs-heatmap	-bs 1440 -hm	version	0.15.2
+month-single-server-access-logs-heatmap	-bs 1440 -hm	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-02.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-03.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-04.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-05.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-06.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-07.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-08.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-09.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-10.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-11.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-12.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-13.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-14.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-15.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-16.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-17.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-18.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-19.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-20.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-21.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-22.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-23.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-24.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-25.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-26.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-27.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-28.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-29.txt	1633537993
+month-single-server-access-logs-heatmap	-bs 1440 -hm	lines_read	7749167
+month-single-server-access-logs-heatmap	-bs 1440 -hm	lines_included	7749167
+month-single-server-access-logs-heatmap	-bs 1440 -hm	TIMING	read_files	224.333
+month-single-server-access-logs-heatmap	-bs 1440 -hm	TIMING	initialize_buckets	0.000
+month-single-server-access-logs-heatmap	-bs 1440 -hm	TIMING	group_similar	0.000
+month-single-server-access-logs-heatmap	-bs 1440 -hm	TIMING	calculate_statistics	2.100
+month-single-server-access-logs-heatmap	-bs 1440 -hm	TIMING	heatmap_statistics	0.068
+month-single-server-access-logs-heatmap	-bs 1440 -hm	TIMING	histogram_statistics	0.000
+month-single-server-access-logs-heatmap	-bs 1440 -hm	TIMING	normalize_data	0.002
+month-single-server-access-logs-heatmap	-bs 1440 -hm	TIMING	total	226.504
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	rss_peak	2256568320
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	bucket_stats_counters	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	bucket_stats_counters_hl	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	consolidation_clusters	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	consolidation_key_message	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	consolidation_key_trigrams	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	consolidation_key_trigrams_norm	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	consolidation_ngram_index	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	consolidation_patterns	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	consolidation_posting_size	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	consolidation_unmatched	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	heatmap_counters	2516532
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	heatmap_counters_hl	232
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	heatmap_data	83070
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	heatmap_data_hl	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	heatmap_raw	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	heatmap_raw_hl	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	histogram_counters	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	histogram_counters_hl	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	histogram_values	576
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	log_analysis	15661
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	log_messages	1702537009
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	log_messages_counters	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	log_occurrences	37637
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	log_sessions	2319606
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	log_stats	30277
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	log_threadpools	232
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	threadpool_activity	762
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	udm_distinct	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY	udm_last_value	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY_FINAL	log_messages	1702537009
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY_FINAL	log_analysis	12594
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY_FINAL	consolidation_clusters	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY_FINAL	consolidation_patterns	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY_FINAL	consolidation_key_message	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY_FINAL	consolidation_unmatched	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY_FINAL	consolidation_ngram_index	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY_FINAL	consolidation_key_trigrams	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	MEMORY_FINAL	consolidation_key_trigrams_norm	120
+month-single-server-access-logs-heatmap	-bs 1440 -hm	COUNTS	log_messages_entries	1212275
+month-single-server-access-logs-heatmap	-bs 1440 -hm	COUNTS	log_occurrences_entries	28
+month-single-server-access-logs-heatmap	-bs 1440 -hm	COUNTS	log_stats_entries	28
+month-single-server-access-logs-heatmap	-bs 1440 -hm	CONFIG	terminal_width	200
+month-single-server-access-logs-heatmap	-bs 1440 -hm	CONFIG	terminal_height	24
+month-single-server-access-logs-heatmap	-bs 1440 -hm	CONFIG	max_log_message_length	200
+month-single-server-access-logs-heatmap	-bs 1440 -hm	CONFIG	time_bucket_size	1440
+month-single-server-access-logs-heatmap	-bs 1440 -hm	CONFIG	bucket_size_seconds	86400.00
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	version	0.15.2
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-02.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-03.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-04.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-05.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-06.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-07.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-08.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-09.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-10.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-11.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-12.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-13.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-14.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-15.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-16.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-17.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-18.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-19.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-20.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-21.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-22.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-23.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-24.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-25.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-26.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-27.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-28.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-29.txt	1633537993
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	lines_read	7749167
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	lines_included	7749167
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	TIMING	read_files	249.812
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	TIMING	initialize_buckets	0.000
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	TIMING	group_similar	98.955
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	TIMING	calculate_statistics	7.224
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	TIMING	heatmap_statistics	0.000
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	TIMING	histogram_statistics	0.000
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	TIMING	normalize_data	0.003
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	TIMING	total	355.995
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	rss_peak	1668874240
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	bucket_stats_counters	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	bucket_stats_counters_hl	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	consolidation_clusters	531863079
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	consolidation_key_message	2590878
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	consolidation_key_trigrams	38447345
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	consolidation_key_trigrams_norm	30853610
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	consolidation_ngram_index	37707548
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	consolidation_patterns	289782
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	consolidation_posting_size	996979
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	consolidation_unmatched	1629563
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	heatmap_counters	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	heatmap_counters_hl	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	heatmap_data	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	heatmap_data_hl	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	heatmap_raw	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	heatmap_raw_hl	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	histogram_counters	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	histogram_counters_hl	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	histogram_values	576
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	log_analysis	594983589
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	log_messages	594593777
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	log_messages_counters	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	log_occurrences	37637
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	log_sessions	2319478
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	log_stats	44643
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	log_threadpools	232
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	threadpool_activity	762
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	udm_distinct	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY	udm_last_value	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY_FINAL	log_messages	594593777
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY_FINAL	log_analysis	13010
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY_FINAL	consolidation_clusters	531863079
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY_FINAL	consolidation_patterns	248469
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY_FINAL	consolidation_key_message	131128
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY_FINAL	consolidation_unmatched	424
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY_FINAL	consolidation_ngram_index	120
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY_FINAL	consolidation_key_trigrams	65592
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	MEMORY_FINAL	consolidation_key_trigrams_norm	65592
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	COUNTS	log_messages_entries	1317
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	COUNTS	log_occurrences_entries	28
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	COUNTS	log_stats_entries	28
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	CONFIG	terminal_width	200
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	CONFIG	terminal_height	24
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	CONFIG	max_log_message_length	200
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	CONFIG	time_bucket_size	1440
+month-single-server-access-logs-top25-consolidate	-bs 1440 -n 25 -g	CONFIG	bucket_size_seconds	86400.00
+month-single-server-access-logs-top25	-bs 1440 -n 25	version	0.15.2
+month-single-server-access-logs-top25	-bs 1440 -n 25	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-02.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-03.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-04.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-05.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-06.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-07.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-08.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-09.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-10.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-11.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-12.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-13.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-14.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-15.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-16.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-17.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-18.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-19.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-20.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-21.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-22.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-23.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-24.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-25.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-26.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-27.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-28.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-29.txt	1633537993
+month-single-server-access-logs-top25	-bs 1440 -n 25	lines_read	7749167
+month-single-server-access-logs-top25	-bs 1440 -n 25	lines_included	7749167
+month-single-server-access-logs-top25	-bs 1440 -n 25	TIMING	read_files	211.428
+month-single-server-access-logs-top25	-bs 1440 -n 25	TIMING	initialize_buckets	0.000
+month-single-server-access-logs-top25	-bs 1440 -n 25	TIMING	group_similar	0.000
+month-single-server-access-logs-top25	-bs 1440 -n 25	TIMING	calculate_statistics	5.225
+month-single-server-access-logs-top25	-bs 1440 -n 25	TIMING	heatmap_statistics	0.000
+month-single-server-access-logs-top25	-bs 1440 -n 25	TIMING	histogram_statistics	0.000
+month-single-server-access-logs-top25	-bs 1440 -n 25	TIMING	normalize_data	0.002
+month-single-server-access-logs-top25	-bs 1440 -n 25	TIMING	total	216.655
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	rss_peak	2730934272
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	bucket_stats_counters	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	bucket_stats_counters_hl	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	consolidation_clusters	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	consolidation_key_message	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	consolidation_key_trigrams	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	consolidation_key_trigrams_norm	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	consolidation_ngram_index	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	consolidation_patterns	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	consolidation_posting_size	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	consolidation_unmatched	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	heatmap_counters	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	heatmap_counters_hl	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	heatmap_data	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	heatmap_data_hl	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	heatmap_raw	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	heatmap_raw_hl	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	histogram_counters	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	histogram_counters_hl	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	histogram_values	576
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	log_analysis	594859077
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	log_messages	1704457993
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	log_messages_counters	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	log_occurrences	37445
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	log_sessions	2319606
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	log_stats	44643
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	log_threadpools	232
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	threadpool_activity	762
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	udm_distinct	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY	udm_last_value	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY_FINAL	log_messages	1704457993
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY_FINAL	log_analysis	13010
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY_FINAL	consolidation_clusters	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY_FINAL	consolidation_patterns	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY_FINAL	consolidation_key_message	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY_FINAL	consolidation_unmatched	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY_FINAL	consolidation_ngram_index	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY_FINAL	consolidation_key_trigrams	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	MEMORY_FINAL	consolidation_key_trigrams_norm	120
+month-single-server-access-logs-top25	-bs 1440 -n 25	COUNTS	log_messages_entries	1212275
+month-single-server-access-logs-top25	-bs 1440 -n 25	COUNTS	log_occurrences_entries	28
+month-single-server-access-logs-top25	-bs 1440 -n 25	COUNTS	log_stats_entries	28
+month-single-server-access-logs-top25	-bs 1440 -n 25	CONFIG	terminal_width	200
+month-single-server-access-logs-top25	-bs 1440 -n 25	CONFIG	terminal_height	24
+month-single-server-access-logs-top25	-bs 1440 -n 25	CONFIG	max_log_message_length	200
+month-single-server-access-logs-top25	-bs 1440 -n 25	CONFIG	time_bucket_size	1440
+month-single-server-access-logs-top25	-bs 1440 -n 25	CONFIG	bucket_size_seconds	86400.00
+month-single-server-access-logs-standard	-bs 1440	version	0.15.2
+month-single-server-access-logs-standard	-bs 1440	FILES	/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-02.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-03.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-04.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-05.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-06.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-07.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-08.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-09.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-10.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-11.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-12.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-13.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-14.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-15.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-16.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-17.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-18.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-19.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-20.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-21.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-22.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-23.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-24.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-25.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-26.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-27.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-28.txt;/Users/gregeva/Documents/GitHub/logtimeline/logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-29.txt	1633537993
+month-single-server-access-logs-standard	-bs 1440	lines_read	7749167
+month-single-server-access-logs-standard	-bs 1440	lines_included	7749167
+month-single-server-access-logs-standard	-bs 1440	TIMING	read_files	211.794
+month-single-server-access-logs-standard	-bs 1440	TIMING	initialize_buckets	0.000
+month-single-server-access-logs-standard	-bs 1440	TIMING	group_similar	0.000
+month-single-server-access-logs-standard	-bs 1440	TIMING	calculate_statistics	4.962
+month-single-server-access-logs-standard	-bs 1440	TIMING	heatmap_statistics	0.000
+month-single-server-access-logs-standard	-bs 1440	TIMING	histogram_statistics	0.000
+month-single-server-access-logs-standard	-bs 1440	TIMING	normalize_data	0.002
+month-single-server-access-logs-standard	-bs 1440	TIMING	total	216.758
+month-single-server-access-logs-standard	-bs 1440	MEMORY	rss_peak	2735505408
+month-single-server-access-logs-standard	-bs 1440	MEMORY	bucket_stats_counters	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	bucket_stats_counters_hl	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	consolidation_clusters	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	consolidation_key_message	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	consolidation_key_trigrams	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	consolidation_key_trigrams_norm	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	consolidation_ngram_index	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	consolidation_patterns	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	consolidation_posting_size	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	consolidation_unmatched	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	heatmap_counters	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	heatmap_counters_hl	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	heatmap_data	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	heatmap_data_hl	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	heatmap_raw	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	heatmap_raw_hl	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	histogram_counters	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	histogram_counters_hl	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	histogram_values	576
+month-single-server-access-logs-standard	-bs 1440	MEMORY	log_analysis	594859077
+month-single-server-access-logs-standard	-bs 1440	MEMORY	log_messages	1702537257
+month-single-server-access-logs-standard	-bs 1440	MEMORY	log_messages_counters	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	log_occurrences	37637
+month-single-server-access-logs-standard	-bs 1440	MEMORY	log_sessions	2319606
+month-single-server-access-logs-standard	-bs 1440	MEMORY	log_stats	44643
+month-single-server-access-logs-standard	-bs 1440	MEMORY	log_threadpools	232
+month-single-server-access-logs-standard	-bs 1440	MEMORY	threadpool_activity	762
+month-single-server-access-logs-standard	-bs 1440	MEMORY	udm_distinct	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY	udm_last_value	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY_FINAL	log_messages	1702537257
+month-single-server-access-logs-standard	-bs 1440	MEMORY_FINAL	log_analysis	13010
+month-single-server-access-logs-standard	-bs 1440	MEMORY_FINAL	consolidation_clusters	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY_FINAL	consolidation_patterns	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY_FINAL	consolidation_key_message	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY_FINAL	consolidation_unmatched	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY_FINAL	consolidation_ngram_index	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY_FINAL	consolidation_key_trigrams	120
+month-single-server-access-logs-standard	-bs 1440	MEMORY_FINAL	consolidation_key_trigrams_norm	120
+month-single-server-access-logs-standard	-bs 1440	COUNTS	log_messages_entries	1212275
+month-single-server-access-logs-standard	-bs 1440	COUNTS	log_occurrences_entries	28
+month-single-server-access-logs-standard	-bs 1440	COUNTS	log_stats_entries	28
+month-single-server-access-logs-standard	-bs 1440	CONFIG	terminal_width	200
+month-single-server-access-logs-standard	-bs 1440	CONFIG	terminal_height	24
+month-single-server-access-logs-standard	-bs 1440	CONFIG	max_log_message_length	200
+month-single-server-access-logs-standard	-bs 1440	CONFIG	time_bucket_size	1440
+month-single-server-access-logs-standard	-bs 1440	CONFIG	bucket_size_seconds	86400.00
