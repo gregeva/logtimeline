@@ -105,6 +105,9 @@ my %verbose_section_registry = (
     'percentile-algorithm' => {
         description => 'Per-surface effective percentile algorithm: resolved data model and algorithm name for histogram, heatmap, message-stats, and bucket-stats (Issue #280).',
     },
+    'statistics-demand' => {
+        description => 'Per-store resolved statistics-group demand with raising consumers, shape-moment pass execution counters, and per-store moment source (Issue #305).',
+    },
     'profile' => {
         description => 'Timeline folding (--profile): resolved mode, fold period, included weekdays, and included vs dropped sample counts (Issue #256).',
     },
@@ -125,6 +128,7 @@ my @verbose_section_order = qw(
     heatmap-palette
     csv-output
     percentile-algorithm
+    statistics-demand
     profile
     udm-counting
     benchmark-data
@@ -536,6 +540,71 @@ my $bucket_stats_capture_mode      = undef;   # 'raw' or 'bin' (set before parsi
 # the consumer half of that conjunction. One boolean per statistics store.
 my $bucket_duration_stats_demand   = 0;       # per-time-bucket statistics (%log_analysis): timeline latency column, STATS CSV
 my $message_duration_stats_demand  = 0;       # per-message-key statistics (%log_messages): messages-table statistics variant, MESSAGES CSV
+
+# Statistics-group demand registry (#305): extends the store-level demand
+# above to statistic-group granularity. The 22-statistic duration ladder is
+# partitioned into four groups; each consumer surface declares the groups it
+# reads; resolve_statistics_group_demand() derives per-store per-group demand
+# from the active surfaces. Demand gates capture (read-loop accumulators),
+# compute (the derivation blocks in calculate_statistics /
+# calculate_statistics_bin), and storage (undemanded statistic fields are
+# never written to %log_messages / %log_stats) — the storage gate is the
+# memory lever at high key cardinality.
+my %STAT_GROUP_FIELDS = (
+    # terminal_core: every ladder field any terminal surface reads — the
+    # timeline latency column (p50/p95/p99/p999/cv) and the messages-table
+    # statistics variant (min/p50/p999/cv). Demanded whenever the store is.
+    terminal_core        => [qw(min p50 p95 p99 p999 cv)],
+    # csv_body: body statistics consumed only by the STATS/MESSAGES CSVs
+    # (and -so sort keys).
+    csv_body             => [qw(mean max p1 p75 p90 std_dev)],
+    extended_percentiles => [qw(p5 p10 p25 p9999 p99999 iqr)],
+    shape_moments        => [qw(skewness kurtosis bimodality_coef)],
+);
+my %STAT_FIELD_GROUP;   # field name -> group name; built by the resolver.
+
+# Resolved demand with provenance: {store}{group} = [consumer names].
+# Only consulted for -V reporting; the hot paths read the cached booleans.
+my %stats_group_demand;
+# Cached per-store group-demand booleans (terminal_core needs no boolean:
+# every store-activating consumer declares it, so terminal_core demand is
+# identical to the store-level demand flag above by construction).
+my ($bucket_stats_demand_csv_body, $bucket_stats_demand_extended, $bucket_stats_demand_shape)    = (0, 0, 0);
+my ($message_stats_demand_csv_body, $message_stats_demand_extended, $message_stats_demand_shape) = (0, 0, 0);
+# Telemetry for the -V statistics-demand section: how often the raw path's
+# O(n) shape-moment pass ran vs was skipped by demand. (The section's
+# moment_source line is derived from resolved config in the emitter, not
+# tracked here.)
+my %stats_demand_telemetry = (
+    shape_pass_executed => 0,
+    shape_pass_skipped  => 0,
+);
+
+# Consumer declarations: which statistics store a surface reads from, when it
+# is active, and which statistic groups it consumes. 'active' closures read
+# post-resolution option state, so the resolver must run after every option
+# (including the -os deprecation fold) is settled. 'groups' is a static list,
+# or a closure for consumers whose group set depends on an option value
+# (-so). The 'sort-on' consumer makes duration-statistic sort keys an
+# explicit demand contributor: sorting on a statistic requires that
+# statistic's group to be computed and stored for every sorted key.
+my @STAT_CONSUMERS = (
+    { name => 'timeline-latency-column', store => 'bucket',
+      active => sub { !$hide_stats && !$heatmap_enabled },
+      groups => ['terminal_core'] },
+    { name => 'stats-csv', store => 'bucket',
+      active => sub { $write_messages_to_csv },
+      groups => [qw(terminal_core csv_body extended_percentiles shape_moments)] },
+    { name => 'messages-table', store => 'message',
+      active => sub { $top_n_messages > 0 },
+      groups => ['terminal_core'] },
+    { name => 'messages-csv', store => 'message',
+      active => sub { $write_messages_to_csv },
+      groups => [qw(terminal_core csv_body extended_percentiles shape_moments)] },
+    { name => 'sort-on', store => 'message',
+      active => sub { defined $sort_key && exists $STAT_FIELD_GROUP{$sort_key} },
+      groups => sub { [ $STAT_FIELD_GROUP{$sort_key} ] } },
+);
 
 # The heatmap and histogram surfaces are display-geometry bound (#201): their
 # bounded partition counts (~70 total) re-bin at end-of-parse into a coarser
@@ -1575,6 +1644,49 @@ sub choose_data_model {
     return resolve_data_model($surface);
 }
 
+# Issue #305: derive per-store per-group statistics demand from the consumer
+# declarations in @STAT_CONSUMERS. Runs once from
+# adapt_to_command_line_options(), after the store-level duration-statistics
+# demand resolution (whose booleans it layers on top of, never re-derives)
+# and after every option those consumers' 'active' closures read is settled.
+# -V sections report resolved state truthfully whether or not statistics ran,
+# so they create no demand here (same rule as the store-level resolution).
+sub resolve_statistics_group_demand {
+    # Field -> group reverse index (also consulted by the sort-on consumer's
+    # 'active' closure and by callers needing "is this field a statistic").
+    %STAT_FIELD_GROUP = ();
+    for my $group (keys %STAT_GROUP_FIELDS) {
+        $STAT_FIELD_GROUP{$_} = $group for @{ $STAT_GROUP_FIELDS{$group} };
+    }
+
+    %stats_group_demand = ();
+    my %store_demand = (
+        bucket  => $bucket_duration_stats_demand,
+        message => $message_duration_stats_demand,
+    );
+    if (!$omit_durations) {
+        for my $consumer (@STAT_CONSUMERS) {
+            next unless $store_demand{ $consumer->{store} };
+            next unless $consumer->{active}->();
+            my $groups = ref $consumer->{groups} eq 'CODE'
+                ? $consumer->{groups}->()
+                : $consumer->{groups};
+            my $label = $consumer->{name} eq 'sort-on'
+                ? "sort-on:$sort_key"
+                : $consumer->{name};
+            push @{ $stats_group_demand{ $consumer->{store} }{$_} }, $label
+                for @$groups;
+        }
+    }
+
+    $bucket_stats_demand_csv_body   = $stats_group_demand{bucket}{csv_body}              ? 1 : 0;
+    $bucket_stats_demand_extended   = $stats_group_demand{bucket}{extended_percentiles}  ? 1 : 0;
+    $bucket_stats_demand_shape      = $stats_group_demand{bucket}{shape_moments}         ? 1 : 0;
+    $message_stats_demand_csv_body  = $stats_group_demand{message}{csv_body}             ? 1 : 0;
+    $message_stats_demand_extended  = $stats_group_demand{message}{extended_percentiles} ? 1 : 0;
+    $message_stats_demand_shape     = $stats_group_demand{message}{shape_moments}        ? 1 : 0;
+}
+
 # Issue #231: classify each known long-flag-name as having been supplied
 # via the command line, the LTL_CONFIG env-var splice, both, or neither.
 # Returns a hash mapping flag-name => list of sources ('command-line',
@@ -2221,6 +2333,67 @@ sub emit_percentile_algorithm_verbose {
     }
 
     push @verbose_output, "=== END percentile-algorithm ===";
+}
+
+# Issue #305: statistics-group demand observability. Reports, per statistics
+# store (bucket, message): the store-level demand boolean, each statistic
+# group's resolved demand with the consumer surfaces that raised it, and the
+# moment source the store's shape statistics would use. A trailing
+# shape_pass line carries the raw-path second-pass execution counters — the
+# observable proof that demand gating skips the O(n) moment pass. The bin
+# path's O(1) sidecar derivation is intentionally NOT counted there; it is
+# reported through moment_source.
+#
+# Locked surface: section name 'statistics-demand'; line shapes
+#   `store: <bucket|message>`
+#   `  store_demand: <0|1>`
+#   `  group <name>: demanded=<0|1> consumers=<comma-joined|->`
+#   `  moment_source: <second_pass|sidecar|none>`
+#   `shape_pass: executed=<N> skipped=<N>`
+# Group order is fixed: terminal_core, csv_body, extended_percentiles,
+# shape_moments. The sort-on consumer is labeled `sort-on:<field>`.
+sub emit_statistics_demand_verbose {
+    return unless section_requested('statistics-demand');
+
+    push @verbose_output, "=== statistics-demand ===";
+
+    my %store_demand = (
+        bucket  => $bucket_duration_stats_demand,
+        message => $message_duration_stats_demand,
+    );
+    my %store_shape_demand = (
+        bucket  => $bucket_stats_demand_shape,
+        message => $message_stats_demand_shape,
+    );
+    my %store_surface = ( bucket => 'bucket-stats', message => 'message-stats' );
+
+    for my $store (qw( bucket message )) {
+        push @verbose_output, "store: $store";
+        push @verbose_output, "  store_demand: " . ($store_demand{$store} ? 1 : 0);
+        for my $group (qw( terminal_core csv_body extended_percentiles shape_moments )) {
+            my $consumers = $stats_group_demand{$store}{$group};
+            my $demanded  = ($consumers && @$consumers) ? 1 : 0;
+            my $names     = $demanded ? join(',', @$consumers) : '-';
+            push @verbose_output, "  group $group: demanded=$demanded consumers=$names";
+        }
+        # Moment source: which mechanism produces this store's shape moments.
+        # Derivable from resolved state: none when shape is undemanded (or the
+        # store inactive); otherwise the store's effective data model decides
+        # between the raw path's O(n) second pass and the bin path's
+        # Welford-Pébay sidecar derivation.
+        my $source = 'none';
+        if ($store_demand{$store} && $store_shape_demand{$store}) {
+            my $dm = choose_data_model($store_surface{$store}) // 'raw';
+            $source = $dm eq 'bin' ? 'sidecar' : 'second_pass';
+        }
+        push @verbose_output, "  moment_source: $source";
+    }
+
+    push @verbose_output, "shape_pass: "
+        . "executed=$stats_demand_telemetry{shape_pass_executed} "
+        . "skipped=$stats_demand_telemetry{shape_pass_skipped}";
+
+    push @verbose_output, "=== END statistics-demand ===";
 }
 
 # Issue #256: timeline-folding observability. Reports the resolved --profile
@@ -5437,42 +5610,49 @@ sub merge_bin_state {
     return if $n_b == 0;
 
     if ($n_a == 0) {
-        # Target empty — adopt source sidecars wholesale.
+        # Target empty — adopt source sidecars wholesale. The moment sidecars
+        # exist on entries only under shape-group demand (#305): the capture
+        # sites never update them otherwise, so the merge skips them
+        # symmetrically rather than writing zero-valued fields.
         $target->{duration_count} = $n_b;
         $target->{_running_mean}  = $source->{_running_mean};
-        $target->{m2_sum}         = $source->{m2_sum} // 0;
-        $target->{m3_sum}         = $source->{m3_sum} // 0;
-        $target->{m4_sum}         = $source->{m4_sum} // 0;
+        if ($message_stats_demand_shape) {
+            $target->{m2_sum}         = $source->{m2_sum} // 0;
+            $target->{m3_sum}         = $source->{m3_sum} // 0;
+            $target->{m4_sum}         = $source->{m4_sum} // 0;
+        }
     } else {
         my $n_ab    = $n_a + $n_b;
         my $mean_a  = $target->{_running_mean};
         my $mean_b  = $source->{_running_mean};
         my $delta   = $mean_b - $mean_a;
-        my $M2_a    = $target->{m2_sum} // 0;
-        my $M2_b    = $source->{m2_sum} // 0;
-        my $M3_a    = $target->{m3_sum} // 0;
-        my $M3_b    = $source->{m3_sum} // 0;
-        my $M4_a    = $target->{m4_sum} // 0;
-        my $M4_b    = $source->{m4_sum} // 0;
-        my $d2      = $delta * $delta;
-        my $d3      = $d2 * $delta;
-        my $d4      = $d2 * $d2;
-        # Order: M4 (reads M2 and M3), M3 (reads M2), M2, mean. All read OLD
-        # state before any field is overwritten.
-        my $M4_ab = $M4_a + $M4_b
-                  + $d4 * $n_a * $n_b * ($n_a*$n_a - $n_a*$n_b + $n_b*$n_b) / ($n_ab * $n_ab * $n_ab)
-                  + 6 * $d2 * ($n_a*$n_a * $M2_b + $n_b*$n_b * $M2_a) / ($n_ab * $n_ab)
-                  + 4 * $delta * ($n_a * $M3_b - $n_b * $M3_a) / $n_ab;
-        my $M3_ab = $M3_a + $M3_b
-                  + $d3 * $n_a * $n_b * ($n_a - $n_b) / ($n_ab * $n_ab)
-                  + 3 * $delta * ($n_a * $M2_b - $n_b * $M2_a) / $n_ab;
-        my $M2_ab = $M2_a + $M2_b + $d2 * $n_a * $n_b / $n_ab;
+        if ($message_stats_demand_shape) {
+            my $M2_a    = $target->{m2_sum} // 0;
+            my $M2_b    = $source->{m2_sum} // 0;
+            my $M3_a    = $target->{m3_sum} // 0;
+            my $M3_b    = $source->{m3_sum} // 0;
+            my $M4_a    = $target->{m4_sum} // 0;
+            my $M4_b    = $source->{m4_sum} // 0;
+            my $d2      = $delta * $delta;
+            my $d3      = $d2 * $delta;
+            my $d4      = $d2 * $d2;
+            # Order: M4 (reads M2 and M3), M3 (reads M2), M2, mean. All read OLD
+            # state before any field is overwritten.
+            my $M4_ab = $M4_a + $M4_b
+                      + $d4 * $n_a * $n_b * ($n_a*$n_a - $n_a*$n_b + $n_b*$n_b) / ($n_ab * $n_ab * $n_ab)
+                      + 6 * $d2 * ($n_a*$n_a * $M2_b + $n_b*$n_b * $M2_a) / ($n_ab * $n_ab)
+                      + 4 * $delta * ($n_a * $M3_b - $n_b * $M3_a) / $n_ab;
+            my $M3_ab = $M3_a + $M3_b
+                      + $d3 * $n_a * $n_b * ($n_a - $n_b) / ($n_ab * $n_ab)
+                      + 3 * $delta * ($n_a * $M2_b - $n_b * $M2_a) / $n_ab;
+            my $M2_ab = $M2_a + $M2_b + $d2 * $n_a * $n_b / $n_ab;
+            $target->{m2_sum}         = $M2_ab;
+            $target->{m3_sum}         = $M3_ab;
+            $target->{m4_sum}         = $M4_ab;
+        }
         my $mean_ab = $mean_a + $delta * $n_b / $n_ab;
         $target->{duration_count} = $n_ab;
         $target->{_running_mean}  = $mean_ab;
-        $target->{m2_sum}         = $M2_ab;
-        $target->{m3_sum}         = $M3_ab;
-        $target->{m4_sum}         = $M4_ab;
     }
 
     # Bin-counter entry merge (only meaningful when source observed at least
@@ -7461,6 +7641,12 @@ sub adapt_to_command_line_options {
         || $write_messages_to_csv                # MESSAGES CSV statistics columns
     ) ) ? 1 : 0;
 
+    # Statistics-group demand (#305): layer per-group demand on top of the
+    # store-level booleans above, from the consumer declarations in
+    # @STAT_CONSUMERS. Must run after the -os deprecation fold and the
+    # store-level resolution, before the runtime-config emission below.
+    resolve_statistics_group_demand();
+
     # Verbose output: runtime-config section (Issues #19, #21, #56, #226, #231).
     # Extended in #231 to surface per-flag resolution under three sub-sections
     # (command-line, environment-variable, defaults) per the locked decision in
@@ -8390,9 +8576,9 @@ sub read_and_process_logs {
                             min            => undef,
                             max            => undef,
                             _running_mean  => 0,
-                            m2_sum         => 0,
-                            m3_sum         => 0,
-                            m4_sum         => 0,
+                            # Moment sidecars only under shape-group demand (#305):
+                            # three per-key numeric fields that nothing reads otherwise.
+                            ($message_stats_demand_shape ? (m2_sum => 0, m3_sum => 0, m4_sum => 0) : ()),
                         } : {
                             occurrences    => 0,
                             total_bytes    => 0,
@@ -8492,6 +8678,10 @@ sub read_and_process_logs {
                                     # distinct from {occurrences}, which counts all matched lines
                                     # for this (category, log_key) regardless of duration presence,
                                     # and matches the raw path's `scalar @{$bucket_data->{durations}}`.
+                                    # duration_count and _running_mean stay unconditional (consumed
+                                    # by core derivation and merge_bin_state); the M2/M3/M4 moment
+                                    # accumulation runs only under shape-group demand (#305) — the
+                                    # moments feed nothing else.
                                     my $n_old = $entry->{duration_count};
                                     my $n     = $n_old + 1;
                                     if ($n_old == 0) {
@@ -8500,17 +8690,19 @@ sub read_and_process_logs {
                                         my $mean     = $entry->{_running_mean};
                                         my $delta    = $duration - $mean;
                                         my $delta_n  = $delta / $n;
-                                        my $delta_n2 = $delta_n * $delta_n;
-                                        my $term1    = $delta * $delta_n * $n_old;
                                         $entry->{_running_mean} = $mean + $delta_n;
-                                        $entry->{m4_sum} +=
-                                              $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
-                                            + 6 * $delta_n2 * $entry->{m2_sum}
-                                            - 4 * $delta_n  * $entry->{m3_sum};
-                                        $entry->{m3_sum} +=
-                                              $term1 * $delta_n * ($n - 2)
-                                            - 3 * $delta_n * $entry->{m2_sum};
-                                        $entry->{m2_sum} += $term1;
+                                        if ($message_stats_demand_shape) {
+                                            my $delta_n2 = $delta_n * $delta_n;
+                                            my $term1    = $delta * $delta_n * $n_old;
+                                            $entry->{m4_sum} +=
+                                                  $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
+                                                + 6 * $delta_n2 * $entry->{m2_sum}
+                                                - 4 * $delta_n  * $entry->{m3_sum};
+                                            $entry->{m3_sum} +=
+                                                  $term1 * $delta_n * ($n - 2)
+                                                - 3 * $delta_n * $entry->{m2_sum};
+                                            $entry->{m2_sum} += $term1;
+                                        }
                                     }
                                     $entry->{duration_count} = $n;
                                 }
@@ -8561,9 +8753,8 @@ sub read_and_process_logs {
                         min            => undef,
                         max            => undef,
                         _running_mean  => 0,
-                        m2_sum         => 0,
-                        m3_sum         => 0,
-                        m4_sum         => 0,
+                        # Moment sidecars only under shape-group demand (#305).
+                        ($bucket_stats_demand_shape ? (m2_sum => 0, m3_sum => 0, m4_sum => 0) : ()),
                     } : {
                         occurrences => 0,
                         total_bytes => 0,
@@ -8615,6 +8806,9 @@ sub read_and_process_logs {
 
                                 # Welford-Pébay online M2/M3/M4 update (Pébay 2008, SAND2008-6212).
                                 # Order matters: M4 reads the old M2 and M3, M3 reads the old M2, M2 last.
+                                # duration_count and _running_mean stay unconditional (core
+                                # derivation consumes them); the M2/M3/M4 accumulation runs only
+                                # under shape-group demand (#305).
                                 my $n_old = $entry->{duration_count};
                                 my $n     = $n_old + 1;
                                 if ($n_old == 0) {
@@ -8623,17 +8817,19 @@ sub read_and_process_logs {
                                     my $mean     = $entry->{_running_mean};
                                     my $delta    = $duration - $mean;
                                     my $delta_n  = $delta / $n;
-                                    my $delta_n2 = $delta_n * $delta_n;
-                                    my $term1    = $delta * $delta_n * $n_old;
                                     $entry->{_running_mean} = $mean + $delta_n;
-                                    $entry->{m4_sum} +=
-                                          $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
-                                        + 6 * $delta_n2 * $entry->{m2_sum}
-                                        - 4 * $delta_n  * $entry->{m3_sum};
-                                    $entry->{m3_sum} +=
-                                          $term1 * $delta_n * ($n - 2)
-                                        - 3 * $delta_n * $entry->{m2_sum};
-                                    $entry->{m2_sum} += $term1;
+                                    if ($bucket_stats_demand_shape) {
+                                        my $delta_n2 = $delta_n * $delta_n;
+                                        my $term1    = $delta * $delta_n * $n_old;
+                                        $entry->{m4_sum} +=
+                                              $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
+                                            + 6 * $delta_n2 * $entry->{m2_sum}
+                                            - 4 * $delta_n  * $entry->{m3_sum};
+                                        $entry->{m3_sum} +=
+                                              $term1 * $delta_n * ($n - 2)
+                                            - 3 * $delta_n * $entry->{m2_sum};
+                                        $entry->{m2_sum} += $term1;
+                                    }
                                 }
                                 $entry->{duration_count} = $n;
                             }
@@ -9637,31 +9833,31 @@ sub calculate_all_statistics {
             # (per-time-bucket statistics). Under 'bin' the statistics are
             # derived from the per-bucket bin-counter partition plus the
             # Welford-Pébay sidecars held on $log_analysis{$bucket} (shared
-            # 22-tuple derivation with the per-message-key surface via
+            # derivation with the per-message-key surface via
             # calculate_statistics_bin); under 'raw' the nearest-rank
-            # primitive runs unchanged. The %log_stats{$bucket} build below is
-            # identical for both paths.
+            # primitive runs unchanged. Both return a hashref carrying only
+            # the demanded statistics groups' fields (#305) — merging it into
+            # the %log_stats{$bucket} literal below is the storage gate:
+            # undemanded statistic fields are never written.
             my $dm = choose_data_model('bucket-stats') // 'raw';
-            my ($min, $mean, $max,
-                $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
-                $std_dev, $cv,
-                $skewness, $kurtosis, $bimodality_coef);
+            my $bucket_demand = {
+                csv_body => $bucket_stats_demand_csv_body,
+                extended => $bucket_stats_demand_extended,
+                shape    => $bucket_stats_demand_shape,
+            };
+            my $stats;
             if ($dm eq 'bin') {
-                ($min, $mean, $max,
-                 $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
-                 $std_dev, $cv,
-                 $skewness, $kurtosis, $bimodality_coef) = calculate_statistics_bin(
+                $stats = calculate_statistics_bin(
                     $log_analysis{$bucket},              # sidecar entry (min/max/duration_count/m*_sum/total_duration/sum_of_squares/occurrences)
                     $bucket_stats_counters{$bucket},     # counter entry (undef when every duration was 0)
                     $aggregated_data,
+                    $bucket_demand,                      # statistics-group demand (#305)
                     \%bucket_stats_audit,                # per-time-bucket audit aggregation (kept separate from message-stats)
                 );
             } else {
-                ($min, $mean, $max,
-                 $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
-                 $std_dev, $cv,
-                 $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
+                $stats = calculate_statistics($aggregated_data, $bucket_demand);
             }
+            $stats //= {};
 
             $log_stats{$bucket} = {
                 occurrences   => $aggregated_data->{occurrences},
@@ -9676,27 +9872,7 @@ sub calculate_all_statistics {
                 count_max     => $log_analysis{$bucket}{count_max},
                 count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? ($log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
                 count_sum     => $log_analysis{$bucket}{count_sum},
-                min           => $min,
-                mean          => $mean,
-                max           => $max,
-                p1            => $p1,
-                p5            => $p5,
-                p10           => $p10,
-                p25           => $p25,
-                p50           => $p50,
-                p75           => $p75,
-                iqr           => $iqr,
-                p90           => $p90,
-                p95           => $p95,
-                p99           => $p99,
-                p999          => $p999,
-                p9999         => $p9999,
-                p99999        => $p99999,
-                std_dev       => $std_dev,
-                cv            => $cv,
-                skewness      => $skewness,
-                kurtosis      => $kurtosis,
-                bimodality_coef => $bimodality_coef,
+                %$stats,
             };
 
         } else {
@@ -9919,54 +10095,35 @@ sub calculate_all_statistics {
                 if( defined $aggregated_data->{total_duration} && $message_duration_stats_demand ) {
                     # Issue #266 dispatch shell, now wired for #287 surface 3.
                     # Under 'raw' (and at default), the existing sort-and-index
-                    # primitive runs unchanged. Under 'bin', the new sibling
+                    # primitive runs unchanged. Under 'bin', the sibling
                     # primitive calculate_statistics_bin() runs against the
                     # per-key sidecar entry (%log_messages{...}) and the
                     # corresponding counter-store entry (%log_messages_counters).
-                    # Commit 1 of #287 ships the stub forwarder; Commit 2 lands
-                    # the real sidecar-and-percentile derivation.
+                    # Both return a hashref carrying only the demanded
+                    # statistics groups' fields (#305); the hash-slice write
+                    # below is the storage gate — undemanded statistic fields
+                    # are never written onto the per-key entry, which is the
+                    # memory lever at high key cardinality.
                     my $dm = choose_data_model('message-stats') // 'raw';
-                    my ($min, $mean, $max,
-                        $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
-                        $std_dev, $cv,
-                        $skewness, $kurtosis, $bimodality_coef);
+                    my $message_demand = {
+                        csv_body => $message_stats_demand_csv_body,
+                        extended => $message_stats_demand_extended,
+                        shape    => $message_stats_demand_shape,
+                    };
+                    my $stats;
                     if ($dm eq 'bin') {
-                        ($min, $mean, $max,
-                         $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
-                         $std_dev, $cv,
-                         $skewness, $kurtosis, $bimodality_coef) = calculate_statistics_bin(
+                        $stats = calculate_statistics_bin(
                             $log_messages{$category}{$log_key},
                             $log_messages_counters{"$category\x1f$log_key"},
                             $aggregated_data,
+                            $message_demand,             # statistics-group demand (#305)
                         );
                     } else {
-                        ($min, $mean, $max,
-                         $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
-                         $std_dev, $cv,
-                         $skewness, $kurtosis, $bimodality_coef) = calculate_statistics($aggregated_data);
+                        $stats = calculate_statistics($aggregated_data, $message_demand);
                     }
-
-                    $log_messages{$category}{$log_key}{min} = $min;
-                    $log_messages{$category}{$log_key}{mean} = $mean;
-                    $log_messages{$category}{$log_key}{max} = $max;
-                    $log_messages{$category}{$log_key}{std_dev} = $std_dev;
-                    $log_messages{$category}{$log_key}{p1} = $p1;
-                    $log_messages{$category}{$log_key}{p5} = $p5;
-                    $log_messages{$category}{$log_key}{p10} = $p10;
-                    $log_messages{$category}{$log_key}{p25} = $p25;
-                    $log_messages{$category}{$log_key}{p50} = $p50;
-                    $log_messages{$category}{$log_key}{p75} = $p75;
-                    $log_messages{$category}{$log_key}{iqr} = $iqr;
-                    $log_messages{$category}{$log_key}{p90} = $p90;
-                    $log_messages{$category}{$log_key}{p95} = $p95;
-                    $log_messages{$category}{$log_key}{p99} = $p99;
-                    $log_messages{$category}{$log_key}{p999} = $p999;
-                    $log_messages{$category}{$log_key}{p9999} = $p9999;
-                    $log_messages{$category}{$log_key}{p99999} = $p99999;
-                    $log_messages{$category}{$log_key}{cv} = $cv;
-                    $log_messages{$category}{$log_key}{skewness} = $skewness;
-                    $log_messages{$category}{$log_key}{kurtosis} = $kurtosis;
-                    $log_messages{$category}{$log_key}{bimodality_coef} = $bimodality_coef;
+                    if ($stats && %$stats) {
+                        @{ $log_messages{$category}{$log_key} }{ keys %$stats } = values %$stats;
+                    }
                     $log_messages{$category}{$log_key}{total_duration_num} = $aggregated_data->{total_duration} if defined $aggregated_data->{total_duration};
                     $log_messages{$category}{$log_key}{total_duration} = format_time( $aggregated_data->{total_duration}, 'ms', 'medium', 'space' ) if defined $aggregated_data->{total_duration};
                 }
@@ -10068,9 +10225,19 @@ sub log_bucket {
     return $value > 0 ? floor(log($value) / log($base)) : 0;
 }
 
-# Function to calculate statistical metrics
+# Function to calculate statistical metrics for the raw data model.
+# $demand is the #305 statistics-group demand descriptor for the calling
+# store: { csv_body => 0|1, extended => 0|1, shape => 0|1 }. terminal_core
+# statistics are always computed (they are demanded whenever the store is).
+# Cheap scalars that other demanded statistics derive from (mean, std_dev,
+# p75) are computed regardless of their own group's demand; the gates control
+# the O(n) shape-moment pass, the extended percentile reads, and — via the
+# returned hashref, which carries ONLY the demanded groups' fields — which
+# statistic fields the caller stores. Fields whose value is legitimately
+# undefined under demand (std_dev at n<2, shape moments at n<4 or degenerate
+# m2) are present-with-undef, matching the pre-#305 contract.
 sub calculate_statistics {
-    my ($bucket_data) = @_;
+    my ($bucket_data, $demand) = @_;
     my $occurrences = $bucket_data->{occurrences};
     return unless $occurrences > 0;
 
@@ -10096,56 +10263,72 @@ sub calculate_statistics {
     # Percentile calculations must use duration_count, not occurrences
     # to correctly index into the sorted durations array
     my $p1    = $sorted[int($duration_count * 0.01)];
-    my $p5    = $sorted[int($duration_count * 0.05)];
-    my $p10   = $sorted[int($duration_count * 0.10)];
-    my $p25   = $sorted[int($duration_count * 0.25)];
     my $p50   = $sorted[int($duration_count * 0.5)];
     my $p75   = $sorted[int($duration_count * 0.75)];
     my $p90   = $sorted[int($duration_count * 0.9)];
     my $p95   = $sorted[int($duration_count * 0.95)];
     my $p99   = $sorted[int($duration_count * 0.99)];
     my $p999  = $sorted[int($duration_count * 0.999)];
-    my $p9999 = $sorted[int($duration_count * 0.9999)] // $sorted[-1];
-    my $p99999 = $sorted[int($duration_count * 0.99999)] // $sorted[-1];
-    my $iqr   = $p75 - $p25;
+
+    my %stats = (
+        min => $min, p50 => $p50, p95 => $p95, p99 => $p99, p999 => $p999, cv => $cv,
+    );
+    if ($demand->{csv_body}) {
+        @stats{qw(mean max p1 p75 p90 std_dev)} = ($mean, $max, $p1, $p75, $p90, $std_dev);
+    }
+    if ($demand->{extended}) {
+        my $p5    = $sorted[int($duration_count * 0.05)];
+        my $p10   = $sorted[int($duration_count * 0.10)];
+        my $p25   = $sorted[int($duration_count * 0.25)];
+        my $p9999 = $sorted[int($duration_count * 0.9999)] // $sorted[-1];
+        my $p99999 = $sorted[int($duration_count * 0.99999)] // $sorted[-1];
+        my $iqr   = $p75 - $p25;
+        @stats{qw(p5 p10 p25 p9999 p99999 iqr)} = ($p5, $p10, $p25, $p9999, $p99999, $iqr);
+    }
 
     # Distribution-shape moments — sample-corrected skewness and excess kurtosis,
     # plus Sarle's bimodality coefficient screening. Sarle BC > 5/9 (~0.555) flags
     # suspect multimodal; threshold is the canonical cutoff from the bimodality
     # literature. Requires n >= 4 (denominator of BC has (n-2)(n-3) factor) and a
-    # non-degenerate distribution (positive second moment).
-    my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
-    if ($duration_count >= 4) {
-        my ($m2_sum, $m3_sum, $m4_sum) = (0, 0, 0);
-        for my $x (@sorted) {
-            my $d = $x - $mean;
-            my $d2 = $d * $d;
-            $m2_sum += $d2;
-            $m3_sum += $d2 * $d;
-            $m4_sum += $d2 * $d2;
+    # non-degenerate distribution (positive second moment). The O(n) moment pass
+    # is the dominant per-key cost of this function and runs only under
+    # shape-group demand (#305).
+    if ($demand->{shape}) {
+        my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
+        if ($duration_count >= 4) {
+            $stats_demand_telemetry{shape_pass_executed}++;
+            my ($m2_sum, $m3_sum, $m4_sum) = (0, 0, 0);
+            for my $x (@sorted) {
+                my $d = $x - $mean;
+                my $d2 = $d * $d;
+                $m2_sum += $d2;
+                $m3_sum += $d2 * $d;
+                $m4_sum += $d2 * $d2;
+            }
+            my $n  = $duration_count;
+            my $m2 = $m2_sum / $n;
+            my $m3 = $m3_sum / $n;
+            my $m4 = $m4_sum / $n;
+            if ($m2 > 0) {
+                my $g1 = $m3 / ($m2 ** 1.5);
+                my $g2 = $m4 / ($m2 ** 2) - 3;
+                $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
+                $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
+                my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
+                $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
+            }
         }
-        my $n  = $duration_count;
-        my $m2 = $m2_sum / $n;
-        my $m3 = $m3_sum / $n;
-        my $m4 = $m4_sum / $n;
-        if ($m2 > 0) {
-            my $g1 = $m3 / ($m2 ** 1.5);
-            my $g2 = $m4 / ($m2 ** 2) - 3;
-            $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
-            $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
-            my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
-            $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
-        }
+        @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef);
+    } elsif ($duration_count >= 4) {
+        $stats_demand_telemetry{shape_pass_skipped}++;
     }
 
-    return ($min, $mean, $max,
-            $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
-            $std_dev, $cv,
-            $skewness, $kurtosis, $bimodality_coef);
+    return \%stats;
 }
 
 # Issue #287: per-message-key bin-counter consumer. Sibling of
-# calculate_statistics() — same 22-tuple return shape, different derivation:
+# calculate_statistics() — same hashref return shape and #305 demand
+# semantics, different derivation:
 #   min/max  — running sidecar (R2.2 of features/287-*.md).
 #   mean     — total_duration / duration_count (matches raw path's denominator).
 #   std_dev, cv — from sum_of_squares accumulator (matches raw path).
@@ -10159,9 +10342,10 @@ sub calculate_statistics {
 # observable output remains byte-identical to -mdm raw. Commit 2 replaces
 # the body with the real sidecar-and-percentile derivation.
 sub calculate_statistics_bin {
-    # Issue #287 Commit 2: real per-statistic derivation. Returns the same
-    # 22-tuple as calculate_statistics(), with derivation per the R3.2 table
-    # in features/287-message-stats-bin-counter-data-model.md:
+    # Issue #287 Commit 2: real per-statistic derivation. Returns a hashref
+    # of computed statistic fields with the same field names and demand
+    # semantics as calculate_statistics() (#305), with derivation per the
+    # R3.2 table in features/287-message-stats-bin-counter-data-model.md:
     #   min/max:                 sidecar (R2.2; populated unconditionally per
     #                            sample so 0-duration samples are captured).
     #   mean:                    total_duration / duration_count (matches the
@@ -10185,7 +10369,15 @@ sub calculate_statistics_bin {
     # #287 per-message-key callers are unchanged; the per-time-bucket caller
     # passes \%bucket_stats_audit so the two surfaces' -V telemetry stay
     # separate when both run bin (e.g. under -dm bin).
-    my ($sidecar_entry, $counter_entry, $aggregated_data, $audit_ref) = @_;
+    # Issue #305: $demand is the statistics-group demand descriptor
+    # { csv_body => 0|1, extended => 0|1, shape => 0|1 }. Undemanded groups'
+    # percentile() calls and the shape derivation are skipped, and the
+    # returned hashref carries only the demanded groups' fields (undemanded
+    # quantiles also make no out_of_range_bounded audit contribution). The
+    # shape_pass telemetry counters are NOT touched here — they count the raw
+    # path's O(n) second pass; this path's O(1) sidecar derivation is
+    # reported via moment_source instead.
+    my ($sidecar_entry, $counter_entry, $aggregated_data, $demand, $audit_ref) = @_;
     $audit_ref //= \%message_stats_audit;
     return unless $sidecar_entry && ($sidecar_entry->{occurrences} // 0) > 0;
     my $n = $sidecar_entry->{duration_count} // 0;
@@ -10204,6 +10396,18 @@ sub calculate_statistics_bin {
         $cv = $mean != 0 ? $std_dev / $mean : undef;
     }
 
+    # Quantiles to derive, by demand: terminal_core always; csv_body and
+    # extended_percentiles when demanded. p75 is additionally needed as an
+    # intermediate whenever extended is demanded (iqr = p75 - p25), even if
+    # csv_body (p75's own group) is not. Explicit [field, quantile] pairs —
+    # deriving field names from $q*100 would risk float stringification
+    # artifacts.
+    my @quantiles = ( [p50 => 0.50], [p95 => 0.95], [p99 => 0.99], [p999 => 0.999] );
+    push @quantiles, ( [p1 => 0.01], [p90 => 0.90] ) if $demand->{csv_body};
+    push @quantiles, [p75 => 0.75] if $demand->{csv_body} || $demand->{extended};
+    push @quantiles, ( [p5 => 0.05], [p10 => 0.10], [p25 => 0.25],
+                       [p9999 => 0.9999], [p99999 => 0.99999] ) if $demand->{extended};
+
     # Percentile ladder. When $counter_entry is undef (the rare case of every
     # observed duration being 0, so counter_update was never called for this
     # key), all percentiles collapse to 0 — matches the raw path's behavior
@@ -10211,21 +10415,13 @@ sub calculate_statistics_bin {
     # into the caller-selected $audit_ref for the -V out_of_range_bounded
     # report; the matching finalize_*_unified() drains the aggregation into
     # the per-consumer telemetry hash.
-    my ($p1, $p5, $p10, $p25, $p50, $p75, $p90, $p95, $p99, $p999, $p9999, $p99999);
+    my %pct;   # percentile field name (e.g. 'p999') -> value
     if ($counter_entry) {
         my %a;
-        ($p1,     $a{p1})     = percentile($counter_entry, 0.01);
-        ($p5,     $a{p5})     = percentile($counter_entry, 0.05);
-        ($p10,    $a{p10})    = percentile($counter_entry, 0.10);
-        ($p25,    $a{p25})    = percentile($counter_entry, 0.25);
-        ($p50,    $a{p50})    = percentile($counter_entry, 0.50);
-        ($p75,    $a{p75})    = percentile($counter_entry, 0.75);
-        ($p90,    $a{p90})    = percentile($counter_entry, 0.90);
-        ($p95,    $a{p95})    = percentile($counter_entry, 0.95);
-        ($p99,    $a{p99})    = percentile($counter_entry, 0.99);
-        ($p999,   $a{p999})   = percentile($counter_entry, 0.999);
-        ($p9999,  $a{p9999})  = percentile($counter_entry, 0.9999);
-        ($p99999, $a{p99999}) = percentile($counter_entry, 0.99999);
+        for my $pair (@quantiles) {
+            my ($key, $q) = @$pair;
+            ($pct{$key}, $a{$key}) = percentile($counter_entry, $q);
+        }
         # Aggregate: 'high' wins over 'low' wins over 'none'.
         for my $q (keys %a) {
             my $new = $a{$q};
@@ -10243,7 +10439,7 @@ sub calculate_statistics_bin {
         # clamping here preserves #224 Decision 4's "min <= p1 ... p99999
         # <= max" Layer 2 invariant while still using bin-counter precision
         # for everything inside the observed range.
-        for ($p1, $p5, $p10, $p25, $p50, $p75, $p90, $p95, $p99, $p999, $p9999, $p99999) {
+        for (values %pct) {
             next unless defined;
             $_ = $min if defined $min && $_ < $min;
             $_ = $max if defined $max && $_ > $max;
@@ -10251,32 +10447,46 @@ sub calculate_statistics_bin {
     } else {
         # All-zero degenerate case: every percentile equals min (which is 0
         # here because durations are non-negative and we observed only zeros).
-        $p1 = $p5 = $p10 = $p25 = $p50 = $p75 = $p90 = $p95 = $p99 = $p999 = $p9999 = $p99999 = ($min // 0);
+        $pct{ $_->[0] } = ($min // 0) for @quantiles;
     }
-    my $iqr = (defined $p75 && defined $p25) ? $p75 - $p25 : undef;
 
-    # Distribution-shape moments — same downstream formulas as calculate_statistics
-    # at ltl:~8895, with m2/m3/m4 sourced from the Welford-Pébay sidecar
-    # accumulators (M_k_sum / n = m_k central moment).
-    my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
-    if ($n >= 4) {
-        my $m2 = $sidecar_entry->{m2_sum} / $n;
-        my $m3 = $sidecar_entry->{m3_sum} / $n;
-        my $m4 = $sidecar_entry->{m4_sum} / $n;
-        if ($m2 > 0) {
-            my $g1 = $m3 / ($m2 ** 1.5);
-            my $g2 = $m4 / ($m2 ** 2) - 3;
-            $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
-            $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
-            my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
-            $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
+    my %stats = (
+        min => $min, p50 => $pct{p50}, p95 => $pct{p95}, p99 => $pct{p99},
+        p999 => $pct{p999}, cv => $cv,
+    );
+    if ($demand->{csv_body}) {
+        @stats{qw(mean max p1 p75 p90 std_dev)} =
+            ($mean, $max, $pct{p1}, $pct{p75}, $pct{p90}, $std_dev);
+    }
+    if ($demand->{extended}) {
+        my $iqr = (defined $pct{p75} && defined $pct{p25}) ? $pct{p75} - $pct{p25} : undef;
+        @stats{qw(p5 p10 p25 p9999 p99999 iqr)} =
+            (@pct{qw(p5 p10 p25 p9999 p99999)}, $iqr);
+    }
+
+    # Distribution-shape moments — same downstream formulas as calculate_statistics,
+    # with m2/m3/m4 sourced from the Welford-Pébay sidecar accumulators
+    # (M_k_sum / n = m_k central moment). O(1) here; gated on demand so the
+    # fields are neither derived nor stored when no consumer reads them.
+    if ($demand->{shape}) {
+        my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
+        if ($n >= 4) {
+            my $m2 = $sidecar_entry->{m2_sum} / $n;
+            my $m3 = $sidecar_entry->{m3_sum} / $n;
+            my $m4 = $sidecar_entry->{m4_sum} / $n;
+            if ($m2 > 0) {
+                my $g1 = $m3 / ($m2 ** 1.5);
+                my $g2 = $m4 / ($m2 ** 2) - 3;
+                $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
+                $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
+                my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
+                $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
+            }
         }
+        @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef);
     }
 
-    return ($min, $mean, $max,
-            $p1, $p5, $p10, $p25, $p50, $p75, $iqr, $p90, $p95, $p99, $p999, $p9999, $p99999,
-            $std_dev, $cv,
-            $skewness, $kurtosis, $bimodality_coef);
+    return \%stats;
 }
 
 sub initialize_empty_time_windows {
@@ -13297,6 +13507,8 @@ emit_heatmap_palette_verbose();
 emit_csv_output_verbose();
 
 emit_percentile_algorithm_verbose();
+
+emit_statistics_demand_verbose();
 
 emit_profile_verbose();
 
