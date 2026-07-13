@@ -66,6 +66,8 @@ store: <bucket|message>
   moment_source: <second_pass|sidecar|none>
   stats_calls: <N>
   group_calc <name>: computed=<N> skipped_demand=<N> ineligible=<N>
+  sort_selection: statistic=<field> defined=<N> fill=<N> demoted=<N>
+  sort_calc: population=<N> topn=<N>
 === END statistics-demand ===
 ```
 
@@ -101,7 +103,28 @@ store: <bucket|message>
     per-group split exists so future per-group compute optionality (e.g.
     #303's two-pass sort computing only the sort statistic's group for the
     population pass) is observable the day it lands.
-- Counters are maintained only when the section is requested (the
+- `sort_selection` / `sort_calc` — calculated-statistic sort path
+  observability (#303). Emitted only for the store where the two-pass sort
+  selection ran: the message store, when `-so` names a duration-statistic
+  field. Absent on every other run (available-value sorts, bucket store) —
+  the absence is contractual and harness-assertable.
+  - `statistic` — the resolved sort field (e.g. `p99`, `skewness`).
+  - `defined` — keys ranked by the computed sort value (the defined block),
+    summed across message categories (highlight + plain).
+  - `fill` — keys with no defined value for the sort statistic: below the
+    statistic's eligibility floor (percentiles/min/max/mean n ≥ 1,
+    std_dev/cv n ≥ 2, shape n ≥ 4), no observed durations, or demoted (see
+    below). They keep their place in the reference set and fill remaining
+    display slots ranked by occurrences.
+  - `demoted` — the subset of `fill` that met the eligibility floor but
+    whose sort value computed to undef (degenerate data, e.g. zero-mean
+    `cv`, zero-variance shape moments). `demoted` ≤ `fill`; `defined +
+    fill` = the store's total key population.
+  - `sort_calc population` — pass-1 primitive invocations (defined-block
+    candidates, minimal per-call demand: only the sort statistic's group).
+    `topn` is derived at emit time as `stats_calls − population`: every
+    store call not made by the population pass came from the top-N pass
+    (full demanded statistics for displayed keys only).
   `$stats_demand_telemetry_active` gate set in
   `resolve_statistics_group_demand()`): per-key increments in the
   statistics primitives would otherwise tax every run at high key

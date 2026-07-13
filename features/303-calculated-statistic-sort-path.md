@@ -250,9 +250,23 @@ commit.
 
 ## Status
 
-- Landed on branch `303-calculated-statistic-sort-path`: per-store
-  `stats_calls` + per-group `group_calc computed/skipped_demand/ineligible`
-  counters in `-V statistics-demand` (the before/after instrument).
-- Next: premise re-validation probe → benchmark scenarios → sort contract +
-  eligibility split + two-pass implementation → production-scale
-  measurement → contingency decision.
+- Landed on branch `303-calculated-statistic-sort-path`:
+  - per-store `stats_calls` + per-group `group_calc` counters in
+    `-V statistics-demand` (the before/after instrument);
+  - premise re-validation probe (results above);
+  - `sort-p99` / `sort-skewness` benchmark scenarios (suite 7×9=63) with
+    `compare-results.sh` table columns;
+  - the sort contract + eligibility split + two-pass implementation
+    (memory disposition (a): population-pass values are transient; the
+    `print_message_summary` fallback sort is removed — both sort branches
+    record `%message_key_order`);
+  - `sort_selection` / `sort_calc` observability lines with feature-doc
+    contract and harness assertions (sabotage-proven).
+- Implementation notes: the fill block honors `-sa` (the occurrences
+  ranking reuses the occurrences-sort conventions including direction);
+  the two-stage display-cut comparators are intentionally inlined per
+  block, matching the #302 idiom, rather than routed through a shared
+  coderef-based helper — coderef comparators measurably tax
+  population-scale sorts.
+- Next: production-scale measurement (before/after, `-mem` HWMs both
+  dispositions) → findings analysis → contingency decision.

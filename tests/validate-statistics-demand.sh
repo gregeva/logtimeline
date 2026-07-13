@@ -228,6 +228,12 @@ if body=$(extract_section "$out"); then
         asserts     'On a terminal-only run the message store demand-skips the shape derivation for every eligible key — the observable proof that demand gating fires' \
         produced_by 'calculate_statistics() in ltl (group_calc counters in %stats_demand_telemetry)' \
         contract    "$CONTRACT"
+    assert_command \
+        command     "! grep -qE '^  sort_(selection|calc):' '$sm'" \
+        label       'no sort_selection/sort_calc lines under the default occurrences sort' \
+        asserts     'The #303 sort-path lines appear only when a calculated-statistic sort ran; an available-value sort (default occurrences) emits neither' \
+        produced_by 'emit_statistics_demand_verbose() in ltl (sort_selection telemetry populated only on the two-pass sort path)' \
+        contract    "$CONTRACT"
 fi
 echo
 
@@ -297,9 +303,41 @@ if body=$(extract_section "$out"); then
         produced_by 'emit_statistics_demand_verbose() in ltl' \
         contract    "$CONTRACT"
     assert_line "$sm" \
-        pattern     '^  group_calc shape_moments: computed=[1-9][0-9]* skipped_demand=0 ineligible=[0-9]+$' \
-        asserts     'A statistic sort computes the sort statistic for the entire eligible key population — the population-wide cost #303 targets, measured by stats_calls and the per-group computed counts' \
-        produced_by 'calculate_statistics() in ltl (group_calc counters; all-keys path in calculate_all_statistics)' \
+        pattern     '^  group_calc shape_moments: computed=[1-9][0-9]* skipped_demand=0 ineligible=0$' \
+        asserts     'Under the #303 two-pass sort the shape derivation runs only for keys that met the n>=4 eligibility floor (population pass) or won a display slot (top-N pass) — nothing is demand-skipped and no ineligible key ever reaches the primitive' \
+        produced_by 'calculate_statistics() in ltl (group_calc counters; two-pass sort path in calculate_all_statistics)' \
+        contract    "$CONTRACT"
+    # Sabotage record (HARNESS-DESIGN.md § Proving a new assertion can fail),
+    # 2026-07-13, three probes against emit_statistics_demand_verbose(), each
+    # restored after confirming the expected failure with the full
+    # asserts/produced_by/contract triple and exit 1:
+    #   1. key renamed sort_selection -> sort_sel  => sort_selection line
+    #      assertion failed;
+    #   2. population count emitted +1             => the population =
+    #      defined + demoted invariant failed;
+    #   3. sort lines emitted unconditionally      => both absence assertions
+    #      (scenario-1 message store, scenario-3 bucket store) failed.
+    assert_line "$sm" \
+        pattern     '^  sort_selection: statistic=skewness defined=[1-9][0-9]* fill=[1-9][0-9]* demoted=[0-9]+$' \
+        asserts     'The calculated-statistic sort reports its eligibility split: keys ranked by the computed value (defined) vs keys ranked by occurrences (fill), with demoted counting eligible keys whose value computed to undef' \
+        produced_by 'calculate_all_statistics() in ltl (sort_selection telemetry), emitted by emit_statistics_demand_verbose()' \
+        contract    "$CONTRACT"
+    assert_line "$sm" \
+        pattern     '^  sort_calc: population=[1-9][0-9]* topn=[1-9][0-9]*$' \
+        asserts     'The two-pass sort attributes primitive invocations per pass: population (defined-block candidates, sort-statistic group only) and topn (displayed keys, full demanded statistics)' \
+        produced_by 'calculate_all_statistics() in ltl (population_calls telemetry); topn derived at emit time as stats_calls minus population' \
+        contract    "$CONTRACT"
+    assert_command \
+        command     "pop=\$(grep -oE '^  sort_calc: population=[0-9]+' '$sm' | grep -oE '[0-9]+\$'); def=\$(grep -oE 'defined=[0-9]+' '$sm' | grep -oE '[0-9]+\$'); dem=\$(grep -oE 'demoted=[0-9]+' '$sm' | grep -oE '[0-9]+\$'); [[ -n \"\$pop\" && -n \"\$def\" && -n \"\$dem\" && \"\$pop\" -eq \$((def + dem)) ]]" \
+        label       'population calls = defined + demoted (every pass-1 call produced a ranked value or a demotion)' \
+        asserts     'Every population-pass invocation is accounted for: it either yielded a defined sort value or demoted the key to the fill block' \
+        produced_by 'calculate_all_statistics() in ltl (two-pass sort path)' \
+        contract    "$CONTRACT"
+    assert_command \
+        command     "! grep -qE '^  sort_(selection|calc):' '$sb'" \
+        label       'no sort_selection/sort_calc lines on the bucket store' \
+        asserts     'The sort-path lines are emitted only for the store where the two-pass selection ran (the message store); their absence elsewhere is contractual' \
+        produced_by 'emit_statistics_demand_verbose() in ltl (sort_selection telemetry is message-store only)' \
         contract    "$CONTRACT"
 fi
 echo

@@ -106,7 +106,7 @@ my %verbose_section_registry = (
         description => 'Per-surface effective percentile algorithm: resolved data model and algorithm name for histogram, heatmap, message-stats, and bucket-stats (Issue #280).',
     },
     'statistics-demand' => {
-        description => 'Per-store resolved statistics-group demand with raising consumers, per-store moment source, and per-store statistics-calculation counters (invocations plus per-group computed/skipped_demand/ineligible) (Issues #305, #303).',
+        description => 'Per-store resolved statistics-group demand with raising consumers, per-store moment source, per-store statistics-calculation counters (invocations plus per-group computed/skipped_demand/ineligible), and calculated-statistic sort selection (defined/fill split, per-pass call attribution) (Issues #305, #303).',
     },
     'profile' => {
         description => 'Timeline folding (--profile): resolved mode, fold period, included weekdays, and included vs dropped sample counts (Issue #256).',
@@ -582,6 +582,12 @@ my ($message_stats_demand_csv_body, $message_stats_demand_extended, $message_sta
 #   {store}{$group}{ineligible}               — calls where the group cannot be
 #                                               derived regardless of demand
 #                                               (shape moments need n >= 4)
+#   {store}{sort_selection}                   — calculated-statistic sort path
+#                                               only (#303): {statistic} sort
+#                                               field, {defined}/{fill}/{demoted}
+#                                               block sizes summed across
+#                                               categories, {population_calls}
+#                                               pass-1 primitive invocations
 # Maintained only when the statistics-demand section is requested (the
 # $stats_demand_telemetry_active gate below) so the per-key increments cost
 # nothing on non-observability runs — at high key cardinality every statistics
@@ -2417,6 +2423,19 @@ sub emit_statistics_demand_verbose {
                 . " computed="       . ($g->{computed}       // 0)
                 . " skipped_demand=" . ($g->{skipped_demand} // 0)
                 . " ineligible="     . ($g->{ineligible}     // 0);
+        }
+        # Calculated-statistic sort selection (#303): emitted only for the
+        # store where the two-pass sort path ran (message store, statistic
+        # sort key active). topn attribution is derived: every store call
+        # not made by the population pass came from the top-N pass.
+        if (my $s = $t->{sort_selection}) {
+            push @verbose_output, "  sort_selection: statistic=" . $s->{statistic}
+                . " defined=" . ($s->{defined} // 0)
+                . " fill="    . ($s->{fill}    // 0)
+                . " demoted=" . ($s->{demoted} // 0);
+            push @verbose_output, "  sort_calc:"
+                . " population=" . ($s->{population_calls} // 0)
+                . " topn=" . (($t->{stats_calls} // 0) - ($s->{population_calls} // 0));
         }
     }
 
@@ -10007,7 +10026,11 @@ sub calculate_all_statistics {
             # Collect and sort the log keys based on the count within each log_key
             my (@sorted_log_keys, @top_keys);
 
-            if( $sort_key !~ /^(min|mean|max|std_dev|cv|iqr|skewness|kurtosis|bimodality_coef|p1|p5|p10|p25|p50|p75|p90|p95|p99|p999|p9999|p99999)$/ ) {
+            # A calculated-statistic sort key is exactly a key of the #305
+            # group registry (%STAT_FIELD_GROUP covers the full 22-field
+            # duration ladder); available-value sort keys (occurrences,
+            # total_duration_num, bytes, impact, count_*) are not in it.
+            if( !exists $STAT_FIELD_GROUP{$sort_key} ) {
                 # Two-stage selection (Issue #302). Only the top N keys are ever
                 # displayed, but a deterministic total order (the metric, then a
                 # tiebreaker) is needed to pick them reproducibly. On a
@@ -10074,8 +10097,147 @@ sub calculate_all_statistics {
                 # Capture only the top N log keys for calculations if possible
                 @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)];
             } else {
-                # Sort by statistical metric which first needs to be calculated for all messages (will inevitably take longer)
-                @top_keys = sort keys %{$log_messages{$category}};
+                # Calculated-statistic sort (#303): the sort value does not
+                # exist until statistics are computed, so the pool selection
+                # above cannot apply directly. Selection runs in two passes,
+                # per the sort contract in
+                # features/303-calculated-statistic-sort-path.md:
+                #
+                #   Defined block: keys whose observation count meets the
+                #   statistic's eligibility floor rank by the computed value
+                #   in the requested direction (-sa means smallest defined
+                #   value first, never undefined first).
+                #   Fill block: keys without a defined value stay in the
+                #   reference set and fill any remaining display slots ranked
+                #   by occurrences under the same conventions as the
+                #   occurrences sort. Their statistic columns render blank —
+                #   the blank is the signal; no notice is printed.
+                #
+                # Pass 1 (population, defined block only) computes just the
+                # sort statistic's demand group per key into a transient map;
+                # nothing is stored on the per-key entry, so population-wide
+                # memory stays flat at high key cardinality (#323). Keys
+                # whose value computes to undef despite meeting the floor
+                # (degenerate data, e.g. zero-mean cv) demote to the fill
+                # block. Pass 2 is the shared loop below: full demanded
+                # statistics for only the keys that won a display slot.
+                my $n_floor = $sort_key =~ /^(?:skewness|kurtosis|bimodality_coef)$/ ? 4
+                            : $sort_key =~ /^(?:std_dev|cv)$/                        ? 2
+                            :                                                          1;
+                my $sort_group = $STAT_FIELD_GROUP{$sort_key};
+                my $population_demand = {
+                    store    => 'message',
+                    csv_body => ($sort_group eq 'csv_body'             ? 1 : 0),
+                    extended => ($sort_group eq 'extended_percentiles' ? 1 : 0),
+                    shape    => ($sort_group eq 'shape_moments'        ? 1 : 0),
+                };
+                my $dm = choose_data_model('message-stats') // 'raw';
+
+                my (%sort_value, @fill_block);
+                my ($demoted, $population_calls) = (0, 0);
+                foreach my $log_key (keys %{$log_messages{$category}}) {
+                    my $entry = $log_messages{$category}{$log_key};
+                    my $n = $message_stats_capture_mode eq 'bin'
+                        ? ($entry->{duration_count} // 0)
+                        : scalar @{ $entry->{durations} // [] };
+                    if (!$message_duration_stats_demand || $n < $n_floor
+                        || !defined $entry->{occurrences}) {
+                        push @fill_block, $log_key;
+                        next;
+                    }
+                    my $stats;
+                    if ($dm eq 'bin') {
+                        $stats = calculate_statistics_bin(
+                            $entry,
+                            $log_messages_counters{"$category\x1f$log_key"},
+                            {},
+                            $population_demand,
+                        );
+                    } else {
+                        # The durations arrayref is aliased, not copied:
+                        # calculate_statistics sorts into its own copy and
+                        # never mutates its input.
+                        $stats = calculate_statistics({
+                            occurrences    => $entry->{occurrences},
+                            total_duration => $entry->{total_duration},
+                            sum_of_squares => $entry->{sum_of_squares},
+                            durations      => $entry->{durations},
+                        }, $population_demand);
+                    }
+                    $population_calls++;
+                    my $value = $stats ? $stats->{$sort_key} : undef;
+                    if (defined $value) {
+                        $sort_value{$log_key} = $value;
+                    } else {
+                        $demoted++;
+                        push @fill_block, $log_key;
+                    }
+                }
+
+                # Defined block: the same two-stage display-cut selection as
+                # the available-value branch above, on the transient values.
+                my @defined_sorted;
+                if (%sort_value) {
+                    my @by_stat = sort {
+                        $sort_ascending
+                            ? ($sort_value{$a} <=> $sort_value{$b})
+                            : ($sort_value{$b} <=> $sort_value{$a});
+                    } keys %sort_value;
+                    my $cut = min($#by_stat, $top_n_messages - 1);
+                    my $cut_val = $sort_value{$by_stat[$cut]};
+                    my $pool_end = $cut;
+                    $pool_end++ while $pool_end < $#by_stat
+                        && $sort_value{$by_stat[$pool_end + 1]} == $cut_val;
+                    my @pool = @by_stat[0 .. $pool_end];
+                    @defined_sorted = sort {
+                        ($sort_ascending
+                            ? ($sort_value{$a} <=> $sort_value{$b})
+                            : ($sort_value{$b} <=> $sort_value{$a}))
+                        || ($a cmp $b);
+                    } @pool;
+                }
+
+                # Fill block: ranked by occurrences, only when display slots
+                # remain after the defined block. Same two-stage idiom.
+                my @fill_sorted;
+                my $fill_needed = $top_n_messages - scalar(@defined_sorted);
+                if ($fill_needed > 0 && @fill_block) {
+                    my @by_occ = sort {
+                        my $occurrences_a = $log_messages{$category}{$a}{occurrences} // 0;
+                        my $occurrences_b = $log_messages{$category}{$b}{occurrences} // 0;
+                        $sort_ascending
+                            ? ($occurrences_a <=> $occurrences_b)
+                            : ($occurrences_b <=> $occurrences_a);
+                    } @fill_block;
+                    my $cut = min($#by_occ, $fill_needed - 1);
+                    my $cut_val = $log_messages{$category}{$by_occ[$cut]}{occurrences} // 0;
+                    my $pool_end = $cut;
+                    $pool_end++ while $pool_end < $#by_occ
+                        && (($log_messages{$category}{$by_occ[$pool_end + 1]}{occurrences} // 0) == $cut_val);
+                    my @occ_pool = @by_occ[0 .. $pool_end];
+                    @fill_sorted = sort {
+                        my $occurrences_a = $log_messages{$category}{$a}{occurrences} // 0;
+                        my $occurrences_b = $log_messages{$category}{$b}{occurrences} // 0;
+                        ($sort_ascending
+                            ? ($occurrences_a <=> $occurrences_b)
+                            : ($occurrences_b <=> $occurrences_a))
+                        || ($a cmp $b);
+                    } @occ_pool;
+                }
+
+                @sorted_log_keys = (@defined_sorted, @fill_sorted);
+                $message_key_order{$category} = \@sorted_log_keys;
+                @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)];
+
+                if ($stats_demand_telemetry_active) {
+                    my $t = $stats_demand_telemetry{message} //= {};
+                    my $s = $t->{sort_selection} //= {};
+                    $s->{statistic} = $sort_key;
+                    $s->{defined}          += scalar keys %sort_value;
+                    $s->{fill}             += scalar @fill_block;
+                    $s->{demoted}          += $demoted;
+                    $s->{population_calls} += $population_calls;
+                }
             }
 
             foreach my $log_key (@top_keys) {
@@ -12948,27 +13110,12 @@ sub print_message_summary {
     my %sorted_keys = ( 'highlight' => [], 'plain' => [] );
 
     foreach my $grouping ( qw( highlight plain ) ) {
-        # Reuse the ordering already computed in calculate_all_statistics when the
-        # sort metric is an available field (Issue #302): same keys, same
-        # comparator, same result — re-sorting a high-cardinality category here
-        # is redundant. Only the top N are ever displayed, and that ordering
-        # already selected them. The order is absent only when sorting on a
-        # computed statistic (ordered only after the stats exist), so fall back
-        # to a local sort there.
-        if ($message_key_order{$grouping}) {
-            $sorted_keys{$grouping} = $message_key_order{$grouping};
-            next;
-        }
-        my @sorted_keys = sort {
-            my $occurrences_a = $log_messages{$grouping}{$a}{$sort_key} // 0;
-            my $occurrences_b = $log_messages{$grouping}{$b}{$sort_key} // 0;
-            ($sort_ascending
-                ? ($occurrences_a <=> $occurrences_b)
-                : ($occurrences_b <=> $occurrences_a))
-            || ($a cmp $b);
-        } keys %{$log_messages{$grouping}};
-
-        $sorted_keys{$grouping} = \@sorted_keys;
+        # The display ordering is computed exactly once, in
+        # calculate_all_statistics, for every sort type — the available-value
+        # pool selection (#302) or the calculated-statistic two-pass
+        # selection (#303) — and reused here: same keys, same comparator,
+        # same result. A grouping with no message keys has no recorded order.
+        $sorted_keys{$grouping} = $message_key_order{$grouping} // [];
     }
 
     # Initialize the hash to store top message counts
