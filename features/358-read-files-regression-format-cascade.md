@@ -127,6 +127,48 @@ permits spaces in authuser, but servers typically log `-` or encode; zero such l
 exist in the probe corpus, and Tomcat/ThingWorx always emit `-`. Accepting this
 narrowing is a disposition decision for the fix.
 
+## Cascade-wide lazy-prefix survey (2026-07-13)
+
+Four patterns in the `read_and_process_logs()` format cascade carry the `(.+? ){3}`
+prefix. Per-pattern cost on the 276,209-line with-duration probe file (each pattern
+run in isolation against every line):
+
+| pattern | role on this file | lazy prefix | deterministic prefix |
+|---|---|---|---|
+| match_type 12 (CodeBeamer `[Nms] [Ts]`) | fails every line | 0.05 s (0.18 µs/line) | 0.05 s |
+| match_type 4 (common, end-anchored) | fails every line | 2.84 s (10.3 µs/line) | 0.29 s (1.0 µs/line) |
+| match_type 3 (with-duration — matches) | matches every line | 0.24 s (0.85 µs/line) | 0.23 s |
+| match_type 9 (enhanced/JBoss: quoted referrer + UA + trailing duration) | fails every line | 2.83 s (10.2 µs/line) | 0.28 s (1.0 µs/line) |
+
+Full shipped cascade (12 → 4 → 3) over the file: 3.15 s lazy vs 0.58 s
+all-deterministic — 5.4x.
+
+Findings:
+
+1. **match_type 12 is free despite running first**: its regex contains the mandatory
+   literal `ms] [`, so Perl's fixed-substring pre-check rejects non-CodeBeamer lines
+   before the regex engine starts. This is why the v0.15.1 baseline stayed fast with
+   this pattern ahead of the cascade. match_type 4 and 9 have no such distinctive
+   literal (everything they require appears in every access-log line), so the engine
+   runs to an expensive backtracking failure.
+2. **match_type 9 has the identical pathology (~10 µs/line on failure) but is latent
+   on with-duration files** — match_type 3 matches those lines before the cascade
+   reaches 9. It taxes lines that fall through the whole access-log family (unmatched
+   lines in mixed-format files). The deterministic prefix fixes it identically; as a
+   fail-only path on real corpora it should ride along in the #358 fix.
+3. **match_type 9 is shadowed dead code for its own format** — a genuine
+   enhanced/JBoss line is captured by match_type 3 first with duration lost (undef)
+   and junk thread/session captures. Same shadowing-defect class #345 fixed for
+   match_type 4, but the casualty is a real observed duration. Latent in every
+   released version (match_type 3 precedes 9 in v0.15.1 too); not part of the #358
+   regression. Tracked as #365 (enhanced/JBoss format shadowed, duration silently
+   lost); the fix ordering must be coordinated with the #358 fix.
+
+Recommended fix shape for #358: apply the deterministic `([^ ]+ ){3}` prefix to the
+match_type 4, 3, and 9 patterns (match_type 12 optionally for consistency — no
+measured gain), accepting the spaces-in-authuser narrowing documented above. The
+match_type 9 reachability defect is fixed separately under #365.
+
 ## Measurement hygiene notes
 
 - `tests/baseline/results/305-post.tsv` totals are poisoned by this regression (noted
