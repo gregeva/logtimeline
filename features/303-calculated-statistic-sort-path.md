@@ -5,133 +5,216 @@
 Sorting the messages table by a computed statistic (`-so p99`, `-so skewness`,
 any ladder field) cannot use the #302/#304 candidate-pool selection, because
 the sort value does not exist until statistics are computed. The current path
-(`## STATS FOR TOP LOG MESSAGES ##` in `ltl`, the `else` branch of the
-`$sort_key` ladder-field regex) therefore computes and stores statistics for
-**every** message key, then sorts the full population — versus the
-available-value path, which computes stats only for the displayed pool.
+(the `else` branch of the `$sort_key` ladder-field regex in
+`calculate_all_statistics`, `## STATS FOR TOP LOG MESSAGES ##`) computes and
+stores statistics for **every** message key, then sorts the full population —
+versus the available-value path, which computes stats only for the displayed
+pool.
 
 Both CSV writers slice to top-N, so the population-wide compute exists only
 to feed the sort; nothing else consumes it. This population-wide compute and
-storage is also why #303 blocks #323 (memory-model research): it directly
-shapes per-key memory on statistic-sort runs.
+storage is also why #303 blocks #323 (memory-model research).
 
 ## GitHub Issue
 
 https://github.com/gregeva/logtimeline/issues/303
 
-## Decision record (2026-07-13 design interview)
+## Design record (2026-07-13 design interview)
 
-The following were resolved with the architect before design/implementation:
+Established conversationally with the architect. This record supersedes the
+earlier questionnaire-derived decision list in full.
 
-1. **Benchmark coverage (issue step 1) — bundled suite + targeted.** Two new
-   scenarios are added to `SCENARIOS` in `tests/baseline/run-benchmark.sh`:
-   one `-so p99` (tail percentile — the proxy-poolable path) and one
-   `-so skewness` (shape statistic — exercises the O(n) shape pass and the
-   no-cheap-proxy fallback path). Cross-product grows 7×7=49 → 7×9=63.
-   Prior baselines (v0.16.0 and earlier) lack these scenarios; their first
-   release-to-release comparison happens at the next release gate.
-2. **Issue-level before/after measurement is targeted only.** The bundled
-   suite is a release-gate instrument and is not run during issue work. The
-   optimization's before/after uses targeted single-file, single-scenario
-   runs, median of 3 minimum.
-3. **Design shape: proxy pool with two-pass fallback.**
-   - *Proxy pool*: cheap safe-bound scan over all keys → candidate pool →
-     full (demanded-group) statistics on the pool only → sort the pool.
-   - *Two-pass fallback* (for metrics with no safe cheap proxy): pass 1
-     computes only the sort statistic's group for all keys via a minimal
-     per-call demand descriptor; pass 2 computes full demand for the top-N.
-     The #305 demand descriptor is per-call precisely to permit this without
-     reworking the registry.
-4. **Proxy-safety mechanism: prototype both, decide on measurement.** Build
-   the static per-metric proxy table first (max-proxy where safe AND tight:
-   tail percentiles and `max` itself; everything else → fallback), then probe
-   whether the adaptive verify-and-expand loop (build pool → verify no
-   excluded key's safe bound beats the value at the display cut → expand
-   until proven) ever pays on realistic distributions before adopting it.
-5. **Ascending sorts are in scope, symmetrically.** `-sa` with a statistic
-   sort uses the mirrored proxy: `min` is the safe bound for ascending
-   percentile sorts (pNN ≥ min always). Bin mode already tracks per-key
-   min/max incrementally (free proxy); raw mode's min scan costs the same as
-   the max scan.
-6. **Pass-1 / population memory disposition: defer to measurement.**
-   Candidate designs: (a) transient — proxy/pass-1 values live in a temporary
-   sort structure and are discarded, `%log_messages` stores statistics only
-   for the displayed pool (the outcome #323 wants); (b) store the sort
-   statistic's field population-wide. Measure `-mem` per-structure HWMs both
-   ways before locking the design.
-7. **Observability: extend the `-V statistics-demand` section.** Sort-path
-   lines (proxy used, pool size vs population, verify/expansion events,
-   per-pass call attribution) join the existing per-store `stats_calls` /
-   `group_calc` counters. Per the test-harness contract, the section contract
-   in `features/duration-statistics.md`, `tests/validate-statistics-demand.sh`,
-   and the code change land in the same commit.
-8. **Correctness bar: byte-identity, harness-enforced.** Displayed top-N and
-   CSV rows under any `-so <statistic>` must be byte-identical to the
-   current all-keys path, including tie resolution at the display cut
-   (anchoring lesson from #302). Enforced by `-so` scenarios added to
-   `validate-statistics-demand.sh` (with prove-can-fail sabotage recorded)
-   plus direct pre/post diffs during development.
-9. **Measurement fixture: TBD following analysis.** The issue's measurements
-   used an uncommitted constructed fixture (~21.7K duration-bearing keys via
-   `-iqs`); it does not exist and is not restorable. The targeted-measurement
-   fixture (committed log at natural cardinality, reconstructed
-   high-cardinality case, or both) is chosen once the analysis phase
-   establishes what cardinality the question needs.
+### Target workload and priority
 
-## Premise re-validation (mandatory before implementing)
+- The path this must be fast for is the **turn-by-turn terminal analyst**:
+  single production log target (one busy day can be millions of lines; small
+  systems reach that volume over a week), repeated re-execution as options
+  are adjusted, output consumed only through the top-N table.
+- The **CSV/export flow is explicitly allowed to stay slower** — it is the
+  less frequent, broad-brush use (export for follow-up tooling or
+  period-to-period comparison persistence).
+- **The default `occurrences` sort is sacred**: it must not regress at all.
+  A statistic sort is opt-in — the analyst knows what they asked for — so a
+  visible, bounded overhead from multi-pass computation is acceptable.
+  Parity with the occurrences sort is desirable but not required.
+- The statistic-sort feature itself is new and as yet unused in anger; shape
+  statistics (`skewness`, `kurtosis`, `bimodality_coef`) are anticipated to
+  be at least as valuable to analysts as tail percentiles.
 
-All quantitative claims in the issue body predate #305 and must be
-re-measured on the current code before the optimization is designed against
-them:
+### Production population shape (grounding, from the #323 measurement)
 
-- The ≈2× `calculate_statistics` cost (0.82s vs 0.41s at 21.7K keys) was
-  measured when every invocation computed the full ladder. Post-#305, a
-  terminal-only `-so p99` run computes only `terminal_core` population-wide
-  (p99 is in `terminal_core`; csv_body/extended/shape are skipped), so the
-  gap has likely narrowed. A `-so skewness` run additionally computes the
-  shape group population-wide and likely retains more of the gap.
-- The ~38× max-scan-vs-full-stats microbench likewise assumed full-ladder
-  compute per key.
+One ThingWorx access-log node, ~8M lines: 600,345 distinct message keys;
+**96.7% occur exactly once**, 99.1% occur ≤5 times; ~193 hot keys carry 77%
+of all samples. Consequences for this path:
 
-Probe protocol: dev-scale targeted runs on the current branch, using the
-`-V statistics-demand` per-store `stats_calls` and `group_calc` counters
-(landed on this branch) as the demanded-work denominator, per the #306
-lesson (features/305-shape-moment-extended-percentile-demand.md § #306
-investigation).
+- The population pass is Edge-A dominated: per-key sub-call overhead and
+  per-key stored fields across ~600k mostly-singleton keys — not per-sample
+  statistics arithmetic (a singleton `%log_messages` entry measures ~2.3 KB,
+  of which the durations array is ~3%).
+- For statistics with an eligibility floor (std_dev/cv at n≥2, shape at n≥4
+  plus non-degenerate m2), the eligible population is a small fraction of
+  the key population (n≥2 keeps ~3%; n≥4 far less).
+- For percentiles/min/max/mean on access logs, every line carries a
+  duration, so the mathematically-defined population is the full 600k —
+  `-so p99` descending at high cardinality is the one heavy case.
 
-## Design notes preserved from the issue
+### The sort contract (behavior change, replaces undef-sorts-as-zero)
 
-- `max` is a safe upper bound for any percentile; safe AND tight for tail
-  percentiles, safe but loose for central ones (p25/p50/p75) — `mean`
-  predicts central percentiles better but is not a safe bound.
-- `mean` is derivable for free from already-accumulated
-  `total_duration`/`occurrences`; `std_dev`/`cv`/`iqr`/shape moments have no
-  cheap safe bound → fallback path.
-- Maintaining min/max incrementally at parse time was prototyped in #302 and
-  rejected: ~2% on `read_files` paid by every run. An at-sort-time scan only
-  when the sort needs it avoids the universal cost (consistent with the #306
-  standing guidance: per-sample read-loop work is the most expensive place
-  to add anything).
+Statistics are derived from durations; a key with no data for the sort
+statistic must not be *ranked by* it — generating a rank from nothing is
+misleading. The comparator's current `// 0` treatment (undef competes as
+zero; under `-sa` duration-less keys flood the top) is replaced by:
+
+1. **Defined block first**: keys with a defined value for the sort statistic,
+   ordered by that value in the requested direction (`-sa` applies here —
+   ascending means "smallest defined value first", never "undefined first").
+2. **Fill block second**: keys without a defined value stay in the reference
+   set (the analyst did not ask to filter them out). Remaining top-N slots
+   are filled from them ranked by **occurrences**, reusing the existing
+   occurrences-sort conventions unchanged.
+3. **Tiebreaker is the message key, everywhere, unchanged.** The secondary
+   sort field is #302-tuned (significant performance work went into sorting
+   this hash); do not introduce a different tiebreak rule.
+4. **No notice/warning output** when the fill block appears — the blank
+   statistic column on fill rows is the signal.
+5. Follow the principles already present in the sorting code wherever this
+   contract is silent; do not invent new ordering rules that create
+   incoherence with the existing implementation.
+
+**Correctness bar**: output identity to *this documented contract* (the
+previous byte-identity-to-current-behavior bar is overturned by the contract
+change). Existing `-so` expectations/baselines are re-blessed against it.
+Enforcement: `-so` scenarios in `tests/validate-statistics-demand.sh` with a
+prove-can-fail sabotage record, plus direct diffs against a reference
+ordering during development.
+
+### Eligibility: defined vs. meaningful — and a flagged open nuance
+
+For this issue, "defined" is the code's mathematical contract: percentiles /
+min / max / mean from n≥1 (a single sample *is* its own p99), std_dev/cv
+from n≥2, shape moments from n≥4 with non-degenerate m2. Eligibility is
+determinable from already-stored observation counts **before** any statistic
+is computed — the defined/fill split is free.
+
+> **OPEN DESIGN NUANCE — minimum-sample statistical meaningfulness
+> (follow-up, deliberately not resolved here).** A pNN value computed from
+> one sample is mathematically defined but is not a tail estimate: it is the
+> duration of one request wearing a percentile's name. Sorting `-so p99`
+> descending on an access log therefore ranks one-off slow requests above an
+> API called 200,000 times with a genuinely bad tail — which may be signal
+> or chaff depending on the hunt. Any future gate must make statistical
+> sense **per statistic, scaled to its number of nines**: a p99 says little
+> below ~100 samples, p999 below ~1000, p9999 below ~10000; min/max/mean are
+> honest from n=1; std_dev/cv from n≥2; shape from n≥4. Candidate shapes for
+> future work: fixed per-statistic floors (extending the existing shape-gate
+> idiom), an analyst-controlled threshold, or leaving ranking permissive and
+> treating filtering as a separately expressed concern. Interacts with the
+> defined/fill contract above (a gate moves keys from the defined block to
+> the fill block) and with pool sizing (any floor shrinks the heavy
+> `-so p99` population drastically). Future statistic-sort and
+> statistic-display enhancements must consult this paragraph.
+
+### Design sequencing: two-pass first, proxy pool as contingency
+
+**Committed scope** — implement and measure before any further machinery:
+
+1. **Eligibility split** from stored observation counts: partition keys into
+   defined/fill blocks with no statistics computed.
+2. **Population pass (defined block only)**: compute only the sort
+   statistic's group via a minimal per-call #305 demand descriptor. The
+   descriptor is per-call precisely to permit this without reworking the
+   registry. At production shape this alone collapses shape/std_dev/cv sorts
+   from 600k keys to the eligible few thousand.
+3. **Top-N pass**: full demanded statistics for the displayed keys only
+   (defined-block winners plus fill-block rows).
+4. Measure at production scale (targeted runs, median of 3): the residual
+   heavy case is `-so p99` descending over a fully-eligible high-cardinality
+   population.
+
+**Contingency scope** — only if the measured `-so p99` turn remains
+unacceptable: a candidate-pool prefilter using a cheap safe bound before the
+population pass. Preserved analysis for that eventuality:
+
+- `max` is a safe upper bound for any percentile (pNN ≤ max), tight for tail
+  percentiles, loose for central ones (p25/p50/p75; `mean` predicts those
+  better but is not a safe bound). Ascending sorts mirror to `min`
+  (pNN ≥ min).
+- Bin mode (`-mdm bin`) already maintains exact per-key min/max
+  incrementally — the proxy is free there. Raw mode needs an at-sort-time
+  O(n) scan per key (~38× cheaper than full stats pre-#305; re-measure).
+- Maintaining min/max at parse time was prototyped in #302 and rejected
+  (~2% on `read_files` paid by every run) — consistent with the #306
+  standing guidance that the read loop is the most expensive place to add
+  anything; scan at sort time only when the sort needs it.
 - Pool sizing must anchor at the display cut including ties (the #302
-  lesson).
+  lesson). Safety verification (no excluded key's bound beats the value at
+  the cut) and expansion policy are designed only if this contingency is
+  ever built.
+
+### Premise re-validation (mandatory before implementing)
+
+All quantitative claims in the issue body predate #305 and are re-measured
+on the current branch before implementation: the ≈2× `calculate_statistics`
+cost (0.82s vs 0.41s at 21.7K keys) was measured when every invocation
+computed the full ladder — post-#305 a terminal-only `-so p99` run computes
+only `terminal_core` population-wide, so the gap has likely narrowed; the
+~38× max-scan microbench likewise assumed full-ladder compute. Probe
+protocol: dev-scale targeted runs using the per-store `stats_calls` /
+`group_calc computed/skipped_demand/ineligible` counters (landed on this
+branch) as the demanded-work denominator, per the #306 lesson.
+
+### Benchmark coverage (issue step 1)
+
+- Two scenarios join `SCENARIOS` in `tests/baseline/run-benchmark.sh`:
+  `-so p99` (the heavy fully-eligible percentile path) and `-so skewness`
+  (the eligibility-split / shape-pass path). Cross-product 7×7=49 → 7×9=63.
+  Both are terminal-only (no `-o`), matching the tuning target.
+- Prior baselines lack these scenarios; their first release-to-release
+  comparison happens at the next release gate.
+- The issue's own before/after measurement uses **targeted** single-file,
+  single-scenario runs (median of 3 minimum) — the bundled suite remains a
+  release-gate instrument and is not run during issue work.
+- Measurement fixture: chosen during the analysis phase once the probe
+  establishes what cardinality the question needs (the issue's ~21.7K-key
+  constructed fixture was never committed and is not restorable).
+
+### Memory disposition of the population pass
+
+Deferred to measurement, with the direction sharpened by #323: candidate
+designs are (a) transient — population-pass values live in a temporary sort
+structure, `%log_messages` stores statistics only for displayed keys (the
+same storage shape as non-statistic sorts, and the outcome #323 needs); or
+(b) storing the sort statistic's field population-wide. Decide on `-mem`
+per-structure HWMs measured both ways at production scale.
+
+### Observability
+
+Sort-path lines join the existing `-V statistics-demand` section (defined vs
+fill block sizes, per-pass call attribution, contingency-pool counters if
+that scope is ever built). Per the test-harness contract, the section
+contract in `features/duration-statistics.md`,
+`tests/validate-statistics-demand.sh`, and the code change land in the same
+commit.
 
 ## Relationship to other issues
 
-- **#302/#304** — candidate-pool selection for available-value sorts; this
-  issue extends the pool idea to values that must be computed.
+- **#302/#304** — candidate-pool selection for available-value sorts; the
+  tuned two-stage sort and message-key tiebreak are load-bearing and
+  unchanged by this design.
 - **#305** — the statistics-group demand registry; supplies the per-call
-  demand descriptor the two-pass fallback uses, and the `-V
-  statistics-demand` instrument this issue extends and measures with.
+  demand descriptor the population pass uses, and the `-V statistics-demand`
+  instrument this issue extends and measures with.
 - **#306** — fused moment accumulation, measured and rejected; its standing
   guidance (prefer deferred pool-limited compute over read-loop work)
-  constrains this design.
-- **#323** — blocked by this issue; the pass-1 memory disposition (decision
-  6) is the coupling point.
+  constrains this design and rules out parse-time proxy maintenance.
+- **#323** — blocked by this issue; supplied the production population shape
+  above, and the population-pass memory disposition is the coupling point.
 
 ## Status
 
 - Landed on branch `303-calculated-statistic-sort-path`: per-store
   `stats_calls` + per-group `group_calc computed/skipped_demand/ineligible`
   counters in `-V statistics-demand` (the before/after instrument).
-- Next: premise re-validation probe → benchmark scenarios → proxy-table
-  prototype vs adaptive probe → implementation.
+- Next: premise re-validation probe → benchmark scenarios → sort contract +
+  eligibility split + two-pass implementation → production-scale
+  measurement → contingency decision.
