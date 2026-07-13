@@ -1,8 +1,8 @@
 # Issue #358 — read_files ~2x regression: access-log format-cascade ordering
 
-Investigation findings (2026-07-13). Scope of this document: root cause, attribution,
-and measured evidence. No fix is implemented yet; candidate fix directions are listed
-at the end with their constraints.
+Investigation findings and fix record (2026-07-13): root cause, attribution, measured
+evidence, and the shipped fix (deterministic `([^ ]+ ){3}` prefix across the
+access-log pattern family — see § Implemented fix).
 
 ## Verdict
 
@@ -79,9 +79,9 @@ $duration;`, or anything else in the #345 diff.
 3. With-duration output must remain byte-identical (verified across Tomcat 9, Apache
    HTTP2, CodeBeamer logs in #345).
 
-## Candidate fix directions (not implemented)
+## Candidate fix directions (evaluated during investigation)
 
-- **Deterministic prefix (validated — see below):** replace the `(.+? ){3}` prefix
+- **Deterministic prefix (IMPLEMENTED — see § Implemented fix):** replace the `(.+? ){3}` prefix
   with `([^ ]+ ){3}` in both access-log patterns so a failed attempt dies linearly
   instead of backtracking. Keeps both patterns and #345's ordering/classification.
 - **Single combined pattern, classify by capture presence:** run only the broad
@@ -168,6 +168,29 @@ Recommended fix shape for #358: apply the deterministic `([^ ]+ ){3}` prefix to 
 match_type 4, 3, and 9 patterns (match_type 12 optionally for consistency — no
 measured gain), accepting the spaces-in-authuser narrowing documented above. The
 match_type 9 reachability defect is fixed separately under #365.
+
+## Implemented fix (2026-07-13)
+
+The deterministic prefix `([^ ]+ ){3}` replaced `(.+? ){3}` in all four access-log
+patterns (match_type 12, 4, 3, 9) in `read_and_process_logs()`; a comment at the head
+of the family records the backtracking-free constraint. No other change.
+
+Verification:
+
+- Output byte-identical to the pre-fix binary on the 5k Tomcat sample and the full
+  Apache HTTP2 Windchill log (only the run's own timing/memory block differs).
+- `validate-format-detection.sh` 19/19, `validate-duration-display.sh` 18/18 —
+  the #345 classification contract holds. Stderr runtime-warning-clean.
+- 57 MB probe, median of 3: read_files **4.05 s** (was 6.51 s regressed; pre-#345
+  baseline 3.64 s) — ~86% of the regression removed.
+
+Accepted residuals (deliberate, documented above):
+
+- ~+0.4 s on the probe (~1.5 µs/line): every with-duration line still pays one cheap
+  failed anchored attempt. Eliminating it requires the single-pattern or per-file
+  format-lock-in direction.
+- Spaces inside the host/ident/authuser prefix fields are no longer tolerated (see
+  § Deterministic-prefix validation behavioral delta).
 
 ## Measurement hygiene notes
 
