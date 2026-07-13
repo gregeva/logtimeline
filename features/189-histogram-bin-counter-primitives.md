@@ -741,18 +741,18 @@ Even after #346, summing every `-mem`-reported structure leaves **~0.81 GB (9% o
 
 ### Sequencing (architect decision, 2026-07-13)
 
-**#2 (memory ceiling + graceful degradation) and #44 (source-file heuristics / up-front estimation) are the umbrella for this memory line.** All storage-policy work below is designed inside that framework, not standalone:
+**#2 (memory ceiling + graceful degradation) is the umbrella for this memory line.** Its available-memory measurement and target ceiling drive the raw→bin promotion-threshold policy. All storage-policy work below is designed inside that framework, not standalone:
 
-1. **#2/#44 design first** — the estimation (#46 index-informed) and ceiling/degradation contract under which every downstream policy (promotion thresholds, budget awareness, cardinality reduction) is decided.
-2. **#354 (BUG: `-mdm bin` heavier than raw) is blocked behind that design.** Its fix — head/body split: raw for N below the ~N=88 crossover, partition only above — is a storage policy owned by the umbrella. The #306 rejection settles the entry shapes: head keeps sidecar + partition (sidecar authoritative for moments), body keeps neither (moments via the post-sort pass).
-3. **Edge A via grouping** (#96 / auto-`-g`, intent-gated) — the per-message-hash cost is the largest lever; estimation-driven, so it belongs to the #44 side of the umbrella.
+1. **#2 design first** — available-memory detection, the target ceiling, and the degradation contract under which every downstream policy (promotion thresholds, budget awareness) is decided.
+2. **#354 (BUG: `-mdm bin` heavier than raw) is blocked behind that design.** Its fix — head/body split: raw for N below the ~N=88 crossover, partition only above — is a storage policy owned by the #2 umbrella. The #306 rejection settles the entry shapes: head keeps sidecar + partition (sidecar authoritative for moments), body keeps neither (moments via the post-sort pass).
+3. **Edge A via grouping** (#96 / auto-`-g`, intent-gated) — the per-message-hash cost is the largest lever; a separate track from the data-model policy, orthogonal to the umbrella.
 4. **Re-measure** any implemented head/body split on the same node with `-mem` to confirm it beats *both* pure models (the two measured endpoints — bin 7.17 GB, raw 4.63 GB — bracket the target). Peak-RSS anchors must be re-taken post-#362: the runs above used `-n 2000000` before the unclamped output-phase slice burst (~0.16–0.19 GB transient RSS ratchet) was fixed; per-structure `Devel::Size` figures are unaffected.
 
 ### Dependencies / cross-links
 
-- **#2 / #44** — the umbrella (see Sequencing above); #354 is blocked on them.
+- **#2** — the umbrella (see Sequencing above); #354 is blocked on it.
 - **#346** — resolved (PR #350); made this measurement possible.
-- **#354 (BUG: `-mdm bin` memory regression vs raw)** — the actionable defect this investigation surfaced; blocked behind the #2/#44 design, which owns its head/body-split fix.
+- **#354 (BUG: `-mdm bin` memory regression vs raw)** — the actionable defect this investigation surfaced; blocked behind the #2 design, which owns its head/body-split fix.
 - **#306** — closed (implemented, measured, rejected): the raw path keeps its two-pass moment computation; raw entries carry no Welford sidecars. Constants and rationale in features/305-shape-moment-extended-percentile-demand.md § #306 investigation.
 - **#96 / `-g`** — the Edge-A cardinality lever (the dominant remaining cost).
 - **#347 (bin-counter eviction)** — closed as not planned: prevention (never allocate sparse partitions, per the #354 fix direction) supersedes evicting them. Residual eviction scope (raw-side synthesized residue) belongs to #2's contract if ever needed.
