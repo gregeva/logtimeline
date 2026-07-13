@@ -343,6 +343,41 @@ fi
 echo
 
 ############################################################
+current_scenario="scenario-3b-sort-on-p99"
+# The sort_selection/sort_calc assertions below grep the same emitted lines
+# already sabotage-proven under scenario-3 (see the record there); the group
+# demand-line shapes are the long-established scenario-1/2/3 patterns.
+echo "--- $current_scenario ---"
+out=$(run_section statistics-demand -so p99)
+check_capture_warnings "$out"
+if body=$(extract_section "$out"); then
+    sm=$(extract_store "$body" message)
+    assert_line "$sm" \
+        pattern     '^  group terminal_core: demanded=1 consumers=messages-table,sort-on:p99$' \
+        asserts     'Sorting on p99 raises no group beyond terminal_core (p99 is a terminal_core field): the sort-on consumer joins the existing terminal_core demand with provenance' \
+        produced_by 'resolve_statistics_group_demand() in ltl (@STAT_CONSUMERS sort-on declaration)' \
+        contract    "$CONTRACT"
+    for group in csv_body extended_percentiles shape_moments; do
+        assert_line "$sm" \
+            pattern     "^  group $group: demanded=0 consumers=-\$" \
+            asserts     "A terminal_core sort key ($group check) raises no demand on any other statistics group" \
+            produced_by 'resolve_statistics_group_demand() in ltl' \
+            contract    "$CONTRACT"
+    done
+    assert_line "$sm" \
+        pattern     '^  sort_selection: statistic=p99 defined=[1-9][0-9]* fill=[0-9]+ demoted=[0-9]+$' \
+        asserts     'The two-pass sort path runs (and reports its eligibility split) even when the sort statistic needs no extra group demand — a percentile sort at n>=1 makes every duration-bearing key defined' \
+        produced_by 'calculate_all_statistics() in ltl (sort_selection telemetry), emitted by emit_statistics_demand_verbose()' \
+        contract    "$CONTRACT"
+    assert_line "$sm" \
+        pattern     '^  sort_calc: population=[1-9][0-9]* topn=[1-9][0-9]*$' \
+        asserts     'Both passes run under a percentile sort: population over the defined block, top-N over the displayed keys' \
+        produced_by 'calculate_all_statistics() in ltl (population_calls telemetry); topn derived at emit time' \
+        contract    "$CONTRACT"
+fi
+echo
+
+############################################################
 current_scenario="scenario-4-heatmap-no-bucket-demand"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -hm duration)
