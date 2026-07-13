@@ -49,18 +49,19 @@ Improve memory tracking to provide accurate, low-overhead measurements with stru
 ```
   TOTAL TIME                        2.1 sec
   MAXIMUM MEMORY USED               83.0 MB
-    log_messages         (59%)      12.2 MB
-    log_analysis         (41%)       8.5 MB
+    log_messages         (15%)      12.2 MB
+    log_analysis         (10%)       8.5 MB
     log_stats            (<1%)       5.4 kB
     log_occurrences      (<1%)       2.4 kB
+    unattributed         (75%)      62.3 MB
   ─────────────────────────────────────────
 ```
 
 **Notes:**
-- Only structures with >= 1KB are displayed (empty structures are hidden)
-- Percentages are relative to total measured structures, not RSS
-- Each structure's high-water mark may be captured at different measurement points
-- RSS includes Perl interpreter overhead and loaded modules not reflected in structure totals
+- Only structures with >= 1KB are displayed (empty structures are hidden); the `unattributed` row is always shown
+- Percentages are shares of MAXIMUM MEMORY USED (peak RSS), so the displayed rows plus `unattributed` reconcile to the peak (Issue #356)
+- `unattributed` = peak RSS minus the sum of ALL structure high-water marks (including hidden sub-1KB ones), floored at zero; it aggregates interpreter baseline, allocator-retained transients, and allocation slack — see the Memory Diagnostic Method section for why this cannot be attributed per structure
+- Each structure's high-water mark may be captured at different measurement points, which is why the subtraction is floored rather than exact
 
 ## Performance Results
 
@@ -114,11 +115,13 @@ Overhead: **~0ms** (within measurement noise)
 
 ## Issue #356 Specification — Peak-RSS Coherence
 
+**Status: Implemented** (branch `356-mem-untracked-rss-residual`).
+
 The #356 investigation decomposed the untracked peak-RSS residual into named categories (findings comment on the issue). The dominant term — an O(`-n`) transient range-list burst in the output subs — is a behavioral defect fixed separately under #362. This specification covers the remaining remedy: making every user-facing memory surface coherent against peak RSS.
 
 ### S1. Final measurement point after the output phase
 
-`measure_memory_structures()` is additionally called after the output stages (`print_message_summary()` / `print_threadpool_summary()`, before exit). Today the last call precedes the output phase, and MAXIMUM MEMORY USED under-reported the true process peak by 34% at dev scale (316 MB reported vs 478 MB actual).
+`measure_memory_structures()` is additionally called (a) at the entry to the summary-table rendering, so the displayed MAXIMUM MEMORY USED includes the normalize/bar-graph/CSV phase, and (b) after the output stages (`print_message_summary()` / `print_threadpool_summary()`, before exit), which keeps the recorded peak honest for the full process lifetime and surfaces through the `-mem debug` end-of-run line. The displayed value structurally cannot include allocations made by the output stages that print after it; with the #362 clamp in place that blind spot is the message/threadpool row rendering only (~KBs at dev scale). Before this change the last measurement preceded the entire output phase and MAXIMUM MEMORY USED under-reported the true process peak by 34% at dev scale (316 MB reported vs 478 MB actual).
 
 ### S2. `%message_key_order` joins the named-structure map
 
