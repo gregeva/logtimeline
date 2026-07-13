@@ -268,5 +268,45 @@ commit.
   block, matching the #302 idiom, rather than routed through a shared
   coderef-based helper — coderef comparators measurably tax
   population-scale sorts.
-- Next: production-scale measurement (before/after, `-mem` HWMs both
-  dispositions) → findings analysis → contingency decision.
+- Next: contingency decision (architect), release-branch PR when directed.
+
+### Before/after measurement (2026-07-13, Phase-A workload)
+
+Same protocol as the premise probe: `-iqs` on the 148 MB 2025-05-07 access
+log (22,244 message keys), terminal-only, median of 3, timing runs separate
+from counter/memory runs. "Before" = the branch commit preceding the
+two-pass change (probe table above); "after" = the two-pass implementation.
+
+| sort              | calc_stats before | calc_stats after | Δ | total after |
+|-------------------|------------------:|-----------------:|---|------------:|
+| `-so occurrences` | 0.187s (0.185–0.195) | 0.179s (0.176–0.181) | −4% (noise-level) | 17.69s |
+| `-so p99`         | 0.458s (0.455–0.458) | 0.283s (0.277–0.289) | **−38%** | 17.97s |
+| `-so skewness`    | 0.592s (0.591–0.593) | 0.356s (0.353–0.359) | **−40%** | 18.10s |
+
+Memory (`-mem`, `%log_messages` HWM == final in all cases):
+
+| sort           | before | after | Δ |
+|----------------|-------:|------:|---|
+| `-so p99`      | 89.5 MB | 74.7 MB | −16.5% (−664 B per non-displayed key) |
+| `-so skewness` | 92.7 MB | 74.7 MB | −19.4% |
+
+RSS peak: −9.4 MB (p99) / −12.5 MB (skewness). Attribution:
+
+- The `-so p99` win exceeded the probe's expectation (~none): the
+  population pass computes the same terminal_core work as before, but the
+  transient map eliminates 22,234 per-key hash-slice stat writes +
+  `total_duration_num`/formatted-total assignments, and the two-stage
+  numeric sort replaces `print_message_summary`'s removed full-population
+  deterministic sort (string tiebreak over all 22K keys).
+- The `-so skewness` win is the eligibility collapse: terminal_core+shape
+  computed for ~1.8K n≥4 keys (plus 10 top-N) instead of terminal_core for
+  all 22,244; the residual over the occurrences baseline is the eligibility
+  scan, the fill-block occurrences ranking (~20K keys), and the fact that
+  eligible keys are exactly the sample-heavy ones.
+- The default `occurrences` sort is untouched (sacred): 0.179s vs 0.187s.
+- Ceiling: the `-so p99` marginal cost over occurrences is ≈4.7 µs/key
+  (0.104s at 22.2K). Linear extrapolation to the #323 production shape
+  (600K keys) adds ≈2.8s of statistics time to a read-dominated multi-minute
+  turn (~1–2%) — the contingency proxy pool is not warranted on current
+  evidence; the memory disposition (transient, storage only for displayed
+  keys) is the outcome #323 needs.
