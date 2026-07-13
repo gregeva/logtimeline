@@ -135,6 +135,33 @@ store: <bucket|message>
 - Additions are non-breaking; renames/removals are breaking per
   HARNESS-DESIGN.md's stability contract.
 
+## Deferred follow-up: calculated-statistic sort contingency pool (#303)
+
+Not scheduled — recorded here so future statistics work finds it. The #303
+two-pass sort computes the sort statistic's group for every
+eligibility-passing key (the population pass). A further optimization was
+designed but deliberately **not built**: a candidate-pool prefilter using a
+cheap safe bound before the population pass — `max` is a safe upper bound
+for any percentile (pNN ≤ max, tight for tail percentiles), `min` mirrors
+it for ascending sorts; bin mode already maintains exact per-key min/max,
+raw mode would scan at sort time only.
+
+Deferral rationale (2026-07-13 measurement, architect-confirmed): after the
+two-pass change the marginal cost of the heaviest case (`-so p99`
+descending, fully-eligible population) is ≈4.7 µs/key — ≈2.8s extrapolated
+to the 600K-key production shape inside a read-dominated multi-minute turn
+(~1–2%). Reconsider only if a real-world statistic-sort turn is reported
+unacceptable at high key cardinality. The full preserved design analysis
+(proxy tightness per metric, pool sizing anchored at the display cut,
+safety verification/expansion policy) lives in
+features/303-calculated-statistic-sort-path.md § Design sequencing
+(contingency scope) and its measurement sections.
+
+Any work resuming this must also consult the flagged open nuance in that
+same doc (§ Eligibility: defined vs. meaningful): a minimum-sample
+meaningfulness gate would shrink the pool population drastically and
+interacts with both the defined/fill contract and pool sizing.
+
 ## Related issue docs
 
 - features/305-shape-moment-extended-percentile-demand.md — #305 demand
