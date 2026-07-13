@@ -6477,22 +6477,12 @@ sub run_consolidation_checkpoint {
     }
 }
 
-# Issue #45: Measure all data structures and update high-water marks
-# Called after each major subroutine to capture peak memory usage
-sub measure_memory_structures {
-    # Always capture RSS high-water mark
-    $current_memory_usage = get_memory_usage();
-    if ($current_memory_usage > $max_memory_usage) {
-        $max_memory_usage = $current_memory_usage;
-    }
-
-    # Only measure individual structures when -mem flag is used
-    return unless $show_memory;
-
+# Single resolution surface for the named-structure size map: every consumer
+# (the -mem high-water tracking and any diagnostic sampler) measures the same
+# set of structures through this sub.
+sub named_structure_sizes {
     require Devel::Size;
-
-    # Measure all key data structures
-    my %current_sizes = (
+    return (
         log_occurrences        => Devel::Size::total_size(\%log_occurrences),
         log_analysis           => Devel::Size::total_size(\%log_analysis),
         log_messages           => Devel::Size::total_size(\%log_messages),
@@ -6523,6 +6513,21 @@ sub measure_memory_structures {
         consolidation_key_trigrams => Devel::Size::total_size(\%consolidation_key_trigrams),
         consolidation_key_trigrams_norm => Devel::Size::total_size(\%consolidation_key_trigrams_norm),
     );
+}
+
+# Issue #45: Measure all data structures and update high-water marks
+# Called after each major subroutine to capture peak memory usage
+sub measure_memory_structures {
+    # Always capture RSS high-water mark
+    $current_memory_usage = get_memory_usage();
+    if ($current_memory_usage > $max_memory_usage) {
+        $max_memory_usage = $current_memory_usage;
+    }
+
+    # Only measure individual structures when -mem flag is used
+    return unless $show_memory;
+
+    my %current_sizes = named_structure_sizes();
 
     # Update high-water marks (only if current value is larger)
     for my $struct (keys %current_sizes) {
