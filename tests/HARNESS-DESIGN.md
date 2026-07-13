@@ -104,6 +104,7 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `heatmap-palette` — heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250)
 - `profile` — timeline folding (--profile): resolved mode, fold period, included weekdays, included vs dropped sample counts (Issue #256)
 - `udm-counting` — per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313)
+- `statistics-demand` — per-store resolved statistics-group demand with raising consumers, shape-moment pass execution counters, and per-store moment source (Issue #305)
 - `benchmark-data` — machine-parseable TSV: version, files, line counts, timings, memory, structure counts
 
 **Reserved by sub-issues, not yet implemented:**

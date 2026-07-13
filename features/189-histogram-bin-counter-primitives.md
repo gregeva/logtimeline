@@ -20,6 +20,8 @@ The primitives serve every consumer catalogued in #187 R12:
 
 The primitives support **independent partitions per consumer** (heatmap, histogram, per-message, per-time-bucket all hold their own partitions) while sharing partition-computation, bin-assignment, counter-update, and percentile-interpolation logic. The contract is what's the same; the keying and rendering are what consumers choose.
 
+Consumer-side statistics demand: which statistic groups the message-stats and bucket-stats consumers actually compute and store — including whether the Welford-Pébay moment sidecars are maintained at all — is governed by the statistics-group demand registry; see `features/305-shape-moment-extended-percentile-demand.md`.
+
 ## GitHub Issue
 
 [#189](https://github.com/gregeva/logtimeline/issues/189)
