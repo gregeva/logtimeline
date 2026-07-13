@@ -10,10 +10,10 @@ Establish repeatable memory and performance baselines for ltl before the core ar
 All verbose output (regex info, histogram buckets, benchmark data) is collected in `@verbose_output` and printed via `print_verbose_output()` before the bar graph. This keeps verbose output grouped at the top of output.
 
 ### DD-02: Benchmark data block format
-Machine-parseable TSV block delimited by `=== BENCHMARK DATA ===` / `=== END BENCHMARK DATA ===`. All values are raw (seconds for timing, bytes for memory). This block only appears when `-V` is used.
+Machine-parseable TSV block delimited by `=== benchmark-data ===` / `=== END benchmark-data ===`. All values are raw (seconds for timing, bytes for memory). This block only appears when `-V` is used.
 
 ### DD-03: Per-structure memory requires `-mem`
-Timing + RSS peak are always included in the benchmark block when `-V` is active. Per-structure HWMs require both `-V` and `-mem`.
+Timing + RSS peak are always included in the benchmark block when `-V` is active. Per-structure HWMs require both `-V` and `-mem`. With `-mem`, the per-structure rows are followed by a `MEMORY	unattributed	<bytes>` row (Issue #356): `rss_peak` minus the sum of all structure high-water marks, floored at zero because the HWMs are captured at different instants. `unattributed` is a reserved metric name in the MEMORY row namespace — never a structure name. It aggregates interpreter baseline, allocator-retained transients, and allocation slack; consumers that join MEMORY rows by metric name treat it like any other additive row.
 
 ### DD-04: Test runner output format
 TSV with composite key (test_name + metric_name). Results stored in `tests/baseline/results/` and committed to git as reference baselines.

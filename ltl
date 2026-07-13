@@ -204,6 +204,7 @@ my @column_colors = (
 );
 my %column_color_lookup = map { $_->{name} => $_ } @column_colors;
 my ( $durations_observed, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, undef );
+my ( $show_memory_debug, $memory_usage_operand ) = ( 0, undef );   # -mem debug diagnostic mode (Issue #356)
 my $explain_arg;   # --explain [<topic>]: undef = not given; '' = bare; non-empty = topic name (Issue #261)
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -1889,6 +1890,7 @@ sub emit_runtime_config_verbose {
         'highlight-count-min'               => $highlight_count_min,
         'highlight-count-max'               => $highlight_count_max,
         'memory-usage'                      => $show_memory,
+        'memory-usage-debug'                => $show_memory_debug,
         'output-csv'                        => $write_messages_to_csv,
         'sort-on'                           => $sort_type,
         'sort-ascending'                    => $sort_ascending,
@@ -4327,7 +4329,7 @@ sub print_help {
     $out .= help_opt("-v,   --version",       "Print the version number and exit");
     $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic (e.g. 'statistics') shows that topic's index.");
     $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic; with no topic, lists available topics.");
-    $out .= help_opt("-mem, --memory-usage",  "Display memory consumption statistics after processing completes");
+    $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' additionally emits per-phase memory diagnostics on stderr");
 
     $out .= help_heading("EXAMPLES");
     my $ex_desc_col = 68;  # description column for examples (commands are longer than options)
@@ -6477,26 +6479,17 @@ sub run_consolidation_checkpoint {
     }
 }
 
-# Issue #45: Measure all data structures and update high-water marks
-# Called after each major subroutine to capture peak memory usage
-sub measure_memory_structures {
-    # Always capture RSS high-water mark
-    $current_memory_usage = get_memory_usage();
-    if ($current_memory_usage > $max_memory_usage) {
-        $max_memory_usage = $current_memory_usage;
-    }
-
-    # Only measure individual structures when -mem flag is used
-    return unless $show_memory;
-
+# Single resolution surface for the named-structure size map: every consumer
+# (the -mem high-water tracking and any diagnostic sampler) measures the same
+# set of structures through this sub.
+sub named_structure_sizes {
     require Devel::Size;
-
-    # Measure all key data structures
-    my %current_sizes = (
+    return (
         log_occurrences        => Devel::Size::total_size(\%log_occurrences),
         log_analysis           => Devel::Size::total_size(\%log_analysis),
         log_messages           => Devel::Size::total_size(\%log_messages),
         log_messages_counters  => Devel::Size::total_size(\%log_messages_counters),
+        message_key_order      => Devel::Size::total_size(\%message_key_order),
         log_stats              => Devel::Size::total_size(\%log_stats),
         log_threadpools        => Devel::Size::total_size(\%log_threadpools),
         log_sessions           => Devel::Size::total_size(\%log_sessions),
@@ -6523,6 +6516,21 @@ sub measure_memory_structures {
         consolidation_key_trigrams => Devel::Size::total_size(\%consolidation_key_trigrams),
         consolidation_key_trigrams_norm => Devel::Size::total_size(\%consolidation_key_trigrams_norm),
     );
+}
+
+# Issue #45: Measure all data structures and update high-water marks
+# Called after each major subroutine to capture peak memory usage
+sub measure_memory_structures {
+    # Always capture RSS high-water mark
+    $current_memory_usage = get_memory_usage();
+    if ($current_memory_usage > $max_memory_usage) {
+        $max_memory_usage = $current_memory_usage;
+    }
+
+    # Only measure individual structures when -mem flag is used
+    return unless $show_memory;
+
+    my %current_sizes = named_structure_sizes();
 
     # Update high-water marks (only if current value is larger)
     for my $struct (keys %current_sizes) {
@@ -6531,6 +6539,42 @@ sub measure_memory_structures {
         if ($current > $hwm) {
             $memory_high_water_marks{$struct} = $current;
         }
+    }
+}
+
+# -mem debug (Issue #356): per-phase memory diagnostics emitted on STDERR as
+# TSV MEMDIAG lines. memory_debug_sample() is the cheap RSS-only probe safe
+# to call from hot loops at a coarse cadence (each call is a syscall/exec on
+# some platforms); memory_debug_decomposition() additionally walks the
+# named-structure map (Devel::Size) and reports the unattributed remainder
+# (RSS minus the sum of live named structures), so it runs only at phase
+# boundaries. Diagnostic lines never carry the " at <file> line <N>" suffix
+# reserved for interpreter warnings (tests/HARNESS-DESIGN.md § Runtime-warning
+# cleanliness).
+my $memory_debug_epoch;
+my $memory_debug_key_samples = 0;   # shared cadence counter across per-key loops
+sub memory_debug_sample {
+    return unless $show_memory_debug;
+    my ($tag) = @_;
+    $memory_debug_epoch //= Time::HiRes::time();
+    printf STDERR "MEMDIAG\t%.3f\t%s\trss=%d\n",
+        Time::HiRes::time() - $memory_debug_epoch, $tag, get_memory_usage() // 0;
+}
+sub memory_debug_decomposition {
+    return unless $show_memory_debug;
+    my ($tag) = @_;
+    $memory_debug_epoch //= Time::HiRes::time();
+    my $rss = get_memory_usage() // 0;
+    my %sizes = named_structure_sizes();
+    my $named_sum = 0;
+    $named_sum += $_ for values %sizes;
+    my $unattributed = $rss - $named_sum;
+    $unattributed = 0 if $unattributed < 0;
+    printf STDERR "MEMDIAG-FULL\t%.3f\t%s\trss=%d\tnamed_sum=%d\tunattributed=%d\n",
+        Time::HiRes::time() - $memory_debug_epoch, $tag, $rss, $named_sum, $unattributed;
+    for my $struct (sort { $sizes{$b} <=> $sizes{$a} || $a cmp $b } keys %sizes) {
+        last if $sizes{$struct} < 1_048_576;
+        printf STDERR "MEMDIAG-STRUCT\t%s\t%s\t%d\n", $tag, $struct, $sizes{$struct};
     }
 }
 
@@ -7243,7 +7287,7 @@ sub adapt_to_command_line_options {
         'highlight-bytes-max|hbmax=i' => \$highlight_bytes_max,
         'highlight-count-min|hcmin=i' => \$highlight_count_min,
         'highlight-count-max|hcmax=i' => \$highlight_count_max,
-	    'memory-usage|mem' => \$show_memory,
+	    'memory-usage|mem:s' => \$memory_usage_operand,
         'disable-progress' => \$disable_progress,                                   # hidden
         'output-csv|o' => \$write_messages_to_csv,
         'csv-precision|cp=s' => sub { $csv_precision = $_[1]; $csv_precision_source = "-cp $_[1]"; },
@@ -7360,6 +7404,21 @@ sub adapt_to_command_line_options {
 
     $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
     $filter_range{'end'} = $filter_range_end if defined(  $filter_range_end );
+
+    # -mem option processing (Issue #356): optional literal operand 'debug'
+    # enables per-phase memory diagnostics. Getopt's :s greedily captures a
+    # following bare token, so any value other than the literal 'debug' is
+    # pushed back as a positional (file) argument. Unlike -g/-hm (#231) the
+    # pushback is silent: -mem accepts exactly one literal, so a following
+    # filename is the normal invocation shape, not a mis-typed operand.
+    if (defined $memory_usage_operand) {
+        $show_memory = 1;
+        if ($memory_usage_operand eq 'debug') {
+            $show_memory_debug = 1;
+        } elsif ($memory_usage_operand ne '') {
+            unshift @ARGV, $memory_usage_operand;
+        }
+    }
 
     # Consolidation option processing (Issue #96)
     if ($group_similar_sensitivity ne "none") {
@@ -7905,6 +7964,7 @@ sub read_and_process_logs {
             my ( $timestamp, $threadname );
             my @csv_fields;
             $total_lines_read++;
+            memory_debug_sample("read_lines") if $show_memory_debug && $total_lines_read % 75000 == 0;
 
             if ($total_lines_read % 4999 == 0 && !$disable_progress) {   # print progress based on total lines read (not per-file) to handle many small files
                 my $now = Time::HiRes::time();
@@ -10136,6 +10196,7 @@ sub calculate_all_statistics {
                 my (%sort_value, @fill_block);
                 my ($demoted, $population_calls) = (0, 0);
                 foreach my $log_key (keys %{$log_messages{$category}}) {
+                    memory_debug_sample("stats_population_keys") if $show_memory_debug && ++$memory_debug_key_samples % 10000 == 0;
                     my $entry = $log_messages{$category}{$log_key};
                     my $n = $message_stats_capture_mode eq 'bin'
                         ? ($entry->{duration_count} // 0)
@@ -10241,6 +10302,7 @@ sub calculate_all_statistics {
             }
 
             foreach my $log_key (@top_keys) {
+                memory_debug_sample("stats_top_keys") if $show_memory_debug && ++$memory_debug_key_samples % 10000 == 0;
                 my $aggregated_data = {};
 
                 next if !defined( $log_messages{$category}{$log_key}{occurrences} );
@@ -11794,6 +11856,14 @@ sub print_verbose_output {
         for my $struct (sort keys %memory_high_water_marks) {
             printf "MEMORY\t%s\t%d\n", $struct, $memory_high_water_marks{$struct};
         }
+        # Issue #356 (S3): rss_peak minus the sum of all structure high-water
+        # marks, floored at zero (HWMs are captured at different instants).
+        # Same value the -mem terminal breakdown renders as 'unattributed'.
+        my $total_hwm = 0;
+        $total_hwm += $_ for values %memory_high_water_marks;
+        my $unattributed = $max_memory_usage - $total_hwm;
+        $unattributed = 0 if $unattributed < 0;
+        printf "MEMORY\tunattributed\t%d\n", $unattributed;
     }
 
     # Final-state memory snapshot (only with -mem) — shows where memory ended up after consolidation
@@ -12964,27 +13034,39 @@ sub print_summary_table {
             # Skip structures with only empty hash/array overhead (< 1KB means effectively empty)
             my $min_size_threshold = 1024;
 
-            # Calculate total of measured structures (only those above threshold)
-            my $total_measured = 0;
-            for my $size (values %memory_high_water_marks) {
-                $total_measured += $size if $size >= $min_size_threshold;
-            }
+            # Issue #356 (S3): the breakdown accounts against the peak RSS
+            # itself. Percentages are shares of MAXIMUM MEMORY USED, and the
+            # remainder no structure walk can attribute (interpreter baseline,
+            # allocator-retained transients, allocation slack) is surfaced as
+            # an explicit 'unattributed' row so the displayed rows reconcile
+            # to the peak. Structure values are high-water marks captured at
+            # different instants, so the subtraction is floored at zero. The
+            # unattributed value subtracts the FULL sum of high-water marks
+            # (not the >=1KB-filtered display set) so hidden near-empty
+            # structures are not misreported as unattributed memory.
+            my $total_hwm = 0;
+            $total_hwm += $_ for values %memory_high_water_marks;
+            my $unattributed = $max_memory_usage - $total_hwm;
+            $unattributed = 0 if $unattributed < 0;
 
             # Sort by size descending, skip empty structures
             my @sorted = sort { $memory_high_water_marks{$b} <=> $memory_high_water_marks{$a} || ($a cmp $b) }
                          grep { $memory_high_water_marks{$_} >= $min_size_threshold }
                          keys %memory_high_water_marks;
 
-            for my $struct (@sorted) {
-                my $size = $memory_high_water_marks{$struct};
+            my $emit_breakdown_row = sub {
+                my ($label, $size) = @_;
                 my $category_width = $category_column_width + 2;
                 my $occurrences_width = $occurrences_column_width - 2;
-                my $pct = $total_measured > 0 ? ($size / $total_measured) * 100 : 0;
+                my $pct = $max_memory_usage > 0 ? ($size / $max_memory_usage) * 100 : 0;
                 my $pct_str = $pct < 1 ? "(<1%)" : sprintf("(%2.0f%%)", $pct);
 
-                my $indented_label = sprintf(" %-25s %5s", $struct, $pct_str);
+                my $indented_label = sprintf(" %-25s %5s", $label, $pct_str);
                 push @summary_table, sprintf( "$padding%-${category_width}s %${occurrences_width}s$padding\n", $indented_label, format_bytes( $size, 'B', 0 ) );
-            }
+            };
+
+            $emit_breakdown_row->($_, $memory_high_water_marks{$_}) for @sorted;
+            $emit_breakdown_row->('unattributed', $unattributed);
     }
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
 
@@ -13156,7 +13238,7 @@ sub print_message_summary {
 
         # Ensure the grouping exists and is a hash reference
         if (exists $log_messages{$grouping} && ref($log_messages{$grouping}) eq 'HASH') {
-            my @top_keys = @{$sorted_keys{$grouping}}[0..($top_n_messages-1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
+            my @top_keys = @{$sorted_keys{$grouping}}[0 .. min($#{$sorted_keys{$grouping}}, $top_n_messages - 1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
             next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
             my $header_title = " ";
 
@@ -13193,6 +13275,7 @@ sub print_message_summary {
 
             # Print the top messages
             foreach my $key (@top_keys) {
+                memory_debug_sample("message_summary_keys") if $show_memory_debug && ++$memory_debug_key_samples % 10000 == 0;
                 next if $messages_printed++ >= $messages_to_print{$grouping};
                 next if !defined $key;
                 my $is_consolidated = ($log_messages{$grouping}{$key}{is_consolidated} // 0);
@@ -13414,7 +13497,7 @@ sub print_threadpool_summary {
 
         # Ensure the grouping exists and is a hash reference
         if (exists $threadpool_activity{$grouping} && ref($threadpool_activity{$grouping}) eq 'HASH') {
-            my @top_keys = @{$sorted_keys{$grouping}}[0..($top_n_messages-1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
+            my @top_keys = @{$sorted_keys{$grouping}}[0 .. min($#{$sorted_keys{$grouping}}, $top_n_messages - 1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
 
             next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
 
@@ -13478,12 +13561,15 @@ adapt_to_terminal_settings();
 # Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
 read_index_file();
 
+memory_debug_decomposition("startup");
+
 # READ AND PROCESS LOGS #
 $start_time = [gettimeofday];
 read_and_process_logs();
 $end_time = [gettimeofday];
 $elapsed_read_files = tv_interval($start_time, $end_time);
 measure_memory_structures();
+memory_debug_decomposition("after_read");
 
 # INITIALIZE EMPTY TIME BUCKETS #
 $start_time = [gettimeofday];
@@ -13491,6 +13577,7 @@ initialize_empty_time_windows();
 $end_time = [gettimeofday];
 $elapsed_initialize_empty_time_windows = tv_interval($start_time, $end_time);
 measure_memory_structures();
+memory_debug_decomposition("after_bucket_init");
 
 # GROUP SIMILAR MESSAGES TOGETHER (Issue #96) #
 unless( $group_similar_sensitivity eq "none" ) {
@@ -13662,6 +13749,8 @@ unless( $group_similar_sensitivity eq "none" ) {
     }
 }
 
+memory_debug_decomposition("after_grouping") unless $group_similar_sensitivity eq "none";
+
 # CALCULATE STATISTICS #
 $start_time = [gettimeofday];
 print "Calculate statistics..." unless $disable_progress;
@@ -13669,6 +13758,7 @@ calculate_all_statistics();
 $end_time = [gettimeofday];
 $elapsed_calculate_statistics = tv_interval($start_time, $end_time);
 measure_memory_structures();
+memory_debug_decomposition("after_stats");
 
 # Issue #287: snapshot per-message-key bin-counter telemetry before any
 # subsequent stage discards the streaming counter store. Sibling of the
@@ -13687,6 +13777,7 @@ if ($heatmap_enabled) {
     $end_time = [gettimeofday];
     $elapsed_heatmap_statistics = tv_interval($start_time, $end_time);
     measure_memory_structures();
+    memory_debug_decomposition("after_heatmap");
 }
 
 # CALCULATE HISTOGRAM BUCKETS (if enabled) - Issue #25 #
@@ -13696,6 +13787,7 @@ if ($histogram_enabled) {
     $end_time = [gettimeofday];
     $elapsed_histogram_statistics = tv_interval($start_time, $end_time);
     measure_memory_structures();
+    memory_debug_decomposition("after_histogram");
 }
 
 # NORMALIZE DATA FOR CONSOLE OUTPUT #
@@ -13703,6 +13795,7 @@ $start_time = [gettimeofday];
 normalize_data_for_output();
 $end_time = [gettimeofday];
 $elapsed_normalize_data = tv_interval($start_time, $end_time);
+memory_debug_decomposition("after_normalize");
 
 $elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_heatmap_statistics + $elapsed_histogram_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
 
@@ -13742,10 +13835,19 @@ if( $write_messages_to_csv ) {                     # If write to CSV enabled, op
 }
 
 print_bar_graph();
+memory_debug_decomposition("after_bar_graph");
 print_histograms() if $histogram_enabled;  # Issue #25: Histograms appear after bar graph
 close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
 
+# Issue #356 (S1): capture the peak through normalize/bar-graph/CSV rendering
+# so the displayed MAXIMUM MEMORY USED reflects everything up to this point.
+# The output stages below can no longer move the peak materially (#362 clamped
+# the only O(-n) allocation); their residual is covered by the post-output
+# measurement and visible under -mem debug.
+measure_memory_structures();
+
 print_summary_table();
+memory_debug_decomposition("after_summary_table");
 
 if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
     $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
@@ -13772,9 +13874,16 @@ if( $write_messages_to_csv ) {                     # If write to CSV enabled, op
 }
 
 print_message_summary();														                    # Print and write message summaries
+memory_debug_decomposition("after_message_summary");
 close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
 
 print_threadpool_summary() if $include_threadpool_summary;										    # Print threadpool summaries
+memory_debug_decomposition("after_threadpool_summary") if $include_threadpool_summary;
+
+# Issue #356 (S1): post-output measurement keeps the recorded peak honest for
+# the full process lifetime; surfaced by the -mem debug "end" line below.
+measure_memory_structures();
+memory_debug_decomposition("end");
 
 write_index_file();  # Write persistent index file with per-file metadata (Issue #46)
 
