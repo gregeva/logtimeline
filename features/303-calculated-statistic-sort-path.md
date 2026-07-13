@@ -163,6 +163,44 @@ protocol: dev-scale targeted runs using the per-store `stats_calls` /
 `group_calc computed/skipped_demand/ineligible` counters (landed on this
 branch) as the demanded-work denominator, per the #306 lesson.
 
+#### Probe results (2026-07-13, this branch)
+
+Workload: `-iqs` on `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt`
+(148 MB, 22,244 message-store keys — reproduces the issue's ~21.7K-key
+fixture scale). Terminal-only, `--terminal-width 200`, median of 3,
+`-V benchmark-data` timing runs kept separate from `-V statistics-demand`
+counter runs. Message-store demand attribution:
+
+| sort              | stats_calls | terminal_core | shape computed / ineligible | calc_stats median (range) | total median |
+|-------------------|------------:|--------------:|----------------------------:|--------------------------:|-------------:|
+| `-so occurrences` |          10 |            10 |                       0 / 0 |     0.187s (0.185–0.195) |       17.75s |
+| `-so p99`         |      22,244 |        22,244 |                       0 / 0 |     0.458s (0.455–0.458) |       18.17s |
+| `-so skewness`    |      22,244 |        22,244 |              1,770 / 20,474 |     0.592s (0.591–0.593) |       18.37s |
+
+Findings:
+
+- **The phase-relative gap persists post-#305**: 2.4× for `-so p99`, 3.2×
+  for `-so skewness` vs the occurrences pool path. In absolute turn terms
+  it is small at this cardinality (~0.27–0.41s of an ~18s read-dominated
+  turn, ≈2%); the concern scales with key cardinality (production shape:
+  600k keys).
+- **Population-pass arithmetic confirms the eligibility-split win**: the
+  p99→skewness delta (0.134s for 1,770 shape second-pass computations +
+  20,474 eligibility checks) and the occurrences→p99 delta (0.27s for
+  22,234 extra terminal_core calls ≈ 12µs/key) attribute cleanly to
+  demanded work.
+- **Sharpened expectation for the committed scope**: for a terminal-only
+  `-so p99`, today's path already computes only `terminal_core`
+  population-wide — exactly what the two-pass population pass would compute
+  — so the two-pass design yields ~no compute win there (its win is memory
+  transience, the #323 coupling). The compute win concentrates on
+  shape/std_dev/cv sorts (eligibility collapse: 22,244 → 1,770 here) and on
+  CSV-demand runs (population pass computes one group instead of all
+  demanded groups). `-so p99` compute remains irreducible without the
+  contingency proxy pool — consistent with the design record's "residual
+  heavy case" framing.
+- Stderr clean across all runs (no runtime warnings).
+
 ### Benchmark coverage (issue step 1)
 
 - Two scenarios join `SCENARIOS` in `tests/baseline/run-benchmark.sh`:
