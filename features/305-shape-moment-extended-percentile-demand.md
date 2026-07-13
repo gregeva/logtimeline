@@ -149,10 +149,10 @@ shape_pass: executed=<N> skipped=<N>
 - Group order fixed: terminal_core, csv_body, extended_percentiles,
   shape_moments. Store order fixed: bucket, message.
 - `moment_source` — how the store's shape moments are produced when
-  demanded: `second_pass` (raw path O(n) pass), `sidecar` (bin path
-  Welford-Pébay derivation; the raw path also becomes `sidecar` when #306
-  lands), `none` (shape undemanded or store inactive). Derived from resolved
-  configuration in the emitter.
+  demanded: `second_pass` (raw path O(n) pass — the measured-cheaper design;
+  see § #306 investigation below), `sidecar` (bin path Welford-Pébay
+  derivation), `none` (shape undemanded or store inactive). Derived from
+  resolved configuration in the emitter.
 - `shape_pass` counters count **only the raw path's O(n) second pass**:
   `executed` = invocations that ran it; `skipped` = invocations with n≥4
   whose shape group was undemanded. The bin path's O(1) derivation is
@@ -187,6 +187,72 @@ inverse implication: with gating in place, unconsumed statistics cost
 nothing, so any future reduction decision is purely about user-facing
 surface complexity, not performance.
 
+## #306 investigation — fused moment accumulation: measured and rejected
+
+#306 proposed fusing the raw path's m2/m3/m4 accumulation into the read loop
+(Welford-Pébay sidecars, as the bin path does) to eliminate the second O(n)
+traversal in `calculate_statistics`. The fusion was **fully implemented and
+proven numerically correct** (drift confined to exactly
+skewness/kurtosis/bimodality_coef at ≤1.6e-13 relative — running-mean vs
+final-mean centering; L3 NumPy/SciPy oracle green on all 18 scenarios;
+terminal output byte-identical), then **rejected on measured performance**
+and reverted. The full record is on the #306 issue; the durable findings any
+future change to this code path must be weighed against:
+
+**Measured result** (median of 3, ranges non-overlapping; single-day Tomcat
+log, 761,698 lines; base = post-#305 two-pass, head = fused):
+
+| configuration | read_files | calculate_statistics | total | log_messages |
+|---|---|---|---|---|
+| `-o` (both stores demand shape) | +9.0% (+1.60s) | −46.6% (−0.149s) | **+8.0%** | **+12.5%** |
+| `-so skewness` (message store only) | +5.1% (+0.91s) | −28.5% (−0.111s) | **+4.4%** | +12% |
+
+**Attribution** (the two configurations isolate the mechanism — they differ
+only in how many stores run the per-line update): one Welford update costs
+**~1.0–1.2 µs per sample** (+0.91s/762k lines at one store; +1.60s at two);
+the second-pass loop it replaced costs **~0.15 µs per element** (the
+measured `calculate_statistics` savings over the same populations). **The
+fused update is ~7–8× more expensive per element.**
+
+**Mechanism**: the second pass is 3 lexical-scalar multiply-adds over a
+contiguous, already-sorted array — the sort is paid for percentiles
+regardless — i.e. near-optimal Perl. The Welford update performs 5–6
+hash-field reads/writes per sample (string-keyed lookups) plus an FP
+division; in Perl, hash traffic dominates arithmetic. Memory: the sidecars
+add 5 numeric fields to **every** observed key (capture is population-wide),
+while statistics are computed only for the top-N pool on non-statistic sorts
+— +12% on `log_messages`, the dominant structure.
+
+**Ceiling analysis**: collapsing the 5 hash fields into one arrayref field
+would roughly halve the update (~0.5–0.6 µs) — still ~4× the pass. Both
+sides scale linearly with sample count, so the constants decide at every
+scale; no optimization within the fused design beats the two-pass.
+
+**Why the premise failed**: #306 was written pre-#305, when the pass ran
+unconditionally for every key on every run, and assumed extending the
+`sum_of_squares` pattern (one field `+=`) to three moments was the same
+cost class. Post-#305: undemanded runs skip the pass entirely (measured
+`calculate_statistics` beats the v0.14.5 baseline by 13–16% on all seven
+month-single-server scenarios), and demanded runs are at v0.14.5 parity by
+construction (v0.14.5 also computed everything). **The +15–27% regression
+that motivated #302/#305/#306 is fully accounted for by #304 (sort
+comparator) + #305 (demand gating); no residual remains for #306.**
+
+**Standing guidance for this code path**:
+- The raw path keeps the demand-gated two-pass; do not fuse moment
+  accumulation into the read loop without new evidence that beats the
+  per-element arithmetic above.
+- The bin path keeps its Welford sidecars — there they are the only option
+  (no raw samples) and they buy the elimination of the durations arrays.
+- Per-sample work in `read_and_process_logs` is the most expensive place to
+  add anything: at ~1 µs per hash-heavy update per line, one added update
+  costs ~+5–9% total wall-clock on access-log workloads. Prefer deferred,
+  pool-limited computation at the `calculate_statistics` site.
+- The `-V statistics-demand` section (retained) is the instrument that made
+  this measurable: `shape_pass executed/skipped` gives the demanded-work
+  denominator and `moment_source` names the mechanism per store — use them
+  for any future attribution in this territory.
+
 ## Relationship to other issues
 
 - **#349** — the store-level demand contract this extends (recorded above).
@@ -196,11 +262,14 @@ surface complexity, not performance.
   is less work per key.
 - **#303** — population-wide compute on statistic sorts; enabled by the
   per-call demand descriptor, not solved here.
-- **#306** — replaces the raw path's O(n) shape pass with incremental
-  Welford-Pébay sidecars when shape IS demanded; shape-group demand gates
-  that capture (the #305/#306 interlock). See
-  features/189-histogram-bin-counter-primitives.md for the sidecar/merge
-  machinery.
+- **#306** — proposed replacing the raw path's O(n) shape pass with
+  incremental Welford-Pébay sidecars. **Implemented, measured, and
+  rejected**: the fusion is a net loss on both time and memory in the
+  post-#305 world — see § #306 investigation below for the attributed,
+  validated findings that any future change to this code path must be
+  weighed against. The bin path's sidecar/merge machinery (which rightly
+  keeps Welford — it has no raw samples) is in
+  features/189-histogram-bin-counter-primitives.md.
 - **#323/#354** — the memory investigations that established per-key field
   cost at scale; the storage gate is this design's contribution to that
   reduction line.
