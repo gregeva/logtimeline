@@ -739,20 +739,23 @@ Raw-first's *premise* is validated but its *shape* is corrected. The win is **no
 
 Even after #346, summing every `-mem`-reported structure leaves **~0.81 GB (9% of the 8.64 GB peak RSS) untracked** in the bin run (0.19 GB / 4% in the raw run). A `Devel::Size` sweep of the 75 unmapped file-scope structures found **no single large holder** (only `message_key_order` ≈ 4 MB above 100 KB) — so the gap is diffuse/transient allocation (Perl arena fragmentation, the `-n 2000000` per-message percentile scratch), not one missing hash to add to the map. **Filed as #356.**
 
-### Next steps (to bring this back to a go-forward stance)
+### Sequencing (architect decision, 2026-07-13)
 
-1. **Resolve #354 first** — it is the concrete, measured defect (`-mdm bin` memory regression) and its fix direction *is* the raw-first design (don't allocate partitions for low-N messages). #354's disposition largely determines this investigation's.
-2. **Design the head/body split** grounded in these numbers: raw for N below the ~N=88 crossover, partition only above — coordinated with #354 and the #306 Welford-redundancy decision (which of sidecars vs. partition is authoritative).
-3. **Attack Edge A separately** via grouping (#96 / auto-`-g`, intent-gated) — the per-message-hash cost is the largest lever and is orthogonal to the data model.
-4. **Re-measure** any implemented head/body split on the same node with `-mem` to confirm it beats *both* pure models (the two measured endpoints — bin 7.17 GB, raw 4.63 GB — bracket the target).
+**#2 (memory ceiling + graceful degradation) and #44 (source-file heuristics / up-front estimation) are the umbrella for this memory line.** All storage-policy work below is designed inside that framework, not standalone:
+
+1. **#2/#44 design first** — the estimation (#46 index-informed) and ceiling/degradation contract under which every downstream policy (promotion thresholds, budget awareness, cardinality reduction) is decided.
+2. **#354 (BUG: `-mdm bin` heavier than raw) is blocked behind that design.** Its fix — head/body split: raw for N below the ~N=88 crossover, partition only above — is a storage policy owned by the umbrella. The #306 rejection settles the entry shapes: head keeps sidecar + partition (sidecar authoritative for moments), body keeps neither (moments via the post-sort pass).
+3. **Edge A via grouping** (#96 / auto-`-g`, intent-gated) — the per-message-hash cost is the largest lever; estimation-driven, so it belongs to the #44 side of the umbrella.
+4. **Re-measure** any implemented head/body split on the same node with `-mem` to confirm it beats *both* pure models (the two measured endpoints — bin 7.17 GB, raw 4.63 GB — bracket the target). Peak-RSS anchors must be re-taken post-#362: the runs above used `-n 2000000` before the unclamped output-phase slice burst (~0.16–0.19 GB transient RSS ratchet) was fixed; per-structure `Devel::Size` figures are unaffected.
 
 ### Dependencies / cross-links
 
+- **#2 / #44** — the umbrella (see Sequencing above); #354 is blocked on them.
 - **#346** — resolved (PR #350); made this measurement possible.
-- **#354 (BUG: `-mdm bin` memory regression vs raw)** — the actionable defect this investigation surfaced; its fix is the raw-first design. Lead dependency now.
-- **#306** — carries the Welford-sidecar / counter-partition storage-redundancy facet (memory) alongside its compute-cost scope.
+- **#354 (BUG: `-mdm bin` memory regression vs raw)** — the actionable defect this investigation surfaced; blocked behind the #2/#44 design, which owns its head/body-split fix.
+- **#306** — closed (implemented, measured, rejected): the raw path keeps its two-pass moment computation; raw entries carry no Welford sidecars. Constants and rationale in features/305-shape-moment-extended-percentile-demand.md § #306 investigation.
 - **#96 / `-g`** — the Edge-A cardinality lever (the dominant remaining cost).
-- **#2 / #44** — budget detection / up-front memory estimation, relevant only if a budget-driven promotion policy is pursued; deferred pending the head/body-split design.
-- **#347 (bin-counter eviction)** — adjacent memory lever for the same store; relationship still a post-design decision.
+- **#347 (bin-counter eviction)** — closed as not planned: prevention (never allocate sparse partitions, per the #354 fix direction) supersedes evicting them. Residual eviction scope (raw-side synthesized residue) belongs to #2's contract if ever needed.
+- **#362** — resolved; reframes the peak-RSS figures above (see Sequencing item 4).
 - **#356 (`-mem` untracked residual)** — the ~9%-of-RSS gap surfaced while reconciling these measurements; `-mem` should attribute or explicitly surface it so the memory account closes.
 - The **single-sample inline producer** (`read_and_process_logs`, `%tmp` `_single` path) is a second place entry-kind is minted; any head/body implementation must route it through the same policy as the main write path.
