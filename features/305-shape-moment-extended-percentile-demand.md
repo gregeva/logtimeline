@@ -130,36 +130,11 @@ Demand gates three distinct cost sites; all three matter:
 
 ## -V statistics-demand section contract
 
-Registered section `statistics-demand` (registry + `@verbose_section_order`,
-after `percentile-algorithm`), emitted by `emit_statistics_demand_verbose()`
-after finalize so counters are final. Harness:
-`tests/validate-statistics-demand.sh` (5 scenarios; self-documenting
-assertions per HARNESS-DESIGN.md). Locked line shapes:
-
-```
-=== statistics-demand ===
-store: <bucket|message>
-  store_demand: <0|1>
-  group <name>: demanded=<0|1> consumers=<comma-joined|->
-  moment_source: <second_pass|sidecar|none>
-shape_pass: executed=<N> skipped=<N>
-=== END statistics-demand ===
-```
-
-- Group order fixed: terminal_core, csv_body, extended_percentiles,
-  shape_moments. Store order fixed: bucket, message.
-- `moment_source` — how the store's shape moments are produced when
-  demanded: `second_pass` (raw path O(n) pass — the measured-cheaper design;
-  see § #306 investigation below), `sidecar` (bin path Welford-Pébay
-  derivation), `none` (shape undemanded or store inactive). Derived from
-  resolved configuration in the emitter.
-- `shape_pass` counters count **only the raw path's O(n) second pass**:
-  `executed` = invocations that ran it; `skipped` = invocations with n≥4
-  whose shape group was undemanded. The bin path's O(1) derivation is
-  deliberately not counted — its story is `moment_source: sidecar`. These
-  counters are the observable proof that demand gating skips work.
-- Additions are non-breaking; renames/removals are breaking per
-  HARNESS-DESIGN.md's stability contract.
+Moved to the capability-owning feature doc: see
+features/duration-statistics.md § -V statistics-demand section contract for
+the locked line shapes and the semantics of every emitted key and counter.
+This doc retains only the #305-specific decision record (the demand
+registry, the gate classes, and the #306 investigation below).
 
 ## Sorting and the top-N landscape (context for demand's compute impact)
 
@@ -249,9 +224,10 @@ comparator) + #305 (demand gating); no residual remains for #306.**
   costs ~+5–9% total wall-clock on access-log workloads. Prefer deferred,
   pool-limited computation at the `calculate_statistics` site.
 - The `-V statistics-demand` section (retained) is the instrument that made
-  this measurable: `shape_pass executed/skipped` gives the demanded-work
-  denominator and `moment_source` names the mechanism per store — use them
-  for any future attribution in this territory.
+  this measurable: the per-store `stats_calls` and
+  `group_calc <name>: computed/skipped_demand/ineligible` counters give the
+  demanded-work denominator and `moment_source` names the mechanism per
+  store — use them for any future attribution in this territory.
 
 ## Relationship to other issues
 

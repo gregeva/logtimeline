@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # validate-statistics-demand.sh — Validate the statistics-demand `-V` section:
 # per-store statistics-group demand resolution with raising consumers, the
-# shape-moment pass execution counters, and the per-store moment source
-# (Issue #305).
+# per-store moment source, and the per-store statistics-calculation counters
+# (stats_calls invocations plus per-group computed/skipped_demand/ineligible)
+# (Issues #305, #303).
 # Usage: ./tests/validate-statistics-demand.sh
 #
 # Follows the self-documenting assertion design from tests/HARNESS-DESIGN.md
@@ -38,7 +39,7 @@ WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 cd "$WORKDIR"
 
-CONTRACT='features/305-shape-moment-extended-percentile-demand.md § -V statistics-demand section contract — stability-contracted; renames are breaking'
+CONTRACT='features/duration-statistics.md § -V statistics-demand section contract — stability-contracted; renames are breaking'
 
 pass=0
 fail=0
@@ -158,14 +159,14 @@ extract_section() {
 }
 
 # Extract the per-store sub-block (lines from `store: <name>` up to the next
-# `store:` or the shape_pass line) so per-store assertions cannot match the
-# other store's lines.
+# `store:` or the section end marker) so per-store assertions cannot match
+# the other store's lines.
 extract_store() {
     local body="$1" store="$2"
     local out="$body.$store"
     awk -v store="$store" '
         $0 == "store: " store { inside=1; print; next }
-        inside && (/^store: / || /^shape_pass: / || /^=== END /) { inside=0 }
+        inside && (/^store: / || /^=== END /) { inside=0 }
         inside { print }
     ' "$body" > "$out"
     echo "$out"
@@ -205,11 +206,33 @@ if body=$(extract_section "$out"); then
             asserts     "With shape_moments undemanded the $store store reports moment_source none" \
             produced_by 'emit_statistics_demand_verbose() in ltl' \
             contract    "$CONTRACT"
+        assert_line "$sb" \
+            pattern     '^  stats_calls: [1-9][0-9]*$' \
+            asserts     "The $store store reports a non-zero count of statistics-primitive invocations on a demanded store (every call is counted, including no-duration early returns)" \
+            produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (stats_calls in %stats_demand_telemetry)' \
+            contract    "$CONTRACT"
+        assert_line "$sb" \
+            pattern     '^  group_calc terminal_core: computed=[1-9][0-9]* skipped_demand=0 ineligible=0$' \
+            asserts     "terminal_core is derived on every non-early-returned invocation of the $store store's statistics primitive (never demand-skipped: terminal_core demand equals store demand)" \
+            produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (group_calc counters)' \
+            contract    "$CONTRACT"
+        assert_line "$sb" \
+            pattern     '^  group_calc shape_moments: computed=0 skipped_demand=[0-9]+ ineligible=[0-9]+$' \
+            asserts     "On a terminal-only run the $store store's shape-moment derivation never runs — eligible (n>=4) calls are demand-skipped and n<4 calls are counted ineligible, so every invocation is accounted for" \
+            produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (group_calc counters)' \
+            contract    "$CONTRACT"
     done
-    assert_line "$body" \
-        pattern     '^shape_pass: executed=0 skipped=[1-9][0-9]*$' \
-        asserts     'On a terminal-only run the raw O(n) shape-moment pass never executes and is skipped for every key/bucket with n>=4 — the observable proof that demand gating fires' \
-        produced_by 'calculate_statistics() in ltl (shape_pass counters in %stats_demand_telemetry)' \
+    sm=$(extract_store "$body" message)
+    assert_line "$sm" \
+        pattern     '^  group_calc shape_moments: computed=0 skipped_demand=[1-9][0-9]* ineligible=[0-9]+$' \
+        asserts     'On a terminal-only run the message store demand-skips the shape derivation for every eligible key — the observable proof that demand gating fires' \
+        produced_by 'calculate_statistics() in ltl (group_calc counters in %stats_demand_telemetry)' \
+        contract    "$CONTRACT"
+    assert_command \
+        command     "! grep -qE '^  sort_(selection|calc):' '$sm'" \
+        label       'no sort_selection/sort_calc lines under the default occurrences sort' \
+        asserts     'The #303 sort-path lines appear only when a calculated-statistic sort ran; an available-value sort (default occurrences) emits neither' \
+        produced_by 'emit_statistics_demand_verbose() in ltl (sort_selection telemetry populated only on the two-pass sort path)' \
         contract    "$CONTRACT"
 fi
 echo
@@ -242,10 +265,16 @@ if body=$(extract_section "$out"); then
         asserts     'Under the default raw data model with shape demanded, the message store reports moment_source second_pass' \
         produced_by 'emit_statistics_demand_verbose() in ltl' \
         contract    "$CONTRACT"
-    assert_line "$body" \
-        pattern     '^shape_pass: executed=[1-9][0-9]* skipped=0$' \
-        asserts     'With every group demanded the shape pass executes for every eligible key/bucket and nothing is skipped — output parity with the pre-gating behavior' \
-        produced_by 'calculate_statistics() in ltl (shape_pass counters)' \
+    assert_line "$sm" \
+        pattern     '^  group_calc shape_moments: computed=[1-9][0-9]* skipped_demand=0 ineligible=[0-9]+$' \
+        asserts     'With every group demanded the message store derives shape moments for every eligible key and demand-skips nothing — output parity with the pre-gating behavior' \
+        produced_by 'calculate_statistics() in ltl (group_calc counters)' \
+        contract    "$CONTRACT"
+    assert_command \
+        command     "calls=\$(awk '/^  stats_calls: /{print \$2; exit}' '$sm'); tc=\$(grep -oE '^  group_calc terminal_core: computed=[0-9]+' '$sm' | grep -oE '[0-9]+\$'); [[ -n \"\$calls\" && -n \"\$tc\" && \"\$calls\" -ge \"\$tc\" ]]" \
+        label       'message stats_calls >= terminal_core computed (early-returned calls are counted as invocations)' \
+        asserts     'stats_calls counts every statistics-primitive invocation, so it is always >= the terminal_core computed count (the difference is the early-returned no-duration calls)' \
+        produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (stats_calls vs group_calc counters)' \
         contract    "$CONTRACT"
 fi
 echo
@@ -272,6 +301,78 @@ if body=$(extract_section "$out"); then
         pattern     '^  moment_source: second_pass$' \
         asserts     'The message store computes shape moments (via the raw second pass) when demanded by the sort key alone' \
         produced_by 'emit_statistics_demand_verbose() in ltl' \
+        contract    "$CONTRACT"
+    assert_line "$sm" \
+        pattern     '^  group_calc shape_moments: computed=[1-9][0-9]* skipped_demand=0 ineligible=0$' \
+        asserts     'Under the #303 two-pass sort the shape derivation runs only for keys that met the n>=4 eligibility floor (population pass) or won a display slot (top-N pass) — nothing is demand-skipped and no ineligible key ever reaches the primitive' \
+        produced_by 'calculate_statistics() in ltl (group_calc counters; two-pass sort path in calculate_all_statistics)' \
+        contract    "$CONTRACT"
+    # Sabotage record (HARNESS-DESIGN.md § Proving a new assertion can fail),
+    # 2026-07-13, three probes against emit_statistics_demand_verbose(), each
+    # restored after confirming the expected failure with the full
+    # asserts/produced_by/contract triple and exit 1:
+    #   1. key renamed sort_selection -> sort_sel  => sort_selection line
+    #      assertion failed;
+    #   2. population count emitted +1             => the population =
+    #      defined + demoted invariant failed;
+    #   3. sort lines emitted unconditionally      => both absence assertions
+    #      (scenario-1 message store, scenario-3 bucket store) failed.
+    assert_line "$sm" \
+        pattern     '^  sort_selection: statistic=skewness defined=[1-9][0-9]* fill=[1-9][0-9]* demoted=[0-9]+$' \
+        asserts     'The calculated-statistic sort reports its eligibility split: keys ranked by the computed value (defined) vs keys ranked by occurrences (fill), with demoted counting eligible keys whose value computed to undef' \
+        produced_by 'calculate_all_statistics() in ltl (sort_selection telemetry), emitted by emit_statistics_demand_verbose()' \
+        contract    "$CONTRACT"
+    assert_line "$sm" \
+        pattern     '^  sort_calc: population=[1-9][0-9]* topn=[1-9][0-9]*$' \
+        asserts     'The two-pass sort attributes primitive invocations per pass: population (defined-block candidates, sort-statistic group only) and topn (displayed keys, full demanded statistics)' \
+        produced_by 'calculate_all_statistics() in ltl (population_calls telemetry); topn derived at emit time as stats_calls minus population' \
+        contract    "$CONTRACT"
+    assert_command \
+        command     "pop=\$(grep -oE '^  sort_calc: population=[0-9]+' '$sm' | grep -oE '[0-9]+\$'); def=\$(grep -oE 'defined=[0-9]+' '$sm' | grep -oE '[0-9]+\$'); dem=\$(grep -oE 'demoted=[0-9]+' '$sm' | grep -oE '[0-9]+\$'); [[ -n \"\$pop\" && -n \"\$def\" && -n \"\$dem\" && \"\$pop\" -eq \$((def + dem)) ]]" \
+        label       'population calls = defined + demoted (every pass-1 call produced a ranked value or a demotion)' \
+        asserts     'Every population-pass invocation is accounted for: it either yielded a defined sort value or demoted the key to the fill block' \
+        produced_by 'calculate_all_statistics() in ltl (two-pass sort path)' \
+        contract    "$CONTRACT"
+    assert_command \
+        command     "! grep -qE '^  sort_(selection|calc):' '$sb'" \
+        label       'no sort_selection/sort_calc lines on the bucket store' \
+        asserts     'The sort-path lines are emitted only for the store where the two-pass selection ran (the message store); their absence elsewhere is contractual' \
+        produced_by 'emit_statistics_demand_verbose() in ltl (sort_selection telemetry is message-store only)' \
+        contract    "$CONTRACT"
+fi
+echo
+
+############################################################
+current_scenario="scenario-3b-sort-on-p99"
+# The sort_selection/sort_calc assertions below grep the same emitted lines
+# already sabotage-proven under scenario-3 (see the record there); the group
+# demand-line shapes are the long-established scenario-1/2/3 patterns.
+echo "--- $current_scenario ---"
+out=$(run_section statistics-demand -so p99)
+check_capture_warnings "$out"
+if body=$(extract_section "$out"); then
+    sm=$(extract_store "$body" message)
+    assert_line "$sm" \
+        pattern     '^  group terminal_core: demanded=1 consumers=messages-table,sort-on:p99$' \
+        asserts     'Sorting on p99 raises no group beyond terminal_core (p99 is a terminal_core field): the sort-on consumer joins the existing terminal_core demand with provenance' \
+        produced_by 'resolve_statistics_group_demand() in ltl (@STAT_CONSUMERS sort-on declaration)' \
+        contract    "$CONTRACT"
+    for group in csv_body extended_percentiles shape_moments; do
+        assert_line "$sm" \
+            pattern     "^  group $group: demanded=0 consumers=-\$" \
+            asserts     "A terminal_core sort key ($group check) raises no demand on any other statistics group" \
+            produced_by 'resolve_statistics_group_demand() in ltl' \
+            contract    "$CONTRACT"
+    done
+    assert_line "$sm" \
+        pattern     '^  sort_selection: statistic=p99 defined=[1-9][0-9]* fill=[0-9]+ demoted=[0-9]+$' \
+        asserts     'The two-pass sort path runs (and reports its eligibility split) even when the sort statistic needs no extra group demand — a percentile sort at n>=1 makes every duration-bearing key defined' \
+        produced_by 'calculate_all_statistics() in ltl (sort_selection telemetry), emitted by emit_statistics_demand_verbose()' \
+        contract    "$CONTRACT"
+    assert_line "$sm" \
+        pattern     '^  sort_calc: population=[1-9][0-9]* topn=[1-9][0-9]*$' \
+        asserts     'Both passes run under a percentile sort: population over the defined block, top-N over the displayed keys' \
+        produced_by 'calculate_all_statistics() in ltl (population_calls telemetry); topn derived at emit time' \
         contract    "$CONTRACT"
 fi
 echo

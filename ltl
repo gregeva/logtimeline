@@ -106,7 +106,7 @@ my %verbose_section_registry = (
         description => 'Per-surface effective percentile algorithm: resolved data model and algorithm name for histogram, heatmap, message-stats, and bucket-stats (Issue #280).',
     },
     'statistics-demand' => {
-        description => 'Per-store resolved statistics-group demand with raising consumers, shape-moment pass execution counters, and per-store moment source (Issue #305).',
+        description => 'Per-store resolved statistics-group demand with raising consumers, per-store moment source, per-store statistics-calculation counters (invocations plus per-group computed/skipped_demand/ineligible), and calculated-statistic sort selection (defined/fill split, per-pass call attribution) (Issues #305, #303).',
     },
     'profile' => {
         description => 'Timeline folding (--profile): resolved mode, fold period, included weekdays, and included vs dropped sample counts (Issue #256).',
@@ -571,14 +571,30 @@ my %stats_group_demand;
 # identical to the store-level demand flag above by construction).
 my ($bucket_stats_demand_csv_body, $bucket_stats_demand_extended, $bucket_stats_demand_shape)    = (0, 0, 0);
 my ($message_stats_demand_csv_body, $message_stats_demand_extended, $message_stats_demand_shape) = (0, 0, 0);
-# Telemetry for the -V statistics-demand section: how often the raw path's
-# O(n) shape-moment pass ran vs was skipped by demand. (The section's
-# moment_source line is derived from resolved config in the emitter, not
-# tracked here.)
-my %stats_demand_telemetry = (
-    shape_pass_executed => 0,
-    shape_pass_skipped  => 0,
-);
+# Telemetry for the -V statistics-demand section: per-store invocation and
+# per-group derivation counters for the statistics primitives
+# (calculate_statistics / calculate_statistics_bin). Structure:
+#   {store}{stats_calls}                      — primitive invocations (including
+#                                               early-returned no-duration calls)
+#   {store}{$group}{computed}                 — calls that derived the group's fields
+#   {store}{$group}{skipped_demand}           — calls eligible to derive the group
+#                                               but skipped because undemanded
+#   {store}{$group}{ineligible}               — calls where the group cannot be
+#                                               derived regardless of demand
+#                                               (shape moments need n >= 4)
+#   {store}{sort_selection}                   — calculated-statistic sort path
+#                                               only (#303): {statistic} sort
+#                                               field, {defined}/{fill}/{demoted}
+#                                               block sizes summed across
+#                                               categories, {population_calls}
+#                                               pass-1 primitive invocations
+# Maintained only when the statistics-demand section is requested (the
+# $stats_demand_telemetry_active gate below) so the per-key increments cost
+# nothing on non-observability runs — at high key cardinality every statistics
+# call is per-key work. (The section's moment_source line is derived from
+# resolved config in the emitter, not tracked here.)
+my %stats_demand_telemetry;
+my $stats_demand_telemetry_active = 0;
 
 # Consumer declarations: which statistics store a surface reads from, when it
 # is active, and which statistic groups it consumes. 'active' closures read
@@ -1685,6 +1701,10 @@ sub resolve_statistics_group_demand {
     $message_stats_demand_csv_body  = $stats_group_demand{message}{csv_body}             ? 1 : 0;
     $message_stats_demand_extended  = $stats_group_demand{message}{extended_percentiles} ? 1 : 0;
     $message_stats_demand_shape     = $stats_group_demand{message}{shape_moments}        ? 1 : 0;
+
+    # Statistics-calculation telemetry is per-key work in the statistics
+    # primitives; maintain the counters only when their section will be read.
+    $stats_demand_telemetry_active = section_requested('statistics-demand');
 }
 
 # Issue #231: classify each known long-flag-name as having been supplied
@@ -2337,19 +2357,24 @@ sub emit_percentile_algorithm_verbose {
 
 # Issue #305: statistics-group demand observability. Reports, per statistics
 # store (bucket, message): the store-level demand boolean, each statistic
-# group's resolved demand with the consumer surfaces that raised it, and the
-# moment source the store's shape statistics would use. A trailing
-# shape_pass line carries the raw-path second-pass execution counters — the
-# observable proof that demand gating skips the O(n) moment pass. The bin
-# path's O(1) sidecar derivation is intentionally NOT counted there; it is
-# reported through moment_source.
+# group's resolved demand with the consumer surfaces that raised it, the
+# moment source the store's shape statistics would use, and the per-store
+# statistics-calculation counters: stats_calls (invocations of the store's
+# statistics primitive, including early-returned no-duration calls) and one
+# group_calc line per statistics group breaking those invocations down into
+# computed / skipped_demand / ineligible outcomes. The counters cover both
+# the raw and bin primitives; moment_source discloses which mechanism a
+# store's shape moments use. Counters are maintained only when this section
+# is requested (see $stats_demand_telemetry_active), so they are always
+# final and accurate whenever they are emitted.
 #
 # Locked surface: section name 'statistics-demand'; line shapes
 #   `store: <bucket|message>`
 #   `  store_demand: <0|1>`
 #   `  group <name>: demanded=<0|1> consumers=<comma-joined|->`
 #   `  moment_source: <second_pass|sidecar|none>`
-#   `shape_pass: executed=<N> skipped=<N>`
+#   `  stats_calls: <N>`
+#   `  group_calc <name>: computed=<N> skipped_demand=<N> ineligible=<N>`
 # Group order is fixed: terminal_core, csv_body, extended_percentiles,
 # shape_moments. The sort-on consumer is labeled `sort-on:<field>`.
 sub emit_statistics_demand_verbose {
@@ -2387,11 +2412,32 @@ sub emit_statistics_demand_verbose {
             $source = $dm eq 'bin' ? 'sidecar' : 'second_pass';
         }
         push @verbose_output, "  moment_source: $source";
-    }
 
-    push @verbose_output, "shape_pass: "
-        . "executed=$stats_demand_telemetry{shape_pass_executed} "
-        . "skipped=$stats_demand_telemetry{shape_pass_skipped}";
+        # Per-store statistics-calculation counters (maintained only when
+        # this section is requested, so they are final and accurate here).
+        my $t = $stats_demand_telemetry{$store} // {};
+        push @verbose_output, "  stats_calls: " . ($t->{stats_calls} // 0);
+        for my $group (qw( terminal_core csv_body extended_percentiles shape_moments )) {
+            my $g = $t->{$group} // {};
+            push @verbose_output, "  group_calc $group:"
+                . " computed="       . ($g->{computed}       // 0)
+                . " skipped_demand=" . ($g->{skipped_demand} // 0)
+                . " ineligible="     . ($g->{ineligible}     // 0);
+        }
+        # Calculated-statistic sort selection (#303): emitted only for the
+        # store where the two-pass sort path ran (message store, statistic
+        # sort key active). topn attribution is derived: every store call
+        # not made by the population pass came from the top-N pass.
+        if (my $s = $t->{sort_selection}) {
+            push @verbose_output, "  sort_selection: statistic=" . $s->{statistic}
+                . " defined=" . ($s->{defined} // 0)
+                . " fill="    . ($s->{fill}    // 0)
+                . " demoted=" . ($s->{demoted} // 0);
+            push @verbose_output, "  sort_calc:"
+                . " population=" . ($s->{population_calls} // 0)
+                . " topn=" . (($t->{stats_calls} // 0) - ($s->{population_calls} // 0));
+        }
+    }
 
     push @verbose_output, "=== END statistics-demand ===";
 }
@@ -9841,6 +9887,7 @@ sub calculate_all_statistics {
             # undemanded statistic fields are never written.
             my $dm = choose_data_model('bucket-stats') // 'raw';
             my $bucket_demand = {
+                store    => 'bucket',    # telemetry attribution (-V statistics-demand)
                 csv_body => $bucket_stats_demand_csv_body,
                 extended => $bucket_stats_demand_extended,
                 shape    => $bucket_stats_demand_shape,
@@ -9979,7 +10026,11 @@ sub calculate_all_statistics {
             # Collect and sort the log keys based on the count within each log_key
             my (@sorted_log_keys, @top_keys);
 
-            if( $sort_key !~ /^(min|mean|max|std_dev|cv|iqr|skewness|kurtosis|bimodality_coef|p1|p5|p10|p25|p50|p75|p90|p95|p99|p999|p9999|p99999)$/ ) {
+            # A calculated-statistic sort key is exactly a key of the #305
+            # group registry (%STAT_FIELD_GROUP covers the full 22-field
+            # duration ladder); available-value sort keys (occurrences,
+            # total_duration_num, bytes, impact, count_*) are not in it.
+            if( !exists $STAT_FIELD_GROUP{$sort_key} ) {
                 # Two-stage selection (Issue #302). Only the top N keys are ever
                 # displayed, but a deterministic total order (the metric, then a
                 # tiebreaker) is needed to pick them reproducibly. On a
@@ -10046,8 +10097,147 @@ sub calculate_all_statistics {
                 # Capture only the top N log keys for calculations if possible
                 @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)];
             } else {
-                # Sort by statistical metric which first needs to be calculated for all messages (will inevitably take longer)
-                @top_keys = sort keys %{$log_messages{$category}};
+                # Calculated-statistic sort (#303): the sort value does not
+                # exist until statistics are computed, so the pool selection
+                # above cannot apply directly. Selection runs in two passes,
+                # per the sort contract in
+                # features/303-calculated-statistic-sort-path.md:
+                #
+                #   Defined block: keys whose observation count meets the
+                #   statistic's eligibility floor rank by the computed value
+                #   in the requested direction (-sa means smallest defined
+                #   value first, never undefined first).
+                #   Fill block: keys without a defined value stay in the
+                #   reference set and fill any remaining display slots ranked
+                #   by occurrences under the same conventions as the
+                #   occurrences sort. Their statistic columns render blank —
+                #   the blank is the signal; no notice is printed.
+                #
+                # Pass 1 (population, defined block only) computes just the
+                # sort statistic's demand group per key into a transient map;
+                # nothing is stored on the per-key entry, so population-wide
+                # memory stays flat at high key cardinality (#323). Keys
+                # whose value computes to undef despite meeting the floor
+                # (degenerate data, e.g. zero-mean cv) demote to the fill
+                # block. Pass 2 is the shared loop below: full demanded
+                # statistics for only the keys that won a display slot.
+                my $n_floor = $sort_key =~ /^(?:skewness|kurtosis|bimodality_coef)$/ ? 4
+                            : $sort_key =~ /^(?:std_dev|cv)$/                        ? 2
+                            :                                                          1;
+                my $sort_group = $STAT_FIELD_GROUP{$sort_key};
+                my $population_demand = {
+                    store    => 'message',
+                    csv_body => ($sort_group eq 'csv_body'             ? 1 : 0),
+                    extended => ($sort_group eq 'extended_percentiles' ? 1 : 0),
+                    shape    => ($sort_group eq 'shape_moments'        ? 1 : 0),
+                };
+                my $dm = choose_data_model('message-stats') // 'raw';
+
+                my (%sort_value, @fill_block);
+                my ($demoted, $population_calls) = (0, 0);
+                foreach my $log_key (keys %{$log_messages{$category}}) {
+                    my $entry = $log_messages{$category}{$log_key};
+                    my $n = $message_stats_capture_mode eq 'bin'
+                        ? ($entry->{duration_count} // 0)
+                        : scalar @{ $entry->{durations} // [] };
+                    if (!$message_duration_stats_demand || $n < $n_floor
+                        || !defined $entry->{occurrences}) {
+                        push @fill_block, $log_key;
+                        next;
+                    }
+                    my $stats;
+                    if ($dm eq 'bin') {
+                        $stats = calculate_statistics_bin(
+                            $entry,
+                            $log_messages_counters{"$category\x1f$log_key"},
+                            {},
+                            $population_demand,
+                        );
+                    } else {
+                        # The durations arrayref is aliased, not copied:
+                        # calculate_statistics sorts into its own copy and
+                        # never mutates its input.
+                        $stats = calculate_statistics({
+                            occurrences    => $entry->{occurrences},
+                            total_duration => $entry->{total_duration},
+                            sum_of_squares => $entry->{sum_of_squares},
+                            durations      => $entry->{durations},
+                        }, $population_demand);
+                    }
+                    $population_calls++;
+                    my $value = $stats ? $stats->{$sort_key} : undef;
+                    if (defined $value) {
+                        $sort_value{$log_key} = $value;
+                    } else {
+                        $demoted++;
+                        push @fill_block, $log_key;
+                    }
+                }
+
+                # Defined block: the same two-stage display-cut selection as
+                # the available-value branch above, on the transient values.
+                my @defined_sorted;
+                if (%sort_value) {
+                    my @by_stat = sort {
+                        $sort_ascending
+                            ? ($sort_value{$a} <=> $sort_value{$b})
+                            : ($sort_value{$b} <=> $sort_value{$a});
+                    } keys %sort_value;
+                    my $cut = min($#by_stat, $top_n_messages - 1);
+                    my $cut_val = $sort_value{$by_stat[$cut]};
+                    my $pool_end = $cut;
+                    $pool_end++ while $pool_end < $#by_stat
+                        && $sort_value{$by_stat[$pool_end + 1]} == $cut_val;
+                    my @pool = @by_stat[0 .. $pool_end];
+                    @defined_sorted = sort {
+                        ($sort_ascending
+                            ? ($sort_value{$a} <=> $sort_value{$b})
+                            : ($sort_value{$b} <=> $sort_value{$a}))
+                        || ($a cmp $b);
+                    } @pool;
+                }
+
+                # Fill block: ranked by occurrences, only when display slots
+                # remain after the defined block. Same two-stage idiom.
+                my @fill_sorted;
+                my $fill_needed = $top_n_messages - scalar(@defined_sorted);
+                if ($fill_needed > 0 && @fill_block) {
+                    my @by_occ = sort {
+                        my $occurrences_a = $log_messages{$category}{$a}{occurrences} // 0;
+                        my $occurrences_b = $log_messages{$category}{$b}{occurrences} // 0;
+                        $sort_ascending
+                            ? ($occurrences_a <=> $occurrences_b)
+                            : ($occurrences_b <=> $occurrences_a);
+                    } @fill_block;
+                    my $cut = min($#by_occ, $fill_needed - 1);
+                    my $cut_val = $log_messages{$category}{$by_occ[$cut]}{occurrences} // 0;
+                    my $pool_end = $cut;
+                    $pool_end++ while $pool_end < $#by_occ
+                        && (($log_messages{$category}{$by_occ[$pool_end + 1]}{occurrences} // 0) == $cut_val);
+                    my @occ_pool = @by_occ[0 .. $pool_end];
+                    @fill_sorted = sort {
+                        my $occurrences_a = $log_messages{$category}{$a}{occurrences} // 0;
+                        my $occurrences_b = $log_messages{$category}{$b}{occurrences} // 0;
+                        ($sort_ascending
+                            ? ($occurrences_a <=> $occurrences_b)
+                            : ($occurrences_b <=> $occurrences_a))
+                        || ($a cmp $b);
+                    } @occ_pool;
+                }
+
+                @sorted_log_keys = (@defined_sorted, @fill_sorted);
+                $message_key_order{$category} = \@sorted_log_keys;
+                @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)];
+
+                if ($stats_demand_telemetry_active) {
+                    my $t = $stats_demand_telemetry{message} //= {};
+                    my $s = $t->{sort_selection} //= {};
+                    $s->{statistic} = $sort_key;
+                    $s->{defined}          += scalar keys %sort_value;
+                    $s->{fill}             += scalar @fill_block;
+                    $s->{demoted}          += $demoted;
+                    $s->{population_calls} += $population_calls;
+                }
             }
 
             foreach my $log_key (@top_keys) {
@@ -10106,6 +10296,7 @@ sub calculate_all_statistics {
                     # memory lever at high key cardinality.
                     my $dm = choose_data_model('message-stats') // 'raw';
                     my $message_demand = {
+                        store    => 'message',    # telemetry attribution (-V statistics-demand)
                         csv_body => $message_stats_demand_csv_body,
                         extended => $message_stats_demand_extended,
                         shape    => $message_stats_demand_shape,
@@ -10238,6 +10429,13 @@ sub log_bucket {
 # m2) are present-with-undef, matching the pre-#305 contract.
 sub calculate_statistics {
     my ($bucket_data, $demand) = @_;
+    # Telemetry handle for -V statistics-demand: undef (zero-cost) unless the
+    # section was requested. stats_calls counts every invocation, including
+    # the early-returned no-duration ones below.
+    my $t = $stats_demand_telemetry_active
+        ? ($stats_demand_telemetry{ $demand->{store} // 'unattributed' } //= {})
+        : undef;
+    $t->{stats_calls}++ if $t;
     my $occurrences = $bucket_data->{occurrences};
     return unless $occurrences > 0;
 
@@ -10270,13 +10468,18 @@ sub calculate_statistics {
     my $p99   = $sorted[int($duration_count * 0.99)];
     my $p999  = $sorted[int($duration_count * 0.999)];
 
+    $t->{terminal_core}{computed}++ if $t;
     my %stats = (
         min => $min, p50 => $p50, p95 => $p95, p99 => $p99, p999 => $p999, cv => $cv,
     );
     if ($demand->{csv_body}) {
+        $t->{csv_body}{computed}++ if $t;
         @stats{qw(mean max p1 p75 p90 std_dev)} = ($mean, $max, $p1, $p75, $p90, $std_dev);
+    } elsif ($t) {
+        $t->{csv_body}{skipped_demand}++;
     }
     if ($demand->{extended}) {
+        $t->{extended_percentiles}{computed}++ if $t;
         my $p5    = $sorted[int($duration_count * 0.05)];
         my $p10   = $sorted[int($duration_count * 0.10)];
         my $p25   = $sorted[int($duration_count * 0.25)];
@@ -10284,6 +10487,8 @@ sub calculate_statistics {
         my $p99999 = $sorted[int($duration_count * 0.99999)] // $sorted[-1];
         my $iqr   = $p75 - $p25;
         @stats{qw(p5 p10 p25 p9999 p99999 iqr)} = ($p5, $p10, $p25, $p9999, $p99999, $iqr);
+    } elsif ($t) {
+        $t->{extended_percentiles}{skipped_demand}++;
     }
 
     # Distribution-shape moments — sample-corrected skewness and excess kurtosis,
@@ -10295,8 +10500,11 @@ sub calculate_statistics {
     # shape-group demand (#305).
     if ($demand->{shape}) {
         my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
+        if ($duration_count < 4 && $t) {
+            $t->{shape_moments}{ineligible}++;
+        }
         if ($duration_count >= 4) {
-            $stats_demand_telemetry{shape_pass_executed}++;
+            $t->{shape_moments}{computed}++ if $t;
             my ($m2_sum, $m3_sum, $m4_sum) = (0, 0, 0);
             for my $x (@sorted) {
                 my $d = $x - $mean;
@@ -10319,8 +10527,9 @@ sub calculate_statistics {
             }
         }
         @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef);
-    } elsif ($duration_count >= 4) {
-        $stats_demand_telemetry{shape_pass_skipped}++;
+    } elsif ($t) {
+        if ($duration_count >= 4) { $t->{shape_moments}{skipped_demand}++ }
+        else                      { $t->{shape_moments}{ineligible}++ }
     }
 
     return \%stats;
@@ -10374,11 +10583,16 @@ sub calculate_statistics_bin {
     # percentile() calls and the shape derivation are skipped, and the
     # returned hashref carries only the demanded groups' fields (undemanded
     # quantiles also make no out_of_range_bounded audit contribution). The
-    # shape_pass telemetry counters are NOT touched here — they count the raw
-    # path's O(n) second pass; this path's O(1) sidecar derivation is
-    # reported via moment_source instead.
+    # -V statistics-demand telemetry counters count this path's derivations
+    # the same as the raw path's — the counters report which groups were
+    # derived per store; the per-store moment_source line discloses the
+    # mechanism (sidecar here vs the raw path's O(n) second pass).
     my ($sidecar_entry, $counter_entry, $aggregated_data, $demand, $audit_ref) = @_;
     $audit_ref //= \%message_stats_audit;
+    my $t = $stats_demand_telemetry_active
+        ? ($stats_demand_telemetry{ $demand->{store} // 'unattributed' } //= {})
+        : undef;
+    $t->{stats_calls}++ if $t;
     return unless $sidecar_entry && ($sidecar_entry->{occurrences} // 0) > 0;
     my $n = $sidecar_entry->{duration_count} // 0;
     return unless $n > 0;
@@ -10450,18 +10664,25 @@ sub calculate_statistics_bin {
         $pct{ $_->[0] } = ($min // 0) for @quantiles;
     }
 
+    $t->{terminal_core}{computed}++ if $t;
     my %stats = (
         min => $min, p50 => $pct{p50}, p95 => $pct{p95}, p99 => $pct{p99},
         p999 => $pct{p999}, cv => $cv,
     );
     if ($demand->{csv_body}) {
+        $t->{csv_body}{computed}++ if $t;
         @stats{qw(mean max p1 p75 p90 std_dev)} =
             ($mean, $max, $pct{p1}, $pct{p75}, $pct{p90}, $std_dev);
+    } elsif ($t) {
+        $t->{csv_body}{skipped_demand}++;
     }
     if ($demand->{extended}) {
+        $t->{extended_percentiles}{computed}++ if $t;
         my $iqr = (defined $pct{p75} && defined $pct{p25}) ? $pct{p75} - $pct{p25} : undef;
         @stats{qw(p5 p10 p25 p9999 p99999 iqr)} =
             (@pct{qw(p5 p10 p25 p9999 p99999)}, $iqr);
+    } elsif ($t) {
+        $t->{extended_percentiles}{skipped_demand}++;
     }
 
     # Distribution-shape moments — same downstream formulas as calculate_statistics,
@@ -10470,6 +10691,10 @@ sub calculate_statistics_bin {
     # fields are neither derived nor stored when no consumer reads them.
     if ($demand->{shape}) {
         my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
+        if ($t) {
+            if ($n >= 4) { $t->{shape_moments}{computed}++ }
+            else         { $t->{shape_moments}{ineligible}++ }
+        }
         if ($n >= 4) {
             my $m2 = $sidecar_entry->{m2_sum} / $n;
             my $m3 = $sidecar_entry->{m3_sum} / $n;
@@ -10484,6 +10709,9 @@ sub calculate_statistics_bin {
             }
         }
         @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef);
+    } elsif ($t) {
+        if ($n >= 4) { $t->{shape_moments}{skipped_demand}++ }
+        else         { $t->{shape_moments}{ineligible}++ }
     }
 
     return \%stats;
@@ -12882,27 +13110,12 @@ sub print_message_summary {
     my %sorted_keys = ( 'highlight' => [], 'plain' => [] );
 
     foreach my $grouping ( qw( highlight plain ) ) {
-        # Reuse the ordering already computed in calculate_all_statistics when the
-        # sort metric is an available field (Issue #302): same keys, same
-        # comparator, same result — re-sorting a high-cardinality category here
-        # is redundant. Only the top N are ever displayed, and that ordering
-        # already selected them. The order is absent only when sorting on a
-        # computed statistic (ordered only after the stats exist), so fall back
-        # to a local sort there.
-        if ($message_key_order{$grouping}) {
-            $sorted_keys{$grouping} = $message_key_order{$grouping};
-            next;
-        }
-        my @sorted_keys = sort {
-            my $occurrences_a = $log_messages{$grouping}{$a}{$sort_key} // 0;
-            my $occurrences_b = $log_messages{$grouping}{$b}{$sort_key} // 0;
-            ($sort_ascending
-                ? ($occurrences_a <=> $occurrences_b)
-                : ($occurrences_b <=> $occurrences_a))
-            || ($a cmp $b);
-        } keys %{$log_messages{$grouping}};
-
-        $sorted_keys{$grouping} = \@sorted_keys;
+        # The display ordering is computed exactly once, in
+        # calculate_all_statistics, for every sort type — the available-value
+        # pool selection (#302) or the calculated-statistic two-pass
+        # selection (#303) — and reused here: same keys, same comparator,
+        # same result. A grouping with no message keys has no recorded order.
+        $sorted_keys{$grouping} = $message_key_order{$grouping} // [];
     }
 
     # Initialize the hash to store top message counts

@@ -71,6 +71,8 @@ SCENARIOS+=("heatmap|-hm")
 SCENARIOS+=("histogram|-hg")
 SCENARIOS+=("heatmap-histogram|-hm -hg")
 SCENARIOS+=("heatmap-histogram-consolidate|-hm -hg -g")
+SCENARIOS+=("sort-p99|-so p99")
+SCENARIOS+=("sort-skewness|-so skewness")
 
 # --- Test Execution ---
 
