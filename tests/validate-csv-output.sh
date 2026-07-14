@@ -160,16 +160,10 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
         continue
     fi
 
-    # Perl runtime warnings (interpreter-emitted, always suffixed
-    # " at <file> line <N>") are unguarded-data-path bugs, not noise.
-    # Intentional ltl diagnostics printed to stderr never carry that
-    # suffix, so the pattern separates the two cleanly.
-    if grep -qE ' at .+ line [0-9]+' "$v_capture_dir/ltl.stderr"; then
-        echo "FAIL  scenario=$scenario perl-runtime-warnings-on-stderr" >&2
-        grep -E ' at .+ line [0-9]+' "$v_capture_dir/ltl.stderr" | sort | uniq -c | sort -rn | head -5 | sed 's/^/        /' >&2
-        echo "        asserts: a scenario run emits no Perl runtime warnings (uninitialized value, substr outside of string, non-numeric argument, ...) on stderr" >&2
-        echo "        produced_by: whichever ltl code path the warning text names (the warning carries the emitting line)" >&2
-        echo "        contract: ltl must run warning-free on supported inputs; a runtime warning is an unguarded data path (Issue #326)" >&2
+    # Runtime-warning cleanliness (shared check; HARNESS-DESIGN.md section
+    # Runtime-warning cleanliness). The csv-cache capture is checked inside
+    # csv_cache_produce; this covers the -V capture run.
+    if ! assert_no_runtime_warnings "$v_capture_dir/ltl.stderr" "scenario=$scenario"; then
         total_fail=$((total_fail + 1))
         scenarios_run=$((scenarios_run + 1))
         continue

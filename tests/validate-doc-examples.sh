@@ -27,6 +27,9 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 EXTRACTOR="$SCRIPT_DIR/extract-doc-examples.pl"
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 # Temp dir for per-test stdout/stderr captures; cleaned up on EXIT per
 # HARNESS-DESIGN.md Trap 10.
 TMP_DIR=$(mktemp -d)
@@ -209,6 +212,15 @@ run_doc_example() {
             produced_by 'docs/usage.md (example) + ltl option parser' \
             contract    'features/225-test-harness-coverage-gaps.md section #234 - docs/usage.md is the canonical wiki source per CLAUDE.md release-process step 15; broken examples ship to the wiki' \
             detail      "command: $LTL $LTL_INJECT $ltl_args ; stderr: $(head -3 "$stderr_file" 2>/dev/null | tr '\n' ' ')"
+        return
+    fi
+
+    # Runtime-warning cleanliness (HARNESS-DESIGN.md section Runtime-warning
+    # cleanliness): intentional ltl notices on stderr never carry the
+    # ` at <file> line <N>` suffix, so they do not trip this check.
+    if ! assert_no_runtime_warnings "$stderr_file" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
         return
     fi
 

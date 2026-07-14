@@ -93,12 +93,12 @@ ltl -h "/api/v2/orders" -hdmin 5000 access.log
 
 ### Recording & Processing
 
-These options control which metrics logtimeline extracts and computes during processing. By default, it detects and processes everything it finds — durations, byte sizes, and counts. The omit options suppress extraction entirely, so the data is never computed and the corresponding columns do not appear. Use `-ic` to opt in to count tracking, which is off by default.
+These options control which metrics logtimeline extracts and computes during processing. By default, it detects and processes everything it finds — durations, byte sizes, and counts. The omit options suppress extraction entirely, so the data is never computed and the corresponding columns do not appear. The deprecated `-os` is the exception: it only hides the statistics panel (like `-hst, --hide-stats`), and statistics are still computed for any other active consumer — with `-o`, the STATS CSV carries its statistics columns regardless of `-os`/`-hst`. Use `-ic` to opt in to count tracking, which is off by default.
 
 | Option | Description |
 |--------|-------------|
 | `-ov, --omit-values` | Hide the per-bucket numeric values on the bar graph |
-| `-os, --omit-stats` | Hide the statistics columns (min/avg/max/stddev/etc.) |
+| `-os, --omit-stats` | Deprecated: use `-od, --omit-durations` to skip capturing durations, or `-hst, --hide-stats` to hide the statistics panel |
 | `-oe, --omit-empty` | Skip time buckets that contain zero log entries |
 | `-or, --omit-rate` | Hide the error/message rate from the legend |
 | `-od, --omit-durations` | Suppress duration extraction and related columns (significantly reduces memory and processing time on large files) |
@@ -207,7 +207,9 @@ ltl -so bimodality_coef access.log
 ltl -so occurrences -sa access.log
 ```
 
-Percentile and shape metrics require a sufficient sample size to be statistically meaningful: `p999` ≥ ~1k, `p9999` ≥ ~100k, `p99999` ≥ ~1M. `bimodality_coef` is a *screening* statistic — at n < 100 small-sample noise can produce false positives. Skewness/kurtosis/bimodality_coef are undefined (blank in CSV, treated as 0 for sort ordering) when n < 4.
+Percentile and shape metrics require a sufficient sample size to be statistically meaningful: `p999` ≥ ~1k, `p9999` ≥ ~100k, `p99999` ≥ ~1M. `bimodality_coef` is a *screening* statistic — at n < 100 small-sample noise can produce false positives. Skewness/kurtosis/bimodality_coef are undefined (blank in CSV) when n < 4.
+
+When sorting on a statistic, messages that have no defined value for it (no recorded durations, or too few samples for that statistic) are not ranked by it: they are listed after the ranked messages, ordered by occurrence count. Their blank statistic column is the signal. With `-sa`, ascending means the smallest defined value first — never the undefined ones.
 
 ### Percentile data model and algorithm
 
@@ -457,7 +459,7 @@ Version, help, and diagnostic options.
 | `-v, --version` | Print the version number and exit |
 | `-?, --help [<topic>]` | Show the help screen and exit; naming a topic (e.g. `statistics`) shows that topic's index |
 | `-ex, --explain [<topic>]` | Show long-form documentation for a statistic; with no topic, lists available topics |
-| `-mem, --memory-usage` | Display memory consumption statistics after processing completes |
+| `-mem, --memory-usage [debug]` | Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; `debug` additionally emits per-phase memory diagnostics on stderr |
 
 ## Alternate Names
 

@@ -96,7 +96,7 @@ End markers are required. They exist so harnesses can use range extraction (`sed
 This list prevents collisions across parallel work. Update it when adding a new section.
 
 **Implemented:**
-- `runtime-config` — effective runtime configuration: LTL_CONFIG, merged include/exclude/highlight/threadpool regexes, and per-flag resolved values (including the numeric highlight criteria, Issue #312)
+- `runtime-config` — effective runtime configuration: LTL_CONFIG, merged include/exclude/highlight/threadpool regexes, resolved duration-statistics demand booleans (Issue #349), and per-flag resolved values (including the numeric highlight criteria, Issue #312)
 - `index-read-back` — index pre-seed lookups, freshness, aggregated bounds, drift detection (Issue #179); `heatmap_preseed_min`/`heatmap_preseed_max` expose the live post-preseed heatmap bounds when a heatmap is active (Issue #310)
 - `histogram-array` — raw-array histogram dimensions; active when a surface resolves to the raw values data model
 - `histogram-bin-counters` — HDR-style bin-counter histogram state and finalized histogram dimensions (Issue #187)
@@ -104,6 +104,7 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `heatmap-palette` — heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250)
 - `profile` — timeline folding (--profile): resolved mode, fold period, included weekdays, included vs dropped sample counts (Issue #256)
 - `udm-counting` — per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313)
+- `statistics-demand` — per-store resolved statistics-group demand with raising consumers, per-store moment source, per-store statistics-calculation counters (`stats_calls` invocations plus per-group `group_calc` computed/skipped_demand/ineligible outcomes), and calculated-statistic sort selection (`sort_selection` defined/fill/demoted split, `sort_calc` per-pass attribution) (Issues #305, #303)
 - `benchmark-data` — machine-parseable TSV: version, files, line counts, timings, memory, structure counts
 
 **Reserved by sub-issues, not yet implemented:**
@@ -410,10 +411,12 @@ fi
 **Obligations:**
 
 - New harnesses include this check from the first commit; it is part of the capture step, not an optional extra assertion.
-- Shared capture helpers (e.g. `tests/lib/csv-cache.sh`) perform the check once at the point of capture so individual harnesses don't re-implement it.
+- The check is implemented once in `tests/lib/runtime-warnings.sh` (`assert_no_runtime_warnings <stderr_file> <context>`); harnesses source that library rather than re-implementing the pattern. Shared capture helpers (`tests/lib/csv-cache.sh`) perform the check at the point of capture so their consumers don't repeat it.
 - Discarding stderr (`2>/dev/null`) in a harness is prohibited for the same reason as Trap 1 above — and this section extends that rule: even *captured-but-uninspected* stderr is a gap.
+- When a capture helper is invoked via command substitution (`out=$(run_xxx ...)`), the check must run at the call site in the main shell — counters incremented inside the substituted function are lost with the subshell. The helper writes `<capture>.stderr`; the caller checks it (see `check_capture_warnings()` in `tests/validate-histogram-bin-counters.sh`).
+- Splitting a previously merged (`2>&1`) capture relocates *intentional* ltl diagnostics out of the stdout capture: any assertion that greps for an intentional stderr message must be re-pointed at the stderr capture in the same change.
 
-The reference implementation is the `perl-runtime-warnings-on-stderr` check in `tests/validate-csv-output.sh`. The rule exists because the `udm-counting` csv-output scenario exercised the exact code path of a per-message uninitialized-division bug and emitted 125 warnings on every run — invisibly, because no harness read stderr. Retrofitting the remaining harnesses is tracked by Issue #341.
+The rule exists because the `udm-counting` csv-output scenario exercised the exact code path of a per-message uninitialized-division bug and emitted 125 warnings on every run — invisibly, because no harness read stderr (Issue #326). The sweep that brought every harness under the check was Issue #341.
 
 ## Self-documenting assertions
 

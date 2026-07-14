@@ -20,6 +20,8 @@ The primitives serve every consumer catalogued in #187 R12:
 
 The primitives support **independent partitions per consumer** (heatmap, histogram, per-message, per-time-bucket all hold their own partitions) while sharing partition-computation, bin-assignment, counter-update, and percentile-interpolation logic. The contract is what's the same; the keying and rendering are what consumers choose.
 
+Consumer-side statistics demand: which statistic groups the message-stats and bucket-stats consumers actually compute and store — including whether the Welford-Pébay moment sidecars are maintained at all — is governed by the statistics-group demand registry; see `features/305-shape-moment-extended-percentile-demand.md`.
+
 ## GitHub Issue
 
 [#189](https://github.com/gregeva/logtimeline/issues/189)
@@ -605,3 +607,155 @@ Tests that exercise multiple consumers sharing primitives in the same run (e.g.,
 The primitive contract (R1–R11) tracks the locked #187 unified contract. Changes to the locked contract in #187 cascade to #189's requirements; #189 does not lock decisions independently of #187. If prototype validation surfaces a need to revise a locked #187 decision, the revision is recorded in #187 first, then propagated to #189.
 
 The **Audit findings** section is the technical inventory of ltl call sites at the time of writing. Line numbers may shift with subsequent refactors; subroutine names and global-variable identifiers are the stable anchors. Adding a consumer to R12 (in #187) is not a contract change for #189; the parameterization in R3 already accommodates new keying shapes.
+
+## Investigation — dynamic bins-per-decade by message occurrence count (#323)
+
+**Question investigated**: should the per-message bin-counter partition (`summary_table` consumer, `%log_messages_counters`) use a smaller bins-per-decade (BPD) for messages with few observations and the full BPD only for messages with many, on the premise that sparse messages waste memory on empty bins?
+
+**Recommendation: do not implement.** The skew premise is confirmed and extreme, but the memory motivation does not hold — sparse partitions are already cheap under the shipped sparse-array representation, so dynamic BPD saves little while adding a per-occurrence-count tiering surface and (for post-collection tiering) a rebin pass. The fidelity intuition is correct but yields no observable benefit at sparse N.
+
+### Grounding
+
+All measurements from `-mdm bin -V` (and a BPD tier sweep via `--data-model-precision`) on a 112 MB high-cardinality Tomcat access log with the default (no fuzzy consolidation) grouping. The `summary_table` partition store held 21,103 partitions.
+
+**Occurrence-count distribution (the skew):**
+
+| occurrences | # messages | % of messages | % of all samples |
+|---|---|---|---|
+| 1 | 48,826 | 95.2% | 9.4% |
+| 2–5 | 1,051 | 2.0% | 0.6% |
+| 6–20 | 788 | 1.5% | 1.7% |
+| 21–100 | 381 | 0.7% | 3.4% |
+| 101–1000 | 151 | 0.3% | 6.7% |
+| 1001+ | 102 | 0.2% | 78.3% |
+
+95.2% of messages occur exactly once; 97.2% occur ≤5 times yet carry ~10% of samples; the top 0.2% carry 78.3%. Median occurrence count = 1. The skew is a power law and is stronger than the issue hypothesized.
+
+**Counter-store memory vs. BPD (tier sweep, same 21,103 partitions):**
+
+| precision tier | BPD | `counter_memory_bytes` | total max memory |
+|---|---|---|---|
+| 1 | 4 | 28.4 MB | 142 MB |
+| 5 (default) | 53 | 52.8 MB | 175 MB |
+| 9 | 616 | 324.6 MB | 471 MB |
+
+Least-squares fit over the sweep: `counter_memory ≈ 26.9 MB + 483 KB × bpd`, i.e. a fixed **~1,274 bytes/partition** (BPD-independent) plus ~22.9 bytes/partition per unit BPD.
+
+### Why dynamic BPD does not pay off
+
+The per-partition memory cost is driven by **populated bins, not `bin_count`.** A single-occurrence partition stores exactly one populated bin in a sparse Perl array; its footprint is essentially the same at BPD 4 or BPD 53 (only the `bin_count` scalar differs). The BPD-driven growth in the sweep comes almost entirely from the dense 0.2% of partitions that legitimately populate hundreds of bins — precisely the partitions #323 would *keep* at full BPD.
+
+Consequently, the fixed ~1.3 KB/partition term dominates the sparse tail's cost, and that term is BPD-independent. Lowering the sparse 95% from BPD 53 to BPD 4 removes only their small share of the ~22.9 bytes/partition/BPD marginal term, not the dominant fixed overhead. The achievable saving is far below a naïve "95% × 52.8 MB" estimate.
+
+### Answers to the issue's investigation questions
+
+1. **Thresholds** — moot given the recommendation; the distribution would support tiers (e.g. 1, 2–20, 21+) if pursued, but see the memory finding.
+2. **Timing of the decision** — BPD is baked into the partition at `partition_new` on the **first observation**, before occurrence count is known. Choosing BPD by occurrence count is therefore inherently an end-of-parse decision.
+3. **Rebinning cost** — `partition_rebin` already re-projects a populated partition into a caller-chosen geometry, so a post-collection down-tier is mechanically available. But rebinning a sparse partition *down* saves negligible memory (one populated bin either way) while costing CPU per partition across the 95% tail — net-negative.
+4. **Memory impact** — quantified above: the sparse tail is already cheap; the BPD lever does not target the fixed per-partition overhead that dominates it.
+5. **Output fidelity** — a message with ≤5 samples populates ≤5 bins regardless of BPD; percentiles over so few points have low inherent precision and are unaffected by reduced BPD. Reduced BPD on sparse messages is safe — and, per (4), nearly free of benefit.
+6. **Implementation shape** — would require either per-partition BPD chosen at first observation (impossible: count unknown) or an end-of-parse rebin tier pass over `%log_messages_counters`. The existing structures accommodate the latter, but (3)/(4) make it not worthwhile.
+
+### Surfaced adjacent findings
+
+- **Filed as #346** — `-mem` omits `%log_messages_counters` from its measurement map, undercounting reported memory by the full counter-store size (~53 MB here) under `-mdm bin`. Discovered while grounding this investigation.
+- **The real sparse-tail lever is the fixed ~1.3 KB/partition overhead** (partition hash, metadata, `"\x1f"`-joined string keys × 21,103 partitions ≈ 27 MB), not BPD. A leaner per-partition representation would beat dynamic BPD on the sparse tail. Recorded here as a candidate direction, not a committed one.
+- **`log_messages` raw sidecar (~30 MB) is the larger memory ceiling** and is BPD-independent — separate territory from the bin-counter store.
+
+## Investigation (second direction) — raw-first, promote-to-histogram under memory pressure (#323)
+
+**Status: IN PROGRESS — production-scale measurement done; several earlier hypotheses OVERTURNED.** A real large-log run (below) replaced the synthetic projections. The headline correction: the earlier "~90–95% raw-first win" was built on a raw-cost model that the measured data shows was **~13× too optimistic**, and a true like-for-like (`-mdm bin` vs `-mdm raw`) shows the shipped **bin model uses *more* message-stats memory than raw** at production scale, not less. The real lever is narrower and better-targeted than first thought: promotion only helps the tiny high-occurrence head; the singleton body needs raw representation, not partitions. Measured evidence and the corrected conclusions are below.
+
+### Question investigated
+
+Instead of allocating a histogram bin-counter partition on a message's *first* observation, start each message as a **raw array of observed values** (exact, lossless) and convert to a partition only under memory pressure. Does this beat the shipped all-partition model on memory, and at what fidelity cost?
+
+### What is established (measured, stands)
+
+Per-representation costs measured with `Devel::Size::total_size` on Homebrew Perl 5.42, entry shapes faithful to `ltl`'s streaming `counter_update` write path (sparse `bins` array extended only to the highest assigned index; `partition_new` seeded 5 decades, BPD 53):
+
+| representation | N=1 | N=20 | N≈88 | marginal / extra value |
+|---|---|---|---|---|
+| partition entry `{partition,bins,overflow,underflow}` | 2,524 B | 3,452 B | ~2,884 B (clustered) | — |
+| raw bare arrayref `[v, …]` | 96 B | 704 B | ~2,624 B | **32 B** |
+
+- **Single-occurrence partition floor ≈ 2,524 B**, of which 1,152 B is a `bins` array pre-extended to ~133 slots (a lone value lands at the geometric centre, bin ~132 of 265). This cross-checks the first direction's anchor three ways (52.8 MB ÷ 21,103 = 2,502 B; measured 2,524 B; LSQ `1,274 + 22.9×53` = 2,488 B). The "~1.3 KB" first-direction headline is the BPD-*independent* intercept; the real floor at BPD 53 is ~2.5 KB.
+- **Memory crossover ≈ N=88** (with realistically clustered per-message latencies): below it a raw array is *both smaller and exact*; above it the partition is the cheaper container.
+- **Fidelity ordering is unconditional**: for every percentile ltl reports, nearest-rank over the raw values is exact and a partition only ever approximates. A histogram is *never* more faithful than the raw data — its only justification is memory. (Separately, ltl's own sample-size rule notes high-nines are statistically meaningless below ~10/(1−q) samples regardless of representation; that is neutral to the raw-vs-partition choice, not an argument for promoting.)
+- **Promotion replay is cheap** (~4–27 µs per promoted message; it *defers* bin-assign work rather than adding it) and a code inventory found **five consumers** that would need entry-kind branching if the store became heterogeneous (percentile path, `-V` telemetry snapshot, three fuzzy-consolidation merge subs), plus two uniform pass-throughs. These are structural facts about the code, independent of the memory question.
+
+### Production-scale measurement (the real test)
+
+Instrument: `ltl -mdm bin|raw -mem -V -o -n 2000000 --disable-progress`, one ThingWorx access-log node (30 files, ~8M lines, ~1.6 GB), same input for both models, `caffeinate`-wrapped. Enabled by #346 (which put `%log_messages_counters` in the `-mem` map). Both runs deterministic (identical `counter_memory_bytes`, `partition_count` across repeats).
+
+**Occurrence-count distribution (measured, ltl's own grouping — 600,345 distinct messages, 7.35M samples):**
+
+| occurrences | # msgs | % msgs | % samples |
+|---|---|---|---|
+| **1** | **580,237** | **96.7%** | 7.9% |
+| 2–5 | 8,387 | 1.4% | 0.3% |
+| 6–20 | 6,298 | 1.0% | 0.9% |
+| 21–100 | 3,902 | 0.6% | 2.3% |
+| 101–1000 | 1,106 | 0.2% | 4.0% |
+| 1001–10000 | 222 | 0.0% | 7.3% |
+| 10001–100000 | 182 | 0.0% | 55.1% |
+| 100001+ | 11 | 0.0% | 22.1% |
+
+96.7% of messages occur exactly once; 99.1% ≤5 times. Just **193 messages** (>10k occurrences) carry **77% of all samples**; the hottest single message has **197,293** occurrences.
+
+**Like-for-like memory, `-mdm bin` vs `-mdm raw` (measured, same node, `-n 2000000`):**
+
+| structure | `-mdm bin` | `-mdm raw` |
+|---|---|---|
+| `log_messages` | 4.22 GB | 4.63 GB |
+| `log_messages_counters` | 2.96 GB | 0 |
+| **message-stats total** | **7.17 GB** | **4.63 GB** |
+| peak RSS | 8.64 GB | 5.45 GB |
+
+### What the measurement overturned
+
+1. **The "~90–95% raw-first win" was wrong — the raw-cost model was ~13× too optimistic.** The synthetic model assumed a raw entry ≈ a bare arrayref of doubles (`64 + 32·N`). The real `%log_messages` entry is a per-message **stats hash** (name string, ~15 stat fields, Welford-Pébay `m2_sum`/`m3_sum`/`m4_sum`, Perl hash overhead) — measured **2,327 B for a singleton**, of which the durations array is only **75 B (3%)**. So the raw store is dominated by fixed per-message hash overhead, not by value arrays. Calibrating the model to the measured 4.63 GB raw store required a 13.6× scale factor — i.e. the bare-array model under-predicted reality by that much.
+
+2. **`-mdm bin` uses *more* message-stats memory than `-mdm raw`, not less: 7.17 GB vs 4.63 GB (~55% heavier).** Bin correctly skips the durations push under `-mdm bin` (`read_and_process_logs`: `push @{...{durations}}, $duration unless $message_stats_capture_mode eq 'bin'`), but for the 96.7% singleton body that saves only ~75 B/message (~44 MB total) while the counter store *adds* 2.96 GB. Bin keeps the full per-message sidecar hash in `log_messages` **and** a partition store on top. **Filed as #354.**
+
+3. **Storage redundancy confirmed at the code level.** Under `-mdm bin` each `%log_messages` entry carries Welford `m2_sum`/`m3_sum`/`m4_sum` **and** a full bin-counter partition exists for the same key — both computing overlapping distribution statistics (the code comments already acknowledge "the bin-counter store and Welford-Pébay sidecars carry the same data"). **Noted on #306** (which owns the compute-cost side of the same sidecars).
+
+### What still stands (measured, unchanged)
+
+- **The distribution is extreme and power-law** (96.7% singletons; 193 hot keys carry 77% of samples) — confirming both edges are real:
+  - **Edge A (high cardinality):** the singleton body. Promotion is **structurally powerless** here (a 1-value raw entry is already smaller than any partition; converting it *increases* memory). The lever is **cardinality reduction** — coarser fuzzy grouping (auto `-g`), applied to the invisible tail and gated by user intent (`-dmin`/`-dmax`, occurrence/sort, include/exclude — exact gating is follow-up research), with a warning. This is where the real memory (per-message hashes × 600k) lives, and neither data model touches it.
+  - **Edge B (high duration occurrences):** the ~193 hot keys. As raw value arrays these are enormous (the 197k-occurrence key ≈ 6.3 MB); as partitions they are ~2.3 KB (a ~2,700× per-key win). **This is the only place a histogram partition earns its memory** — and there are vanishingly few of them, so promoting only these is cheap.
+- **Per-entry `Devel::Size` costs** (partition floor ~2,524 B; raw arrayref +32 B/value; crossover ~N=88) and the **unconditional fidelity ordering** (raw exact, partition approximate) stand as measured earlier.
+
+### Reframed conclusion
+
+Raw-first's *premise* is validated but its *shape* is corrected. The win is **not** "raw instead of bin everywhere" (raw already beats bin at 4.63 vs 7.17 GB) and **not** a 90% reduction. The real design is:
+
+- **Body (singletons/low-N):** store raw — it is smaller and exact. Do **not** allocate a partition.
+- **Head (the ~193 hot keys):** promote to a partition — the only case where it saves memory and the durations array would otherwise be huge.
+- The dominant remaining cost — the per-message stats hash × 600k messages — is **an Edge-A cardinality problem** that promotion cannot touch; grouping (#96) is the lever there.
+
+### Also surfaced — untracked `-mem` memory
+
+Even after #346, summing every `-mem`-reported structure leaves **~0.81 GB (9% of the 8.64 GB peak RSS) untracked** in the bin run (0.19 GB / 4% in the raw run). A `Devel::Size` sweep of the 75 unmapped file-scope structures found **no single large holder** (only `message_key_order` ≈ 4 MB above 100 KB) — so the gap is diffuse/transient allocation (Perl arena fragmentation, the `-n 2000000` per-message percentile scratch), not one missing hash to add to the map. **Filed as #356.**
+
+### Sequencing (architect decision, 2026-07-13)
+
+**#2 (memory ceiling + graceful degradation) is the umbrella for this memory line.** Its available-memory measurement and target ceiling drive the raw→bin promotion-threshold policy. All storage-policy work below is designed inside that framework, not standalone:
+
+1. **#2 design first** — available-memory detection, the target ceiling, and the degradation contract under which every downstream policy (promotion thresholds, budget awareness) is decided.
+2. **#354 (BUG: `-mdm bin` heavier than raw) is blocked behind that design.** Its fix — head/body split: raw for N below the ~N=88 crossover, partition only above — is a storage policy owned by the #2 umbrella. The #306 rejection settles the entry shapes: head keeps sidecar + partition (sidecar authoritative for moments), body keeps neither (moments via the post-sort pass).
+3. **Edge A via grouping** (#96 / auto-`-g`, intent-gated) — the per-message-hash cost is the largest lever; a separate track from the data-model policy, orthogonal to the umbrella.
+4. **Re-measure** any implemented head/body split on the same node with `-mem` to confirm it beats *both* pure models (the two measured endpoints — bin 7.17 GB, raw 4.63 GB — bracket the target). Peak-RSS anchors must be re-taken post-#362: the runs above used `-n 2000000` before the unclamped output-phase slice burst (~0.16–0.19 GB transient RSS ratchet) was fixed; per-structure `Devel::Size` figures are unaffected.
+
+### Dependencies / cross-links
+
+- **#2** — the umbrella (see Sequencing above); #354 is blocked on it.
+- **#346** — resolved (PR #350); made this measurement possible.
+- **#354 (BUG: `-mdm bin` memory regression vs raw)** — the actionable defect this investigation surfaced; blocked behind the #2 design, which owns its head/body-split fix.
+- **#306** — closed (implemented, measured, rejected): the raw path keeps its two-pass moment computation; raw entries carry no Welford sidecars. Constants and rationale in features/305-shape-moment-extended-percentile-demand.md § #306 investigation.
+- **#96 / `-g`** — the Edge-A cardinality lever (the dominant remaining cost).
+- **#347 (bin-counter eviction)** — closed as not planned: prevention (never allocate sparse partitions, per the #354 fix direction) supersedes evicting them. Residual eviction scope (raw-side synthesized residue) belongs to #2's contract if ever needed.
+- **#362** — resolved; reframes the peak-RSS figures above (see Sequencing item 4).
+- **#356 (`-mem` untracked residual)** — resolved (merged into `release/0.16.0`); the memory account closes, so `-mem`-based re-measurements in this line are trustworthy.
+- The **single-sample inline producer** (`read_and_process_logs`, `%tmp` `_single` path) is a second place entry-kind is minted; any head/body implementation must route it through the same policy as the main write path.

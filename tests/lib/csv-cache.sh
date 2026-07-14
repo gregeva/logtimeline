@@ -54,6 +54,12 @@ fi
 
 # Resolve once at source-time so callers can change directory freely.
 _CSV_CACHE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Runtime-warning cleanliness check (HARNESS-DESIGN.md section Runtime-warning
+# cleanliness): performed once here at the point of capture so the harnesses
+# that consume cached CSVs don't re-implement it.
+# shellcheck source=tests/lib/runtime-warnings.sh
+source "$_CSV_CACHE_LIB_DIR/runtime-warnings.sh"
 _CSV_CACHE_TESTS_DIR="$(cd "$_CSV_CACHE_LIB_DIR/.." && pwd)"
 _CSV_CACHE_REPO_DIR="$(cd "$_CSV_CACHE_TESTS_DIR/.." && pwd)"
 _CSV_CACHE_DIR="$_CSV_CACHE_TESTS_DIR/.artifacts/csv"
@@ -182,6 +188,11 @@ csv_cache_produce() {
         sed 's/^/        /' "$tmp_dir/ltl.stderr" >&2
         rm -rf "$tmp_dir"
         return $rc
+    fi
+
+    if ! assert_no_runtime_warnings "$tmp_dir/ltl.stderr" "csv-cache scenario=$scenario"; then
+        rm -rf "$tmp_dir"
+        return 1
     fi
 
     local produced_msg produced_stats

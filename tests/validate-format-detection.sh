@@ -8,11 +8,15 @@
 # -V format-detection on a specific log, parses the resulting section,
 # and asserts the expected slug, match_type, and matched_lines.
 #
-# Scope: 7 of 14 slugs have committed fixtures. The remaining 7 slugs
-# (thingworx_rac_client, connection_server_json, java_gc_log,
-# tw_analytics_v2, tw_analytics_worker, jboss_access, connection_server_standard,
-# tomcat_access_common) are out of scope until fixtures exist or until
-# the format-registry rewrite (#23) lands.
+# Scope: slugs with fixtures under logs/ are asserted directly;
+# tomcat_access_common is asserted against a fixture derived on the fly
+# from the Tomcat 9 log (duration field stripped, issue #345), and
+# jboss_access against a fixture derived from the same log (quoted
+# referrer/user-agent + trailing duration appended, issue #365). The
+# remaining slugs (thingworx_rac_client, connection_server_json,
+# java_gc_log, tw_analytics_v2, tw_analytics_worker,
+# connection_server_standard) are out of scope until fixtures exist or
+# until the format-registry rewrite (#23) lands.
 #
 # Implements the self-documenting-assertion design from
 # tests/HARNESS-DESIGN.md. Reference: tests/validate-histogram-bin-counters.sh.
@@ -24,6 +28,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
+
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 
 # Temp dir for captured outputs; cleaned up on EXIT per HARNESS-DESIGN.md Trap 10.
 TMP_DIR=$(mktemp -d)
@@ -74,6 +81,18 @@ assert_line() {
     fi
 }
 
+# Runtime-warning cleanliness for a run_format_detection capture (its stderr
+# lives beside the captured stdout as <capture>.stderr). Runs in the main
+# shell so the fail counters persist - a command-substitution subshell could
+# not update them. HARNESS-DESIGN.md section Runtime-warning cleanliness.
+check_capture_warnings() {
+    local capture="$1"
+    if ! assert_no_runtime_warnings "$capture.stderr" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
+}
+
 # Helper: run ltl -V format-detection against $1 (log path), forward
 # any extra args ($2..) before the log. Output captured to a temp file
 # whose path is echoed for the caller.
@@ -117,6 +136,7 @@ scenario_tomcat9_ms() {
     local log="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
     local out
     out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: tomcat_access_with_duration$' \
@@ -137,6 +157,93 @@ scenario_tomcat9_ms() {
         contract    'Fixture is hand-truncated to exactly 5000 lines; if the fixture changes, the expected count must change in the same commit'
 }
 
+scenario_tomcat_common() {
+    current_scenario="tomcat-common"
+    echo "[$current_scenario]"
+
+    # Standard/common access log format (%h %l %u %t "%r" %s %b — no duration
+    # field). Derived on the fly from the canonical Tomcat 9 fixture by
+    # stripping the trailing %D field, so the two scenarios cannot drift
+    # apart and no near-duplicate corpus file is needed. Issue #345.
+    local src="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+    local log="$TMP_DIR/tomcat-access-common-5k.txt"
+    awk '{NF=NF-1; print}' "$src" > "$log"
+    if [[ ! -s "$log" ]]; then
+        echo "FAIL: could not derive common-format fixture from $src" >&2
+        exit 1
+    fi
+
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^  format: tomcat_access_common$' \
+        asserts     'A standard/common access log (no duration field) binds to slug `tomcat_access_common`, not to `tomcat_access_with_duration`. The end-anchored match_type 4 regex is ordered before the broader match_type 3 regex so duration-less lines cannot be claimed by the with-duration branch.' \
+        produced_by 'emit_format_detection_verbose() in ltl; detection cascade in read_and_process_logs() (match_type 4 branch, `$`-anchored after the bytes field)' \
+        contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
+
+    assert_line "$out" \
+        pattern     '^  match_type: 4$' \
+        asserts     'Common access log binds to internal match_type 4' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
+        contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type integers are an implementation detail surfaced for diagnostic value; the slug is the user-facing contract'
+
+    assert_line "$out" \
+        pattern     '^  matched_lines: 5000$' \
+        asserts     'Every line of the derived common-format fixture parses as match_type 4 (no fallthroughs to other branches)' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
+        contract    'Derived 1:1 from the hand-truncated 5000-line Tomcat 9 fixture; if that fixture changes, the expected count changes in the same commit'
+}
+
+scenario_jboss_enhanced() {
+    current_scenario="jboss-enhanced"
+    echo "[$current_scenario]"
+
+    # JBoss/Jersey enhanced access log format (%h %l %u %t "%r" %s %b
+    # "%{Referer}i" "%{User-Agent}i" %D). Derived on the fly from the canonical
+    # Tomcat 9 fixture by rewriting the trailing %D field into quoted referrer +
+    # quoted user-agent + duration, so the scenarios cannot drift apart and no
+    # near-duplicate corpus file is needed. Lines with "-" bytes are excluded:
+    # the match_type 9 regex requires numeric bytes, and such lines fall through
+    # to match_type 3 by design. Issue #365.
+    local src="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+    local log="$TMP_DIR/jboss-enhanced-access.txt"
+    awk '$(NF-1) ~ /^[0-9]+$/ {dur=$NF; $NF="\"-\" \"Jersey/2.37 (HttpUrlConnection 11.0.22)\" " dur; print}' "$src" > "$log"
+    if [[ ! -s "$log" ]]; then
+        echo "FAIL: could not derive enhanced-format fixture from $src" >&2
+        exit 1
+    fi
+    local expected_lines
+    expected_lines=$(wc -l < "$log" | tr -d ' ')
+    if [[ -z "$expected_lines" || "$expected_lines" -eq 0 ]]; then
+        echo "FAIL: derived enhanced-format fixture is empty" >&2
+        exit 1
+    fi
+
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^  format: jboss_access$' \
+        asserts     'An enhanced/JBoss access log (quoted referrer, quoted user-agent, trailing duration) binds to slug `jboss_access`, not to `tomcat_access_with_duration`. The end-anchored match_type 9 regex is ordered before the broader match_type 3 regex, whose all-optional tail would otherwise claim these lines with duration=undef and junk thread/session captures (issue #365).' \
+        produced_by 'emit_format_detection_verbose() in ltl; detection cascade in read_and_process_logs() (match_type 9 branch, `$`-anchored after the trailing duration field)' \
+        contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
+
+    assert_line "$out" \
+        pattern     '^  match_type: 9$' \
+        asserts     'Enhanced/JBoss access log binds to internal match_type 9' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
+        contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type integers are an implementation detail surfaced for diagnostic value; the slug is the user-facing contract'
+
+    assert_line "$out" \
+        pattern     "^  matched_lines: $expected_lines\$" \
+        asserts     'Every line of the derived enhanced-format fixture parses as match_type 9 (no fallthroughs to match_type 3 or other branches)' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
+        contract    'Derived from the hand-truncated Tomcat 9 fixture (numeric-bytes lines only); the expected count is computed from the derived file so the assertion tracks the fixture'
+}
+
 scenario_apache_httpd_us() {
     current_scenario="apache-httpd-us"
     echo "[$current_scenario]"
@@ -146,6 +253,7 @@ scenario_apache_httpd_us() {
     # Run with -du us per the documented workaround. Apache HTTP %D is
     # microseconds; without -du us, durations are 1000x off.
     out=$(run_format_detection "$log" -du us)
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: tomcat_access_with_duration$' \
@@ -167,6 +275,7 @@ scenario_codebeamer() {
     local log="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
     local out
     out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: tomcat_codebeamer$' \
@@ -194,6 +303,7 @@ scenario_thingworx_standard() {
     local log="$REPO_DIR/logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log"
     local out
     out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: thingworx_standard$' \
@@ -215,6 +325,7 @@ scenario_thingworx_with_metrics() {
     local log="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
     local out
     out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: thingworx_standard$' \
@@ -236,6 +347,7 @@ scenario_tw_edge_c_sdk() {
     local log="$REPO_DIR/logs/UDM/rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log"
     local out
     out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: tw_edge_c_sdk$' \
@@ -259,6 +371,7 @@ scenario_csv_with_udm() {
     # CSV detection requires at least one -udm flag for the CSV path to
     # be reached; otherwise ltl treats every CSV line as unmatched log content.
     out=$(run_format_detection "$log" -udm latency_ms)
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  format: csv$' \
@@ -280,6 +393,8 @@ echo "  ltl:       $LTL"
 echo ""
 
 scenario_tomcat9_ms;            echo ""
+scenario_tomcat_common;         echo ""
+scenario_jboss_enhanced;        echo ""
 scenario_apache_httpd_us;       echo ""
 scenario_codebeamer;            echo ""
 scenario_thingworx_standard;    echo ""

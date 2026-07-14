@@ -31,6 +31,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
@@ -58,7 +61,7 @@ EXPECTED_LONG_COL=$((OPT_COL + SHORT_COL + 1))     # long form starts here
 # meaningfully (at least 60 chars per description line) so wrap-continuation
 # alignment can be exercised.
 HELP_OUT=$(mktemp)
-"$LTL" --terminal-width 120 --help 2>&1 > "$HELP_OUT" || true
+"$LTL" --terminal-width 120 --help > "$HELP_OUT" 2>"$HELP_OUT.stderr" || true
 
 # Strip terminal-rendering bytes: ANSI escape sequences and backspace
 # overstrike used for emphasis on terminals without color (see print_help in
@@ -111,6 +114,13 @@ emit_fail() {
     fail=$((fail + 1))
     failures+=("$label")
 }
+
+# Runtime-warning cleanliness for the --help capture (HARNESS-DESIGN.md
+# section Runtime-warning cleanliness, issue #341). Silent when clean.
+if ! assert_no_runtime_warnings "$HELP_OUT.stderr" "ltl --help capture"; then
+    fail=$((fail + 1))
+    failures+=("ltl --help capture :: perl-runtime-warnings-on-stderr")
+fi
 
 # ---------------------------------------------------------------------------
 # Sanity: $desc_col found and looks reasonable
@@ -398,7 +408,7 @@ assert_pair "-hgb"   "--histogram-buckets"
 # ---------------------------------------------------------------------------
 # Wrap-up
 # ---------------------------------------------------------------------------
-rm -f "$HELP_OUT" "$STRIPPED"
+rm -f "$HELP_OUT" "$HELP_OUT.stderr" "$STRIPPED"
 
 echo ""
 echo "Results: $pass passed, $fail failed"

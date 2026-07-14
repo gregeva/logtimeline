@@ -21,6 +21,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 # 5k-line samples of real production logs, sliced from the middle of the
 # corresponding logs/<source>/ files. See docs/test-logs.md and
 # tests/fixtures/regenerate-index-readback-fixtures.sh for derivation.
@@ -77,13 +80,26 @@ current_scenario=""
 # Orchestration helpers (6a)
 # ---------------------------------------------------------------------------
 
-# Run ltl in the current cwd, capture combined output to a temp file, echo path.
+# Run ltl in the current cwd, capture stdout to a temp file (stderr beside it
+# as <capture>.stderr), echo path.
 # Usage: out=$(run_ltl <ltl args...>)
 run_ltl() {
     local outfile
     outfile=$(mktemp)
-    "$LTL" "$@" > "$outfile" 2>&1 || true
+    "$LTL" "$@" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
+}
+
+# Runtime-warning cleanliness for a run_ltl/run_ltl_v capture (its stderr
+# lives beside the captured stdout as <capture>.stderr). Runs in the main
+# shell so the fail counters persist - a command-substitution subshell could
+# not update them. HARNESS-DESIGN.md section Runtime-warning cleanliness.
+check_capture_warnings() {
+    local capture="$1"
+    if ! assert_no_runtime_warnings "$capture.stderr" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
 }
 
 # Convenience: run ltl with -V index-read-back and the COMMON flags,
@@ -440,6 +456,7 @@ scenario_cold_no_index() {
 
     local out
     out=$(run_ltl_v "$ACCESS_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -462,6 +479,7 @@ scenario_warm_unfiltered() {
     seed_from_fixture
     local out
     out=$(run_ltl_v "$ACCESS_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -502,6 +520,7 @@ scenario_cold_filtered_tier2_fallback() {
     delete_index_rows "entry_type=selection AND filters=-dmin=50"
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -538,6 +557,7 @@ scenario_warm_tier1_filtered() {
     seed_from_fixture
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -573,6 +593,7 @@ scenario_warm_tier2_different_filters() {
     seed_from_fixture
     local out
     out=$(run_ltl_v -dmin 100 "$ACCESS_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  lookup: tier_2_file$' \
@@ -604,11 +625,14 @@ scenario_stale_mtime() {
     # (Fixture cannot be reused here because it references a different path.)
     local local_log="./access.log"
     cp "$ACCESS_LOG" "$local_log"
-    run_ltl $COMMON -V index-read-back "$local_log" > /dev/null
+    local seed_out
+    seed_out=$(run_ltl $COMMON -V index-read-back "$local_log")
+    check_capture_warnings "$seed_out"
     sleep 1
     touch "$local_log"   # advance mtime past stored value
     local out
     out=$(run_ltl_v "$local_log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -632,10 +656,13 @@ scenario_stale_size() {
     # stored file_size to a wrong value to provoke staleness.
     local local_log="./access.log"
     cp "$ACCESS_LOG" "$local_log"
-    run_ltl $COMMON -V index-read-back "$local_log" > /dev/null
+    local seed_out
+    seed_out=$(run_ltl $COMMON -V index-read-back "$local_log")
+    check_capture_warnings "$seed_out"
     edit_index_row "entry_type=file" "file_size=42"
     local out
     out=$(run_ltl_v "$local_log")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -670,6 +697,7 @@ scenario_drift_refresh_tier1() {
     edit_index_row "entry_type=selection AND filters=-dmin=50" "duration_max=$narrowed"
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -699,6 +727,7 @@ scenario_drift_refresh_tier1() {
     current_scenario="drift-refresh-tier1-recovery"
     local out2
     out2=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
+    check_capture_warnings "$out2"
 
     assert_line "$out2" \
         pattern     '^drift_detected: no$' \
@@ -728,6 +757,7 @@ scenario_drift_refresh_tier2() {
     edit_index_row "entry_type=file" "duration_max=$narrowed"
     local out
     out=$(run_ltl_v "$ACCESS_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^  lookup: tier_2_file$' \
@@ -758,6 +788,7 @@ scenario_multi_file_all_fresh_tier2_unfiltered() {
     delete_index_rows "entry_type=selection"
     local out
     out=$(run_ltl_v "$ACCESS_LOG" "$SCRIPT_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -793,6 +824,7 @@ scenario_multi_file_all_fresh_tier1() {
     seed_from_fixture
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG" "$SCRIPT_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -818,6 +850,7 @@ scenario_multi_file_mixed_tiers() {
     delete_index_rows "entry_type=selection AND file_path=$SCRIPT_LOG AND filters=-dmin=50"
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG" "$SCRIPT_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -854,11 +887,14 @@ scenario_multi_file_one_stale() {
     local f2="./script.log"
     cp "$ACCESS_LOG" "$f1"
     cp "$SCRIPT_LOG" "$f2"
-    run_ltl $COMMON -V index-read-back "$f1" "$f2" > /dev/null
+    local seed_out
+    seed_out=$(run_ltl $COMMON -V index-read-back "$f1" "$f2")
+    check_capture_warnings "$seed_out"
     sleep 1
     touch "$f1"   # advance only $f1's mtime
     local out
     out=$(run_ltl_v "$f1" "$f2")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -892,6 +928,7 @@ scenario_malformed_index() {
     corrupt_index_file malform
     local out
     out=$(run_ltl_v "$ACCESS_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -922,6 +959,7 @@ scenario_missing_bound_column() {
     delete_index_rows "entry_type=selection"   # force Tier 2
     local out
     out=$(run_ltl_v "$ACCESS_LOG")
+    check_capture_warnings "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -950,6 +988,7 @@ scenario_expired_selection_entry() {
     set_entry_date "entry_type=selection AND filters=-dmin=50" 91
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
+    check_capture_warnings "$out"
     # The expired selection row is purged at end-of-run write per #46 logic;
     # at read-back time it may still match Tier 1 (read-back doesn't expire).
     # The acceptance criterion is that after the run, the prior expired row
@@ -976,9 +1015,11 @@ scenario_signature_canonicalization() {
     # is written and can be re-matched.
     local outA outB sigA sigB
     outA=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -e GET -e POST "$ACCESS_LOG")
+    check_capture_warnings "$outA"
     sigA=$(extract_v_value "$outA" 'index_filter_signature')
 
     outB=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -e POST -e GET "$ACCESS_LOG")
+    check_capture_warnings "$outB"
     sigB=$(extract_v_value "$outB" 'index_filter_signature')
 
     assert_command \
@@ -1021,11 +1062,13 @@ scenario_filtered_tier2_no_leak() {
     # second run so it exercises the same Tier-2 path.
     local out1 out2 max1 max2
     out1=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -hm duration -dmin 50 "$ACCESS_LOG")
+    check_capture_warnings "$out1"
     max1=$(extract_v_value "$out1" 'heatmap_preseed_max')
 
     delete_index_rows "entry_type=selection AND filters=-dmin=50"
     edit_index_row "entry_type=file AND file_path=$ACCESS_LOG" "duration_max=999999999"
     out2=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -hm duration -dmin 50 "$ACCESS_LOG")
+    check_capture_warnings "$out2"
     max2=$(extract_v_value "$out2" 'heatmap_preseed_max')
 
     assert_line "$out1" \

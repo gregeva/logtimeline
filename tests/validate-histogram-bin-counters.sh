@@ -16,6 +16,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
+
+# shellcheck source=lib/runtime-warnings.sh
+source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt"
 
 if [[ ! -x "$LTL" ]]; then
@@ -38,8 +41,20 @@ current_scenario=""
 run_section() {
     local outfile
     outfile=$(mktemp)
-    "$LTL" --disable-progress -V histogram-bin-counters "$@" "$ACCESS_LOG" > "$outfile" 2>&1 || true
+    "$LTL" --disable-progress -V histogram-bin-counters "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
+}
+
+# Runtime-warning cleanliness for a run_section/run_pa_section capture (its
+# stderr lives beside the captured stdout as <capture>.stderr). Runs in the
+# main shell so the fail counters persist - a command-substitution subshell
+# could not update them. HARNESS-DESIGN.md section Runtime-warning cleanliness.
+check_capture_warnings() {
+    local capture="$1"
+    if ! assert_no_runtime_warnings "$capture.stderr" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
 }
 
 # Self-documenting assertion: a line matching `pattern` must be present.
@@ -133,6 +148,7 @@ scenario_default() {
     echo "[$current_scenario]"
     local out
     out=$(run_section)
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
@@ -142,7 +158,7 @@ scenario_default() {
         produced_by 'emit_bin_counter_mode_verbose() in ltl (run-level header block)' \
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 + section Decision 2 - tier 5 is the default level; source annotation form is locked'
 
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -153,6 +169,7 @@ scenario_precision_tier() {
     echo "[$current_scenario]"
     local out
     out=$(run_section --data-model-precision 7)
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
@@ -162,7 +179,7 @@ scenario_precision_tier() {
         produced_by 'emit_bin_counter_mode_verbose() in ltl (run-level header block; supplied-flag branch of source annotation)' \
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - source annotation form is locked per branch'
 
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -173,10 +190,13 @@ scenario_precision_out_of_range() {
     echo "[$current_scenario]"
     local out
     out=$(run_section --data-model-precision 12)
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
-    assert_line "$out" \
+    # The intentional out-of-range diagnostic is printed to stderr, so the
+    # assertion reads the stderr capture (runtime-warning split, issue #341).
+    assert_line "$out.stderr" \
         pattern     'Invalid --data-model-precision: 12 \(must be 1\.\.9\)' \
         asserts     'When --data-model-precision is outside the locked 1..9 range, ltl emits a warning to stderr naming the invalid value' \
         produced_by 'adapt_to_command_line_options() in ltl (tier range-check branch)' \
@@ -188,7 +208,7 @@ scenario_precision_out_of_range() {
         produced_by 'adapt_to_command_line_options() in ltl (range-check fallback) + emit_bin_counter_mode_verbose() (source annotation)' \
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 2 - fallback to default is locked behavior'
 
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -208,7 +228,7 @@ run_pa_section() {
     local outfile
     outfile=$(mktemp)
     "$LTL" --disable-progress -V percentile-algorithm -hg -hm \
-        -mdm bin -bdm bin "$@" "$ACCESS_LOG" > "$outfile" 2>&1 || true
+        -mdm bin -bdm bin "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
 }
 
@@ -248,12 +268,13 @@ scenario_tier_table() {
         esac
         read -r hg hm bs ms <<< "$cells"
         out=$(run_pa_section --data-model-precision "$tier")
+        check_capture_warnings "$out"
         current_scenario="tier-table[dmp=$tier]"
         assert_surface_bpd "$out" histogram     "$hg"
         assert_surface_bpd "$out" heatmap       "$hm"
         assert_surface_bpd "$out" bucket-stats  "$bs"
         assert_surface_bpd "$out" message-stats "$ms"
-        rm -f "$out"
+        rm -f "$out" "$out.stderr"
     done
     current_scenario="tier-table"
 }
@@ -269,6 +290,7 @@ scenario_message_stats_bin() {
     echo "[$current_scenario]"
     local out
     out=$(run_section -mdm bin -n 3)
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
@@ -356,7 +378,7 @@ scenario_message_stats_bin() {
         produced_by 'emit_bin_counter_mode_verbose() in ltl - %feature_active map' \
         contract    'features/187-histogram-bin-counter-percentiles.md section R10 - feature_not_active is the no-op label.'
 
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -370,6 +392,7 @@ scenario_message_stats_csv_shared() {
     echo "[$current_scenario]"
     local out
     out=$(run_section -mdm bin -n 3 -o)
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
@@ -387,7 +410,7 @@ scenario_message_stats_csv_shared() {
 
     # Cleanup: -o leaves CSV files in the cwd
     rm -f *MESSAGES-*.csv *STATS-*.csv 2>/dev/null || true
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -401,6 +424,7 @@ scenario_message_stats_raw() {
     echo "[$current_scenario]"
     local out
     out=$(run_section -mdm raw -n 3)
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
@@ -422,7 +446,7 @@ scenario_message_stats_raw() {
         produced_by 'emit_bin_counter_mode_verbose() in ltl - next-after-path-emit short-circuit' \
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - opt-out blocks emit only the path: line.'
 
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -440,6 +464,7 @@ scenario_bucket_stats_bin() {
     echo "[$current_scenario]"
     local out
     out=$(run_section -bdm bin -bs 240)
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
@@ -521,7 +546,7 @@ scenario_bucket_stats_bin() {
         produced_by 'emit_bin_counter_mode_verbose() in ltl - %shares_with map has no time_bucket_stats entry' \
         contract    'features/289-bucket-stats-bin-counter-data-model.md section dedicated-store decision (divergence 2).'
 
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -534,6 +559,7 @@ scenario_bucket_stats_raw() {
     echo "[$current_scenario]"
     local out
     out=$(run_section -bdm raw -bs 240)
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
@@ -549,7 +575,7 @@ scenario_bucket_stats_raw() {
         produced_by 'emit_bin_counter_mode_verbose() in ltl - %consumer_opted_out_to_raw map (Issue #289)' \
         contract    'features/187-histogram-bin-counter-percentiles.md section R10 path vocabulary - user_opt_out is the migrated-but-pinned-raw label.'
 
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
@@ -562,10 +588,11 @@ scenario_always_present() {
     local out
     # Heatmap is enabled but no percentile flags; the section should still emit.
     out=$(run_section -hm duration)
+    check_capture_warnings "$out"
 
     assert_header_present "$out"
 
-    rm -f "$out"
+    rm -f "$out" "$out.stderr"
 }
 
 # ---------------------------------------------------------------------------
