@@ -2,7 +2,9 @@
 
 ## Status
 
-- **Last reviewed:** 2026-05-09
+- **Last reviewed:** 2026-07-15
+- **Scope re-cut (2026-07-15, later same session — D21):** Phase 2 moves out of 0.17.0 as well: its motivating consumer is Phase 4's inter-line derived metrics, so **Phases 2 and 4 ship together in a later release** (with #57 and #55). 0.17.0 = Drops 0/1/2: #180 → #58 → #60. Account-at-read-time locked as the universal time-attribution semantic; temporal interpolation not planned, spec'd for the record in #370 (D22).
+- **True-up (2026-07-15):** Implementation scheduled for release 0.17.0 as a merge train of section drops on `release/0.17.0` (~~Phases 1–3~~ re-cut by D21 above; Phase 4 deferred to a later release). Prerequisite graph collapsed since 2026-05-09: #34/#41/#51 closed (superseded/resolved by the #187/#189 unified bin-counter contract), #179 shipped with a narrowed role (detect-stage hints only), #181 reframed as architecture guidance rather than a deliverable. Memory design target reframed: eliminate waste and stay bounded/accountable — do not minimize to the floor; available memory is spent on fidelity. See Decision Log entry for 2026-07-15 (D15–D19).
 - **Sequencing change (2026-05-09):** Pre-requisite "staging primitive" work lands on separate branches against today's architecture *before* #23 implementation begins. This shrinks the rewrite's surface area. New prerequisite issues filed: #179 (index read-back), #180 (named pipeline stages), #181 (buffered read pipeline). Existing issues #41, #34, #51 updated with Phase 2 alignment requirements and re-classified as Phase 2 prerequisites. See "Decision Log" entry for 2026-05-09 below.
 
 ## Overview
@@ -192,11 +194,13 @@ The core processing pipeline must change from a streaming single-pass model to a
 
 **New model:** Read line → parse minimally (extract timestamp, raw fields) → store in time bucket → once bucket is "closed" (reading has advanced sufficiently past it) → run grouping, derivation, delta calculations, statistics, and heatmap computations on that bucket's collected data → produce final counts/stats → free raw data.
 
+**Why (reframed 2026-07-15, D15):** The purpose of the deferred-per-bucket model is to **unlock calculated metrics over a complete time bucket** — computations that need the full picture of a bucket's data before they can run (per-bucket statistics finalization, message-identity grouping within a bucket, and eventually Phase 4's inter-line derived metrics and transaction correlation). It is *not* a memory-reduction play. The sliding window's memory contribution is **waste elimination** — raw data whose consumers have all run is freed instead of persisting to end-of-run — and **structural boundedness**, not a lower peak than today's model.
+
 Key implications:
 - **Statistics and heatmaps computed inline**: These currently run as a batch after all reading is complete. In the new model, they must be computed per-bucket as each bucket is finalized, since the raw data will be freed afterward.
 - **Sliding window**: Only the current bucket and a small number of trailing buckets are held in memory. Once a bucket is finalized and its raw data is no longer needed for inter-line calculations, it is freed.
 - **Decoupled phases**: Reading/parsing is decoupled from calculation/statistics. This separation enables derived metrics that require the full picture of a bucket before processing.
-- **Memory savings**: Despite holding raw data temporarily, the sliding window approach should reduce peak memory compared to today's model where all aggregated data structures persist until the end.
+- **Memory posture (per D15)**: The per-bucket raw holding is transient working state — bounded by the window's shape, freed at bucket close, and visible in `-V`/`-mem` accounting. Success is "no waste, bounded, accountable," not "peak memory reduced vs baseline." Persistent per-key representation choices (raw array vs bin-counter partition, head/body split) are a separate concern owned by the #2 memory-ceiling umbrella and are **not** a dependency of this pipeline redesign — the pipeline feeds whatever message-stats data model is in effect, identically.
 
 #### 7. Derived Metrics
 
@@ -233,8 +237,8 @@ Requirements:
 - Additional functions like `rate()`, `irate()` should follow Prometheus semantics where applicable
 - Function results can be used in arithmetic expressions (e.g., `rate(tcp_errors) * 60`)
 - Inter-line functions can feed into intra-line expressions and vice versa, respecting dependency ordering
-- **Per-message-identity state**: State must be tracked per message identity within a time bucket, not globally. See section 9 (Fuzzy Matching) for how identity is determined.
-- **Temporal interpolation**: When counter readings are sparse relative to bucket size, deltas must be linearly interpolated across intervening buckets. For example, if a counter is reported every 5 minutes but buckets are 1 minute wide, the delta observed at the 5-minute mark is divided evenly across the 5 one-minute buckets, avoiding artificial spikes. Overlapping bucket boundaries must not cause double-counting.
+- **Per-message-identity state**: State must be tracked per message identity within a time bucket, not globally. State holds the last observed value **and its exact timestamp** — the timestamp is required so `delta()`/`rate()` divide by true elapsed time and report magnitude-correct rates. See section 9 (Fuzzy Matching) for how identity is determined.
+- **Time attribution — account-at-read-time (LOCKED 2026-07-15, D22)**: A delta's full contribution is accounted in the bucket of the observation that completes it, consistent with ltl's universal semantic (a line's contribution lands in the bucket of the line's timestamp — exactly as a one-hour access-log request lands in its completion bucket). ~~Temporal interpolation (linear distribution of the delta across intervening buckets) was previously specified as mandatory here~~ — **not planned**, by architectural decision: it is the sole consumer requiring finalized buckets to be reopenable, it fabricates smoothness the data doesn't contain, and it splits the tool's time semantics. Full spec and rationale recorded in #370 (open, labeled not planned). If ever revisited: per-metric opt-in, never a default change.
 - **Counter reset handling**: `idelta()` discards negative deltas (counter resets). `delta()` reports them as-is.
 - **Staleness/max-gap**: TODO - determine whether a maximum time gap should exist beyond which a delta is considered stale and discarded rather than interpolated.
 
@@ -293,6 +297,8 @@ Requirements:
 #### 11. Unit System
 
 Every metric — raw or derived — carries a unit type. The system must know how to accept user-specified units, normalize values to a canonical internal form, and format values for display.
+
+**Scope boundary (2026-07-15, D18):** Unit *auto-detection* — statistical determination of a unit by sampling values — and speculative unit tracking are **not** part of the #23 rewrite. The rewrite's contribution to the unit problem is declarative only: a detected format carries its known units as registry metadata (e.g., Tomcat 9 `%D` = milliseconds), which for unambiguous formats makes auto-detection unnecessary. Statistical sampling remains #17's separate, simpler follow-on for ambiguous format variants. Unit knowledge sources, in precedence order: (1) explicit `-du` override → (2) format-carried unit from the registry (this rewrite) → (3) prior-run knowledge via index read-back (#179) → (4) sample-based auto-detection (#17, follow-on; its ~100-line sampling window is the same buffered detection window described in #181).
 
 ##### Unit Types
 
@@ -410,13 +416,12 @@ This redesign replaces the entire core processing pipeline. Every existing featu
 - **Mitigation**: Build a comprehensive regression test suite from existing test logs *before* starting implementation. Capture current output as golden files. Run before/after comparisons on every change.
 - **Mitigation**: Consider a phased approach where the old and new pipelines can run in parallel during development.
 
-### 2. Memory Model Uncertainty — HIGH
-The sliding window is expected to reduce peak memory, but this is unproven. If buckets contain many unique message identities with many metrics, the per-bucket raw data plus inter-line state could exceed current memory usage for certain workloads.
-- **Mitigation**: Profile current memory usage to establish a baseline. Build a prototype of the bucket data structure and measure memory for representative log files before committing to the full implementation.
+### 2. Memory Model Uncertainty — MEDIUM (reframed 2026-07-15, D15)
+~~The sliding window is expected to reduce peak memory, but this is unproven.~~ Peak-memory reduction is no longer the target (D15). The residual risk is that the per-bucket transient holding is **unbounded or invisible**: buckets with many unique message identities and many extracted fields could hold large raw volumes while open, and if that consumer is not bounded and not reported, it masks regressions and defeats accountability.
+- **Mitigation**: The window is structurally bounded (bucket count) and reported in `-V`/`-mem` alongside existing consumers. #57's prototype quantifies per-bucket transient cost using the per-entry cost constants already measured in the #323/#306 investigations (partition floor ~2,524 B, raw +32 B/value, singleton stats-hash ~2,327 B, per-sample hash-field update ~1.0–1.2 µs) rather than re-deriving them.
 
-### 3. Temporal Interpolation Correctness — MEDIUM
-Linear interpolation of counter deltas across buckets is an approximation. For bursty workloads, this smoothing may hide real patterns (a spike that happened in one minute gets spread across five). Users coming from Prometheus may expect different behavior.
-- **Mitigation**: Research how other tools handle this and document the trade-offs. Consider making the interpolation strategy configurable (linear, last-bucket-only, none).
+### 3. Temporal Interpolation Correctness — RETIRED (2026-07-15, D22)
+~~Linear interpolation of counter deltas across buckets is an approximation…~~ Resolved by removal: account-at-read-time is locked as the universal semantic and interpolation is not planned (#370 records the spec and rationale). The risk this entry anticipated — smoothing hiding real patterns — was one of the grounds for rejecting interpolation outright.
 
 ### 4. Fuzzy Matching is a Hard Problem — ~~HIGH~~ MITIGATED
 Getting message identity right is critical for inter-line metrics to produce meaningful results. Too loose: different counters get mixed. Too tight: the same logical counter doesn't match itself across lines due to minor variations.
@@ -481,28 +486,34 @@ Inter-line functions need state that persists across bucket boundaries (the last
 
 This refactor is staged into phases with independent deliverables. Each phase builds on the previous and can be validated independently. Prerequisites must be completed before Phase 1 begins.
 
-### Prerequisites (revised 2026-05-09)
+### Prerequisites (trued up 2026-07-15)
 | Issue | Title | Status / Purpose |
 |-------|-------|------------------|
 | #53 | Automated test suite with golden files | **COMPLETE** (delivered with #56, v0.14.2) |
 | #54 | Fuzzy matching engine research | **COMPLETE** — implemented in #96 (v0.13.0). See `docs/similarity-engine-best-practices.md` |
 | #56 | Memory baseline profiling | **COMPLETE** (v0.14.2) |
-| **#179** | **Index read-back with drift detection and refresh** | **NEW (2026-05-09)** — pre-seeds heatmap/histogram bounds from `ltl-index.csv`; refreshes on drift. Phase 1 + Phase 2 prerequisite. |
-| **#180** | **Name the implicit pipeline stages (detect/parse/accumulate/finalize/render)** | **NEW (2026-05-09)** — names the existing implicit pipeline so Phase 1 inserts the registry into the `detect` stage and Phase 2 adds per-bucket lifecycle inside `finalize`. Phase 1 prerequisite. |
-| **#181** | **Decouple file I/O from processing via a buffered read pipeline** | **NEW (2026-05-09)** — substrate for multi-format detection-fallback (Phase 1) and transaction-spanning event correlation (Phase 2 sliding window). Phase 1 + Phase 2 prerequisite. |
-| **#41** | **Heatmap/histogram unified binning** | **OPEN — Phase 2 prerequisite** (alignment requirements added 2026-05-09). |
-| **#34** | **Memory-optimized two-pass streaming** | **OPEN — Phase 2 prerequisite** (alignment requirements added 2026-05-09). |
-| **#51** | **Highlight-data memory optimization** | **OPEN — Phase 2 prerequisite** (alignment requirements added 2026-05-09). |
-| #55 | Expression parser research & build | **OPEN — Phase 4 prerequisite.** Standalone component for derived metric arithmetic. |
-| #57 | Bucket data structure prototype | **OPEN — Phase 2 prerequisite.** Validates sliding window feasibility. |
+| #179 | Index read-back with drift detection and refresh | **COMPLETE** (shipped v0.15.x), with a **narrowed role** under the #187 contract: partitions auto-resize online, so the index is no longer load-bearing for histogram/heatmap bound pre-seed. Remaining value to this rewrite: timestamp-range / `ts_precision` hints to the `detect` stage, and prior-run unit knowledge (see D18 precedence order). |
+| #180 | Name the implicit pipeline stages (detect/parse/accumulate/finalize/render) | **OPEN — Drop 0 of the 0.17.0 merge train.** Phase 1 inserts the registry into the `detect` stage; Phase 2 adds per-bucket lifecycle inside `finalize`. |
+| #181 | Decouple file I/O from processing via a buffered read pipeline | **REFRAMED (2026-07-10 / 2026-07-15, D17) — architecture guidance, not a deliverable.** Perf testing showed file I/O is not a bottleneck. Phase 1 needs only a minimal detection window (hold the first ~N lines during format detection, per-line re-detect on cache-miss); that window is also the future substrate for #17's unit sampling. No full reader/processor decoupling is built. |
+| ~~#41~~ | ~~Heatmap/histogram unified binning~~ | **CLOSED — superseded by #187/#189**: heatmap and histogram run the same unified bin-counter primitives at the same precision. |
+| ~~#34~~ | ~~Memory-optimized two-pass streaming~~ | **CLOSED — resolved by #187/#189**: reframed as the consumer migration onto the unified primitive contract and delivered there. |
+| ~~#51~~ | ~~Highlight-data memory optimization~~ | **CLOSED — resolved under the #187/#189 contract** (highlight-subset consumer migration). |
+| #55 | Expression parser research & build | **OPEN — Phase 4 prerequisite; out of 0.17.0 scope** (deferred with Phase 4). Standalone component for derived metric arithmetic. |
+| #57 | Bucket data structure prototype | **OPEN — Phase 2 gate (Drop 2a), rescoped 2026-07-15.** Per-entry cost constants are already measured (#323/#306); the prototype's remaining question is the per-bucket *transient* holding cost and window shape under the sliding window. See D15. |
 
-### Phases (revised 2026-05-09)
-| Issue | Phase | Title | Depends On |
-|-------|-------|-------|------------|
-| #58 | 1 | Format registry and staged detection | #179, #180, #181 |
-| #59 | 2 | Sliding-window deferred-per-bucket processing | #58, #181, #57, **#41, #34, #51** |
-| #60 | 3 | Configurable metric visibility and purpose | #59 |
-| #61 | 4 | Derived metrics (intra-line and inter-line) | #60, #55 (#54 already COMPLETE) |
+### Phases (re-cut 2026-07-15, D21 — 0.17.0 merge train)
+| Issue | Phase | Drop | Title | Depends On | 0.17.0 |
+|-------|-------|------|-------|------------|--------|
+| #180 | — | 0 | Named pipeline stages (zero behavioral change) | — | **In** |
+| #58 | 1 | 1 | Format registry and staged detection (fixes #369; unblocks #17's declarative path) | #180 | **In** |
+| #60 | 3 | 2 | Configurable metric visibility and purpose | #58 | **In** |
+| #57 | — | — | Bucket data structure prototype (go/no-go gate for Phase 2) | #58 (design context) | **Out — Phase 2+4 release (D21)** |
+| #59 | 2 | — | Sliding-window deferred-per-bucket processing (motivating consumer: Phase 4 inter-line derived metrics) | #58, #57 | **Out — Phase 2+4 release (D21)** |
+| #61 | 4 | — | Derived metrics (intra-line and inter-line) | #60, #55, #59 in practice (#54 already COMPLETE) | **Out — Phase 2+4 release (D16/D21)** |
+
+Phase 2's deferred-per-bucket machinery exists *for* Phase 4's inter-line functions (2026-02-06 decision 2); shipping it a release ahead of its consumer would build holding machinery nothing uses, while streaming bin-mode accumulation (v0.15.x–v0.16.0) has already absorbed part of its secondary justification. Hence: one coherent "bucketed computation + derived metrics" release after 0.17.0.
+
+Each drop lands on its own branch off `release/0.17.0`, merges back via PR through the full regression gate (byte-identical golden files + complete `tests/validate-*.sh` suite + targeted timing/memory probes sized to the drop). The XL benchmark `all` tier runs once, at release-gate time.
 
 ### Phasing Principles
 - Each phase must produce identical output for existing functionality (golden file comparison)
@@ -515,6 +526,22 @@ This refactor is staged into phases with independent deliverables. Each phase bu
 [Issue #23: Log Format Registry - Refactor core parsing architecture](https://github.com/gregeva/logtimeline/issues/23)
 
 ## Design Decisions Log
+
+### 2026-07-15: 0.17.0 scheduling session — true-up and target reframe
+
+Implementation scheduled for release 0.17.0 as a merge train of section drops on `release/0.17.0`, each merged back through the full regression gate. Decisions reached:
+
+1. **D15 — Memory design target reframed.** The rewrite does not pursue minimal memory footprint. Two distinct obligations replace it: (a) **eliminate waste** — never store what has no remaining consumer (aligned with the shipped demand registry #305 and the #349 demand contract); (b) **spend available memory on fidelity** — raw values are exact, a histogram only ever approximates, so representation degradation is purely a memory-policy decision. Persistent per-key representation policy (raw vs partition, head/body split, promotion thresholds) is owned by the **#2 memory-ceiling umbrella and is NOT a dependency of this rewrite** — the pipeline feeds whatever message-stats data model is in effect. Phase 2's per-bucket holding is transient working state: structurally bounded, freed at bucket close, visible in `-V`/`-mem`. Grounding: the #323 investigation record in `features/189-histogram-bin-counter-primitives.md` (both directions).
+2. **D16 — Phase 4 (#61) out of 0.17.0.** The 0.17.0 scope is Phases 1–3 (#180 → #58 → #57 → #59 → #60). Derived metrics and the expression parser (#55) are a release-sized feature sitting on top of the rewritten engine, deferred to a later release.
+3. **D17 — #181 reframed to architecture guidance.** Perf evidence (2026-07-10 note on #181) shows file I/O is not a bottleneck; no full reader/processor decoupling is built. Phase 1's D13 detect-fallback needs only a minimal detection window: hold the first ~N lines during format detection, per-line re-detect on cache-miss. That same window is the future substrate for #17's unit-detection sampling (~100 lines) when no prior-run knowledge exists — the design tie recorded on #181 and #17 (2026-07-15 comments).
+4. **D18 — Unit scope boundary.** No unit auto-detection and no speculative unit tracking inside the rewrite. The registry's contribution is declarative: format definitions carry known units as metadata. Knowledge precedence: `-du` override → format-carried unit → index read-back (#179) → sample-based auto-detection (#17, follow-on).
+5. **D19 — #187/#189 outcome absorbed.** #34, #41, #51 are closed (superseded/resolved under the unified bin-counter contract); Phase 2 inherits one already-unified binning/memory model instead of reconciling three. #179 shipped with a narrowed role (detect-stage hints; no longer load-bearing for bounds pre-seed).
+
+6. **D21 — Phase 2 out of 0.17.0; Phases 2+4 ship together (added same session, drop-walkthrough dialog).** Phase 2's deferred-per-bucket model exists *for* Phase 4's inter-line derived metrics (2026-02-06 decision 2: "the streaming single-pass model cannot support inter-line derived metrics"). With Phase 4 deferred (D16), shipping Phase 2 alone would build holding machinery a release ahead of its only consumer — while v0.15.x–v0.16.0's streaming bin-mode accumulation has already absorbed part of its secondary justification (inline stats finalization). Re-cut: **0.17.0 = #180 → #58 → #60** (Drops 0/1/2); **#57, #59, #61, #55 form the next release** as one coherent bucketed-computation + derived-metrics line. Native dependencies re-cut accordingly (#60 now blocked by #58, not #59).
+7. **D22 — Account-at-read-time locked; temporal interpolation not planned (added same session).** The universal time-attribution semantic is: a line's contribution lands in the bucket of the line's timestamp — for UDM deltas exactly as for durations (a one-hour request lands in its completion bucket). Inter-line state retains last value + **exact timestamp** per (metric × log key), so `rate()` divides by true elapsed time and magnitudes stay correct; placement is the read bucket. Interpolation (linear spreading across intervening buckets) rejected as a planned capability — it fabricates smoothness, splits the tool's time semantics, and is the sole consumer forcing finalized buckets to be reopenable (collapsing that requirement radically simplifies Phase 2's window: buckets close aggressively and permanently). Spec'd for the record as a **general capability across all metrics** (counters *and* durations — any index of elapsed activity), not UDM-specific, in **#370, open and labeled not planned**. If ever revisited: per-metric opt-in (linear / last-bucket-only / none), never a default change. Section 7b and Risk 3 updated to match.
+8. **D20 — Move-to-front detection scan (added same session, drop-walkthrough dialog).** Phase 1's detection structure is an ordered array of compiled `qr//` patterns (one per registry entry) scanned front-to-back per line, with the matching entry **moved to the front**. Detection is a change-point workload (one format for millions of consecutive lines, changing at file boundaries), so MTF converges in one match per change point and delivers the original "detect once per file" intent globally with no per-file reset bookkeeping; steady-state per-line cost is one successful compiled match at index 0. Bubble-up-one (the `docs/regex-best-practices.md` sketch, proven in `match_consolidation_patterns()`) was argued and rejected for this use: its noise-damping pays off at high pattern counts with genuinely interleaved traffic (the consolidation problem), not ~13 patterns over near-constant streams. Stray-line worst case under MTF is one failed match on the next line. Lines matching nothing (continuation lines) pay the full scan under any ordering — a possible pre-filter is an in-drop design point, independent of ordering policy. The matched entry IS the registry entry: extraction runs from its definition, replacing the `match_type` integer. Supersedes the "detect once per file, cache the format" wording (2026-02) in earlier issue drafts.
+
+Branch: `23-log-format-registry` (documentation true-up; issue walkthrough and enhancement in the same session).
 
 ### 2026-05-09: Pre-rewrite planning session — staging primitives and sequencing
 
@@ -548,24 +575,33 @@ Discussion established that derived metrics require a fundamental change to the 
 
 ## Related
 
-### Prerequisites filed/updated 2026-05-09
-- **Issue #179**: Index read-back with drift detection and refresh — Phase 1 + Phase 2 prerequisite (NEW)
-- **Issue #180**: Name the implicit pipeline stages — Phase 1 prerequisite (NEW)
-- **Issue #181**: Decouple file I/O from processing via buffered read — Phase 1 + Phase 2 prerequisite (NEW)
-- **Issue #41**: Align heatmap with histogram binning — Phase 2 prerequisite (alignment requirements added)
-- **Issue #34**: Two-pass streaming memory mode — Phase 2 prerequisite (alignment requirements added)
-- **Issue #51**: Highlight-data memory optimization — Phase 2 prerequisite (alignment requirements added)
+### Prerequisites (status as of 2026-07-15)
+- **Issue #179**: Index read-back — **COMPLETE** (shipped v0.15.x); narrowed role: detect-stage hints + unit knowledge precedence, not bounds pre-seed
+- **Issue #180**: Name the implicit pipeline stages — **OPEN**, Drop 0 of the 0.17.0 merge train
+- **Issue #181**: Buffered read pipeline — **REFRAMED (D17)**: architecture guidance only; minimal detection window replaces full decoupling
+- **Issue #41**: Align heatmap with histogram binning — **CLOSED**, superseded by #187/#189
+- **Issue #34**: Two-pass streaming memory mode — **CLOSED**, resolved as consumer migration under #187/#189
+- **Issue #51**: Highlight-data memory optimization — **CLOSED**, resolved under #187/#189
 
 ### Already-shipped foundations
 - Issue #46: Index file (`ltl-index.csv`) — provides the data #179 will consume
 - Issue #22: User-defined metrics with simple delta — Phase 4 replaces its global delta with per-identity
 - Issue #54: Fuzzy matching engine research — **COMPLETE**, resolved by #96
 - Issue #96: Fuzzy message consolidation — **SHIPPED** (v0.13.0), provides the similarity engine for Phase 4 message identity and the architectural template (S1-S5 pipeline) for Phase 2
+- Issues #187/#189: Unified histogram bin-counter primitives — **SHIPPED** (v0.15.x/v0.16.0), the single binning/percentile substrate Phase 2 inherits; closed #34/#41/#51
+- Issue #305: Statistics demand registry — **SHIPPED** (v0.16.0), demand-gated capture/compute/storage; the proving ground Phase 3 (#60) generalizes (see also #349 demand contract)
 
 ### Other related
-- Issue #17: Duration unit autodetection (blocked by this refactor)
+- Issue #17: Duration unit autodetection — the declarative path (format-carried units) ships with Phase 1; the sampling fallback stays #17's own follow-on (D18)
+- Issue #369: Access-log read-phase regression (v0.16.0) — fixed by Phase 1's staged detection (removes the per-line sequential pattern cascade)
+- Issue #2: Memory ceiling umbrella — owns persistent storage/representation policy; explicitly NOT a dependency of this rewrite (D15)
 - Issue #44: Source file heuristics — depends on #179 (index read-back)
 - Issue #48: Performance profiling (provided evidence for processing model changes)
+
+### Per-drop feature docs (0.17.0 merge train — repo-side source of truth per drop)
+- features/180-named-pipeline-stages.md — Drop 0 (#180)
+- features/58-format-registry-staged-detection.md — Drop 1 (#58)
+- features/60-metric-visibility-demand-map.md — Drop 2 (#60)
 
 ### Documentation
 - features/duration-unit-autodetection.md
