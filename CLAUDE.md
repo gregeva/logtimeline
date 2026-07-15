@@ -232,6 +232,27 @@ git branch --show-current  # Must start with the issue number AND match the issu
 ### GitHub Issue Updates (MANDATORY)
 Update issues throughout development: when starting, during investigation, on design decisions, and when complete. Close with `gh issue close <number> --reason completed`.
 
+### Issue Blocking Relationships (MANDATORY)
+
+Blocking is tracked ONLY through GitHub's native issue-dependency mechanism — never a `blocked` label, a "Blocked by #N" line in the body, or a comment. Those are prose that GitHub does not understand as a dependency; the label was removed from this repo for exactly this reason. When an issue cannot proceed until another open issue lands, record it as a native `blocked_by` dependency (which automatically surfaces the reciprocal `blocking` on the other issue).
+
+Rules:
+- **The blocker must be an OPEN issue.** A closed issue is no longer a block — resolve or drop the dependency instead.
+- **State the dependency in the body prose too**, as a human-readable `Blocked by #N (short context)` line, but the prose NEVER stands in for the native dependency — both must exist and agree.
+- **Both directions are maintained by the one API call**: setting `blocked_by` on the dependent issue makes GitHub show `blocking` on the blocker automatically. Do not add anything by hand on the blocker side.
+
+GraphQL does not yet expose these fields; use the REST endpoints (`issue_id` is the blocker's numeric `id`, passed as an integer via `-F`, not its issue number):
+
+```bash
+# Add: "#DEPENDENT is blocked by #BLOCKER"
+BLOCKER_ID=$(gh api repos/{owner}/{repo}/issues/BLOCKER --jq '.id')
+gh api --method POST repos/{owner}/{repo}/issues/DEPENDENT/dependencies/blocked_by -F issue_id="$BLOCKER_ID"
+
+# Inspect
+gh api repos/{owner}/{repo}/issues/DEPENDENT/dependencies/blocked_by --jq '[.[].number]'
+gh api repos/{owner}/{repo}/issues/BLOCKER/dependencies/blocking --jq '[.[].number]'
+```
+
 ### Development Phases
 1. **Planning**: Create feature doc in `features/`, review existing TO-DOs, create implementation plan
 2. **Prototyping** (non-trivial features): Validate approach in `prototype/` directory first
