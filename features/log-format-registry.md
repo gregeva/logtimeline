@@ -598,6 +598,11 @@ Discussion established that derived metrics require a fundamental change to the 
 - Issue #44: Source file heuristics — depends on #179 (index read-back)
 - Issue #48: Performance profiling (provided evidence for processing model changes)
 
+### Per-drop feature docs (0.17.0 merge train — repo-side source of truth per drop)
+- features/180-named-pipeline-stages.md — Drop 0 (#180)
+- features/58-format-registry-staged-detection.md — Drop 1 (#58)
+- features/60-metric-visibility-demand-map.md — Drop 2 (#60)
+
 ### Documentation
 - features/duration-unit-autodetection.md
 - features/fuzzy-message-consolidation.md
