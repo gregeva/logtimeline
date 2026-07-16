@@ -21,9 +21,13 @@ One entry per format carrying everything downstream code currently infers from t
 
 - compiled pattern (`qr//`) + pattern source (never reconstruct source from `qr//` stringification — `docs/regex-best-practices.md`)
 - field mapping (which captures are timestamp, message, duration, bytes, count, …)
-- timestamp format
+- **time contract** (three parts, all declarative — D23):
+  - *layout* — the timestamp parse pattern
+  - *precision* — what the format resolves to (s / ms / µs); drives sub-second bucketing (`-ms`), the integer-milliseconds hash-key rule, and cross-checks the `ts_precision` hint from index read-back (#179)
+  - *timezone semantics* — (a) offset present in the line → parse and honor it; (b) offset absent, format documented as UTC → registry pins UTC; (c) offset absent, format writes local time → registry pins "local", and what local means resolves through the configuration cascade (CLI firmest → registry/user config → default). The format *knows*; the engine never guesses — same declarative pattern as duration units. Consumers: #155 (UTC normalization) reads cases (a)/(b); #154 (fixed rendering offset) is the display-side override.
 - duration field + **declared duration unit** (D18 — declarative format-carried knowledge, e.g. Tomcat 9 `%D` = milliseconds), with an **ambiguity marker** for variants (Tomcat 9 ms vs Tomcat 10.1+/Apache HTTP µs `%D`)
 - access-log property (replacing `$is_access_log`)
+- **`event_pairs` reservation (D23 — reserved in this drop, consumed by #372 in the Phase 2+4 release):** an optional array of pair-pattern declarations, each holding two independent patterns (`start_pattern` / `end_pattern`, asymmetry inherent), a correlation binding (captures matched by name across the two patterns), a log-key composition template (rebuilding the merged key from captures of both sides), and a metric mapping onto canonical record fields. This drop **validates** the slot at load time (user YAML with pair declarations fails loudly, never silently) but does not consume it — placeholder-with-contract, so #372 lands without schema churn. The schema must not bake in "one line = one event."
 - format name/description + sample lines (samples become per-format test fixtures)
 
 ### R2 — Detection mechanism: move-to-front ordered scan (LOCKED, D20)
