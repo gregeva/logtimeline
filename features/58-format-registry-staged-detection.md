@@ -64,6 +64,31 @@ The registry slots into #180's named `detect` role; `read_index_file()` hints (#
 - Full buffered-read I/O decoupling (#181, D17)
 - Extraction improvements — this drop is extraction *parity* per format, not enhancement
 
+## Research and prototype phase — MANDATORY before implementation
+
+The registry is a new data model on the hottest path in the tool: consulted per line across tens of millions of lines, replacing hardcoded inline extraction with data-driven indirection. Changing the data model after implementation is a far larger task than validating it up front — so this drop follows the full workflow: **research → prototype → validate → refine design → record decisions → implement**. Precedent: #187 Decision 10 (prototype validation as a hard prerequisite), delivered in `prototype/` per the standard development phases.
+
+### Research (precedes the prototype; the prototype is built on its output)
+
+- Survey candidate entry representations and dispatch shapes; ground them against the repo's measured constants and prior findings before building anything: per-sample hash-field update ≈ 1.0–1.2 µs (#306 — bounds any per-line bookkeeping the registry adds), `docs/regex-best-practices.md` (pattern-count scaling, alternation rejection, `qr//` handling), `docs/perl-performance-optimization.md`, and the NYTProf workflow for profiling.
+- Identify the candidate implementations for the highest-risk axis — **data-driven extraction dispatch**. Today each cascade branch extracts fields with inline positional code; a registry must express this as data. Candidates to research (non-exhaustive): per-format extraction closures compiled once at load; a generic capture-map loop consulted per line; named captures (`%+`) vs positional; hybrid (data-driven definitions compiled into per-format code refs at startup).
+
+### Prototype charter (`prototype/`, no production code)
+
+Compare the candidate implementations, measured at representative scale (staged 1k → 10k → 100k → millions of lines, per the NYTProf sample plan), against today's inline cascade as the baseline:
+
+1. **Registry entry structure** — build-up cost at startup and memory footprint (`Devel::Size`), hash-of-hashes vs array-of-entries access cost per line.
+2. **Hash/field access in the hot loop** — per-line cost of reading the matched entry's metadata (field map, units, flags) under each candidate structure.
+3. **Extraction dispatch** — per-line cost of each candidate vs the inline baseline; this is the axis most likely to regress and the one the choice hinges on.
+4. **MTF reorder cost** — splice-to-front cost at realistic reorder frequencies (rare in steady state; measure the change-point burst too).
+5. **Detection window handling** — cost of holding/replaying the first ~N lines.
+
+### Exit criteria
+
+- A chosen approach with measured justification (memory + timing tables, medians with ranges, vs baseline).
+- Matched-line extraction shows **no regression** vs the inline baseline within noise; detection-phase improvement consistent with the #369 expectation.
+- Lessons learned and the resulting design refinements recorded back into this document as decisions (Dxx) **before** implementation begins.
+
 ## In-drop design decisions to settle
 
 - Pattern priority when multiple registry entries could match the same line (umbrella Q2)
@@ -78,6 +103,7 @@ The existing `format-detection` section (`emit_format_detection_verbose()`) gain
 
 ## Acceptance criteria / merge gate
 
+- [ ] **Research + prototype phase completed and its decisions recorded in this document before implementation began** (see the mandatory phase above).
 - [ ] All existing tests byte-identical: golden files + full `tests/validate-*.sh` suite exits 0; runtime-warning-clean stderr.
 - [ ] **#369 probe**: `TIMING/read_files` on an access-log selection improves vs. the v0.16.0 baseline — cost class removed, not shaved. Targeted single-file probe, median-of-3; no XL suites during development.
 - [ ] Detection observability per the section-contract above.
