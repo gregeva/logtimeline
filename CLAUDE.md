@@ -264,7 +264,7 @@ gh api repos/{owner}/{repo}/issues/BLOCKER/dependencies/blocking --jq '[.[].numb
 
 ### Development Phases
 1. **Planning**: Create feature doc in `features/`, review existing TO-DOs, create implementation plan
-2. **Prototyping** (non-trivial features): Validate approach in `prototype/` directory first
+2. **Prototyping** (non-trivial features): Validate approach in `prototype/` directory first. **MANDATORY — not a judgment call — when the work introduces (a) a new or changed data model, (b) a new per-line hot-path cost, or (c) any feature/fix deemed impactful by its cost profile — execution frequency × per-execution cost (a cheap operation run tens of millions of times, or an expensive one run per key at high cardinality).** The workflow is research → prototype → validate → refine design → record decisions (as Dxx in the owning feature doc) → implement. Research precedes and grounds the prototype (candidate representations, applicable measured constants, prior findings); the prototype compares implementation candidates at staged scale (1k → 10k → 100k → millions) against the current code as baseline; exit requires measured justification (medians with ranges) and lessons learned recorded BEFORE implementation begins. Precedent: #187 Decision 10; applied to #58 (registry data model) and #372 (pair-correlation store + sub-determination) on 2026-07-16. Data models are far more expensive to change after they ship than to validate up front.
 3. **Scheduling**: Get explicit user approval before implementation
 4. **Implementation**: Update feature doc progress as you work
 5. **Testing**: Use sample files in `logs/` directory (see `docs/test-logs.md`)
