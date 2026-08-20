@@ -226,6 +226,34 @@ Compare the candidate implementations, measured at representative scale (staged 
 - Matched-line extraction shows **no regression** vs the inline baseline within noise; detection-phase improvement consistent with the #369 expectation.
 - Lessons learned and the resulting design refinements recorded back into this document as decisions (Dxx) **before** implementation begins.
 
+### Prototype findings (2026-08-20 —) — measured on the fixture dataset
+
+Prototype infrastructure: `prototype/58-generate-fixtures.sh` deterministically regenerates the 27-fixture dataset into `/tmp/ltl-58-fixtures/` (7 families × 1k/10k/100k/1m from the repo's known test logs; `pure-scriptlog-dense` capped at 100k; provenance in its manifest and header). `prototype/58-measure.pm` is the shared measurement scaffold: warmup + N runs, median with min–max range, ns/line, RSS delta, one TSV shape. `prototype/58-baseline-extractor.pl` is the faithful copy of the recognition region of `read_and_process_logs()` (all 13 branches, inert-guard fidelity, parity-accumulator surface all candidates must reproduce).
+
+#### P1 — Full-cascade baseline: the removable cost class, quantified per fixture
+
+Median ns/line at 10k (5 runs, ranges tight; 1k consistent): pure-access 6,258; interleave-100 5,633; concat-pair 5,541; pure-gc 5,006; pure-scriptlog 4,746; pure-scriptlog-dense 6,083; twx-blend 2,779. Confirmations of A1/A2 mechanics: access lines are the *most* expensive matched class (each mt3 line first fails 7 earlier patterns incl. 4 same-head access siblings); no-match continuation lines are the *cheapest* (all 13 anchors reject near position 0) — the F3 discriminator's value is therefore bounded low on this population. The dense-vs-sparse scriptlog gap (6,083 vs 4,746) prices the A11 message-metric probes + masking at ~1,300 ns/line on metric-bearing lines.
+
+Fixture characterization recorded during scaffolding: GC fixtures match mt6 on only ~42% of lines — `Pause Remark`/`Pause Cleanup` carry no cause clause and fall through (#382 filed, backlog); metric-bearing lines (any of bytes/count/durationMs) in the sparse scriptlog family are 0% at 1k, ~0.5% at 100k, ~13% at 1m (they cluster late in the pool), while every dense-family line is metric-bearing — sparse measures the probes' miss path, dense their hit path.
+
+#### P2 — Extraction dispatch (charter item 3, F8-4): closures are viable; interpreter is out; list-return beats hashref
+
+`prototype/58-dispatch-mini.pl`: single-pattern match + extraction + identical common-mode post-steps (count probe, threadpool, guards), lines pre-loaded, I/O and scan order excluded — the steady-state MTF position-0 workload. All candidates byte-identical to the inline branch on every line of every fixture tested (parity gate built in, `--verify-only`); the closure candidates are *generated at load from declarative specs* (capture→field map + named transform primitives), i.e. the registry-entry shape itself.
+
+Median ns/line at 100k (5 runs; 10k consistent):
+
+| candidate | pure-access (mt3) | pure-scriptlog (mt1) | dense (mt1+probes) |
+|---|---|---|---|
+| inline (today's branch) | 3,382 | 4,145 | 5,422 |
+| closure-list | 3,483 (+3.0%) | 4,182 (+0.9%) | 5,560 (+2.5%) |
+| closure-hashref | 3,679 (+8.8%) | 4,319 (+4.2%) | 5,781 (+6.6%) |
+| capture-map interpreter | 6,068 (+79%) | 6,200 (+50%) | 7,751 (+43%) |
+
+- **Closure-list: +40–140 ns/line over inline** — matches F6's prediction (coderef call ~86–100 ns + list-return copy). A 1–3% dispatch tax against the 4.7–6.6 µs/line full-cascade baseline.
+- **The tax is dwarfed by the removable class**: pure-access full-cascade 6,258 vs dispatch-only 3,451 ns/line ⇒ ~2,800 ns/line (~45%) is failed same-head sibling attempts — #369's mechanism, now quantified. MTF steady state removes it; the closure costs back ~2%.
+- **Record shape (A5 named risk): settled toward list-return.** Hashref costs a consistent +130–300 ns/line over list-return — real but far below A5's ~10 µs worst case, which assumed per-field hash updates rather than one-shot anonymous-hash construction. List-return into the existing scalars is the lead unless a later axis contradicts.
+- **Capture-map interpreter confirmed as the loser** (+2.0–2.7 µs/line): per-line declarative interpretation is off the hot path for good; declarative *definitions compiled to closures at load* is the shape (consistent with F6's codegen precedent and A3's transform inventory).
+
 ## In-drop design decisions to settle
 
 - Pattern priority when multiple registry entries could match the same line (umbrella Q2) — constrained by A2's partial-order finding; mechanism chosen in the prototype
