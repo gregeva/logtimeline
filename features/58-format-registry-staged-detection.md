@@ -303,6 +303,23 @@ Policies: `static` (today); `mtf-free` (unconstrained); `mtf-pinned` (winner pro
 - **Rejected variants** (10k iteration; kept in the mini-proto as negative results): *tail-window "O(1)" guards* — digit-ending non-access lines (stack-trace `…:123`) pass the last-char prechecks and pay full-line `rindex`/`tr` scans, regressing blend by ~+0.37 s/M; *fam2 winner-skip* — the extra per-entry branch costs what the skipped family check saves. The *family-shared prefilter* (`] "` memoized once per line across the four access entries) is the balanced alternative — best on GC/blend, but gives back 0.34 s/M of the access prize; not recommended while access logs are the driving workload, retained as a measured option.
 - **Remaining headroom:** access sits 1.86 s/M above the (correctness-invalid) free-MTF ceiling — three guard-closure calls plus their scan costs per line. Inlining guard tests into generated scan code (no closure call) is the identified next increment if the gate probe demands more; not pursued in the mini-proto.
 
+#### P5 — Registry entry structure & memory (charter items 1–2): build and footprint are negligible; array-of-arrays with constant indices wins the scan loop
+
+`prototype/58-entry-struct-mini.pl`: the same fully-loaded 13-entry registry (R1 shape — identity, compiled pattern + source, field map, transforms, time contract, unit, statistics flag, samples, message-metric declarations, compiled extraction/guard closures, pinned ancestors) materialized in four container shapes, built from one declarative spec. Scan measurement runs the P4-winning configuration with identical logic per shape (direct field access — an early harness draft measured accessor-closure indirection instead of the containers and was rewritten); parity gate per shape before timing; ramped 1k → 10k → 100k → 1m, ordering stable at every step.
+
+- **Build cost and memory are non-factors.** Full registry construction — 13 pattern compiles, guard/extractor closures, all metadata — costs **161–188 µs** (one-time startup) and **73–82 KB** total (`Devel::Size`, ~5.7–6.3 KB/entry, dominated by compiled patterns and sample strings). No shape is meaningfully cheaper to build; `aoa` is smallest.
+- **Scan-loop container access, 1m fixtures (median ns/line; deltas vs the winner):**
+
+  | shape | pure-access | pure-scriptlog | twx-blend |
+  |---|---|---|---|
+  | `aoa` array-of-arrayrefs, constant indices | **2,907** | 2,475 | 2,049 |
+  | `soa` parallel arrays + scan-order index | 2,994 (+0.09 s/M) | **2,474** | **2,027** |
+  | `aoh` array-of-hashrefs | 3,142 (+0.24 s/M) | 2,551 (+0.08) | 2,161 (+0.11) |
+  | `hoh` hash-of-hashrefs + order array | 3,146 (+0.24 s/M) | 2,574 (+0.10) | 2,293 (+0.24) |
+
+- **Recommendation: `aoa` — entries as arrayrefs with `use constant` field-name indices.** Hash-field lookups cost the aoh shape +0.08–0.24 s per million lines in the scan loop; hoh's extra name→entry lookup per scan step makes it strictly worst — rejected (its YAML-merge convenience belongs at *load* time: merge in a hash, then freeze into the aoa scan array). `soa` is statistically equivalent to aoa but splits one entry across parallel arrays, complicating reorder and readability for no measured gain — not recommended. Constant-named indices keep aoa as legible as a hashref while paying array-index cost.
+- Only the hot fields (pattern, guard, name, and the few post-match metadata reads) are touched per line — cold metadata (samples, sources, field maps) rides along in the same arrayref without per-line cost, so no hot/cold split is warranted.
+
 ## In-drop design decisions to settle
 
 - Pattern priority when multiple registry entries could match the same line (umbrella Q2) — constrained by A2's partial-order finding; mechanism chosen in the prototype
