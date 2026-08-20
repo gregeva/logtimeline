@@ -360,6 +360,19 @@ Policies: `static` (today); `mtf-free` (unconstrained); `mtf-pinned` (winner pro
 - **Cache efficacy is data-dependent, not format-dependent**: the driver is the unique-seconds-to-lines ratio. Dense bursts (scriptlog: 50 lines/s) hit the per-second cache constantly; sparse event streams (GC: ~0.7 unique seconds *per line*) miss 69%+ and pay `timegm` per miss.
 - **Finding worth its own attention: today's cache grows unbounded on sparse-timestamp files — 100.7 MB after one million GC lines.** The date-cache variant (midnight epoch per date + HMS arithmetic, exact under `timegm`'s pure-UTC math) bounds it at keys = days (6 KB) *and* is 2.5× faster on that population, at a cost of +120–170 ns/line on dense streams. Candidate resolutions for the drop or a follow-up: per-layout choice is wrong (it's the data, not the format); a last-second scalar memo in front of the date-cache would likely recover the dense-stream loss — unmeasured, noted as the tuning option. This memory behavior exists in production `ltl` today, independent of the registry work — filed as #383 (unbounded timestamp-cache growth on sparse-timestamp files), backlog.
 
+#### P9 — CSV matcher-kind (A7): CSV stays a per-file stage outside the scan array; the registry carries a non-scanned `csv` entry
+
+Design analysis plus a correctness demonstration (`prototype/58-csv-mini.pl`).
+
+**Why a matcher-kind inside the MTF array fails structurally.** CSV's lifecycle inverts the pinned-order model: while *unconfirmed* it must sit behind every regex entry (confirmation requires the full scan to have failed lines 1–2 — any log match disqualifies), but once *confirmed* it must short-circuit ahead of everything (today's `$csv_detected` branch at the top of the loop). Under P3's promotion rule the unconfirmed position makes all 12 regex entries CSV's ancestors, so promotion is a permanent no-op — the model cannot express "behind all, then in front of all." Additionally, CSV's matcher is per-file *state* (stashed header, column indices, separator, `$csv_detected`), while registry entries are global; a coderef matcher-kind would smuggle per-file state into a shared structure.
+
+**Decision shape (recommended for locking at consolidation):** CSV remains a stateful per-file stage outside the ordered scan, exactly as today (#107 mechanics unchanged):
+- unconfirmed: the stage consumes only the *no-match outcome* of the scan on lines 1–2;
+- confirmed: a per-file extractor override bypasses the scan entirely;
+- the registry still owns a **non-scanned `csv` entry** carrying the metadata surface (slug `csv` — harness-locked, time contract epoch/ISO with the #328 skip-and-warn, split-based extraction closure, statistics-eligible) — one resolution surface for everything downstream; only the matcher lives outside the array. `pipeline_parse()`'s per-file context owns the detection state.
+
+**Demonstration** — five scenarios, each run under static and pinned+sel-guards order, all outcomes (per-line kind sequence, detection flag, UDM column mapping) identical: real CSVs with matching UDM configs confirm at line 2 with correct column mapping (`connection-server-custom-metrics.csv` → col 7; 10k of `results_data_idonly-timestampMs.csv` → col 2); a log fixture with UDM configs never confirms; an adversarial log-line-first CSV stream is disqualified; a CSV with no UDM configs leaves the stage inert. This closes the composition question: CSV confirmation consumes only match/no-match outcomes, which P3 proved order-invariant, so the registry's reordering cannot disturb #107's mechanics.
+
 ## In-drop design decisions to settle
 
 - Pattern priority when multiple registry entries could match the same line (umbrella Q2) — constrained by A2's partial-order finding; mechanism chosen in the prototype
