@@ -45,9 +45,9 @@ An ordered array of compiled regexes, one per registry entry, tested front-to-ba
 
 All ~13 cascade branches become registry entries. **Audit constraint (2026-07-15):** the cascade's outputs (`match_type`-conditional extraction, `$is_access_log` behavior, CSV/UDM header detection state) are consumed deep into the read loop — entries must carry all of it. Parity is per-format testable: each migrated format produces identical fields to its old branch on its sample fixtures.
 
-### R4 — User-defined formats via YAML (D12)
+### R4 — User-defined formats via YAML (D12) — **re-scoped to a follow-up issue (D37, 2026-08-20)**
 
-Loaded at startup; validated with clear, actionable errors; able to extend or override built-ins. In-drop decision: YAML::PP vs YAML::Tiny, weighed against the PAR-packaged builds.
+The user-facing YAML surface (loader, config folder/file convention, CLI option, YAML::PP hard dependency) moves to its own issue, natively blocked by #58. This drop delivers R4's substrate: the registry schema, the sparse-override merge shape (D35), and the full D24 validation machinery, all in code and exercised by the built-ins at load.
 
 ### R5 — Format-carried units (D18 boundary)
 
@@ -395,9 +395,7 @@ Each distills the referenced P-finding into the design the implementation follow
 
 ## In-drop design decisions still open (not covered by the prototype phase)
 
-- Format definition inheritance — "like tomcat9 but microseconds" (umbrella Q3): pure schema design, settle during implementation planning of R4
-- Strict mode vs. current permissive behavior for unrecognized formats (umbrella Q5)
-- YAML module choice (R4): F7 recommends YAML::PP pending its startup-latency check — a one-off measurement at implementation start
+All resolved during implementation planning (2026-08-20): umbrella Q3 → D35; umbrella Q5 → D36; YAML module and R4 scope → D37. See the locked decisions below.
 
 ## Locked decisions (Dxx continues the umbrella sequence in `features/log-format-registry.md`)
 
@@ -419,6 +417,27 @@ Per A11: the optional in-message metric probes (today ` bytes=`/` durationMs=` h
 
 Parity boundary for this drop: probes migrate as data with byte-identical behavior, including the count probe's current global scope. Whether probes become format-/family-scoped configuration (which formats run which probes, whether count stays global) is a metric visibility/purpose question and is assigned to #60, recorded as guidance on that issue.
 
+### D35 — No inheritance mechanism; user-format adjustment is sparse-override (LOCKED 2026-08-20, resolves umbrella Q3)
+
+A user format entry naming an existing built-in is a **sparse override**: it starts from that built-in's spec, applies only the fields it states, then recompiles and revalidates through the full D24 gates (samples, lint, cross-shadowing). There is no separate `extends` mechanism: same-pattern variants cannot coexist in the scan array (cross-shadowing correctly rejects two patterns that match each other's samples, and MTF cannot order identical patterns meaningfully), so "like tomcat9 but microseconds" is inherently an override, and a *different* pattern is simply a new format. Formats carry **default** configuration only — runtime layers (`-du` override, index hints, future #17 detection) sit above per the R5 precedence chain.
+
+### D36 — No strict mode in this drop (LOCKED 2026-08-20, resolves umbrella Q5)
+
+Permissive unmatched-line behavior stays byte-identical. Unmatched-line visibility improves via the new `-V format-detection` scan telemetry; a strict/fail-on-unrecognized mode remains available as a small follow-on if ever wanted.
+
+### D37 — R4 re-scoped out of Drop 1; YAML::PP as a hard dependency when the user-format feature lands (LOCKED 2026-08-20)
+
+User-configurable YAML formats require a config folder/file mechanism that does not exist yet, and users do not need custom-format access immediately — Drop 1's purpose is getting the internal mechanisms working, active, and tested. Therefore:
+
+- **In this drop:** the registry schema, data model, and full D24 validation machinery land in code, exercised by the built-in formats at every startup. No YAML file, no YAML module, no new CLI surface, no new dependency.
+- **Follow-up issue (natively blocked by #58):** the YAML loader, the config folder/file convention, the CLI surface, and the YAML::PP dependency. When that feature lands, **YAML::PP is a hard dependency** (`use`, not a lazy `require`) — once the capability exists in the tool, the module must be present. Module choice per F7: YAML::PP (pure Perl, PAR-safe on all three platforms; YAML::Tiny's weaker validation and YAML::XS's packing risk both rejected). D35's sparse-override semantics and the already-implemented D24 gates transfer to that issue.
+- Umbrella D12's "users get custom formats via YAML" intent is unchanged but re-sequenced; the umbrella doc carries the true-up.
+- Coverage note per `tests/HARNESS-DESIGN.md` ("a gate only guards surfaces a scenario exercises"): with no external definition input in Drop 1, the D24 *failure* paths have no permanent scenario here — sabotage proofs are demonstrated at authoring time, and permanent malformed-definition scenarios are the follow-up issue's harness work.
+
+### D38 — Detection window ships as structure now; N-sizing is a follow-up prototyping activity (LOCKED 2026-08-20)
+
+The D30 two-phase-store structure lands in this drop with default window size 0 and a hidden `--detection-window=N` test flag; side-effect-ordering parity at N>0 (deferred extraction of held lines relative to read-side effects — a surface P7 did not exercise) is proven in this drop's parity testing at N=1000, so enabling the window later changes one constant against an already-proven surface. Sizing N appropriately is a **post-development prototyping activity** in its own follow-up GH issue (blocked by #58), enhancing the P7 battery; this closes the gap that the prototype phase measured the window *mechanism* (throughput/memory — free up to 10k lines) but never derived the value N should hold.
+
 ## `-V format-detection` section-contract (stub — to be locked in-drop)
 
 The existing `format-detection` section (`emit_format_detection_verbose()`) gains ordering/scan-depth telemetry sufficient to prove MTF behavior: per-format match counts, scan-depth distribution (or total failed-attempt count), final array order. Per `tests/HARNESS-DESIGN.md`: line shapes and counter semantics are locked here when implemented, and the consuming harness is updated in the same change. This document becomes the owning feature doc for that section-contract.
@@ -430,8 +449,9 @@ The existing `format-detection` section (`emit_format_detection_verbose()`) gain
 - [ ] **#369 probe**: `TIMING parse/read_files` on an access-log selection improves vs. the v0.16.0 baseline — cost class removed, not shaved. Targeted single-file probe, median-of-3; no XL suites during development.
 - [ ] Detection observability per the section-contract above.
 - [ ] Extraction parity per migrated format (sample-line fixtures).
-- [ ] At least one user-defined YAML format loads and parses a fixture; malformed definitions produce clear errors.
+- [ ] ~~At least one user-defined YAML format loads and parses a fixture; malformed definitions produce clear errors.~~ **Re-scoped to the user-format follow-up issue (D37).** In its place: registry load-time self-validation (D24) demonstrably fails on sabotaged definitions (broken sample, broken guard, undeclared shadow) with clear diagnostics.
 - [ ] Format-carried unit applied for a known format; `-du` wins; ambiguity warning fires on the Tomcat `%D` case.
+- [ ] Follow-up issues filed with native `blocked_by` #58: user-configurable YAML formats + config mechanism (D37); detection-window N sizing prototyping (D38).
 - [ ] Gate passes → merge to `release/0.17.0`; #369 fix comment + close; #17's declarative half delivered (sampling follow-on stays open).
 
 ## Related
