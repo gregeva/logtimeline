@@ -320,6 +320,21 @@ Policies: `static` (today); `mtf-free` (unconstrained); `mtf-pinned` (winner pro
 - **Recommendation: `aoa` — entries as arrayrefs with `use constant` field-name indices.** Hash-field lookups cost the aoh shape +0.08–0.24 s per million lines in the scan loop; hoh's extra name→entry lookup per scan step makes it strictly worst — rejected (its YAML-merge convenience belongs at *load* time: merge in a hash, then freeze into the aoa scan array). `soa` is statistically equivalent to aoa but splits one entry across parallel arrays, complicating reorder and readability for no measured gain — not recommended. Constant-named indices keep aoa as legible as a hashref while paying array-index cost.
 - Only the hot fields (pattern, guard, name, and the few post-match metadata reads) are touched per line — cold metadata (samples, sources, field maps) rides along in the same arrayref without per-line cost, so no hot/cold split is warranted.
 
+#### P6 — Message-metric probe placement (A11/D25, coverage item 8): fusion rejected empirically; index-guarded closure probes with an `=` outer gate win
+
+`prototype/58-probe-mini.pl`: single-pattern mt1 recognition (P2 isolation protocol), probes for bytes/durationMs/count, masking identical in every candidate. The fused candidate was implemented as fairly as possible — optional *lookahead* captures anchored at message start (order-independent, lazy `.*?` for first-occurrence parity) — and still loses. Parity: every candidate byte-identical to inline (post-mask message, all three metrics) on every line at every size, including the full 1m sparse pass. Ramped 1k → 10k → 100k → 1m (dense capped at its 100k maximum, which is its final size).
+
+| candidate | dense-100k (hit path, ns/line) | sparse-1m (miss path, ns/line = s/M) |
+|---|---|---|
+| inline (today) | **4,544** | 3,556 (3.56 s) |
+| fused into recognition regex | 4,940 (+396) | 4,644 (**+1.09 s/M**) |
+| index-guarded probes | 4,591 (+47) | 3,508 (−0.05 s/M) |
+| `=` gate + guarded probes | 4,638 (+94) | **3,299 (−0.26 s/M)** |
+
+- **D25 confirmed empirically: probes stay out of the recognition regex.** Fusion costs +1.09 s per million metric-less lines (the majority population in real streams) and +0.40 s/M even on the pure hit path — the A11 prediction, now measured, closing the loop the #306 lesson demanded (premise measured, not assumed).
+- **Recommendation: closure-compiled probes with per-probe `index()` guards behind one `index($message,'=')` outer gate.** The outer gate is a superset of every probe literal (all probes require `=`), bounds the miss path to a single scan (−0.26 s/M on sparse), and costs +94 ns/line on fully-dense streams — a workload no real mixed log sustains. All three layers (gate, per-probe guard literals, probe regex + mask template) are declarative registry entry data compiled at load — the D25 shape holds unchanged.
+- The count probe migrates with its current global scope (parity boundary, D25); scoping remains #60's question.
+
 ## In-drop design decisions to settle
 
 - Pattern priority when multiple registry entries could match the same line (umbrella Q2) — constrained by A2's partial-order finding; mechanism chosen in the prototype
