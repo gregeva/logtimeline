@@ -68,7 +68,8 @@ issue_status_labels() {
 
 cmd_set() {
     [ $# -eq 2 ] || usage
-    local issue="$1" label state current remove_args=() existing
+    local issue="$1" label state current existing
+    local -a remove_args=()
 
     label="$(resolve_status_label "$2")"
 
@@ -92,7 +93,7 @@ cmd_set() {
         remove_args+=(--remove-label "$existing")
     done <<< "$current"
 
-    gh issue edit "$issue" --add-label "$label" "${remove_args[@]}" >/dev/null
+    gh issue edit "$issue" --add-label "$label" ${remove_args[@]+"${remove_args[@]}"} >/dev/null
     echo "[ok] #$issue -> '$label'${current:+ (was: $(printf '%s' "$current" | paste -sd, -))}"
 }
 
@@ -120,7 +121,8 @@ cmd_list() {
 
 cmd_sweep() {
     [ $# -eq 0 ] || usage
-    local stripped=0 missing=0 multiple=0 number labels label remove_args
+    local stripped=0 missing=0 multiple=0 number labels label
+    local -a remove_args
 
     # Closed issues must carry no status label — strip whatever is there.
     while IFS=$'\t' read -r number labels; do
@@ -130,7 +132,7 @@ cmd_sweep() {
             [ -n "$label" ] || continue
             remove_args+=(--remove-label "$label")
         done <<< "$(printf '%s' "$labels" | tr ',' '\n')"
-        gh issue edit "$number" "${remove_args[@]}" >/dev/null
+        gh issue edit "$number" ${remove_args[@]+"${remove_args[@]}"} >/dev/null
         echo "[fixed] #$number closed — stripped: $labels"
         stripped=$((stripped + 1))
     done < <(gh issue list --state closed --limit 500 --json number,labels \
