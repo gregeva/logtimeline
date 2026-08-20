@@ -344,6 +344,22 @@ Policies: `static` (today); `mtf-free` (unconstrained); `mtf-pinned` (winner pro
 - **Design choice therefore falls to structure, not speed: `two-phase-store`** — window loop classifies each held line once and stores `[line, entry]`, flush runs deferred extraction, then a *clean* steady loop with no window check (the P3 lean-loop lesson applied). `reclassify` (hold raw, classify twice) is acceptable if buffer simplicity is ever preferred; `naive-branch` (window test left in the hot loop) is measurable at small scale and structurally worse for zero benefit — avoided.
 - Consequence for D17: the minimal detection window can be sized generously (hundreds to a few thousand lines) without measurable cost; the binding constraints are memory (trivial) and time-to-first-output, not throughput.
 
+#### P8 — Timestamp-cache parity semantics (A6, F8-7): contract closures achieve exact parity; today's per-second cache grows unbounded on sparse-timestamp streams
+
+`prototype/58-timestamp-mini.pl`: today's two parse families (ISO `substr`+`timegm`; Apache `dd/Mon/yyyy` via the month map) and the shared `%timestamp_cache` re-expressed as the R1 **time contract** — `layout` declared per entry, compiled at load into a parse closure with identical cache semantics — plus F6's last-seen-date cache as a measured alternative. Isolation protocol as P2/P6 (untimed prep yields the exact post-chop `timestamp_str` stream today's code sees). **Parity is exact**: per-line `(timestamp, fractional_ms, epoch)` triples identical across all candidates on every line of every fixture at every size, cache key-sets identical for the contract candidate, `ts_precision`-flip semantics identical. Ramped 1k → 10k → 100k → 1m.
+
+1m results (median ns/line; cache after the full pass):
+
+| fixture (1m) | inline (today) | contract closure | date-cache | inline cache | date-cache cache |
+|---|---|---|---|---|---|
+| pure-access | 703 | **696** | 822 | 46,682 keys / 5.8 MB | 1 key / 333 B |
+| pure-scriptlog | 857 | **837** | 1,026 | 19,799 keys / 3.7 MB | 1 key / 332 B |
+| pure-gc | 2,481 | 2,340 | **985 (−1.50 s/M)** | **694,101 keys / 100.7 MB** | 54 keys / 6 KB |
+
+- **For the drop: the contract closure is the shape** — declarative layout compiled at load, byte-exact parity, and slightly *faster* than inline (−7 to −141 ns/line; the closure-call overhead disappears entirely once inlined into the per-format extraction closure). R1's time contract is validated end-to-end: offsets stay discarded (chops before the shared fractional strip), cache keys exclude offset and fraction, precision hint flips on `fractional_ms > 0`.
+- **Cache efficacy is data-dependent, not format-dependent**: the driver is the unique-seconds-to-lines ratio. Dense bursts (scriptlog: 50 lines/s) hit the per-second cache constantly; sparse event streams (GC: ~0.7 unique seconds *per line*) miss 69%+ and pay `timegm` per miss.
+- **Finding worth its own attention: today's cache grows unbounded on sparse-timestamp files — 100.7 MB after one million GC lines.** The date-cache variant (midnight epoch per date + HMS arithmetic, exact under `timegm`'s pure-UTC math) bounds it at keys = days (6 KB) *and* is 2.5× faster on that population, at a cost of +120–170 ns/line on dense streams. Candidate resolutions for the drop or a follow-up: per-layout choice is wrong (it's the data, not the format); a last-second scalar memo in front of the date-cache would likely recover the dense-stream loss — unmeasured, noted as the tuning option. This memory behavior exists in production `ltl` today, independent of the registry work.
+
 ## In-drop design decisions to settle
 
 - Pattern priority when multiple registry entries could match the same line (umbrella Q2) — constrained by A2's partial-order finding; mechanism chosen in the prototype
