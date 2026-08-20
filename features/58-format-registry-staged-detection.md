@@ -143,6 +143,63 @@ Micro-benchmark preserved at `prototype/58-research-microbench.pl`; all numbers 
 6. Specificity cross-test of all patterns against all sample fixtures as a correctness gate, not a perf item (F4).
 7. Compiled timestamp arithmetic + date-cache inside the generated closures (F6).
 
+### Application-code audit (2026-08-20) — mapping the research onto `ltl`
+
+Read-through of the cascade in `read_and_process_logs()` (the `elsif` chain binding `$match_type` 1–13), its downstream consumers, and the `-V format-detection` surface. Each item states what the code actually does, which research finding it modulates, and what the prototype must therefore cover. Function names + snippets are the durable references; line numbers drift.
+
+#### A1 — All 13 patterns are already `^`-anchored; the cost is shared-head overlap, not unanchored retry
+
+Elastic's headline 6× unanchored-failure penalty (F2) is *not* the mechanism here — every cascade branch anchors at `^`. The measured #369 cost comes from anchored patterns that share long common heads and diverge late: five access-log variants share `^([^ ]+ ){3}[\[]` (mt12/4/9/3 plus mt9's quoted tail), and six formats share a `^\d{4}-\d{2}-\d{2}` timestamp head (mt1 standard, mt1 generic, mt10, mt2, mt6, mt8). A failed attempt on a same-head sibling runs deep into the line before rejecting. Consequences for the prototype: (a) the F2 payoff to measure is atomic/possessive heads and head-sharing order, not first-position rejection; (b) the existing in-code constraint — the `([^ ]+ ){3}` access-log prefix "must remain backtracking-free" (comment above mt12) — is a locked property registry patterns must keep; (c) failure-cost must be measured per pattern-*pair* (right-format line vs each wrong same-head pattern), not just per pattern.
+
+#### A2 — The cascade encodes a deliberate, load-bearing specific-before-generic partial order; unconstrained MTF breaks it
+
+F4's overlap warning is confirmed in our own code, with comments as evidence:
+
+- mt10 (Connection Server standard) sits above the generic mt1/mt2 branches — "needed to move this before other more generic patterns".
+- mt4 (common access) is `$`-anchored after bytes specifically "so it wins over the broader with-duration pattern below" (mt3).
+- mt9 (JBoss) is `$`-anchored above mt3 because mt3's "all-optional tail would otherwise claim these lines with duration=undef and junk thread/session captures".
+- mt2 (RAC) is a broad bracketed-timestamp catch-all: it *also matches mt10's lines* (capturing the thread as the level), so mt10 above mt2 is correctness, not preference.
+- mt3 is the access-family catch-all with an all-optional tail; mt12/mt4/mt9 must stay above it.
+- Known codified misclassification: Apache HTTP 2.x `%D` (µs) binds to `tomcat_access_with_duration` — the slug-map comment block above `%match_type_to_slug` documents it and the harness codifies current behavior (the D18 ambiguity case).
+
+**A pure MTF array over these patterns is unsound**: one stray mt3-shaped line promotes the catch-all above mt4/mt9/mt12 and silently misclassifies every subsequent line of those formats. The registry needs an explicit priority structure — e.g. specificity tiers with MTF *within* tier, or a pinned partial order with MTF over unordered pairs — settled in the prototype. Tightening patterns to mutual exclusivity instead is *not* available in this drop: extraction parity (R3) freezes which lines match which branch, including on malformed input. This refines D20, it does not overturn it: the workload argument stands; the reorder rule gains constraints.
+
+#### A3 — Cascade branches are capture + normalization + derived values, not pure recognition
+
+Every branch mutates its captures before downstream code sees them: metric masking for grouping (`s/ ((bytes|durationM[sS])\s*=\s*)(\d+)/ $1?/g` in mt1, `? millseconds` in mt10), HTTP status bucketing (`s/(\d)\d{2}/$1xx/`), timezone chops, `tr/T/ /` and `tr/,/./` timestamp normalization, CLI-gated trims (`$include_query_string`, `$include_session`), ephemeral-port masking (mt10), GC heap delta `convert_bytes($heap_from) - convert_bytes($heap_to)` clamped at 0 (mt6), and Edge-SDK PID-strip + `\w+\.cpp:\d+` object hoist (mt11). A registry entry must therefore carry a *transform stage*, not just a capture map — this materially favors the compiled-closure candidates (F6 lead) over a generic capture-map loop, which would need a declarative mini-language to express these. Prototype fixture obligation: per-format sample lines that exercise every mutation (masked metrics, query strings, sessions, GC heap forms, cpp-tagged Edge lines), asserting byte-identical `$message`/field output.
+
+#### A4 — `$is_access_log` is only partly format-static; the registry flag must be split
+
+The access-log family, GC (mt6, "need this to have statistics calculated"), and CSV set it statically — but mt1 sets it *per line* only when ` bytes=`/` durationMs=` appear in the message, and the format-independent count-metric and UDM extraction blocks set it on any format (`$is_access_log = 1 if %udm_values`). It gates three statistics-capture paths (`if ($is_access_log)` in consolidation stats-source build, per-message stats, per-bucket stats). A naive static registry property would switch ThingWorx logs to always-on statistics — a behavior change. The registry needs two concepts: a format-level *statistics-eligible* property and the per-line *metrics-observed* dynamic; parity fixtures for mt1 must include both metric-bearing and plain lines.
+
+#### A5 — The record representation is itself a hot-path axis: today's cascade binds ~19 pre-initialized scalars per line
+
+The loop initializes 12 string + 7 numeric scalars every line and the cascade binds them by list-assignment inside the `elsif` conditions. Against the #306 constant (~1.0–1.2 µs per hash-field update), returning a per-line record *hash* from an extraction closure could add ~10 µs/line — far exceeding any dispatch savings. The prototype matrix must measure record shape explicitly: closure returning a fixed-order list into the existing scalars vs hashref record vs writing package/closure variables. (This was implicit in charter item 2; the audit makes it a named risk.)
+
+#### A6 — Timestamp machinery already implements F6's fast path; the registry must preserve its exact semantics
+
+`%timestamp_cache` (epoch per unique post-strip timestamp string) is precisely the research-recommended cache; the two parse families (ISO `substr`+`timegm`, Apache `dd/Mon/yyyy` via `%month_map`) are selected by the mt-number groupings `match_type == 1 || 2 || 5 || ...` vs `3 || 4 || 9 || 12` — the classic "code knows what's declared nowhere" this drop replaces with the R1 time contract. Parity constraints: fractional-ms is stripped by a *shared* `s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/` after per-branch timezone chops, so the cache key excludes both offset and fraction; offsets are *discarded* today (mt1/access chop them, mt5 chops `+HH:MM`) and must remain discarded in this drop (the declarative tz semantics get consumers only in #155/#154); the index `ts_precision` hint flips on `$fractional_ms > 0`; CSV adds the epoch path plus the #328 unparseable-timestamp skip-and-warn. The mt13 ISO-shape guard (`$timestamp_str !~ /^\d{4}-...` → skip row) and the mt3-junk duration guard (`$duration !~ /^[0-9]+(?:\.[0-9]+)?$/` → undef) are behavior to keep byte-identical.
+
+#### A7 — CSV (mt13) is not a regex format and cannot live in the MTF array as-is
+
+CSV detection is stateful and lazy (#107): active only when `@udm_configs` is non-empty, line 1 stashed as potential header, confirmed only when line 2 *also fails every log pattern* and field-counts validate (`detect_and_parse_csv_header()`); extraction is `split`-based with column-index UDMs, and any log-format match on lines 1–2 disqualifies CSV. In-drop schema decision: either registry entries support a non-regex *matcher kind* (coderef matcher), or CSV remains a special pre/post-scan stage outside the array. Either way the ordering dependency — CSV confirmation requires the full scan to have *failed* — must survive MTF.
+
+#### A8 — Today there is no lock: detection is per-line, and the per-file binding is observability-only
+
+`%format_detection` binds `match_type`/slug at the *first* matching line per file, then only counts `matched_lines`/`unmatched_lines`; every line still runs the full cascade. So the registry's MTF changes runtime behavior of detection order but must not change the reported per-file semantics (`first_match_line`, matched/unmatched counts, slug set). The slug names are a locked harness contract (`tests/validate-format-detection.sh`; slug map states renames are breaking, and the Apache-µs note already anticipates a harness update when the registry lands). The `-V` section-contract stub below inherits these preserved keys plus the new scan-depth/order telemetry.
+
+#### A9 — Format-carried duration units, as they exist implicitly today (feeds R5)
+
+mt1 `durationMs`=ms; mt10 `N milliseconds`=ms; mt12 `[%Dms]`=ms explicit (its `[%Ts]` seconds capture is discarded); mt3 `%D` assumed ms (Tomcat 9) — the ambiguous case (Apache/Tomcat 10.1+ µs) that gets the D18 marker + warning; mt9 trailing integer=ms; mt6 GC pause decimal ms; CSV/`-du` via `convert_duration_to_ms()`. The registry entries transcribe exactly this table; the ambiguity warning has precisely one trigger today (mt3's slug).
+
+#### A10 — Adjacent per-line costs observed during the audit (explicitly *not* this drop's scope)
+
+Recorded so the prototype baselines don't mistake them for cascade cost, and as candidates for later issues: the log-level gate is a per-line linear `grep { $_ eq $category_bucket } @log_levels`; UDM patterns match via interpolation (`if (/$pattern/)`) paying the qr-interpolation penalty (F6, p5p #19405) per line per config; the count-metric regex runs on every matched message. All stay behavior-identical in this drop.
+
+#### Prototype coverage additions distilled from the audit
+
+Beyond the F8 ranked list: (1) constrained-MTF variants (tiered / pinned partial order) with a misclassification test built from each format's samples cross-run against the full array (A2); (2) pattern-pair failure-cost measurement on shared-head siblings (A1); (3) record-shape comparison list-return vs hashref (A5); (4) transform-stage expression — closure-compiled vs declarative — over the A3 mutation inventory; (5) fixtures asserting `%timestamp_cache` semantics and the A6 guard behaviors; (6) CSV matcher-kind decision (A7); (7) `-V format-detection` output preserved byte-compatible for existing keys while adding scan telemetry (A8).
+
 ### Prototype charter (`prototype/`, no production code)
 
 Compare the candidate implementations, measured at representative scale (staged 1k → 10k → 100k → millions of lines, per the NYTProf sample plan), against today's inline cascade as the baseline:
