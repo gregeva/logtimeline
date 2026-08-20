@@ -196,9 +196,19 @@ mt1 `durationMs`=ms; mt10 `N milliseconds`=ms; mt12 `[%Dms]`=ms explicit (its `[
 
 Recorded so the prototype baselines don't mistake them for cascade cost, and as candidates for later issues: the log-level gate is a per-line linear `grep { $_ eq $category_bucket } @log_levels`; UDM patterns match via interpolation (`if (/$pattern/)`) paying the qr-interpolation penalty (F6, p5p #19405) per line per config; the count-metric regex runs on every matched message. All stay behavior-identical in this drop.
 
+#### A11 — Message-metric probes (bytes/durationMs/count/UDM): the two-step extraction dimension
+
+The secondary in-message metric extraction is a two-step design: the format regex recognizes the line, then separate probes extract optional named metrics from the message. The original shield — "the generic second step only runs against ThingWorx lines" — holds today for ` bytes=`/` durationMs=` (inside the mt1 branch) but **not** for the count probe (`if( !$omit_count && defined $message )` sits outside the cascade and runs on every matched line of every format) or for the UDM probes (likewise format-independent). Part of the intended shield no longer exists.
+
+Fusing the probes into the single compiled format regex is *not* the expected win: optional position-variable metrics require optional scanning groups (`(?:.*? bytes\s*=\s*(\d+))?`), which re-introduce mid-pattern unbounded scans on every line including the metric-less majority (F2), go combinatorial when metrics can appear in any order, and couple recognition cost to extraction cost — every failed detection attempt by another format also pays the tail. Precedent: the #306 fused-moment lesson (the fused update measured 7–8× the pass it replaced; premises are measured, not assumed).
+
+Registry-native design instead: the entry carries a declared optional `message_metrics` list (name, pattern, unit, mask template), compiled at load into the per-format extraction closure — encoded into the compiled *closure*, not the compiled *regex*. This restores the shield declaratively (only formats declaring probes pay them — count included), turns mt1's implicit behavior into data, unifies vocabulary with the UDM configs (one resolution surface per vocabulary), and permits an `index($message, ' bytes')` literal pre-check before each probe regex — the same sub-determination idiom D23(a) locks for event pairs.
+
+Parity boundary: making the count probe format-scoped would change behavior, so this drop carries the probes as data with today's global count/UDM behavior intact; *which formats/families run which probes* is a visibility/purpose question and is handed to #60 (see D25). Boundary with #60 recorded as guidance on that issue.
+
 #### Prototype coverage additions distilled from the audit
 
-Beyond the F8 ranked list: (1) constrained-MTF variants (tiered / pinned partial order) with a misclassification test built from each format's samples cross-run against the full array (A2); (2) pattern-pair failure-cost measurement on shared-head siblings (A1); (3) record-shape comparison list-return vs hashref (A5); (4) transform-stage expression — closure-compiled vs declarative — over the A3 mutation inventory; (5) fixtures asserting `%timestamp_cache` semantics and the A6 guard behaviors; (6) CSV matcher-kind decision (A7); (7) `-V format-detection` output preserved byte-compatible for existing keys while adding scan telemetry (A8).
+Beyond the F8 ranked list: (1) constrained-MTF variants (tiered / pinned partial order) with a misclassification test built from each format's samples cross-run against the full array (A2); (2) pattern-pair failure-cost measurement on shared-head siblings (A1); (3) record-shape comparison list-return vs hashref (A5); (4) transform-stage expression — closure-compiled vs declarative — over the A3 mutation inventory; (5) fixtures asserting `%timestamp_cache` semantics and the A6 guard behaviors; (6) CSV matcher-kind decision (A7); (7) `-V format-detection` output preserved byte-compatible for existing keys while adding scan telemetry (A8); (8) message-metric probe placement — fused-into-format-regex vs closure-compiled probes vs index()-guarded closure probes, measured on metric-bearing *and* metric-less lines (A11).
 
 ### Prototype charter (`prototype/`, no production code)
 
@@ -218,11 +228,31 @@ Compare the candidate implementations, measured at representative scale (staged 
 
 ## In-drop design decisions to settle
 
-- Pattern priority when multiple registry entries could match the same line (umbrella Q2)
+- Pattern priority when multiple registry entries could match the same line (umbrella Q2) — constrained by A2's partial-order finding; mechanism chosen in the prototype
 - Format definition inheritance — "like tomcat9 but microseconds" (umbrella Q3)
 - Strict mode vs. current permissive behavior for unrecognized formats (umbrella Q5)
-- YAML module choice (R4)
-- Whether a no-match pre-filter is warranted (R2)
+- YAML module choice (R4; F7 leads with YAML::PP)
+- Whether a no-match pre-filter is warranted (R2; F3/A1 candidate: whitespace-first-char discriminator)
+
+## Locked decisions (Dxx continues the umbrella sequence in `features/log-format-registry.md`)
+
+### D24 — User-pattern anchoring and load-time validation (LOCKED 2026-08-20)
+
+User-supplied format patterns (R4 YAML) are **automatically `^`-anchored**: the loader wraps the pattern as `^(?:...)`, stripping a user-supplied leading `^` first so it never doubles. Anchoring is implicit and documented — format recognition *means* matching from line start, and forgetting the anchor is the documented grok failure mode (F2, ~6× failed-match penalty). **`$` is never auto-appended**: four built-ins are deliberately prefix-matching (generic mt1, RAC mt2, JSON mt5, mt3's open tail) and user formats with free-text trailing messages need the same; the line end belongs to the author.
+
+Because the anchor alone cannot protect performance (`^.*ERROR` re-imports the scan inside the anchor), validation is the stronger shield, all at load time with clear errors:
+
+1. **Mandatory sample lines as executable tests** (F5, lnav precedent): a user format without at least one sample, or whose pattern fails any of its own samples, fails to load.
+2. **Lint pass**: warn/error on `.*`/`.+` immediately following the anchor, on all-optional tails (the mt3 lesson, A2), and on nested quantifier constructs.
+3. **Cross-shadowing test** (A2): the user pattern is run against every built-in format's samples and every built-in pattern against the user format's samples; overlap fails loudly unless the user declares an explicit priority for the entry.
+
+Net effect: both silent failure modes the architect raised — broken recognition and invisible performance degradation — become load-time diagnostics.
+
+### D25 — Message-metric probes become registry-declared, closure-compiled data; probe *scoping* is #60's (LOCKED 2026-08-20)
+
+Per A11: the optional in-message metric probes (today ` bytes=`/` durationMs=` hardcoded in the mt1 branch; ` count=` and UDM patterns global across formats) are expressed in the registry as a declared optional `message_metrics` list per entry (name, pattern, unit, mask template), compiled at load into the per-format extraction closure with an `index()` literal pre-check before each probe regex (the D23(a) sub-determination idiom). They are **not** fused into the format-recognition regex (expected loss per A11's analysis; #306 precedent) — the prototype measures the three placements (coverage item 8) to confirm.
+
+Parity boundary for this drop: probes migrate as data with byte-identical behavior, including the count probe's current global scope. Whether probes become format-/family-scoped configuration (which formats run which probes, whether count stays global) is a metric visibility/purpose question and is assigned to #60, recorded as guidance on that issue.
 
 ## `-V format-detection` section-contract (stub — to be locked in-drop)
 
