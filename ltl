@@ -313,6 +313,43 @@ my %match_type_to_slug = (
 #   first_match_line   => integer (1-based file line number of first match)
 my %format_detection;
 
+# Format registry (Issue #58 / #23 Phase 1).
+#
+# Each registry entry is an arrayref indexed by the FR_* constants below
+# (array-of-arrayrefs with constant field indices — the measured scan-loop
+# container, features/58-format-registry-staged-detection.md § D29). The
+# declarative source specs live in format_registry_specs(); they are
+# compiled into live entries by build_format_registry(), which also runs
+# the load-time validation gates (§ D24: sample self-tests, extraction
+# parity against declared expected records, guard soundness, cross-shadow
+# ordering-constraint derivation).
+#
+# @format_registry holds the scanned entries in static cascade order.
+# Entries with FR_SCANNED false (the csv entry, § D32) are excluded from
+# the scan array but kept in %format_registry_entry for metadata lookup.
+use constant {
+    FR_NAME            => 0,   # short internal entry name (mt1std, mt3, ...)
+    FR_SLUG            => 1,   # user-facing slug (harness-locked contract)
+    FR_MATCH_TYPE      => 2,   # legacy match_type integer for %format_detection
+    FR_SCANNED         => 3,   # 1 = member of the ordered scan array
+    FR_PATTERN         => 4,   # compiled qr// (recognition)
+    FR_PATTERN_SRC     => 5,   # pattern source string (never rebuilt from qr)
+    FR_FIELD_MAP       => 6,   # [ [capture_ordinal, field_name], ... ]
+    FR_TRANSFORMS      => 7,   # [ transform primitive names ] (post-capture)
+    FR_TIME            => 8,   # { layout, precision, tz } — declarative time contract
+    FR_DURATION_UNIT   => 9,   # declared unit of the duration field (undef = none)
+    FR_UNIT_AMBIGUOUS  => 10,  # 1 = unit varies across producers (D18 warning case)
+    FR_STATS           => 11,  # statistics-eligible: sets is_access_log statically
+    FR_GUARD           => 12,  # cheap superset guard closure or undef (D28)
+    FR_EXTRACT         => 13,  # compiled extraction closure (fixed-order list return)
+    FR_MESSAGE_METRICS => 14,  # declared in-message metric probes (D33)
+    FR_EVENT_PAIRS     => 15,  # reserved slot — validated empty in this drop (D23)
+    FR_SAMPLES         => 16,  # sample lines (load-time executable self-tests)
+    FR_ANCESTORS       => 17,  # derived pinned-ancestor names (D26 constraints)
+};
+my @format_registry;           # scanned entries, static cascade order (frozen at build)
+my %format_registry_entry;     # name => entry (includes non-scanned entries)
+
 # Rate unit override (Issue #122)
 my $rate_unit = 'm';                                     # Default: per-minute (preserves existing behavior)
 my %rate_multiplier = ( 's' => 1, 'm' => 60, 'h' => 3600, 'd' => 86400 );
@@ -2029,6 +2066,557 @@ sub emit_index_readback_verbose {
     }
 
     push @verbose_output, "=== END index-read-back ===";
+}
+
+## FORMAT REGISTRY (Issue #58 / #23 Phase 1) ##
+#
+# The declarative format definitions and the machinery that compiles them
+# into live registry entries at startup. Design record:
+# features/58-format-registry-staged-detection.md (D24-D34 and the
+# section-contract for -V format-detection). The scan array replaces the
+# match-type elsif cascade in read_and_process_logs(); until that swap,
+# the registry is built and validated on every run but has no hot-loop
+# consumer.
+#
+# Extraction closures return a fixed-order list (@format_record_fields).
+# Per-field defaults are NOT uniformly the loop initializers: under the
+# static cascade, a failed elsif condition's list assignment clobbers its
+# named targets to undef before a later branch wins, so the value
+# downstream sees for a field the winner does not capture depends on the
+# winner's static position. build_format_registry() reproduces this
+# exactly by computing each entry's clobbered-field set from the field
+# maps of the entries ahead of it in static order; extraction parity is
+# then byte-identical regardless of dynamic scan order.
+
+# Canonical extraction record, in return-list order. status_code and
+# is_access_log are numeric (0 default); bytes/duration default undef;
+# the string fields default '' unless clobbered (see above).
+my @format_record_fields = qw(timestamp_str category_bucket object instance
+                              user session platform thread message
+                              bytes duration status_code is_access_log);
+
+# Transform primitives: named post-capture mutation snippets spliced into
+# generated extraction closures. One resolution surface for this
+# vocabulary — new formats reference these names; a new mutation gets a
+# new named primitive here, never inline code at a call site. Snippets
+# operate on the closure lexicals declared by the codegen.
+my %format_transform_code = (
+    mask_ephemeral_port => q{ $message =~ s/(from \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:)\d{4,5} /${1}XXXXX /; },
+    t_to_space          => q{ $timestamp_str =~ tr/T/ /; },
+    comma_to_dot        => q{ $timestamp_str =~ tr/,/./; },
+    chop_tz_offset      => q{ $timestamp_str =~ s/ \+\d{4}$//; },
+    chop_tz_colon_offset=> q{ $timestamp_str =~ s/\+\d{2}:\d{2}$//; },
+    status_bucket       => q{ $status_code = $category_bucket; $category_bucket =~ s/(\d)\d{2}/$1xx/; },
+    undef_bytes_dash    => q{ undef $bytes if $bytes eq "-"; },
+    chop_http_proto     => q{ $message =~ s/ HTTP\/\d\.\d$//; },
+    strip_query_string  => q{ $message =~ s/\?.+$//; },                # emitted only when query strings are excluded (CLI-gated at compile)
+    prepend_session     => q{ $message = "[$session] $message" if defined $session; },  # emitted only when sessions are included (CLI-gated at compile)
+    strip_trailing_ws   => q{ $message =~ s/\s+$//g; },
+    gc_heap_delta       => q{ $bytes = convert_bytes( $heap_from ) - convert_bytes( $heap_to ); $bytes = $bytes < 0 ? 0 : $bytes; },
+    chop_message        => q{ chop $message; },
+    strip_pid           => q{ $message =~ s/\d+ (.*)$/$1/; },
+    hoist_cpp_object    => q{ if( $message =~ /\w+\.cpp:\d+ / ) { $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/; $object = $1; } },
+);
+
+# Declarative format definitions, in the static cascade order the elsif
+# chain implements today. Every entry documents one format completely:
+# recognition pattern (source string; compiled once at build), capture->
+# field map, transform list, in-message metric probes (D33: compiled into
+# the closure behind an index() superset gate, never fused into the
+# recognition regex), the three-part time contract (D23/D31), duration
+# unit (D18; unit_ambiguous marks the Tomcat9-vs-Apache %D case),
+# statistics eligibility (static is_access_log; formats whose probes set
+# it per line leave this 0 and set marks_metrics_observed on the probe
+# block), cheap superset guards (D28: only the expensive-to-reject access
+# siblings carry one), reserved event_pairs (D23: validated empty in this
+# drop), and sample lines with their expected extraction records under
+# default CLI configuration (executable load-time self-tests, D24).
+#
+# The ([^ ]+ ){3} host/ident/authuser prefix shared by the access-log
+# family must remain backtracking-free: these patterns are attempted (and
+# most fail) on every access-log line, and a lazy prefix makes each
+# failed attempt ~10x more expensive.
+#
+# expect_ancestors declares the pinned-ancestor set (D26) the cross-shadow
+# derivation must reproduce from the samples; a mismatch in either
+# direction fails the build loudly.
+sub format_registry_specs {
+    return (
+    { name => 'mt1std', slug => 'thingworx_standard', match_type => 1, scanned => 1,
+      pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ((?:\](?! )|[^\]])*)] (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'instance'],[5,'user'],[6,'session'],[7,'platform'],[8,'thread'],[9,'message'] ],
+      transforms => [],
+      message_metrics => {
+          gate_lit => '=',
+          probes => [ { name => 'bytes',    field => 'bytes',    guard_lit => ' bytes',     pattern => ' bytes\s*=\s*(\d+)',          unit => 'B'  },
+                      { name => 'duration', field => 'duration', guard_lit => ' durationM', pattern => ' durationM[sS]\s*=\s*(\d+)',  unit => 'ms' } ],
+          mask => { pattern => ' ((bytes|durationM[sS])\s*=\s*)(\d+)', replace => ' $1?' },
+          marks_metrics_observed => 1,
+      },
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        '2025-05-05 00:00:00.006+0000 [L: ERROR] [O: c.p.a.u.JobPurgeScheduler] [I: ] [U: SuperUser] [S: ] [P: ] [T: pool-1-thread-1] Job purge completed',
+        '2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7',
+      ],
+      expect => [
+        [ '2025-05-05 00:00:00.006', 'ERROR', 'c.p.a.u.JobPurgeScheduler', '', 'SuperUser', '', '', 'pool-1-thread-1', 'Job purge completed', undef, undef, '0', '0' ],
+        [ '2025-05-05 00:00:01.100', 'INFO', 'S.c.t.d.e.DSLScript', '', 'Administrator', 'F0000000-0000-0000-0000-00000000000F', 'platform-1', 'TWEventProcessor-4', 'Executed service durationMs=? result bytes=? count=7', '1024', '42', '0', '1' ],
+      ] },
+    { name => 'mt10', slug => 'connection_server_standard', match_type => 10, scanned => 1,
+      pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'object'],[5,'message'] ],
+      transforms => [ 'mask_ephemeral_port' ],
+      message_metrics => {
+          gate_lit => ' milliseconds',
+          probes => [ { name => 'duration', field => 'duration', guard_lit => undef, pattern => ' (\d+) milliseconds', unit => 'ms' } ],
+          mask => { pattern => ' (\d+) milliseconds', replace => ' ? millseconds' },
+          marks_metrics_observed => 1,
+      },
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'local' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        '2025-08-14 21:00:34.633 [vert.x-eventloop-thread-12] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size',
+        '2025-08-14 21:00:35.100 [vert.x-eventloop-thread-3] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Request from 10.1.2.3:52344 completed processing in 152 milliseconds',
+      ],
+      expect => [
+        [ '2025-08-14 21:00:34.633', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-12', 'Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size', undef, undef, '0', '0' ],
+        [ '2025-08-14 21:00:35.100', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in ? millseconds', undef, '152', '0', '1' ],
+      ] },
+    { name => 'mt1gen', slug => 'thingworx_standard', match_type => 1, scanned => 1,
+      pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
+      transforms => [],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [ 'mt1std' ],
+      samples => [
+        '2025-02-04 12:05:57.481+0000 [L: DEBUG] trailing content that does not carry the full bracket sections',
+        '2025-02-04 12:05:58.002+0000 [L: WARN] partial line with only level bracket',
+      ],
+      expect => [
+        [ '2025-02-04 12:05:57.481', 'DEBUG', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+        [ '2025-02-04 12:05:58.002', 'WARN', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+      ] },
+    { name => 'mt2', slug => 'thingworx_rac_client', match_type => 2, scanned => 1,
+      pattern_src => '^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3}).*? \[[L: ]*([^\]]*)\]',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
+      transforms => [ 't_to_space' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'local' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [ 'mt1std', 'mt10', 'mt1gen' ],
+      samples => [
+        '[2025-02-04T12:06:22.784] [TRACE] tunnel keepalive sent',
+        '2025-03-01 08:00:00.123 tunnel worker [INFO] session established',
+      ],
+      expect => [
+        [ '2025-02-04 12:06:22.784', 'TRACE', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+        [ '2025-03-01 08:00:00.123', 'INFO', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+      ] },
+    { name => 'mt12', slug => 'tomcat_codebeamer', match_type => 12, scanned => 1,
+      pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.]+)ms\] \[(.+)s\]',
+      field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[6,'duration'] ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
+      time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 1,
+      guard => { lit => 'ms] [' },
+      expect_ancestors => [],
+      samples => [
+        '192.168.223.1 - - [29/Oct/2025:08:52:11 +0000] "GET /urlversioned/202510290803/images/newskin/login_page/icon_qa.png HTTP/1.1" 200 20097 [5ms] [0.005s]',
+        '192.168.223.1 - - [29/Oct/2025:08:52:12 +0000] "GET /cb/item?id=42&filter=open HTTP/1.1" 200 512 [12ms] [0.012s]',
+      ],
+      expect => [
+        [ '29/Oct/2025:08:52:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /urlversioned/202510290803/images/newskin/login_page/icon_qa.png', '20097', '5', '200', '1' ],
+        [ '29/Oct/2025:08:52:12', '2xx', undef, undef, undef, undef, undef, undef, 'GET /cb/item', '512', '12', '200', '1' ],
+      ] },
+    { name => 'mt4', slug => 'tomcat_access_common', match_type => 4, scanned => 1,
+      pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$',
+      field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'] ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
+      time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 1,
+      guard => { tail_one_token => 1 },
+      expect_ancestors => [],
+      samples => [
+        '43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626',
+        '10.0.0.1 - - [02/Feb/2025:00:01:00 +0000] "GET /health HTTP/1.1" 204 -',
+      ],
+      expect => [
+        [ '02/Feb/2025:00:00:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Thingworx/Metrics', '17626', undef, '200', '1' ],
+        [ '02/Feb/2025:00:01:00', '2xx', undef, undef, undef, undef, undef, undef, 'GET /health', undef, undef, '204', '1' ],
+      ] },
+    { name => 'mt9', slug => 'jboss_access', match_type => 9, scanned => 1,
+      pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$',
+      field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[8,'duration'] ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'chop_http_proto', 'strip_query_string' ],
+      time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 1,
+      guard => { lit => '" "' },
+      expect_ancestors => [],
+      samples => [
+        '127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651',
+        '127.0.0.1 - - [13/Mar/2025:09:02:42 +0000] "POST /async/prediction/jobs HTTP/1.1" 201 88 "https://ref.example/" "Mozilla/5.0" 12',
+      ],
+      expect => [
+        [ '13/Mar/2025:09:02:41', '2xx', undef, undef, undef, undef, undef, undef, 'GET /async/prediction/evaluation', '51', '651', '200', '1' ],
+        [ '13/Mar/2025:09:02:42', '2xx', undef, undef, undef, undef, undef, undef, 'POST /async/prediction/jobs', '88', '12', '201', '1' ],
+      ] },
+    { name => 'mt3', slug => 'tomcat_access_with_duration', match_type => 3, scanned => 1,
+      pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?',
+      field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[6,'duration'],[7,'thread'],[8,'session'] ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
+      time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line' },
+      duration_unit => 'ms', unit_ambiguous => 1, stats_eligible => 1,
+      expect_ancestors => [ 'mt12', 'mt4', 'mt9' ],
+      samples => [
+        '43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295',
+        '10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1',
+        '1.2.3.4 - - [05/May/2025:00:00:01 +0000] "GET /Thingworx/Things/T1 HTTP/1.1" 200 100 25 http-nio-8443-exec-3 AB12CD34EF',
+      ],
+      expect => [
+        [ '02/Feb/2025:00:00:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Thingworx/Metrics', '17626', '295', '200', '1' ],
+        [ '05/May/2025:00:00:00', '2xx', undef, undef, undef, undef, undef, undef, 'POST /Thingworx/WS', '261', '1', '200', '1' ],
+        [ '05/May/2025:00:00:01', '2xx', undef, undef, undef, 'AB12CD34EF', undef, 'http-nio-8443-exec-3', 'GET /Thingworx/Things/T1', '100', '25', '200', '1' ],
+      ] },
+    { name => 'mt5', slug => 'connection_server_json', match_type => 5, scanned => 1,
+      pattern_src => '^{"\@timestamp":"([^"]*).*"level":"([^"]*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
+      transforms => [ 'chop_tz_colon_offset', 't_to_space' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        '{"@timestamp":"2025-02-02T21:03:06.725+00:00","@version":1,"message":"Error encountered, closing WebSocket: endpointId=2608459","logger_name":"com.thingworx.connectionserver.alwayson.AbstractClientEndpoint","thread_name":"vert.x-eventloop-thread-16","level":"WARN","level_value":30000}',
+        '{"@timestamp":"2025-02-02T21:03:07.001+00:00","@version":1,"message":"Session registered","logger_name":"c.t.c.a.SessionTracker","thread_name":"vert.x-eventloop-thread-2","level":"INFO","level_value":20000}',
+      ],
+      expect => [
+        [ '2025-02-02 21:03:06.725', 'WARN', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+        [ '2025-02-02 21:03:07.001', 'INFO', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+      ] },
+    { name => 'mt6', slug => 'java_gc_log', match_type => 6, scanned => 1,
+      pattern_src => '^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}.*?\[info\]\[gc\s*\] GC\(\d+\) (.+?) (\(.+?\)) (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'message'],[4,'heap_from'],[5,'heap_to'],[6,'heap_size'],[7,'duration'] ],
+      transforms => [ 'gc_heap_delta' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 1,
+      expect_ancestors => [],
+      samples => [
+        '[2025-04-05T11:10:47.867+0000][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 2433M->66M(49152M) 18.406ms',
+        '[2025-04-05T12:00:03.101+0000][info][gc] GC(7) Pause Young (Concurrent Start) (Metadata GC Threshold) 512M->128M(49152M) 7.250ms',
+      ],
+      expect => [
+        [ '2025-04-05T11:10:47.867', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause)', '2367000000', '18.406', '0', '1' ],
+        [ '2025-04-05T12:00:03.101', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Concurrent Start) (Metadata GC Threshold)', '384000000', '7.250', '0', '1' ],
+      ] },
+    { name => 'mt7', slug => 'tw_analytics_v2', match_type => 7, scanned => 1,
+      pattern_src => '^([^ ]+)\s+\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[.,]\d{3})\] (.*)$',
+      field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],
+      transforms => [ 'comma_to_dot', 't_to_space', 'strip_trailing_ws' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'local' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        'ERROR [2025-02-19 18:31:00,284] com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!',
+        'INFO  [2025-02-20 04:49:11,450] org.ehcache.core.EhcacheManager: Cache \'scorefunc_cachex\' created in EhcacheManager.   ',
+      ],
+      expect => [
+        [ '2025-02-19 18:31:00.284', 'ERROR', undef, undef, undef, undef, undef, undef, 'com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!', undef, undef, '0', '0' ],
+        [ '2025-02-20 04:49:11.450', 'INFO', undef, undef, undef, undef, undef, undef, 'org.ehcache.core.EhcacheManager: Cache \'scorefunc_cachex\' created in EhcacheManager.', undef, undef, '0', '0' ],
+      ] },
+    { name => 'mt8', slug => 'tw_analytics_worker', match_type => 8, scanned => 1,
+      pattern_src => '^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^ ]*)\s+\[([^]]+)\]\s+(\w+)\s+(.*)$',
+      field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'message'] ],
+      transforms => [ 'comma_to_dot', 't_to_space', 'strip_trailing_ws' ],
+      time => { layout => 'iso_flex', precision => 's', tz => 'local' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [ 'mt1std', 'mt10', 'mt1gen' ],
+      samples => [
+        '2025-02-20 10:06:10 [nioEventLoopGroup-2-1] WARN  io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]',
+        '2025-02-20 10:06:11,123 [pool-2-thread-1] INFO  io.netty.util.ResourceLeakDetector - Leak detection level set to SIMPLE.  ',
+      ],
+      expect => [
+        [ '2025-02-20 10:06:10', 'WARN', undef, undef, undef, undef, undef, 'nioEventLoopGroup-2-1', 'io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]', undef, undef, '0', '0' ],
+        [ '2025-02-20 10:06:11.123', 'INFO', undef, undef, undef, undef, undef, 'pool-2-thread-1', 'io.netty.util.ResourceLeakDetector - Leak detection level set to SIMPLE.', undef, undef, '0', '0' ],
+      ] },
+    { name => 'mt11', slug => 'tw_edge_c_sdk', match_type => 11, scanned => 1,
+      pattern_src => '^([^ ]+) (\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}[,.]\d+) (.*)',
+      field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],
+      transforms => [ 'chop_message', 'strip_pid', 'hoist_cpp_object' ],
+      time => { layout => 'iso_flex_frac', precision => 'ms', tz => 'local' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        'INFO 2025-08-09 18:19:04,479 8012 change_notification_source.cpp:11 OnProvisioningChanged provisioning change update received',
+        'ERROR 2025-08-09 18:27:18,38 TW_SSL_READ: Error reading from SSL stream',
+        'FORCE 2025-08-09 18:27:18,40 8012 twx_connection.cpp:246 Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed]',
+      ],
+      expect => [
+        [ '2025-08-09 18:19:04,479', 'INFO', 'change_notification_source.cpp:11', undef, undef, undef, undef, undef, 'OnProvisioningChanged provisioning change update receive', undef, undef, '0', '0' ],
+        [ '2025-08-09 18:27:18,38', 'ERROR', undef, undef, undef, undef, undef, undef, 'TW_SSL_READ: Error reading from SSL strea', undef, undef, '0', '0' ],
+        [ '2025-08-09 18:27:18,40', 'FORCE', 'twx_connection.cpp:246', undef, undef, undef, undef, undef, 'Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed', undef, undef, '0', '0' ],
+      ] },
+    # CSV is a stateful per-file stage outside the ordered scan (D32): its
+    # matcher is the two-line confirmation in read_and_process_logs()
+    # (detect_and_parse_csv_header), not a regex, so this entry is never
+    # scanned. It exists so downstream metadata (slug, time contract,
+    # statistics eligibility) has one resolution surface.
+    { name => 'csv', slug => 'csv', match_type => 13, scanned => 0,
+      pattern_src => undef,
+      field_map => [], transforms => [],
+      time => { layout => 'csv', precision => 'ms', tz => 'utc' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 1,
+      expect_ancestors => [],
+      samples => [], expect => [] },
+    );
+}
+
+# Compile a declarative guard spec (D28) into a closure over the raw line.
+# Contract: a guard may false-positive (one wasted pattern attempt) but
+# must never false-negative — pattern match implies guard pass, verified
+# against every sample at build time.
+sub compile_format_guard {
+    my ($guard) = @_;
+    return undef unless $guard;
+    if (defined $guard->{lit}) {
+        my $lit = $guard->{lit};
+        return sub { index($_[0], $lit) >= 0 };
+    }
+    if ($guard->{tail_one_token}) {
+        return sub {
+            my $p = rindex($_[0], '" ');
+            return 0 if $p < 0;
+            return (substr($_[0], $p + 2) =~ tr/ //) == 1;
+        };
+    }
+    die "ltl: format registry: unknown guard spec for compile_format_guard\n";
+}
+
+# Generate one entry's extraction closure from its declarative definition
+# (D27: load-time codegen, fixed-order list return). $clobbered is the
+# set of record fields a statically-earlier entry's failed condition
+# assignment would have undefined (see the section header comment);
+# $opts carries the CLI-gated compile decisions (include_query_string,
+# include_session).
+sub compile_format_extractor {
+    my ($spec, $clobbered, $opts) = @_;
+    my $pattern = qr/$spec->{pattern_src}/;
+
+    my %is_record = map { $_ => 1 } @format_record_fields;
+    my %is_target = map { $_->[1] => 1 } @{ $spec->{field_map} };
+
+    # Declarations: record fields with their static-order-faithful defaults,
+    # plus any auxiliary capture targets (e.g. GC heap fields).
+    my @decls;
+    for my $f (@format_record_fields) {
+        my $default = ($f eq 'bytes' || $f eq 'duration') ? 'undef'
+                    : ($f eq 'status_code' || $f eq 'is_access_log') ? '0'
+                    : $clobbered->{$f} ? 'undef' : q{""};
+        push @decls, "my \$$f = $default;";
+    }
+    my @aux = grep { !$is_record{$_} } map { $_->[1] } @{ $spec->{field_map} };
+    push @decls, 'my (' . join(', ', map { "\$$_" } @aux) . ');' if @aux;
+
+    # Capture target list, with undef placeholders for discarded ordinals.
+    my $max_ord = 0;
+    $max_ord = $_->[0] > $max_ord ? $_->[0] : $max_ord for @{ $spec->{field_map} };
+    my %ord_to_field = map { $_->[0] => $_->[1] } @{ $spec->{field_map} };
+    my $targets = join(', ', map { defined $ord_to_field{$_} ? "\$$ord_to_field{$_}" : 'undef' } 1 .. $max_ord);
+
+    my @body;
+    push @body, "( $targets ) = \$_[0] =~ \$pattern or return;";
+    push @body, "\$is_access_log = 1;" if $spec->{stats_eligible};
+
+    # In-message metric probes (D33): index() superset gate, per-probe
+    # index() guards, probe regexes, then the conditional mask + the
+    # metrics-observed flag — the shape P6 measured and proved
+    # byte-identical to the inline cascade.
+    if (my $mm = $spec->{message_metrics}) {
+        my @probe_lines;
+        for my $p (@{ $mm->{probes} }) {
+            my $line = "( \$$p->{field} ) = \$message =~ /$p->{pattern}/";
+            $line .= " if index(\$message, '$p->{guard_lit}') >= 0" if defined $p->{guard_lit};
+            push @probe_lines, "    $line;";
+        }
+        my $any_defined = join(' || ', map { "defined \$$_->{field}" } @{ $mm->{probes} });
+        my @mask_block;
+        push @mask_block, "        \$is_access_log = 1;" if $mm->{marks_metrics_observed};
+        push @mask_block, "        \$message =~ s/$mm->{mask}{pattern}/$mm->{mask}{replace}/g;" if $mm->{mask};
+        push @body,
+            "if (index(\$message, '$mm->{gate_lit}') >= 0) {\n"
+          . join("\n", @probe_lines) . "\n"
+          . "    if ($any_defined) {\n"
+          . join("\n", @mask_block) . "\n"
+          . "    }\n"
+          . "}";
+    }
+
+    for my $t (@{ $spec->{transforms} }) {
+        if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }
+        if ($t eq 'prepend_session')    { next unless $opts->{include_session}; }
+        my $code = $format_transform_code{$t}
+            or die "ltl: format registry: entry '$spec->{name}' references unknown transform '$t'\n";
+        push @body, $code;
+    }
+
+    my $return_list = join(', ', map { "\$$_" } @format_record_fields);
+    my $src = "sub {\n" . join("\n", @decls) . "\n" . join("\n", @body) . "\nreturn ( $return_list );\n}";
+    my $closure = eval $src;
+    die "ltl: format registry: extraction codegen failed for entry '$spec->{name}': $@\nGENERATED SOURCE:\n$src\n"
+        if $@ || ref $closure ne 'CODE';
+    return $closure;
+}
+
+# Cross-shadow constraint derivation (D24/D26): every entry's samples are
+# run against every scanned pattern. A later entry whose pattern matches
+# an earlier entry's sample must stay behind that entry — the pair
+# becomes a pinned-ordering constraint, and the transitive closure of
+# those pairs is the entry's ancestor set the MTF promotion preserves.
+# Returns { name => [ ancestor names, static order ] }.
+sub derive_format_constraints {
+    my ($specs, $patterns) = @_;
+    my @scanned = grep { $_->{scanned} } @$specs;
+    my %idx = map { $scanned[$_]{name} => $_ } 0 .. $#scanned;
+    my %must_precede;   # $must_precede{later}{earlier} = 1
+
+    for my $owner (@scanned) {
+        for my $sample (@{ $owner->{samples} }) {
+            # The owning entry must be the first static match — otherwise the
+            # sample is mislabeled and every derivation from it is suspect.
+            my ($first) = grep { $sample =~ $patterns->{$_->{name}} } @scanned;
+            die "ltl: format registry: sample of entry '$owner->{name}' first matches '"
+                . ($first ? $first->{name} : 'nothing') . "' under static order — mislabeled sample or pattern drift:\n  $sample\n"
+                unless $first && $first->{name} eq $owner->{name};
+            for my $other (@scanned) {
+                next if $other->{name} eq $owner->{name};
+                next unless $idx{ $other->{name} } > $idx{ $owner->{name} };
+                $must_precede{ $other->{name} }{ $owner->{name} } = 1
+                    if $sample =~ $patterns->{ $other->{name} };
+            }
+        }
+    }
+
+    my %ancestors;
+    for my $s (@scanned) {
+        my %seen;
+        my @queue = keys %{ $must_precede{ $s->{name} } // {} };
+        while (@queue) {
+            my $p = shift @queue;
+            next if $seen{$p}++;
+            push @queue, keys %{ $must_precede{$p} // {} };
+        }
+        $ancestors{ $s->{name} } = [ sort { $idx{$a} <=> $idx{$b} } keys %seen ];
+    }
+    return \%ancestors;
+}
+
+# Build the live registry from the declarative specs and run the D24
+# validation gates. Dies with an actionable diagnostic on any violation —
+# a registry that fails its own samples must never reach the scan loop.
+# Live extraction closures bake the CLI-gated options; validation runs a
+# parallel default-configuration compile so the declared expected records
+# stay comparable regardless of flags.
+sub build_format_registry {
+    my @specs = format_registry_specs();
+
+    # Compile recognition patterns once; validate reserved slots.
+    my %patterns;
+    for my $spec (@specs) {
+        die "ltl: format registry: entry '$spec->{name}' declares event_pairs, which is reserved and not yet consumed (features/58-format-registry-staged-detection.md D23)\n"
+            if $spec->{event_pairs} && @{ $spec->{event_pairs} };
+        next unless $spec->{scanned};
+        $patterns{ $spec->{name} } = qr/$spec->{pattern_src}/;
+    }
+
+    # Per-entry clobbered-field sets from static order (see section header).
+    my %is_record = map { $_ => 1 } @format_record_fields;
+    my (%clobbered_by, %clobber_union);
+    for my $spec (grep { $_->{scanned} } @specs) {
+        $clobbered_by{ $spec->{name} } = { %clobber_union };
+        $clobber_union{ $_->[1] } = 1 for grep { $is_record{ $_->[1] } } @{ $spec->{field_map} };
+    }
+
+    # D24 gate 1: every sample matches its own pattern.
+    for my $spec (grep { $_->{scanned} } @specs) {
+        for my $i (0 .. $#{ $spec->{samples} }) {
+            die "ltl: format registry: entry '$spec->{name}' sample " . ($i + 1)
+              . " does not match its own pattern (produced_by format_registry_specs(); the sample set is the entry's executable self-test):\n  $spec->{samples}[$i]\n"
+                unless $spec->{samples}[$i] =~ $patterns{ $spec->{name} };
+        }
+    }
+
+    # D24 gate 2: extraction parity — default-config closure output must
+    # equal the declared expected record for every sample.
+    for my $spec (grep { $_->{scanned} } @specs) {
+        my $extract = compile_format_extractor($spec, $clobbered_by{ $spec->{name} },
+            { include_query_string => 0, include_session => 0 });
+        for my $i (0 .. $#{ $spec->{samples} }) {
+            my @got = $extract->( $spec->{samples}[$i] );
+            my $want = $spec->{expect}[$i]
+                or die "ltl: format registry: entry '$spec->{name}' sample " . ($i + 1) . " has no expected record\n";
+            for my $f (0 .. $#format_record_fields) {
+                my ($g, $w) = ($got[$f], $want->[$f]);
+                next if (!defined $g && !defined $w) || (defined $g && defined $w && $g eq $w);
+                die "ltl: format registry: extraction parity failure for entry '$spec->{name}' sample " . ($i + 1)
+                  . " field '$format_record_fields[$f]': got " . (defined $g ? "'$g'" : 'undef')
+                  . ", expected " . (defined $w ? "'$w'" : 'undef')
+                  . " (produced_by compile_format_extractor(); contract: expected records in format_registry_specs() transcribe the retired cascade branch)\n";
+            }
+        }
+    }
+
+    # D24 gate 3: guard soundness — pattern match implies guard pass, over
+    # every sample of every entry.
+    my %guards = map { $_->{name} => compile_format_guard($_->{guard}) } grep { $_->{scanned} } @specs;
+    for my $guarded (grep { $_->{scanned} && $guards{ $_->{name} } } @specs) {
+        for my $spec (grep { $_->{scanned} } @specs) {
+            for my $sample (@{ $spec->{samples} }) {
+                next unless $sample =~ $patterns{ $guarded->{name} };
+                die "ltl: format registry: guard for entry '$guarded->{name}' rejects a line its pattern matches (sample of '$spec->{name}') — guards must never false-negative:\n  $sample\n"
+                    unless $guards{ $guarded->{name} }->($sample);
+            }
+        }
+    }
+
+    # D24 gate 4: cross-shadow ordering constraints match the declared
+    # expectations (D26 pinned-ancestor sets).
+    my $ancestors = derive_format_constraints(\@specs, \%patterns);
+    for my $spec (grep { $_->{scanned} } @specs) {
+        my $derived  = join(',', @{ $ancestors->{ $spec->{name} } });
+        my $declared = join(',', @{ $spec->{expect_ancestors} // [] });
+        die "ltl: format registry: derived pinned-ancestor set for entry '$spec->{name}' is [$derived] but the spec declares [$declared] — the sample cross-shadow test disagrees with the declared ordering constraints; reconcile before shipping (produced_by derive_format_constraints())\n"
+            if $derived ne $declared;
+    }
+
+    # Freeze the live registry (CLI-gated options baked into extractors).
+    my $opts = { include_query_string => $include_query_string, include_session => $include_session };
+    @format_registry = ();
+    %format_registry_entry = ();
+    for my $spec (@specs) {
+        my $entry = [];
+        $entry->[FR_NAME]            = $spec->{name};
+        $entry->[FR_SLUG]            = $spec->{slug};
+        $entry->[FR_MATCH_TYPE]      = $spec->{match_type};
+        $entry->[FR_SCANNED]         = $spec->{scanned};
+        $entry->[FR_PATTERN]         = $spec->{scanned} ? $patterns{ $spec->{name} } : undef;
+        $entry->[FR_PATTERN_SRC]     = $spec->{pattern_src};
+        $entry->[FR_FIELD_MAP]       = $spec->{field_map};
+        $entry->[FR_TRANSFORMS]      = $spec->{transforms};
+        $entry->[FR_TIME]            = $spec->{time};
+        $entry->[FR_DURATION_UNIT]   = $spec->{duration_unit};
+        $entry->[FR_UNIT_AMBIGUOUS]  = $spec->{unit_ambiguous};
+        $entry->[FR_STATS]           = $spec->{stats_eligible};
+        $entry->[FR_GUARD]           = $guards{ $spec->{name} };
+        $entry->[FR_EXTRACT]         = $spec->{scanned}
+            ? compile_format_extractor($spec, $clobbered_by{ $spec->{name} }, $opts) : undef;
+        $entry->[FR_MESSAGE_METRICS] = $spec->{message_metrics};
+        $entry->[FR_EVENT_PAIRS]     = $spec->{event_pairs};
+        $entry->[FR_SAMPLES]         = $spec->{samples};
+        $entry->[FR_ANCESTORS]       = $ancestors->{ $spec->{name} } // [];
+        push @format_registry, $entry if $spec->{scanned};
+        $format_registry_entry{ $spec->{name} } = $entry;
+    }
 }
 
 # Section name and field names are locked by
@@ -13548,12 +14136,19 @@ sub print_threadpool_summary {
 
 # Stage: detect -- pre-read detection inputs.
 # Receives: settled command-line state; ltl-index.csv on disk (if present).
-# Emits: prior-run per-file metadata hints (timestamp range, ts_precision,
+# Emits: the compiled, validated format registry (@format_registry — the
+# scan array plus per-format metadata and extraction closures, #58);
+# prior-run per-file metadata hints (timestamp range, ts_precision,
 # bounds) pre-seeded for the parse pass (#179).
 # Per-line format identification itself currently lives inside
 # read_and_process_logs() as the match-type cascade; the format registry (#58)
 # replaces that mechanism at this role boundary.
 sub pipeline_detect {
+    # Issue #58: compile the declarative format definitions into the live
+    # registry and run its load-time validation gates. Must run after
+    # option parsing — extraction closures bake CLI-gated behavior.
+    build_format_registry();
+
     # Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
     read_index_file();
 
