@@ -232,7 +232,21 @@ Prototype infrastructure: `prototype/58-generate-fixtures.sh` deterministically 
 
 #### P1 — Full-cascade baseline: the removable cost class, quantified per fixture
 
-Median ns/line at 10k (5 runs, ranges tight; 1k consistent): pure-access 6,258; interleave-100 5,633; concat-pair 5,541; pure-gc 5,006; pure-scriptlog 4,746; pure-scriptlog-dense 6,083; twx-blend 2,779. Confirmations of A1/A2 mechanics: access lines are the *most* expensive matched class (each mt3 line first fails 7 earlier patterns incl. 4 same-head access siblings); no-match continuation lines are the *cheapest* (all 13 anchors reject near position 0) — the F3 discriminator's value is therefore bounded low on this population. The dense-vs-sparse scriptlog gap (6,083 vs 4,746) prices the A11 message-metric probes + masking at ~1,300 ns/line on metric-bearing lines.
+Median at 1m fixture size, 5 runs, ranges ≤3% (1k/10k spot checks consistent in ordering); wall seconds are the absolute cost of one full recognition pass over the fixture:
+
+| fixture (1m lines) | ns/line | wall |
+|---|---|---|
+| pure-access | 6,448 | 6.45 s |
+| interleave-100 | 5,642 | 5.64 s |
+| concat-pair | 5,626 | 5.63 s |
+| pure-gc | 5,161 | 5.16 s |
+| pure-scriptlog | 4,892 | 4.89 s |
+| twx-blend | 3,535 | 3.54 s |
+| pure-scriptlog-dense (100k cap) | 6,042 | 0.60 s/100k |
+
+Composition caveat for cross-size comparisons: the blend and sparse-scriptlog families change mix with slice size (blend is 74.6% continuation lines at 1k but only 17% at 1m; sparse metric-bearing lines are 0% at 1k, ~13% at 1m), so per-size numbers for those families are workload-shift measurements, not noise.
+
+Confirmations of A1/A2 mechanics: access lines are the *most* expensive matched class (each mt3 line first fails 7 earlier patterns incl. 4 same-head access siblings); no-match continuation lines are the *cheapest* (all 13 anchors reject near position 0) — the F3 discriminator's value is therefore bounded low on this population. The dense-vs-sparse scriptlog gap at equal 100k scale (6,042 vs 4,799) prices the A11 message-metric probes + masking at ~1,240 ns/line on metric-bearing lines — ~1.2 s per million such lines.
 
 Fixture characterization recorded during scaffolding: GC fixtures match mt6 on only ~42% of lines — `Pause Remark`/`Pause Cleanup` carry no cause clause and fall through (#382 filed, backlog); metric-bearing lines (any of bytes/count/durationMs) in the sparse scriptlog family are 0% at 1k, ~0.5% at 100k, ~13% at 1m (they cluster late in the pool), while every dense-family line is metric-bearing — sparse measures the probes' miss path, dense their hit path.
 
@@ -240,18 +254,18 @@ Fixture characterization recorded during scaffolding: GC fixtures match mt6 on o
 
 `prototype/58-dispatch-mini.pl`: single-pattern match + extraction + identical common-mode post-steps (count probe, threadpool, guards), lines pre-loaded, I/O and scan order excluded — the steady-state MTF position-0 workload. All candidates byte-identical to the inline branch on every line of every fixture tested (parity gate built in, `--verify-only`); the closure candidates are *generated at load from declarative specs* (capture→field map + named transform primitives), i.e. the registry-entry shape itself.
 
-Median ns/line at 100k (5 runs; 10k consistent):
+Median ns/line at 1m fixture size (dense at its 100k cap), 5 runs; 10k/100k consistent. Absolute deltas are per million lines vs inline:
 
-| candidate | pure-access (mt3) | pure-scriptlog (mt1) | dense (mt1+probes) |
+| candidate | pure-access (mt3) | pure-scriptlog (mt1) | dense-100k (mt1+probes) |
 |---|---|---|---|
-| inline (today's branch) | 3,382 | 4,145 | 5,422 |
-| closure-list | 3,483 (+3.0%) | 4,182 (+0.9%) | 5,560 (+2.5%) |
-| closure-hashref | 3,679 (+8.8%) | 4,319 (+4.2%) | 5,781 (+6.6%) |
-| capture-map interpreter | 6,068 (+79%) | 6,200 (+50%) | 7,751 (+43%) |
+| inline (today's branch) | 3,527 | 4,316 | 5,522 |
+| closure-list | 3,646 (+3.4%, +0.12 s/M) | 4,488 (+4.0%, +0.17 s/M) | 5,737 (+3.9%) |
+| closure-hashref | 3,854 (+9.3%, +0.33 s/M) | 4,627 (+7.2%, +0.31 s/M) | 5,954 (+7.8%) |
+| capture-map interpreter | 6,217 (+76%, +2.69 s/M) | 6,511 (+51%, +2.20 s/M) | 7,871 (+43%) |
 
-- **Closure-list: +40–140 ns/line over inline** — matches F6's prediction (coderef call ~86–100 ns + list-return copy). A 1–3% dispatch tax against the 4.7–6.6 µs/line full-cascade baseline.
-- **The tax is dwarfed by the removable class**: pure-access full-cascade 6,258 vs dispatch-only 3,451 ns/line ⇒ ~2,800 ns/line (~45%) is failed same-head sibling attempts — #369's mechanism, now quantified. MTF steady state removes it; the closure costs back ~2%.
-- **Record shape (A5 named risk): settled toward list-return.** Hashref costs a consistent +130–300 ns/line over list-return — real but far below A5's ~10 µs worst case, which assumed per-field hash updates rather than one-shot anonymous-hash construction. List-return into the existing scalars is the lead unless a later axis contradicts.
+- **Closure-list: +119–215 ns/line over inline (+0.12–0.17 s per million lines)** — matches F6's prediction (coderef call ~86–100 ns + list-return copy). A ~2–4% dispatch tax against the 4.9–6.4 µs/line full-cascade baseline.
+- **The tax is dwarfed by the removable class**: pure-access full-cascade 6,448 vs dispatch-only inline 3,527 ns/line at 1m ⇒ ~2,920 ns/line (~45%, 2.92 s per million access lines) is failed same-head sibling attempts — #369's mechanism, now quantified. MTF steady state removes it; the closure costs back ~0.1–0.2 s/M.
+- **Record shape (A5 named risk): settled toward list-return.** Hashref costs a consistent +200–330 ns/line over list-return (~0.2–0.3 s per million lines) — real but far below A5's ~10 µs worst case, which assumed per-field hash updates rather than one-shot anonymous-hash construction. List-return into the existing scalars is the lead unless a later axis contradicts.
 - **Capture-map interpreter confirmed as the loser** (+2.0–2.7 µs/line): per-line declarative interpretation is off the hot path for good; declarative *definitions compiled to closures at load* is the shape (consistent with F6's codegen precedent and A3's transform inventory).
 
 #### P3 — Constrained-MTF ordering (A2/F8-3, coverage item 1): pinned-closure MTF is correct and free; the remaining access cost is same-head rejects, not ordering
@@ -269,7 +283,7 @@ Policies: `static` (today); `mtf-free` (unconstrained); `mtf-pinned` (winner pro
   | pure-gc | 4,297 ns/l = 4.30 s | 3,394 ns/l = 3.39 s | **−0.90 s (−21%)** | 3,398 ns/l (same) | 3,536 ns/l |
   | twx-blend | 1,807 ns/l = 1.81 s | 1,934 ns/l = 1.93 s | **+0.13 s (+7%)** | 1,890 ns/l | 2,092 ns/l |
 
-  At real-file scale (the 1.43M-line 05-05 access log): pinned saves ~0.3 s of a ~6.2 s classification cost; the invalid ceiling shows ~4.7 s available. On GC-style files the pinned win is already large (~0.9 s/M lines). **Blend regression is an implementation artifact, not an ordering cost**: with zero reorders and identical attempts/line (3.04), the mtf loop's per-attempt array-indexing/bookkeeping overhead (~40 ns/attempt vs static's direct entry iteration) shows through on low-attempt workloads — a production implementation must keep the steady-state scan loop as lean as the static one (hoisted front-entry fast path, index-free iteration), which P3's structure did not optimize. Change-point/interleave fixtures: mtf-pinned ≈ static or slightly better at 10k, reorders = 2 and 100 — reordering itself is essentially free at realistic change-point rates. `tier-mtf` is strictly worse everywhere (its tier-0 holds nine entries scanned before mt3's tier) — **rejected**.
+  On the 1m access fixture, pinned saves ~0.21 s of the 4.32 s classification pass while the invalid ceiling shows ~3.29 s available; on the 1m GC fixture the pinned win is already large (0.90 s). **Blend regression is an implementation artifact, not an ordering cost**: with zero reorders and identical attempts/line (3.04), the mtf loop's per-attempt array-indexing/bookkeeping overhead (~40 ns/attempt vs static's direct entry iteration) shows through on low-attempt workloads — a production implementation must keep the steady-state scan loop as lean as the static one (hoisted front-entry fast path, index-free iteration), which P3's structure did not optimize. Change-point/interleave fixtures: mtf-pinned ≈ static or slightly better at 10k, reorders = 2 and 100 — reordering itself is essentially free at realistic change-point rates. `tier-mtf` is strictly worse everywhere (its tier-0 holds nine entries scanned before mt3's tier) — **rejected**.
 - **The design finding:** on the #369 access workload, constrained ordering alone recovers only ~5% (4,108 vs 4,322 ns/line; ~0.3 s on the 1.43M-line file), because the pinned predecessors mt12/mt4/mt9 *must* be attempted before mt3 on every line, and those same-head siblings are precisely the expensive failures (A1) — the cheap first-char rejects that MTF skips cost almost nothing. The gap to the (correctness-invalid) mtf-free ceiling — 4,029 → 1,016, ~3,000 ns/line — is entirely same-head sibling rejects. **The #369 prize therefore requires making the pinned predecessors cheap to reject, not reordering them away**: per-entry cheap superset guards (F3 contract — e.g. mt12 only possible when the line contains `ms] [`; mt4 only when the line *ends* after the bytes field; mt9 only when a quoted user-agent tail is present) and/or A1 atomic/possessive same-head work. That is the next mini-proto axis (F8-5 + coverage item 2), measured against this P3 baseline.
 
 ## In-drop design decisions to settle
