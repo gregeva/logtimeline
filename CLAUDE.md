@@ -139,12 +139,12 @@ When a feature/bugfix branch lands via PR into the release branch, complete the 
 
 1. Commit all changes to feature branch
 2. Push feature branch: `git push origin {feature-branch}`
-3. Create PR into the active release branch: `gh pr create --base release/X.Y.Z --head {feature-branch}`
+3. Create PR into the active release branch: `gh pr create --base release/X.Y.Z --head {feature-branch}`, then immediately `./build/issue-status.sh set {number} "in review"`
 4. Merge the PR: `gh pr merge {PR#} --merge`
 5. Verify the release branch picked up the merge: `git log origin/release/X.Y.Z --oneline -3`
 6. Update `releases/v{version}.md` directly on the release branch: add ONE bullet per merged issue with `(#NNN)` reference. No prose, no metacommentary. Commit + push directly to the release branch (this is the canonical exception to "no direct commits" — release-notes maintenance is release-process work, not issue work).
 7. Add a completion comment to the GitHub issue: commit hash, branch name, PR #, merge commit, summary of what shipped.
-8. Close the issue: `gh issue close {number} --reason completed`. The issue is addressed when it makes it into a release branch — it does not need to wait for the release to ship.
+8. Close the issue: `gh issue close {number} --reason completed`. The issue is addressed when it makes it into a release branch — it does not need to wait for the release to ship. Closing removes the issue from status tracking: strip its status label in the same step with `gh issue edit {number} --remove-label "status: in review"` (`./build/issue-status.sh sweep` is the repair path if one is missed).
 
 ### Cutting the release
 
@@ -211,6 +211,21 @@ Hidden CLI options: `--disable-progress` (ALWAYS use from Claude Code), `--termi
 
 ## Development Workflow
 
+### Named Branch Sync (MANDATORY FIRST STEP)
+
+**When the architect names a branch, that branch is checked out and synced from origin before any other action** — before reading a file, before answering a question about its contents, before planning against it. Not "eventually", not "when we start editing": first.
+
+```bash
+git fetch origin --prune
+git checkout {branch} 2>/dev/null || git checkout -b {branch} origin/{branch}   # local branch may not exist yet
+git pull --ff-only origin {branch}
+git branch --show-current   # confirm; then confirm the tree is clean with git status
+```
+
+Never read, plan, or work from a stale local copy, and never from a different branch than the one named. A branch that exists only on origin is the common case after time away — `git checkout -b {branch} origin/{branch}` creates the tracking branch. If the working tree is dirty or the pull is not a fast-forward, stop and raise it rather than improvising a merge.
+
+Why: reasoning from the wrong branch produces conclusions that are confidently wrong. Every file read, every line number, every "the code currently does X" is silently false, and the error is invisible until it has propagated through a plan.
+
 ### Branch Naming (MANDATORY)
 
 Each issue gets its own branch named `{issue-number}-{semantic-slug-from-issue-title}`. The slug MUST be derived from the GitHub issue's title (kebab-cased, semantically tight) — **never** from the activity being performed on the branch.
@@ -231,7 +246,8 @@ If multiple branches are genuinely needed for one issue (rare), differentiate wi
 
 ### Branch Verification (MANDATORY FIRST STEP)
 ```bash
-git branch --show-current  # Must start with the issue number AND match the issue's semantic title
+git branch --show-current                          # Must start with the issue number AND match the issue's semantic title
+./build/issue-status.sh set {number} "in progress"  # Before the first line of code
 ```
 
 **CRITICAL:** Verify branch before making code changes. Do not write production code until implementation plan is approved.
@@ -240,6 +256,31 @@ git branch --show-current  # Must start with the issue number AND match the issu
 Update issues throughout development: when starting, during investigation, on design decisions, and when complete. Close with `gh issue close <number> --reason completed`.
 
 The **`not planned` label** marks an **open** issue retained as a decision/spec record (e.g. #370, temporal interpolation): the capability is specified for the record but not planned for implementation. Do not close such issues — "label as not planned" and "close as not planned" are different dispositions.
+
+### Issue Status (MANDATORY)
+
+Every **open** issue carries exactly one `status:` label recording where it sits in the development flow. Closed issues carry **none** — their terminal state is native (closed as completed, or closed as not planned).
+
+| Label | Meaning |
+|---|---|
+| `status: backlog` | Accepted and understood; no work underway. The state anything filed lands in. |
+| `status: in progress` | Branch cut, work underway. Set **before** the first line of code. |
+| `status: in review` | PR open against the release branch. |
+| `status: on hold` | Deliberately paused by the architect — nothing external is stopping it. |
+
+**Status is updated at the moment the state changes — never batched, never deferred to a tidy-up pass.** A status that is correct only in retrospect is worse than none: it reports work as idle while it is running, or as running after it has stopped. The transitions are already embedded in the steps that cause them (Branch Verification sets `in progress`; per-feature workflow step 3 sets `in review`; step 8 strips the label on close) — there is no separate moment at which status gets "brought up to date."
+
+`build/issue-status.sh` is the **only** sanctioned writer. Labels are a set, not an enum, so mutual exclusion is enforced by the script rather than by memory: `set` swaps the old label for the new in a single call, so an issue is never transiently statusless or double-statused.
+
+```bash
+./build/issue-status.sh set {number} "in progress"   # Set status (accepts bare name or full label)
+./build/issue-status.sh show {number}                # One issue's status
+./build/issue-status.sh list                         # All open issues with status
+./build/issue-status.sh sweep                        # Repair drift: strip status from closed issues,
+                                                     # report open issues with none or with several
+```
+
+Status is orthogonal to blocking. An issue can be `blocked_by` an open issue **and** be `in progress` at the same time — blocking is tracked exclusively through native dependencies (see *Issue Blocking Relationships* below) and is never expressed as a status. `not planned` is likewise orthogonal: it is a *reason*, not a state — #370 (temporal interpolation, spec'd as a decision record) is `status: backlog` and carries `not planned` to explain why it stays there.
 
 ### Issue Blocking Relationships (MANDATORY)
 
