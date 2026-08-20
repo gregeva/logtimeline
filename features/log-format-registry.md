@@ -2,6 +2,7 @@
 
 ## Status
 
+- **Drop 1 (#58) research + prototype phase complete (2026-08-20):** the mandatory pre-implementation cycle ran end to end on branch `58-format-registry-staged-detection` — research F1–F8, application audit A1–A11, prototype findings P1–P9, decisions D24–D34 locked. Full record in `features/58-format-registry-staged-detection.md`; umbrella summary in the Decision Log entry below. Q2 (pattern priority) resolved by D26; Q3 (inheritance) and Q5 (strict mode) deferred to #58 implementation planning. Backlog side-findings: #382 (GC pause-form gap), #383 (timestamp-cache growth). Next: #58 implementation planning against the locked decisions.
 - **Drop 0 shipped (2026-08-20):** #180 (named pipeline stages) merged into `release/0.17.0` via PR #380 and closed — five `pipeline_*()` entry points with documented role contracts; stage-coherent `stage/step` timing nomenclature (decision recorded in `features/180-named-pipeline-stages.md`). #379 (spaced input paths failed to open — csh `glob()` whitespace splitting) found while gating and fixed via PR #381. Next: Drop 1 (#58), opening with its mandatory research → prototype phase; hand-forward notes for #58/#60 on their issue threads (2026-08-20).
 - **Last reviewed:** 2026-08-20
 - **Scope re-cut (2026-07-15, later same session — D21):** Phase 2 moves out of 0.17.0 as well: its motivating consumer is Phase 4's inter-line derived metrics, so **Phases 2 and 4 ship together in a later release** (with #57 and #55). 0.17.0 = Drops 0/1/2: #180 → #58 → #60. Account-at-read-time locked as the universal time-attribution semantic; temporal interpolation not planned, spec'd for the record in #370 (D22).
@@ -361,10 +362,10 @@ The following functions already exist in `ltl` and provide a solid base:
 
 ### Format Registry
 1. ~~What file format should user-defined formats use?~~ **RESOLVED 2026-05-09 (D12): YAML.** Ecosystem standard for monitoring tools (Prometheus, Datadog). Adds YAML::PP or YAML::Tiny dependency. Best fit for nested structures (derived metrics, dependency graphs).
-2. How should format priority/ordering work when multiple patterns could match? *— Phase 1 (#58) design decision.*
-3. Should format definitions support inheritance (e.g., "like tomcat9 but with microseconds")? *— Phase 1 (#58) design decision.*
+2. ~~How should format priority/ordering work when multiple patterns could match?~~ **RESOLVED 2026-08-20 (D26): pinned-closure MTF — specific-before-general constraints derived at load from sample cross-testing; the winner promotes with its ancestor closure.** See `features/58-format-registry-staged-detection.md` § P3.
+3. Should format definitions support inheritance (e.g., "like tomcat9 but with microseconds")? *— Phase 1 (#58) design decision; deferred to implementation planning (2026-08-20).*
 4. ~~How to handle logs that switch formats mid-file?~~ **RESOLVED 2026-05-09 (D13): Detect once, fall back to per-line on low-confidence. Skipped/non-matching lines must be re-testable.** This requires the buffered-read architecture filed as #181 — the file reader pushes lines into a bounded buffer; the processor pulls and may push lines back for re-testing against alternate patterns.
-5. Should there be a "strict mode" that fails on unrecognized formats vs. current permissive behavior? *— Phase 1 (#58) design decision.*
+5. Should there be a "strict mode" that fails on unrecognized formats vs. current permissive behavior? *— Phase 1 (#58) design decision; deferred to implementation planning (2026-08-20).*
 
 ### Processing Model
 6. ~~How many trailing buckets should the sliding window retain?~~ **RESOLVED 2026-05-09 (D14): Auto-adjust at runtime; power-user CLI override.** "Sliding window" tracks transaction-spanning events (e.g., start in bucket 1, end 20 minutes later in bucket 5), not clock skew. Window auto-sizes based on observed transaction span; CLI flag exposes manual override for power users.
@@ -527,6 +528,26 @@ Each drop lands on its own branch off `release/0.17.0`, merges back via PR throu
 [Issue #23: Log Format Registry - Refactor core parsing architecture](https://github.com/gregeva/logtimeline/issues/23)
 
 ## Design Decisions Log
+
+### 2026-08-20: Drop 1 (#58) research + prototype phase complete — D24–D34
+
+The mandatory research → prototype → decide cycle for Drop 1 ran to completion: internet research (F1–F8), application-code audit (A1–A11), and nine measured prototype findings (P1–P9), all recorded in full in `features/58-format-registry-staged-detection.md` — the owning record for the detail; this entry is the umbrella-level summary. All measurements ramped 1k → 10k → 100k → 1m fixtures with medians and ranges; correctness criterion throughout was per-line classification/extraction parity with today's cascade.
+
+Decisions locked 2026-08-20 (full statements and evidence tables in the #58 feature doc):
+
+1. **D24 — User-pattern anchoring + load-time validation**: auto-`^`-anchor, mandatory executable samples, lint pass, cross-shadowing test.
+2. **D25 — Message-metric probes as registry-declared, closure-compiled data**; probe *scoping* is #60's.
+3. **D26 — Detection ordering refines D20 to pinned-closure MTF**: unconstrained MTF measurably misclassifies (one stray catch-all-shaped line flips whole streams); the winner promotes together with its ancestor closure, constraints *derived at load* from sample cross-testing. Tier-MTF rejected. The scan loop must stay as lean as today's.
+4. **D27 — Extraction dispatch: load-time codegen closures, fixed-order list-return** (+0.12–0.17 s/M-line tax); generic interpreter (+2.2–2.7 s/M) and hashref records rejected.
+5. **D28 — Cheap superset guards are per-entry, opt-in, measured data**: shipped on the three access-family siblings (−1.29 s/M access lines, −31%); blanket guards are a measured net loss; atomic heads subsumed.
+6. **D29 — Registry container: array-of-arrayrefs with constant indices**; build 161–188 µs, 73–82 KB — startup non-factors.
+7. **D30 — Detection window (D17): two-phase-store** — free at scale (≤ +54 ns/line), sized by detection needs not throughput.
+8. **D31 — Time contract compiled to per-layout parse closures** with exact parity; per-second `%timestamp_cache` semantics unchanged this drop (sparse-stream unbounded growth — 100.7 MB/1M GC lines — filed as #383).
+9. **D32 — CSV stays a per-file stage outside the scan array** with a non-scanned `csv` registry entry (the matcher-kind-in-array shape is structurally inexpressible under pinned promotion).
+10. **D33 — Probes: per-probe `index()` guards behind one `=` superset gate**, closure-compiled; fusion into the recognition regex rejected on measurement (+1.09 s/M miss path).
+11. **D34 — No no-match pre-filter in Drop 1** (resolves D20's open pre-filter point): the no-match population is the *cheapest* class, not the most expensive.
+
+Composed effect on the #369 workload (classification, 1m access fixture): 4.32 s/M static → 2.94 s/M under D26+D28 (−32%), the failed-attempt cost class removed structurally. Final proof remains the merge-gate `TIMING parse/read_files` probe. Side discoveries filed to backlog during the phase: #382 (GC Pause Remark/Cleanup unmatched), #383 (timestamp-cache growth).
 
 ### 2026-07-15: 0.17.0 scheduling session — true-up and target reframe
 
