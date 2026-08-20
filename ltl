@@ -49,7 +49,7 @@ my $impact_time_exponent = 7;		            # it was 5, and was weighting a few s
 my ( $time_bucket_size, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
-my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_read_files, $elapsed_initialize_empty_time_windows, $elapsed_calculate_statistics, $elapsed_normalize_data, $elapsed_group_similar_messages, $elapsed_heatmap_statistics, $elapsed_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
+my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 my @verbose_output;           # Accumulated verbose output lines (Issue #56)
 
@@ -11832,13 +11832,13 @@ sub print_verbose_output {
     print "lines_included\t$total_lines_included\n";
 
     # Timing rows (raw seconds)
-    printf "TIMING\tread_files\t%.3f\n", $elapsed_read_files;
-    printf "TIMING\tinitialize_buckets\t%.3f\n", $elapsed_initialize_empty_time_windows;
-    printf "TIMING\tgroup_similar\t%.3f\n", $elapsed_group_similar_messages;
-    printf "TIMING\tcalculate_statistics\t%.3f\n", $elapsed_calculate_statistics;
-    printf "TIMING\theatmap_statistics\t%.3f\n", $elapsed_heatmap_statistics;
-    printf "TIMING\thistogram_statistics\t%.3f\n", $elapsed_histogram_statistics;
-    printf "TIMING\tnormalize_data\t%.3f\n", $elapsed_normalize_data;
+    printf "TIMING\tparse/read_files\t%.3f\n", $elapsed_parse_read_files;
+    printf "TIMING\taccumulate/initialize_buckets\t%.3f\n", $elapsed_accumulate_initialize_buckets;
+    printf "TIMING\tfinalize/group_similar\t%.3f\n", $elapsed_finalize_group_similar;
+    printf "TIMING\tfinalize/calculate_statistics\t%.3f\n", $elapsed_finalize_calculate_statistics;
+    printf "TIMING\tfinalize/heatmap_statistics\t%.3f\n", $elapsed_finalize_heatmap_statistics;
+    printf "TIMING\tfinalize/histogram_statistics\t%.3f\n", $elapsed_finalize_histogram_statistics;
+    printf "TIMING\trender/normalize_data\t%.3f\n", $elapsed_render_normalize_data;
     printf "TIMING\ttotal\t%.3f\n", $elapsed_total;
 
     # Memory rows (raw bytes)
@@ -13012,13 +13012,13 @@ sub print_summary_table {
     push @summary_table, sprintf( $table_format, "HIGHLIGHTED", $total_lines_highlighted ) if $highlight_active;
     push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
     push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FILE PROCESSING TIME", format_time( $elapsed_read_files, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "INITIALIZE EMPTY BUCKETS", format_time( $elapsed_initialize_empty_time_windows, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "GROUP SIMILAR MESSAGES", format_time( $elapsed_group_similar_messages, 's', 'medium', " " ) ) unless $group_similar_sensitivity =~ /^none$/;
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "CALCULATE STATISTICS", format_time( $elapsed_calculate_statistics, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "HEATMAP STATISTICS", format_time( $elapsed_heatmap_statistics, 's', 'medium', " " ) ) if $heatmap_enabled;
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "HISTOGRAM STATISTICS", format_time( $elapsed_histogram_statistics, 's', 'medium', " " ) ) if $histogram_enabled;
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "SCALE DATA TO TERMINAL", format_time( $elapsed_normalize_data, 's', 'medium', " " ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "PARSE: FILE PROCESSING", format_time( $elapsed_parse_read_files, 's', 'medium', " " ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "ACCUMULATE: EMPTY BUCKETS", format_time( $elapsed_accumulate_initialize_buckets, 's', 'medium', " " ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: GROUP SIMILAR", format_time( $elapsed_finalize_group_similar, 's', 'medium', " " ) ) unless $group_similar_sensitivity =~ /^none$/;
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: CALCULATE STATISTICS", format_time( $elapsed_finalize_calculate_statistics, 's', 'medium', " " ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: HEATMAP STATISTICS", format_time( $elapsed_finalize_heatmap_statistics, 's', 'medium', " " ) ) if $heatmap_enabled;
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: HISTOGRAM STATISTICS", format_time( $elapsed_finalize_histogram_statistics, 's', 'medium', " " ) ) if $histogram_enabled;
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "RENDER: SCALE DATA TO TERMINAL", format_time( $elapsed_render_normalize_data, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $max_memory_usage, 'B' ) );
 
@@ -13533,6 +13533,391 @@ sub print_threadpool_summary {
     return;
 }
 
+# ── Pipeline stage entry points (Issue #180) ─────────────────────────────────
+# The five stages -- detect, parse, accumulate, finalize, render -- are ROLES
+# with contracts (call surfaces crossed repeatedly), not one-pass-each temporal
+# phases: the read pass inside pipeline_parse() crosses detect -> parse ->
+# accumulate per line, and finalize-role work (consolidation S1 inline matching
+# and mid-stream checkpoints, #96) fires during the read pass by design.
+# Every stage takes two standing inputs alongside its data, both settled during
+# option processing before any stage runs: the resolved statistics demand
+# (@STAT_CONSUMERS -> resolve_statistics_group_demand(), #305) and the
+# per-surface data-model capture modes (choose_data_model(), #266).
+# See docs/staged-processing-pipeline.md, "Named pipeline stages".
+
+# Stage: detect -- pre-read detection inputs.
+# Receives: settled command-line state; ltl-index.csv on disk (if present).
+# Emits: prior-run per-file metadata hints (timestamp range, ts_precision,
+# bounds) pre-seeded for the parse pass (#179).
+# Per-line format identification itself currently lives inside
+# read_and_process_logs() as the match-type cascade; the format registry (#58)
+# replaces that mechanism at this role boundary.
+sub pipeline_detect {
+    # Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
+    read_index_file();
+
+    memory_debug_decomposition("startup");
+}
+
+# Stage: parse -- the read pass.
+# Receives: input file list; resolved demand; capture modes; detect-stage hints.
+# Emits: populated accumulation stores (%log_occurrences, %log_messages,
+# streaming partition counters and highlight variants, threadpool/session/UDM
+# state, consolidation state) and read-phase timing.
+# The per-line loop crosses detect -> parse -> accumulate roles per iteration;
+# consolidation S1 inline matching and S2-S4 checkpoints (finalize-role, #96)
+# and per-line streaming partition accumulation (counter_update(), #187/#189)
+# fire mid-stream. That interleaving is contractual -- do not restructure it to
+# make the stages look cleanly sequential.
+sub pipeline_parse {
+    # READ AND PROCESS LOGS #
+    $start_time = [gettimeofday];
+    read_and_process_logs();
+    $end_time = [gettimeofday];
+    $elapsed_parse_read_files = tv_interval($start_time, $end_time);
+    measure_memory_structures();
+    memory_debug_decomposition("after_read");
+}
+
+# Stage: accumulate -- bucket-axis completion outside the read loop.
+# Receives: the time range observed by the parse stage.
+# Emits: empty time buckets for uncovered intervals so the bucket axis is
+# contiguous for finalize and render.
+sub pipeline_accumulate {
+    # INITIALIZE EMPTY TIME BUCKETS #
+    $start_time = [gettimeofday];
+    initialize_empty_time_windows();
+    $end_time = [gettimeofday];
+    $elapsed_accumulate_initialize_buckets = tv_interval($start_time, $end_time);
+    measure_memory_structures();
+    memory_debug_decomposition("after_bucket_init");
+}
+
+# Stage: finalize -- demand-gated derivation over the accumulated stores.
+# Receives: accumulation stores; resolved demand; capture modes.
+# Emits: consolidation final pass (gated on -g sensitivity) and its verbose
+# section; per-message and per-bucket statistics for whatever the consumer map
+# demands; unified bin-counter finalize snapshots (#287/#289); heatmap and
+# histogram bucket structures (each a #266 data-model dispatcher).
+# Phase 2 (#59, later release) adds per-bucket lifecycle hooks inside this role.
+sub pipeline_finalize {
+    # GROUP SIMILAR MESSAGES TOGETHER (Issue #96) #
+    unless( $group_similar_sensitivity eq "none" ) {
+
+
+        $start_time = [gettimeofday];
+        group_similar_messages();
+        $end_time = [gettimeofday];
+        $elapsed_finalize_group_similar = tv_interval($start_time, $end_time);
+
+        # message-grouping verbose diagnostics (Issue #96).
+        if (section_requested('message-grouping')) {
+            push @verbose_output, "";
+            push @verbose_output, "=== message-grouping ===";
+            push @verbose_output, sprintf("  Threshold: %d%%  Trigger: %d  Ceiling: %d  Final pass: %s",
+                $consolidation_threshold, $consolidation_trigger, $consolidation_occurrence_ceiling,
+                $consolidation_final_pass ? "on (threshold=${consolidation_final_threshold}%, ceiling=${consolidation_final_ceiling})" : "off");
+
+            my ($grand_keys, $grand_s1, $grand_s2, $grand_s3, $grand_s4, $grand_s5, $grand_s6, $grand_fc) = (0,0,0,0,0,0,0,0);
+            my $grand_checkpoints = 0;
+            my $grand_patterns = 0;
+
+            # Total patterns across all cat_gk groups (final count after both phases)
+            my $total_patterns_all = 0;
+            for my $cat_gk (keys %consolidation_patterns) {
+                $total_patterns_all += scalar @{$consolidation_patterns{$cat_gk}};
+            }
+
+            for my $cat_gk (sort keys %consolidation_cat_stats) {
+                my $s = $consolidation_cat_stats{$cat_gk};
+                my $keys_seen = $s->{keys_seen} // 0;
+                next unless $keys_seen > 0;
+
+                my ($category_part) = split(/\|/, $cat_gk, 2);
+
+                # --- Streaming phase ---
+                my $checkpoints = $s->{checkpoints} // 0;
+                my $patterns = $s->{patterns_final} // 0;
+                my $evicted = $s->{evicted} // 0;
+
+                # S2/S5: saved before final pass reset (or computed from current unmatched if no final pass)
+                my $ceiling_filtered;
+                my $genuinely_unmatched;
+                if ($consolidation_final_pass && exists $s->{streaming_s2}) {
+                    $ceiling_filtered = $s->{streaming_s2};
+                    $genuinely_unmatched = $s->{streaming_s5};
+                } else {
+                    # No final pass — compute from current %consolidation_unmatched
+                    $ceiling_filtered = 0;
+                    $genuinely_unmatched = 0;
+                    for my $key (keys %{$consolidation_unmatched{$cat_gk} // {}}) {
+                        my $occ = $log_messages{$category_part}{$key}{occurrences} // 1;
+                        if ($occ >= $consolidation_occurrence_ceiling) { $ceiling_filtered++; } else { $genuinely_unmatched++; }
+                    }
+                }
+
+                push @verbose_output, "";
+                push @verbose_output, sprintf("  --- %s: Streaming Phase ---", $cat_gk);
+                push @verbose_output, sprintf("    Keys seen:             %d  (%d checkpoints, %d patterns)", $keys_seen, $checkpoints, $patterns);
+                push @verbose_output, sprintf("    S1 Inline match:       %d", $s->{s1_inline} // 0);
+                push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d)", $ceiling_filtered, $consolidation_occurrence_ceiling);
+                push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{s3_checkpoint} // 0);
+                push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{s4_pairwise} // 0);
+                push @verbose_output, sprintf("    S4 Re-scan absorbed:   %d", $s->{s4_rescan} // 0);
+                push @verbose_output, sprintf("    S5 Unmatched:          %d", $genuinely_unmatched);
+                push @verbose_output, sprintf("    S6 Evicted:            %d", $evicted);
+                my $ema_pct = ($s->{absorption_ema} // 0) * 100;
+                my $ms = $s->{max_survivals} // 0;
+                push @verbose_output, sprintf("    Eviction:              EMA=%.1f%%, max_survivals=%d", $ema_pct, $ms);
+                push @verbose_output, sprintf("    find_candidates calls: %d", $s->{fc_calls} // 0);
+                push @verbose_output, sprintf("    S3 attempts:           %d  (skipped: %d, match rate: %.1f%%)",
+                    $s->{s3_calls} // 0, $s->{s3_skipped} // 0,
+                    ($s->{s3_calls} // 0) > 0 ? (($s->{s3_checkpoint} // 0) / ($s->{s3_calls} // 1)) * 100 : 0);
+                push @verbose_output, sprintf("    Cross-cluster merges:  %d", $s->{cross_cluster_merges} // 0);
+                push @verbose_output, sprintf("    Cleanup keys scanned:  %d  (cumulative across %d checkpoints)",
+                    $s->{cleanup_keys_scanned} // 0, $checkpoints);
+
+                # Streaming tracking invariant
+                my $accounted = ($s->{s1_inline} // 0) + $ceiling_filtered + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + ($s->{s4_rescan} // 0) + $genuinely_unmatched + $evicted;
+                if ($accounted != $keys_seen) {
+                    push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
+                        $accounted, $keys_seen, $keys_seen - $accounted);
+                }
+
+                $grand_keys += $keys_seen;
+                $grand_s1 += ($s->{s1_inline} // 0);
+                $grand_s2 += $ceiling_filtered;
+                $grand_s3 += ($s->{s3_checkpoint} // 0);
+                $grand_s4 += ($s->{s4_pairwise} // 0) + ($s->{s4_rescan} // 0);
+                $grand_s5 += $genuinely_unmatched;
+                $grand_s6 += $evicted;
+                $grand_fc += ($s->{fc_calls} // 0);
+                $grand_checkpoints += $checkpoints;
+                $grand_patterns += $patterns;
+
+                # --- Final pass phase (2-pass architecture) ---
+                my $fp_keys = $s->{fp_keys_seen} // 0;
+                if ($fp_keys > 0) {
+                    my $fp_p1_s3 = $s->{fp_p1_s3} // 0;
+                    my $fp_p1_ceiling = $s->{fp_p1_s2_ceiling} // 0;
+                    my $fp_p1_windows = $s->{fp_p1_windows} // 0;
+                    my $fp_p1_s4_pair = $s->{fp_p1_s4_pairwise} // 0;
+                    my $fp_p1_s4_rescan = $s->{fp_p1_s4_rescan} // 0;
+                    my $fp_p1_patterns = $s->{fp_p1_patterns} // 0;
+                    my $fp_p1_fc = $s->{fp_p1_fc_calls} // 0;
+                    my $fp_p1_cross = $s->{fp_p1_cross_merges} // 0;
+                    my $fp_p2_s3 = $s->{fp_p2_s3} // 0;
+
+                    push @verbose_output, sprintf("  --- %s: Final Pass (2-pass) ---", $cat_gk);
+                    push @verbose_output, sprintf("    Keys seen:             %d", $fp_keys);
+                    push @verbose_output, sprintf("    Pass 1:");
+                    push @verbose_output, sprintf("      S3 Pattern match:      %d", $fp_p1_s3);
+                    push @verbose_output, sprintf("      S2 Ceiling skipped:    %d  (occurrences >= %d)", $fp_p1_ceiling, $consolidation_final_ceiling);
+                    push @verbose_output, sprintf("      Windows processed:     %d  (capacity 1000)", $fp_p1_windows);
+                    push @verbose_output, sprintf("      S4 Pairwise discovery: %d", $fp_p1_s4_pair);
+                    push @verbose_output, sprintf("      S4 Re-scan absorbed:   %d", $fp_p1_s4_rescan);
+                    push @verbose_output, sprintf("      New patterns created:  %d", $fp_p1_patterns);
+                    push @verbose_output, sprintf("      find_candidates calls: %d", $fp_p1_fc);
+                    push @verbose_output, sprintf("      Cross-cluster merges:  %d", $fp_p1_cross);
+                    push @verbose_output, sprintf("    Pass 2:");
+                    push @verbose_output, sprintf("      S3 Absorbed (cleanup): %d", $fp_p2_s3);
+
+                    # Tracking invariant: all keys accounted for
+                    my $fp_absorbed = $fp_p1_s3 + $fp_p1_s4_pair + $fp_p1_s4_rescan + $fp_p2_s3;
+                    my $fp_remaining = $fp_keys - $fp_absorbed - $fp_p1_ceiling;
+                    push @verbose_output, sprintf("    Remaining unmatched:   %d", $fp_remaining);
+
+                    my $fp_accounted = $fp_p1_s3 + $fp_p1_ceiling + $fp_p1_s4_pair + $fp_p1_s4_rescan + $fp_p2_s3 + $fp_remaining;
+                    if ($fp_accounted != $fp_keys) {
+                        push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
+                            $fp_accounted, $fp_keys, $fp_keys - $fp_accounted);
+                    }
+                }
+
+                # Combined reduction: streaming keys_seen → final remaining
+                my $final_remaining;
+                if ($fp_keys > 0) {
+                    my $fp_absorbed = ($s->{fp_p1_s3} // 0) + ($s->{fp_p1_s4_pairwise} // 0) + ($s->{fp_p1_s4_rescan} // 0) + ($s->{fp_p2_s3} // 0);
+                    my $combined_patterns = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
+                    $final_remaining = $fp_keys - $fp_absorbed - ($s->{fp_p1_s2_ceiling} // 0) + $combined_patterns;
+                    push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
+                        $keys_seen, $final_remaining,
+                        (1 - $final_remaining / ($keys_seen || 1)) * 100);
+                } else {
+                    $final_remaining = $genuinely_unmatched + $evicted + $ceiling_filtered + $patterns;
+                    push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
+                        $keys_seen, $final_remaining,
+                        (1 - $final_remaining / ($keys_seen || 1)) * 100);
+                }
+            }
+
+            if (scalar keys %consolidation_cat_stats > 1) {
+                push @verbose_output, "";
+                push @verbose_output, "=== message-grouping / grand-totals ===";
+                push @verbose_output, sprintf("    Total keys seen:       %d", $grand_keys);
+                push @verbose_output, sprintf("    Total S1 Inline:       %d", $grand_s1);
+                push @verbose_output, sprintf("    Total S2 Ceiling:      %d", $grand_s2);
+                push @verbose_output, sprintf("    Total S3 Checkpoint:   %d", $grand_s3);
+                push @verbose_output, sprintf("    Total S4 Pairwise:     %d", $grand_s4);
+                push @verbose_output, sprintf("    Total S5 Unmatched:    %d", $grand_s5);
+                push @verbose_output, sprintf("    Total S6 Evicted:      %d", $grand_s6);
+                push @verbose_output, sprintf("    Total checkpoints:     %d", $grand_checkpoints);
+                push @verbose_output, sprintf("    Total patterns:        %d", $grand_patterns);
+                push @verbose_output, sprintf("    Total fc calls:        %d", $grand_fc);
+                push @verbose_output, "=== END message-grouping / grand-totals ===";
+            }
+            push @verbose_output, "=== END message-grouping ===";
+            push @verbose_output, "";
+        }
+    }
+
+    memory_debug_decomposition("after_grouping") unless $group_similar_sensitivity eq "none";
+
+    # CALCULATE STATISTICS #
+    $start_time = [gettimeofday];
+    print "Calculate statistics..." unless $disable_progress;
+    calculate_all_statistics();
+    $end_time = [gettimeofday];
+    $elapsed_finalize_calculate_statistics = tv_interval($start_time, $end_time);
+    measure_memory_structures();
+    memory_debug_decomposition("after_stats");
+
+    # Issue #287: snapshot per-message-key bin-counter telemetry before any
+    # subsequent stage discards the streaming counter store. Sibling of the
+    # finalize_heatmap_unified and finalize_histogram_unified hooks below;
+    # no-op under -mdm raw.
+    finalize_message_stats_unified();
+
+    # Issue #289: snapshot per-time-bucket bin-counter telemetry. Sibling of the
+    # message-stats hook above; no-op under -bdm raw.
+    finalize_bucket_stats_unified();
+
+    # CALCULATE HEATMAP BUCKETS (if enabled) #
+    if ($heatmap_enabled) {
+        $start_time = [gettimeofday];
+        calculate_heatmap_buckets();
+        $end_time = [gettimeofday];
+        $elapsed_finalize_heatmap_statistics = tv_interval($start_time, $end_time);
+        measure_memory_structures();
+        memory_debug_decomposition("after_heatmap");
+    }
+
+    # CALCULATE HISTOGRAM BUCKETS (if enabled) - Issue #25 #
+    if ($histogram_enabled) {
+        $start_time = [gettimeofday];
+        calculate_histogram_buckets();
+        $end_time = [gettimeofday];
+        $elapsed_finalize_histogram_statistics = tv_interval($start_time, $end_time);
+        measure_memory_structures();
+        memory_debug_decomposition("after_histogram");
+    }
+}
+
+# Stage: render -- everything from display preparation to post-output artifacts.
+# Receives: finalized statistics and bucket structures; resolved demand.
+# Emits: normalized/scaled display data (layout before scaling), index-drift
+# detection plus the verbose/telemetry surface flush, bar graph, histograms,
+# summary tables, message/threadpool summaries, CSV output lifecycle, and the
+# persistent index file (#46).
+sub pipeline_render {
+    # NORMALIZE DATA FOR CONSOLE OUTPUT #
+    $start_time = [gettimeofday];
+    normalize_data_for_output();
+    $end_time = [gettimeofday];
+    $elapsed_render_normalize_data = tv_interval($start_time, $end_time);
+    memory_debug_decomposition("after_normalize");
+
+    $elapsed_total = $elapsed_parse_read_files + $elapsed_accumulate_initialize_buckets + $elapsed_finalize_calculate_statistics + $elapsed_finalize_heatmap_statistics + $elapsed_finalize_histogram_statistics + $elapsed_render_normalize_data + $elapsed_finalize_group_similar;
+
+    # Issue #179: Compare live captured values against pre-seeded bounds (drift)
+    # and emit the index read-back section into @verbose_output before flush.
+    detect_index_drift();
+    emit_index_readback_verbose();
+
+    emit_bin_counter_mode_verbose();
+
+    emit_format_detection_verbose();
+
+    emit_heatmap_palette_verbose();
+
+    emit_csv_output_verbose();
+
+    emit_percentile_algorithm_verbose();
+
+    emit_statistics_demand_verbose();
+
+    emit_profile_verbose();
+
+    emit_udm_counting_verbose();
+
+    print_verbose_output();
+
+    if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
+        $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
+        my $csv_file_name = build_csv_filename('STATS');
+        open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
+        my @csv_columns = map {
+            if    ($_ eq 'err-rate') { "err-rate$rate_csv_suffix{$rate_unit}" }
+            elsif ($_ eq 'msg-rate') { "msg-rate$rate_csv_suffix{$rate_unit}" }
+            else  { $_ }
+        } @output_columns;
+        $csv->print($csv_fh, [ @csv_columns ] );
+    }
+
+    print_bar_graph();
+    memory_debug_decomposition("after_bar_graph");
+    print_histograms() if $histogram_enabled;  # Issue #25: Histograms appear after bar graph
+    close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
+
+    # Issue #356 (S1): capture the peak through normalize/bar-graph/CSV rendering
+    # so the displayed MAXIMUM MEMORY USED reflects everything up to this point.
+    # The output stages below can no longer move the peak materially (#362 clamped
+    # the only O(-n) allocation); their residual is covered by the post-output
+    # measurement and visible under -mem debug.
+    measure_memory_structures();
+
+    print_summary_table();
+    memory_debug_decomposition("after_summary_table");
+
+    if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
+        $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
+        my $csv_file_name = build_csv_filename('MESSAGES');
+        open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
+        my @udm_csv_headers;
+        foreach my $config (@udm_configs) {
+            my $name = $config->{name};
+            my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
+            if ($config->{agg_kind} eq 'counting') {
+                # Counting aggregation (Issue #313): single value column with
+                # the aggregation as the stat; rate columns carry the -ru suffix
+                my $col = "$config->{base_name}_$config->{aggregation}";
+                $col .= $rate_csv_suffix{$rate_unit} if $config->{aggregation} =~ /^(rate|drate)$/;
+                push @udm_csv_headers, $col;
+            } elsif ($config->{name} ne $config->{base_name}) {
+                # Disambiguated metric: single value column (#99)
+                push @udm_csv_headers, $csv_prefix;
+            } else {
+                push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
+            }
+        }
+        $csv->print($csv_fh, [qw(category message occurrences mean_bytes bytes bytes_nice count_occurrences count_min count_mean count_max count_sum min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef duration duration_nice impact), @udm_csv_headers]);
+    }
+
+    print_message_summary();														                    # Print and write message summaries
+    memory_debug_decomposition("after_message_summary");
+    close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
+
+    print_threadpool_summary() if $include_threadpool_summary;										    # Print threadpool summaries
+    memory_debug_decomposition("after_threadpool_summary") if $include_threadpool_summary;
+
+    # Issue #356 (S1): post-output measurement keeps the recorded peak honest for
+    # the full process lifetime; surfaced by the -mem debug "end" line below.
+    measure_memory_structures();
+    memory_debug_decomposition("end");
+
+    write_index_file();  # Write persistent index file with per-file metadata (Issue #46)
+}
+
 ## MAIN ##
 
 # Skip the banner when a --help or --explain view is being dispatched -- those
@@ -13551,334 +13936,11 @@ print_title() unless $_help_or_explain_invoked;
 adapt_to_command_line_options();
 adapt_to_terminal_settings();
 
-# Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
-read_index_file();
-
-memory_debug_decomposition("startup");
-
-# READ AND PROCESS LOGS #
-$start_time = [gettimeofday];
-read_and_process_logs();
-$end_time = [gettimeofday];
-$elapsed_read_files = tv_interval($start_time, $end_time);
-measure_memory_structures();
-memory_debug_decomposition("after_read");
-
-# INITIALIZE EMPTY TIME BUCKETS #
-$start_time = [gettimeofday];
-initialize_empty_time_windows();
-$end_time = [gettimeofday];
-$elapsed_initialize_empty_time_windows = tv_interval($start_time, $end_time);
-measure_memory_structures();
-memory_debug_decomposition("after_bucket_init");
-
-# GROUP SIMILAR MESSAGES TOGETHER (Issue #96) #
-unless( $group_similar_sensitivity eq "none" ) {
-
-
-    $start_time = [gettimeofday];
-    group_similar_messages();
-    $end_time = [gettimeofday];
-    $elapsed_group_similar_messages = tv_interval($start_time, $end_time);
-
-    # message-grouping verbose diagnostics (Issue #96).
-    if (section_requested('message-grouping')) {
-        push @verbose_output, "";
-        push @verbose_output, "=== message-grouping ===";
-        push @verbose_output, sprintf("  Threshold: %d%%  Trigger: %d  Ceiling: %d  Final pass: %s",
-            $consolidation_threshold, $consolidation_trigger, $consolidation_occurrence_ceiling,
-            $consolidation_final_pass ? "on (threshold=${consolidation_final_threshold}%, ceiling=${consolidation_final_ceiling})" : "off");
-
-        my ($grand_keys, $grand_s1, $grand_s2, $grand_s3, $grand_s4, $grand_s5, $grand_s6, $grand_fc) = (0,0,0,0,0,0,0,0);
-        my $grand_checkpoints = 0;
-        my $grand_patterns = 0;
-
-        # Total patterns across all cat_gk groups (final count after both phases)
-        my $total_patterns_all = 0;
-        for my $cat_gk (keys %consolidation_patterns) {
-            $total_patterns_all += scalar @{$consolidation_patterns{$cat_gk}};
-        }
-
-        for my $cat_gk (sort keys %consolidation_cat_stats) {
-            my $s = $consolidation_cat_stats{$cat_gk};
-            my $keys_seen = $s->{keys_seen} // 0;
-            next unless $keys_seen > 0;
-
-            my ($category_part) = split(/\|/, $cat_gk, 2);
-
-            # --- Streaming phase ---
-            my $checkpoints = $s->{checkpoints} // 0;
-            my $patterns = $s->{patterns_final} // 0;
-            my $evicted = $s->{evicted} // 0;
-
-            # S2/S5: saved before final pass reset (or computed from current unmatched if no final pass)
-            my $ceiling_filtered;
-            my $genuinely_unmatched;
-            if ($consolidation_final_pass && exists $s->{streaming_s2}) {
-                $ceiling_filtered = $s->{streaming_s2};
-                $genuinely_unmatched = $s->{streaming_s5};
-            } else {
-                # No final pass — compute from current %consolidation_unmatched
-                $ceiling_filtered = 0;
-                $genuinely_unmatched = 0;
-                for my $key (keys %{$consolidation_unmatched{$cat_gk} // {}}) {
-                    my $occ = $log_messages{$category_part}{$key}{occurrences} // 1;
-                    if ($occ >= $consolidation_occurrence_ceiling) { $ceiling_filtered++; } else { $genuinely_unmatched++; }
-                }
-            }
-
-            push @verbose_output, "";
-            push @verbose_output, sprintf("  --- %s: Streaming Phase ---", $cat_gk);
-            push @verbose_output, sprintf("    Keys seen:             %d  (%d checkpoints, %d patterns)", $keys_seen, $checkpoints, $patterns);
-            push @verbose_output, sprintf("    S1 Inline match:       %d", $s->{s1_inline} // 0);
-            push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d)", $ceiling_filtered, $consolidation_occurrence_ceiling);
-            push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{s3_checkpoint} // 0);
-            push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{s4_pairwise} // 0);
-            push @verbose_output, sprintf("    S4 Re-scan absorbed:   %d", $s->{s4_rescan} // 0);
-            push @verbose_output, sprintf("    S5 Unmatched:          %d", $genuinely_unmatched);
-            push @verbose_output, sprintf("    S6 Evicted:            %d", $evicted);
-            my $ema_pct = ($s->{absorption_ema} // 0) * 100;
-            my $ms = $s->{max_survivals} // 0;
-            push @verbose_output, sprintf("    Eviction:              EMA=%.1f%%, max_survivals=%d", $ema_pct, $ms);
-            push @verbose_output, sprintf("    find_candidates calls: %d", $s->{fc_calls} // 0);
-            push @verbose_output, sprintf("    S3 attempts:           %d  (skipped: %d, match rate: %.1f%%)",
-                $s->{s3_calls} // 0, $s->{s3_skipped} // 0,
-                ($s->{s3_calls} // 0) > 0 ? (($s->{s3_checkpoint} // 0) / ($s->{s3_calls} // 1)) * 100 : 0);
-            push @verbose_output, sprintf("    Cross-cluster merges:  %d", $s->{cross_cluster_merges} // 0);
-            push @verbose_output, sprintf("    Cleanup keys scanned:  %d  (cumulative across %d checkpoints)",
-                $s->{cleanup_keys_scanned} // 0, $checkpoints);
-
-            # Streaming tracking invariant
-            my $accounted = ($s->{s1_inline} // 0) + $ceiling_filtered + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + ($s->{s4_rescan} // 0) + $genuinely_unmatched + $evicted;
-            if ($accounted != $keys_seen) {
-                push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
-                    $accounted, $keys_seen, $keys_seen - $accounted);
-            }
-
-            $grand_keys += $keys_seen;
-            $grand_s1 += ($s->{s1_inline} // 0);
-            $grand_s2 += $ceiling_filtered;
-            $grand_s3 += ($s->{s3_checkpoint} // 0);
-            $grand_s4 += ($s->{s4_pairwise} // 0) + ($s->{s4_rescan} // 0);
-            $grand_s5 += $genuinely_unmatched;
-            $grand_s6 += $evicted;
-            $grand_fc += ($s->{fc_calls} // 0);
-            $grand_checkpoints += $checkpoints;
-            $grand_patterns += $patterns;
-
-            # --- Final pass phase (2-pass architecture) ---
-            my $fp_keys = $s->{fp_keys_seen} // 0;
-            if ($fp_keys > 0) {
-                my $fp_p1_s3 = $s->{fp_p1_s3} // 0;
-                my $fp_p1_ceiling = $s->{fp_p1_s2_ceiling} // 0;
-                my $fp_p1_windows = $s->{fp_p1_windows} // 0;
-                my $fp_p1_s4_pair = $s->{fp_p1_s4_pairwise} // 0;
-                my $fp_p1_s4_rescan = $s->{fp_p1_s4_rescan} // 0;
-                my $fp_p1_patterns = $s->{fp_p1_patterns} // 0;
-                my $fp_p1_fc = $s->{fp_p1_fc_calls} // 0;
-                my $fp_p1_cross = $s->{fp_p1_cross_merges} // 0;
-                my $fp_p2_s3 = $s->{fp_p2_s3} // 0;
-
-                push @verbose_output, sprintf("  --- %s: Final Pass (2-pass) ---", $cat_gk);
-                push @verbose_output, sprintf("    Keys seen:             %d", $fp_keys);
-                push @verbose_output, sprintf("    Pass 1:");
-                push @verbose_output, sprintf("      S3 Pattern match:      %d", $fp_p1_s3);
-                push @verbose_output, sprintf("      S2 Ceiling skipped:    %d  (occurrences >= %d)", $fp_p1_ceiling, $consolidation_final_ceiling);
-                push @verbose_output, sprintf("      Windows processed:     %d  (capacity 1000)", $fp_p1_windows);
-                push @verbose_output, sprintf("      S4 Pairwise discovery: %d", $fp_p1_s4_pair);
-                push @verbose_output, sprintf("      S4 Re-scan absorbed:   %d", $fp_p1_s4_rescan);
-                push @verbose_output, sprintf("      New patterns created:  %d", $fp_p1_patterns);
-                push @verbose_output, sprintf("      find_candidates calls: %d", $fp_p1_fc);
-                push @verbose_output, sprintf("      Cross-cluster merges:  %d", $fp_p1_cross);
-                push @verbose_output, sprintf("    Pass 2:");
-                push @verbose_output, sprintf("      S3 Absorbed (cleanup): %d", $fp_p2_s3);
-
-                # Tracking invariant: all keys accounted for
-                my $fp_absorbed = $fp_p1_s3 + $fp_p1_s4_pair + $fp_p1_s4_rescan + $fp_p2_s3;
-                my $fp_remaining = $fp_keys - $fp_absorbed - $fp_p1_ceiling;
-                push @verbose_output, sprintf("    Remaining unmatched:   %d", $fp_remaining);
-
-                my $fp_accounted = $fp_p1_s3 + $fp_p1_ceiling + $fp_p1_s4_pair + $fp_p1_s4_rescan + $fp_p2_s3 + $fp_remaining;
-                if ($fp_accounted != $fp_keys) {
-                    push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
-                        $fp_accounted, $fp_keys, $fp_keys - $fp_accounted);
-                }
-            }
-
-            # Combined reduction: streaming keys_seen → final remaining
-            my $final_remaining;
-            if ($fp_keys > 0) {
-                my $fp_absorbed = ($s->{fp_p1_s3} // 0) + ($s->{fp_p1_s4_pairwise} // 0) + ($s->{fp_p1_s4_rescan} // 0) + ($s->{fp_p2_s3} // 0);
-                my $combined_patterns = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
-                $final_remaining = $fp_keys - $fp_absorbed - ($s->{fp_p1_s2_ceiling} // 0) + $combined_patterns;
-                push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
-                    $keys_seen, $final_remaining,
-                    (1 - $final_remaining / ($keys_seen || 1)) * 100);
-            } else {
-                $final_remaining = $genuinely_unmatched + $evicted + $ceiling_filtered + $patterns;
-                push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
-                    $keys_seen, $final_remaining,
-                    (1 - $final_remaining / ($keys_seen || 1)) * 100);
-            }
-        }
-
-        if (scalar keys %consolidation_cat_stats > 1) {
-            push @verbose_output, "";
-            push @verbose_output, "=== message-grouping / grand-totals ===";
-            push @verbose_output, sprintf("    Total keys seen:       %d", $grand_keys);
-            push @verbose_output, sprintf("    Total S1 Inline:       %d", $grand_s1);
-            push @verbose_output, sprintf("    Total S2 Ceiling:      %d", $grand_s2);
-            push @verbose_output, sprintf("    Total S3 Checkpoint:   %d", $grand_s3);
-            push @verbose_output, sprintf("    Total S4 Pairwise:     %d", $grand_s4);
-            push @verbose_output, sprintf("    Total S5 Unmatched:    %d", $grand_s5);
-            push @verbose_output, sprintf("    Total S6 Evicted:      %d", $grand_s6);
-            push @verbose_output, sprintf("    Total checkpoints:     %d", $grand_checkpoints);
-            push @verbose_output, sprintf("    Total patterns:        %d", $grand_patterns);
-            push @verbose_output, sprintf("    Total fc calls:        %d", $grand_fc);
-            push @verbose_output, "=== END message-grouping / grand-totals ===";
-        }
-        push @verbose_output, "=== END message-grouping ===";
-        push @verbose_output, "";
-    }
-}
-
-memory_debug_decomposition("after_grouping") unless $group_similar_sensitivity eq "none";
-
-# CALCULATE STATISTICS #
-$start_time = [gettimeofday];
-print "Calculate statistics..." unless $disable_progress;
-calculate_all_statistics();
-$end_time = [gettimeofday];
-$elapsed_calculate_statistics = tv_interval($start_time, $end_time);
-measure_memory_structures();
-memory_debug_decomposition("after_stats");
-
-# Issue #287: snapshot per-message-key bin-counter telemetry before any
-# subsequent stage discards the streaming counter store. Sibling of the
-# finalize_heatmap_unified and finalize_histogram_unified hooks below;
-# no-op under -mdm raw.
-finalize_message_stats_unified();
-
-# Issue #289: snapshot per-time-bucket bin-counter telemetry. Sibling of the
-# message-stats hook above; no-op under -bdm raw.
-finalize_bucket_stats_unified();
-
-# CALCULATE HEATMAP BUCKETS (if enabled) #
-if ($heatmap_enabled) {
-    $start_time = [gettimeofday];
-    calculate_heatmap_buckets();
-    $end_time = [gettimeofday];
-    $elapsed_heatmap_statistics = tv_interval($start_time, $end_time);
-    measure_memory_structures();
-    memory_debug_decomposition("after_heatmap");
-}
-
-# CALCULATE HISTOGRAM BUCKETS (if enabled) - Issue #25 #
-if ($histogram_enabled) {
-    $start_time = [gettimeofday];
-    calculate_histogram_buckets();
-    $end_time = [gettimeofday];
-    $elapsed_histogram_statistics = tv_interval($start_time, $end_time);
-    measure_memory_structures();
-    memory_debug_decomposition("after_histogram");
-}
-
-# NORMALIZE DATA FOR CONSOLE OUTPUT #
-$start_time = [gettimeofday];
-normalize_data_for_output();
-$end_time = [gettimeofday];
-$elapsed_normalize_data = tv_interval($start_time, $end_time);
-memory_debug_decomposition("after_normalize");
-
-$elapsed_total = $elapsed_read_files + $elapsed_initialize_empty_time_windows + $elapsed_calculate_statistics + $elapsed_heatmap_statistics + $elapsed_histogram_statistics + $elapsed_normalize_data + $elapsed_group_similar_messages;
-
-# Issue #179: Compare live captured values against pre-seeded bounds (drift)
-# and emit the index read-back section into @verbose_output before flush.
-detect_index_drift();
-emit_index_readback_verbose();
-
-emit_bin_counter_mode_verbose();
-
-emit_format_detection_verbose();
-
-emit_heatmap_palette_verbose();
-
-emit_csv_output_verbose();
-
-emit_percentile_algorithm_verbose();
-
-emit_statistics_demand_verbose();
-
-emit_profile_verbose();
-
-emit_udm_counting_verbose();
-
-print_verbose_output();
-
-if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
-    $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
-    my $csv_file_name = build_csv_filename('STATS');
-    open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
-    my @csv_columns = map {
-        if    ($_ eq 'err-rate') { "err-rate$rate_csv_suffix{$rate_unit}" }
-        elsif ($_ eq 'msg-rate') { "msg-rate$rate_csv_suffix{$rate_unit}" }
-        else  { $_ }
-    } @output_columns;
-    $csv->print($csv_fh, [ @csv_columns ] );
-}
-
-print_bar_graph();
-memory_debug_decomposition("after_bar_graph");
-print_histograms() if $histogram_enabled;  # Issue #25: Histograms appear after bar graph
-close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
-
-# Issue #356 (S1): capture the peak through normalize/bar-graph/CSV rendering
-# so the displayed MAXIMUM MEMORY USED reflects everything up to this point.
-# The output stages below can no longer move the peak materially (#362 clamped
-# the only O(-n) allocation); their residual is covered by the post-output
-# measurement and visible under -mem debug.
-measure_memory_structures();
-
-print_summary_table();
-memory_debug_decomposition("after_summary_table");
-
-if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
-    $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
-    my $csv_file_name = build_csv_filename('MESSAGES');
-    open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
-    my @udm_csv_headers;
-    foreach my $config (@udm_configs) {
-        my $name = $config->{name};
-        my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
-        if ($config->{agg_kind} eq 'counting') {
-            # Counting aggregation (Issue #313): single value column with
-            # the aggregation as the stat; rate columns carry the -ru suffix
-            my $col = "$config->{base_name}_$config->{aggregation}";
-            $col .= $rate_csv_suffix{$rate_unit} if $config->{aggregation} =~ /^(rate|drate)$/;
-            push @udm_csv_headers, $col;
-        } elsif ($config->{name} ne $config->{base_name}) {
-            # Disambiguated metric: single value column (#99)
-            push @udm_csv_headers, $csv_prefix;
-        } else {
-            push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
-        }
-    }
-    $csv->print($csv_fh, [qw(category message occurrences mean_bytes bytes bytes_nice count_occurrences count_min count_mean count_max count_sum min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef duration duration_nice impact), @udm_csv_headers]);
-}
-
-print_message_summary();														                    # Print and write message summaries
-memory_debug_decomposition("after_message_summary");
-close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
-
-print_threadpool_summary() if $include_threadpool_summary;										    # Print threadpool summaries
-memory_debug_decomposition("after_threadpool_summary") if $include_threadpool_summary;
-
-# Issue #356 (S1): post-output measurement keeps the recorded peak honest for
-# the full process lifetime; surfaced by the -mem debug "end" line below.
-measure_memory_structures();
-memory_debug_decomposition("end");
-
-write_index_file();  # Write persistent index file with per-file metadata (Issue #46)
+pipeline_detect();
+pipeline_parse();
+pipeline_accumulate();
+pipeline_finalize();
+pipeline_render();
 
 print "\n";
 exit;

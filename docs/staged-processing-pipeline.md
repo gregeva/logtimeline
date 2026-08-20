@@ -145,3 +145,37 @@ Examples beyond log consolidation:
 - `docs/perl-performance-optimization.md` — Profiling and Perl-specific optimization
 - `docs/fuzzy-consolidation-lessons-learned.md` — What didn't work and why
 - `features/fuzzy-message-consolidation.md` — Full #96 feature document (PF-20 for checkpoint architecture details)
+
+## Named Pipeline Stages (#180)
+
+The top level of `ltl` is dispatched through five named stage entry points —
+`pipeline_detect()`, `pipeline_parse()`, `pipeline_accumulate()`,
+`pipeline_finalize()`, `pipeline_render()` — with `## MAIN ##` reduced to a thin
+dispatcher that calls them in order after option settlement.
+
+The stages are **roles with contracts, not one-pass-each temporal phases**:
+
+- The read pass inside `pipeline_parse()` crosses detect → parse → accumulate
+  per line, and finalize-role work fires mid-stream by design — consolidation
+  S1 inline matching and S2–S4 checkpoints (#96), and per-line streaming
+  partition accumulation (#187/#189). This interleaving is contractual; the
+  stage names document where the role boundaries fall, they do not impose
+  sequential execution.
+- Every stage takes two standing inputs alongside its data, both settled during
+  option processing before any stage runs: the resolved statistics demand
+  (`@STAT_CONSUMERS` → `resolve_statistics_group_demand()`, #305) and the
+  per-surface data-model capture modes (`choose_data_model()`, #266). Demand
+  resolution is a plan step ahead of the pipeline; its outputs thread through
+  capture (parse), compute (finalize), and storage gates.
+
+Per-stage contracts (receives / emits) are documented on each entry point in
+`ltl`. Timing surfaces follow the stage nomenclature as `stage/step`: machine
+rows are `TIMING\t<stage>/<step>` (e.g. `parse/read_files`,
+`finalize/calculate_statistics`), summary-table rows are prefixed with the
+stage name (e.g. `PARSE: FILE PROCESSING`), and a stage with several timed
+steps nests them under its own prefix. `detect` has no timed step yet; the
+format registry (#58) adds detection cost under it.
+
+Future stage evolution: #58 replaces the match-type cascade with the format
+registry at the `detect` role boundary; #59 (later release) adds per-bucket
+lifecycle hooks inside `finalize`.

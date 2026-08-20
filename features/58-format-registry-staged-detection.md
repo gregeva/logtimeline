@@ -105,7 +105,7 @@ The existing `format-detection` section (`emit_format_detection_verbose()`) gain
 
 - [ ] **Research + prototype phase completed and its decisions recorded in this document before implementation began** (see the mandatory phase above).
 - [ ] All existing tests byte-identical: golden files + full `tests/validate-*.sh` suite exits 0; runtime-warning-clean stderr.
-- [ ] **#369 probe**: `TIMING/read_files` on an access-log selection improves vs. the v0.16.0 baseline — cost class removed, not shaved. Targeted single-file probe, median-of-3; no XL suites during development.
+- [ ] **#369 probe**: `TIMING parse/read_files` on an access-log selection improves vs. the v0.16.0 baseline — cost class removed, not shaved. Targeted single-file probe, median-of-3; no XL suites during development.
 - [ ] Detection observability per the section-contract above.
 - [ ] Extraction parity per migrated format (sample-line fixtures).
 - [ ] At least one user-defined YAML format loads and parses a fixture; malformed definitions produce clear errors.
