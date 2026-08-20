@@ -266,9 +266,21 @@ Every **open** issue carries exactly one `status:` label recording where it sits
 | `status: backlog` | Accepted and understood; no work underway. The state anything filed lands in. |
 | `status: in progress` | Branch cut, work underway. Set **before** the first line of code. |
 | `status: in review` | PR open against the release branch. |
-| `status: on hold` | Deliberately paused by the architect — nothing external is stopping it. |
+| `status: on hold` | Deliberately paused by an explicit decision. Says nothing about whether work has started. |
 
 **Status is updated at the moment the state changes — never batched, never deferred to a tidy-up pass.** A status that is correct only in retrospect is worse than none: it reports work as idle while it is running, or as running after it has stopped. The transitions are already embedded in the steps that cause them (Branch Verification sets `in progress`; per-feature workflow step 3 sets `in review`; step 8 strips the label on close) — there is no separate moment at which status gets "brought up to date."
+
+**Status is a deliberate decision, never a computed value.** Whoever moves an issue chooses its status and is accountable for it. There is no rule that derives status automatically, and none should be added: the reasons an issue is where it is — an architect deferred it, an approach was rejected pending redesign, work was folded into a broader effort — live in comments, closed issues and PRs, and feature docs, where no mechanical signal can see them. A status that a tool recalculated is a status nobody decided.
+
+Consequences:
+
+- **A recorded status stands until another deliberate decision changes it.** A general convention stated later does not reach back and overwrite a specific call already made on an issue.
+- **`build/issue-status.sh sweep` proposes, it never applies.** Its advisory pass reads the mechanical signals — an open PR, a live branch, an open `blocked_by` dependency — and prints a proposed status *with the reasoning that produced it*, for a human to accept or reject. It speaks only where a status is missing or is the weakest one (`backlog`); it leaves `on hold` and `in progress` alone, because both record a judgement no signal can second-guess. The only thing it changes on its own is stripping status from closed issues, where there is exactly one correct answer.
+- **When a status change is not self-evident from the issue thread, comment the reasoning and where the decision lives.** #209 (benchmark TSV absolute paths) sat unexplained because its governing decision was in the closing comment of a *closed* PR — invisible from the open issue. A status whose justification cannot be found from the issue is a status that will be re-litigated or silently reverted.
+
+**`on hold` is about a decision, not about progress.** It records that someone deliberately paused the issue — deferred it, folded it into other work, rejected the proposed approach pending a redesign. It carries no implication either way about whether work has started: an issue can be paused before anything begins, or after a branch has been merged. What distinguishes `on hold` from `backlog` is the existence of an explicit decision to stop, not the amount of work behind it. Where that decision lives — a comment, a closed issue or PR, a feature-doc section — is recorded on the issue so it stays discoverable from the open thread.
+
+**Parent issues follow the same rule, evaluated over themselves *and* their children.** A parent (umbrella) issue is ordinary — it can have its own branch and its own commits, and often does. It is `in progress` once work has started either on the parent itself or on any child issue beneath it. Closing a child does not move the parent back: the parent stays `in progress` until it is closed, or until it is deliberately moved to `on hold`. A parent with no work started anywhere in its tree is `backlog` like anything else.
 
 `build/issue-status.sh` is the **only** sanctioned writer. Labels are a set, not an enum, so mutual exclusion is enforced by the script rather than by memory: `set` swaps the old label for the new in a single call, so an issue is never transiently statusless or double-statused.
 

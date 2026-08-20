@@ -13,7 +13,7 @@
 #   ./build/issue-status.sh set <issue> <status>   set status (swaps in one call)
 #   ./build/issue-status.sh show <issue>           print one issue's status
 #   ./build/issue-status.sh list                   list open issues with status
-#   ./build/issue-status.sh sweep                  report and repair drift
+#   ./build/issue-status.sh sweep                  integrity check + advisory proposals
 
 set -euo pipefail
 
@@ -33,8 +33,10 @@ Usage: ./build/issue-status.sh <command> [args]
                          ("status: in review").
   show <issue>           Print one issue's current status.
   list                   List open issues with their status.
-  sweep                  Strip status labels from closed issues; report open
-                         issues carrying none or more than one.
+  sweep                  Integrity + advisory pass. Strips status from closed issues,
+                         reports open issues carrying several, and proposes a status
+                         (with reasoning) where one is missing or looks understated.
+                         Proposals are printed, never applied.
 USAGE
     exit 1
 }
@@ -121,10 +123,10 @@ cmd_list() {
 
 cmd_sweep() {
     [ $# -eq 0 ] || usage
-    local stripped=0 missing=0 multiple=0 number labels label
+    local stripped=0 multiple=0 proposed=0 number labels label
     local -a remove_args
 
-    # Closed issues must carry no status label — strip whatever is there.
+    # --- Integrity: closed issues carry no status. One correct answer, so fix it. ---
     while IFS=$'\t' read -r number labels; do
         [ -n "$number" ] || continue
         remove_args=()
@@ -139,22 +141,85 @@ cmd_sweep() {
         --jq "[.[] | {number, s: [.labels[].name | select(startswith(\"$LABEL_PREFIX\"))]} | select(.s | length > 0)]
               | .[] | [.number, (.s | join(\",\"))] | @tsv")
 
-    # Open issues must carry exactly one. Report, never guess.
+    # --- Integrity: exactly one status per open issue. Which one is a judgement call. ---
     while IFS=$'\t' read -r number labels; do
         [ -n "$number" ] || continue
-        if [ -z "$labels" ]; then
-            echo "[warn] #$number open with no status — set one with: ./build/issue-status.sh set $number <status>"
-            missing=$((missing + 1))
-        else
-            echo "[warn] #$number open with multiple statuses ($labels) — resolve with: ./build/issue-status.sh set $number <status>"
-            multiple=$((multiple + 1))
-        fi
+        echo "[conflict] #$number carries several statuses ($labels) — pick one:"
+        echo "           ./build/issue-status.sh set $number <status>"
+        multiple=$((multiple + 1))
     done < <(gh issue list --state open --limit 500 --json number,labels \
-        --jq "[.[] | {number, s: [.labels[].name | select(startswith(\"$LABEL_PREFIX\"))]} | select(.s | length != 1)]
+        --jq "[.[] | {number, s: [.labels[].name | select(startswith(\"$LABEL_PREFIX\"))]} | select(.s | length > 1)]
               | .[] | [.number, (.s | join(\",\"))] | @tsv")
 
-    echo "[ok] sweep complete — $stripped closed issue(s) stripped, $missing open without status, $multiple open with multiple"
-    [ "$missing" -eq 0 ] && [ "$multiple" -eq 0 ]
+    # --- Advisory: propose, never apply. ---
+    #
+    # Status is a deliberate decision. These signals cannot see the decisions that
+    # live in comments, closed PRs and feature docs, so they never overrule a
+    # recorded status — they only speak where the state is absent or is the weakest
+    # one (`backlog`), and where a mechanical signal says otherwise. `on hold` and
+    # `in progress` are left alone: both record a judgement no signal can second-guess.
+    local branches prs current proposal reason
+    branches="$(git branch -a --format='%(refname:short)' 2>/dev/null | sed 's|^origin/||' | sort -u)"
+    prs="$(gh pr list --state open --limit 200 --json number,headRefName,body \
+           --jq '.[] | [.number, .headRefName, (.body // "" | gsub("\n"; " "))] | @tsv' 2>/dev/null)"
+
+    while IFS=$'\t' read -r number current; do
+        [ -n "$number" ] || continue
+        [ "$current" = "on hold" ] && continue
+        [ "$current" = "in progress" ] && continue
+
+        proposal=""; reason=""
+
+        # An open PR for the issue is unambiguous and outranks the rest.
+        local pr_num
+        pr_num="$(printf '%s\n' "$prs" | awk -F'\t' -v n="$number" \
+            '$2 ~ "^"n"-" || $3 ~ ("#"n"([^0-9]|$)") { print $1; exit }')"
+        if [ -n "$pr_num" ] && [ "$current" != "in review" ]; then
+            proposal="in review"
+            reason="PR #$pr_num is open for this issue"
+        fi
+
+        # A live branch means work is underway now.
+        if [ -z "$proposal" ]; then
+            local branch
+            branch="$(printf '%s\n' "$branches" | grep -E "^${number}-" | head -1 || true)"
+            if [ -n "$branch" ]; then
+                proposal="in progress"
+                reason="branch '$branch' exists — work is underway"
+            fi
+        fi
+
+        # A recorded dependency means the issue was planned for delivery and picked
+        # up out of the backlog; it is waiting for the blocker, not queued unstarted.
+        if [ -z "$proposal" ]; then
+            local blockers
+            blockers="$(gh api "repos/{owner}/{repo}/issues/$number/dependencies/blocked_by" \
+                --jq '[.[] | select(.state=="open") | "#\(.number)"] | join(", ")' 2>/dev/null || true)"
+            if [ -n "$blockers" ]; then
+                proposal="on hold"
+                reason="blocked by $blockers (open) — a recorded dependency means delivery was planned and the issue picked up"
+            fi
+        fi
+
+        # Nothing else to go on.
+        if [ -z "$proposal" ] && [ -z "$current" ]; then
+            proposal="backlog"
+            reason="no open blocker, no branch, no open PR — nothing indicates work started or planned"
+        fi
+
+        if [ -n "$proposal" ]; then
+            echo "[propose] #$number  ${current:-(no status)} -> $proposal"
+            echo "          why:   $reason"
+            echo "          apply: ./build/issue-status.sh set $number \"$proposal\""
+            proposed=$((proposed + 1))
+        fi
+    done < <(gh issue list --state open --limit 500 --json number,labels \
+        --jq "[.[] | {number, s: [.labels[].name | select(startswith(\"$LABEL_PREFIX\")) | ltrimstr(\"$LABEL_PREFIX\")]} | select(.s | length <= 1)]
+              | .[] | [.number, (.s | join(\"\"))] | @tsv")
+
+    echo "[ok] sweep complete — $stripped closed stripped, $multiple conflicting, $proposed proposal(s) for review"
+    echo "     Proposals are advisory. Status is a deliberate decision; nothing above was applied."
+    [ "$multiple" -eq 0 ]
 }
 
 main() {
