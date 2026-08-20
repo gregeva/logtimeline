@@ -165,16 +165,20 @@ cmd_sweep() {
 
     while IFS=$'\t' read -r number current; do
         [ -n "$number" ] || continue
-        [ "$current" = "on hold" ] && continue
-        [ "$current" = "in progress" ] && continue
+        # Only the absent and the weakest state invite a proposal. Every other
+        # status records a judgement no mechanical signal can second-guess.
+        case "$current" in
+            ""|backlog) ;;
+            *) continue ;;
+        esac
 
         proposal=""; reason=""
 
         # An open PR for the issue is unambiguous and outranks the rest.
         local pr_num
         pr_num="$(printf '%s\n' "$prs" | awk -F'\t' -v n="$number" \
-            '$2 ~ "^"n"-" || $3 ~ ("#"n"([^0-9]|$)") { print $1; exit }')"
-        if [ -n "$pr_num" ] && [ "$current" != "in review" ]; then
+            '$2 ~ "^"n"-" || tolower($3) ~ ("(close[sd]?|fix(e[sd])?|resolve[sd]?)[ ]*#"n"([^0-9]|$)") { print $1; exit }')"
+        if [ -n "$pr_num" ]; then
             proposal="in review"
             reason="PR #$pr_num is open for this issue"
         fi
