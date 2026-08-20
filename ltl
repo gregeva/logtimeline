@@ -30,6 +30,7 @@ use Devel::Size qw(total_size);
 # On Windows, Win32::API calls K32GetProcessMemoryInfo directly (kernel32.dll)
 use List::Util qw(min max);
 use Cwd qw(abs_path);
+use File::Glob qw(bsd_glob);
 use File::Spec;
 use Text::CSV;
 use Text::CSV_PP;
@@ -7605,7 +7606,7 @@ sub adapt_to_command_line_options {
     # $explain_arg, and $print_version are populated here but no longer read.
 
     foreach my $pattern (@ARGV) {									# do in process file globbing for common experience across environments (Windows doesn't glob in the shell, passes in the parameters)
-        push @in_files, glob($pattern);
+        push @in_files, bsd_glob($pattern);						    # bsd_glob: wildcard/brace/tilde expansion without treating whitespace as a pattern separator, so paths containing spaces survive as one candidate
     }
 
 	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
