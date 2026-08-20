@@ -160,6 +160,19 @@ run_comparison() {
     local filter_mode="$1"
 
     awk -F'\t' -v filter="$filter_mode" '
+    # TIMING label compat map: pre-v0.17.0 TSVs carry flat stage labels; the
+    # #180 named-pipeline-stages rename moved them to stage/step form. Rows are
+    # canonicalized to the new labels on read so cross-version rows still pair.
+    BEGIN {
+        tmap["read_files"] = "parse/read_files"
+        tmap["initialize_buckets"] = "accumulate/initialize_buckets"
+        tmap["group_similar"] = "finalize/group_similar"
+        tmap["calculate_statistics"] = "finalize/calculate_statistics"
+        tmap["heatmap_statistics"] = "finalize/heatmap_statistics"
+        tmap["histogram_statistics"] = "finalize/histogram_statistics"
+        tmap["normalize_data"] = "render/normalize_data"
+    }
+    { if ($3 == "TIMING" && $4 in tmap) $4 = tmap[$4] }
     # Skip headers
     NR == FNR && FNR == 1 { next }
     NR != FNR && FNR == 1 { next }

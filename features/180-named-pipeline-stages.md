@@ -72,16 +72,18 @@ Locked decisions governing this drop live in the umbrella doc: D15 (memory targe
 - **Role-not-phase stage semantics** (R2) — driven by the consolidation-interleaving correction (architect, 2026-07-15).
 - **Demand + capture modes as stage-contract inputs** (R3) — driven by the demand-registry review (architect pointed to the #305 producer/consumer map; audit confirmed its reach across stages).
 
+- **Stage-coherent timing nomenclature (architect, 2026-08-20).** The timing variables, machine-readable `TIMING` labels, and summary-table display strings adopt the stage nomenclature so the timing surface and the named architecture stay coherent, in `stage/step` form to accommodate multiple timed steps nested under one entry point: `TIMING` rows become `parse/read_files`, `accumulate/initialize_buckets`, `finalize/group_similar`, `finalize/calculate_statistics`, `finalize/heatmap_statistics`, `finalize/histogram_statistics`, `render/normalize_data` (`total` unchanged); summary-table rows are stage-prefixed (`PARSE: FILE PROCESSING`, …, ≤30 chars to fit the fixed category column). `detect` has no timed step yet — #58 adds detection cost under it. This is the drop's one deliberate observable-output change: `tests/baseline/compare-results.sh` canonicalizes pre-rename TSV labels to the new form so cross-version benchmark rows still pair, and the regression harnesses' timing-row filters cover both forms (goldens stay byte-identical). Forward-looking references updated (`features/58-format-registry-staged-detection.md` #369 probe).
+
 ## Acceptance criteria / merge gate
 
-- [ ] Five named entry-point subroutines exist with documented contracts (data + demand + capture-mode inputs).
-- [ ] `## MAIN ##` is a thin top-level dispatcher calling the stages in order.
-- [ ] Demand-resolution timing and all capture/compute/storage gates untouched — `-V statistics-demand` before/after equality on identical invocations.
-- [ ] All golden-file tests byte-identical; full `tests/validate-*.sh` suite exits 0; runtime-warning-clean stderr.
-- [ ] Instrumentation checkpoints keep their positions and labels.
-- [ ] Benchmark probes show no regression beyond noise (targeted probes; no XL suites during development).
-- [ ] Stage contracts documented (inline + short addendum to `docs/staged-processing-pipeline.md`).
-- [ ] Pre-existing functions become callees of the named stages.
+- [x] Five named entry-point subroutines exist with documented contracts (data + demand + capture-mode inputs).
+- [x] `## MAIN ##` is a thin top-level dispatcher calling the stages in order.
+- [x] Demand-resolution timing and all capture/compute/storage gates untouched — `-V statistics-demand` before/after equality on identical invocations.
+- [x] All golden-file tests byte-identical; full `tests/validate-*.sh` suite exits 0; runtime-warning-clean stderr. (Timing rows are excluded from golden comparison by the harness filters; the timing-nomenclature decision above is the drop's only observable-output change.)
+- [x] Instrumentation checkpoints keep their positions and labels.
+- [x] Benchmark probes show no regression beyond noise (targeted probes; no XL suites during development).
+- [x] Stage contracts documented (inline + short addendum to `docs/staged-processing-pipeline.md`).
+- [x] Pre-existing functions become callees of the named stages.
 
 ## Related
 
