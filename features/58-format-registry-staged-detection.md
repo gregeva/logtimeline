@@ -76,6 +76,73 @@ The registry is a new data model on the hottest path in the tool: consulted per 
 - Survey candidate entry representations and dispatch shapes; ground them against the repo's measured constants and prior findings before building anything: per-sample hash-field update ≈ 1.0–1.2 µs (#306 — bounds any per-line bookkeeping the registry adds), `docs/regex-best-practices.md` (pattern-count scaling, alternation rejection, `qr//` handling), `docs/perl-performance-optimization.md`, and the NYTProf workflow for profiling.
 - Identify the candidate implementations for the highest-risk axis — **data-driven extraction dispatch**. Today each cascade branch extracts fields with inline positional code; a registry must express this as data. Candidates to research (non-exhaustive): per-format extraction closures compiled once at load; a generic capture-map loop consulted per line; named captures (`%+`) vs positional; hybrid (data-driven definitions compiled into per-format code refs at startup).
 
+### Research findings (2026-08-20) — inputs to the prototype
+
+Internet survey of industry practice (lnav, Fluent Bit, Logstash/grok, Vector/VRL, Promtail/Loki, GoAccess, Splunk), the multi-pattern-matching and self-organizing-list literature, and Perl-specific dispatch mechanics. These findings are *hypotheses and candidates* — the prototype is the sole proof point on speed (per this drop's exit criteria); nothing below is a decision until measured.
+
+#### F1 — MTF is the literature-correct heuristic for this workload (validates D20)
+
+- Sleator & Tarjan (CACM 1985) prove move-to-front is 2-competitive against the optimal offline algorithm on *any* request sequence; transpose and frequency-count are not ([paper](https://courses.grainger.illinois.edu/ece511/Fa2005/papers/Sleator.1985.CACM.pdf)). Bentley & McGeoch's empirical study finds MTF best on real, locality-heavy streams ([ACM](https://dl.acm.org/doi/pdf/10.1145/3341.3349)).
+- Under locality-of-reference models, MTF is provably the *uniquely optimal* list-update algorithm (Angelopoulos, Dorrigiv & López-Ortiz, SOFSEM 2008 / [JACM bijective analysis](https://dl.acm.org/doi/10.1145/2450142.2450143)). A change-point stream is the extreme of locality.
+- The known pathologies confirm the choice: frequency-count's failure mode is *inertia after a distribution shift* — exactly wrong at file boundaries; MTF's adversarial case (round-robin with no repeats) does not occur here.
+- Industry precedent: lnav locks a detected format per file (first 15k lines, then lock-on, documented as a performance decision) *and* within a format moves the last-matched regex to the front — per-format MTF in production ([lnav format docs](https://docs.lnav.org/en/latest/formats.html)). MTF with a hoisted front-pattern fast path ("try cached winner, fall into the scan on miss") subsumes lnav's hard lock while staying robust to concatenated/mixed files.
+
+#### F2 — Failed-match cost dominates a cascade; anchoring is the highest-leverage fix
+
+- Elastic's grok benchmark ("[Do you grok Grok?](https://www.elastic.co/blog/do-you-grok-grok)"): a non-matching line costs up to **~6× a successful match** on a backtracking engine, because an unanchored pattern retries at every offset; `^` anchoring made failure detection ~10× cheaper — near parity with success. This is the mechanism behind the measured 6.46s of failed ThingWorx attempts (#369).
+- Fail-fast literal/tight-class heads (`^\d{4}-` not `^.*`) let the engine reject at position 0; greedy mid-pattern catch-alls are the failure-path blow-up risk (Friedl; [Russ Cox](https://swtch.com/~rsc/regexp/regexp1.html)).
+- Elastic's tiered matching (cheap shared-header pre-match → payload dispatch) bought 2.5× *unanchored* but the benefit disappears once patterns are anchored — anchor first, tier only if measurement still demands it.
+- Atomic groups `(?>…)`/possessive quantifiers prune the failure-path backtrack tree (orders of magnitude on non-matching input per Friedl) — relevant only for patterns sharing a head (e.g. common timestamp prefixes) that diverge deep in the line; lower priority once anchored.
+- Migration consequence: registry-pattern audit for `^` anchoring and fail-fast heads is part of the cascade migration (R3), and every failure path — including the all-formats-fail stack-trace case — becomes a near-O(1) position-0 rejection ×13.
+
+#### F3 — Prefilter ideas that transfer to a pure-Perl scan
+
+- The engine-level techniques (ripgrep/RegexSet/Hyperscan literal prefilters, rare-byte memchr, Teddy/Aho-Corasick) do not transfer as engines, but their *contract* does: a guard must be a **superset test** — it may pass non-matches but must never reject a true match (Hyperscan's prefilter semantics; [regex-internals](https://burntsushi.net/regex-internals/)).
+- Perl's own regex optimizer already extracts anchored literal heads and runs a Boyer-Moore pre-check ([perlperf](https://perldoc.perl.org/perlperf)) — so explicit `index()`/`substr` guards add value mainly (a) to skip the `=~` invocation overhead itself, and (b) as a *shared* discriminator ruling out most of the list in one test, which per-pattern optimization cannot do.
+- **First-character discriminator for the no-match population** (answers R2's open pre-filter question): continuation/stack-trace lines almost universally start with whitespace or a non-digit/non-`[` character; one `substr($line,0,1)` class test can route them past the whole scan. Must be verified as a superset test against all 13 formats' heads in the prototype.
+- `index()` ≈10× a fixed-token regex for literal guards ([PerlMonks](https://www.perlmonks.org/?node_id=777323)); value concentrates on the miss path (patterns 2..13 during a scan).
+
+#### F4 — Specificity/overlap is a correctness gate for MTF (feeds umbrella Q2)
+
+lnav's hard rule — *each regex must match exactly one message shape* — exists because a generic pattern shadows specific ones, and lnav orders specific-before-generic by cross-testing every format's samples at startup. MTF *dynamically* reorders, so if any two registry patterns can match the same line, MTF can promote the generic one and misclassify a whole file. The prototype/implementation must cross-test all 13 patterns against every format's sample fixtures (the R1 samples) and either tighten to mutual exclusivity or pin the ambiguous entries' relative order. This turns umbrella Q2 (pattern priority) from a policy question into a testable invariant.
+
+#### F5 — Industry schema consensus validates R1, with adoptable refinements
+
+Across lnav/Fluent Bit/grok/Promtail/GoAccess, format definitions converge on exactly R1's shape: identity + anchored named-capture patterns + per-field *type* metadata separate from the regex + a structured timestamp contract + sample lines. Specifics worth adopting:
+
+- **Samples are mandatory executable tests** (lnav errors at load if a sample fails its format) — strengthens R1's "samples become fixtures" into a load-time self-check candidate.
+- **Duration-unit-as-metadata is established practice**: lnav `duration-field` + `duration-divisor`; GoAccess encodes the unit in the specifier itself (`%T` s / `%L` ms / `%D` µs / `%n` ns, first-wins). Runtime unit sniffing is *not* industry practice — confirms the D18 boundary.
+- **Offset-less timezone policy is a standard, named knob**: Fluent Bit `time_offset`/IANA-zone/system-TZ fallback; Promtail `location`; lnav `convert-to-local-time` — matches the R1 three-case contract (D23). Promtail additionally names an explicit *unparseable-timestamp policy* (`action_on_failure`: fudge/skip).
+- **Unmatched-line disposition is an explicit, observable policy everywhere** (lnav continuation lines, grok `_grokparsefailure` counters, GoAccess `--invalid-requests`) — supports the `-V format-detection` telemetry contract (match counts, scan depth, no-match counts).
+- **Explicit pinning outranks detection** wherever both exist (Splunk's precedence chain; lnav `file-pattern`); half the industry (Fluent Bit, Vector, Promtail) refuses to auto-detect at all — detection is a convenience layered on a registry, never a substitute for one. A per-format file-pattern scoping hint is a cheap future-compatible slot to reserve in the YAML schema.
+
+#### F6 — Perl extraction-dispatch mechanics (single-run magnitudes on perl 5.44/darwin; re-measure in the prototype)
+
+Micro-benchmark preserved at `prototype/58-research-microbench.pl`; all numbers are one-run magnitudes, not blessed medians.
+
+- **Named-capture *access* via `%+` is the trap, not named groups themselves**: `%+`/`%-` are tied hashes with per-key FETCH magic ([Tie::Hash::NamedCapture](https://perldoc.perl.org/Tie::Hash::NamedCapture)). Measured on a 6-field log-line extract: positional `$1..$6` 1363 ns/iter; `%+` access 2801 ns (~2× the entire match+extract); `@{^CAPTURE}` 1811 ns; `@-`/`@+`+substr 3521 ns. Named groups *in the pattern* read positionally cost nothing (1355 ns) — so registry patterns can keep named groups for self-documentation while generated extraction reads `$1..$n`, with name→ordinal resolved once at load.
+- **qr// storage placement is second-order**: literal 941 ns vs lexical qr 1094 vs array-element 1097 vs hashref-element `$entry->{pattern}` 1158 vs interpolated 1152 — ~60 ns/line for hashref vs lexical (~0.6 s per 10M lines). Never *interpolate* a qr into another pattern at match time (documented 5–10% penalty, open [p5p #19405](https://github.com/Perl/perl5/issues/19405)); compose once at load. `/o` is off the table (perlop: "almost never a good idea" on modern perls).
+- **Call overhead of leaving the elsif chain**: empty sub 33 ns; 3-arg sub/coderef ~86 ns; hash-dispatched coderef ~100 ns → one extraction-coderef call per line ≈ 0.9–1.0 s per 10M lines (~3–8% of a 1–3 µs/line budget). Fewer args / `$_[0]` access shrinks it. A **per-file/steady-state cached format coderef** (call the current winner directly, no dispatch) recovers most of it — matrix variant.
+- **Load-time codegen of data-driven specs into closures is the established Perl fast path**: Type::Tiny ([Eval::TypeTiny](https://typetiny.toby.ink/Eval-TypeTiny.html)), Moose inlined accessors, Eval::Closure. No published generic-interpreter-vs-compiled-closure ratio exists for parsing — the prototype must produce it; the generic capture-map loop (candidate b) pays per-line per-field interpreter cost that closures pay once at load, so it enters the matrix as the expected loser / honest baseline.
+- **Timestamp parsing**: known-fast class is compiled regex + direct arithmetic (`Time::Local::timegm`) with a **last-seen-date cache** (consecutive lines share the date part) — ~1M parses/s class vs 10–30× slower for Date::Parse/DateTime-based strptime paths ([Time::Str announcement](https://blogs.perl.org/users/chansen/2026/05/introducing-timestr.html); Perl Cookbook 3.8). Do not route per-line through `Time::Piece->strptime` with a runtime format string; compile the declared layout into the generated extraction closure.
+
+#### F7 — YAML module (feeds the R4 in-drop decision)
+
+- **YAML::PP** — recommended candidate: pure Perl (PAR-safe on all three platforms), YAML 1.2, spec-compliant type resolution, actively maintained (v0.41.0, 2026-06); slowest parser but load-once-config irrelevant; error messages carry line/position though self-admittedly improvable.
+- **YAML::Tiny** — viable only if deliberately restricting users to a subset (no anchors/aliases, no tags, no flow collections); known to accept some invalid YAML → weaker validation UX for R4's "clear, actionable errors".
+- **YAML::XS rejected**: fastest but YAML 1.1-era divergences and XS shared objects are the primary source of PAR packing failures ([PAR-Packer #67](https://github.com/rschupp/PAR-Packer/issues/67)) — unnecessary risk for a config read once at startup.
+- Decision itself (YAML::PP vs YAML::Tiny) stays in-drop pending a startup-latency check of YAML::PP's compile cost.
+
+#### F8 — Ranked prototype candidates (what the matrix must measure)
+
+1. Anchoring + fail-fast head audit of all 13 patterns (F2) — prerequisite; makes everything else measurable.
+2. First-character superset discriminator ahead of the scan for the no-match population (F3).
+3. MTF as locked, plus the hoisted front-pattern fast path (F1); measure against a detect-and-lock-per-file variant (lnav model) to confirm the front-cache subsumes it.
+4. Extraction dispatch: load-time codegen closures (lead) vs generic capture-map loop (baseline-of-honesty) vs inline cascade (today's baseline); positional reads throughout, `%+` excluded from the hot path (F6).
+5. Per-pattern `index()`/fixed-offset guards — expected modest after anchoring; measure, don't assume (F3).
+6. Specificity cross-test of all patterns against all sample fixtures as a correctness gate, not a perf item (F4).
+7. Compiled timestamp arithmetic + date-cache inside the generated closures (F6).
+
 ### Prototype charter (`prototype/`, no production code)
 
 Compare the candidate implementations, measured at representative scale (staged 1k → 10k → 100k → millions of lines, per the NYTProf sample plan), against today's inline cascade as the baseline:
