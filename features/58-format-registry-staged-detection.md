@@ -335,6 +335,15 @@ Policies: `static` (today); `mtf-free` (unconstrained); `mtf-pinned` (winner pro
 - **Recommendation: closure-compiled probes with per-probe `index()` guards behind one `index($message,'=')` outer gate.** The outer gate is a superset of every probe literal (all probes require `=`), bounds the miss path to a single scan (−0.26 s/M on sparse), and costs +94 ns/line on fully-dense streams — a workload no real mixed log sustains. All three layers (gate, per-probe guard literals, probe regex + mask template) are declarative registry entry data compiled at load — the D25 shape holds unchanged.
 - The count probe migrates with its current global scope (parity boundary, D25); scoping remains #60's question.
 
+#### P7 — Detection-window replay cost (charter item 5, D17): free at realistic window sizes; two-phase-store is the shape
+
+`prototype/58-window-mini.pl`: hold-the-first-N-lines designs priced against no-window, all running the P4 scan configuration with an identical extraction stand-in; accumulator parity gated before timing; ramped 1k (too noisy to read — sub-4 ms totals) → 10k → 100k → 1m, window = 1000.
+
+- **At 1m the window mechanism is free in every variant**: deltas vs no-window are +8–54 ns/line across all three fixtures — at or inside run-to-run ranges. The overheads visible at small scale (reclassify's double classification of window lines, naive's per-line branch) are window-fraction artifacts that vanish as N/total → 0; a 1,000-line window is 0.1% of a 1m stream.
+- **Buffer memory is linear and negligible**: ~310–575 bytes per held line for `[line, entry]` pairs (~185–450 raw lines only) — 0.3–0.6 MB for a 1,000-line window, 1.8–5.8 MB even at 10,000 lines.
+- **Design choice therefore falls to structure, not speed: `two-phase-store`** — window loop classifies each held line once and stores `[line, entry]`, flush runs deferred extraction, then a *clean* steady loop with no window check (the P3 lean-loop lesson applied). `reclassify` (hold raw, classify twice) is acceptable if buffer simplicity is ever preferred; `naive-branch` (window test left in the hot loop) is measurable at small scale and structurally worse for zero benefit — avoided.
+- Consequence for D17: the minimal detection window can be sized generously (hundreds to a few thousand lines) without measurable cost; the binding constraints are memory (trivial) and time-to-first-output, not throughput.
+
 ## In-drop design decisions to settle
 
 - Pattern priority when multiple registry entries could match the same line (umbrella Q2) — constrained by A2's partial-order finding; mechanism chosen in the prototype
