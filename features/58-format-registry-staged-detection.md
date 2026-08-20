@@ -5,6 +5,7 @@
 - **Issue:** #58 — **Drop 1 of the 0.17.0 merge train** (parent: #23; follows Drop 0 #180)
 - **Planned:** 2026-07-15 walkthrough session (this document is the repo-side source of truth for the drop; the issue body is its GitHub-side snapshot)
 - **Umbrella:** `features/log-format-registry.md` — shared requirements (sections 1–5, 11) and locked decisions D12/D13/D17/D18/D20 live there
+- **Prerequisite #180: COMPLETE (2026-08-20, PR #380)** — the named stage entry points exist; see R6 for the concrete anchors this drop builds against
 - **Fixes:** #369 (access-log read-phase regression). **Unblocks:** #17's declarative path (format-carried units)
 
 ## Overview
@@ -54,7 +55,9 @@ Duration unit is registry metadata. Precedence: explicit `-du` override → form
 
 ### R6 — Detect-stage integration
 
-The registry slots into #180's named `detect` role; `read_index_file()` hints (#179 — timestamp range, `ts_precision`) are available detect-stage inputs. The D17 minimal detection window (hold first ~N lines; per-line re-scan on cache-miss) is the only line-holding built — no full reader/processor decoupling (#181 is architecture guidance only).
+The registry slots into #180's named `detect` role — concretely (post-Drop 0, 2026-08-20): the pre-read detect surface is `pipeline_detect()` (today `read_index_file()` + the startup memory checkpoint), and the per-line match-type cascade this drop replaces lives inside `read_and_process_logs()` under `pipeline_parse()`. Each `pipeline_*()` sub carries a contract header comment (receives/emits + resolved demand and capture modes as standing inputs); the headers on `pipeline_detect()`/`pipeline_parse()` are updated **in the same change** that moves detection into the registry, as is `docs/staged-processing-pipeline.md` § "Named Pipeline Stages". `read_index_file()` hints (#179 — timestamp range, `ts_precision`) are available detect-stage inputs. The D17 minimal detection window (hold first ~N lines; per-line re-scan on cache-miss) is the only line-holding built — no full reader/processor decoupling (#181 is architecture guidance only).
+
+**Detection timing nomenclature (contract from #180's 2026-08-20 decision):** timing surfaces follow `stage/step` form. When this drop adds detection cost, the machine row is `TIMING	detect/<step>` and the summary-table row is `DETECT: <NAME>` with the display string **≤30 characters** (the summary table's category column is fixed at width 30; longer strings overflow). New labels need no `compare-results.sh` compat mapping — only renames of pre-existing labels do (the #180 rename map already exists there).
 
 ## Out of scope
 

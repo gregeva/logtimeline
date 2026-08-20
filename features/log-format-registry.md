@@ -2,7 +2,8 @@
 
 ## Status
 
-- **Last reviewed:** 2026-07-15
+- **Drop 0 shipped (2026-08-20):** #180 (named pipeline stages) merged into `release/0.17.0` via PR #380 and closed — five `pipeline_*()` entry points with documented role contracts; stage-coherent `stage/step` timing nomenclature (decision recorded in `features/180-named-pipeline-stages.md`). #379 (spaced input paths failed to open — csh `glob()` whitespace splitting) found while gating and fixed via PR #381. Next: Drop 1 (#58), opening with its mandatory research → prototype phase; hand-forward notes for #58/#60 on their issue threads (2026-08-20).
+- **Last reviewed:** 2026-08-20
 - **Scope re-cut (2026-07-15, later same session — D21):** Phase 2 moves out of 0.17.0 as well: its motivating consumer is Phase 4's inter-line derived metrics, so **Phases 2 and 4 ship together in a later release** (with #57 and #55). 0.17.0 = Drops 0/1/2: #180 → #58 → #60. Account-at-read-time locked as the universal time-attribution semantic; temporal interpolation not planned, spec'd for the record in #370 (D22).
 - **True-up (2026-07-15):** Implementation scheduled for release 0.17.0 as a merge train of section drops on `release/0.17.0` (~~Phases 1–3~~ re-cut by D21 above; Phase 4 deferred to a later release). Prerequisite graph collapsed since 2026-05-09: #34/#41/#51 closed (superseded/resolved by the #187/#189 unified bin-counter contract), #179 shipped with a narrowed role (detect-stage hints only), #181 reframed as architecture guidance rather than a deliverable. Memory design target reframed: eliminate waste and stay bounded/accountable — do not minimize to the floor; available memory is spent on fidelity. See Decision Log entry for 2026-07-15 (D15–D19).
 - **Sequencing change (2026-05-09):** Pre-requisite "staging primitive" work lands on separate branches against today's architecture *before* #23 implementation begins. This shrinks the rewrite's surface area. New prerequisite issues filed: #179 (index read-back), #180 (named pipeline stages), #181 (buffered read pipeline). Existing issues #41, #34, #51 updated with Phase 2 alignment requirements and re-classified as Phase 2 prerequisites. See "Decision Log" entry for 2026-05-09 below.
@@ -493,7 +494,7 @@ This refactor is staged into phases with independent deliverables. Each phase bu
 | #54 | Fuzzy matching engine research | **COMPLETE** — implemented in #96 (v0.13.0). See `docs/similarity-engine-best-practices.md` |
 | #56 | Memory baseline profiling | **COMPLETE** (v0.14.2) |
 | #179 | Index read-back with drift detection and refresh | **COMPLETE** (shipped v0.15.x), with a **narrowed role** under the #187 contract: partitions auto-resize online, so the index is no longer load-bearing for histogram/heatmap bound pre-seed. Remaining value to this rewrite: timestamp-range / `ts_precision` hints to the `detect` stage, and prior-run unit knowledge (see D18 precedence order). |
-| #180 | Name the implicit pipeline stages (detect/parse/accumulate/finalize/render) | **OPEN — Drop 0 of the 0.17.0 merge train.** Phase 1 inserts the registry into the `detect` stage; Phase 2 adds per-bucket lifecycle inside `finalize`. |
+| #180 | Name the implicit pipeline stages (detect/parse/accumulate/finalize/render) | **COMPLETE — shipped 2026-08-20** (PR #380 into `release/0.17.0`). Phase 1 inserts the registry into the `detect` stage (`pipeline_detect()`/`pipeline_parse()` now exist); Phase 2 adds per-bucket lifecycle inside `finalize`. |
 | #181 | Decouple file I/O from processing via a buffered read pipeline | **REFRAMED (2026-07-10 / 2026-07-15, D17) — architecture guidance, not a deliverable.** Perf testing showed file I/O is not a bottleneck. Phase 1 needs only a minimal detection window (hold the first ~N lines during format detection, per-line re-detect on cache-miss); that window is also the future substrate for #17's unit sampling. No full reader/processor decoupling is built. |
 | ~~#41~~ | ~~Heatmap/histogram unified binning~~ | **CLOSED — superseded by #187/#189**: heatmap and histogram run the same unified bin-counter primitives at the same precision. |
 | ~~#34~~ | ~~Memory-optimized two-pass streaming~~ | **CLOSED — resolved by #187/#189**: reframed as the consumer migration onto the unified primitive contract and delivered there. |
@@ -504,7 +505,7 @@ This refactor is staged into phases with independent deliverables. Each phase bu
 ### Phases (re-cut 2026-07-15, D21 — 0.17.0 merge train)
 | Issue | Phase | Drop | Title | Depends On | 0.17.0 |
 |-------|-------|------|-------|------------|--------|
-| #180 | — | 0 | Named pipeline stages (zero behavioral change) | — | **In** |
+| #180 | — | 0 | Named pipeline stages (zero behavioral change) | — | **In — MERGED 2026-08-20 (PR #380)** |
 | #58 | 1 | 1 | Format registry and staged detection (fixes #369; unblocks #17's declarative path) | #180 | **In** |
 | #60 | 3 | 2 | Configurable metric visibility and purpose | #58 | **In** |
 | #57 | — | — | Bucket data structure prototype (go/no-go gate for Phase 2) | #58 (design context) | **Out — Phase 2+4 release (D21)** |
@@ -579,7 +580,7 @@ Discussion established that derived metrics require a fundamental change to the 
 
 ### Prerequisites (status as of 2026-07-15)
 - **Issue #179**: Index read-back — **COMPLETE** (shipped v0.15.x); narrowed role: detect-stage hints + unit knowledge precedence, not bounds pre-seed
-- **Issue #180**: Name the implicit pipeline stages — **OPEN**, Drop 0 of the 0.17.0 merge train
+- **Issue #180**: Name the implicit pipeline stages — **COMPLETE** (merged 2026-08-20, PR #380), Drop 0 of the 0.17.0 merge train
 - **Issue #181**: Buffered read pipeline — **REFRAMED (D17)**: architecture guidance only; minimal detection window replaces full decoupling
 - **Issue #41**: Align heatmap with histogram binning — **CLOSED**, superseded by #187/#189
 - **Issue #34**: Two-pass streaming memory mode — **CLOSED**, resolved as consumer migration under #187/#189

@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Issue:** #180 — **Drop 0 of the 0.17.0 merge train** (parent: #23)
+- **Issue:** #180 — **Drop 0 of the 0.17.0 merge train** (parent: #23) — **SHIPPED 2026-08-20**: merged into `release/0.17.0` via PR #380 (commit ee5ed88, merge commit fc434d9); issue closed. Full gate green (all `tests/validate-*.sh`, byte-identical goldens, `-V statistics-demand` equality, timing probe within noise).
 - **Planned:** 2026-07-15 walkthrough session (this document is the repo-side source of truth for the drop; the issue body is its GitHub-side snapshot)
 - **Umbrella:** `features/log-format-registry.md` — shared requirements and locked decisions D1–D22 live there, not here
 
