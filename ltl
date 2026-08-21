@@ -291,7 +291,7 @@ my %match_type_to_slug = (
     3  => 'tomcat_access_with_duration',     # Tomcat 9 %D; also catches Apache HTTP2 %D (see note above)
     4  => 'tomcat_access_common',            # access log without duration
     5  => 'connection_server_json',          # ThingWorx Connection Server JSON
-    6  => 'java_gc_log',                     # Java 11 GC info-level pause
+    6  => 'java_gc_g1',                      # Java G1 collector info-level pause and event lines
     7  => 'tw_analytics_v2',                 # ThingWorx Analytics V2
     8  => 'tw_analytics_worker',             # ThingWorx Analytics worker
     9  => 'jboss_access',                    # JBoss / Jersey access log
@@ -824,6 +824,8 @@ my @log_levels = (
     'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx', 
     '4xx-HL', '4xx', '3xx-HL', '3xx', '2xx-HL', '2xx', '1xx-HL', 
     '1xx', 'Pause Young-HL', 'Pause Young', 'Pause Full-HL', 'Pause Full',
+    'Pause Remark-HL', 'Pause Remark', 'Pause Cleanup-HL', 'Pause Cleanup',
+    'To-space exhausted-HL', 'To-space exhausted', 'Using G1-HL', 'Using G1',
     'DATA-HL', 'DATA', 'err-rate', 'msg-rate', 'empty'
 );
 
@@ -861,6 +863,10 @@ my %colors = (
     '5xx'  => "\033[0;31m",
     'Pause Young' => "\033[0;35m",
     'Pause Full' => "\033[0;31m",
+    'Pause Remark' => "\033[0;33m",
+    'Pause Cleanup' => "\033[0;32m",
+    'To-space exhausted' => "\033[0;31m",
+    'Using G1' => "\033[0;34m",
     'err-rate' => "\033[91m\033[109m",
     'msg-rate'    => "\033[0m",
     'NC'    => "\033[0m",
@@ -2177,7 +2183,7 @@ my %format_transform_code = (
     strip_query_string  => q{ $message =~ s/\?.+$//; },                # emitted only when query strings are excluded (CLI-gated at compile)
     prepend_session     => q{ $message = "[$session] $message" if defined $session; },  # emitted only when sessions are included (CLI-gated at compile)
     strip_trailing_ws   => q{ $message =~ s/\s+$//g; },
-    gc_heap_delta       => q{ $bytes = convert_bytes( $heap_from ) - convert_bytes( $heap_to ); $bytes = $bytes < 0 ? 0 : $bytes; },
+    gc_heap_delta       => q{ if( defined $heap_from && defined $heap_to ) { $bytes = convert_bytes( $heap_from ) - convert_bytes( $heap_to ); $bytes = $bytes < 0 ? 0 : $bytes; } },
     chop_message        => q{ chop $message; },
     strip_pid           => q{ $message =~ s/\d+ (.*)$/$1/; },
     hoist_cpp_object    => q{ if( $message =~ /\w+\.cpp:\d+ / ) { $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/; $object = $1; } },
@@ -2362,8 +2368,18 @@ sub format_registry_specs {
         [ '2025-02-02 21:03:06', 'WARN', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
         [ '2025-02-02 21:03:07', 'INFO', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
       ] },
-    { name => 'mt6', slug => 'java_gc_log', match_type => 6, scanned => 1, head_class => 'bracket_digit',
-      pattern_src => '^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}.*?\[info\]\[gc\s*\] GC\(\d+\) (.+?) (\(.+?\)) (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms',
+    # The event name is a closed alternation, not an open `(.+?)`: G1's
+    # concurrent-cycle lines (`Concurrent Mark Cycle`, `Concurrent Cycle`,
+    # `Concurrent Undo Cycle`) share this line head but are deliberately
+    # not recognized. Their end-of-cycle `Nms` figure is a wall-clock
+    # envelope that already contains the Remark and Cleanup pauses this
+    # entry captures, so admitting it would double-count stop-the-world
+    # time. Cause clause and heap/duration payload are both optional: G1
+    # writes `Pause Remark`/`Pause Cleanup` with no cause, and
+    # `To-space exhausted`/`Using G1` with neither. `Using G1` is also the
+    # only form with no `GC(n)` prefix.
+    { name => 'mt6', slug => 'java_gc_g1', match_type => 6, scanned => 1, head_class => 'bracket_digit',
+      pattern_src => '^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}.*?\[info\]\[gc\s*\] (?:GC\(\d+\) )?(Pause (?:Young|Full|Remark|Cleanup)|To-space exhausted|Using G1)(?: (\(.+?\)))?(?: (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms)?$',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'message'],[4,'heap_from'],[5,'heap_to'],[6,'heap_size'],[7,'duration'] ],
       transforms => [ 'gc_heap_delta' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
@@ -2372,10 +2388,18 @@ sub format_registry_specs {
       samples => [
         '[2025-04-05T11:10:47.867+0000][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 2433M->66M(49152M) 18.406ms',
         '[2025-04-05T12:00:03.101+0000][info][gc] GC(7) Pause Young (Concurrent Start) (Metadata GC Threshold) 512M->128M(49152M) 7.250ms',
+        '[2025-04-05T11:10:50.305+0000][info][gc] GC(2) Pause Remark 74M->74M(320M) 2.422ms',
+        '[2025-04-05T11:10:50.309+0000][info][gc] GC(2) Pause Cleanup 82M->82M(320M) 0.204ms',
+        '[2024-10-16T05:27:56.233+0000][info][gc] GC(144521) To-space exhausted',
+        '[2025-06-05T11:17:57.418+0000][info][gc] Using G1',
       ],
       expect => [
         [ '2025-04-05T11:10:47', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause)', '2367000000', '18.406', '0', '1' ],
         [ '2025-04-05T12:00:03', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Concurrent Start) (Metadata GC Threshold)', '384000000', '7.250', '0', '1' ],
+        [ '2025-04-05T11:10:50', 'Pause Remark', undef, undef, undef, undef, undef, undef, undef, '0', '2.422', '0', '1' ],
+        [ '2025-04-05T11:10:50', 'Pause Cleanup', undef, undef, undef, undef, undef, undef, undef, '0', '0.204', '0', '1' ],
+        [ '2024-10-16T05:27:56', 'To-space exhausted', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
+        [ '2025-06-05T11:17:57', 'Using G1', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
       ] },
     { name => 'mt7', slug => 'tw_analytics_v2', match_type => 7, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+)\s+\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[.,]\d{3})\] (.*)$',
@@ -13897,9 +13921,8 @@ sub print_summary_table {
     foreach my $category_bucket (@log_levels) {
         next if $category_bucket =~ /^(empty|err-rate|msg-rate)$/;
         next unless $category_totals{$category_bucket};
-	
-        my ( $legend_title ) =  "$category_bucket:" . " " x ( 14 - length( $category_bucket ) );
-        push @summary_table, sprintf( $table_format, $category_bucket, $category_totals{$category_bucket} ); 
+
+        push @summary_table, sprintf( $table_format, $category_bucket, $category_totals{$category_bucket} );
     }
 
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );

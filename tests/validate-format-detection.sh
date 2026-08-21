@@ -14,7 +14,7 @@
 # jboss_access against a fixture derived from the same log (quoted
 # referrer/user-agent + trailing duration appended, issue #365). The
 # remaining slugs (thingworx_rac_client, connection_server_json,
-# java_gc_log, tw_analytics_v2, tw_analytics_worker,
+# java_gc_g1, tw_analytics_v2, tw_analytics_worker,
 # connection_server_standard) are asserted against fixtures derived from
 # the format registry's own sample lines (issue #58) — the same lines the
 # D24 load-time gates validate, so fixture and registry cannot drift.
@@ -485,15 +485,19 @@ EOF
     assert_registry_sample_scenario "$log" connection_server_json 5 2
 }
 
-scenario_java_gc_log() {
-    current_scenario="java-gc-log"
+scenario_java_gc_g1() {
+    current_scenario="java-gc-g1"
     echo "[$current_scenario]"
     local log="$TMP_DIR/gc.log"
     cat > "$log" <<'EOF'
 [2025-04-05T11:10:47.867+0000][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 2433M->66M(49152M) 18.406ms
 [2025-04-05T12:00:03.101+0000][info][gc] GC(7) Pause Young (Concurrent Start) (Metadata GC Threshold) 512M->128M(49152M) 7.250ms
+[2025-04-05T11:10:50.305+0000][info][gc] GC(2) Pause Remark 74M->74M(320M) 2.422ms
+[2025-04-05T11:10:50.309+0000][info][gc] GC(2) Pause Cleanup 82M->82M(320M) 0.204ms
+[2024-10-16T05:27:56.233+0000][info][gc] GC(144521) To-space exhausted
+[2025-06-05T11:17:57.418+0000][info][gc] Using G1
 EOF
-    assert_registry_sample_scenario "$log" java_gc_log 6 2
+    assert_registry_sample_scenario "$log" java_gc_g1 6 6
 }
 
 scenario_tw_analytics_v2() {
@@ -725,7 +729,7 @@ scenario_tw_edge_c_sdk;         echo ""
 scenario_csv_with_udm;          echo ""
 scenario_thingworx_rac_client;  echo ""
 scenario_connection_server_json; echo ""
-scenario_java_gc_log;           echo ""
+scenario_java_gc_g1;            echo ""
 scenario_tw_analytics_v2;       echo ""
 scenario_tw_analytics_worker;   echo ""
 scenario_connection_server_standard; echo ""
