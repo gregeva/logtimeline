@@ -84,6 +84,49 @@ assert_line() {
     fi
 }
 
+# Contracted-absence assertion: a line matching `pattern` must NOT be
+# present (HARNESS-DESIGN.md: absence asserted only when it is itself a
+# contracted invariant, stated explicitly in `asserts`). A missing capture
+# file is a hard failure, never a pass.
+assert_absent() {
+    local outfile="$1"
+    shift
+    local pattern asserts produced_by contract
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            pattern)     pattern="$2";     shift 2 ;;
+            asserts)     asserts="$2";     shift 2 ;;
+            produced_by) produced_by="$2"; shift 2 ;;
+            contract)    contract="$2";    shift 2 ;;
+            *) echo "assert_absent: unknown field '$1'"; exit 2 ;;
+        esac
+    done
+    : "${pattern:?assert_absent requires pattern}"
+    : "${asserts:?assert_absent requires asserts}"
+    : "${produced_by:?assert_absent requires produced_by}"
+    : "${contract:?assert_absent requires contract}"
+
+    if [[ ! -f "$outfile" ]]; then
+        echo "  FAIL  $current_scenario :: capture file missing: $outfile" >&2
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: missing capture for absence check")
+        return
+    fi
+    if grep -qE "$pattern" "$outfile"; then
+        echo "  FAIL  $current_scenario"
+        echo "        pattern:     $pattern (contracted ABSENT, but found)"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        echo "        (found in $outfile)"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: absent-pattern found: $pattern")
+    else
+        echo "  PASS  $current_scenario :: absent: $pattern"
+        pass=$((pass + 1))
+    fi
+}
+
 # Runtime-warning cleanliness for a run_format_detection capture (its stderr
 # lives beside the captured stdout as <capture>.stderr). Runs in the main
 # shell so the fail counters persist - a command-substitution subshell could
@@ -621,6 +664,50 @@ scenario_scan_telemetry_nomatch() {
         contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
 }
 
+scenario_unit_ambiguity_warning() {
+    current_scenario="unit-ambiguity-warning"
+    echo "[$current_scenario]"
+
+    # D18 (#58 S7): binding a format whose duration unit varies across
+    # producers without -du emits one stderr note naming the assumption.
+    # The note is an intentional diagnostic — it never carries an
+    # ` at ... line` suffix, so check_capture_warnings stays clean.
+    local tomcat="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+    local out
+    out=$(run_format_detection "$tomcat")
+    check_capture_warnings "$out"
+
+    assert_line "$out.stderr" \
+        pattern     '^Note: .*duration field \(%D\) is milliseconds on Tomcat 9 but microseconds on Apache HTTP Server and Tomcat 10\.1\+; assuming milliseconds - use -du us' \
+        asserts     'Binding slug `tomcat_access_with_duration` without -du emits the unit-ambiguity note on stderr, naming the milliseconds assumption and the -du us remedy' \
+        produced_by 'read_and_process_logs() in ltl (first-match block, FR_UNIT_AMBIGUOUS gate)' \
+        contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18); the note text is part of the contract'
+
+    # Contracted absence 1: an explicit -du suppresses the note — the user
+    # has stated the unit, so there is no assumption to surface.
+    local out_du
+    out_du=$(run_format_detection "$tomcat" -du ms)
+    check_capture_warnings "$out_du"
+
+    assert_absent "$out_du.stderr" \
+        pattern     '^Note: .*duration field \(%D\)' \
+        asserts     'With -du given (any unit), the unit-ambiguity note is contracted ABSENT: the note exists only to surface an assumption, and -du removes the assumption' \
+        produced_by 'read_and_process_logs() in ltl (first-match block, duration_unit_override gate)' \
+        contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18)'
+
+    # Contracted absence 2: an unambiguous format (codebeamer declares ms
+    # unconditionally) never triggers the note.
+    local out_cb
+    out_cb=$(run_format_detection "$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt")
+    check_capture_warnings "$out_cb"
+
+    assert_absent "$out_cb.stderr" \
+        pattern     '^Note: .*duration field \(%D\)' \
+        asserts     'A format without the unit-ambiguity flag is contracted to never emit the note — the gate is the registry declaration, not the presence of durations' \
+        produced_by 'read_and_process_logs() in ltl (first-match block, FR_UNIT_AMBIGUOUS gate)' \
+        contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18) - only entries declaring unit_ambiguous carry it'
+}
+
 # ---------- Run -----------------------------------------------------------
 
 echo "Validating format-detection -V section (issue #228)"
@@ -643,7 +730,8 @@ scenario_tw_analytics_v2;       echo ""
 scenario_tw_analytics_worker;   echo ""
 scenario_connection_server_standard; echo ""
 scenario_scan_telemetry;        echo ""
-scenario_scan_telemetry_nomatch
+scenario_scan_telemetry_nomatch; echo ""
+scenario_unit_ambiguity_warning
 
 echo ""
 echo "Results: $pass passed, $fail failed"

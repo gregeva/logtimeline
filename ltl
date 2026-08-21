@@ -376,6 +376,7 @@ use constant FORMAT_SCAN_NOMATCH_SAMPLE_EVERY => 256;
 my $format_scan_promotions = 0;        # actual reorders via format_registry_promote()
 my $format_scan_nomatch_samples = 0;   # sampled no-match scans timed
 my $format_scan_nomatch_sample_us = 0; # summed elapsed us across those samples
+my $format_unit_ambiguity_warned = 0;  # D18 unit-ambiguity note emitted (once per run)
 
 # Rate unit override (Issue #122)
 my $rate_unit = 'm';                                     # Default: per-minute (preserves existing behavior)
@@ -9179,6 +9180,16 @@ sub read_and_process_logs {
                     $fdd->{match_type}       = $match_type;
                     $fdd->{slug}             = $match_type_to_slug{$match_type} // 'unknown';
                     $fdd->{first_match_line} = $line_number;
+                    # D18: the bound format's duration unit varies across
+                    # producers and no -du was given — tell the user which
+                    # assumption is in effect, once per run. Intentional
+                    # diagnostic: must never carry an ` at ... line` suffix
+                    # (runtime-warning discriminator, HARNESS-DESIGN.md).
+                    if ($line_entry && $line_entry->[FR_UNIT_AMBIGUOUS]
+                        && !defined $duration_unit_override && !$format_unit_ambiguity_warned) {
+                        $format_unit_ambiguity_warned = 1;
+                        print STDERR "Note: $in_file: this access log format's duration field (%D) is milliseconds on Tomcat 9 but microseconds on Apache HTTP Server and Tomcat 10.1+; assuming milliseconds - use -du us if this log's producer emits microseconds\n";
+                    }
                 }
                 $fdd->{matched_lines}++;
                 $fdd->{is_access_log} = 1 if $is_access_log;
@@ -9192,9 +9203,18 @@ sub read_and_process_logs {
                 # reach arithmetic or unit conversion.
                 $duration = undef if defined $duration && $duration !~ /^[0-9]+(?:\.[0-9]+)?$/;
 
-                # Duration unit conversion (Issue #17) - convert to milliseconds if user specified a unit
-                if (defined $duration && defined $duration_unit_override) {
-                    $duration = convert_duration_to_ms($duration, $duration_unit_override);
+                # Duration unit conversion (Issue #17): -du wins; otherwise
+                # the winning format's declared unit applies (format-carried,
+                # #58 R5). Every built-in declares ms or no unit, so the
+                # format-carried branch converts nothing today — it exists so
+                # a non-ms format declaration is honored without code changes.
+                if (defined $duration) {
+                    if (defined $duration_unit_override) {
+                        $duration = convert_duration_to_ms($duration, $duration_unit_override);
+                    } elsif ($line_entry && defined $line_entry->[FR_DURATION_UNIT]
+                             && $line_entry->[FR_DURATION_UNIT] ne 'ms') {
+                        $duration = convert_duration_to_ms($duration, $line_entry->[FR_DURATION_UNIT]);
+                    }
                 }
 
                 # Scan-matched lines arrive with $timestamp and
