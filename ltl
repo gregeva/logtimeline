@@ -78,7 +78,7 @@ my %verbose_section_registry = (
         description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction (Issue #96).',
     },
     'format-detection' => {
-        description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts (Issue #228).',
+        description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts, plus registry scan telemetry: order, promotions, per-entry match counts, sampled no-match cost (Issues #228, #58).',
     },
     'heatmap-palette' => {
         description => 'Heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250).',
@@ -311,6 +311,10 @@ my %match_type_to_slug = (
 #   matched_lines      => integer
 #   unmatched_lines    => integer
 #   first_match_line   => integer (1-based file line number of first match)
+#   scan_attempts        => integer (registry scan-sub invocations for the file,
+#                           including detection-window prefill classifications;
+#                           excludes confirmed-CSV fast-path lines and held-line replays)
+#   scan_failed_attempts => integer (scan invocations that matched no entry)
 my %format_detection;
 
 # Format registry (Issue #58 / #23 Phase 1).
@@ -351,6 +355,8 @@ use constant {
     FR_ANC_SET         => 19,  # FR_ANCESTORS as a name-set hashref — the hot
                                # loop's O(ancestors) already-optimal check must
                                # not rebuild a hash per line (P3 lean-loop)
+    FR_MATCHES         => 20,  # run-total matched-line count for this entry
+                               # (scan telemetry; -V format-detection / scan)
 };
 my @format_registry;           # scanned entries, static cascade order (frozen at build)
 my %format_registry_entry;     # name => entry (includes non-scanned entries)
@@ -360,6 +366,16 @@ my @format_scan_order;         # live MTF scan state: @format_registry reordered
 my $format_detection_window = 0; # hidden --detection-window=N: two-phase-store window
                                  # size (D30/D38); 0 = no window until a consumer
                                  # (#17 unit resolution) sizes it
+# Scan telemetry for -V format-detection / scan. The no-match scan is the
+# structural worst case (every entry attempted, nothing matches), so its
+# cost is instrumented by sampling: 1 in FORMAT_SCAN_NOMATCH_SAMPLE_EVERY
+# no-match lines is re-scanned under a timer on the already-expensive
+# no-match path. Per-line timer pairs around every scan are deliberately
+# NOT used — the clock calls would cost more than many scans they measure.
+use constant FORMAT_SCAN_NOMATCH_SAMPLE_EVERY => 256;
+my $format_scan_promotions = 0;        # actual reorders via format_registry_promote()
+my $format_scan_nomatch_samples = 0;   # sampled no-match scans timed
+my $format_scan_nomatch_sample_us = 0; # summed elapsed us across those samples
 
 # Rate unit override (Issue #122)
 my $rate_unit = 'm';                                     # Default: per-minute (preserves existing behavior)
@@ -2847,6 +2863,7 @@ sub build_format_registry {
         $entry->[FR_ANCESTORS]       = $ancestors->{ $spec->{name} } // [];
         $entry->[FR_TIME_PARSE]      = compile_format_time_parser( $spec->{time}{layout} );
         $entry->[FR_ANC_SET]         = { map { $_ => 1 } @{ $entry->[FR_ANCESTORS] } };
+        $entry->[FR_MATCHES]         = 0;
         push @format_registry, $entry if $spec->{scanned};
         $format_registry_entry{ $spec->{name} } = $entry;
     }
@@ -2900,6 +2917,8 @@ sub build_format_registry {
     ( $timestamp, $fractional_ms ) = ( undef, 0 );
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
     %timestamp_cache = ();   # validation parsed the samples; start the run with an empty cache
+    $format_scan_promotions = 0;   # gate 5's sample stream promoted entries; the
+                                   # telemetry counts run promotions only
 }
 
 # Classify one line through the generated scan sub (detection-window
@@ -2928,6 +2947,7 @@ sub format_registry_promote {
         if ($front{ $o->[FR_NAME] }) { push @f, $o } else { push @r, $o }
     }
     @format_scan_order = (@f, @r);
+    $format_scan_promotions++;
     my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
     $format_scan_sub = $format_scan_sub_cache{$sig} //= compile_format_scan_sub($format_registry_opts);
     return;
@@ -2970,6 +2990,8 @@ sub emit_format_detection_verbose {
             push @verbose_output, "  matched_lines: 0";
             push @verbose_output, "  unmatched_lines: 0";
             push @verbose_output, "  first_match_line: -";
+            push @verbose_output, "  scan_attempts: 0";
+            push @verbose_output, "  scan_failed_attempts: 0";
             next;
         }
         my $slug = $fdd->{slug} // '-';
@@ -2981,7 +3003,30 @@ sub emit_format_detection_verbose {
         push @verbose_output, "  unmatched_lines: $fdd->{unmatched_lines}";
         push @verbose_output, "  first_match_line: " .
             (defined $fdd->{first_match_line} ? $fdd->{first_match_line} : '-');
+        push @verbose_output, "  scan_attempts: " . ($fdd->{scan_attempts} // 0);
+        push @verbose_output, "  scan_failed_attempts: " . ($fdd->{scan_failed_attempts} // 0);
     }
+
+    # Scan-order telemetry: the run-level view of the registry scan that
+    # produced the per-file results above — sufficient to prove MTF
+    # behavior end-to-end (final order, promotion count, per-entry match
+    # attribution). Names are registry entry names (FR_NAME), not slugs:
+    # the scan orders entries, and two entries can share a slug.
+    push @verbose_output, "=== format-detection / scan ===";
+    push @verbose_output, "entries: " . scalar(@format_registry);
+    push @verbose_output, "guarded: " .
+        (join(',', map { $_->[FR_NAME] } grep { $_->[FR_GUARD] } @format_registry) || '-');
+    push @verbose_output, "window_size: $format_detection_window";
+    push @verbose_output, "final_order: " . join(',', map { $_->[FR_NAME] } @format_scan_order);
+    push @verbose_output, "promotions: $format_scan_promotions";
+    push @verbose_output, "match_counts: " .
+        join(',', map { $_->[FR_NAME] . '=' . $_->[FR_MATCHES] } @format_registry);
+    push @verbose_output, "nomatch_scan_samples: $format_scan_nomatch_samples";
+    push @verbose_output, "nomatch_scan_avg_us: " .
+        ($format_scan_nomatch_samples
+            ? sprintf('%.1f', $format_scan_nomatch_sample_us / $format_scan_nomatch_samples)
+            : '-');
+    push @verbose_output, "=== END format-detection / scan ===";
 
     push @verbose_output, "=== END format-detection ===";
 }
@@ -8848,11 +8893,14 @@ sub read_and_process_logs {
         # [raw_line, entry]; the main loop replays them with their cached
         # classification — extraction deferred to the replay — then switches
         # to the streaming path. Default N=0: no lines held.
+        my ( $file_scan_attempts, $file_scan_failed ) = ( 0, 0 );  # scan telemetry (Issue #228)
         my @window_held;
         if ($format_detection_window > 0) {
             while (@window_held < $format_detection_window && defined(my $wline = <$fh>)) {
                 (my $wstripped = $wline) =~ s/[\r\n]+$//;
                 my ($wentry) = format_registry_classify($wstripped);
+                $file_scan_attempts++;
+                $file_scan_failed++ unless $wentry;
                 push @window_held, [ $wline, $wentry ];
             }
         }
@@ -8964,9 +9012,26 @@ sub read_and_process_logs {
                         $match_type = $window_entry->[FR_MATCH_TYPE];
                         $line_entry = $window_entry;
                     }
-                } elsif ( $line_entry = $format_scan_sub->($_) ) {
-                    $is_line_match = 1;
-                    $match_type = $line_entry->[FR_MATCH_TYPE];
+                } else {
+                    $file_scan_attempts++;
+                    if ( $line_entry = $format_scan_sub->($_) ) {
+                        $is_line_match = 1;
+                        $match_type = $line_entry->[FR_MATCH_TYPE];
+                    } else {
+                        # No-match scan: the structural worst case (every
+                        # entry attempted). Sampled timing on this already-
+                        # expensive path: re-scan 1 in N such lines under a
+                        # timer. The re-scan is side-effect-safe — no match
+                        # means no promotion, and the failed attempts' empty
+                        # capture writes repeat the state the first scan left.
+                        $file_scan_failed++;
+                        if ($file_scan_failed % FORMAT_SCAN_NOMATCH_SAMPLE_EVERY == 0) {
+                            my $t0 = [gettimeofday];
+                            $format_scan_sub->($_);
+                            $format_scan_nomatch_sample_us += tv_interval($t0) * 1e6;
+                            $format_scan_nomatch_samples++;
+                        }
+                    }
                 }
             }
 
@@ -9117,6 +9182,7 @@ sub read_and_process_logs {
                 }
                 $fdd->{matched_lines}++;
                 $fdd->{is_access_log} = 1 if $is_access_log;
+                $line_entry->[FR_MATCHES]++ if $line_entry;
 
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
 
@@ -9910,6 +9976,21 @@ sub read_and_process_logs {
         }
 
         close $fh;
+
+        # Scan telemetry lands with the file's detection record; a file may
+        # produce zero matches (or zero lines), so create the record here too.
+        {
+            my $fdd = $format_detection{$in_file} //= {
+                match_type       => undef,
+                slug             => undef,
+                is_access_log    => 0,
+                matched_lines    => 0,
+                unmatched_lines  => 0,
+                first_match_line => undef,
+            };
+            $fdd->{scan_attempts}        = $file_scan_attempts;
+            $fdd->{scan_failed_attempts} = $file_scan_failed;
+        }
 
         if ($csv_skipped_timestamp_rows > 1) {
             print STDERR "Warning: $in_file: skipped $csv_skipped_timestamp_rows CSV rows with unparseable timestamps\n";

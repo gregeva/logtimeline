@@ -15,8 +15,11 @@
 # referrer/user-agent + trailing duration appended, issue #365). The
 # remaining slugs (thingworx_rac_client, connection_server_json,
 # java_gc_log, tw_analytics_v2, tw_analytics_worker,
-# connection_server_standard) are out of scope until fixtures exist or
-# until the format-registry rewrite (#23) lands.
+# connection_server_standard) are asserted against fixtures derived from
+# the format registry's own sample lines (issue #58) — the same lines the
+# D24 load-time gates validate, so fixture and registry cannot drift.
+# The `format-detection / scan` sub-section (registry scan telemetry,
+# issue #58) is asserted by the scan-telemetry scenarios.
 #
 # Implements the self-documenting-assertion design from
 # tests/HARNESS-DESIGN.md. Reference: tests/validate-histogram-bin-counters.sh.
@@ -386,6 +389,238 @@ scenario_csv_with_udm() {
         contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type 13 is reserved for the CSV path'
 }
 
+# Shared shape for the six registry-sample scenarios: write the fixture
+# from a heredoc holding the registry entry's sample lines verbatim,
+# run, and assert slug + match_type + matched_lines. The samples are the
+# same lines build_format_registry() validates at every startup (D24), so
+# a passing scenario proves the end-to-end path (file -> scan -> section)
+# for a format the corpus has no committed fixture for.
+assert_registry_sample_scenario() {
+    local fixture="$1" slug="$2" mt="$3" nlines="$4"
+    local out
+    out=$(run_format_detection "$fixture")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     "^  format: $slug\$" \
+        asserts     "The registry sample fixture for slug \`$slug\` binds to that slug (registry entry for match_type $mt; samples are the entry's own D24-validated sample lines)" \
+        produced_by 'emit_format_detection_verbose() in ltl' \
+        contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
+
+    assert_line "$out" \
+        pattern     "^  match_type: $mt\$" \
+        asserts     "Slug \`$slug\` binds to internal match_type $mt" \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - match_type integers are diagnostic; the slug is the user-facing contract'
+
+    assert_line "$out" \
+        pattern     "^  matched_lines: $nlines\$" \
+        asserts     "Every line of the registry-sample fixture parses via match_type $mt (no fallthroughs)" \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
+        contract    "Fixture is the registry entry's sample lines verbatim; if the samples change in format_registry_specs(), this fixture and count change in the same commit"
+}
+
+scenario_thingworx_rac_client() {
+    current_scenario="thingworx-rac-client"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/rac-client.log"
+    cat > "$log" <<'EOF'
+[2025-02-04T12:06:22.784] [TRACE] tunnel keepalive sent
+2025-03-01 08:00:00.123 tunnel worker [INFO] session established
+EOF
+    assert_registry_sample_scenario "$log" thingworx_rac_client 2 2
+}
+
+scenario_connection_server_json() {
+    current_scenario="connection-server-json"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/cxserver-json.log"
+    cat > "$log" <<'EOF'
+{"@timestamp":"2025-02-02T21:03:06.725+00:00","@version":1,"message":"Error encountered, closing WebSocket: endpointId=2608459","logger_name":"com.thingworx.connectionserver.alwayson.AbstractClientEndpoint","thread_name":"vert.x-eventloop-thread-16","level":"WARN","level_value":30000}
+{"@timestamp":"2025-02-02T21:03:07.001+00:00","@version":1,"message":"Session registered","logger_name":"c.t.c.a.SessionTracker","thread_name":"vert.x-eventloop-thread-2","level":"INFO","level_value":20000}
+EOF
+    assert_registry_sample_scenario "$log" connection_server_json 5 2
+}
+
+scenario_java_gc_log() {
+    current_scenario="java-gc-log"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/gc.log"
+    cat > "$log" <<'EOF'
+[2025-04-05T11:10:47.867+0000][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 2433M->66M(49152M) 18.406ms
+[2025-04-05T12:00:03.101+0000][info][gc] GC(7) Pause Young (Concurrent Start) (Metadata GC Threshold) 512M->128M(49152M) 7.250ms
+EOF
+    assert_registry_sample_scenario "$log" java_gc_log 6 2
+}
+
+scenario_tw_analytics_v2() {
+    current_scenario="tw-analytics-v2"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/analytics-v2.log"
+    cat > "$log" <<'EOF'
+ERROR [2025-02-19 18:31:00,284] com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!
+INFO  [2025-02-20 04:49:11,450] org.ehcache.core.EhcacheManager: Cache 'scorefunc_cachex' created in EhcacheManager.
+EOF
+    assert_registry_sample_scenario "$log" tw_analytics_v2 7 2
+}
+
+scenario_tw_analytics_worker() {
+    current_scenario="tw-analytics-worker"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/analytics-worker.log"
+    cat > "$log" <<'EOF'
+2025-02-20 10:06:10 [nioEventLoopGroup-2-1] WARN  io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]
+2025-02-20 10:06:11,123 [pool-2-thread-1] INFO  io.netty.util.ResourceLeakDetector - Leak detection level set to SIMPLE.
+EOF
+    assert_registry_sample_scenario "$log" tw_analytics_worker 8 2
+}
+
+scenario_connection_server_standard() {
+    current_scenario="connection-server-standard"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/cxserver-standard.log"
+    cat > "$log" <<'EOF'
+2025-08-14 21:00:34.633 [vert.x-eventloop-thread-12] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size
+2025-08-14 21:00:35.100 [vert.x-eventloop-thread-3] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Request from 10.1.2.3:52344 completed processing in 152 milliseconds
+EOF
+    assert_registry_sample_scenario "$log" connection_server_standard 10 2
+}
+
+scenario_scan_telemetry() {
+    current_scenario="scan-telemetry"
+    echo "[$current_scenario]"
+
+    # The codebeamer fixture drives the clean MTF story: mt12 sits behind
+    # four non-ancestors in the static order, so the first match promotes
+    # it to the front (exactly one promotion), after which every line hits
+    # the front block and no further promotion occurs.
+    local log="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^=== format-detection / scan ===$' \
+        asserts     'The scan-telemetry sub-section is emitted inside the format-detection section' \
+        produced_by 'emit_format_detection_verbose() in ltl' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract; delimiters per HARNESS-DESIGN.md section Delimiter contract'
+
+    assert_line "$out" \
+        pattern     '^entries: 13$' \
+        asserts     'All 13 scanned registry entries are compiled into the scan (csv is outside the scan array by design)' \
+        produced_by 'build_format_registry() in ltl; emitted by emit_format_detection_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
+
+    assert_line "$out" \
+        pattern     '^guarded: mt12,mt4,mt9$' \
+        asserts     'Exactly the three cheap-superset-guard entries (D28) carry guards, listed in static registry order' \
+        produced_by 'compile_format_guard() wiring in build_format_registry(); emitted by emit_format_detection_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (D28 guard set)'
+
+    assert_line "$out" \
+        pattern     '^window_size: 0$' \
+        asserts     'Without --detection-window, the two-phase-store window is disabled (N=0, D30/D38 default)' \
+        produced_by 'emit_format_detection_verbose() in ltl ($format_detection_window)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+
+    assert_line "$out" \
+        pattern     '^final_order: mt12,' \
+        asserts     'After the codebeamer run, mt12 (no pinned ancestors) leads the MTF scan order' \
+        produced_by 'format_registry_promote() in ltl; emitted by emit_format_detection_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (D26 pinned-closure MTF)'
+
+    assert_line "$out" \
+        pattern     '^promotions: 1$' \
+        asserts     'A single-format file causes exactly one promotion: the first match reorders, every later line hits the already-optimal front block' \
+        produced_by 'format_registry_promote() in ltl (counter incremented only on actual reorders; reset after the D24 build gates)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+
+    assert_line "$out" \
+        pattern     '^match_counts: .*mt12=741' \
+        asserts     'All 741 codebeamer lines are attributed to entry mt12 in the per-entry match counts' \
+        produced_by 'FR_MATCHES increment in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - counts are per registry entry (FR_NAME), static registry order'
+
+    assert_line "$out" \
+        pattern     '^  scan_attempts: 741$' \
+        asserts     'Every line of the 741-line fixture entered the registry scan exactly once' \
+        produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+
+    assert_line "$out" \
+        pattern     '^  scan_failed_attempts: 0$' \
+        asserts     'A fully-matched file records zero failed scan attempts' \
+        produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+}
+
+scenario_scan_telemetry_nomatch() {
+    current_scenario="scan-telemetry-nomatch"
+    echo "[$current_scenario]"
+
+    # 300 unmatchable lines exercise the no-match path past the 1-in-256
+    # sampling threshold, so exactly one sampled timing must be recorded;
+    # 20 codebeamer lines appended after them prove failed attempts and
+    # matches coexist in one file's counters.
+    local src="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
+    local log="$TMP_DIR/scan-nomatch-mixed.txt"
+    {
+        for i in $(seq 1 300); do echo "junk unmatched line $i without any timestamp"; done
+        head -20 "$src"
+    } > "$log"
+    if [[ ! -s "$log" ]]; then
+        echo "FAIL: could not derive no-match fixture from $src" >&2
+        exit 1
+    fi
+
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^  scan_failed_attempts: 300$' \
+        asserts     'Each of the 300 unmatchable lines records one failed scan attempt' \
+        produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+
+    assert_line "$out" \
+        pattern     '^  scan_attempts: 320$' \
+        asserts     'scan_attempts counts matched and failed scans together (300 junk + 20 codebeamer lines)' \
+        produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+
+    assert_line "$out" \
+        pattern     '^nomatch_scan_samples: 1$' \
+        asserts     '300 no-match scans cross the 1-in-256 sampling threshold exactly once' \
+        produced_by 'no-match sampling in read_and_process_logs() (FORMAT_SCAN_NOMATCH_SAMPLE_EVERY)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - the sampling interval is part of the contract; changing it changes this count'
+
+    assert_line "$out" \
+        pattern     '^nomatch_scan_avg_us: [0-9]+\.[0-9]$' \
+        asserts     'With at least one sample, the average no-match scan cost is reported as a one-decimal microsecond value (dash only when zero samples)' \
+        produced_by 'emit_format_detection_verbose() in ltl (sampled no-match accumulator)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+
+    # Same fixture through the two-phase-store window path: prefill
+    # classifications must fold into the same per-file counters (no
+    # double-count on held-line replay) and the resolved N is reported.
+    local wout
+    wout=$(run_format_detection "$log" --detection-window=8)
+    check_capture_warnings "$wout"
+
+    assert_line "$wout" \
+        pattern     '^window_size: 8$' \
+        asserts     'With --detection-window=8, the sub-section reports the resolved window size' \
+        produced_by 'emit_format_detection_verbose() in ltl ($format_detection_window)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (D30/D38 window structure)'
+
+    assert_line "$wout" \
+        pattern     '^  scan_attempts: 320$' \
+        asserts     'Window prefill classifications count as scan attempts and held-line replays are not re-counted: the total is identical to the windowless run' \
+        produced_by 'window prefill + per-file scan counters in read_and_process_logs()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+}
+
 # ---------- Run -----------------------------------------------------------
 
 echo "Validating format-detection -V section (issue #228)"
@@ -400,7 +635,15 @@ scenario_codebeamer;            echo ""
 scenario_thingworx_standard;    echo ""
 scenario_thingworx_with_metrics; echo ""
 scenario_tw_edge_c_sdk;         echo ""
-scenario_csv_with_udm
+scenario_csv_with_udm;          echo ""
+scenario_thingworx_rac_client;  echo ""
+scenario_connection_server_json; echo ""
+scenario_java_gc_log;           echo ""
+scenario_tw_analytics_v2;       echo ""
+scenario_tw_analytics_worker;   echo ""
+scenario_connection_server_standard; echo ""
+scenario_scan_telemetry;        echo ""
+scenario_scan_telemetry_nomatch
 
 echo ""
 echo "Results: $pass passed, $fail failed"

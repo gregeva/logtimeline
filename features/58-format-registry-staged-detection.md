@@ -471,9 +471,27 @@ NYTProf attribution on the swapped engine (100k fixtures) located the remaining 
 
 Observability follow-through (architect, 2026-08-21): the no-match scan is the structural worst case, so S6's section contract gains a no-match scan counter (free — increments on the already-expensive path) and **sampled** no-match scan timing (time 1-in-N scans; per-line timer pairs were considered and rejected as an anti-pattern — the clock calls would cost more than many scans they measure).
 
-## `-V format-detection` section-contract (stub — to be locked in-drop)
+## `-V format-detection` section-contract
 
-The existing `format-detection` section (`emit_format_detection_verbose()`) gains ordering/scan-depth telemetry sufficient to prove MTF behavior: per-format match counts, scan-depth distribution (or total failed-attempt count), final array order. Per `tests/HARNESS-DESIGN.md`: line shapes and counter semantics are locked here when implemented, and the consuming harness is updated in the same change. This document becomes the owning feature doc for that section-contract.
+This document owns the section-contract for the `format-detection` `-V` section and its `format-detection / scan` sub-section, both emitted by `emit_format_detection_verbose()` and consumed by `tests/validate-format-detection.sh`. All pre-existing keys of the parent section (per-file `format:`, `match_type:`, `is_access_log:`, `matched_lines:`, `unmatched_lines:`, `first_match_line:`; run-level `duration_unit_override:`, `files:`) are byte-preserved from their pre-registry shapes; everything below is additive. Renames and removals are breaking per `tests/HARNESS-DESIGN.md` § Stability contract.
+
+**Per-file keys (inside each `file:` block, two-space indent):**
+
+- `scan_attempts: N` — registry scan-sub invocations for this file. Counts one per line entering the scan, **including** detection-window prefill classifications; **excluding** confirmed-CSV fast-path lines (outside the scan, D32) and held-window replay lines (their classification was already counted at prefill; the replay runs only the entry's extraction). A file the scan never touches (all-CSV after confirmation, empty file) reports 0.
+- `scan_failed_attempts: N` — the subset of `scan_attempts` that matched no entry (the no-match scan — the structural worst case, every entry attempted). Increments on the streaming no-match branch and on prefill classifications returning no entry. A fully-matched file reports 0; `matched_lines + scan_failed_attempts = scan_attempts` holds for non-CSV files with no window.
+
+**Sub-section `=== format-detection / scan ===` (run-level, one per run, emitted inside the parent section before its END marker; closed by `=== END format-detection / scan ===`):**
+
+- `entries: N` — count of scanned registry entries compiled into the scan sub (13 as of this drop; `csv` is outside the scan array by design, D32). Changes only when a scanned format is added/removed — same commit updates this contract and the harness.
+- `guarded: name,...` — registry entry names (FR_NAME, e.g. `mt12`) carrying a D28 cheap-superset guard, static registry order; `-` if none. Currently `mt12,mt4,mt9`.
+- `window_size: N` — resolved two-phase-store detection window (`--detection-window`, hidden; D30/D38). Default 0.
+- `final_order: name,...` — the MTF scan order (`@format_scan_order`) at emission time, front first. Proves promotion end-state: a single-format run shows that format's pinned-ancestor closure + itself at the front, tail in recency order.
+- `promotions: N` — count of actual reorders through `format_registry_promote()`. Increments only when a winner at a non-optimal generated position promotes; steady-state front matches emit no promotion code and do not count. Reset to 0 at the end of `build_format_registry()` so D24 gate-5 sample classification (which promotes) is excluded — the counter reports run promotions only.
+- `match_counts: name=N,...` — per-entry matched-line totals across the run, **static registry order** (comparable across runs regardless of promotion history). Keyed by entry name, not slug: two entries can share a slug (mt1std/mt1gen → `thingworx_standard`) and the scan attributes per entry. CSV-matched lines are not listed (csv is not a scan entry).
+- `nomatch_scan_samples: N` — number of sampled no-match scan timings. Sampling is 1 in `FORMAT_SCAN_NOMATCH_SAMPLE_EVERY` (= 256) no-match lines per file: the sampled line is **re-scanned under a timer** on the already-expensive no-match path. The re-scan is side-effect-safe (no match ⇒ no promotion; failed attempts' empty-capture writes repeat the first scan's end state). Per-line timer pairs around every scan were considered and rejected as an anti-pattern — the clock calls would cost more than many scans they measure.
+- `nomatch_scan_avg_us: X.X` — mean elapsed microseconds across those samples, one decimal; the literal `-` when zero samples. **Nondeterministic when samples exist** — harnesses assert its shape (`[0-9]+\.[0-9]`), never its value, and it must be stripped by any golden-output capture that enables this section.
+
+Vocabulary note: entry names (`mt1std`, `mt3`, …) are the registry's internal scan identity and appear only in this diagnostic sub-section; the user-facing format identity remains the slug vocabulary locked by `%match_type_to_slug`.
 
 ## Acceptance criteria / merge gate
 
