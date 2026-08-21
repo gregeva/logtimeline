@@ -349,6 +349,9 @@ use constant {
 };
 my @format_registry;           # scanned entries, static cascade order (frozen at build)
 my %format_registry_entry;     # name => entry (includes non-scanned entries)
+my $format_registry_shadow = 0; # hidden flag: run the registry scan alongside the live
+                                # cascade and report divergences (temporary #58 parity
+                                # instrument; deleted with the cascade swap)
 
 # Rate unit override (Issue #122)
 my $rate_unit = 'm';                                     # Default: per-minute (preserves existing behavior)
@@ -7899,6 +7902,7 @@ sub adapt_to_command_line_options {
         'terminal-width|tw=i' => \$terminal_width,                                  # hidden
         'no-auto-hide|nah' => \$no_auto_hide,
         'debug-layout' => \$debug_layout,                                           # hidden
+        'format-registry-shadow' => \$format_registry_shadow,                       # hidden — temporary #58 parity instrument
         'validate-layout' => \$validate_layout,                                     # hidden
         'help:s'       => \$show_help,                                              # hidden — special-cased; legacy aliases -?/--help via PreProcessor. Optional arg: '' = full help; 'statistics' = stats index; other = error (Issue #261).
         'explain|ex:s' => \$explain_arg,                                            # Issue #261: optional arg: '' = topic registry; <topic> = long-form explanation. Aliases shared with -so (avg, stddev, p1..p99999).
@@ -8489,6 +8493,15 @@ sub read_and_process_logs {
     $message_stats_capture_mode = choose_data_model('message-stats') // 'raw';
     $bucket_stats_capture_mode  = choose_data_model('bucket-stats')  // 'raw';
 
+    # Shadow-mode state (#58 S4, temporary): the registry scan's own MTF
+    # order (global across files, per D20 — no per-file reset) and the
+    # divergence accumulators reported at end of run.
+    my (@shadow_order, $shadow_lines_compared, $shadow_divergences, @shadow_divergence_details);
+    if ($format_registry_shadow) {
+        @shadow_order = @format_registry;
+        ($shadow_lines_compared, $shadow_divergences) = (0, 0);
+    }
+
     foreach my $in_file (@in_files) {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
         push @files_processed, $in_file;
@@ -8748,7 +8761,67 @@ sub read_and_process_logs {
                     $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/;
                     $object = $1;
                 }
-            
+
+            }
+
+            # Shadow comparison (#58 S4, temporary): run the registry scan
+            # (pinned-closure MTF + guards, D26/D28) against the same raw
+            # line and compare classification + the full extraction record
+            # with what the cascade above just bound. Placed before the lazy
+            # CSV block so both sides see the identical stage: post-branch
+            # extraction (mt1 probes included), pre count/UDM/CSV. Skipped
+            # for confirmed-CSV lines — CSV is outside the scan array (D32).
+            if ($format_registry_shadow && !$csv_detected) {
+                $shadow_lines_compared++;
+                my ($shadow_entry, @shadow_rec);
+                SHADOW: for my $si (0 .. $#shadow_order) {
+                    my $e = $shadow_order[$si];
+                    my $g = $e->[FR_GUARD];
+                    next SHADOW if $g && !$g->($_);
+                    if (@shadow_rec = $e->[FR_EXTRACT]->($_)) {
+                        $shadow_entry = $e;
+                        if ($si > 0) {
+                            # pinned-closure promotion (D26): winner moves to
+                            # front together with its ancestors, relative order
+                            # preserved; no-op when already directly behind them
+                            my %anc = map { $_ => 1 } @{ $e->[FR_ANCESTORS] };
+                            my $optimal = 1;
+                            for my $sj (0 .. $si - 1) {
+                                if (!$anc{ $shadow_order[$sj][FR_NAME] }) { $optimal = 0; last }
+                            }
+                            if (!$optimal) {
+                                my %front = (%anc, $e->[FR_NAME] => 1);
+                                my (@sf, @sr);
+                                for my $o (@shadow_order) {
+                                    if ($front{ $o->[FR_NAME] }) { push @sf, $o } else { push @sr, $o }
+                                }
+                                @shadow_order = (@sf, @sr);
+                            }
+                        }
+                        last SHADOW;
+                    }
+                }
+                my @divergence;
+                if ($is_line_match && !$shadow_entry) {
+                    push @divergence, "cascade matched match_type=$match_type but registry scan matched nothing";
+                } elsif (!$is_line_match && $shadow_entry) {
+                    push @divergence, "registry matched entry $shadow_entry->[FR_NAME] but cascade matched nothing";
+                } elsif ($shadow_entry) {
+                    push @divergence, "match_type: cascade=$match_type registry=$shadow_entry->[FR_MATCH_TYPE]"
+                        if $shadow_entry->[FR_MATCH_TYPE] != $match_type;
+                    my @cascade_rec = ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message, $bytes, $duration, $status_code, $is_access_log );
+                    for my $fi (0 .. $#format_record_fields) {
+                        my ($c, $r) = ($cascade_rec[$fi], $shadow_rec[$fi]);
+                        next if (!defined $c && !defined $r) || (defined $c && defined $r && $c eq $r);
+                        push @divergence, "field $format_record_fields[$fi]: cascade=" . (defined $c ? "'$c'" : 'undef')
+                                        . " registry=" . (defined $r ? "'$r'" : 'undef');
+                    }
+                }
+                if (@divergence) {
+                    $shadow_divergences++;
+                    push @shadow_divergence_details, "$in_file:$line_number: " . join('; ', @divergence) . "\n    line: $_"
+                        if @shadow_divergence_details < 10;
+                }
             }
 
             ## LAZY CSV DETECTION (Issue #107) ##
@@ -9746,6 +9819,15 @@ sub read_and_process_logs {
         print STDERR "Note: " . format_number( $numeric_filter_no_metric{$metric} )
             . " lines carried no $metric value and were excluded by the $metric filter"
             . " (numeric filters only keep lines that carry the filtered metric)\n";
+    }
+
+    # Shadow-mode report (#58 S4, temporary): always printed when the flag
+    # is on, so a zero-divergence run is a positive assertion, not silence.
+    if ($format_registry_shadow) {
+        print STDERR "format-registry-shadow: $shadow_lines_compared lines compared, $shadow_divergences divergences\n";
+        print STDERR "  $_\n" for @shadow_divergence_details;
+        print STDERR "  ... (further divergences elided)\n"
+            if $shadow_divergences > @shadow_divergence_details;
     }
 
     return;
