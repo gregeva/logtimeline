@@ -9191,7 +9191,7 @@ sub read_and_process_logs {
                     if ($line_entry && $line_entry->[FR_UNIT_AMBIGUOUS]
                         && !defined $duration_unit_override && !$format_unit_ambiguity_warned) {
                         $format_unit_ambiguity_warned = 1;
-                        print STDERR "Note: access log %D durations assumed to be milliseconds (Tomcat 9); Apache HTTP Server and Tomcat 10.1+ emit microseconds - use -du us for those producers\n";
+                        print STDERR "Note: the detected log format's duration unit varies across producers; durations are assumed to be milliseconds - use -du to specify the appropriate duration unit for the files being analyzed\n";
                     }
                 }
                 $fdd->{matched_lines}++;
