@@ -4,6 +4,17 @@
 #
 # Re-runs the same ltl commands as capture-regression.sh and diffs against
 # the stored reference output. Any difference is a regression.
+#
+# Known acceptable failure — capture-location dependency (#209): ltl
+# absolutizes input file paths and renders them in the file legend, so the
+# stored references embed the absolute paths of the checkout where they
+# were captured. Run from any other location, the legend-bearing scenarios
+# fail with diffs on exactly the `[√] /abs/path...` legend lines. Those
+# legend-line diffs are the ONLY acceptable differences; any other diff
+# line is a real regression. The durable fix (relative path emission in
+# ltl + this harness passing repo-relative paths) is #209's scope; until
+# it lands, references are fully reproducible only from the capture
+# checkout, and rebaselining stays a per-release activity.
 
 set -euo pipefail
 
@@ -45,7 +56,7 @@ DPM5K_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtende
 # Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin
 strip_nondeterministic() {
     perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[0-9.]+\]/log timeline [VERSION]/' \
-    | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
+    | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
 }
 
 # Verify reference directory exists

@@ -50,7 +50,7 @@ my $impact_time_exponent = 7;		            # it was 5, and was weighting a few s
 my ( $time_bucket_size, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
-my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
+my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_detect_registry_build, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0,0 );
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 my @verbose_output;           # Accumulated verbose output lines (Issue #56)
 
@@ -78,7 +78,7 @@ my %verbose_section_registry = (
         description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction (Issue #96).',
     },
     'format-detection' => {
-        description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts (Issue #228).',
+        description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts, plus registry scan telemetry: order, promotions, per-entry match counts, sampled no-match cost (Issues #228, #58).',
     },
     'heatmap-palette' => {
         description => 'Heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250).',
@@ -311,7 +311,72 @@ my %match_type_to_slug = (
 #   matched_lines      => integer
 #   unmatched_lines    => integer
 #   first_match_line   => integer (1-based file line number of first match)
+#   scan_attempts        => integer (registry scan-sub invocations for the file,
+#                           including detection-window prefill classifications;
+#                           excludes confirmed-CSV fast-path lines and held-line replays)
+#   scan_failed_attempts => integer (scan invocations that matched no entry)
 my %format_detection;
+
+# Format registry (Issue #58 / #23 Phase 1).
+#
+# Each registry entry is an arrayref indexed by the FR_* constants below
+# (array-of-arrayrefs with constant field indices — the measured scan-loop
+# container, features/58-format-registry-staged-detection.md § D29). The
+# declarative source specs live in format_registry_specs(); they are
+# compiled into live entries by build_format_registry(), which also runs
+# the load-time validation gates (§ D24: sample self-tests, extraction
+# parity against declared expected records, guard soundness, cross-shadow
+# ordering-constraint derivation).
+#
+# @format_registry holds the scanned entries in static cascade order.
+# Entries with FR_SCANNED false (the csv entry, § D32) are excluded from
+# the scan array but kept in %format_registry_entry for metadata lookup.
+use constant {
+    FR_NAME            => 0,   # short internal entry name (mt1std, mt3, ...)
+    FR_SLUG            => 1,   # user-facing slug (harness-locked contract)
+    FR_MATCH_TYPE      => 2,   # legacy match_type integer for %format_detection
+    FR_SCANNED         => 3,   # 1 = member of the ordered scan array
+    FR_PATTERN         => 4,   # compiled qr// (recognition)
+    FR_PATTERN_SRC     => 5,   # pattern source string (never rebuilt from qr)
+    FR_FIELD_MAP       => 6,   # [ [capture_ordinal, field_name], ... ]
+    FR_TRANSFORMS      => 7,   # [ transform primitive names ] (post-capture)
+    FR_TIME            => 8,   # { layout, precision, tz } — declarative time contract
+    FR_DURATION_UNIT   => 9,   # declared unit of the duration field (undef = none)
+    FR_UNIT_AMBIGUOUS  => 10,  # 1 = unit varies across producers (D18 warning case)
+    FR_STATS           => 11,  # statistics-eligible: sets is_access_log statically
+    FR_GUARD           => 12,  # cheap superset guard closure or undef (D28)
+    FR_EXTRACT         => 13,  # compiled extraction closure (fixed-order list return)
+    FR_MESSAGE_METRICS => 14,  # declared in-message metric probes (D33)
+    FR_EVENT_PAIRS     => 15,  # reserved slot — validated empty in this drop (D23)
+    FR_SAMPLES         => 16,  # sample lines (load-time executable self-tests)
+    FR_ANCESTORS       => 17,  # derived pinned-ancestor names (D26 constraints)
+    FR_TIME_PARSE      => 18,  # compiled timestamp-parse closure for the entry's
+                               # declared layout (D31; shares %timestamp_cache)
+    FR_ANC_SET         => 19,  # FR_ANCESTORS as a name-set hashref — the hot
+                               # loop's O(ancestors) already-optimal check must
+                               # not rebuild a hash per line (P3 lean-loop)
+    FR_MATCHES         => 20,  # run-total matched-line count for this entry
+                               # (scan telemetry; -V format-detection / scan)
+};
+my @format_registry;           # scanned entries, static cascade order (frozen at build)
+my %format_registry_entry;     # name => entry (includes non-scanned entries)
+my @format_scan_order;         # live MTF scan state: @format_registry reordered by
+                               # pinned-closure promotion (D26); global across files
+                               # (change points converge in one match, D20)
+my $format_detection_window = 0; # hidden --detection-window=N: two-phase-store window
+                                 # size (D30/D38); 0 = no window until a consumer
+                                 # (#17 unit resolution) sizes it
+# Scan telemetry for -V format-detection / scan. The no-match scan is the
+# structural worst case (every entry attempted, nothing matches), so its
+# cost is instrumented by sampling: 1 in FORMAT_SCAN_NOMATCH_SAMPLE_EVERY
+# no-match lines is re-scanned under a timer on the already-expensive
+# no-match path. Per-line timer pairs around every scan are deliberately
+# NOT used — the clock calls would cost more than many scans they measure.
+use constant FORMAT_SCAN_NOMATCH_SAMPLE_EVERY => 256;
+my $format_scan_promotions = 0;        # actual reorders via format_registry_promote()
+my $format_scan_nomatch_samples = 0;   # sampled no-match scans timed
+my $format_scan_nomatch_sample_us = 0; # summed elapsed us across those samples
+my $format_unit_ambiguity_warned = 0;  # D18 unit-ambiguity note emitted (once per run)
 
 # Rate unit override (Issue #122)
 my $rate_unit = 'm';                                     # Default: per-minute (preserves existing behavior)
@@ -2031,6 +2096,864 @@ sub emit_index_readback_verbose {
     push @verbose_output, "=== END index-read-back ===";
 }
 
+## FORMAT REGISTRY (Issue #58 / #23 Phase 1) ##
+#
+# The declarative format definitions and the machinery that compiles them
+# into live registry entries at startup. Design record:
+# features/58-format-registry-staged-detection.md (D24-D34 and the
+# section-contract for -V format-detection). The scan array replaces the
+# match-type elsif cascade in read_and_process_logs(); until that swap,
+# the registry is built and validated on every run but has no hot-loop
+# consumer.
+#
+# Extraction closures return a fixed-order list (@format_record_fields).
+# Per-field defaults are NOT uniformly the loop initializers: under the
+# static cascade, a failed elsif condition's list assignment clobbers its
+# named targets to undef before a later branch wins, so the value
+# downstream sees for a field the winner does not capture depends on the
+# winner's static position. build_format_registry() reproduces this
+# exactly by computing each entry's clobbered-field set from the field
+# maps of the entries ahead of it in static order; extraction parity is
+# then byte-identical regardless of dynamic scan order.
+
+# Canonical extraction record. The 13 record fields live as file-scoped
+# lexicals (declared below) that the generated extraction closures write
+# DIRECTLY — measured on the P4 gate probe, routing them through a
+# return-list costs an extra full copy of every field per line (~1 us on
+# the message-bearing formats). read_and_process_logs() reads the same
+# lexicals; its per-line loop no longer declares them. status_code and
+# is_access_log are numeric (0 default); bytes/duration default undef;
+# the string fields default '' unless clobbered (see above).
+my @format_record_fields = qw(timestamp_str category_bucket object instance
+                              user session platform thread message
+                              bytes duration status_code is_access_log);
+my ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message );
+my ( $bytes, $duration );
+my ( $status_code, $is_access_log );
+# Set by the generated blocks alongside the record fields: the parsed
+# whole-second epoch and the fractional milliseconds stripped from
+# $timestamp_str (the strip runs before parsing so cache keys exclude
+# both offset and fraction, exactly as before). The CSV paths in
+# read_and_process_logs() set these directly. The last-seen memo fronts
+# %timestamp_cache: consecutive lines overwhelmingly share a timestamp
+# second, and a string eq is cheaper than two hash ops.
+my ( $timestamp, $fractional_ms );
+my ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
+
+# The single generated scan sub (see compile_format_scan_sub) and the
+# regeneration inputs promotion needs: the entry snapshot the generated
+# code indexes into, the declarative specs and per-entry clobber sets by
+# name, and the live CLI-gated compile options.
+my $format_scan_sub;
+my %format_registry_spec;
+my %format_registry_clobbered;
+my $format_registry_opts;
+
+# Scan-sub cache, keyed by order signature (joined entry names). The
+# scan order is true pinned MTF (D26): the winner promotes to the front
+# with its ancestor closure and the rest KEEP THEIR RECENCY ORDER, so a
+# file alternating between two or three formats scans only those formats
+# before the tail. Alternation cycles through a tiny set of orders, so
+# every order's generated sub is compiled at most once per run and
+# selected by signature ever after; the static order and every
+# first-promotion-from-static order are precompiled eagerly at startup
+# (pay the compile cost before the loop, never inside it).
+my %format_scan_sub_cache;     # order signature => generated scan sub
+
+# Transform primitives: named post-capture mutation snippets spliced into
+# generated extraction closures. One resolution surface for this
+# vocabulary — new formats reference these names; a new mutation gets a
+# new named primitive here, never inline code at a call site. Snippets
+# operate on the closure lexicals declared by the codegen.
+my %format_transform_code = (
+    mask_ephemeral_port => q{ $message =~ s/(from \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:)\d{4,5} /${1}XXXXX /; },
+    t_to_space          => q{ $timestamp_str =~ tr/T/ /; },
+    comma_to_dot        => q{ $timestamp_str =~ tr/,/./; },
+    chop_tz_offset      => q{ $timestamp_str =~ s/ \+\d{4}$//; },
+    chop_tz_colon_offset=> q{ $timestamp_str =~ s/\+\d{2}:\d{2}$//; },
+    status_bucket       => q{ $status_code = $category_bucket; $category_bucket =~ s/(\d)\d{2}/$1xx/; },
+    undef_bytes_dash    => q{ undef $bytes if $bytes eq "-"; },
+    chop_http_proto     => q{ $message =~ s/ HTTP\/\d\.\d$//; },
+    strip_query_string  => q{ $message =~ s/\?.+$//; },                # emitted only when query strings are excluded (CLI-gated at compile)
+    prepend_session     => q{ $message = "[$session] $message" if defined $session; },  # emitted only when sessions are included (CLI-gated at compile)
+    strip_trailing_ws   => q{ $message =~ s/\s+$//g; },
+    gc_heap_delta       => q{ $bytes = convert_bytes( $heap_from ) - convert_bytes( $heap_to ); $bytes = $bytes < 0 ? 0 : $bytes; },
+    chop_message        => q{ chop $message; },
+    strip_pid           => q{ $message =~ s/\d+ (.*)$/$1/; },
+    hoist_cpp_object    => q{ if( $message =~ /\w+\.cpp:\d+ / ) { $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/; $object = $1; } },
+);
+
+# Declarative format definitions, in the static cascade order the elsif
+# chain implements today. Every entry documents one format completely:
+# recognition pattern (source string; compiled once at build), capture->
+# field map, transform list, in-message metric probes (D33: compiled into
+# the closure behind an index() superset gate, never fused into the
+# recognition regex), the three-part time contract (D23/D31), duration
+# unit (D18; unit_ambiguous marks the Tomcat9-vs-Apache %D case),
+# statistics eligibility (static is_access_log; formats whose probes set
+# it per line leave this 0 and set marks_metrics_observed on the probe
+# block), cheap superset guards (D28: only the expensive-to-reject access
+# siblings carry one), reserved event_pairs (D23: validated empty in this
+# drop), and sample lines with their expected extraction records under
+# default CLI configuration (executable load-time self-tests, D24). The
+# expected timestamp_str is the POST-fractional-strip form — the block
+# strips the fraction into $fractional_ms before it parses.
+#
+# The ([^ ]+ ){3} host/ident/authuser prefix shared by the access-log
+# family must remain backtracking-free: these patterns are attempted (and
+# most fail) on every access-log line, and a lazy prefix makes each
+# failed attempt ~10x more expensive.
+#
+# expect_ancestors declares the pinned-ancestor set (D26) the cross-shadow
+# derivation must reproduce from the samples; a mismatch in either
+# direction fails the build loudly.
+sub format_registry_specs {
+    return (
+    { name => 'mt1std', slug => 'thingworx_standard', match_type => 1, scanned => 1, head_class => 'digit',
+      pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ((?:\](?! )|[^\]])*)] (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'instance'],[5,'user'],[6,'session'],[7,'platform'],[8,'thread'],[9,'message'] ],
+      transforms => [],
+      message_metrics => {
+          gate_lit => '=',
+          probes => [ { name => 'bytes',    field => 'bytes',    guard_lit => ' bytes',     pattern => ' bytes\s*=\s*(\d+)',          unit => 'B'  },
+                      { name => 'duration', field => 'duration', guard_lit => ' durationM', pattern => ' durationM[sS]\s*=\s*(\d+)',  unit => 'ms' } ],
+          mask => { pattern => ' ((bytes|durationM[sS])\s*=\s*)(\d+)', replace => ' $1?' },
+          marks_metrics_observed => 1,
+      },
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        '2025-05-05 00:00:00.006+0000 [L: ERROR] [O: c.p.a.u.JobPurgeScheduler] [I: ] [U: SuperUser] [S: ] [P: ] [T: pool-1-thread-1] Job purge completed',
+        '2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7',
+      ],
+      expect => [
+        [ '2025-05-05 00:00:00', 'ERROR', 'c.p.a.u.JobPurgeScheduler', '', 'SuperUser', '', '', 'pool-1-thread-1', 'Job purge completed', undef, undef, '0', '0' ],
+        [ '2025-05-05 00:00:01', 'INFO', 'S.c.t.d.e.DSLScript', '', 'Administrator', 'F0000000-0000-0000-0000-00000000000F', 'platform-1', 'TWEventProcessor-4', 'Executed service durationMs=? result bytes=? count=7', '1024', '42', '0', '1' ],
+      ] },
+    { name => 'mt10', slug => 'connection_server_standard', match_type => 10, scanned => 1, head_class => 'digit',
+      pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'object'],[5,'message'] ],
+      transforms => [ 'mask_ephemeral_port' ],
+      message_metrics => {
+          gate_lit => ' milliseconds',
+          probes => [ { name => 'duration', field => 'duration', guard_lit => undef, pattern => ' (\d+) milliseconds', unit => 'ms' } ],
+          mask => { pattern => ' (\d+) milliseconds', replace => ' ? millseconds' },
+          marks_metrics_observed => 1,
+      },
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        '2025-08-14 21:00:34.633 [vert.x-eventloop-thread-12] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size',
+        '2025-08-14 21:00:35.100 [vert.x-eventloop-thread-3] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Request from 10.1.2.3:52344 completed processing in 152 milliseconds',
+      ],
+      expect => [
+        [ '2025-08-14 21:00:34', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-12', 'Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size', undef, undef, '0', '0' ],
+        [ '2025-08-14 21:00:35', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in ? millseconds', undef, '152', '0', '1' ],
+      ] },
+    { name => 'mt1gen', slug => 'thingworx_standard', match_type => 1, scanned => 1, head_class => 'digit',
+      pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
+      transforms => [],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [ 'mt1std' ],
+      samples => [
+        '2025-02-04 12:05:57.481+0000 [L: DEBUG] trailing content that does not carry the full bracket sections',
+        '2025-02-04 12:05:58.002+0000 [L: WARN] partial line with only level bracket',
+      ],
+      expect => [
+        [ '2025-02-04 12:05:57', 'DEBUG', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+        [ '2025-02-04 12:05:58', 'WARN', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+      ] },
+    { name => 'mt2', slug => 'thingworx_rac_client', match_type => 2, scanned => 1, head_class => 'bracket_digit',
+      pattern_src => '^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3}).*? \[[L: ]*([^\]]*)\]',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
+      transforms => [ 't_to_space' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [ 'mt1std', 'mt10', 'mt1gen' ],
+      samples => [
+        '[2025-02-04T12:06:22.784] [TRACE] tunnel keepalive sent',
+        '2025-03-01 08:00:00.123 tunnel worker [INFO] session established',
+      ],
+      expect => [
+        [ '2025-02-04 12:06:22', 'TRACE', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+        [ '2025-03-01 08:00:00', 'INFO', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+      ] },
+    { name => 'mt12', slug => 'tomcat_codebeamer', match_type => 12, scanned => 1, head_class => 'any',
+      pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.]+)ms\] \[(.+)s\]',
+      field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[6,'duration'] ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
+      time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 1,
+      guard => { lit => 'ms] [' },
+      expect_ancestors => [],
+      samples => [
+        '192.168.223.1 - - [29/Oct/2025:08:52:11 +0000] "GET /urlversioned/202510290803/images/newskin/login_page/icon_qa.png HTTP/1.1" 200 20097 [5ms] [0.005s]',
+        '192.168.223.1 - - [29/Oct/2025:08:52:12 +0000] "GET /cb/item?id=42&filter=open HTTP/1.1" 200 512 [12ms] [0.012s]',
+      ],
+      expect => [
+        [ '29/Oct/2025:08:52:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /urlversioned/202510290803/images/newskin/login_page/icon_qa.png', '20097', '5', '200', '1' ],
+        [ '29/Oct/2025:08:52:12', '2xx', undef, undef, undef, undef, undef, undef, 'GET /cb/item', '512', '12', '200', '1' ],
+      ] },
+    { name => 'mt4', slug => 'tomcat_access_common', match_type => 4, scanned => 1, head_class => 'any',
+      pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$',
+      field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'] ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
+      time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 1,
+      guard => { tail_one_token => 1 },
+      expect_ancestors => [],
+      samples => [
+        '43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626',
+        '10.0.0.1 - - [02/Feb/2025:00:01:00 +0000] "GET /health HTTP/1.1" 204 -',
+      ],
+      expect => [
+        [ '02/Feb/2025:00:00:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Thingworx/Metrics', '17626', undef, '200', '1' ],
+        [ '02/Feb/2025:00:01:00', '2xx', undef, undef, undef, undef, undef, undef, 'GET /health', undef, undef, '204', '1' ],
+      ] },
+    { name => 'mt9', slug => 'jboss_access', match_type => 9, scanned => 1, head_class => 'any',
+      pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$',
+      field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[8,'duration'] ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'chop_http_proto', 'strip_query_string' ],
+      time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 1,
+      guard => { lit => '" "' },
+      expect_ancestors => [],
+      samples => [
+        '127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651',
+        '127.0.0.1 - - [13/Mar/2025:09:02:42 +0000] "POST /async/prediction/jobs HTTP/1.1" 201 88 "https://ref.example/" "Mozilla/5.0" 12',
+      ],
+      expect => [
+        [ '13/Mar/2025:09:02:41', '2xx', undef, undef, undef, undef, undef, undef, 'GET /async/prediction/evaluation', '51', '651', '200', '1' ],
+        [ '13/Mar/2025:09:02:42', '2xx', undef, undef, undef, undef, undef, undef, 'POST /async/prediction/jobs', '88', '12', '201', '1' ],
+      ] },
+    { name => 'mt3', slug => 'tomcat_access_with_duration', match_type => 3, scanned => 1, head_class => 'any',
+      pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?',
+      field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[6,'duration'],[7,'thread'],[8,'session'] ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
+      time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
+      duration_unit => 'ms', unit_ambiguous => 1, stats_eligible => 1,
+      expect_ancestors => [ 'mt12', 'mt4', 'mt9' ],
+      samples => [
+        '43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295',
+        '10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1',
+        '1.2.3.4 - - [05/May/2025:00:00:01 +0000] "GET /Thingworx/Things/T1 HTTP/1.1" 200 100 25 http-nio-8443-exec-3 AB12CD34EF',
+      ],
+      expect => [
+        [ '02/Feb/2025:00:00:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Thingworx/Metrics', '17626', '295', '200', '1' ],
+        [ '05/May/2025:00:00:00', '2xx', undef, undef, undef, undef, undef, undef, 'POST /Thingworx/WS', '261', '1', '200', '1' ],
+        [ '05/May/2025:00:00:01', '2xx', undef, undef, undef, 'AB12CD34EF', undef, 'http-nio-8443-exec-3', 'GET /Thingworx/Things/T1', '100', '25', '200', '1' ],
+      ] },
+    { name => 'mt5', slug => 'connection_server_json', match_type => 5, scanned => 1, head_class => 'brace',
+      pattern_src => '^{"\@timestamp":"([^"]*).*"level":"([^"]*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
+      transforms => [ 'chop_tz_colon_offset', 't_to_space' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'generic' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        '{"@timestamp":"2025-02-02T21:03:06.725+00:00","@version":1,"message":"Error encountered, closing WebSocket: endpointId=2608459","logger_name":"com.thingworx.connectionserver.alwayson.AbstractClientEndpoint","thread_name":"vert.x-eventloop-thread-16","level":"WARN","level_value":30000}',
+        '{"@timestamp":"2025-02-02T21:03:07.001+00:00","@version":1,"message":"Session registered","logger_name":"c.t.c.a.SessionTracker","thread_name":"vert.x-eventloop-thread-2","level":"INFO","level_value":20000}',
+      ],
+      expect => [
+        [ '2025-02-02 21:03:06', 'WARN', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+        [ '2025-02-02 21:03:07', 'INFO', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
+      ] },
+    { name => 'mt6', slug => 'java_gc_log', match_type => 6, scanned => 1, head_class => 'bracket_digit',
+      pattern_src => '^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}.*?\[info\]\[gc\s*\] GC\(\d+\) (.+?) (\(.+?\)) (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'message'],[4,'heap_from'],[5,'heap_to'],[6,'heap_size'],[7,'duration'] ],
+      transforms => [ 'gc_heap_delta' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 1,
+      expect_ancestors => [],
+      samples => [
+        '[2025-04-05T11:10:47.867+0000][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 2433M->66M(49152M) 18.406ms',
+        '[2025-04-05T12:00:03.101+0000][info][gc] GC(7) Pause Young (Concurrent Start) (Metadata GC Threshold) 512M->128M(49152M) 7.250ms',
+      ],
+      expect => [
+        [ '2025-04-05T11:10:47', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause)', '2367000000', '18.406', '0', '1' ],
+        [ '2025-04-05T12:00:03', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Concurrent Start) (Metadata GC Threshold)', '384000000', '7.250', '0', '1' ],
+      ] },
+    { name => 'mt7', slug => 'tw_analytics_v2', match_type => 7, scanned => 1, head_class => 'any',
+      pattern_src => '^([^ ]+)\s+\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[.,]\d{3})\] (.*)$',
+      field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],
+      transforms => [ 'comma_to_dot', 't_to_space', 'strip_trailing_ws' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        'ERROR [2025-02-19 18:31:00,284] com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!',
+        'INFO  [2025-02-20 04:49:11,450] org.ehcache.core.EhcacheManager: Cache \'scorefunc_cachex\' created in EhcacheManager.   ',
+      ],
+      expect => [
+        [ '2025-02-19 18:31:00', 'ERROR', undef, undef, undef, undef, undef, undef, 'com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!', undef, undef, '0', '0' ],
+        [ '2025-02-20 04:49:11', 'INFO', undef, undef, undef, undef, undef, undef, 'org.ehcache.core.EhcacheManager: Cache \'scorefunc_cachex\' created in EhcacheManager.', undef, undef, '0', '0' ],
+      ] },
+    { name => 'mt8', slug => 'tw_analytics_worker', match_type => 8, scanned => 1, head_class => 'digit',
+      pattern_src => '^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^ ]*)\s+\[([^]]+)\]\s+(\w+)\s+(.*)$',
+      field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'message'] ],
+      transforms => [ 'comma_to_dot', 't_to_space', 'strip_trailing_ws' ],
+      time => { layout => 'iso_flex', precision => 's', tz => 'local', frac => 'generic' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [ 'mt1std', 'mt10', 'mt1gen' ],
+      samples => [
+        '2025-02-20 10:06:10 [nioEventLoopGroup-2-1] WARN  io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]',
+        '2025-02-20 10:06:11,123 [pool-2-thread-1] INFO  io.netty.util.ResourceLeakDetector - Leak detection level set to SIMPLE.  ',
+      ],
+      expect => [
+        [ '2025-02-20 10:06:10', 'WARN', undef, undef, undef, undef, undef, 'nioEventLoopGroup-2-1', 'io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]', undef, undef, '0', '0' ],
+        [ '2025-02-20 10:06:11', 'INFO', undef, undef, undef, undef, undef, 'pool-2-thread-1', 'io.netty.util.ResourceLeakDetector - Leak detection level set to SIMPLE.', undef, undef, '0', '0' ],
+      ] },
+    { name => 'mt11', slug => 'tw_edge_c_sdk', match_type => 11, scanned => 1, head_class => 'any',
+      pattern_src => '^([^ ]+) (\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}[,.]\d+) (.*)',
+      field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],
+      transforms => [ 'chop_message', 'strip_pid', 'hoist_cpp_object' ],
+      time => { layout => 'iso_flex_frac', precision => 'ms', tz => 'local', frac => 'generic' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        'INFO 2025-08-09 18:19:04,479 8012 change_notification_source.cpp:11 OnProvisioningChanged provisioning change update received',
+        'ERROR 2025-08-09 18:27:18,38 TW_SSL_READ: Error reading from SSL stream',
+        'FORCE 2025-08-09 18:27:18,40 8012 twx_connection.cpp:246 Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed]',
+      ],
+      expect => [
+        [ '2025-08-09 18:19:04', 'INFO', 'change_notification_source.cpp:11', undef, undef, undef, undef, undef, 'OnProvisioningChanged provisioning change update receive', undef, undef, '0', '0' ],
+        [ '2025-08-09 18:27:18', 'ERROR', undef, undef, undef, undef, undef, undef, 'TW_SSL_READ: Error reading from SSL strea', undef, undef, '0', '0' ],
+        [ '2025-08-09 18:27:18', 'FORCE', 'twx_connection.cpp:246', undef, undef, undef, undef, undef, 'Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed', undef, undef, '0', '0' ],
+      ] },
+    # CSV is a stateful per-file stage outside the ordered scan (D32): its
+    # matcher is the two-line confirmation in read_and_process_logs()
+    # (detect_and_parse_csv_header), not a regex, so this entry is never
+    # scanned. It exists so downstream metadata (slug, time contract,
+    # statistics eligibility) has one resolution surface.
+    { name => 'csv', slug => 'csv', match_type => 13, scanned => 0,
+      pattern_src => undef,
+      field_map => [], transforms => [],
+      time => { layout => 'csv', precision => 'ms', tz => 'utc' },
+      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 1,
+      expect_ancestors => [],
+      samples => [], expect => [] },
+    );
+}
+
+# Timestamp-parse closures per declared layout family (D31). Both share
+# the process-wide %timestamp_cache with today's exact semantics: keyed by
+# the post-chop, post-fractional-strip timestamp string, whole seconds
+# only. The iso parser serves every iso_* layout (fixed substr offsets,
+# as before); apache_clf parses the dd/Mon/yyyy:HH:MM:SS form.
+my %format_month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
+sub compile_format_time_parser {
+    my ($layout) = @_;
+    if ($layout eq 'apache_clf') {
+        return sub {
+            my $ts = $_[0];
+            return $timestamp_cache{$ts} if exists $timestamp_cache{$ts};
+            my ($day, $month_str, $year, $hour, $minute, $second) = $ts =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/;
+            my $month = $format_month_map{$month_str};
+            return $timestamp_cache{$ts} = timegm( $second, $minute, $hour, $day, $month - 1, $year );
+        };
+    }
+    # Every iso_* layout (and csv's ISO fallback path) uses the fixed-offset
+    # substr extraction, exactly as the retired per-match-type branch did.
+    return sub {
+        my $ts = $_[0];
+        return $timestamp_cache{$ts} if exists $timestamp_cache{$ts};
+        return $timestamp_cache{$ts} = timegm(
+            substr($ts, 17, 2),     # second
+            substr($ts, 14, 2),     # minute
+            substr($ts, 11, 2),     # hour
+            substr($ts, 8, 2),      # day
+            substr($ts, 5, 2) - 1,  # month (0-11)
+            substr($ts, 0, 4),      # year
+        );
+    };
+}
+
+# Compile a declarative guard spec (D28) into a closure over the raw line.
+# Contract: a guard may false-positive (one wasted pattern attempt) but
+# must never false-negative — pattern match implies guard pass, verified
+# against every sample at build time.
+sub compile_format_guard {
+    my ($guard) = @_;
+    return undef unless $guard;
+    if (defined $guard->{lit}) {
+        my $lit = $guard->{lit};
+        return sub { index($_[0], $lit) >= 0 };
+    }
+    if ($guard->{tail_one_token}) {
+        return sub {
+            my $p = rindex($_[0], '" ');
+            return 0 if $p < 0;
+            return (substr($_[0], $p + 2) =~ tr/ //) == 1;
+        };
+    }
+    die "ltl: format registry: unknown guard spec for compile_format_guard\n";
+}
+
+# Generate one entry's extraction closure from its declarative definition
+# (D27 codegen, amended by the S5 gate probe): the closure writes the
+# file-scoped record lexicals directly and returns 1, so the hot path
+# pays no per-call field declarations and no return-list copy. Failure
+# semantics mirror the retired cascade exactly: a failed match's empty
+# list assignment clobbers only that entry's own capture targets; on
+# success the non-captured record fields receive the entry's
+# static-order-faithful defaults ($clobbered — see the section header).
+# $opts carries the CLI-gated compile decisions (include_query_string,
+# include_session).
+sub compile_format_extractor {
+    my ($spec, $clobbered, $opts) = @_;
+
+    my ($aux_decl, $cond_src, $body_src) = format_entry_block_src($spec, $clobbered, $opts);
+    my $src = "sub {\n$aux_decl$cond_src or return;\n$body_src\nreturn 1;\n}";
+    my $closure = eval $src;
+    die "ltl: format registry: extraction codegen failed for entry '$spec->{name}': $@\nGENERATED SOURCE:\n$src\n"
+        if $@ || ref $closure ne 'CODE';
+    return $closure;
+}
+
+# Emit one entry's recognition-plus-extraction source fragments, shared by
+# compile_format_extractor() (per-entry closure: validation + window
+# replay) and compile_format_scan_sub() (the single generated hot-loop
+# scan). Returns (aux_declaration, match_condition, post_match_body); the
+# pattern is spliced as a literal m~...~ so the compiled op carries no
+# per-line qr indirection. The line is always $_[0].
+sub format_entry_block_src {
+    my ($spec, $clobbered, $opts) = @_;
+
+    die "ltl: format registry: pattern for entry '$spec->{name}' contains the m~~ delimiter\n"
+        if index($spec->{pattern_src}, '~') >= 0;
+
+    my %is_record = map { $_ => 1 } @format_record_fields;
+    my %is_target = map { $_->[1] => 1 } @{ $spec->{field_map} };
+
+    # Auxiliary capture targets (e.g. GC heap fields) stay block-local.
+    my @aux = grep { !$is_record{$_} } map { $_->[1] } @{ $spec->{field_map} };
+    my $aux_decl = @aux ? 'my (' . join(', ', map { "\$$_" } @aux) . ");\n" : '';
+    # (scan-sub generation hoists these instead — the capture condition
+    # references them before any block-local declaration could run)
+
+    # Capture target list, with undef placeholders for discarded ordinals.
+    my $max_ord = 0;
+    $max_ord = $_->[0] > $max_ord ? $_->[0] : $max_ord for @{ $spec->{field_map} };
+    my %ord_to_field = map { $_->[0] => $_->[1] } @{ $spec->{field_map} };
+    my $targets = join(', ', map { defined $ord_to_field{$_} ? "\$$ord_to_field{$_}" : 'undef' } 1 .. $max_ord);
+
+    my $cond_src = "( ( $targets ) = \$_[0] =~ m~$spec->{pattern_src}~ )";
+
+    my @body;
+    # Post-match defaults for the record fields this entry does not capture.
+    my (@dflt_empty, @dflt_undef, @dflt_zero);
+    for my $f (@format_record_fields) {
+        next if $is_target{$f};
+        if    ($f eq 'bytes' || $f eq 'duration') { push @dflt_undef, "\$$f"; }
+        elsif ($f eq 'status_code' || $f eq 'is_access_log') { push @dflt_zero, "\$$f"; }
+        elsif ($clobbered->{$f}) { push @dflt_undef, "\$$f"; }
+        else { push @dflt_empty, "\$$f"; }
+    }
+    push @body, '( ' . join(', ', @dflt_empty) . ' ) = ("") x ' . scalar(@dflt_empty) . ';' if @dflt_empty;
+    push @body, '( ' . join(', ', @dflt_undef) . ' ) = (undef) x ' . scalar(@dflt_undef) . ';' if @dflt_undef;
+    push @body, '( ' . join(', ', @dflt_zero) . ' ) = (0) x ' . scalar(@dflt_zero) . ';' if @dflt_zero;
+    push @body, "\$is_access_log = 1;" if $spec->{stats_eligible};
+
+    # In-message metric probes (D33): index() superset gate, per-probe
+    # index() guards, probe regexes, then the conditional mask + the
+    # metrics-observed flag — the shape P6 measured and proved
+    # byte-identical to the inline cascade.
+    if (my $mm = $spec->{message_metrics}) {
+        my @probe_lines;
+        for my $p (@{ $mm->{probes} }) {
+            my $line = "( \$$p->{field} ) = \$message =~ /$p->{pattern}/";
+            $line .= " if index(\$message, '$p->{guard_lit}') >= 0" if defined $p->{guard_lit};
+            push @probe_lines, "    $line;";
+        }
+        my $any_defined = join(' || ', map { "defined \$$_->{field}" } @{ $mm->{probes} });
+        my @mask_block;
+        push @mask_block, "        \$is_access_log = 1;" if $mm->{marks_metrics_observed};
+        push @mask_block, "        \$message =~ s/$mm->{mask}{pattern}/$mm->{mask}{replace}/g;" if $mm->{mask};
+        push @body,
+            "if (index(\$message, '$mm->{gate_lit}') >= 0) {\n"
+          . join("\n", @probe_lines) . "\n"
+          . "    if ($any_defined) {\n"
+          . join("\n", @mask_block) . "\n"
+          . "    }\n"
+          . "}";
+    }
+
+    for my $t (@{ $spec->{transforms} }) {
+        if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }
+        if ($t eq 'prepend_session')    { next unless $opts->{include_session}; }
+        my $code = $format_transform_code{$t}
+            or die "ltl: format registry: entry '$spec->{name}' references unknown transform '$t'\n";
+        push @body, $code;
+    }
+
+    # Inline timestamp handling (D31 taken to its P8 conclusion: the
+    # closure-call overhead disappears when the parse is inlined into the
+    # per-format block). Fractional handling first — after the tz-chop
+    # transforms — so %timestamp_cache keys exclude offset and fraction,
+    # exactly as before; the declared frac contract selects the variant:
+    #   fixed3  — pattern-guaranteed SS.mmm tail: fixed-offset substr
+    #             reads, no regex, no exponent math
+    #   none    — layout never carries a fraction: constant zero, no scan
+    #   generic — variable/unguaranteed shape: the original s/// strip
+    # Then the layout parse, fronted by the last-seen memo and the cache.
+    my $frac = $spec->{time}{frac} // 'generic';
+    if ($frac eq 'fixed3') {
+        die "ltl: format registry: entry '$spec->{name}' declares frac 'fixed3' but its pattern does not guarantee a 3-digit fraction\n"
+            unless $spec->{pattern_src} =~ /\\\.\\d\{3\}|\[\.,\]\\d\{3\}/;
+        push @body, q{$fractional_ms = substr($timestamp_str, 20, 3);
+substr($timestamp_str, 19) = '';};
+    } elsif ($frac eq 'none') {
+        push @body, q{$fractional_ms = 0;};
+    } else {
+        push @body, q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); } else { $fractional_ms = 0; }};
+    }
+    my $compute = (($spec->{time}{layout} // '') eq 'apache_clf')
+        ? q{do { my ($day, $month_str, $year, $hour, $minute, $second) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/; timegm( $second, $minute, $hour, $day, $format_month_map{$month_str} - 1, $year ) }}
+        : q{timegm( substr($timestamp_str, 17, 2), substr($timestamp_str, 14, 2), substr($timestamp_str, 11, 2), substr($timestamp_str, 8, 2), substr($timestamp_str, 5, 2) - 1, substr($timestamp_str, 0, 4) )};
+    push @body, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
+elsif (exists \$timestamp_cache{\$timestamp_str}) {
+    \$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str};
+    \$format_last_ts_str = \$timestamp_str;
+}
+else {
+    \$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str} = $compute;
+    \$format_last_ts_str = \$timestamp_str;
+}};
+
+    return ($aux_decl, $cond_src, join("\n", @body), \@aux);
+}
+
+# Emit the inline guard condition for a scan block (D28), or '' when the
+# entry carries no guard. Same semantics as compile_format_guard(), spliced
+# as literal ops so the hot path pays no closure call per attempt.
+sub format_guard_cond_src {
+    my ($guard) = @_;
+    return '' unless $guard;
+    if (defined $guard->{lit}) {
+        (my $q = $guard->{lit}) =~ s/([\\'])/\\$1/g;
+        return "index(\$_[0], '$q') >= 0 and ";
+    }
+    if ($guard->{tail_one_token}) {
+        return "do { my \$p = rindex(\$_[0], '\" '); \$p >= 0 && (substr(\$_[0], \$p + 2) =~ tr/ //) == 1 } and ";
+    }
+    die "ltl: format registry: unknown guard spec for format_guard_cond_src\n";
+}
+
+# Compile the entire ordered scan into ONE generated sub (the P4
+# "inlining" increment, forced by the S5 gate probe: per-entry closure
+# calls cost ~0.8-1.7 us/line against the real inline baseline). The sub
+# tries each entry of @format_scan_order in order — guard inline, literal
+# pattern match, extraction body inline — and returns the winning entry
+# from its own captured entry snapshot. Promotion is emitted ONLY into
+# blocks whose generation-time position is not already optimal (some
+# non-ancestor ahead), so steady state runs no promotion code at all.
+# Returns the compiled sub; callers cache it per front format (D40) so
+# each possible order is compiled at most once per run.
+sub compile_format_scan_sub {
+    my ($opts) = @_;
+    my (@blocks, @tab_blocks, %aux_seen, @aux_all);
+    for my $si (0 .. $#format_scan_order) {
+        my $e = $format_scan_order[$si];
+        my $spec = $format_registry_spec{ $e->[FR_NAME] };
+        my (undef, $cond_src, $body_src, $aux) =
+            format_entry_block_src($spec, $format_registry_clobbered{ $e->[FR_NAME] }, $opts);
+        push @aux_all, grep { !$aux_seen{$_}++ } @$aux;
+        my $guard_src = format_guard_cond_src($spec->{guard});
+        my $optimal = 1;
+        for my $sj (0 .. $si - 1) {
+            if (!$e->[FR_ANC_SET]{ $format_scan_order[$sj][FR_NAME] }) { $optimal = 0; last }
+        }
+        # The winner is captured before promotion switches the active sub;
+        # @entries is this sub's own immutable snapshot of its order.
+        my $return_src = $optimal
+            ? "return \$entries[$si];\n"
+            : "my \$winner = \$entries[$si];\nformat_registry_promote($si);\nreturn \$winner;\n";
+        my $block = "if ( $guard_src$cond_src ) {\n$body_src\n$return_src}";
+        push @blocks, $block;
+        # Tab-led lines can only match heads that accept a tab first char
+        # ([^ ]+ heads — head_class 'any'); the whitespace dispatch below
+        # scans just those blocks, in the same scan order.
+        push @tab_blocks, $block if ($spec->{head_class} // 'any') eq 'any';
+    }
+    my $aux_decls = @aux_all ? 'my (' . join(', ', map { "\$$_" } @aux_all) . ");\n" : '';
+    # Whitespace dispatch: no head accepts a space first char (every head
+    # is a digit/bracket/brace class or [^ ]+), so space-led lines are a
+    # proven no-match; tab-led lines scan only the tab-capable subset.
+    # Both facts are verified against the samples at build (D24 gate 6).
+    my $ws_dispatch = "my \$head_ord = ord(\$_[0]);\n"
+        . "if (\$head_ord == 32) { return undef; }\n"
+        . "if (\$head_ord == 9) {\n" . join("\n", @tab_blocks) . "\nreturn undef;\n}\n";
+    my @entries = @format_scan_order;
+    my $src = "sub {\n$aux_decls$ws_dispatch" . join("\n", @blocks) . "\nreturn undef;\n}";
+    my $sub = eval $src;
+    die "ltl: format registry: scan-sub codegen failed: $@\nGENERATED SOURCE:\n$src\n"
+        if $@ || ref $sub ne 'CODE';
+    return $sub;
+}
+
+# Cross-shadow constraint derivation (D24/D26): every entry's samples are
+# run against every scanned pattern. A later entry whose pattern matches
+# an earlier entry's sample must stay behind that entry — the pair
+# becomes a pinned-ordering constraint, and the transitive closure of
+# those pairs is the entry's ancestor set the MTF promotion preserves.
+# Returns { name => [ ancestor names, static order ] }.
+sub derive_format_constraints {
+    my ($specs, $patterns) = @_;
+    my @scanned = grep { $_->{scanned} } @$specs;
+    my %idx = map { $scanned[$_]{name} => $_ } 0 .. $#scanned;
+    my %must_precede;   # $must_precede{later}{earlier} = 1
+
+    for my $owner (@scanned) {
+        for my $sample (@{ $owner->{samples} }) {
+            # The owning entry must be the first static match — otherwise the
+            # sample is mislabeled and every derivation from it is suspect.
+            my ($first) = grep { $sample =~ $patterns->{$_->{name}} } @scanned;
+            die "ltl: format registry: sample of entry '$owner->{name}' first matches '"
+                . ($first ? $first->{name} : 'nothing') . "' under static order — mislabeled sample or pattern drift:\n  $sample\n"
+                unless $first && $first->{name} eq $owner->{name};
+            for my $other (@scanned) {
+                next if $other->{name} eq $owner->{name};
+                next unless $idx{ $other->{name} } > $idx{ $owner->{name} };
+                $must_precede{ $other->{name} }{ $owner->{name} } = 1
+                    if $sample =~ $patterns->{ $other->{name} };
+            }
+        }
+    }
+
+    my %ancestors;
+    for my $s (@scanned) {
+        my %seen;
+        my @queue = keys %{ $must_precede{ $s->{name} } // {} };
+        while (@queue) {
+            my $p = shift @queue;
+            next if $seen{$p}++;
+            push @queue, keys %{ $must_precede{$p} // {} };
+        }
+        $ancestors{ $s->{name} } = [ sort { $idx{$a} <=> $idx{$b} } keys %seen ];
+    }
+    return \%ancestors;
+}
+
+# Build the live registry from the declarative specs and run the D24
+# validation gates. Dies with an actionable diagnostic on any violation —
+# a registry that fails its own samples must never reach the scan loop.
+# Live extraction closures bake the CLI-gated options; validation runs a
+# parallel default-configuration compile so the declared expected records
+# stay comparable regardless of flags.
+sub build_format_registry {
+    my @specs = format_registry_specs();
+
+    # Compile recognition patterns once; validate reserved slots.
+    my %patterns;
+    for my $spec (@specs) {
+        die "ltl: format registry: entry '$spec->{name}' declares event_pairs, which is reserved and not yet consumed (features/58-format-registry-staged-detection.md D23)\n"
+            if $spec->{event_pairs} && @{ $spec->{event_pairs} };
+        next unless $spec->{scanned};
+        $patterns{ $spec->{name} } = qr/$spec->{pattern_src}/;
+    }
+
+    # Per-entry clobbered-field sets from static order (see section header).
+    my %is_record = map { $_ => 1 } @format_record_fields;
+    my (%clobbered_by, %clobber_union);
+    for my $spec (grep { $_->{scanned} } @specs) {
+        $clobbered_by{ $spec->{name} } = { %clobber_union };
+        $clobber_union{ $_->[1] } = 1 for grep { $is_record{ $_->[1] } } @{ $spec->{field_map} };
+    }
+
+    # D24 gate 1: every sample matches its own pattern.
+    for my $spec (grep { $_->{scanned} } @specs) {
+        for my $i (0 .. $#{ $spec->{samples} }) {
+            die "ltl: format registry: entry '$spec->{name}' sample " . ($i + 1)
+              . " does not match its own pattern (produced_by format_registry_specs(); the sample set is the entry's executable self-test):\n  $spec->{samples}[$i]\n"
+                unless $spec->{samples}[$i] =~ $patterns{ $spec->{name} };
+        }
+    }
+
+    # D24 gate 2: extraction parity — the default-config closure (same
+    # write-direct shape production runs) must leave the record lexicals
+    # equal to the declared expected record for every sample.
+    for my $spec (grep { $_->{scanned} } @specs) {
+        my $extract = compile_format_extractor($spec, $clobbered_by{ $spec->{name} },
+            { include_query_string => 0, include_session => 0 });
+        for my $i (0 .. $#{ $spec->{samples} }) {
+            ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = (undef) x 9;
+            ( $bytes, $duration, $status_code, $is_access_log ) = (undef) x 4;
+            $extract->( $spec->{samples}[$i] );
+            my @got = ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message, $bytes, $duration, $status_code, $is_access_log );
+            my $want = $spec->{expect}[$i]
+                or die "ltl: format registry: entry '$spec->{name}' sample " . ($i + 1) . " has no expected record\n";
+            for my $f (0 .. $#format_record_fields) {
+                my ($g, $w) = ($got[$f], $want->[$f]);
+                next if (!defined $g && !defined $w) || (defined $g && defined $w && $g eq $w);
+                die "ltl: format registry: extraction parity failure for entry '$spec->{name}' sample " . ($i + 1)
+                  . " field '$format_record_fields[$f]': got " . (defined $g ? "'$g'" : 'undef')
+                  . ", expected " . (defined $w ? "'$w'" : 'undef')
+                  . " (produced_by compile_format_extractor(); contract: expected records in format_registry_specs() transcribe the retired cascade branch)\n";
+            }
+        }
+    }
+
+    # D24 gate 3: guard soundness — pattern match implies guard pass, over
+    # every sample of every entry.
+    my %guards = map { $_->{name} => compile_format_guard($_->{guard}) } grep { $_->{scanned} } @specs;
+    for my $guarded (grep { $_->{scanned} && $guards{ $_->{name} } } @specs) {
+        for my $spec (grep { $_->{scanned} } @specs) {
+            for my $sample (@{ $spec->{samples} }) {
+                next unless $sample =~ $patterns{ $guarded->{name} };
+                die "ltl: format registry: guard for entry '$guarded->{name}' rejects a line its pattern matches (sample of '$spec->{name}') — guards must never false-negative:\n  $sample\n"
+                    unless $guards{ $guarded->{name} }->($sample);
+            }
+        }
+    }
+
+    # D24 gate 4: cross-shadow ordering constraints match the declared
+    # expectations (D26 pinned-ancestor sets).
+    my $ancestors = derive_format_constraints(\@specs, \%patterns);
+    for my $spec (grep { $_->{scanned} } @specs) {
+        my $derived  = join(',', @{ $ancestors->{ $spec->{name} } });
+        my $declared = join(',', @{ $spec->{expect_ancestors} // [] });
+        die "ltl: format registry: derived pinned-ancestor set for entry '$spec->{name}' is [$derived] but the spec declares [$declared] — the sample cross-shadow test disagrees with the declared ordering constraints; reconcile before shipping (produced_by derive_format_constraints())\n"
+            if $derived ne $declared;
+    }
+
+    # D24 gate 6: whitespace-dispatch soundness. A space-prefixed sample
+    # must match NO pattern (space fast-reject), and a tab-prefixed sample
+    # must match no pattern whose entry is outside head_class 'any' (the
+    # tab subset scan). Any hit means the dispatch could misclassify a
+    # line the full scan would have matched — fail the build.
+    for my $spec (grep { $_->{scanned} } @specs) {
+        for my $sample (@{ $spec->{samples} }) {
+            for my $probe_spec (grep { $_->{scanned} } @specs) {
+                die "ltl: format registry: space-prefixed sample of '$spec->{name}' matches '$probe_spec->{name}' — the space fast-reject would misclassify it (produced_by compile_format_scan_sub() whitespace dispatch)\n"
+                    if " $sample" =~ $patterns{ $probe_spec->{name} };
+                next if ($probe_spec->{head_class} // 'any') eq 'any';
+                die "ltl: format registry: tab-prefixed sample of '$spec->{name}' matches '$probe_spec->{name}' (head_class $probe_spec->{head_class}) — the tab subset scan would miss it\n"
+                    if "\t$sample" =~ $patterns{ $probe_spec->{name} };
+            }
+        }
+    }
+
+    # Freeze the live registry (CLI-gated options baked into extractors).
+    my $opts = { include_query_string => $include_query_string, include_session => $include_session };
+    @format_registry = ();
+    %format_registry_entry = ();
+    for my $spec (@specs) {
+        my $entry = [];
+        $entry->[FR_NAME]            = $spec->{name};
+        $entry->[FR_SLUG]            = $spec->{slug};
+        $entry->[FR_MATCH_TYPE]      = $spec->{match_type};
+        $entry->[FR_SCANNED]         = $spec->{scanned};
+        $entry->[FR_PATTERN]         = $spec->{scanned} ? $patterns{ $spec->{name} } : undef;
+        $entry->[FR_PATTERN_SRC]     = $spec->{pattern_src};
+        $entry->[FR_FIELD_MAP]       = $spec->{field_map};
+        $entry->[FR_TRANSFORMS]      = $spec->{transforms};
+        $entry->[FR_TIME]            = $spec->{time};
+        $entry->[FR_DURATION_UNIT]   = $spec->{duration_unit};
+        $entry->[FR_UNIT_AMBIGUOUS]  = $spec->{unit_ambiguous};
+        $entry->[FR_STATS]           = $spec->{stats_eligible};
+        $entry->[FR_GUARD]           = $guards{ $spec->{name} };
+        $entry->[FR_EXTRACT]         = $spec->{scanned}
+            ? compile_format_extractor($spec, $clobbered_by{ $spec->{name} }, $opts) : undef;
+        $entry->[FR_MESSAGE_METRICS] = $spec->{message_metrics};
+        $entry->[FR_EVENT_PAIRS]     = $spec->{event_pairs};
+        $entry->[FR_SAMPLES]         = $spec->{samples};
+        $entry->[FR_ANCESTORS]       = $ancestors->{ $spec->{name} } // [];
+        $entry->[FR_TIME_PARSE]      = compile_format_time_parser( $spec->{time}{layout} );
+        $entry->[FR_ANC_SET]         = { map { $_ => 1 } @{ $entry->[FR_ANCESTORS] } };
+        $entry->[FR_MATCHES]         = 0;
+        push @format_registry, $entry if $spec->{scanned};
+        $format_registry_entry{ $spec->{name} } = $entry;
+    }
+    @format_scan_order = @format_registry;
+    %format_registry_spec      = map { $_->{name} => $_ } @specs;
+    %format_registry_clobbered = %clobbered_by;
+    $format_registry_opts      = $opts;
+    %format_scan_sub_cache     = ();
+    $format_scan_sub = $format_scan_sub_cache{ join ',', map { $_->[FR_NAME] } @format_scan_order }
+                     = compile_format_scan_sub($opts);
+    # Eager precompilation (D40): every first-promotion-from-static order
+    # (winner's ancestors, winner, rest in static relative order) is known
+    # up front — compile them all now so the compile cost is paid before
+    # the read loop, never inside it. Deeper recency permutations (only
+    # reachable in multi-format interleaved streams) cache on first
+    # occurrence and are reused for the rest of the run.
+    for my $e (@format_registry) {
+        my %front = ( %{ $e->[FR_ANC_SET] }, $e->[FR_NAME] => 1 );
+        my (@f, @r);
+        for my $o (@format_registry) {
+            if ($front{ $o->[FR_NAME] }) { push @f, $o } else { push @r, $o }
+        }
+        my @save = @format_scan_order;
+        @format_scan_order = (@f, @r);
+        my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
+        $format_scan_sub_cache{$sig} //= compile_format_scan_sub($opts);
+        @format_scan_order = @save;
+    }
+
+    # D24 gate 5: the generated scan sub (the production truth) classifies
+    # every sample to its owning entry under the initial (static) order.
+    for my $spec (grep { $_->{scanned} } @specs) {
+        for my $sample (@{ $spec->{samples} }) {
+            my $winner = $format_scan_sub->($sample);
+            die "ltl: format registry: generated scan sub classifies a sample of '$spec->{name}' as '"
+              . ($winner ? $winner->[FR_NAME] : 'no match')
+              . "' (produced_by compile_format_scan_sub())\n"
+                unless $winner && $winner->[FR_NAME] eq $spec->{name};
+        }
+    }
+    # Gate 5's format-alternating sample stream promoted entries (warming
+    # deeper recency orders); restore the static order and its sub.
+    @format_scan_order = @format_registry;
+    $format_scan_sub = $format_scan_sub_cache{ join ',', map { $_->[FR_NAME] } @format_scan_order };
+
+    # Validation ran the write-direct closures against the record lexicals;
+    # restore their pristine per-run state before any line is read.
+    ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = ("") x 9;
+    ( $bytes, $duration ) = ( undef, undef );
+    ( $status_code, $is_access_log ) = ( 0, 0 );
+    ( $timestamp, $fractional_ms ) = ( undef, 0 );
+    ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
+    %timestamp_cache = ();   # validation parsed the samples; start the run with an empty cache
+    $format_scan_promotions = 0;   # gate 5's sample stream promoted entries; the
+                                   # telemetry counts run promotions only
+}
+
+# Classify one line through the generated scan sub (detection-window
+# prefill's named entry point). Returns the winning entry or undef; as a
+# side effect the winning entry's extraction writes the record lexicals
+# and a change-point match promotes/regenerates the scan order.
+sub format_registry_classify {
+    my ($line) = @_;
+    return $format_scan_sub->($line);
+}
+
+# Promotion (D26): the winner moves to the front together with its
+# ancestor closure; every other entry keeps its current relative order —
+# recency ordering, so recently active formats stay ahead of the tail.
+# The scan sub for the resulting order is selected from the signature
+# cache; a genuinely new order (first time this recency permutation
+# occurs in the run) compiles once and is cached. Only blocks whose
+# generation-time position is not already optimal call this — steady
+# state never enters here.
+sub format_registry_promote {
+    my ($si) = @_;
+    my $e = $format_scan_order[$si];
+    my %front = ( %{ $e->[FR_ANC_SET] }, $e->[FR_NAME] => 1 );
+    my (@f, @r);
+    for my $o (@format_scan_order) {
+        if ($front{ $o->[FR_NAME] }) { push @f, $o } else { push @r, $o }
+    }
+    @format_scan_order = (@f, @r);
+    $format_scan_promotions++;
+    my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
+    $format_scan_sub = $format_scan_sub_cache{$sig} //= compile_format_scan_sub($format_registry_opts);
+    return;
+}
+
 # Section name and field names are locked by
 # features/225-test-harness-coverage-gaps.md § #228 section. Slug values are
 # locked by %match_type_to_slug at the top of GLOBALS. Renames and
@@ -2068,6 +2991,8 @@ sub emit_format_detection_verbose {
             push @verbose_output, "  matched_lines: 0";
             push @verbose_output, "  unmatched_lines: 0";
             push @verbose_output, "  first_match_line: -";
+            push @verbose_output, "  scan_attempts: 0";
+            push @verbose_output, "  scan_failed_attempts: 0";
             next;
         }
         my $slug = $fdd->{slug} // '-';
@@ -2079,7 +3004,30 @@ sub emit_format_detection_verbose {
         push @verbose_output, "  unmatched_lines: $fdd->{unmatched_lines}";
         push @verbose_output, "  first_match_line: " .
             (defined $fdd->{first_match_line} ? $fdd->{first_match_line} : '-');
+        push @verbose_output, "  scan_attempts: " . ($fdd->{scan_attempts} // 0);
+        push @verbose_output, "  scan_failed_attempts: " . ($fdd->{scan_failed_attempts} // 0);
     }
+
+    # Scan-order telemetry: the run-level view of the registry scan that
+    # produced the per-file results above — sufficient to prove MTF
+    # behavior end-to-end (final order, promotion count, per-entry match
+    # attribution). Names are registry entry names (FR_NAME), not slugs:
+    # the scan orders entries, and two entries can share a slug.
+    push @verbose_output, "=== format-detection / scan ===";
+    push @verbose_output, "entries: " . scalar(@format_registry);
+    push @verbose_output, "guarded: " .
+        (join(',', map { $_->[FR_NAME] } grep { $_->[FR_GUARD] } @format_registry) || '-');
+    push @verbose_output, "window_size: $format_detection_window";
+    push @verbose_output, "final_order: " . join(',', map { $_->[FR_NAME] } @format_scan_order);
+    push @verbose_output, "promotions: $format_scan_promotions";
+    push @verbose_output, "match_counts: " .
+        join(',', map { $_->[FR_NAME] . '=' . $_->[FR_MATCHES] } @format_registry);
+    push @verbose_output, "nomatch_scan_samples: $format_scan_nomatch_samples";
+    push @verbose_output, "nomatch_scan_avg_us: " .
+        ($format_scan_nomatch_samples
+            ? sprintf('%.1f', $format_scan_nomatch_sample_us / $format_scan_nomatch_samples)
+            : '-');
+    push @verbose_output, "=== END format-detection / scan ===";
 
     push @verbose_output, "=== END format-detection ===";
 }
@@ -7311,6 +8259,7 @@ sub adapt_to_command_line_options {
         'terminal-width|tw=i' => \$terminal_width,                                  # hidden
         'no-auto-hide|nah' => \$no_auto_hide,
         'debug-layout' => \$debug_layout,                                           # hidden
+        'detection-window=i' => \$format_detection_window,                          # hidden — D30 two-phase-store window size (default 0 until #17 sizes it)
         'validate-layout' => \$validate_layout,                                     # hidden
         'help:s'       => \$show_help,                                              # hidden — special-cased; legacy aliases -?/--help via PreProcessor. Optional arg: '' = full help; 'statistics' = stats index; other = error (Issue #261).
         'explain|ex:s' => \$explain_arg,                                            # Issue #261: optional arg: '' = topic registry; <topic> = long-form explanation. Aliases shared with -so (avg, stddev, p1..p99999).
@@ -7901,6 +8850,7 @@ sub read_and_process_logs {
     $message_stats_capture_mode = choose_data_model('message-stats') // 'raw';
     $bucket_stats_capture_mode  = choose_data_model('bucket-stats')  // 'raw';
 
+
     foreach my $in_file (@in_files) {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
         push @files_processed, $in_file;
@@ -7928,7 +8878,6 @@ sub read_and_process_logs {
             sel_count_count      => 0, sel_count_min    => undef, sel_count_max    => undef, sel_count_sum    => 0,
         };
         my $filter_range_filter_initialized = 0;
-        my %month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
         %udm_last_value = () if @udm_configs;  # Reset delta state between files (Issue #22)
         $csv_detected = 0;
@@ -7939,13 +8888,50 @@ sub read_and_process_logs {
         my $potential_csv_header;
         my $csv_skipped_timestamp_rows = 0;
 
-        while (<$fh>) {
+        # Detection window (D30 two-phase-store, structure only until #17
+        # sizes N — D38): with a window configured, the first N lines of the
+        # file are classified once (cold path, shared scan sub) and held as
+        # [raw_line, entry]; the main loop replays them with their cached
+        # classification — extraction deferred to the replay — then switches
+        # to the streaming path. Default N=0: no lines held.
+        my ( $file_scan_attempts, $file_scan_failed ) = ( 0, 0 );  # scan telemetry (Issue #228)
+        my @window_held;
+        if ($format_detection_window > 0) {
+            while (@window_held < $format_detection_window && defined(my $wline = <$fh>)) {
+                (my $wstripped = $wline) =~ s/[\r\n]+$//;
+                my ($wentry) = format_registry_classify($wstripped);
+                $file_scan_attempts++;
+                $file_scan_failed++ unless $wentry;
+                push @window_held, [ $wline, $wentry ];
+            }
+        }
+
+        while (1) {
+            # Line source: held window lines replay first (carrying their
+            # one-time classification), then the stream. A held line whose
+            # classification found no match must not be re-scanned — the
+            # $from_window flag distinguishes "classified as no-match" from
+            # "not yet classified".
+            my ($from_window, $window_entry);
+            if (@window_held) {
+                my $held = shift @window_held;
+                $_ = $held->[0];
+                $window_entry = $held->[1];
+                $from_window = 1;
+            } else {
+                last unless defined( $_ = <$fh> );
+            }
             s/[\r\n]+$//;                                   # Remove Windows line endings (CRLF) or Unix line endings (LF) if present
             $line_number++;
-            my ( $timestamp_str, $log_level, $category_bucket, $category, $object, $instance, $user, $platform, $thread, $threadpool, $session, $message ) = ("") x 12;
-            my ( $is_line_match, $is_access_log, $match_type, $status_code, $heap_from, $heap_to, $heap_size ) = ( 0, 0, 0, 0, 0, 0, 0 );
-            my ( $bytes, $duration, $occurrences, $count ) = ( undef, undef, undef, undef );
-            my ( $timestamp, $threadname );
+            # The 13 record fields ($timestamp_str .. $is_access_log) are
+            # file-scoped lexicals written directly by the extraction
+            # closures; per-line state for them is established by the match
+            # (or by the CSV branches' explicit resets), not re-declared here.
+            my ( $log_level, $category, $threadpool ) = ("") x 3;
+            my ( $is_line_match, $match_type ) = ( 0, 0 );
+            my ( $occurrences, $count ) = ( undef, undef );
+            my ( $threadname );
+            my $line_entry;                                 # winning registry entry for this line (drives timestamp-parse dispatch)
             my @csv_fields;
             $total_lines_read++;
             memory_debug_sample("read_lines") if $show_memory_debug && $total_lines_read % 75000 == 0;
@@ -7997,170 +8983,57 @@ sub read_and_process_logs {
                 $is_line_match = 1;
                 $is_access_log = 1;
                 $match_type = 13;
+                $line_entry = $format_registry_entry{csv};
+                # Record lexicals the CSV path does not produce: reset
+                # explicitly (the scan's closures never ran for this line).
+                ( $object, $instance, $user, $session, $platform, $thread ) = ("") x 6;
+                ( $bytes, $duration ) = ( undef, undef );
+                $status_code = 0;
 
-            ## ThingWorx Standard Log Format (ApplicationLog, ErrorLog, ScriptLog, ...) ##
-            } elsif ( ($timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ((?:\](?! )|[^\]])*)] (.*)/) {
-                $is_line_match = 1;
-                $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
-
-                # this section is optional, for cases where log line has included additional context which should be interpretted (row count, execution duration, result size)
-                ( $bytes ) = $message =~ / bytes\s*=\s*(\d+)/;								# 2025-04-22 remove the trailing whitespace as same as below
-                ( $duration ) = $message =~ / durationM[sS]\s*=\s*(\d+)/;						# 2025-04-17 remove the trailing white space as it was not picking up the variable if it was at the end of the line
-                if (defined $bytes || defined $duration) {
-                    $is_access_log = 1;
-                    $message =~ s/ ((bytes|durationM[sS])\s*=\s*)(\d+)/ $1?/g;		# mask out bytes and duration values for grouping purposes (but leave others for later processing)
+            ## Registry scan (#58): recognition + extraction in one step ##
+            # Pinned-closure MTF over the compiled registry entries, cheap
+            # superset guards first (D28). The winning entry's generated
+            # closure returns the fixed-order extraction record; a held
+            # window line reuses its one-time classification and runs only
+            # the deferred extraction. The scan is inline (not a sub call)
+            # per the P3 lean-loop obligation; promotion is a rare event and
+            # goes through format_registry_promote().
+            } else {
+                # The generated scan sub inlines guard, literal-pattern
+                # match, and extraction for every entry in MTF order and
+                # writes the file-scoped record lexicals directly; a failed
+                # attempt's empty capture assignment clobbers just that
+                # entry's own targets — the retired cascade's exact
+                # semantics, with no per-line field copies or per-entry
+                # closure calls. Held window lines reuse their one-time
+                # classification and run only the entry's extraction closure.
+                if ($from_window) {
+                    if ($window_entry && $window_entry->[FR_EXTRACT]->($_)) {
+                        $is_line_match = 1;
+                        $match_type = $window_entry->[FR_MATCH_TYPE];
+                        $line_entry = $window_entry;
+                    }
+                } else {
+                    $file_scan_attempts++;
+                    if ( $line_entry = $format_scan_sub->($_) ) {
+                        $is_line_match = 1;
+                        $match_type = $line_entry->[FR_MATCH_TYPE];
+                    } else {
+                        # No-match scan: the structural worst case (every
+                        # entry attempted). Sampled timing on this already-
+                        # expensive path: re-scan 1 in N such lines under a
+                        # timer. The re-scan is side-effect-safe — no match
+                        # means no promotion, and the failed attempts' empty
+                        # capture writes repeat the state the first scan left.
+                        $file_scan_failed++;
+                        if ($file_scan_failed % FORMAT_SCAN_NOMATCH_SAMPLE_EVERY == 0) {
+                            my $t0 = [gettimeofday];
+                            $format_scan_sub->($_);
+                            $format_scan_nomatch_sample_us += tv_interval($t0) * 1e6;
+                            $format_scan_nomatch_samples++;
+                        }
+                    }
                 }
-
-
-# [elapsed 39ms]
-#  [elapsed 20m 47s 399ms] Import completed successfully
-# ApplicationLog.2025-04-29.135.log:2025-04-29 09:07:04.340+0000 [L: INFO] [O: c.t.c.ImportProcessor] [I: ] [U: Administrator] [S: ] [P: ] [T: https-jsse-nio-8443-exec-1] ***  [elapsed 20m 47s 399ms] Import completed successfully
-#( $duration ) = $message =~ /\[elapsed (\d+)ms\]/;
-#$message =~ s/\[elapsed (\d+)ms\]/\[duration ??ms\]/g;
-
-            ## ThingWorx Connection Server Standard Log Format ##
-            } elsif ( ($timestamp_str, $thread, $category_bucket, $object, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)/) {
-                $is_line_match = 1;
-                # for some reason needed to move this before other more generic patterns which shouldn't be matching this, or are valid
-                $match_type = 10;                       # 2025-08-14 21:00:34.633 [vert.x-eventloop-thread-12] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size
-
-                ( $duration ) = $message =~ / (\d+) milliseconds/;
-                $message =~ s/ (\d+) milliseconds/ ? millseconds/g;
-
-                $message =~ s/(from \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:)\d{4,5} /${1}XXXXX /;	# remove the ephemeral port in order to group common messages
-                $is_access_log = 1 if defined $bytes || defined $duration;
-
-            ## Generic Java/Logback Pattern with timestamp and level ##
-            } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]/) {
-                $is_line_match = 1;
-                $match_type = 1;			# this is matching ThingWorx standard log format 2025-02-04 12:05:57.481+0000 [L: DEBUG] 
-
-            ## ThingWorx Remote Access Client Log Format ##
-            } elsif ( ($timestamp_str, $category_bucket ) = $_ =~ /^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3}).*? \[[L: ]*([^\]]*)\]/ ) {
-                $is_line_match = 1;
-                $match_type = 2;			# this is matching RAC client log format [2025-02-04T12:06:22.784] [TRACE]
-                $timestamp_str =~ tr/T/ /;
-
-            ## Apache Tomcat Access Log with CodeBeamer format for Service Execution Time in ms ([%Dms]) and seconds ([%Ts])  ##
-            # The ([^ ]+ ){3} host/ident/authuser prefix in the access-log family
-            # must remain backtracking-free: these patterns are attempted (and most
-            # fail) on every access-log line, and a lazy prefix makes each failed
-            # attempt ~10x more expensive because the engine retries every field
-            # partition before giving up.
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, undef) = $_ =~ /^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.]+)ms\] \[(.+)s\]/ ) {
-                $is_line_match = 1;
-                $match_type = 12;			# matching Tomcat access log CodeBeamer format 192.168.223.1 - - [29/Oct/2025:08:52:11 +0000] "GET /urlversioned/202510290803/images/newskin/login_page/icon_qa.png HTTP/1.1" 200 20097 [5ms] [0.005s]
-
-                $is_access_log = 1;
-                $status_code = $category_bucket;
-                $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
-                $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
-                undef $bytes if $bytes eq "-";
-
-                $message =~ s/ HTTP\/\d\.\d$//;							# chop off the HTTP protocol and version
-                $message =~ s/\?.+$// unless $include_query_string;				# chop off the query string from the URI
-                $message = "[$session] $message" if defined $session && $include_session;	# include session if we found it in the logs
-
-            ## Apache Tomcat Standard/Common Access Log Format (no duration field) ##
-            # Anchored to end-of-line after the bytes field so it wins over the broader
-            # with-duration pattern below; a line with anything after bytes (duration,
-            # thread, session) falls through to match_type 3.
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes) = $_ =~ /^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$/ ) {
-                $is_line_match = 1;
-                $match_type = 4;			# this is matching Tomcat/Apache common access log format (no duration) 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626
-                $is_access_log = 1;
-                $status_code = $category_bucket;
-                $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
-                $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
-                undef $bytes if $bytes eq "-";
-
-                $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
-                $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
-
-            ## JBoss/Jersey Enhanced Access Log Format: quoted referrer, quoted user-agent, then execution time ##
-            # Anchored to end-of-line after the trailing duration so it wins over the
-            # broader with-duration pattern below; that pattern's all-optional tail
-            # would otherwise claim these lines with duration=undef and junk
-            # thread/session captures from the quoted fields.
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, undef, undef, $duration) = $_ =~ /^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$/ ) {
-            # access logs # 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
-                $is_line_match = 1;
-                $match_type = 9;			# this is matching Jboss access log format with service execution time 127.0.0.1 - - [13/Mar/2025:09:02:41 +0000] "GET /async/prediction/evaluation?limit=99999 HTTP/1.1" 200 51 "-" "Jersey/2.37 (HttpUrlConnection 11.0.22)" 651
-                $is_access_log = 1;
-                $status_code = $category_bucket;
-                $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
-                $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
-
-                $message =~ s/ HTTP\/\d\.\d$//;					# chop off the HTTP protocol and version
-                $message =~ s/\?.+$// unless $include_query_string;		# chop off the query string from the URI
-
-            ## Apache Tomcat Access Log with Service Execution Time (%D), and optionally thread (%I) and session (%S) ##
-            } elsif ( (undef, $timestamp_str, $message, $category_bucket, $bytes, $duration, $thread, $session) = $_ =~ /^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?/ ) {
-                $is_line_match = 1;
-                $match_type = 3;			# this is matching Tomcat access log format with service execution time 43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
-                $is_access_log = 1;
-                $status_code = $category_bucket;
-                $category_bucket =~ s/(\d)\d{2}/$1xx/;	# bucket HTTP status codes into their primary families
-                $timestamp_str =~ s/ \+\d{4}$//;	# chop off the timezone offset
-                undef $bytes if $bytes eq "-";
-
-                $message =~ s/ HTTP\/\d\.\d$//;							# chop off the HTTP protocol and version
-                $message =~ s/\?.+$// unless $include_query_string;				# chop off the query string from the URI
-                $message = "[$session] $message" if defined $session && $include_session;	# include session if we found it in the logs
-
-            ## ThingWorx Connection Server JSON Formatted Logs ##
-            } elsif ( ($timestamp_str, $category_bucket) = $_ =~ /^{"\@timestamp":"([^"]*).*"level":"([^"]*)/ ) {
-                $is_line_match = 1;
-                $match_type = 5;			# this matches Connection Server JSON formatted logs : {"@timestamp":"2025-02-02T21:03:06.725+00:00","@version":1,"message":"Error encountered, closing WebSocket: endpointId=2608459","logger_name":"com.thingworx.connectionserver.alwayson.AbstractClientEndpoint","thread_name":"vert.x-eventloop-thread-16","level":"WARN","level_value":30000,"stack_trace":"io.vertx.core.http.HttpClosedException: Connection was closed\n"}
-                $timestamp_str =~ s/\+\d{2}:\d{2}$//;	# chop off the timezone offset
-                $timestamp_str =~ tr/T/ /;
-# TO DO: Pull out thread name
-
-            ## Java 11 GC Log Format with Timestamps Enabled ##
-            } elsif ( ( $timestamp_str, $category_bucket, $message, $heap_from, $heap_to, $heap_size, $duration ) = $_ =~ /^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}.*?\[info\]\[gc\s*\] GC\(\d+\) (.+?) (\(.+?\)) (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms/ ) {
-                $is_line_match = 1;
-                $match_type = 6;			# this matches Java GC log info level pause
-                $is_access_log = 1;			# need this to have statistics calculated
-
-                $bytes = convert_bytes( $heap_from ) - convert_bytes( $heap_to );
-                $bytes = $bytes < 0 ? 0 : $bytes;
-
-            ## ThingWorx Analytics Log Formats ##
-            } elsif ( ( $category_bucket, $timestamp_str, $message ) = $_ =~ /^([^ ]+)\s+\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[.,]\d{3})\] (.*)$/ ) {  
-            # adaptor     # ERROR [2025-02-19 18:31:00,284] com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!
-            # sync        # INFO  [2025-02-20 04:49:11,450] org.ehcache.core.EhcacheManager: Cache 'scorefunc_cachex' created in EhcacheManager.
-            # async       # WARN  [2025-02-19 18:30:01,437] org.apache.zookeeper.ClientCnxnSocketNetty: future isn't success.
-                $is_line_match = 1;
-                $match_type = 7;			# this matches ThingWorx Analytics V2 types for adaptor, sync, async
-                $timestamp_str =~ tr/,/./;
-                $timestamp_str =~ tr/T/ /;
-                $message =~ s/\s+$//g;
-
-            } elsif ( ( $timestamp_str, $thread, $category_bucket, $message ) = $_ =~ /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^ ]*)\s+\[([^]]+)\]\s+(\w+)\s+(.*)$/ ) {  
-            # worker      # 2025-02-20 10:06:10 [nioEventLoopGroup-2-1] WARN  io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]
-                $is_line_match = 1;
-                $match_type = 8;			# this matches ThingWorx Analytics worker type
-                $timestamp_str =~ tr/,/./;
-                $timestamp_str =~ tr/T/ /;
-                $message =~ s/\s+$//g;
-
-            } elsif ( ( $category_bucket, $timestamp_str, $message ) = $_ =~ /^([^ ]+) (\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}[,.]\d+) (.*)/ ) {
-                $is_line_match = 1;
-                $match_type = 11;			# this is matching ThingWorx Edge C SDK format # FORCE 2025-08-09 18:27:18,40 8012 twx_connection.cpp:246 Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed]
-                chop $message;
-
-                # INFO 2025-08-09 18:19:04,479 libremotesession::RemoteConnectionManager::ReloadAllowList : Attempting to load the allowlist.
-                # INFO 2025-08-09 18:19:04,479 8012 change_notification_source.cpp:11 OnProvisioningChanged provisioning change update received
-                # ERROR 2025-08-09 18:27:18,38 TW_SSL_READ: Error reading from SSL stream
-                # WARN 2025-08-09 18:19:04,729 getCurrentPropertyValuesForEachHandler -  startType parameter is missing but optional. Assumed to be useDefaultValue
-                # INFO 2025-08-09 18:27:18,128 8012 twx_app_executor.cpp:83 Detach Detach requested
-
-                $message =~ s/\d+ (.*)$/$1/;			# remove process ID if log messages contains it
-                if( $message =~ /\w+\.cpp:\d+ / ) {
-                    $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/;
-                    $object = $1;
-                }
-            
             }
 
             ## LAZY CSV DETECTION (Issue #107) ##
@@ -8198,6 +9071,10 @@ sub read_and_process_logs {
                             $is_line_match = 1;
                             $is_access_log = 1;
                             $match_type = 13;
+                            $line_entry = $format_registry_entry{csv};
+                            ( $object, $instance, $user, $session, $platform, $thread ) = ("") x 6;
+                            ( $bytes, $duration ) = ( undef, undef );
+                            $status_code = 0;
                         } else {
                             # Field count mismatch — not CSV, reset
                             $csv_detected = 0;
@@ -8303,9 +9180,20 @@ sub read_and_process_logs {
                     $fdd->{match_type}       = $match_type;
                     $fdd->{slug}             = $match_type_to_slug{$match_type} // 'unknown';
                     $fdd->{first_match_line} = $line_number;
+                    # D18: the bound format's duration unit varies across
+                    # producers and no -du was given — tell the user which
+                    # assumption is in effect, once per run. Intentional
+                    # diagnostic: must never carry an ` at ... line` suffix
+                    # (runtime-warning discriminator, HARNESS-DESIGN.md).
+                    if ($line_entry && $line_entry->[FR_UNIT_AMBIGUOUS]
+                        && !defined $duration_unit_override && !$format_unit_ambiguity_warned) {
+                        $format_unit_ambiguity_warned = 1;
+                        print STDERR "Note: $in_file: this access log format's duration field (%D) is milliseconds on Tomcat 9 but microseconds on Apache HTTP Server and Tomcat 10.1+; assuming milliseconds - use -du us if this log's producer emits microseconds\n";
+                    }
                 }
                 $fdd->{matched_lines}++;
                 $fdd->{is_access_log} = 1 if $is_access_log;
+                $line_entry->[FR_MATCHES]++ if $line_entry;
 
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
 
@@ -8315,13 +9203,25 @@ sub read_and_process_logs {
                 # reach arithmetic or unit conversion.
                 $duration = undef if defined $duration && $duration !~ /^[0-9]+(?:\.[0-9]+)?$/;
 
-                # Duration unit conversion (Issue #17) - convert to milliseconds if user specified a unit
-                if (defined $duration && defined $duration_unit_override) {
-                    $duration = convert_duration_to_ms($duration, $duration_unit_override);
+                # Duration unit conversion (Issue #17): -du wins; otherwise
+                # the winning format's declared unit applies (format-carried,
+                # #58 R5). Every built-in declares ms or no unit, so the
+                # format-carried branch converts nothing today — it exists so
+                # a non-ms format declaration is honored without code changes.
+                if (defined $duration) {
+                    if (defined $duration_unit_override) {
+                        $duration = convert_duration_to_ms($duration, $duration_unit_override);
+                    } elsif ($line_entry && defined $line_entry->[FR_DURATION_UNIT]
+                             && $line_entry->[FR_DURATION_UNIT] ne 'ms') {
+                        $duration = convert_duration_to_ms($duration, $line_entry->[FR_DURATION_UNIT]);
+                    }
                 }
 
-                # Extract milliseconds if present (supports . or , separator, 1-6 digits)
-                my $fractional_ms = 0;
+                # Scan-matched lines arrive with $timestamp and
+                # $fractional_ms already set by their generated block
+                # (fractional strip + inline layout parse, D31/P8); only
+                # the CSV paths — outside the scan array (D32) — handle
+                # their timestamps here.
                 if ($csv_epoch_timestamp) {
                     # Epoch timestamp: value is already epoch seconds (or other unit via -du)
                     my $epoch_val = $timestamp_str;
@@ -8332,61 +9232,35 @@ sub read_and_process_logs {
                     }
                     $timestamp = int($epoch_val);
                     my $frac = $epoch_val - $timestamp;
-                    $fractional_ms = $frac * 1000 if $frac > 0;
-                } elsif ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {
-                    my $frac_digits = $2;
-                    # Normalize to milliseconds (e.g., .1 = 100ms, .12 = 120ms, .123 = 123ms, .123456 = 123.456ms)
-                    $fractional_ms = $frac_digits * (10 ** (3 - length($frac_digits)));
+                    $fractional_ms = $frac > 0 ? $frac * 1000 : 0;
                 }
 
                 unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
-                } elsif ($csv_epoch_timestamp) {
-                    # Epoch already parsed above, skip timegm()
-                } elsif( $match_type == 1 || $match_type == 2 || $match_type == 5 || $match_type == 6 || $match_type == 7 || $match_type == 8 || $match_type == 10 || $match_type == 11 || $match_type == 13 ) {
-                    # CSV rows (match_type 13) carry arbitrary column text where the
+                } elsif (!$csv_epoch_timestamp && $match_type == 13) {
+                    # Extract milliseconds if present (supports . or , separator, 1-6 digits)
+                    if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {
+                        # Normalize to milliseconds (e.g., .1 = 100ms, .12 = 120ms, .123 = 123ms, .123456 = 123.456ms)
+                        $fractional_ms = $2 * (10 ** (3 - length($2)));
+                    } else {
+                        $fractional_ms = 0;
+                    }
+                    # CSV rows carry arbitrary column text where the
                     # regex-matched formats guarantee timestamp shape. A value that is
                     # neither epoch (handled above) nor ISO would feed garbage into the
                     # fixed-offset substr extraction and die inside timegm(), so skip
                     # the row instead (Issue #328).
-                    if ($match_type == 13 && (!defined $timestamp_str || $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/)) {
+                    if (!defined $timestamp_str || $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/) {
                         $csv_skipped_timestamp_rows++;
                         if ($csv_skipped_timestamp_rows == 1) {
                             print STDERR "Warning: $in_file line $line_number: CSV timestamp '" . (defined $timestamp_str ? $timestamp_str : '') . "' is neither epoch nor ISO (YYYY-MM-DD HH:MM:SS) - skipping row (further rows in this file skipped silently)\n";
                         }
                         next;
                     }
-                    if (exists $timestamp_cache{$timestamp_str}) {
-                        $timestamp = $timestamp_cache{$timestamp_str};
-                    } else {
-                        # ISO format: use substr() for field extraction, timegm() for epoch
-                        $timestamp = timegm(
-                            substr($timestamp_str, 17, 2),  # second
-                            substr($timestamp_str, 14, 2),  # minute
-                            substr($timestamp_str, 11, 2),  # hour
-                            substr($timestamp_str, 8, 2),   # day
-                            substr($timestamp_str, 5, 2) - 1,  # month (0-11)
-                            substr($timestamp_str, 0, 4),   # year
-                        );
-                        $timestamp_cache{$timestamp_str} = $timestamp;
-                    }
-                } elsif( $match_type == 3 || $match_type == 4 || $match_type == 9 || $match_type == 12 ) {
-                    if (exists $timestamp_cache{$timestamp_str}) {
-                        $timestamp = $timestamp_cache{$timestamp_str};
-                    } else {
-                        my ($day, $month_str, $year, $hour, $minute, $second) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/;
-                        my $month = $month_map{$month_str};
-                        # Apache format: use timegm() for epoch
-                        $timestamp = timegm(
-                            $second,
-                            $minute,
-                            $hour,
-                            $day,
-                            $month - 1,  # month (0-11)
-                            $year,
-                        );
-                        $timestamp_cache{$timestamp_str} = $timestamp;
-                    }
+                    # Declarative time contract (D31): the csv entry's
+                    # compiled layout parser, sharing %timestamp_cache with
+                    # today's exact keying (post-chop, post-fractional-strip).
+                    $timestamp = $line_entry->[FR_TIME_PARSE]->($timestamp_str);
                 }
 
                 # Add fractional milliseconds to epoch for precision filtering
@@ -9122,6 +9996,21 @@ sub read_and_process_logs {
         }
 
         close $fh;
+
+        # Scan telemetry lands with the file's detection record; a file may
+        # produce zero matches (or zero lines), so create the record here too.
+        {
+            my $fdd = $format_detection{$in_file} //= {
+                match_type       => undef,
+                slug             => undef,
+                is_access_log    => 0,
+                matched_lines    => 0,
+                unmatched_lines  => 0,
+                first_match_line => undef,
+            };
+            $fdd->{scan_attempts}        = $file_scan_attempts;
+            $fdd->{scan_failed_attempts} = $file_scan_failed;
+        }
 
         if ($csv_skipped_timestamp_rows > 1) {
             print STDERR "Warning: $in_file: skipped $csv_skipped_timestamp_rows CSV rows with unparseable timestamps\n";
@@ -11833,6 +12722,7 @@ sub print_verbose_output {
     print "lines_included\t$total_lines_included\n";
 
     # Timing rows (raw seconds)
+    printf "TIMING\tdetect/registry_build\t%.3f\n", $elapsed_detect_registry_build;
     printf "TIMING\tparse/read_files\t%.3f\n", $elapsed_parse_read_files;
     printf "TIMING\taccumulate/initialize_buckets\t%.3f\n", $elapsed_accumulate_initialize_buckets;
     printf "TIMING\tfinalize/group_similar\t%.3f\n", $elapsed_finalize_group_similar;
@@ -13013,6 +13903,7 @@ sub print_summary_table {
     push @summary_table, sprintf( $table_format, "HIGHLIGHTED", $total_lines_highlighted ) if $highlight_active;
     push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
     push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "DETECT: FORMAT REGISTRY BUILD", format_time( $elapsed_detect_registry_build, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "PARSE: FILE PROCESSING", format_time( $elapsed_parse_read_files, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "ACCUMULATE: EMPTY BUCKETS", format_time( $elapsed_accumulate_initialize_buckets, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: GROUP SIMILAR", format_time( $elapsed_finalize_group_similar, 's', 'medium', " " ) ) unless $group_similar_sensitivity =~ /^none$/;
@@ -13548,12 +14439,21 @@ sub print_threadpool_summary {
 
 # Stage: detect -- pre-read detection inputs.
 # Receives: settled command-line state; ltl-index.csv on disk (if present).
-# Emits: prior-run per-file metadata hints (timestamp range, ts_precision,
-# bounds) pre-seeded for the parse pass (#179).
-# Per-line format identification itself currently lives inside
-# read_and_process_logs() as the match-type cascade; the format registry (#58)
-# replaces that mechanism at this role boundary.
+# Emits: the compiled, validated format registry (#58) — the declarative
+# entries with their metadata and extraction/timestamp closures, the
+# generated scan sub, and the MTF scan-order state the parse loop's
+# per-line recognition runs on; prior-run per-file metadata hints
+# (timestamp range, ts_precision, bounds) pre-seeded for the parse pass
+# (#179). Per-line recognition itself remains a detect-role step executed
+# inside read_and_process_logs() — see the parse-stage interleaving note.
 sub pipeline_detect {
+    # Issue #58: compile the declarative format definitions into the live
+    # registry and run its load-time validation gates. Must run after
+    # option parsing — extraction closures bake CLI-gated behavior.
+    my $registry_build_start = [gettimeofday];
+    build_format_registry();
+    $elapsed_detect_registry_build = tv_interval($registry_build_start);
+
     # Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
     read_index_file();
 
@@ -13561,7 +14461,9 @@ sub pipeline_detect {
 }
 
 # Stage: parse -- the read pass.
-# Receives: input file list; resolved demand; capture modes; detect-stage hints.
+# Receives: input file list; resolved demand; capture modes; detect-stage
+# outputs (the compiled format registry and its generated scan sub, #58;
+# index hints, #179).
 # Emits: populated accumulation stores (%log_occurrences, %log_messages,
 # streaming partition counters and highlight variants, threadpool/session/UDM
 # state, consolidation state) and read-phase timing.
@@ -13828,7 +14730,7 @@ sub pipeline_render {
     $elapsed_render_normalize_data = tv_interval($start_time, $end_time);
     memory_debug_decomposition("after_normalize");
 
-    $elapsed_total = $elapsed_parse_read_files + $elapsed_accumulate_initialize_buckets + $elapsed_finalize_calculate_statistics + $elapsed_finalize_heatmap_statistics + $elapsed_finalize_histogram_statistics + $elapsed_render_normalize_data + $elapsed_finalize_group_similar;
+    $elapsed_total = $elapsed_detect_registry_build + $elapsed_parse_read_files + $elapsed_accumulate_initialize_buckets + $elapsed_finalize_calculate_statistics + $elapsed_finalize_heatmap_statistics + $elapsed_finalize_histogram_statistics + $elapsed_render_normalize_data + $elapsed_finalize_group_similar;
 
     # Issue #179: Compare live captured values against pre-seeded bounds (drift)
     # and emit the index read-back section into @verbose_output before flush.
