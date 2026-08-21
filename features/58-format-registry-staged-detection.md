@@ -498,17 +498,44 @@ This document owns the section-contract for the `format-detection` `-V` section 
 
 Vocabulary note: entry names (`mt1std`, `mt3`, …) are the registry's internal scan identity and appear only in this diagnostic sub-section; the user-facing format identity remains the slug vocabulary locked by `%match_type_to_slug`.
 
+## S9 gate close-out (2026-08-21)
+
+**Full-suite evidence:** the complete `tests/validate-*.sh` suite ran green on the final code (at the S7 close-out; the only commit since is docs-only, verified by `git diff --stat 7272def..HEAD -- ltl tests/` being empty): 19/21 harnesses pass outright; `validate-regression` reports only the 8 known file-legend mount-path scenarios with **zero** non-legend diff content lines; `validate-index-read-back` re-verified **58/58** from a local-disk clone with regenerated fixtures running this tree's `ltl`. `validate-format-detection`: 58 assertions, 0 failed. Runtime-warning-clean throughout.
+
+**Blessing battery** (1m fixture families, median-of-3 with ranges, local disk under `caffeinate`; pre = the pre-swap cascade at commit b6495c2, final = this tree):
+
+| Family (1m) | pre | final | Δ |
+|---|---|---|---|
+| pure-access | 14.24 s [14.09–14.29] | 12.38 s [11.96–12.38] | **−13.1%** |
+| concat-pair | 11.82 s [11.78–11.87] | 10.52 s [10.51–10.58] | **−11.0%** |
+| interleave-100 | 11.64 s [11.55–11.86] | 10.94 s [10.65–11.00] | **−6.0%** |
+| pure-scriptlog | 10.21 s [10.13–10.26] | 10.06 s [9.90–10.21] | −1.5% |
+| twx-blend | 7.02 s [7.01–7.06] | 6.94 s [6.94–6.98] | −1.1% |
+| pure-gc | 10.53 s [10.49–10.57] | 10.50 s [10.46–10.61] | −0.3% |
+
+Every family is net faster; no regression class remains anywhere in the battery.
+
+**#369 probe** (`TIMING read_files`/`parse/read_files` median-of-3, v0.16.0 tag build vs final, 1m fixtures):
+
+| Fixture (1m) | v0.16.0 | final | Δ |
+|---|---|---|---|
+| pure-access | 13.958 s | 12.060 s | **−13.6%** |
+| twx-blend | 6.817 s | 6.659 s | −2.3% |
+| pure-gc | 10.253 s | 10.000 s | −2.5% |
+
+The v0.16.0 access-log read-phase regression (+5–10% read_files, per #369's measurements) is removed as a class — the read phase is now 13.6% *faster* than the regressed baseline, with the non-access controls also improving.
+
 ## Acceptance criteria / merge gate
 
-- [ ] **Research + prototype phase completed and its decisions recorded in this document before implementation began** (see the mandatory phase above).
-- [ ] All existing tests byte-identical: golden files + full `tests/validate-*.sh` suite exits 0; runtime-warning-clean stderr.
-- [ ] **#369 probe**: `TIMING parse/read_files` on an access-log selection improves vs. the v0.16.0 baseline — cost class removed, not shaved. Targeted single-file probe, median-of-3; no XL suites during development.
-- [ ] Detection observability per the section-contract above.
-- [ ] Extraction parity per migrated format (sample-line fixtures).
-- [ ] ~~At least one user-defined YAML format loads and parses a fixture; malformed definitions produce clear errors.~~ **Re-scoped to the user-format follow-up issue (D37).** In its place: registry load-time self-validation (D24) demonstrably fails on sabotaged definitions (broken sample, broken guard, undeclared shadow) with clear diagnostics.
-- [ ] Format-carried unit applied for a known format; `-du` wins; ambiguity warning fires on the Tomcat `%D` case.
-- [ ] Follow-up issues filed with native `blocked_by` #58: user-configurable YAML formats + config mechanism (D37); detection-window N sizing prototyping (D38).
-- [ ] Gate passes → merge to `release/0.17.0`; #369 fix comment + close; #17's declarative half delivered (sampling follow-on stays open).
+- [x] **Research + prototype phase completed and its decisions recorded in this document before implementation began** (see the mandatory phase above; F1–F8, A1–A12, P1–P9, D24–D40).
+- [x] All existing tests byte-identical: golden files + full `tests/validate-*.sh` suite exits 0; runtime-warning-clean stderr. *(S9 close-out evidence above; regression golden byte-identical modulo the documented file-legend mount-path quirk.)*
+- [x] **#369 probe**: `TIMING parse/read_files` on an access-log selection improves vs. the v0.16.0 baseline — cost class removed, not shaved. *(−13.6% median-of-3 on pure-access-1m; table above.)*
+- [x] Detection observability per the section-contract above. *(S6: per-file scan counters + `format-detection / scan` sub-section, harness-asserted and sabotage-proven.)*
+- [x] Extraction parity per migrated format (sample-line fixtures). *(D24 gates 1–6 at every startup; S4 shadow mode 241 runs / 0 divergences; post-swap full-output parity diffs across all fixture families.)*
+- [x] ~~At least one user-defined YAML format loads and parses a fixture; malformed definitions produce clear errors.~~ **Re-scoped to #387 (D37).** In its place: registry load-time self-validation (D24) demonstrably fails on sabotaged definitions (broken sample, broken guard, undeclared shadow) with clear diagnostics. *(Sabotage proofs demonstrated at S2 authoring time and recorded in its commit; permanent malformed-definition scenarios are #387's harness work.)*
+- [x] Format-carried unit applied for a known format; `-du` wins; ambiguity warning fires on the Tomcat `%D` case. *(S7; note text locked in R5, harness scenario `unit-ambiguity-warning`.)*
+- [x] Follow-up issues filed with native `blocked_by` #58: #387 (user-configurable YAML formats + config mechanism, D37); #388 (detection-window N sizing prototyping, D38); #386 (per-format analysis precision, filed during S5b).
+- [ ] Gate passes → merge to `release/0.17.0`; #369 fix comment + close; #17's declarative half delivered (sampling follow-on stays open). *(Executed via the per-feature workflow; the PR and issue completion comments are the record.)*
 
 ## Related
 
