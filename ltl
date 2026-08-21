@@ -9182,13 +9182,16 @@ sub read_and_process_logs {
                     $fdd->{first_match_line} = $line_number;
                     # D18: the bound format's duration unit varies across
                     # producers and no -du was given — tell the user which
-                    # assumption is in effect, once per run. Intentional
-                    # diagnostic: must never carry an ` at ... line` suffix
-                    # (runtime-warning discriminator, HARNESS-DESIGN.md).
+                    # assumption is in effect, once per run. Phrased run-level
+                    # with no filename: the assumption covers every file the
+                    # format binds, not just the one that tripped it (#390).
+                    # Intentional diagnostic: must never carry an
+                    # ` at ... line` suffix (runtime-warning discriminator,
+                    # HARNESS-DESIGN.md).
                     if ($line_entry && $line_entry->[FR_UNIT_AMBIGUOUS]
                         && !defined $duration_unit_override && !$format_unit_ambiguity_warned) {
                         $format_unit_ambiguity_warned = 1;
-                        print STDERR "Note: $in_file: this access log format's duration field (%D) is milliseconds on Tomcat 9 but microseconds on Apache HTTP Server and Tomcat 10.1+; assuming milliseconds - use -du us if this log's producer emits microseconds\n";
+                        print STDERR "Note: access log %D durations assumed to be milliseconds (Tomcat 9); Apache HTTP Server and Tomcat 10.1+ emit microseconds - use -du us for those producers\n";
                     }
                 }
                 $fdd->{matched_lines}++;

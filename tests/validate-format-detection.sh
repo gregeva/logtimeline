@@ -678,8 +678,8 @@ scenario_unit_ambiguity_warning() {
     check_capture_warnings "$out"
 
     assert_line "$out.stderr" \
-        pattern     '^Note: .*duration field \(%D\) is milliseconds on Tomcat 9 but microseconds on Apache HTTP Server and Tomcat 10\.1\+; assuming milliseconds - use -du us' \
-        asserts     'Binding slug `tomcat_access_with_duration` without -du emits the unit-ambiguity note on stderr, naming the milliseconds assumption and the -du us remedy' \
+        pattern     '^Note: access log %D durations assumed to be milliseconds \(Tomcat 9\); Apache HTTP Server and Tomcat 10\.1\+ emit microseconds - use -du us for those producers$' \
+        asserts     'Binding slug `tomcat_access_with_duration` without -du emits the run-level unit-ambiguity note on stderr (no filename - the assumption covers every ambiguous-format file in the run), naming the milliseconds assumption and the -du us remedy' \
         produced_by 'read_and_process_logs() in ltl (first-match block, FR_UNIT_AMBIGUOUS gate)' \
         contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18); the note text is part of the contract'
 
@@ -690,7 +690,7 @@ scenario_unit_ambiguity_warning() {
     check_capture_warnings "$out_du"
 
     assert_absent "$out_du.stderr" \
-        pattern     '^Note: .*duration field \(%D\)' \
+        pattern     '^Note: access log %D durations' \
         asserts     'With -du given (any unit), the unit-ambiguity note is contracted ABSENT: the note exists only to surface an assumption, and -du removes the assumption' \
         produced_by 'read_and_process_logs() in ltl (first-match block, duration_unit_override gate)' \
         contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18)'
@@ -702,7 +702,7 @@ scenario_unit_ambiguity_warning() {
     check_capture_warnings "$out_cb"
 
     assert_absent "$out_cb.stderr" \
-        pattern     '^Note: .*duration field \(%D\)' \
+        pattern     '^Note: access log %D durations' \
         asserts     'A format without the unit-ambiguity flag is contracted to never emit the note — the gate is the registry declaration, not the presence of durations' \
         produced_by 'read_and_process_logs() in ltl (first-match block, FR_UNIT_AMBIGUOUS gate)' \
         contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18) - only entries declaring unit_ambiguous carry it'
