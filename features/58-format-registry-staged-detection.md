@@ -59,6 +59,8 @@ The registry slots into #180's named `detect` role — concretely (post-Drop 0, 
 
 **Detection timing nomenclature (contract from #180's 2026-08-20 decision):** timing surfaces follow `stage/step` form. When this drop adds detection cost, the machine row is `TIMING	detect/<step>` and the summary-table row is `DETECT: <NAME>` with the display string **≤30 characters** (the summary table's category column is fixed at width 30; longer strings overflow). New labels need no `compare-results.sh` compat mapping — only renames of pre-existing labels do (the #180 rename map already exists there).
 
+*Implemented (2026-08-21):* `TIMING	detect/registry_build` (benchmark-data section) and summary row `DETECT: FORMAT REGISTRY BUILD` (29 chars) time `build_format_registry()` inside `pipeline_detect()`; the value is included in `TIMING total`. Measured ~3–4 ms (compile + all D24 validation gates). The label was added to the `strip_nondeterministic()` timing-label alternation in `validate-regression.sh`/`capture-regression.sh` in the same change (the filter enumerates summary-row labels; an unlisted label would leak into the compared render).
+
 ## Out of scope
 
 - Processing model changes (#59 — Phase 2+4 release)

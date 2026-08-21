@@ -50,7 +50,7 @@ my $impact_time_exponent = 7;		            # it was 5, and was weighting a few s
 my ( $time_bucket_size, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
-my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0 );
+my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_detect_registry_build, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0,0 );
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 my @verbose_output;           # Accumulated verbose output lines (Issue #56)
 
@@ -12421,6 +12421,7 @@ sub print_verbose_output {
     print "lines_included\t$total_lines_included\n";
 
     # Timing rows (raw seconds)
+    printf "TIMING\tdetect/registry_build\t%.3f\n", $elapsed_detect_registry_build;
     printf "TIMING\tparse/read_files\t%.3f\n", $elapsed_parse_read_files;
     printf "TIMING\taccumulate/initialize_buckets\t%.3f\n", $elapsed_accumulate_initialize_buckets;
     printf "TIMING\tfinalize/group_similar\t%.3f\n", $elapsed_finalize_group_similar;
@@ -13601,6 +13602,7 @@ sub print_summary_table {
     push @summary_table, sprintf( $table_format, "HIGHLIGHTED", $total_lines_highlighted ) if $highlight_active;
     push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
     push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "DETECT: FORMAT REGISTRY BUILD", format_time( $elapsed_detect_registry_build, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "PARSE: FILE PROCESSING", format_time( $elapsed_parse_read_files, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "ACCUMULATE: EMPTY BUCKETS", format_time( $elapsed_accumulate_initialize_buckets, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: GROUP SIMILAR", format_time( $elapsed_finalize_group_similar, 's', 'medium', " " ) ) unless $group_similar_sensitivity =~ /^none$/;
@@ -14147,7 +14149,9 @@ sub pipeline_detect {
     # Issue #58: compile the declarative format definitions into the live
     # registry and run its load-time validation gates. Must run after
     # option parsing — extraction closures bake CLI-gated behavior.
+    my $registry_build_start = [gettimeofday];
     build_format_registry();
+    $elapsed_detect_registry_build = tv_interval($registry_build_start);
 
     # Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
     read_index_file();
@@ -14423,7 +14427,7 @@ sub pipeline_render {
     $elapsed_render_normalize_data = tv_interval($start_time, $end_time);
     memory_debug_decomposition("after_normalize");
 
-    $elapsed_total = $elapsed_parse_read_files + $elapsed_accumulate_initialize_buckets + $elapsed_finalize_calculate_statistics + $elapsed_finalize_heatmap_statistics + $elapsed_finalize_histogram_statistics + $elapsed_render_normalize_data + $elapsed_finalize_group_similar;
+    $elapsed_total = $elapsed_detect_registry_build + $elapsed_parse_read_files + $elapsed_accumulate_initialize_buckets + $elapsed_finalize_calculate_statistics + $elapsed_finalize_heatmap_statistics + $elapsed_finalize_histogram_statistics + $elapsed_render_normalize_data + $elapsed_finalize_group_similar;
 
     # Issue #179: Compare live captured values against pre-seeded bounds (drift)
     # and emit the index read-back section into @verbose_output before flush.
