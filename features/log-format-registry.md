@@ -531,6 +531,13 @@ Each drop lands on its own branch off `release/0.17.0`, merges back via PR throu
 
 ## Design Decisions Log
 
+### 2026-08-21: Drop 1 (#58) implementation — D39–D40 (scan-sub codegen and ordering, architect-locked mid-drop)
+
+Two decisions were locked during S5 implementation when measurement invalidated the planned per-entry-closure shape (finding F9: the P2 prototype's baseline was itself a sub, hiding the closure machinery's real cost) and promotion-driven regex recompilation surfaced (+79% on interleaved streams). Full statements, evidence, and the two rejected interim variants in `features/58-format-registry-staged-detection.md`:
+
+1. **D39 — Single generated scan sub.** All entries' guards, literal patterns, extraction bodies, and inline timestamp handling are spliced into ONE eval'd sub per scan order — zero per-line sub calls, write-direct into file-scoped record lexicals. Promotion code is emitted only into blocks whose generation-time position is not already optimal, so steady state runs no promotion logic at all.
+2. **D40 — All orders precompiled up front; order-signature cache; true recency ordering.** Every pattern sub is generated at startup (~tens of ms, paid once before the loop — never inside it); the static order plus all 13 first-promotion orders are eagerly compiled, and deeper recency permutations compile once on first occurrence keyed by an order signature. Ordering is true most-recently-used with pinned-ancestor closures (D26 upheld): files alternating between two or three formats scan only those formats. Two interim variants (regeneration throttle; per-front canonical order with static tail) were rejected — the second violated D26's locked recency semantics and is recorded with the process lesson attached.
+
 ### 2026-08-20: Drop 1 (#58) implementation planning — D35–D38, D12 true-up
 
 Implementation planning against the locked prototype decisions closed the three remaining in-drop questions and re-cut R4's user-facing surface. Full decision text in `features/58-format-registry-staged-detection.md` §§ D35–D38; umbrella-level summary:

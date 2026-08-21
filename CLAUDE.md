@@ -186,7 +186,11 @@ Search for these section markers in the file — line numbers shift as the codeb
 - **`## SUBS ##`**: All processing and output subroutines
 - **`## MAIN ##`**: Execution flow
 
+### Format Recognition
+Log-format recognition and per-line field extraction run through the format registry (`## FORMAT REGISTRY (Issue #58 / #23 Phase 1) ##` section marker in `ltl`): declarative per-format specs in `format_registry_specs()` are compiled at startup by `build_format_registry()` into a single generated scan sub per most-recently-used order (all orders precompiled/cached by order signature; promotion preserves recency with pinned-ancestor closures) and self-validated on every run against each entry's sample lines. CSV stays a stateful per-file path outside the scan array. Adding or changing a format means editing its spec — pattern, field map, transforms, time contract, duration unit, samples with expected records — never hot-loop code. Detailed contracts: `features/58-format-registry-staged-detection.md`.
+
 ### Key Data Structures
+- `@format_registry` / `@format_scan_order` / `$format_scan_sub` - Compiled format entries, their live MTF scan order, and the generated scan sub for that order
 - `%log_occurrences` - Count tallies across time buckets
 - `%log_analysis` - Time bucket statistics
 - `%log_messages` - Message groupings
