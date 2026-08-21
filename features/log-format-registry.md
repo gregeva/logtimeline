@@ -473,6 +473,33 @@ Format definitions, derived metrics, visibility flags, fuzzy matching configurat
 ### 5. State Management Across Bucket Boundaries
 Inter-line functions need state that persists across bucket boundaries (the last known counter value for each message identity). But the sliding window frees bucket data. This means inter-line state lives *outside* the bucket lifecycle — it's a separate, long-lived data structure. The interaction between bucket lifecycle, inter-line state lifecycle, and memory tracking needs careful design.
 
+### 6. One Line Pattern, Many Emitting Applications — Divergent Data Consistency and Quality (added 2026-08-21)
+
+The registry's model assumes a declared line pattern identifies a *format*. In practice a pattern identifies a *line shape*, and a line shape can be emitted by several unrelated applications — most commonly because they share a logging framework and a default encoder configuration. Those applications are independent codebases with independent defects, so the **consistency and quality of the data inside an identical line shape can differ between them**. The registry currently has no way to express that, no way to detect it, and no way to adapt to it.
+
+This is not hypothetical. ThingWorx Integration Runtime and ThingWorx Connection Server both emit:
+
+```
+2024-25-04 09:00:10.004 [vert.x-eventloop-thread-0] INFO  c.t.i.Entrypoint - Shutting Down
+```
+
+Byte-identical shape — both Vert.x, same logback encoder, same thread naming, same `LEVEL logger - message` tail — so one pattern matches both. But Integration Runtime's encoder is `yyyy-dd-MM` where Connection Server's is `yyyy-MM-dd`. The same captured field means two different things depending on which application wrote the line. Flipping the pattern to suit one breaks the other.
+
+Three properties make this a general problem rather than a one-off fix:
+
+1. **The discriminator is not in the line.** Only about a quarter of the Integration Runtime file's lines carry an application-specific logger prefix; the rest come from Apache Camel and a shared client library that the other product also uses. No per-line signal separates the producers, so recognition alone cannot resolve it — provenance evidence must come from outside the line (#384's filename patterns being the first such channel).
+2. **The defect is invisible to the pattern that matched.** Recognition succeeds; extraction succeeds; the value is simply interpreted wrongly. There is no failed match to observe, and in the majority of cases no runtime error either — the failure is silent and plausible.
+3. **Detection has a hard ceiling.** Aggregate probes (out-of-range field values, monotonicity of timestamps against file order) catch the loud cases, but a date on or before the 12th of the month is valid under both orderings, so a file whose whole span sits in days 1–12 offers no contradiction at all. Absence of contradiction is not evidence of correctness, and the design must treat it that way.
+
+What the registry needs from this, to be settled as the mechanism is designed:
+
+- **Expression** — a way to declare that two producer variants share a line pattern but differ in how a field is interpreted, without a second scan entry costing every line a failed match (#384 scope item 2).
+- **Detection** — corroboration probes over a sample of the file that can *confirm* or *contradict* declared provenance, with an explicit contract that silence is inconclusive.
+- **Adaptation** — a defined behavior when provenance is unknown, weak, or contradicted by content: which reading is taken, what is reported, and whether `ltl` may refuse to guess rather than produce a plausible wrong answer.
+- **Confidence proportional to consequence** — evidence strong enough to select a duration unit is not necessarily strong enough to select a date field order; the latter silently relocates events by up to eleven months.
+
+Drivers: #385 (the Integration Runtime case, `on hold` pending the mechanism), #384 (filename provenance evidence, which owns the first channel), #17 (the Tomcat/httpd `%D` unit case, the same problem in its milder metadata-only form).
+
 ## TODOs
 
 - [x] Research fuzzy matching algorithms for message identity grouping (section 9) — completed via #96/#54, see `docs/similarity-engine-best-practices.md`
@@ -530,6 +557,17 @@ Each drop lands on its own branch off `release/0.17.0`, merges back via PR throu
 [Issue #23: Log Format Registry - Refactor core parsing architecture](https://github.com/gregeva/logtimeline/issues/23)
 
 ## Design Decisions Log
+
+### 2026-08-21: #385 — same line shape, divergent data quality; fix deferred to the provenance mechanism
+
+Investigation of #385 (fatal `Month out of range` on Integration Runtime logs) established that the line is recognized correctly and the *data* is malformed at the producer: the Integration Runtime's logback encoder is `yyyy-dd-MM`, systematically, across all ten runtime sessions in the committed fixture. The winning entry is `mt10` / `connection_server_standard`, whose dates are correct ISO — the two products emit byte-identical line shapes.
+
+Architect decisions:
+
+1. **No warning-plus-guard mitigation ships.** The run is left to die. Guarding `timegm()` would stop the crash on the 40.7% of lines carrying a day > 12 while leaving the remaining 59.3% silently transposed by up to eleven months — trading a loud failure for a quiet wrong answer. The stderr diagnostic for non-ISO-compatible dates remains part of the complete fix, not a standalone release.
+2. **The fix is two producer-specific formats, gated on file-level provenance.** #385 is `blocked_by` #384 and `status: on hold`. Once filename provenance evidence exists, the ambiguous entry splits into a Connection Server format (`yyyy-MM-dd`) and an Integration Runtime format (`yyyy-dd-MM`).
+3. **The general problem is umbrella-level, not #385's.** One declared pattern can serve multiple applications whose data consistency and quality differ; the registry needs expression, detection, and adaptation for that class. Recorded as Architectural Challenge 6 above, together with the detectability ceiling (dates ≤ the 12th are valid under both orderings, so contradiction is unavailable for a large share of real files).
+4. **Confidence must scale with consequence.** #384's open question on filename-evidence confidence is sharpened: provenance that changes how a field is *interpreted* demands more than provenance that selects carried metadata. Recorded on #384.
 
 ### 2026-08-21: Drop 1 (#58) implementation — D39–D40 (scan-sub codegen and ordering, architect-locked mid-drop)
 
