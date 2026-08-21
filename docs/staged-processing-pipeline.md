@@ -170,12 +170,18 @@ The stages are **roles with contracts, not one-pass-each temporal phases**:
 
 Per-stage contracts (receives / emits) are documented on each entry point in
 `ltl`. Timing surfaces follow the stage nomenclature as `stage/step`: machine
-rows are `TIMING\t<stage>/<step>` (e.g. `parse/read_files`,
-`finalize/calculate_statistics`), summary-table rows are prefixed with the
-stage name (e.g. `PARSE: FILE PROCESSING`), and a stage with several timed
-steps nests them under its own prefix. `detect` has no timed step yet; the
-format registry (#58) adds detection cost under it.
+rows are `TIMING\t<stage>/<step>` (e.g. `detect/registry_build`,
+`parse/read_files`, `finalize/calculate_statistics`), summary-table rows are
+prefixed with the stage name (e.g. `DETECT: FORMAT REGISTRY BUILD`,
+`PARSE: FILE PROCESSING`), and a stage with several timed steps nests them
+under its own prefix.
 
-Future stage evolution: #58 replaces the match-type cascade with the format
-registry at the `detect` role boundary; #59 (later release) adds per-bucket
-lifecycle hooks inside `finalize`.
+Format recognition (#58): `pipeline_detect()` compiles the declarative
+format registry — validated entry definitions, generated extraction code,
+timestamp-parse closures, and the single generated scan sub — and the read
+pass inside `pipeline_parse()` recognizes each line by running that scan sub
+(move-to-front ordered, pinned by load-time-derived constraints) instead of a
+hardcoded pattern cascade. Detection remains a per-line role executed inside
+the parse loop; the registry moves *what is known about each format* out of
+code and into declarative entries settled at detect time. #59 (later
+release) adds per-bucket lifecycle hooks inside `finalize`.
