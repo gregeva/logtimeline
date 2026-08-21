@@ -4,6 +4,17 @@
 #
 # Re-runs the same ltl commands as capture-regression.sh and diffs against
 # the stored reference output. Any difference is a regression.
+#
+# Known acceptable failure — capture-location dependency (#209): ltl
+# absolutizes input file paths and renders them in the file legend, so the
+# stored references embed the absolute paths of the checkout where they
+# were captured. Run from any other location, the legend-bearing scenarios
+# fail with diffs on exactly the `[√] /abs/path...` legend lines. Those
+# legend-line diffs are the ONLY acceptable differences; any other diff
+# line is a real regression. The durable fix (relative path emission in
+# ltl + this harness passing repo-relative paths) is #209's scope; until
+# it lands, references are fully reproducible only from the capture
+# checkout, and rebaselining stays a per-release activity.
 
 set -euo pipefail
 
