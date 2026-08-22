@@ -10,6 +10,7 @@ logs/
 ├── GC/logs-gc/              # JVM G1 garbage-collection logs
 ├── UDM/                     # User-defined-metric logs (pattern + CSV modes)
 ├── WGM/                     # SolidWorks Workgroup Manager client logs
+├── MethodServer/            # Windchill Method Server / Background Method Server logs
 └── ThingworxLogs/           # ThingWorx application logs
     └── CustomThingworxLogs/ # Custom ScriptLogs with durationMS
 ```
@@ -64,6 +65,29 @@ Client-side diagnostic logs from PTC Workgroup Manager for SolidWorks (WGM). One
 Fields: `date`(T)`time`(ms precision)`Z` (combined ISO-8601 UTC timestamp), `msgtype` (single-letter: C/D/I/T/W/X/Y — config/debug/info/trace/warn/create/destroy), `logid` (process id, hex-prefixed `P`), `tid` (thread id, hex-prefixed `T`), `area` (dotted component path), `message` (free text, may itself contain `: `-delimited sub-fields).
 
 **Note**: No `ltl` format entry exists yet for this log type as of 2026-08-22 — tracked by #395 (blocked by #384).
+
+---
+
+## MethodServer/ - Windchill Method Server / Background Method Server Logs
+
+Server-side `log4j` diagnostic logs from Windchill Method Server and Background Method Server processes. One shared log4j pattern-layout format across the MethodServer/BackgroundMethodServer filename family (including `BackgroundMethodServerCAD` and `BackgroundMethodServerESI` variants), differing by which Windchill process/queue-worker writes the file. Two capture sets are present: a QA-tier set covering all four filename variants, and a multi-node production set spanning several days of rotation.
+
+| Folder | Scenario | Files | Total Size | Use Case |
+|---|---|---|---|---|
+| `queue-worker-tiers/18Jul2025_QA_BGMS_Logs/` | QA App1–4 tiers, all four filename variants present in one set | 18 files (MethodServer, BackgroundMethodServer, BackgroundMethodServerCAD, BackgroundMethodServerESI) | 10MB | Full variant coverage at manageable size; ESI files carry multi-line stack-trace continuation records (see Format note) |
+| `multi-node-prod/04-05Aug2025/` | PROD Node1–4, multi-day rotation | 48 files (MethodServer, BackgroundMethodServer) | ~410MB | Large-scale, multi-node, multi-rotation production example |
+| `multi-node-prod/06Aug2025/` | PROD Node2–4, single file per node | 4 files (MethodServer) | ~21MB | Smaller single-rotation slice of the same set |
+
+**Format**: `log4j` pattern layout — one line per record, no self-describing header (unlike WGM's format above).
+```
+2025-01-27 14:22:28,785 INFO  [main] wt.method.server.startup  - Starting BackgroundMethodServer
+2025-10-29 09:48:57,149 ERROR [ajp-nio-127.0.0.1-8010-exec-2312] com.ptc.windchill.uwgm.proesrv.rrc.RequestResultCache ITSALAN1 - UwgmObjectFactory.createPartIteration :: Unsupported PartType: RAW_MATERIAL
+```
+Fields: `date time,ms` (space-separated, millisecond precision, no explicit timezone — local server time), `LEVEL` (`INFO`/`ERROR`/`WARN`/`DEBUG` etc.), `[thread]` (bracketed thread name, e.g. `main` or an app-server worker id like `ajp-nio-127.0.0.1-8010-exec-2312`), `logger` (dotted Java class/category, e.g. `wt.method.server.startup` or `com.ptc.windchill.uwgm.proesrv.rrc.RequestResultCache`), an optional `user` token before the ` - ` separator (present on some lines, e.g. `ITSALAN1`, absent on others, e.g. startup lines), then free-text `message`.
+
+**Note**: `BackgroundMethodServerESI` files contain multi-line stack-trace continuation records — an `ERROR` line ending in an exception class/message, followed by unindented `Nested exception is:` lines and tab-indented `\tat ...` frames, none carrying their own leading timestamp (same continuation-line shape ltl already handles for ThingWorx's `ScriptErrorLog`).
+
+**Note**: No `ltl` format entry exists yet for this log type as of 2026-08-22 — tracked by #396 (blocked by #384).
 
 ---
 
