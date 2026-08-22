@@ -643,6 +643,34 @@ In scope:
 
 Out of scope: the content probes and variant selection (#384), unit detection (#17), the progress percentage (#397), any change to line recognition or extraction in the main read.
 
+#### #388 findings (2026-08-22) — measured through the implementation's telemetry
+
+Implementation: `sample_file_for_detection()` in `ltl` (FORMAT REGISTRY section), wired at the top of the per-file loop in `read_and_process_logs()`; telemetry emitted by `emit_format_detection_sample_verbose()`; key contract in `features/58-format-registry-staged-detection.md` § `-V format-detection` section-contract; harness `tests/validate-format-detection.sh` (32 assertions added, each proven to fail under a sabotaged 2 KB shape).
+
+**F1 — What each shape sees (constraint 1).** Sweep of K ∈ {3, 4, 6} parts × B ∈ {2, 8, 32, 128} KB per part over seven real specimens (codebeamer 85 KB; Tomcat-5k 1 MB; ApplicationLog 6.9 MB with stack traces; httpd 45 MB; ScriptLog 102 MB, 405-byte lines; cxserver 105 MB; a G1 GC log with ~29 % never-matching lines). Selected rows (lines seen / recognised across all parts):
+
+| specimen | K=3, 2 KB | K=3, 8 KB | K=4, 8 KB | K=3, 32 KB | K=3, 128 KB |
+|---|---|---|---|---|---|
+| codebeamer 85 KB | 56 / 56 | 230 / 230 | 308 / 308 | whole file | whole file |
+| Tomcat-5k 1 MB | 28 / 28 | 113 / 113 | 155 / 155 | 471 / 471 | 1,892 / 1,892 |
+| ApplicationLog 6.9 MB | 19 / 19 | 58 / 58 | 109 / 109 | 198 / 198 | 920 / 920 |
+| httpd 45 MB | 29 / 29 | 119 / 119 | 158 / 158 | 481 / 481 | 1,930 / 1,930 |
+| ScriptLog 102 MB | 14 / 14 | 59 / 59 | 78 / 78 | 240 / 240 | 966 / 966 |
+| cxserver 105 MB | 57 / 28 | 233 / 117 | 310 / 156 | 935 / 467 | 3,741 / 1,871 |
+| GC log | 58 / 41 | 230 / 170 | 307 / 224 | 928 / 669 | 3,714 / 2,663 |
+
+The **first/last-timestamp span** — the signal that decides the date-layout case — is identical at every B on every specimen: 2 KB already reaches the file's first and last lines, and more bytes never change it. No part of any shape landed with 0 whole lines (the 37 KB ApplicationLog stack-trace line did not defeat an 8 KB part). What grows with B is the number of recognised lines available to #17: at 2 KB the access logs yield 28–29 duration-bearing lines; at 8 KB 113–119 (K=3) or 155–158 (K=4) — the ~100-line intent of #17 is met at 8 KB. cxserver recognises ~half its sampled lines (multi-line payloads) at every shape, so a consumer must reason from recognised lines, not lines seen.
+
+**Integration Runtime (the motivating case, #385).** The specimen still dies in the production time parser (`Month '24' out of range`, fixed by #384's `timegm()` guard), so its telemetry cannot be emitted end-to-end yet; replicating the K=3 / 8 KB offsets (0, 343,282, 686,564 of 694,756 bytes) offline: the front part sees 38 lines and **0** with a day token > 12; the middle part 72 lines, **17** with day > 12; the end part 55 lines, **36** with day > 12. The sample decides the case from 24 KB that a 1,000-line front window (decision line 571) would not.
+
+**F2 — Cost (constraint 2).** `sample_us` per file, medians over 5 runs (ranges ≤ 5 % except first-touch outliers on cold 100 MB files): K=3 / 2 KB 0.11–0.23 ms; **K=3 / 8 KB 0.22–0.68 ms (GC log 1.1 ms)**; K=4 / 8 KB 0.33–0.88 ms (GC 1.4 ms); K=3 / 32 KB 0.6–2.5 ms (GC 5.2 ms); K=3 / 128 KB 2.5–9.8 ms (GC 16.7 ms). Cost is linear in bytes read: ~3 µs per recognised line, ~4.4 µs per line on the no-match-heavy GC log (every pattern attempted); seek, resync and the reads themselves are negligible (the 2 KB column is the floor). Many-small-files: 200 × 1 MB Tomcat files, medians of 3, baseline 12.84 s vs 13.18 s with the sample — **+0.34 s, ≈ 1.7 ms per file (+2.6 %)**, of which ~0.7 ms is the recognition of ~113 sampled lines; the remainder is not attributed further. The probes themselves (D52) are #384's to measure on the same sample.
+
+**F3 — Decorrelation (constraint 3).** `tests/validate-regression.sh` 46/46 unchanged reference outputs with the sample in; `tests/validate-format-detection.sh` 58/58 pre-existing assertions untouched (`scan_attempts`, `promotions`, `match_counts`, `final_order` identical). Fallback parity at N = 1,000: 15 runs (5 specimens incl. a 32-line file entirely held × default, `-hm duration`, `-o`) with and without `--detection-window=1000` differ only in the echoed command line and the timing/memory block. No runtime warnings on any stderr capture.
+
+**F4 — Memory (constraint 4).** Retained per file after the sample lines are dropped: **3.9 KB at K=3** (5.5 KB at K=6; Devel::Size of the observation structure). Fallback window at N = 1,000: 310–575 B per held line (P7) → 0.3–0.6 MB while engaged, single window at a time.
+
+**Decision — defaults fixed at K = 3 parts, B = 8,192 bytes (FORMAT_SAMPLE_PARTS / FORMAT_SAMPLE_BYTES); fallback N = 1,000 (FORMAT_DETECTION_WINDOW_FALLBACK).** 8 KB is the smallest shape past which no signal improves for the date-layout case (saturated at 2 KB) while meeting #17's ~100-recognised-line intent on access logs; three parts are the front/middle/end the principle asks for, and a fourth buys 35 % more lines for 30 % more cost without changing any decision. Cost ≈ 0.2–1.1 ms per file at the default; a few milliseconds even at 32 KB if a consumer later needs more.
+
 ### Section contracts owned by this drop
 
 - `-V format-detection`: the per-file and run-level keys in proposal 5 become locked at implementation and are recorded here (consumer: `tests/validate-format-detection.sh`).

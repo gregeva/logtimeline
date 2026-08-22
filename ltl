@@ -363,9 +363,23 @@ my %format_registry_entry;     # name => entry (includes non-scanned entries)
 my @format_scan_order;         # live MTF scan state: @format_registry reordered by
                                # pinned-closure promotion (D26); global across files
                                # (change points converge in one match, D20)
-my $format_detection_window = 0; # hidden --detection-window=N: two-phase-store window
-                                 # size (D30/D38); 0 = no window until a consumer
-                                 # (#17 unit resolution) sizes it
+# Format-detection evidence: a dual process (D53). The primary path takes a
+# read-only sample of every seekable file before its first line is
+# processed — FORMAT_SAMPLE_PARTS parts by byte offset (front, middle,
+# end), FORMAT_SAMPLE_BYTES read at each — through its own handle, with
+# its own counters, recognising lines against the registry patterns
+# without extraction or promotion. The fallback, for input that cannot be
+# repositioned, is the two-phase-store window (D30): hold the first N
+# lines, decide, replay. The hidden --detection-window=N override engages
+# the window regardless, so the fallback stays exercisable.
+use constant FORMAT_SAMPLE_PARTS              => 3;
+use constant FORMAT_SAMPLE_BYTES              => 8192;
+use constant FORMAT_DETECTION_WINDOW_FALLBACK => 1000;
+my $format_detection_window = 0; # hidden --detection-window=N override; 0 = the
+                                 # window engages only as the fallback, at
+                                 # FORMAT_DETECTION_WINDOW_FALLBACK
+my %format_detection_sample;     # in_file => sample observations (sample_file_for_detection())
+my %format_detection_window_engaged;  # in_file => window size actually engaged for that file
 # Scan telemetry for -V format-detection / scan. The no-match scan is the
 # structural worst case (every entry attempted, nothing matches), so its
 # cost is instrumented by sampling: 1 in FORMAT_SCAN_NOMATCH_SAMPLE_EVERY
@@ -2955,6 +2969,102 @@ sub format_registry_classify {
     return $format_scan_sub->($line);
 }
 
+# Detection evidence sample (D53, the primary path of the dual process).
+# Takes a read-only look at a seekable file before its first line is
+# processed: the file's byte size is divided into FORMAT_SAMPLE_PARTS
+# parts (front, middle, end), FORMAT_SAMPLE_BYTES are read at each, and
+# the partial lines at either edge of a part are discarded so only whole
+# lines are seen. A file no larger than the whole sample is read once,
+# whole, as a single part.
+#
+# Completely decorrelated from the production read: own handle, own
+# counters, nothing held or replayed. Lines are recognised by matching the
+# registry entries' compiled patterns directly in static cascade order —
+# the same first-match answer the generated scan sub gives — with no
+# extraction, no promotion, and no timestamp parsing (the raw timestamp
+# string is kept; interpreting it under a layout is the consumers' job,
+# and parsing here would both share the production cache and die on a
+# producer whose day and month are transposed, #385).
+#
+# Returns undef when the path is not a plain file (the caller falls back
+# to the held-line window). Otherwise a hashref:
+#   size, parts, bytes_per_part, whole (1 when read as one part),
+#   lines          => [ sampled lines, stripped ]  — handed forward to the
+#                     evidence consumers (#384 probes, #17 unit sampling)
+#   part_obs       => [ { offset, bytes, lines, avg_line, matched,
+#                         formats => { entry name => count },
+#                         first_ts, last_ts }, ... ]
+#   formats        => { entry name => count } across all parts
+#   elapsed_us     => wall time of the whole sample
+#
+# The sample also knows the file's size and observes its average line
+# length per part — the inputs a percentage-based per-file progress
+# indicator needs (lines read × average line length ÷ file size). That
+# indicator is #397; nothing here implements it.
+sub sample_file_for_detection {
+    my ($path) = @_;
+    return undef unless -f $path;
+    my $t0 = [gettimeofday];
+    open my $sfh, '<', $path or return undef;
+    binmode $sfh;
+    my $size  = -s $sfh;
+    my $parts = FORMAT_SAMPLE_PARTS;
+    my $bytes = FORMAT_SAMPLE_BYTES;
+    my $whole = $size <= $parts * $bytes ? 1 : 0;
+
+    # Timestamp capture ordinal per entry, from the declarative field map.
+    my %ts_ordinal;
+    for my $e (@format_registry) {
+        my ($pair) = grep { $_->[1] eq 'timestamp_str' } @{ $format_registry_spec{ $e->[FR_NAME] }{field_map} };
+        $ts_ordinal{ $e->[FR_NAME] } = $pair ? $pair->[0] - 1 : undef;
+    }
+
+    my @offsets = $whole ? (0)
+                : map { $_ == $parts - 1 ? $size - $bytes : int($_ * ($size - $bytes) / ($parts - 1)) } 0 .. $parts - 1;
+    my (@lines, @part_obs, %formats);
+    for my $offset (@offsets) {
+        seek $sfh, $offset, 0;
+        my $buf = '';
+        my $got = $whole ? read($sfh, $buf, $size) : read($sfh, $buf, $bytes);
+        $got //= 0;
+        my $at_eof = $offset + $got >= $size;
+        my @seg = split /\n/, $buf, -1;
+        shift @seg if $offset > 0;          # partial line the seek landed in
+        pop @seg unless $at_eof;            # partial line cut by the read limit
+        pop @seg if @seg && $seg[-1] eq ''; # trailing newline leaves an empty segment
+        my $obs = { offset => $offset, bytes => $got, lines => 0, avg_line => 0,
+                    matched => 0, formats => {}, first_ts => undef, last_ts => undef };
+        my $line_bytes = 0;
+        for my $line (@seg) {
+            $line =~ s/\r$//;
+            $line_bytes += length($line) + 1;
+            $obs->{lines}++;
+            push @lines, $line;
+            for my $e (@format_registry) {
+                if (my @c = $line =~ $e->[FR_PATTERN]) {
+                    $obs->{matched}++;
+                    $obs->{formats}{ $e->[FR_NAME] }++;
+                    $formats{ $e->[FR_NAME] }++;
+                    my $o = $ts_ordinal{ $e->[FR_NAME] };
+                    if (defined $o && defined $c[$o]) {
+                        $obs->{first_ts} //= $c[$o];
+                        $obs->{last_ts}    = $c[$o];
+                    }
+                    last;
+                }
+            }
+        }
+        $obs->{avg_line} = $obs->{lines} ? int($line_bytes / $obs->{lines} + 0.5) : 0;
+        push @part_obs, $obs;
+    }
+    close $sfh;
+    return {
+        size => $size, parts => scalar(@offsets), bytes_per_part => $bytes, whole => $whole,
+        lines => \@lines, part_obs => \@part_obs, formats => \%formats,
+        elapsed_us => tv_interval($t0) * 1e6,
+    };
+}
+
 # Promotion (D26): the winner moves to the front together with its
 # ancestor closure; every other entry keeps its current relative order —
 # recency ordering, so recently active formats stay ahead of the tail.
@@ -3017,6 +3127,7 @@ sub emit_format_detection_verbose {
             push @verbose_output, "  first_match_line: -";
             push @verbose_output, "  scan_attempts: 0";
             push @verbose_output, "  scan_failed_attempts: 0";
+            emit_format_detection_sample_verbose($file);
             next;
         }
         my $slug = $fdd->{slug} // '-';
@@ -3030,6 +3141,7 @@ sub emit_format_detection_verbose {
             (defined $fdd->{first_match_line} ? $fdd->{first_match_line} : '-');
         push @verbose_output, "  scan_attempts: " . ($fdd->{scan_attempts} // 0);
         push @verbose_output, "  scan_failed_attempts: " . ($fdd->{scan_failed_attempts} // 0);
+        emit_format_detection_sample_verbose($file);
     }
 
     # Scan-order telemetry: the run-level view of the registry scan that
@@ -3042,6 +3154,9 @@ sub emit_format_detection_verbose {
     push @verbose_output, "guarded: " .
         (join(',', map { $_->[FR_NAME] } grep { $_->[FR_GUARD] } @format_registry) || '-');
     push @verbose_output, "window_size: $format_detection_window";
+    push @verbose_output, "window_fallback: " . FORMAT_DETECTION_WINDOW_FALLBACK;
+    push @verbose_output, "sample_parts: " . FORMAT_SAMPLE_PARTS;
+    push @verbose_output, "sample_bytes_per_part: " . FORMAT_SAMPLE_BYTES;
     push @verbose_output, "final_order: " . join(',', map { $_->[FR_NAME] } @format_scan_order);
     push @verbose_output, "promotions: $format_scan_promotions";
     push @verbose_output, "match_counts: " .
@@ -3054,6 +3169,41 @@ sub emit_format_detection_verbose {
     push @verbose_output, "=== END format-detection / scan ===";
 
     push @verbose_output, "=== END format-detection ===";
+}
+
+# Per-file detection-evidence keys inside the file block of -V
+# format-detection (D53): which of the dual process's paths served the
+# file, and what the sample observed. Key shapes are contracted in
+# features/58-format-registry-staged-detection.md § -V format-detection
+# section-contract; the harness is tests/validate-format-detection.sh.
+sub emit_format_detection_sample_verbose {
+    my ($file) = @_;
+    my $s = $format_detection_sample{$file};
+    my $w = $format_detection_window_engaged{$file} // 0;
+    push @verbose_output, "  window: $w";
+    if (!$s) {
+        push @verbose_output, "  sample: no";
+        return;
+    }
+    push @verbose_output, "  sample: yes";
+    push @verbose_output, "  sample_file_bytes: $s->{size}";
+    push @verbose_output, "  sample_whole_file: " . ($s->{whole} ? 'yes' : 'no');
+    my ($lines, $matched) = (0, 0);
+    for my $p (@{ $s->{part_obs} }) { $lines += $p->{lines}; $matched += $p->{matched}; }
+    push @verbose_output, "  sample_lines: $lines";
+    push @verbose_output, "  sample_matched_lines: $matched";
+    push @verbose_output, "  sample_formats: " .
+        (join(',', map { $_->[FR_NAME] . '=' . $s->{formats}{ $_->[FR_NAME] } }
+                   grep { $s->{formats}{ $_->[FR_NAME] } } @format_registry) || '-');
+    my $i = 0;
+    for my $p (@{ $s->{part_obs} }) {
+        $i++;
+        push @verbose_output, sprintf('  sample_part: %d offset=%d bytes=%d lines=%d avg_line=%d matched=%d first_ts="%s" last_ts="%s"',
+            $i, $p->{offset}, $p->{bytes}, $p->{lines}, $p->{avg_line}, $p->{matched},
+            $p->{first_ts} // '-', $p->{last_ts} // '-');
+    }
+    push @verbose_output, sprintf('  sample_us: %.1f', $s->{elapsed_us});
+    return;
 }
 
 # Emit the heatmap-palette `-V` section. Reports the resolved palette state
@@ -8912,16 +9062,32 @@ sub read_and_process_logs {
         my $potential_csv_header;
         my $csv_skipped_timestamp_rows = 0;
 
-        # Detection window (D30 two-phase-store, structure only until #17
-        # sizes N — D38): with a window configured, the first N lines of the
-        # file are classified once (cold path, shared scan sub) and held as
-        # [raw_line, entry]; the main loop replays them with their cached
-        # classification — extraction deferred to the replay — then switches
-        # to the streaming path. Default N=0: no lines held.
+        # Detection evidence (D53, dual process). Primary: the read-only
+        # sample of the file, taken before its first line is processed;
+        # the sample lines are handed to the evidence consumers here and
+        # dropped — only the observations are retained for -V. Fallback:
+        # the two-phase-store window (D30) engages when the file could not
+        # be sampled, at FORMAT_DETECTION_WINDOW_FALLBACK lines — or at the
+        # hidden --detection-window=N override, which engages it regardless.
+        my $sample = sample_file_for_detection($in_file);
+        if ($sample) {
+            delete $sample->{lines};   # no consumer in this drop (#384, #17 attach here)
+            $format_detection_sample{$in_file} = $sample;
+        }
+        my $window_n = $format_detection_window > 0 ? $format_detection_window
+                     : $sample                      ? 0
+                     :                                FORMAT_DETECTION_WINDOW_FALLBACK;
+        $format_detection_window_engaged{$in_file} = $window_n;
+
+        # Detection window (D30 two-phase-store): with a window engaged, the
+        # first N lines of the file are classified once (cold path, shared
+        # scan sub) and held as [raw_line, entry]; the main loop replays them
+        # with their cached classification — extraction deferred to the
+        # replay — then switches to the streaming path. N=0: no lines held.
         my ( $file_scan_attempts, $file_scan_failed ) = ( 0, 0 );  # scan telemetry (Issue #228)
         my @window_held;
-        if ($format_detection_window > 0) {
-            while (@window_held < $format_detection_window && defined(my $wline = <$fh>)) {
+        if ($window_n > 0) {
+            while (@window_held < $window_n && defined(my $wline = <$fh>)) {
                 (my $wstripped = $wline) =~ s/[\r\n]+$//;
                 my ($wentry) = format_registry_classify($wstripped);
                 $file_scan_attempts++;
