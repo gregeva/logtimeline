@@ -461,6 +461,26 @@ assert_registry_sample_scenario() {
         asserts     "Every line of the registry-sample fixture parses via match_type $mt (no fallthroughs)" \
         produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
         contract    "Fixture is the registry entry's sample lines verbatim; if the samples change in format_registry_specs(), this fixture and count change in the same commit"
+
+    # Evidence sample on a file smaller than the whole sample (D53): read
+    # once, whole, as a single part; the fallback window stays disengaged.
+    assert_line "$out" \
+        pattern     '^  window: 0$' \
+        asserts     'A sampled plain file engages no fallback window (window: 0) — the sample served it' \
+        produced_by 'read_and_process_logs() in ltl (window engagement); emitted by emit_format_detection_sample_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+
+    assert_line "$out" \
+        pattern     '^  sample_whole_file: yes$' \
+        asserts     'A file no larger than sample_parts x sample_bytes_per_part is read once, whole, as a single part' \
+        produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+
+    assert_line "$out" \
+        pattern     "^  sample_matched_lines: $nlines\$" \
+        asserts     "Every line of the whole-file sample is recognised by the registry patterns directly ($nlines lines), without touching scan_attempts" \
+        produced_by 'sample_file_for_detection() in ltl (direct pattern recognition, static cascade order)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 }
 
 scenario_thingworx_rac_client() {
@@ -566,9 +586,91 @@ scenario_scan_telemetry() {
 
     assert_line "$out" \
         pattern     '^window_size: 0$' \
-        asserts     'Without --detection-window, the two-phase-store window is disabled (N=0, D30/D38 default)' \
+        asserts     'Without --detection-window, the override is 0 (D30/D38); the window engages per file only as the fallback for unsampled input' \
         produced_by 'emit_format_detection_verbose() in ltl ($format_detection_window)' \
         contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+
+    # Evidence sample (umbrella D53): the dual process's primary path. The
+    # 84,857-byte codebeamer fixture is larger than 3 x 8192, so three
+    # parts are read at byte offsets 0, 38332, 76665 and the per-part
+    # observations are deterministic for the committed fixture.
+    assert_line "$out" \
+        pattern     '^window_fallback: 1000$' \
+        asserts     'The fallback two-phase-store window size for unsampled input is 1000 lines (D53)' \
+        produced_by 'emit_format_detection_verbose() in ltl (FORMAT_DETECTION_WINDOW_FALLBACK)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract; features/log-format-registry.md D53'
+
+    assert_line "$out" \
+        pattern     '^sample_parts: 3$' \
+        asserts     'The evidence sample reads three parts per file: front, middle, end (FORMAT_SAMPLE_PARTS)' \
+        produced_by 'emit_format_detection_verbose() in ltl (FORMAT_SAMPLE_PARTS)' \
+        contract    'features/log-format-registry.md section #388 findings - the value is the measured default; changing it changes every sample_* value below in the same commit'
+
+    assert_line "$out" \
+        pattern     '^sample_bytes_per_part: 8192$' \
+        asserts     'The evidence sample reads 8192 bytes per part (FORMAT_SAMPLE_BYTES)' \
+        produced_by 'emit_format_detection_verbose() in ltl (FORMAT_SAMPLE_BYTES)' \
+        contract    'features/log-format-registry.md section #388 findings - the value is the measured default; changing it changes every sample_* value below in the same commit'
+
+    assert_line "$out" \
+        pattern     '^  window: 0$' \
+        asserts     'A sampled plain file engages no fallback window (window: 0) — the sample served it' \
+        produced_by 'read_and_process_logs() in ltl (window engagement); emitted by emit_format_detection_sample_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+
+    assert_line "$out" \
+        pattern     '^  sample: yes$' \
+        asserts     'A plain file is sampled (the primary path of the dual process)' \
+        produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+
+    assert_line "$out" \
+        pattern     '^  sample_file_bytes: 84857$' \
+        asserts     'The sample records the file byte size it divided (the committed codebeamer fixture is 84,857 bytes)' \
+        produced_by 'sample_file_for_detection() in ltl (-s on the sample handle)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+
+    assert_line "$out" \
+        pattern     '^  sample_whole_file: no$' \
+        asserts     'A file larger than sample_parts x sample_bytes_per_part is sampled in parts, not read whole' \
+        produced_by 'sample_file_for_detection() in ltl' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+
+    assert_line "$out" \
+        pattern     '^  sample_lines: 230$' \
+        asserts     'Three 8192-byte parts of the codebeamer fixture yield 230 whole lines after discarding the partial line at each part edge' \
+        produced_by 'sample_file_for_detection() in ltl (edge-line discard)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - value is deterministic for the committed fixture at the default sample shape'
+
+    assert_line "$out" \
+        pattern     '^  sample_matched_lines: 230$' \
+        asserts     'Every sampled codebeamer line is recognised by the registry patterns directly, without entering the production scan (scan_attempts stays 741)' \
+        produced_by 'sample_file_for_detection() in ltl (direct pattern recognition, static cascade order)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+
+    assert_line "$out" \
+        pattern     '^  sample_formats: mt12=230$' \
+        asserts     'The sample attributes all 230 recognised lines to entry mt12, keyed by entry name in static registry order' \
+        produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+
+    assert_line "$out" \
+        pattern     '^  sample_part: 1 offset=0 bytes=8192 lines=86 avg_line=94 matched=86 first_ts="29/Oct/2025:08:03:31 \+0000" last_ts="29/Oct/2025:08:44:07 \+0000"$' \
+        asserts     'Part 1 starts at byte 0, keeps 86 whole lines (avg 94 bytes), all recognised, and reports the raw (unparsed) first and last timestamp captures' \
+        produced_by 'sample_file_for_detection() in ltl (per-part observations; timestamp_str capture via the field map)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - deterministic for the committed fixture'
+
+    assert_line "$out" \
+        pattern     '^  sample_part: 3 offset=76665 bytes=8192 lines=87 avg_line=94 matched=87 first_ts="29/Oct/2025:11:20:56 \+0000" last_ts="29/Oct/2025:12:04:02 \+0000"$' \
+        asserts     'The last part is positioned so its read ends at EOF (offset = size - bytes) and its last_ts is the file'"'"'s final timestamp' \
+        produced_by 'sample_file_for_detection() in ltl (end-part placement)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - deterministic for the committed fixture'
+
+    assert_line "$out" \
+        pattern     '^  sample_us: [0-9]+\.[0-9]$' \
+        asserts     'The sample wall time is reported as a one-decimal microsecond value (nondeterministic: shape asserted, never the value)' \
+        produced_by 'emit_format_detection_sample_verbose() in ltl' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^final_order: mt12,' \
@@ -660,6 +762,12 @@ scenario_scan_telemetry_nomatch() {
         asserts     'With --detection-window=8, the sub-section reports the resolved window size' \
         produced_by 'emit_format_detection_verbose() in ltl ($format_detection_window)' \
         contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (D30/D38 window structure)'
+
+    assert_line "$wout" \
+        pattern     '^  window: 8$' \
+        asserts     'The --detection-window override engages the fallback window for a sampled file too (dual process: both paths exercisable), at the override size' \
+        produced_by 'read_and_process_logs() in ltl (window engagement: override > sampled ? 0 : fallback)' \
+        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$wout" \
         pattern     '^  scan_attempts: 320$' \
