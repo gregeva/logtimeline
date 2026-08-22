@@ -629,6 +629,20 @@ The battery's two axes are K and B; the tables in R5 show, per specimen, what ea
 3. **Decorrelation** (constraint 3): byte-identical `ltl` output with the pass on/off across the fixture families, including files smaller than the sample; fallback parity re-proved at the shipped N.
 4. **Memory** (constraint 4): retained evidence in bytes (Devel::Size) at the largest (K, B); held-window bytes per line restated.
 
+#### #388 scope (validated by the architect 2026-08-22)
+
+In scope:
+
+1. The sampling pass in the detect stage, once per file before the main read: K parts by byte offset (front, middle, end), B bytes each, resync to a line boundary, recognition against the registry patterns with no side effects, own handle and counters; a file smaller than K × B is read once, whole.
+2. What it hands forward: the sample lines plus per-part observations (byte size, average line length, lines seen, formats recognised, first/last timestamp), ready for #384's probes and #17's unit detection; in this issue the only consumer is the telemetry.
+3. The fallback window at default N = 1,000, engaged only when the pass cannot run; the hidden `--detection-window` override stays so the fallback remains exercisable by the harness; parity at 1,000 re-proved.
+4. `-V format-detection` telemetry for the sample — an observability surface — with its section contract recorded here and scenarios in `tests/validate-format-detection.sh`. No on/off switch: the regression harness's pre-existing reference outputs are the proof that output is unchanged.
+5. Measurements (R5) taken through that telemetry on the real specimens and recorded here; K and B then fixed as the default constants.
+6. A code comment at the pass naming #397 (percentage-based progress) as a future consumer of the size and average-line-length observations.
+7. One release-notes bullet (`-V` output changes are user-observable); no `--help`/`docs/usage.md` change.
+
+Out of scope: the content probes and variant selection (#384), unit detection (#17), the progress percentage (#397), any change to line recognition or extraction in the main read.
+
 ### Section contracts owned by this drop
 
 - `-V format-detection`: the per-file and run-level keys in proposal 5 become locked at implementation and are recorded here (consumer: `tests/validate-format-detection.sh`).
