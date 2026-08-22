@@ -2,6 +2,7 @@
 
 ## Status
 
+- **Drop 1.5 (#384) planned (2026-08-22):** filename provenance evidence and variant groups specified in this document (§ "Drop 1.5 — #384" below; #384 has no feature file of its own — this umbrella is its record). Architect decisions D44–D52 locked through interview; implementation proposals listed separately for strike-or-lock. #388 (detection-window N sizing) becomes a native prerequisite and carries the constraints it must settle; #385 (Integration Runtime `yyyy-dd-MM`) lands as the first variant group. Train order: #58 ✅ → #388 → #384 (Drop 1.5) → #60 (Drop 2). Next: architect review of the proposals, then #384's research → prototype phase (the variant-group scan-sub selection and the probe costs are hot-path-adjacent and must be measured, per the mandatory workflow).
 - **Drop 1 (#58) implemented and gate-closed (2026-08-21):** the per-line match-type cascade is replaced by the format registry — declarative specs (pattern, field map, transforms, three-part time contract, duration unit + ambiguity flag, guards, head_class, samples with expected records) compiled at startup into a single generated scan sub per MTF order (D39/D40: eager precompilation, order-signature cache, pinned-closure recency promotion), validated by the D24 gates on every run. Byte parity proven (shadow mode 241 runs / 0 divergences; post-swap full-output diffs); every 1m fixture family net faster (pure-access −13.1%, concat-pair −11.0%, interleave −6.0%); #369's access read-phase regression removed as a class (read_files −13.6% vs v0.16.0). Scan telemetry shipped in `-V format-detection / scan`; format-carried units + the D18 unit-ambiguity note shipped (R5). Follow-ups filed: #386 (analysis precision), #387 (user YAML formats — the D37 re-sequenced R4 surface), #388 (detection-window N sizing, D38). Full record: `features/58-format-registry-staged-detection.md`. Next: Drop 2 (#60).
 - **Drop 1 (#58) research + prototype phase complete (2026-08-20):** the mandatory pre-implementation cycle ran end to end on branch `58-format-registry-staged-detection` — research F1–F8, application audit A1–A11, prototype findings P1–P9, decisions D24–D34 locked. Full record in `features/58-format-registry-staged-detection.md`; umbrella summary in the Decision Log entry below. Q2 (pattern priority) resolved by D26; Q3 (inheritance) and Q5 (strict mode) deferred to #58 implementation planning. Backlog side-findings: #382 (GC pause-form gap), #383 (timestamp-cache growth). Next: #58 implementation planning against the locked decisions.
 - **Drop 1 (#58) implementation planning complete (2026-08-20):** Q3 resolved as sparse-override (D35), Q5 resolved as no-strict-mode (D36), R4's user-facing YAML surface re-scoped to a follow-up issue with YAML::PP as a hard dependency when it lands (D37 — see the D12 true-up in the Decision Log), detection-window N-sizing split to a follow-up prototyping issue (D38). Full record in `features/58-format-registry-staged-detection.md`; staged implementation underway on branch `58-format-registry-staged-detection`.
@@ -500,6 +501,110 @@ What the registry needs from this, to be settled as the mechanism is designed:
 
 Drivers: #385 (the Integration Runtime case, `on hold` pending the mechanism), #384 (filename provenance evidence, which owns the first channel), #17 (the Tomcat/httpd `%D` unit case, the same problem in its milder metadata-only form).
 
+**Resolution (2026-08-22):** the four needs above are answered by Drop 1.5 — *expression* by variant groups (D47), *detection* by the staged evidence model and content probes (D44, D52), *adaptation* by the visible-or-good-enough principle with the format pin as the correction path (D44, D49), *confidence proportional to consequence* by the detection window replaying held lines under the final decision so a date-layout flip costs nothing inside the window (D48). See § "Drop 1.5 — #384" below.
+
+## Drop 1.5 — #384: filename provenance evidence and variant groups
+
+### Status
+
+- **Issue:** #384 — Drop 1.5 of the 0.17.0 merge train (parent #23; after #58, before #60). **No feature file of its own** — this section is the repo-side record; the issue body is its snapshot.
+- **Planned:** 2026-08-22 interview session (architect + Claude). Decisions D44–D52 locked as written; proposals listed under "Implementation proposals" are **not** locked.
+- **Prerequisites (native `blocked_by`):** #388 — detection-window N sizing, which now carries the constraints in § "Constraints handed to #388".
+- **Unblocks:** #385 (Integration Runtime `yyyy-dd-MM` dates — first variant group; its `timegm()` guard and once-per-file diagnostic ship here), the Tomcat/httpd `%D` unit split (#17's declarative half completes), and #387's user-defined variants (the group contract is designed to be extended from YAML).
+- **Mandatory research → prototype phase before implementation:** the per-file scan-sub selection (D47) touches the generated scan sub and its signature cache; the content probes (D52) add a per-line cost in the window and a sampled cost in the steady loop. Both are hot-path-adjacent — measure against the #58 S9 blessing battery before writing production code.
+
+### The problem this drop solves
+
+A registry pattern identifies a line *shape*; several producers can emit one shape with different semantics (Architectural Challenge 6). Two live cases:
+
+| Shape | Producers | What differs | Consequence of the wrong choice |
+|---|---|---|---|
+| `mt10` (`connection_server_standard`) | ThingWorx Connection Server; ThingWorx Integration Runtime | date layout: `yyyy-MM-dd` vs `yyyy-dd-MM` (#385) | events relocated by up to eleven months; fatal on day > 12 |
+| `mt3` (`tomcat_access_with_duration`) | Tomcat 6–9; Apache HTTP Server 2.x, Tomcat 10.1+ | `%D` unit: ms vs µs (#17) | durations wrong by 1000× |
+
+No per-line discriminator exists for either pair. The discriminator that does exist is file-level provenance — first among its channels, the file's name — plus content corroboration that can confirm or contradict a choice but, by the ≤12-day ceiling, cannot always decide one.
+
+### Naming evidence available (audit of producer conventions, 2026-08-22)
+
+From the original-named specimens held locally under `logs/` (the directory is gitignored; many files there were renamed by the analyst — only the rows below are producer-true):
+
+| Producer | Producer-true name | Stem | Date | Rotation | Ext |
+|---|---|---|---|---|---|
+| ThingWorx platform | `ApplicationLog.log`, `ApplicationLog.2025-05-05.0.log`, `ErrorLog.2025-05-05.1.log`, `ScriptErrorLog…`, `ScriptLog…`, `CommunicationLog…`, `AkkaCommunicationLog.log`, `AuthLog…`, `ConfigurationLog…`, `DatabaseLog…`, `SecurityLog…` | `<Name>Log` (OR set) | `.YYYY-MM-DD` | `.N` (logback) | `.log` |
+| Tomcat access | `localhost_access_log.2025-03-21.txt` | `localhost_access_log` | `.YYYY-MM-DD` | — | **`.txt`** (Tomcat default suffix) |
+| Apache httpd access | `access.log-20260609` | `access` | `-YYYYMMDD` *after* the extension | — | `.log` |
+| HotSpot GC | `gc-….out.3` | `gc` | — | `.N` after the extension | `.out` |
+| Connection Server | `cxserver.1-16.log` | `cxserver` | — | `.1-16` (replica/index form) | `.log` |
+| Integration Runtime | `IntegrationRuntime-46b44bb3-….log` (logback `logs.uniqueId` is the uuid; `maxIndex 5` ⇒ rolled siblings exist) | `IntegrationRuntime-<uuid>` | — | unknown suffix form | `.log` |
+
+Observations that shaped the decisions: Tomcat's `.txt` versus httpd's `.log` is a genuine discriminator in exactly the `%D` case, so the extension carries weight of its own; rotation suffixes land on either side of the extension depending on the producer, so the entry declares components and the resolver composes the matcher; neither `cxserver` nor `IntegrationRuntime` carries a date, so the filename-date probe serves date-rolled producers, not the motivating pair. `alwayson-cxserver` was recalled but could not be confirmed from any specimen and is **not** declared.
+
+### Locked decisions (architect, 2026-08-22)
+
+- **D44 — Detection is a staged accumulation of signals; confidence moves, is never 100%, and a wrong choice is visible-or-good-enough.** Signals arrive in the order they become available: the filename (before any line is read), each line's shape match, content probes over the lines read. Every signal raises or lowers the confidence of the candidates; the current best candidate is what the file is read with; the choice may flip as lines accumulate. ltl never claims certainty — the claim is *matched*. A variant chosen wrongly becomes clear to the analyst (dates that do not line up pages later, magnitudes that do not fit) or it was good enough; in both cases the console names the formats that were used so the analyst can pin and re-run (D49). This is the adaptation contract Challenge 6 asked for: no refusal path, a correction path.
+- **D45 — Filename evidence is declared per entry as four optional components plus executable samples.** `stem` (a pattern over the name stem; OR-able so one entry covers a producer's family, e.g. the ThingWorx `<Name>Log` set), `date` (a layout from a small fixed vocabulary — the filename's own date is *declared*, never guessed), `index` (rotation index form), `ext` (expected extension). Any absent component is simply no signal. The resolver composes the full-name matcher from the components (rotation tolerance is composed, not hand-written per entry); compression suffixes (`.gz`, `.bz2`, …) are stripped by the resolver as a constant, never declared by a producer. The extension *contributes* certainty: a matching extension raises confidence, a missing or different one (renamed file) withholds that signal and leaves confidence lower — it never contradicts. Each entry declaring filename evidence carries filename samples that must match at load (D24 extended). Pattern sources are retained; no `qr//` stringification.
+- **D46 — Evidence weights are fixed per evidence class in source code, never part of the registry schema.** An entry declares *what* its evidence is; how much each class counts (content shape match, stem, extension, filename date, rotation form, each probe) is one table in `ltl`, the same for every format including future user formats. Rationale: weights are a property of the detection engine, and letting definitions set their own would let one format out-shout another.
+- **D47 — Variant groups: a variant is a full registry entry; one member per identical pattern enters the scan per file.** Same-shape producers are modelled as separate entries (own slug, time contract, unit, filename evidence, samples, expected records) tied by a `variant_group` key, with one member declared the group default — today's entry, so behaviour without evidence is unchanged. The generated scan sub contains exactly one member per *identical pattern* within a group, selected per file from the accumulated evidence, so no line ever pays a second attempt for a shape it already matched; the D40 order-signature cache gains the selected members as part of its key, so a flip is a cache lookup. Members whose patterns *differ* (extra columns, reordered columns — the shape #387's user variants will take) are distinguishable by content and enter the scan as ordinary entries; they belong to the group for lineage and evidence, and the same confidence applies. D24 gates run per member (the Integration Runtime member's samples carry `yyyy-dd-MM` expectations and are the executable proof the layout works); the cross-shadow gate treats *in-group* identical-pattern overlap as expected. The `unit_ambiguous` flag is retired: the ambiguity note fires when a group member was selected by default with no deciding evidence. The Tomcat/httpd `%D` pair becomes a group (`tomcat_access_with_duration` default; a new httpd member declares µs, stem `access`, ext `.log`); the Connection Server/Integration Runtime pair becomes a group (`connection_server_standard` default; a new Integration Runtime member declares `yyyy-dd-MM`, stem `IntegrationRuntime-<uuid>`). Shape B (one entry with a `variants:` override list) was rejected: variants need their own samples, slugs and generated blocks regardless, so B is A with the bookkeeping hidden.
+- **D48 — The detection window (D30) is the replay mechanism; #388 is a native prerequisite.** Lines held in the two-phase-store window are extracted *after* the window closes, under whatever the evidence says at that point — so a flip inside the window mis-tags nothing, which is what makes a date-layout choice safe to make on accumulating evidence (three lines read `yyyy-dd-MM` before a flip would otherwise stretch the time axis by months through `initialize_empty_time_windows()`). Past the window, a late flip is accepted and reported. Content probes run in full inside the window and sampled in the steady loop. #388 must deliver N and the contract in § "Constraints handed to #388" before this drop implements.
+- **D49 — A run-level format pin tops the precedence chain.** A CLI option (`-lf` / `--log-format <slug>`, name a proposal below) names the format to use for every file in the run, overriding any classification; an unknown slug is a usage error listing the known slugs. Precedence, top first: **pin → `-du` (unit only) → evidence-selected variant → group default → index read-back hints (#179) → sample-based auto-detection (#17, follow-on)**. The pin is the analyst's escape hatch when evidence is absent or wrong; no separate "disable filename evidence" switch exists — the pin covers it. Industry precedent F5 (explicit pinning outranks detection).
+- **D50 — The console summary names the formats used; confidence stays in `-V`.** In the per-file list of the summary block, each file name is followed by `[n]` or `[n,m,…]` — every format found in that file, numbered against a single-line legend printed once below the list (`1 thingworx_standard  2 tomcat_access_with_duration`, numbered in order of first detection across the run). The file name is truncated through `shorten_filename()` with the bracket width reserved (width derived from the widest bracket in the run), so a long path never pushes the bracket off the line; a no-match file shows `[-]`. The legend and brackets speak the slug vocabulary — one identity surface shared with `-V format-detection` and the pin. Confidence, evidence and flips appear only in `-V format-detection`.
+- **D51 — Detection scenarios run on committed fixtures staged under producer-true names.** `logs/` is gitignored, so assertions that depend on it run only where those files happen to exist. New fixtures live under `tests/fixtures/format-detection/` as `.txt`, each with a manifest row naming the producer-true name the harness stages it under in `$TMP_DIR` before invoking `ltl` (the committed name is never fed to the tool). Slices are cut from real specimens and scrubbed, source recorded in the manifest — the Integration Runtime specimen is the only known true positive for the date transposition, and a synthesized one would prove the synthesizer. Existing `logs/`-dependent scenarios remain; new scenarios are committed-fixture only.
+- **D52 — Content corroboration probes: impossibility is hard evidence; silence is inconclusive.** Three probes feed confidence: (a) an out-of-range date component under the current layout (month token > 12) — decisive against that layout; (b) monotonicity of parsed timestamps against file order — violations lower confidence in the current layout; (c) the filename-date cross-check — the first (and last) parsed timestamp against the date declared in the filename, which **breaks the ≤12-day ceiling for date-rolled files**: `ApplicationLog.2025-05-06.0.log` with content `2025-05-06` is May 6 under `yyyy-MM-dd` and June 5 under `yyyy-dd-MM`, so any day ≠ month resolves the ordering at zero per-line cost. A probe that proves an impossibility outranks name evidence. Absence of contradiction proves nothing and is recorded as such. The `timegm()` guard and #385's once-per-file stderr diagnostic (file, line, offending value; never an ` at … line` suffix) are the out-of-range probe's user-visible half and ship with this drop.
+
+### Implementation proposals — NOT locked (strike or lock at review)
+
+1. **Evidence classes and weights (one table in source, D46).** Content shape match is necessary and carries the base; stem is the strongest name signal; extension next; filename date and rotation form weakest; probe (a) and (c)-mismatch are hard contradictions, (b) a graded penalty. Concrete values to be set in the prototype, where the IR and httpd fixtures must resolve correctly with stem alone and must *not* resolve on extension alone.
+2. **Probe sampling in the steady loop:** 1-in-N lines, the no-match-timing idiom (`FORMAT_SCAN_NOMATCH_SAMPLE_EVERY`), monotonicity only — (a) is free (it fires on the parse path's guard), (c) is head/tail only.
+3. **Option name:** `-lf <slug>` / `--log-format <slug>` (both forms free today); `--help` and `docs/usage.md` updated in the same commit.
+4. **Filename `date` layout vocabulary:** `iso` (`YYYY-MM-DD`), `compact` (`YYYYMMDD`), extensible; `index` forms: `dot_n` (`.N`), `dash_n_n`; whether `index` needs a form at all or just a "present/absent" flag is a prototype question.
+5. **`-V format-detection` per-file additions** (section-contract keys, owned here per HARNESS-DESIGN): `filename_evidence: stem=<entry|-> ext=<match|absent|other> date=<match|mismatch|-> index=<…>`; `candidates: slug=score,…`; `selected: slug`; `selection_basis: pin|evidence|default`; `confidence: 0.NN`; `flips: N`; `probes: out_of_range=N monotonic_violations=N filename_date=match|mismatch|-`; `formats: slug,slug` (the bracket's content). Run-level: `format_pin: -|slug`. Existing keys byte-preserved.
+6. **Ambiguity note rewording** (replaces the S7 text, harness scenario updated in the same commit): fires for a default-selected group member; names the group's consequence class (unit or date layout) and points at `-lf` as well as `-du`.
+7. **Fixture scrubbing scope** for the Integration Runtime slice (uuid, logger names, hosts) — architect to confirm a scrubbed ~300-line real slice is acceptable to commit.
+8. **`-V` legend numbering** also emitted as `legend: 1=slug,2=slug` so the harness can assert bracket↔legend consistency without parsing the rendered summary.
+
+### Constraints handed to #388 (must be settled and landed before this drop implements)
+
+1. **Convergence floor from real specimens.** N must cover the line at which the motivating variant decisions stabilise: in the Integration Runtime specimen the first decisive out-of-range token is at line 571 of 5,416 — #388 measures the decision line across the fixture families and the D51 fixtures and reports the miss rate for candidate N values; a recommended N that would miss the IR case is not acceptable without the architect's explicit sign-off.
+2. **Probe cost inside the window.** Full probes (D52 a/b/c) run on every held line; #388 reports the one-time per-file cost at the chosen N (ns/line over N lines) alongside the window's own replay cost.
+3. **Flip-with-replay contract.** Held lines are extracted under the variant selected at window close — #388 proves side-effect-ordering parity at the chosen N (already proven at N=1000 during #58 S4/S5; re-prove at the final value), including files shorter than N (entirely held).
+4. **Memory bound** per held line at the chosen N (P7: ~310–575 B/line) stated as a number, single window at a time (files are sequential).
+5. **#17's ~100-line unit-sampling requirement** remains a co-consumer (already in #388's body).
+6. **Deliverable shape:** N lands as the default constant; `--detection-window` stays a hidden override; `window_size:` telemetry already exists. Telemetry for "decision stabilised at line L" is this drop's, not #388's.
+
+### Section contracts owned by this drop
+
+- `-V format-detection`: the per-file and run-level keys in proposal 5 become locked at implementation and are recorded here (consumer: `tests/validate-format-detection.sh`).
+- Console summary: the `[n,m]` bracket and the numbered single-line legend (D50) are a rendered-output shape consumed by `validate-regression.sh` references; the legend line is deterministic (slug order = first-detection order) and is **not** stripped.
+- stderr: the group-default ambiguity note (proposal 6) and the #385 out-of-range diagnostic are intentional diagnostics — never an ` at … line` suffix.
+
+### Fixtures (D51) — `tests/fixtures/format-detection/`
+
+| Fixture (committed `.txt`) | Staged as | Proves |
+|---|---|---|
+| Connection Server slice | `cxserver.1.log` | group default + stem evidence |
+| Integration Runtime slice (both >12 and ≤12 day tokens, file-ordered as the specimen) | `IntegrationRuntime-<uuid>.log` | stem → `yyyy-dd-MM`; out-of-range probe; #385 diagnostic |
+| same IR slice | `app.log` | no evidence → default; probe contradiction reported; flip inside window |
+| Tomcat access | `localhost_access_log.2025-05-05.txt` | stem + `.txt` → ms |
+| httpd access (µs `%D`) | `access.log-20260609` | stem + ext → µs with no `-du` |
+| same httpd slice | `renamed.txt` | ext absent → lower confidence, default + note |
+| logback-rolled ThingWorx | `ApplicationLog.2025-05-06.0.log` | filename-date cross-check; date/index decomposition |
+| Connection Server + Tomcat concatenated | `mixed.log` | `[1,2]` bracket and legend |
+| any | with `-lf` | pin outranks evidence; unknown slug errors |
+| sabotage (authoring-time, per D37's coverage note) | — | filename pattern failing its sample; in-group filename overlap fails the build |
+
+### Out of scope (unchanged from the issue)
+
+Statistical unit sampling (#17's remaining half); content fingerprinting beyond the declared pattern; directory/path heuristics beyond the file's own name; file-property performance heuristics (#44); any change to line recognition or extraction (#58's parity stands).
+
+### Merge gate
+
+- [ ] Research → prototype phase: scan-sub member selection cost (D47) and probe costs (D52) measured against the #58 S9 battery; weights (proposal 1) set from fixture outcomes; decisions recorded here before implementation.
+- [ ] #388 closed with the six constraints above satisfied.
+- [ ] All D51 fixtures committed and their scenarios green in `validate-format-detection.sh`; full `tests/validate-*.sh` suite exits 0; runtime-warning-clean.
+- [ ] Success criteria from the issue: Tomcat-named and httpd-named identical-shape files resolve to different units with no `-du`; IR-named file reads `yyyy-dd-MM` with no fatal; pin wins; unnamed file behaves as today plus the note; sabotage fails at load; no read-phase regression outside noise.
+- [ ] `--help`, `docs/usage.md`, `docs/staged-processing-pipeline.md` (detect-stage contract), this section, and the `-V` contract updated in the same change; release-notes bullet (user-observable).
+- [ ] #385 closed by this drop; #17's declarative half noted complete on #17.
+
 ## TODOs
 
 - [x] Research fuzzy matching algorithms for message identity grouping (section 9) — completed via #96/#54, see `docs/similarity-engine-best-practices.md`
@@ -536,7 +641,9 @@ This refactor is staged into phases with independent deliverables. Each phase bu
 | Issue | Phase | Drop | Title | Depends On | 0.17.0 |
 |-------|-------|------|-------|------------|--------|
 | #180 | — | 0 | Named pipeline stages (zero behavioral change) | — | **In — MERGED 2026-08-20 (PR #380)** |
-| #58 | 1 | 1 | Format registry and staged detection (fixes #369; unblocks #17's declarative path) | #180 | **In** |
+| #58 | 1 | 1 | Format registry and staged detection (fixes #369; unblocks #17's declarative path) | #180 | **In — MERGED 2026-08-21 (PR #389)** |
+| #388 | — | — | Size the format-detection window N (prototyping; delivers the D48 replay contract) | #58 | **In — prerequisite of Drop 1.5 (added 2026-08-22)** |
+| #384 | 1 | 1.5 | Filename provenance evidence and variant groups (fixes #385; completes #17's declarative half) | #388 | **In (added 2026-08-20; planned 2026-08-22)** |
 | #60 | 3 | 2 | Configurable metric visibility and purpose | #58 | **In** |
 | #57 | — | — | Bucket data structure prototype (go/no-go gate for Phase 2) | #58 (design context) | **Out — Phase 2+4 release (D21)** |
 | #59 | 2 | — | Sliding-window deferred-per-bucket processing (motivating consumer: Phase 4 inter-line derived metrics) | #58, #57 | **Out — Phase 2+4 release (D21)** |
@@ -557,6 +664,22 @@ Each drop lands on its own branch off `release/0.17.0`, merges back via PR throu
 [Issue #23: Log Format Registry - Refactor core parsing architecture](https://github.com/gregeva/logtimeline/issues/23)
 
 ## Design Decisions Log
+
+### 2026-08-22: Drop 1.5 (#384) planning interview — D44–D52
+
+Filename provenance evidence and variant groups specified through an architect interview; full text in § "Drop 1.5 — #384" above. Summary of the locked calls:
+
+1. **D44 — Staged signal accumulation; never 100%; visible-or-good-enough.** Filename first, then line matches, then content probes; the current best candidate reads the file and may flip; a wrong variant becomes visible to the analyst or was good enough, and the console names what was used so the analyst can pin.
+2. **D45 — Four optional filename components per entry** (stem, date, rotation index, extension) plus executable filename samples; the resolver composes the matcher; extension adds certainty, its absence withholds it, never contradicts.
+3. **D46 — Weights fixed per evidence class in source**, never in the schema.
+4. **D47 — Variant groups as full entries**, one member per identical pattern in the scan per file (selected by evidence, default member = today's behaviour); different-pattern members scan normally — the shape #387's user variants extend. Tomcat/httpd and Connection Server/Integration Runtime become the first two groups; `unit_ambiguous` retires in favour of "default-selected without deciding evidence".
+5. **D48 — Detection window replays held lines under the final decision**; #388 is a native prerequisite and receives six constraints.
+6. **D49 — Run-level format pin** tops the chain: pin → `-du` → evidence → group default → index hints → #17 sampling.
+7. **D50 — Console summary brackets `[n,m]` + numbered legend**, slug vocabulary; confidence only in `-V`.
+8. **D51 — Committed fixtures staged under producer-true names**; `logs/` is gitignored and is not a test substrate.
+9. **D52 — Content probes**: out-of-range component (decisive), monotonicity (graded), filename-date cross-check (breaks the ≤12-day ceiling for date-rolled files); silence is inconclusive; #385's guard and diagnostic ship here.
+
+Process: #384 had been left `on hold` with a prose-only "blocked by #58" after #58 closed — recorded in CLAUDE.md (2026-08-22 observation; per-feature workflow step 9). Recorded directly on `release/0.17.0` (planning artifact; architect instruction 2026-08-22).
 
 ### 2026-08-21: #385 — same line shape, divergent data quality; fix deferred to the provenance mechanism
 
@@ -681,6 +804,7 @@ Discussion established that derived metrics require a fundamental change to the 
 ### Per-drop feature docs (0.17.0 merge train — repo-side source of truth per drop)
 - features/180-named-pipeline-stages.md — Drop 0 (#180)
 - features/58-format-registry-staged-detection.md — Drop 1 (#58)
+- *(no file)* — Drop 1.5 (#384) is recorded in this document, § "Drop 1.5 — #384"
 - features/60-metric-visibility-demand-map.md — Drop 2 (#60)
 
 ### Documentation
