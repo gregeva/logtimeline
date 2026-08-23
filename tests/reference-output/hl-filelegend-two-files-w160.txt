@@ -3012,12 +3012,12 @@ command-line options: --disable-progress -n 1 --terminal-width 160 -hdmin 100000
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-04-10 06:00 and 2025-12-15 23:57
   ─────────────────────────────────────────   
-  ERROR-HL                                1      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs/T...tomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log
-  ERROR                                  88      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs/T...omThingworxLogs/ScriptLog.GetComplexPlotByIndex.log
+  ERROR-HL                                1      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs...mThingworxLogs/ScriptLog-DPMExtended-clean-5k.log [1]
+  ERROR                                  88      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs...ThingworxLogs/ScriptLog.GetComplexPlotByIndex.log [1]
   WARN                                 6016   
-  INFO-HL                                 2   
+  INFO-HL                                 2      Log Formats
   INFO                                 1885   
-  ─────────────────────────────────────────   
+  ─────────────────────────────────────────      1 thingworx_standard
   HIGHLIGHTED                             3   
   LINES INCLUDED                       7992   
   LINES READ                           7992   

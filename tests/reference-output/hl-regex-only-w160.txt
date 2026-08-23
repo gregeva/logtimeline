@@ -51,11 +51,11 @@ command-line options: --disable-progress -n 1 --terminal-width 160 -du us -h Bom
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2026-01-22 08:49 and 2026-01-25 07:41
   ─────────────────────────────────────────   
-  4xx                                     4      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs/A...Server-access_log-Windchill_Navigate.2026-01-25.log
+  4xx                                     4      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs...rver-access_log-Windchill_Navigate.2026-01-25.log [1]
   3xx                                     7   
-  2xx-HL                                 34   
+  2xx-HL                                 34      Log Formats
   2xx                                   632   
-  ─────────────────────────────────────────   
+  ─────────────────────────────────────────      1 tomcat_access_with_duration
   HIGHLIGHTED                            34   
   LINES INCLUDED                        677   
   LINES READ                            677   

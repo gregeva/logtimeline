@@ -478,38 +478,7 @@ Observability follow-through (architect, 2026-08-21): the no-match scan is the s
 
 ## `-V format-detection` section-contract
 
-This document owns the section-contract for the `format-detection` `-V` section and its `format-detection / scan` sub-section, both emitted by `emit_format_detection_verbose()` and consumed by `tests/validate-format-detection.sh`. All pre-existing keys of the parent section (per-file `format:`, `match_type:`, `is_access_log:`, `matched_lines:`, `unmatched_lines:`, `first_match_line:`; run-level `duration_unit_override:`, `files:`) are byte-preserved from their pre-registry shapes; everything below is additive. Renames and removals are breaking per `tests/HARNESS-DESIGN.md` § Stability contract.
-
-**Per-file keys (inside each `file:` block, two-space indent):**
-
-- `scan_attempts: N` — registry scan-sub invocations for this file. Counts one per line entering the scan, **including** detection-window prefill classifications; **excluding** confirmed-CSV fast-path lines (outside the scan, D32) and held-window replay lines (their classification was already counted at prefill; the replay runs only the entry's extraction). A file the scan never touches (all-CSV after confirmation, empty file) reports 0.
-- `scan_failed_attempts: N` — the subset of `scan_attempts` that matched no entry (the no-match scan — the structural worst case, every entry attempted). Increments on the streaming no-match branch and on prefill classifications returning no entry. A fully-matched file reports 0; `matched_lines + scan_failed_attempts = scan_attempts` holds for non-CSV files with no window.
-
-Detection-evidence keys (umbrella D53, #388; emitted by `emit_format_detection_sample_verbose()` after the keys above, for every file block including the no-bind-attempts form):
-
-- `window: N` — the two-phase-store window size engaged **for this file**: the `--detection-window` override when given; otherwise `window_fallback` when the file could not be sampled; otherwise 0. This is the dual process's "which path served the file" indicator read together with `sample:`.
-- `sample: yes|no` — whether the read-only evidence sample was taken (`no` only when the path is not a plain file; such a file gets the fallback window). When `no`, no further `sample_*` keys follow.
-- `sample_file_bytes: N` — the file's byte size at sampling time.
-- `sample_whole_file: yes|no` — `yes` when the file is no larger than `sample_parts × sample_bytes_per_part` and was read once, whole, as a single part.
-- `sample_lines: N` / `sample_matched_lines: N` — whole lines seen across all parts, and how many of them matched a registry entry (first match in static cascade order; no extraction, no promotion — these never feed `scan_attempts` or `match_counts`).
-- `sample_formats: name=N,...` — per-entry counts across the sample, static registry order, entry names (not slugs); `-` when nothing matched.
-- `sample_part: i offset=O bytes=B lines=L avg_line=A matched=M first_ts="…" last_ts="…"` — one line per part, `i` from 1. `offset` is the byte offset seeked to (part 1 is 0; the last part ends at EOF); `bytes` the bytes read; `lines` the whole lines kept after discarding the partial line at either edge; `avg_line` the integer mean line length over those lines (0 when none); `first_ts`/`last_ts` the **raw** timestamp capture of the first and last matched line in the part (never parsed — interpreting it under a layout is the consumers' job), `-` when no line matched. A part shorter than one line (a stack-trace line longer than the part) legitimately reports `lines=0`.
-- `sample_us: X.X` — wall microseconds for the whole sample (open, seeks, reads, recognition), one decimal. **Nondeterministic** — harnesses assert its shape, never its value.
-
-**Sub-section `=== format-detection / scan ===` (run-level, one per run, emitted inside the parent section before its END marker; closed by `=== END format-detection / scan ===`):**
-
-- `entries: N` — count of scanned registry entries compiled into the scan sub (13 as of this drop; `csv` is outside the scan array by design, D32). Changes only when a scanned format is added/removed — same commit updates this contract and the harness.
-- `guarded: name,...` — registry entry names (FR_NAME, e.g. `mt12`) carrying a D28 cheap-superset guard, static registry order; `-` if none. Currently `mt12,mt4,mt9`.
-- `window_size: N` — the `--detection-window` override value (hidden; D30/D38); 0 when not given. It is not the size engaged per file — that is the per-file `window:` key, which resolves to `window_fallback` for unsampled files.
-- `window_fallback: N` — `FORMAT_DETECTION_WINDOW_FALLBACK`, the window size engaged for a file that could not be sampled (umbrella D53; 1000).
-- `sample_parts: K` / `sample_bytes_per_part: B` — `FORMAT_SAMPLE_PARTS` and `FORMAT_SAMPLE_BYTES`, the evidence sample's shape (umbrella D53; values set by #388's measurements — see `features/log-format-registry.md` § "#388 — detection evidence sampling pass"). Changing either changes every `sample_*` per-file value in the harness in the same commit.
-- `final_order: name,...` — the MTF scan order (`@format_scan_order`) at emission time, front first. Proves promotion end-state: a single-format run shows that format's pinned-ancestor closure + itself at the front, tail in recency order.
-- `promotions: N` — count of actual reorders through `format_registry_promote()`. Increments only when a winner at a non-optimal generated position promotes; steady-state front matches emit no promotion code and do not count. Reset to 0 at the end of `build_format_registry()` so D24 gate-5 sample classification (which promotes) is excluded — the counter reports run promotions only.
-- `match_counts: name=N,...` — per-entry matched-line totals across the run, **static registry order** (comparable across runs regardless of promotion history). Keyed by entry name, not slug: two entries can share a slug (mt1std/mt1gen → `thingworx_standard`) and the scan attributes per entry. CSV-matched lines are not listed (csv is not a scan entry).
-- `nomatch_scan_samples: N` — number of sampled no-match scan timings. Sampling is 1 in `FORMAT_SCAN_NOMATCH_SAMPLE_EVERY` (= 256) no-match lines per file: the sampled line is **re-scanned under a timer** on the already-expensive no-match path. The re-scan is side-effect-safe (no match ⇒ no promotion; failed attempts' empty-capture writes repeat the first scan's end state). Per-line timer pairs around every scan were considered and rejected as an anti-pattern — the clock calls would cost more than many scans they measure.
-- `nomatch_scan_avg_us: X.X` — mean elapsed microseconds across those samples, one decimal; the literal `-` when zero samples. **Nondeterministic when samples exist** — harnesses assert its shape (`[0-9]+\.[0-9]`), never its value, and it must be stripped by any golden-output capture that enables this section.
-
-Vocabulary note: entry names (`mt1std`, `mt3`, …) are the registry's internal scan identity and appear only in this diagnostic sub-section; the user-facing format identity remains the slug vocabulary locked by `%match_type_to_slug`.
+Owned by the umbrella: `features/log-format-registry.md` § "`-V format-detection` section-contract" (consumer: `tests/validate-format-detection.sh`).
 
 ## S9 gate close-out (2026-08-21)
 

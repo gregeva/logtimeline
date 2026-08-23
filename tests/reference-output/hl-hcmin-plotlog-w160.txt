@@ -27,11 +27,11 @@ command-line options: --disable-progress -n 1 --terminal-width 160 -ic -hcmin 45
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-12-15 00:00 and 2025-12-15 23:57
   ─────────────────────────────────────────   
-  ERROR                                  66      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs/T...omThingworxLogs/ScriptLog.GetComplexPlotByIndex.log
+  ERROR                                  66      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs...ThingworxLogs/ScriptLog.GetComplexPlotByIndex.log [1]
   WARN                                 1044   
-  INFO-HL                                45   
+  INFO-HL                                45      Log Formats
   INFO                                 1837   
-  ─────────────────────────────────────────   
+  ─────────────────────────────────────────      1 thingworx_standard
   HIGHLIGHTED                            45   
   LINES INCLUDED                       2992   
   LINES READ                           2992   

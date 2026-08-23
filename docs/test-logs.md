@@ -11,7 +11,9 @@ logs/
 ├── UDM/                     # User-defined-metric logs (pattern + CSV modes)
 ├── WGM/                     # SolidWorks Workgroup Manager client logs
 ├── MethodServer/            # Windchill Method Server / Background Method Server logs
+├── IntegrationRuntimeLogs/  # ThingWorx Integration Runtime logs (yyyy-dd-MM dates)
 └── ThingworxLogs/           # ThingWorx application logs
+    ├── CXS/                 # ThingWorx Connection Server logs
     └── CustomThingworxLogs/ # Custom ScriptLogs with durationMS
 ```
 
@@ -21,7 +23,7 @@ logs/
 
 | File | Server | Latency Unit | Metrics | Size | Lines | Use Case |
 |---|---|---|---|---|---|---|
-| `ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` | Apache HTTP Server 2.x | microseconds (%D) | duration, bytes | 658KB | 677 | Apache HTTP2 with microsecond latency |
+| `ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` | Apache HTTP Server 2.x | microseconds (%D) | duration, bytes | 98KB | 677 | Apache HTTP2 with microsecond latency (the `-FULL` sibling is 658KB) |
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 277MB | 1,430,678 | Primary Tomcat 9 access log test |
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 220MB | 1,133,132 | Secondary Tomcat 9 access log test |
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 148MB | 761,698 | Smaller Tomcat 9 access log test |
@@ -39,7 +41,7 @@ logs/
 ```
 Fields: IP, -, -, [timestamp], "method path protocol", status_code, bytes, duration
 
-**Note**: Apache HTTP Server uses `%D` for microseconds, while Tomcat uses `%D` for milliseconds. The detection regex is the same for both servers, so ltl resolves both to the same internal format (`tomcat_access_with_duration`) and assumes milliseconds. For Apache HTTP Server logs, pass `-du us` to convert microsecond durations into milliseconds for statistics; without it, durations are reported in the wrong unit by a factor of 1000. (Value-range autodetection is tracked separately by issues #17 and #23.)
+**Note**: Apache HTTP Server uses `%D` for microseconds, while Tomcat uses `%D` for milliseconds, and the two line shapes are identical. ltl tells them apart by the file's name: a Tomcat name (`localhost_access_log.<date>.txt`) selects `tomcat_access_with_duration` (ms); an httpd name (`access_log`, `access.log-<date>`) selects `httpd_access_with_duration` (µs). A file named in neither way (this Windchill specimen, as renamed here) falls to the Tomcat default with a note — pass `-du us` or `-lf httpd_access_with_duration` for it. The committed, producer-named slices under `tests/fixtures/format-detection/` exercise both paths.
 
 ---
 
@@ -195,6 +197,19 @@ Fields: timestamp [L: level] [O: origin] [I: instance] [U: user] [S: session] [P
 |---|---|---|---|---|
 | `CommunicationLog.2025-05-06.0.log` | occurrences only | 190B | 1 | Communication events (minimal) |
 | `AkkaCommunicationLog.log` | occurrences only | 2.2KB | 3 | Akka communication events |
+
+### CXS/ - ThingWorx Connection Server
+| File | Format | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `cxserver.1-16.log` … `cxserver.1-26.log` | `connection_server_standard` (`yyyy-MM-dd`) | 105MB each | ~1,000,000 each | Vert.x/logback platform log; multi-line payloads (about half the lines are continuation lines); the Connection Server member of the `connection_server` variant group |
+
+---
+
+## IntegrationRuntimeLogs/ - ThingWorx Integration Runtime
+| File | Format | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `IntegrationRuntime-46b44bb3-….log` | `integration_runtime_standard` (`yyyy-dd-MM`) | 695KB | 5,416 | Byte-identical line shape to the Connection Server but dates are day-first; the only known true positive for the date-layout transposition (#385). Detection decides it from the sampled content (day tokens > 12) even when renamed; ten runtime sessions, 2023-06 → 2025-01 |
+| `integrationRuntime-logback.xml` | — | 466B | — | The producer's logback encoder configuration (shows the `yyyy-dd-MM` pattern) |
 
 ---
 

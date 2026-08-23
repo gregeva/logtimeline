@@ -1,0 +1,300 @@
+2026-05-30 16:26:45.214 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598755
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:46.637 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2592691
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:45.795 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598941
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:45.660 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598656
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:46.647 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598411
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:46.647 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2594055
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:46.795 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598775
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:46.877 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598484
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:46.930 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598203
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:47.750 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598639
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:47.908 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598593
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:48.219 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598769
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:48.260 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598622
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:48.662 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598089
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:48.725 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598953
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:49.065 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2595973
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:49.329 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598561
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:50.026 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598952
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:50.303 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598179
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:50.352 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598652
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:50.818 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597956
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:51.117 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598930
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:51.364 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598526
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:51.521 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598933
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:51.525 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598564
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:51.812 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598935
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:51.913 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598549
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:52.270 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598936
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:52.592 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598746
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:52.848 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598160
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:53.188 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598942
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:53.281 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598723
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:53.698 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598967
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:53.834 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598782
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:54.382 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598537
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:54.423 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2592544
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:54.500 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598890
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:54.574 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2587805
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:55.343 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2596176
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:55.537 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598970
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:56.162 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598772
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:56.404 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598974
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:56.589 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=-1
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:58.090 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2596254
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:58.149 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598980
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:58.230 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598766
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:58.295 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598779
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:58.310 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598785
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:58.326 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598383
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:58.484 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598804
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:59.199 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2580120
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:26:59.622 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2594948
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:00.671 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598664
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:00.979 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598229
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:01.114 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597841
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:01.763 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598258
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:01.787 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597382
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:02.091 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2576848
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:02.279 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598820
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:03.052 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2595569
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:03.264 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598315
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:03.585 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598446
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:03.650 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598818
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:03.721 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2587387
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:04.495 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2497319
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:04.709 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597488
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:04.939 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2595689
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:05.234 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597848
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:06.906 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598999
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:07.403 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598094
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:07.945 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598533
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:08.216 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599001
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:08.280 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598814
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:08.760 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2556032
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:08.785 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2588875
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:09.284 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598325
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:10.627 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599009
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:12.140 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598706
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:12.240 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2596859
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:12.339 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599011
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:12.585 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598578
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:12.818 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599013
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:13.314 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597383
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:13.435 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597985
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:15.238 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598803
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:15.329 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597314
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:17.268 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598728
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:17.718 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598856
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:18.041 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598515
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:18.410 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597085
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:18.877 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599032
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:19.077 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597537
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:19.115 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599027
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:19.870 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597619
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:21.306 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599036
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:21.465 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599038
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:21.697 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599039
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:22.077 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599019
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:22.111 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598878
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:22.413 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2594661
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:22.467 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598884
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:23.994 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598887
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:24.148 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2591395
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:24.506 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597227
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:24.537 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2594682
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:24.723 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599028
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:25.125 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2595278
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:26.368 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598182
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:26.584 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598149
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:26.662 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598718
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:26.720 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598651
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:26.840 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597730
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:27.457 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597941
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:27.905 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598487
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:28.188 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599055
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:28.529 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598623
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:28.674 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2513449
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:28.878 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599054
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:28.937 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=-1
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:29.692 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599060
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:29.792 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599058
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:29.841 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2594697
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:30.704 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598811
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:31.333 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599062
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:31.452 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599064
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:32.291 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599049
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:33.785 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597199
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:33.942 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2594370
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:34.166 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598853
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:35.140 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599066
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:35.359 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2596712
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:35.442 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599070
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:35.684 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597748
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:35.696 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598849
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:36.456 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2567515
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:36.469 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2596951
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:36.504 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2595141
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:37.021 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598307
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:38.091 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598303
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:38.233 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599077
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:38.710 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598275
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:39.054 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599080
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:39.353 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2583251
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:39.447 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599079
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:39.628 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598830
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:39.665 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598917
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:39.879 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2597788
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:39.981 [vert.x-eventloop-thread-3] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599078
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:40.015 [vert.x-eventloop-thread-1] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2599056
+io.vertx.core.http.HttpClosedException: Connection was closed
+2026-05-30 16:27:40.493 [vert.x-eventloop-thread-2] WARN  c.t.c.a.AbstractClientEndpoint - Error encountered, closing WebSocket: endpointId=2598789
+io.vertx.core.http.HttpClosedException: Connection was closed

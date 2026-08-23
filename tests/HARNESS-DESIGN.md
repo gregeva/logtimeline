@@ -106,7 +106,7 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `udm-counting` — per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313)
 - `statistics-demand` — per-store resolved statistics-group demand with raising consumers, per-store moment source, per-store statistics-calculation counters (`stats_calls` invocations plus per-group `group_calc` computed/skipped_demand/ineligible outcomes), and calculated-statistic sort selection (`sort_selection` defined/fill/demoted split, `sort_calc` per-pass attribution) (Issues #305, #303)
 - `benchmark-data` — machine-parseable TSV: version, files, line counts, timings, memory, structure counts
-- `format-detection` — per-file detected format slug/match_type and matched/unmatched/scan-attempt counts, plus the `format-detection / scan` sub-section: registry scan-order telemetry (final MTF order, promotions, per-entry match counts, sampled no-match cost) (Issues #228, #58; contract in features/58-format-registry-staged-detection.md)
+- `format-detection` — per-file detected format slug/match_type and matched/unmatched/scan-attempt counts, plus the `format-detection / scan` sub-section: registry scan-order telemetry (final MTF order, promotions, per-entry match counts, sampled no-match cost) (Issues #228, #58, #388, #384; contract in features/log-format-registry.md § `-V format-detection` section-contract)
 
 **Reserved by sub-issues, not yet implemented:**
 - `filter-summary` (Issues #229, #230 — shared section, ownership decided during research)
@@ -392,6 +392,40 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 ```
 
 Add the trap on the *same logical line* as the `mktemp` so it can't be forgotten between declaration and use. If the harness uses multiple temp dirs, set the trap to clean all of them: `trap 'rm -rf "$DIR1" "$DIR2"' EXIT`.
+
+#### Trap 11: backticks inside double-quoted prose are command substitutions
+
+```bash
+# WRONG — bash RUNS `more`: the harness blocks on a pager waiting for a terminal
+assert_line "$out" \
+    asserts     "fallback for environments where the pager cannot interpret ANSI (notably legacy Windows `more`)" \
+    ...
+```
+
+`asserts`, `produced_by` and `contract` strings are documentation, and documentation habitually quotes identifiers with markdown backticks. Inside a double-quoted bash string a backtick pair is a command substitution: the quoted word is executed, its output is spliced into the string, and if the word happens to be a real command (`more`, `less`, `script`, `time`, …) the harness runs it — silently when it exits at once, as a hang when it waits on a terminal. `validate-explain.sh` stalled an entire suite run for 36 minutes this way (2026-08-23): in an interactive terminal `more` exited immediately, so the defect only surfaced when the suite ran in the background.
+
+```bash
+# RIGHT — escape the backticks, or single-quote the string
+    asserts     "fallback ... (notably legacy Windows \`more\`)" \
+    asserts     'fallback ... (notably legacy Windows `more`)' \
+```
+
+Review gate: `grep -n '`' tests/validate-*.sh` — every backtick on a non-comment line is either escaped or inside single quotes. A harness that needs a variable *and* a backtick in one string escapes the backtick.
+
+## Invocation coherence: every `ltl` run is shaped to the test that invokes it
+
+A harness does not run `ltl` "the default way" and read off the part it cares about. Every invocation — in a scenario, a capture helper, a probe, a sabotage proof — is tuned so that the tool does exactly the work the assertion needs and nothing else: the fastest runtime, the minimum memory, and an output whose shape is the one being asserted. Anything the run computes that the assertion never reads is waste at best and, on the wrong input, a resource problem at worst.
+
+The mechanical gate before writing any `ltl` command line in a test:
+
+1. **What does this run prove?** Name the surface under assertion (a `-V` section, a rendered block, an exit code, a stderr diagnostic).
+2. **What does that surface NOT depend on?** Everything else is switched off or made trivially cheap through the tool's own options. A format-detection or evidence assertion is identical at any bucket size, so it runs with the coarsest bucket (`-bs 1440`) and no empty buckets (`-oe`); a column-layout assertion runs with `-n 1`; a stderr-diagnostic assertion needs no rendered table at all where an option suppresses it.
+3. **Does the input's shape match the run?** Fixtures spanning months, or a file set whose files sit years apart, make the default time axis allocate thousands of empty buckets — `-oe` and a day-sized bucket are mandatory there unless the time axis *is* the subject. Use the smallest fixture that carries the signal.
+4. **Consult the tool's documentation (`docs/usage.md`, `--help`) for the options that do this** before inventing a workaround in the harness. Where the right shape is not obvious — a scenario that needs the time axis *and* a wide span, say — the choice is an architect decision, recorded in the scenario's comment.
+
+The scenario's comment states the shape and why (one line: *"`-bs 1440 -oe`: detection assertions; fixtures span months"*). A harness run whose options were never chosen against its own assertion is a defect in review, whether or not it passes.
+
+Precedent: #384 (2026-08-23) — ten new format-detection scenarios and the ad-hoc parity checks behind them ran multi-year fixtures at default (and hourly) buckets, building tens of thousands of empty buckets to assert a per-file selection that never reads a bucket. #399 (audit every test harness for invocation coherence) tracks the audit of every existing harness against this rule.
 
 ## Runtime-warning cleanliness
 

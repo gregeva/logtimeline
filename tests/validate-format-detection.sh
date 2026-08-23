@@ -173,6 +173,77 @@ run_format_detection() {
     echo "$outfile"
 }
 
+
+# assert_command: eval a command; PASS on exit 0. Same self-documenting
+# triple as assert_line (reference: tests/validate-csv-input.sh).
+assert_command() {
+    local command="" label="" asserts="" produced_by="" contract=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            command)     command="$2"; shift 2 ;;
+            label)       label="$2"; shift 2 ;;
+            asserts)     asserts="$2"; shift 2 ;;
+            produced_by) produced_by="$2"; shift 2 ;;
+            contract)    contract="$2"; shift 2 ;;
+            *) echo "assert_command: unknown field '$1'" >&2; exit 2 ;;
+        esac
+    done
+    : "${command:?assert_command requires command}"
+    : "${asserts:?assert_command requires asserts}"
+    : "${produced_by:?assert_command requires produced_by}"
+    : "${contract:?assert_command requires contract}"
+    if eval "$command" >/dev/null 2>&1; then
+        echo "  PASS  $current_scenario :: $label"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario :: $label"
+        echo "        command:     $command"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: $label")
+    fi
+}
+
+# Stage a committed fixture (tests/fixtures/format-detection/<fixture>)
+# under a producer-true name in a per-scenario directory (D51): the
+# committed name is never fed to ltl, and two scenarios may stage the same
+# staged name without colliding. Echoes the staged path.
+FIXTURE_DIR="$REPO_DIR/tests/fixtures/format-detection"
+stage_fixture() {
+    local fixture="$1" staged_as="$2"
+    local dir="$TMP_DIR/$current_scenario"
+    mkdir -p "$dir"
+    if [[ ! -f "$FIXTURE_DIR/$fixture" ]]; then
+        echo "  FAIL  $current_scenario :: fixture $FIXTURE_DIR/$fixture is missing" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: fixture missing"); return 1
+    fi
+    cp "$FIXTURE_DIR/$fixture" "$dir/$staged_as"
+    echo "$dir/$staged_as"
+}
+
+# One variant-selection assertion block: format, selected member, basis.
+assert_variant_selection() {
+    local out="$1" format="$2" selected="$3" basis="$4" confidence="$5"
+    assert_line "$out" pattern "^  format: $format\$" \
+        asserts "The file binds the $format format" \
+        produced_by 'read_and_process_logs() in ltl (first-match block)' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract'
+    assert_line "$out" pattern "^  selected: $selected\$" \
+        asserts "Variant selection put $selected in its group slot for this file (D47)" \
+        produced_by 'select_format_variants() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern "^  selection_basis: $basis\$" \
+        asserts "The selection basis is $basis" \
+        produced_by 'select_format_variants() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern "^  confidence: $confidence\$" \
+        asserts "Confidence = selected score / sum of live members (I1 weights)" \
+        produced_by 'select_format_variants() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 I1 (evidence weights)'
+}
+
 # ---------- Scenarios -----------------------------------------------------
 
 scenario_tomcat9_ms() {
@@ -454,7 +525,7 @@ assert_registry_sample_scenario() {
         pattern     "^  match_type: $mt\$" \
         asserts     "Slug \`$slug\` binds to internal match_type $mt" \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - match_type integers are diagnostic; the slug is the user-facing contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract - match_type integers are diagnostic; the slug is the user-facing contract'
 
     assert_line "$out" \
         pattern     "^  matched_lines: $nlines\$" \
@@ -468,19 +539,19 @@ assert_registry_sample_scenario() {
         pattern     '^  window: 0$' \
         asserts     'A sampled plain file engages no fallback window (window: 0) — the sample served it' \
         produced_by 'read_and_process_logs() in ltl (window engagement); emitted by emit_format_detection_sample_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_whole_file: yes$' \
         asserts     'A file no larger than sample_parts x sample_bytes_per_part is read once, whole, as a single part' \
         produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     "^  sample_matched_lines: $nlines\$" \
         asserts     "Every line of the whole-file sample is recognised by the registry patterns directly ($nlines lines), without touching scan_attempts" \
         produced_by 'sample_file_for_detection() in ltl (direct pattern recognition, static cascade order)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 }
 
 scenario_thingworx_rac_client() {
@@ -570,25 +641,25 @@ scenario_scan_telemetry() {
         pattern     '^=== format-detection / scan ===$' \
         asserts     'The scan-telemetry sub-section is emitted inside the format-detection section' \
         produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract; delimiters per HARNESS-DESIGN.md section Delimiter contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract; delimiters per HARNESS-DESIGN.md section Delimiter contract'
 
     assert_line "$out" \
         pattern     '^entries: 13$' \
         asserts     'All 13 scanned registry entries are compiled into the scan (csv is outside the scan array by design)' \
         produced_by 'build_format_registry() in ltl; emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
+        contract    'features/log-format-registry.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
 
     assert_line "$out" \
         pattern     '^guarded: mt12,mt4,mt9$' \
         asserts     'Exactly the three cheap-superset-guard entries (D28) carry guards, listed in static registry order' \
         produced_by 'compile_format_guard() wiring in build_format_registry(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (D28 guard set)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (D28 guard set)'
 
     assert_line "$out" \
         pattern     '^window_size: 0$' \
         asserts     'Without --detection-window, the override is 0 (D30/D38); the window engages per file only as the fallback for unsampled input' \
         produced_by 'emit_format_detection_verbose() in ltl ($format_detection_window)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     # Evidence sample (umbrella D53): the dual process's primary path. The
     # 84,857-byte codebeamer fixture is larger than 3 x 8192, so three
@@ -598,7 +669,7 @@ scenario_scan_telemetry() {
         pattern     '^window_fallback: 1000$' \
         asserts     'The fallback two-phase-store window size for unsampled input is 1000 lines (D53)' \
         produced_by 'emit_format_detection_verbose() in ltl (FORMAT_DETECTION_WINDOW_FALLBACK)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract; features/log-format-registry.md D53'
+        contract    'features/log-format-registry.md section -V format-detection section-contract; features/log-format-registry.md D53'
 
     assert_line "$out" \
         pattern     '^sample_parts: 3$' \
@@ -616,91 +687,91 @@ scenario_scan_telemetry() {
         pattern     '^  window: 0$' \
         asserts     'A sampled plain file engages no fallback window (window: 0) — the sample served it' \
         produced_by 'read_and_process_logs() in ltl (window engagement); emitted by emit_format_detection_sample_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample: yes$' \
         asserts     'A plain file is sampled (the primary path of the dual process)' \
         produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_file_bytes: 84857$' \
         asserts     'The sample records the file byte size it divided (the committed codebeamer fixture is 84,857 bytes)' \
         produced_by 'sample_file_for_detection() in ltl (-s on the sample handle)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_whole_file: no$' \
         asserts     'A file larger than sample_parts x sample_bytes_per_part is sampled in parts, not read whole' \
         produced_by 'sample_file_for_detection() in ltl' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_lines: 230$' \
         asserts     'Three 8192-byte parts of the codebeamer fixture yield 230 whole lines after discarding the partial line at each part edge' \
         produced_by 'sample_file_for_detection() in ltl (edge-line discard)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - value is deterministic for the committed fixture at the default sample shape'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - value is deterministic for the committed fixture at the default sample shape'
 
     assert_line "$out" \
         pattern     '^  sample_matched_lines: 230$' \
         asserts     'Every sampled codebeamer line is recognised by the registry patterns directly, without entering the production scan (scan_attempts stays 741)' \
         produced_by 'sample_file_for_detection() in ltl (direct pattern recognition, static cascade order)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_formats: mt12=230$' \
         asserts     'The sample attributes all 230 recognised lines to entry mt12, keyed by entry name in static registry order' \
         produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_part: 1 offset=0 bytes=8192 lines=86 avg_line=94 matched=86 first_ts="29/Oct/2025:08:03:31 \+0000" last_ts="29/Oct/2025:08:44:07 \+0000"$' \
         asserts     'Part 1 starts at byte 0, keeps 86 whole lines (avg 94 bytes), all recognised, and reports the raw (unparsed) first and last timestamp captures' \
         produced_by 'sample_file_for_detection() in ltl (per-part observations; timestamp_str capture via the field map)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - deterministic for the committed fixture'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - deterministic for the committed fixture'
 
     assert_line "$out" \
         pattern     '^  sample_part: 3 offset=76665 bytes=8192 lines=87 avg_line=94 matched=87 first_ts="29/Oct/2025:11:20:56 \+0000" last_ts="29/Oct/2025:12:04:02 \+0000"$' \
         asserts     'The last part is positioned so its read ends at EOF (offset = size - bytes) and its last_ts is the file'"'"'s final timestamp' \
         produced_by 'sample_file_for_detection() in ltl (end-part placement)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - deterministic for the committed fixture'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - deterministic for the committed fixture'
 
     assert_line "$out" \
         pattern     '^  sample_us: [0-9]+\.[0-9]$' \
         asserts     'The sample wall time is reported as a one-decimal microsecond value (nondeterministic: shape asserted, never the value)' \
         produced_by 'emit_format_detection_sample_verbose() in ltl' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^final_order: mt12,' \
         asserts     'After the codebeamer run, mt12 (no pinned ancestors) leads the MTF scan order' \
         produced_by 'format_registry_promote() in ltl; emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (D26 pinned-closure MTF)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (D26 pinned-closure MTF)'
 
     assert_line "$out" \
         pattern     '^promotions: 1$' \
         asserts     'A single-format file causes exactly one promotion: the first match reorders, every later line hits the already-optimal front block' \
         produced_by 'format_registry_promote() in ltl (counter incremented only on actual reorders; reset after the D24 build gates)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     assert_line "$out" \
         pattern     '^match_counts: .*mt12=741' \
         asserts     'All 741 codebeamer lines are attributed to entry mt12 in the per-entry match counts' \
         produced_by 'FR_MATCHES increment in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - counts are per registry entry (FR_NAME), static registry order'
+        contract    'features/log-format-registry.md section -V format-detection section-contract - counts are per registry entry (FR_NAME), static registry order'
 
     assert_line "$out" \
         pattern     '^  scan_attempts: 741$' \
         asserts     'Every line of the 741-line fixture entered the registry scan exactly once' \
         produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     assert_line "$out" \
         pattern     '^  scan_failed_attempts: 0$' \
         asserts     'A fully-matched file records zero failed scan attempts' \
         produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 }
 
 scenario_scan_telemetry_nomatch() {
@@ -730,25 +801,25 @@ scenario_scan_telemetry_nomatch() {
         pattern     '^  scan_failed_attempts: 300$' \
         asserts     'Each of the 300 unmatchable lines records one failed scan attempt' \
         produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     assert_line "$out" \
         pattern     '^  scan_attempts: 320$' \
         asserts     'scan_attempts counts matched and failed scans together (300 junk + 20 codebeamer lines)' \
         produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     assert_line "$out" \
         pattern     '^nomatch_scan_samples: 1$' \
         asserts     '300 no-match scans cross the 1-in-256 sampling threshold exactly once' \
         produced_by 'no-match sampling in read_and_process_logs() (FORMAT_SCAN_NOMATCH_SAMPLE_EVERY)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - the sampling interval is part of the contract; changing it changes this count'
+        contract    'features/log-format-registry.md section -V format-detection section-contract - the sampling interval is part of the contract; changing it changes this count'
 
     assert_line "$out" \
         pattern     '^nomatch_scan_avg_us: [0-9]+\.[0-9]$' \
         asserts     'With at least one sample, the average no-match scan cost is reported as a one-decimal microsecond value (dash only when zero samples)' \
         produced_by 'emit_format_detection_verbose() in ltl (sampled no-match accumulator)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     # Same fixture through the two-phase-store window path: prefill
     # classifications must fold into the same per-file counters (no
@@ -761,39 +832,48 @@ scenario_scan_telemetry_nomatch() {
         pattern     '^window_size: 8$' \
         asserts     'With --detection-window=8, the sub-section reports the resolved window size' \
         produced_by 'emit_format_detection_verbose() in ltl ($format_detection_window)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (D30/D38 window structure)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (D30/D38 window structure)'
 
     assert_line "$wout" \
         pattern     '^  window: 8$' \
         asserts     'The --detection-window override engages the fallback window for a sampled file too (dual process: both paths exercisable), at the override size' \
         produced_by 'read_and_process_logs() in ltl (window engagement: override > sampled ? 0 : fallback)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$wout" \
         pattern     '^  scan_attempts: 320$' \
         asserts     'Window prefill classifications count as scan attempts and held-line replays are not re-counted: the total is identical to the windowless run' \
         produced_by 'window prefill + per-file scan counters in read_and_process_logs()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 }
 
 scenario_unit_ambiguity_warning() {
     current_scenario="unit-ambiguity-warning"
     echo "[$current_scenario]"
 
-    # D18 (#58 S7): binding a format whose duration unit varies across
-    # producers without -du emits one stderr note naming the assumption.
-    # The note is an intentional diagnostic — it never carries an
-    # ` at ... line` suffix, so check_capture_warnings stays clean.
+    # D47/I6 (#384): binding a variant-group member that was selected by
+    # default — nothing in the file name or content decided between the
+    # producers — emits one stderr note naming the consequence (here the
+    # duration unit) and the overrides. The note is an intentional
+    # diagnostic — it never carries an ` at ... line` suffix, so
+    # check_capture_warnings stays clean. The Tomcat file's name does not
+    # carry the producer's stem, so the group default holds by its standing
+    # credit (basis default).
     local tomcat="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
     local out
     out=$(run_format_detection "$tomcat")
     check_capture_warnings "$out"
 
     assert_line "$out.stderr" \
-        pattern     '^Note: the detected log format'"'"'s duration unit varies across producers; durations are assumed to be milliseconds - use -du to specify the appropriate duration unit for the files being analyzed$' \
-        asserts     'Binding a unit-ambiguous format without -du emits the run-level note on stderr: format-generic (the condition is the registry ambiguity flag, not any specific log type), no filename, naming the milliseconds assumption and pointing at -du generically (not prescribing a unit)' \
-        produced_by 'read_and_process_logs() in ltl (first-match block, FR_UNIT_AMBIGUOUS gate)' \
-        contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18); the note text is part of the contract'
+        pattern     '^Note: the detected log format \(tomcat_access_with_duration\) is written by more than one producer and the duration unit differs between them \(assumed ms\); nothing in the file names or content decided which - use -du <unit> or -lf httpd_access_with_duration if the files come from the other producer$' \
+        asserts     'Binding a default-selected variant-group member without deciding evidence emits the run-level note on stderr: no filename, naming the consequence class (unit) and the assumption, pointing at -du and at -lf with the other member' \
+        produced_by 'format_variant_ambiguity_note() in ltl (first-match block)' \
+        contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note); the note text is part of the contract'
+    assert_line "$out" \
+        pattern     '^  selection_basis: default$' \
+        asserts     'The note fires only when the selection basis is default' \
+        produced_by 'select_format_variants() in ltl' \
+        contract    'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
 
     # Contracted absence 1: an explicit -du suppresses the note — the user
     # has stated the unit, so there is no assumption to surface.
@@ -802,22 +882,255 @@ scenario_unit_ambiguity_warning() {
     check_capture_warnings "$out_du"
 
     assert_absent "$out_du.stderr" \
-        pattern     '^Note: the detected log format.s duration unit varies' \
-        asserts     'With -du given (any unit), the unit-ambiguity note is contracted ABSENT: the note exists only to surface an assumption, and -du removes the assumption' \
-        produced_by 'read_and_process_logs() in ltl (first-match block, duration_unit_override gate)' \
-        contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18)'
+        pattern     '^Note: the detected log format' \
+        asserts     'With -du given (any unit), the unit note is contracted ABSENT: the note exists only to surface an assumption, and -du removes the assumption' \
+        produced_by 'format_variant_ambiguity_note() in ltl (duration_unit_override gate)' \
+        contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
 
-    # Contracted absence 2: an unambiguous format (codebeamer declares ms
-    # unconditionally) never triggers the note.
+    # Contracted absence 2: a format outside any variant group (codebeamer)
+    # never triggers the note.
     local out_cb
     out_cb=$(run_format_detection "$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt")
     check_capture_warnings "$out_cb"
 
     assert_absent "$out_cb.stderr" \
-        pattern     '^Note: the detected log format.s duration unit varies' \
-        asserts     'A format without the unit-ambiguity flag is contracted to never emit the note — the gate is the registry declaration, not the presence of durations' \
-        produced_by 'read_and_process_logs() in ltl (first-match block, FR_UNIT_AMBIGUOUS gate)' \
-        contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18) - only entries declaring unit_ambiguous carry it'
+        pattern     '^Note: the detected log format' \
+        asserts     'A format that is not a member of a variant group is contracted to never emit the note — the gate is group membership plus a default-basis selection' \
+        produced_by 'format_variant_ambiguity_note() in ltl (variant-group gate)' \
+        contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
+
+    # Contracted absence 3: the same content under the producer-true name
+    # is decided by evidence (stem), so no assumption is in effect.
+    local staged="$TMP_DIR/localhost_access_log.2025-05-05.txt"
+    cp "$tomcat" "$staged"
+    local out_named
+    out_named=$(run_format_detection "$staged")
+    check_capture_warnings "$out_named"
+
+    assert_absent "$out_named.stderr" \
+        pattern     '^Note: the detected log format' \
+        asserts     'Filename stem evidence decides the variant (basis evidence), so the default-selection note is contracted ABSENT' \
+        produced_by 'format_variant_ambiguity_note() in ltl (selection-basis gate)' \
+        contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
+    assert_line "$out_named" \
+        pattern     '^  selection_basis: evidence$' \
+        asserts     'The producer-true Tomcat name selects the Tomcat member by stem evidence' \
+        produced_by 'select_format_variants() in ltl' \
+        contract    'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+}
+
+
+# ---------- #384 variant selection (committed fixtures, D51) ----------------
+# Every run uses -bs 1440 -oe: the fixtures span months (and the mixed
+# fixture pairs files a year apart), and these scenarios assert detection,
+# not buckets — no empty-bucket memory for a time axis nobody reads.
+
+scenario_variant_connection_server() {
+    current_scenario="variant-connection-server"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture connection-server.txt cxserver.1.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" connection_server_standard mt10 evidence '1\.00'
+    assert_line "$out" pattern '^  filename_evidence: stem=mt10 ext=match date=- index=present$' \
+        asserts 'cxserver.1.log decomposes to the Connection Server stem, the declared extension and a rotation index (D45/I4)' \
+        produced_by 'format_filename_evidence() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^  candidates: mt10=[0-9.]+,mt10ir=0\.00$' \
+        asserts 'The Integration Runtime member is eliminated: day tokens > 12 are impossible under yyyy-dd-MM (D52 probe a)' \
+        produced_by 'format_sample_probes() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D52'
+}
+
+scenario_variant_integration_runtime_named() {
+    current_scenario="variant-integration-runtime-named"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '1\.00'
+    assert_line "$out" pattern '^  filename_evidence: stem=mt10ir ext=match date=- index=-$' \
+        asserts 'The IntegrationRuntime-<uuid>.log name matches the Integration Runtime stem' \
+        produced_by 'format_filename_evidence() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^  matched_lines: 124$' \
+        asserts 'Every timestamped line of the slice is read under yyyy-dd-MM with no fatal (#385)' \
+        produced_by 'compile_format_scan_sub() in ltl (iso_ms_ddmm block)' \
+        contract 'features/log-format-registry.md section Drop 1.5 D47/N10'
+    assert_absent "$out.stderr" pattern '^Note: ' \
+        asserts 'No diagnostic: the layout is right and the decision was made by evidence' \
+        produced_by 'format_probe_signal() / format_variant_ambiguity_note() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D52/I6'
+}
+
+scenario_variant_integration_runtime_unnamed() {
+    current_scenario="variant-integration-runtime-unnamed"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture integration-runtime.txt app.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '1\.00'
+    assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
+        asserts 'app.log carries no name evidence for any entry' \
+        produced_by 'format_filename_evidence() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^  candidates: mt10=0\.00,mt10ir=[0-9.]+$' \
+        asserts 'With no name evidence the sample alone decides: the default is eliminated by impossible months under yyyy-MM-dd (F6)' \
+        produced_by 'format_sample_probes() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 F6'
+}
+
+scenario_variant_tomcat_named() {
+    current_scenario="variant-tomcat-named"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture tomcat-access.txt localhost_access_log.2025-05-05.txt) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" tomcat_access_with_duration mt3 evidence '0\.86'
+    assert_line "$out" pattern '^  filename_evidence: stem=mt3 ext=match date=present index=-$' \
+        asserts 'The Tomcat name decomposes to stem, .txt and a date' \
+        produced_by 'format_filename_evidence() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_absent "$out.stderr" pattern '^Note: ' \
+        asserts 'Stem evidence decided the unit; no ambiguity note' \
+        produced_by 'format_variant_ambiguity_note() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 I6'
+}
+
+scenario_variant_tomcat_extension_only() {
+    current_scenario="variant-tomcat-extension-only"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture tomcat-access.txt whatever.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" tomcat_access_with_duration mt3 default '0\.50'
+    assert_line "$out" pattern '^  candidates: mt3=2\.00,mt3us=2\.00$' \
+        asserts 'An extension alone ties the group default (standing credit = extension weight) and never moves the selection off it (I1)' \
+        produced_by 'select_format_variants() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 I1'
+    assert_line "$out.stderr" pattern '^Note: the detected log format \(tomcat_access_with_duration\) is written by more than one producer' \
+        asserts 'A default-basis selection surfaces the assumption' \
+        produced_by 'format_variant_ambiguity_note() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 I6'
+}
+
+scenario_variant_httpd_named() {
+    current_scenario="variant-httpd-named"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture httpd-access.txt access.log-20260609) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" httpd_access_with_duration mt3us evidence '0\.71'
+    assert_line "$out" pattern '^  filename_evidence: stem=mt3us ext=match date=present index=-$' \
+        asserts 'access.log-20260609 decomposes under after-placement: stem, .log, then the compact date' \
+        produced_by 'format_filename_evidence() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D45/I4'
+    assert_absent "$out.stderr" pattern '^Note: ' \
+        asserts 'Evidence decided the microsecond member; no -du needed and no note' \
+        produced_by 'format_variant_ambiguity_note() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 I6'
+    # The microsecond unit is applied: a -du us run must render identically.
+    local out_du; out_du=$(run_format_detection "$log" -bs 1440 -oe -du us); check_capture_warnings "$out_du"
+    assert_command label "httpd member carries microseconds (output identical to -du us)" \
+        command "diff <(grep -av '^duration_unit_override' '$out') <(grep -av '^duration_unit_override' '$out_du') > /dev/null" \
+        asserts 'The httpd member declares %D in microseconds, so the evidence-selected run equals the explicit -du us run' \
+        produced_by 'read_and_process_logs() in ltl (FR_DURATION_UNIT conversion)' \
+        contract 'features/log-format-registry.md section Drop 1.5 D47 (first variant groups)'
+}
+
+scenario_variant_httpd_renamed() {
+    current_scenario="variant-httpd-renamed"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture httpd-access.txt renamed.txt) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" tomcat_access_with_duration mt3 default '0\.75'
+    assert_line "$out.stderr" pattern '^Note: the detected log format \(tomcat_access_with_duration\) is written by more than one producer' \
+        asserts 'A renamed httpd file falls to the default with the note (D44: visible-or-good-enough)' \
+        produced_by 'format_variant_ambiguity_note() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D44/I6'
+}
+
+scenario_variant_thingworx_rolled() {
+    current_scenario="variant-thingworx-rolled"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture thingworx-application-log.txt ApplicationLog.2025-05-06.0.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  filename_evidence: stem=mt1std ext=match date=match index=present$' \
+        asserts 'A logback-rolled ThingWorx name decomposes to stem, date, index and extension, and the filename date agrees with the first content timestamp (D52 probe c)' \
+        produced_by 'format_filename_evidence() / format_sample_probes() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D45/D52'
+    assert_line "$out" pattern '^  format: thingworx_standard$' \
+        asserts 'A format outside any variant group is unaffected by selection' \
+        produced_by 'read_and_process_logs() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract'
+}
+
+scenario_variant_mixed_legend() {
+    current_scenario="variant-mixed-legend"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture mixed.txt mixed.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  formats: connection_server_standard,tomcat_access_with_duration$' \
+        asserts 'Every format found in the file is listed, first-bound first' \
+        produced_by 'read_and_process_logs() in ltl (per-file formats, N7)' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^legend: 1=connection_server_standard,2=tomcat_access_with_duration$' \
+        asserts 'The legend numbers formats in first-detection order across the run (I8)' \
+        produced_by 'emit_format_detection_verbose() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    local render="$TMP_DIR/$current_scenario/render.out"
+    "$LTL" --disable-progress --terminal-width 160 -bs 1440 -oe "$log" > "$render" 2> "$render.stderr"
+    assert_no_runtime_warnings "$render.stderr" "$current_scenario render"
+    assert_command label "console bracket [1,2] after the file name" \
+        command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q 'mixed.log  *\\[1,2\\]'" \
+        asserts 'The summary file list carries the formats found as legend numbers in brackets (D50)' \
+        produced_by 'print_summary_table() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D50'
+    assert_command label "console legend title" \
+        command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q '  Log Formats *\$'" \
+        asserts 'The legend is introduced by a "Log Formats" title, rendered like the file-list heading (D50)' \
+        produced_by 'print_summary_table() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D50'
+    assert_command label "console legend line" \
+        command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q '  1 connection_server_standard  2 tomcat_access_with_duration *\$'" \
+        asserts 'One legend line below the title names the numbered formats (D50)' \
+        produced_by 'print_summary_table() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D50'
+}
+
+scenario_format_pin() {
+    current_scenario="format-pin"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe -lf connection_server_standard); check_capture_warnings "$out"
+    assert_line "$out" pattern '^format_pin: connection_server_standard$' \
+        asserts 'The run-level pin is reported' \
+        produced_by 'emit_format_detection_verbose() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^  format: connection_server_standard$' \
+        asserts 'The pin outranks stem evidence and the probes (D49): the file reads as the pinned format' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D49/N9'
+    assert_line "$out" pattern '^  selection_basis: pin$' \
+        asserts 'Selection basis is pin under -lf' \
+        produced_by 'emit_format_detection_evidence_verbose() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^entries: 1$' \
+        asserts 'The scan is restricted to the entries carrying the pinned name' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 N9'
+    assert_line "$out.stderr" pattern "^Note: .*line [0-9]+: timestamp '[0-9 :-]+' has an impossible date component under the connection_server_standard format's date layout; such lines are kept at the previous line's time - use -lf to pin the correct log format\$" \
+        asserts 'An impossible date under the pinned layout is reported once per file (D52/#385) and never crashes' \
+        produced_by 'format_probe_signal() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D52'
+    local out2; out2=$(run_format_detection "$log" -bs 1440 -oe -lf thingworx_standard); check_capture_warnings "$out2"
+    assert_line "$out2" pattern '^entries: 2$' \
+        asserts 'A name carried by two registry entries pins both (N9)' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 N9'
+    local err="$TMP_DIR/$current_scenario/unknown.stderr"
+    if "$LTL" --disable-progress -bs 1440 -oe -lf nonsense "$log" > /dev/null 2> "$err"; then
+        echo "  FAIL  $current_scenario :: -lf nonsense exited 0"; fail=$((fail + 1)); failures+=("$current_scenario :: -lf nonsense exited 0")
+    else
+        assert_line "$err" pattern '^Error: Unknown log format .nonsense. for -lf\. Known formats: .*connection_server_standard.*integration_runtime_standard.*tomcat_access_with_duration' \
+            asserts 'An unknown pin name is a usage error listing the known format names (D49)' \
+            produced_by 'apply_format_pin() in ltl' \
+            contract 'features/log-format-registry.md section Drop 1.5 D49'
+    fi
 }
 
 # ---------- Run -----------------------------------------------------------
@@ -843,7 +1156,17 @@ scenario_tw_analytics_worker;   echo ""
 scenario_connection_server_standard; echo ""
 scenario_scan_telemetry;        echo ""
 scenario_scan_telemetry_nomatch; echo ""
-scenario_unit_ambiguity_warning
+scenario_unit_ambiguity_warning; echo ""
+scenario_variant_connection_server; echo ""
+scenario_variant_integration_runtime_named; echo ""
+scenario_variant_integration_runtime_unnamed; echo ""
+scenario_variant_tomcat_named; echo ""
+scenario_variant_tomcat_extension_only; echo ""
+scenario_variant_httpd_named; echo ""
+scenario_variant_httpd_renamed; echo ""
+scenario_variant_thingworx_rolled; echo ""
+scenario_variant_mixed_legend; echo ""
+scenario_format_pin
 
 echo ""
 echo "Results: $pass passed, $fail failed"
