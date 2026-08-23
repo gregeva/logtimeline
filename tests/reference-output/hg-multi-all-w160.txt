@@ -33,5 +33,5 @@
 
                  P50: 5ms   P99: 5.5s                              P50: 1.5 KiB   P99: 11.6 KiB                        P50: 4   P99: 101   P99.9: 1.3k        
 
-command-line options: --disable-progress -osum -n 1 -dm raw --terminal-width 160 -hg duration,bytes,count -bs 1 
+command-line options: --disable-progress -ni -osum -n 1 -dm raw --terminal-width 160 -hg duration,bytes,count -bs 1 
 

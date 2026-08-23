@@ -18,5 +18,5 @@
  2025-04-10 06:07 WARN: 225             0:225/m │ ███                         1.7m      0 B       0       │    █| ███            ██        █    |████||         
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────┴─1ms───────14ms─────────244ms────────4.3s────────1.5m
 
-command-line options: --disable-progress -osum -n 1 -dm raw --terminal-width 160 -hm duration -bs 1 
+command-line options: --disable-progress -ni -osum -n 1 -dm raw --terminal-width 160 -hm duration -bs 1 
 

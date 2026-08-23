@@ -18,5 +18,5 @@
  2025-05-07 14:00    0:7.6/m │ ██████                             549.8 KiB     
 ────────────────────────────────────────────────────────────────────────────────
 
-command-line options: --disable-progress -osum -n 1 --terminal-width 80 -os -od -ov 
+command-line options: --disable-progress -ni -osum -n 1 --terminal-width 80 -os -od -ov 
 

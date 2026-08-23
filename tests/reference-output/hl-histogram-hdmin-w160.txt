@@ -62,7 +62,7 @@
                            P25: 35.5ms   P50: 47.1ms   P75: 89.3ms   P90: 541.2ms   P95: 1.3s   P99: 5.3s   P99.9: 7.4s   P99.99: 7.4s          
                               P25: 147.4ms   P50: 357.8ms   P75: 1s   P90: 3.2s   P95: 5.3s   P99: 6.9s   P99.9: 7.4s   P99.99: 7.4s            
 
-command-line options: --disable-progress -n 1 -dm raw --terminal-width 160 -du us -hg duration -hdmin 100 
+command-line options: --disable-progress -ni -n 1 -dm raw --terminal-width 160 -du us -hg duration -hdmin 100 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2026-01-22 08:49 and 2026-01-25 07:41

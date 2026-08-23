@@ -3007,7 +3007,7 @@
  2025-12-15 22:00 WARN: 48                              0:0.4/m │                                                                                               
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-command-line options: --disable-progress -n 1 --terminal-width 160 -hdmin 100000 
+command-line options: --disable-progress -ni -n 1 --terminal-width 160 -hdmin 100000 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-04-10 06:00 and 2025-12-15 23:57
