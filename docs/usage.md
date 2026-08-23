@@ -462,6 +462,7 @@ Version, help, and diagnostic options.
 | `-?, --help [<topic>]` | Show the help screen and exit; naming a topic (e.g. `statistics`) shows that topic's index |
 | `-ex, --explain [<topic>]` | Show long-form documentation for a statistic; with no topic, lists available topics |
 | `-mem, --memory-usage [debug]` | Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; `debug` additionally emits per-phase memory diagnostics on stderr |
+| `-t, --timing` | Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary |
 
 ## Alternate Names
 

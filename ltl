@@ -190,6 +190,7 @@ my @column_colors = (
 my %column_color_lookup = map { $_->{name} => $_ } @column_colors;
 my ( $durations_observed, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, undef );
 my ( $show_memory_debug, $memory_usage_operand ) = ( 0, undef );   # -mem debug diagnostic mode (Issue #356)
+my $show_timing = 0;   # -t, --timing: per-stage timing rows in the summary
 my $explain_arg;   # --explain [<topic>]: undef = not given; '' = bare; non-empty = topic name (Issue #261)
 my ( $filter_duration_min, $filter_duration_max );
 my ( $filter_bytes_min, $filter_bytes_max );
@@ -1874,7 +1875,7 @@ sub _classify_argv_provenance {
                 'highlight-duration-min|hdmin', 'highlight-duration-max|hdmax',
                 'highlight-bytes-min|hbmin', 'highlight-bytes-max|hbmax',
                 'highlight-count-min|hcmin', 'highlight-count-max|hcmax',
-                'memory-usage|mem', 'disable-progress',
+                'memory-usage|mem', 'timing|t', 'disable-progress',
                 'output-csv|o', 'csv-precision|cp', 'sort-on|so', 'sort-ascending|sa',
                 'threadpool-activity-summary|tpas', 'threadpool-activity|tpa',
                 'user-defined-metrics|udm', 'udm-csv-message|ucm',
@@ -2000,6 +2001,7 @@ sub emit_runtime_config_verbose {
         'highlight-count-max'               => $highlight_count_max,
         'memory-usage'                      => $show_memory,
         'memory-usage-debug'                => $show_memory_debug,
+        'timing'                            => $show_timing,
         'output-csv'                        => $write_messages_to_csv,
         'sort-on'                           => $sort_type,
         'sort-ascending'                    => $sort_ascending,
@@ -6033,6 +6035,7 @@ sub print_help {
     $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic (e.g. 'statistics') shows that topic's index.");
     $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic; with no topic, lists available topics.");
     $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' additionally emits per-phase memory diagnostics on stderr");
+    $out .= help_opt("-t,   --timing",          "Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary");
 
     $out .= help_heading("EXAMPLES");
     my $ex_desc_col = 68;  # description column for examples (commands are longer than options)
@@ -8993,6 +8996,7 @@ sub adapt_to_command_line_options {
         'highlight-count-min|hcmin=i' => \$highlight_count_min,
         'highlight-count-max|hcmax=i' => \$highlight_count_max,
 	    'memory-usage|mem:s' => \$memory_usage_operand,
+        'timing|t' => \$show_timing,
         'disable-progress' => \$disable_progress,                                   # hidden
         'output-csv|o' => \$write_messages_to_csv,
         'csv-precision|cp=s' => sub { $csv_precision = $_[1]; $csv_precision_source = "-cp $_[1]"; },
@@ -14732,14 +14736,16 @@ sub print_summary_table {
     push @summary_table, sprintf( $table_format, "HIGHLIGHTED", $total_lines_highlighted ) if $highlight_active;
     push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
     push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "DETECT: FORMAT REGISTRY BUILD", format_time( $elapsed_detect_registry_build, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "PARSE: FILE PROCESSING", format_time( $elapsed_parse_read_files, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "ACCUMULATE: EMPTY BUCKETS", format_time( $elapsed_accumulate_initialize_buckets, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: GROUP SIMILAR", format_time( $elapsed_finalize_group_similar, 's', 'medium', " " ) ) unless $group_similar_sensitivity =~ /^none$/;
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: CALCULATE STATISTICS", format_time( $elapsed_finalize_calculate_statistics, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: HEATMAP STATISTICS", format_time( $elapsed_finalize_heatmap_statistics, 's', 'medium', " " ) ) if $heatmap_enabled;
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: HISTOGRAM STATISTICS", format_time( $elapsed_finalize_histogram_statistics, 's', 'medium', " " ) ) if $histogram_enabled;
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "RENDER: SCALE DATA TO TERMINAL", format_time( $elapsed_render_normalize_data, 's', 'medium', " " ) );
+    if ($show_timing) {
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "DETECT: FORMAT REGISTRY BUILD", format_time( $elapsed_detect_registry_build, 's', 'medium', " " ) );
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "PARSE: FILE PROCESSING", format_time( $elapsed_parse_read_files, 's', 'medium', " " ) );
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "ACCUMULATE: EMPTY BUCKETS", format_time( $elapsed_accumulate_initialize_buckets, 's', 'medium', " " ) );
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: GROUP SIMILAR", format_time( $elapsed_finalize_group_similar, 's', 'medium', " " ) ) unless $group_similar_sensitivity =~ /^none$/;
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: CALCULATE STATISTICS", format_time( $elapsed_finalize_calculate_statistics, 's', 'medium', " " ) );
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: HEATMAP STATISTICS", format_time( $elapsed_finalize_heatmap_statistics, 's', 'medium', " " ) ) if $heatmap_enabled;
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: HISTOGRAM STATISTICS", format_time( $elapsed_finalize_histogram_statistics, 's', 'medium', " " ) ) if $histogram_enabled;
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "RENDER: SCALE DATA TO TERMINAL", format_time( $elapsed_render_normalize_data, 's', 'medium', " " ) );
+    }
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) );
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $max_memory_usage, 'B' ) );
 
