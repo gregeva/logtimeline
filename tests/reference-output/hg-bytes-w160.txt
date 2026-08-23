@@ -61,5 +61,5 @@
 
                          P50: 3 KiB   P75: 3.8 KiB   P90: 7.4 KiB   P95: 10.1 KiB   P99: 10.2 KiB   P99.9: 163.6 KiB   P99.99: 163.6 KiB        
 
-command-line options: --disable-progress -osum -n 1 -dm raw --terminal-width 160 -hg bytes 
+command-line options: --disable-progress -ni -osum -n 1 -dm raw --terminal-width 160 -hg bytes 
 

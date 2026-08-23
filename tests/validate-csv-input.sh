@@ -82,7 +82,7 @@ echo "[csv-input]"
 # of the -udm column; one bucket and one table row suffice.
 run_ltl() {
     local out="$1"; shift
-    "$LTL" --disable-progress -bs 1440 -oe -n 1 "$@" > "$out" 2>"$out.stderr"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 "$@" > "$out" 2>"$out.stderr"
 }
 
 # Runtime-warning cleanliness check for a run_ltl capture (stderr lives at

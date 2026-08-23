@@ -57,7 +57,7 @@ run_section() {
     local sections="$1"; shift
     local outfile
     outfile=$(mktemp)
-    "$LTL" --disable-progress --terminal-width 200 -V "$sections" "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
+    "$LTL" --disable-progress -ni --terminal-width 200 -V "$sections" "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
 }
 

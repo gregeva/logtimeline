@@ -100,7 +100,7 @@ fi
 render_mode() {
     local mode="$1" outfile="$2" stderrfile="$TMP_ROOT/$mode.err"
     set +e
-    "$LTL" --disable-progress -pr "$mode" -bs 60 -oe --terminal-width "$WIDTH" "$LOGFILE" \
+    "$LTL" --disable-progress -ni -pr "$mode" -bs 60 -oe --terminal-width "$WIDTH" "$LOGFILE" \
         2>"$stderrfile" | strip_ansi > "$outfile"
     local st=("${PIPESTATUS[@]}")
     set -e

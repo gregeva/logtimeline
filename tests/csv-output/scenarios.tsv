@@ -1,14 +1,14 @@
 scenario	logfile	options	expected_families	expected_categories
 access-bytes-duration	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25	bytes,duration,percentile,dispersion,shape,level
 thingworx-script	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-bs 240 -n 25	duration,count,percentile,dispersion,shape,level
-thingworx-application	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	-bs 240 -n 25	level
+thingworx-application	@APPLOG_HEAD@	-bs 240 -n 25	level
 precision-default-us	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us	bytes,duration,percentile,dispersion,shape,level
 precision-full	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -cp full	bytes,duration,percentile,dispersion,shape,level
 precision-n4	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -cp 4	bytes,duration,percentile,dispersion,shape,level
 heatmap-duration	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -du us -hm duration	bytes,duration,percentile,dispersion,shape,level
 profile-week	@PROFILE_LOG@	-bs 60 -n 25 -pr week	duration,percentile,dispersion,shape,bytes
 profile-day	@PROFILE_LOG@	-bs 60 -n 25 -pr day	duration,percentile,dispersion,shape,bytes
-udm-counting	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	-bs 240 -n 25 -udm users::distinct:U -udm actions::count:U -udm repeat::ratio:U -udm urate::rate:U -udm udrate::drate:U	level,udm-counting
+udm-counting	@APPLOG_HEAD@	-bs 240 -n 25 -udm users::distinct:U -udm actions::count:U -udm repeat::ratio:U -udm urate::rate:U -udm udrate::drate:U	level,udm-counting
 udm-numeric	logs/ThingworxLogs/ScriptLog.2025-05-05.0.log	-bs 240 -n 25 -udm job_ms:ms:max:durationMS	duration,count,percentile,dispersion,shape,level,udm-numeric
 numeric-highlight-duration-band	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hdmin 100 -hdmax 200	duration,percentile,dispersion,shape,bytes,count,level	expected/numeric-highlight-duration-band.tsv
 numeric-highlight-bytes-band	tests/fixtures/numeric-highlight-boundary.txt	-bs 240 -n 25 -hbmin 5000 -hbmax 6000	duration,percentile,dispersion,shape,bytes,count,level	expected/numeric-highlight-bytes-band.tsv

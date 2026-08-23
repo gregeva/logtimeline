@@ -34,7 +34,7 @@ TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 # Common options: suppress progress, summary table, and limit top messages
-COMMON="--disable-progress -osum -n 1"
+COMMON="--disable-progress -ni -osum -n 1"
 
 # Test log files. ACCESS_LOG is derived deterministically from the clean
 # full-day 2025-05-07 corpus (see tests/lib/fixtures.sh) so the exact fixture
@@ -263,7 +263,7 @@ run_test "hm-hg-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm d
 # rendering, the TOP HIGHLIGHTED MESSAGES block, the per-file highlight
 # indicator in the file legend, and the histogram/heatmap HL overlays.
 # -dm raw on overlay scenarios for the same byte-stability reason as above.
-HL_COMMON="--disable-progress -n 1"
+HL_COMMON="--disable-progress -ni -n 1"
 
 run_test "hl-regex-only-w160"      "$LTL" $HL_COMMON --terminal-width 160 -du us -h BomTransformation "$APACHE_LOG"
 run_test "hl-hdmin-w160"           "$LTL" $HL_COMMON --terminal-width 160 -du us -hdmin 100 "$APACHE_LOG"

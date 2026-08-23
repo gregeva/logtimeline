@@ -217,7 +217,7 @@ test_single_width() {
     local out
     out=$(mktemp)
     # shellcheck disable=SC2086
-    "$LTL" --disable-progress $SHAPE --terminal-width 200 -hg duration -hgw "$hgw" "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
+    "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -hg duration -hgw "$hgw" "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
     if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
         fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
     fi
@@ -288,7 +288,7 @@ test_multi_histogram() {
     local out
     out=$(mktemp)
     # shellcheck disable=SC2086
-    "$LTL" --disable-progress $SHAPE --terminal-width 200 -hg duration,bytes -hgw 95 "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
+    "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -hg duration,bytes -hgw 95 "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
     if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
         fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
     fi

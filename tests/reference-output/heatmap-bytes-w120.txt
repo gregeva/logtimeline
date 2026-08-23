@@ -18,5 +18,5 @@
  2025-04-10 06:07 WARN: 225             0:225/m │ ██              │                                                     
 ──────────────────────────────────────────────────────────────────┴─504 B─────1 KiB───────2.2 KiB──────4.9 KiB──11.6 KiB
 
-command-line options: --disable-progress -osum -n 1 -dm raw --terminal-width 120 -hm bytes -bs 1 
+command-line options: --disable-progress -ni -osum -n 1 -dm raw --terminal-width 120 -hm bytes -bs 1 
 

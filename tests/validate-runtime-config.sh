@@ -153,7 +153,7 @@ run_ltl() {
     RUN_STDOUT="$TMP_DIR/${label}.stdout"
     RUN_STDERR="$TMP_DIR/${label}.stderr"
     set +e
-    "$LTL" --disable-progress "$@" > "$RUN_STDOUT" 2> "$RUN_STDERR"
+    "$LTL" --disable-progress -ni "$@" > "$RUN_STDOUT" 2> "$RUN_STDERR"
     RUN_EXIT=$?
     set -e
     check_stderr_warnings "$RUN_STDERR"
@@ -216,7 +216,7 @@ scenario_runtime_config_env_only() {
     current_scenario="runtime-config-env-only"
     echo "[$current_scenario]"
 
-    LTL_CONFIG='-bs 30' "$LTL" --disable-progress -V runtime-config "$TEST_LOG" > "$TMP_DIR/rc-env.stdout" 2> "$TMP_DIR/rc-env.stderr" || true
+    LTL_CONFIG='-bs 30' "$LTL" --disable-progress -ni -V runtime-config "$TEST_LOG" > "$TMP_DIR/rc-env.stdout" 2> "$TMP_DIR/rc-env.stderr" || true
     check_stderr_warnings "$TMP_DIR/rc-env.stderr"
 
     assert_line "$TMP_DIR/rc-env.stdout" \
@@ -236,7 +236,7 @@ scenario_runtime_config_env_overridden() {
     current_scenario="runtime-config-env-overridden"
     echo "[$current_scenario]"
 
-    LTL_CONFIG='-bs 30' "$LTL" --disable-progress -V runtime-config -bs 60 "$TEST_LOG" > "$TMP_DIR/rc-over.stdout" 2> "$TMP_DIR/rc-over.stderr" || true
+    LTL_CONFIG='-bs 30' "$LTL" --disable-progress -ni -V runtime-config -bs 60 "$TEST_LOG" > "$TMP_DIR/rc-over.stdout" 2> "$TMP_DIR/rc-over.stderr" || true
     check_stderr_warnings "$TMP_DIR/rc-over.stderr"
 
     assert_line "$TMP_DIR/rc-over.stdout" \

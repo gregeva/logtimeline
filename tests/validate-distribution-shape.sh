@@ -119,7 +119,7 @@ generate_and_run() {
         exit 1
     fi
 
-    if ! ( cd "$rundir" && "$LTL" --disable-progress -o "$logfile" \
+    if ! ( cd "$rundir" && "$LTL" --disable-progress -ni -o "$logfile" \
            >/dev/null 2>"$TMP_ROOT/$anchor.ltl.err" ); then
         echo "ERROR: ltl failed for anchor '$anchor':" >&2
         sed 's/^/    /' "$TMP_ROOT/$anchor.ltl.err" >&2

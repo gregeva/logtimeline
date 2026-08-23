@@ -78,7 +78,7 @@ capture_render() {
     local fixture="$1"; shift
     local stderrfile="$TMP_DIR/render.stderr"
     set +e
-    "$LTL" --disable-progress "$@" "$fixture" 2>"$stderrfile" | strip_ansi > "$outfile"
+    "$LTL" --disable-progress -ni "$@" "$fixture" 2>"$stderrfile" | strip_ansi > "$outfile"
     local st=("${PIPESTATUS[@]}")
     set -e
     if [[ "${st[0]}" -ne 0 ]]; then
@@ -106,7 +106,7 @@ capture_render() {
 read_resolved_unit() {
     local fixture="$1"; shift
     local vfile="$TMP_DIR/csv-output.v"
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress -bs 1440 -oe -n 1 -V csv-output "$@" -o "$fixture" ) > "$vfile" 2>"$vfile.stderr" || true
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -V csv-output "$@" -o "$fixture" ) > "$vfile" 2>"$vfile.stderr" || true
 
     local unit
     unit=$(grep -aE '^duration_unit_resolved:' "$vfile" | awk '{print $2}')

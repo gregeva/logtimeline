@@ -425,6 +425,8 @@ The mechanical gate before writing any `ltl` command line in a test:
 
 The scenario's comment states the shape and why (one line: *"`-bs 1440 -oe`: detection assertions; fixtures span months"*). A harness run whose options were never chosen against its own assertion is a defect in review, whether or not it passes.
 
+Every harness invocation also passes `-ni` (`--no-index`) unless the index is the subject (`validate-index-read-back.sh`): without it each run reads and rewrites the working directory's `ltl-index.csv`, which on a developer's checkout is the dominant cost of a small run (measured ~0.4 s per invocation against a 2,000-row index) and appends a test row the developer never asked for.
+
 Precedent: #384 (2026-08-23) — ten new format-detection scenarios and the ad-hoc parity checks behind them ran multi-year fixtures at default (and hourly) buckets, building tens of thousands of empty buckets to assert a per-file selection that never reads a bucket. #399 (audit every test harness for invocation coherence) tracks the audit of every existing harness against this rule.
 
 ## Runtime-warning cleanliness

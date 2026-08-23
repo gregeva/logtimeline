@@ -136,7 +136,7 @@ PY
 capture_section() {
     local mode="$1" outfile="$2"
     local raw="$TMP_ROOT/$mode.raw"
-    if ! "$LTL" --disable-progress -V profile -pr "$mode" "$LOGFILE" \
+    if ! "$LTL" --disable-progress -ni -V profile -pr "$mode" "$LOGFILE" \
          > "$raw" 2>"$TMP_ROOT/$mode.err"; then
         echo "  FAIL  $current_mode :: ltl exited non-zero emitting -V profile" >&2
         sed 's/^/        /' "$TMP_ROOT/$mode.err" >&2
@@ -272,7 +272,7 @@ run_off_case() {
     # No -pr, so nothing folds the month-long fixture: collapse the axis to
     # day buckets with no empty ones - only `profile_active: no` is read
     # (HARNESS-DESIGN.md section Invocation coherence).
-    if ! "$LTL" --disable-progress -bs 1440 -oe -V profile "$LOGFILE" > "$raw" 2>"$TMP_ROOT/off.err"; then
+    if ! "$LTL" --disable-progress -ni -bs 1440 -oe -V profile "$LOGFILE" > "$raw" 2>"$TMP_ROOT/off.err"; then
         echo "  FAIL  $current_mode :: ltl exited non-zero emitting -V profile" >&2
         sed 's/^/        /' "$TMP_ROOT/off.err" >&2
         fail=$((fail + 1)); failures+=("$current_mode :: ltl failed"); return

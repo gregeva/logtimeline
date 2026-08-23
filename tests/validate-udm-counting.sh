@@ -55,7 +55,7 @@ CONTRACT='features/user-defined-metrics.md section Counting Aggregations (Issue 
 run_ltl() {
     local outfile
     outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
-    "$LTL" --disable-progress "$@" "$FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
+    "$LTL" --disable-progress -ni "$@" "$FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
 }
 
@@ -380,7 +380,7 @@ scenario_alias_canonical() {
     # STATS CSV header (input written with the alias, output in canonical form)
     local csvdir="$TMP_DIR/alias-csv"
     mkdir -p "$csvdir"
-    ( cd "$csvdir" && "$LTL" --disable-progress -bs 1 -n 5 -o \
+    ( cd "$csvdir" && "$LTL" --disable-progress -ni -bs 1 -n 5 -o \
         -udm 'x::avg:/ (\d+\.\d+) pool/' \
         -udm 'x::max:/ (\d+\.\d+) pool/' \
         "$FIXTURE" > run.out 2>run.stderr || true )
@@ -402,7 +402,7 @@ scenario_csv_columns() {
     echo "[$current_scenario]"
     local csvdir="$TMP_DIR/shape-csv"
     mkdir -p "$csvdir"
-    ( cd "$csvdir" && "$LTL" --disable-progress -bs 1 -n 5 -o \
+    ( cd "$csvdir" && "$LTL" --disable-progress -ni -bs 1 -n 5 -o \
         -udm "users::distinct:userId" \
         -udm "actions::count:userId" \
         -udm "urate::rate:userId" \
@@ -442,7 +442,7 @@ scenario_consolidation() {
     echo "[$current_scenario]"
     local csvdir="$TMP_DIR/consol-csv"
     mkdir -p "$csvdir"
-    ( cd "$csvdir" && "$LTL" --disable-progress -bs 1 -n 100 -o -g 70 \
+    ( cd "$csvdir" && "$LTL" --disable-progress -ni -bs 1 -n 100 -o -g 70 \
         -udm "actions::count:userId" \
         "$FIXTURE" > run.out 2>run.stderr || true )
     check_stderr_warnings "$csvdir/run.stderr"

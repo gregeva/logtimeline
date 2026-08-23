@@ -33,5 +33,5 @@
 
                            P10: 2ms   P25: 3ms   P50: 5ms   P75: 8ms   P90: 963ms   P95: 1.8s   P99: 5.5s   P99.9: 11.9s   P99.99: 1.5m         
 
-command-line options: --disable-progress -osum -n 1 -dm raw --terminal-width 160 -hm duration -hg duration -bs 1 
+command-line options: --disable-progress -ni -osum -n 1 -dm raw --terminal-width 160 -hm duration -hg duration -bs 1 
 
