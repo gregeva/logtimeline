@@ -87,6 +87,23 @@ if grep -q '@PROFILE_LOG@' "$SCENARIOS_TSV"; then
     fi
 fi
 
+# Scenarios that assert only column families over the ThingWorx
+# ApplicationLog reference @APPLOG_HEAD@: the first 100,000 lines of
+# ApplicationLog.2025-05-05.0.log (~2.8 h, every level and -udm token class
+# present), staged once into the artifacts dir. The assertions are
+# structural - which families appear and are well-formed - so the 480k-line
+# day file adds rows to walk, not signal (HARNESS-DESIGN.md section
+# Invocation coherence).
+APPLOG_HEAD="$SCRIPT_DIR/.artifacts/applicationlog-head-100k.log"
+if grep -q '@APPLOG_HEAD@' "$SCENARIOS_TSV"; then
+    mkdir -p "$(dirname "$APPLOG_HEAD")"
+    head -100000 "$REPO_DIR/logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log" > "$APPLOG_HEAD"
+    if [[ ! -s "$APPLOG_HEAD" ]]; then
+        echo "ERROR: could not stage the ApplicationLog head fixture at $APPLOG_HEAD" >&2
+        exit 1
+    fi
+fi
+
 total_pass=0
 total_fail=0
 scenarios_run=0
@@ -102,6 +119,7 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
 
     # Resolve the generated-fixture marker to its absolute path.
     [[ "$logfile" == "@PROFILE_LOG@" ]] && logfile="$PROFILE_LOG"
+    [[ "$logfile" == "@APPLOG_HEAD@" ]] && logfile="$APPLOG_HEAD"
 
     # Derive the --profile mode (if any) from the scenario's options so the
     # validator can expect the folded timestamp form instead of ISO. Matches
@@ -128,50 +146,13 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
     msg_csv="$CSV_CACHE_MESSAGES"
     stats_csv="$CSV_CACHE_STATS"
 
-    # Capture -V csv-output separately. csv_cache_produce only stages the
-    # CSV files; the precision observability surface (#268) is requested
-    # here via a second invocation against the same logfile + options so
-    # the per-family decimal ceiling assertions can read the run's actual
-    # emit contract. The capture lives in a per-scenario tempdir under
-    # tests/.artifacts/v-csv-output/ — independent of the shared csv-cache
-    # so the contract between this harness and the cache stays narrow.
+    # The -V csv-output capture comes from the producing run itself
+    # (csv_cache_produce requests the section and caches the stdout), so
+    # the precision assertions read the contract of the run that wrote
+    # the CSVs under test - no second identical ltl run.
     v_capture_dir="$SCRIPT_DIR/.artifacts/v-csv-output/$scenario"
     mkdir -p "$v_capture_dir"
-    abs_log=""
-    if [[ "$logfile" = /* ]]; then
-        abs_log="$logfile"
-    else
-        abs_log="$REPO_DIR/$logfile"
-    fi
-    set +e
-    # shellcheck disable=SC2086  # word-splitting on $options is intentional
-    (
-        cd "$v_capture_dir"
-        "$LTL" --disable-progress -ni -V csv-output $options -o "$abs_log" \
-            >"$v_capture_dir/ltl.stdout" 2>"$v_capture_dir/ltl.stderr"
-    )
-    vrc=$?
-    set -e
-    # Discard the timestamped CSV copies ltl emits as a side effect of
-    # `-o`; the csv-cache already produced the authoritative copies for
-    # validation. Keeping only ltl.stdout/ltl.stderr for the -V capture.
-    find "$v_capture_dir" -maxdepth 1 -name '*-LTL-*.csv' -delete 2>/dev/null || true
-    if [[ $vrc -ne 0 ]]; then
-        echo "FAIL  scenario=$scenario v-csv-output-capture-failed exit=$vrc" >&2
-        sed 's/^/        /' "$v_capture_dir/ltl.stderr" >&2
-        total_fail=$((total_fail + 1))
-        scenarios_run=$((scenarios_run + 1))
-        continue
-    fi
-
-    # Runtime-warning cleanliness (shared check; HARNESS-DESIGN.md section
-    # Runtime-warning cleanliness). The csv-cache capture is checked inside
-    # csv_cache_produce; this covers the -V capture run.
-    if ! assert_no_runtime_warnings "$v_capture_dir/ltl.stderr" "scenario=$scenario"; then
-        total_fail=$((total_fail + 1))
-        scenarios_run=$((scenarios_run + 1))
-        continue
-    fi
+    cp "$CSV_CACHE_STDOUT" "$v_capture_dir/ltl.stdout"
 
     # Extract -V csv-output / precision sub-section into a file the
     # validator reads. Anchored by the 'precision' sub-section markers
