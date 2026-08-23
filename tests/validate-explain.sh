@@ -5,6 +5,8 @@
 # topics, that unknown topics produce hard errors, that the short -ex alias
 # works, that rendered output respects --terminal-width, and that table
 # blocks render with Unicode box-drawing characters.
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# --explain / --help only - no log input, nothing to shape.
 # Usage: ./tests/validate-explain.sh
 #
 # Follows the self-documenting assertion design from tests/HARNESS-DESIGN.md.

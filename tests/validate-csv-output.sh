@@ -33,6 +33,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 HARNESS_DIR="$SCRIPT_DIR/csv-output"
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): each
+# scenario's options and fixture in scenarios.tsv are the subject (the CSV
+# rows and -V csv-output fields derive from them); display options stay as
+# the scenario declares them.
 SCENARIOS_TSV="$HARNESS_DIR/scenarios.tsv"
 RULES_MESSAGES="$HARNESS_DIR/rules/messages-columns.tsv"
 RULES_STATS="$HARNESS_DIR/rules/stats-columns.tsv"

@@ -77,9 +77,12 @@ echo "[csv-input]"
 
 # Never toggles errexit itself: callers capture the exit code with
 # `rc=0; run_ltl ... || rc=$?`, which is condition context under set -e.
+# Shape (tests/HARNESS-DESIGN.md section Invocation coherence): the
+# assertions read the exit code, the stderr skip diagnostic and the presence
+# of the -udm column; one bucket and one table row suffice.
 run_ltl() {
     local out="$1"; shift
-    "$LTL" --disable-progress "$@" > "$out" 2>"$out.stderr"
+    "$LTL" --disable-progress -bs 1440 -oe -n 1 "$@" > "$out" 2>"$out.stderr"
 }
 
 # Runtime-warning cleanliness check for a run_ltl capture (stderr lives at

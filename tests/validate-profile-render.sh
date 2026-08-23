@@ -60,6 +60,9 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 TMP_ROOT=$(mktemp -d); trap 'rm -rf "$TMP_ROOT"' EXIT
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): the
+# folded time axis is the subject, so each mode renders at `-bs 60 -oe` on
+# the generated month (see render_mode).
 LOGFILE="$TMP_ROOT/profile.log"
 
 pass=0

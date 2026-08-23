@@ -28,7 +28,8 @@ logs/
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 220MB | 1,133,132 | Secondary Tomcat 9 access log test |
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 148MB | 761,698 | Smaller Tomcat 9 access log test |
 | `localhost_access_log.2025-03-21.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 2.6MB | 22,264 | **CORRUPT — do not use for clean-output testing.** Contains concatenated records (two log lines merged on one line), so field captures pick up fragments of the following record (e.g. an IP fragment where the duration belongs). Useful only as adversarial malformed input; ltl treats such non-numeric duration captures as unobserved (#341, #345). No harness uses this file (the regression/ticks fixture is derived from the 2025-05-07 corpus via `tests/lib/fixtures.sh`) |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 1.0MB | 5,000 | 5k-line slice from 05-05 log; used by `tests/validate-index-read-back.sh`. Regenerate via `tests/fixtures/regenerate-index-readback-fixtures.sh` |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 1.0MB | 5,000 | 5k-line slice from 05-05 log; the configuration-class fixture for `tests/validate-index-read-back.sh`, `validate-histogram-bin-counters.sh`, `validate-format-detection.sh`, `validate-statistics-demand.sh`, `validate-numeric-criteria-notices.sh`. Regenerate via `tests/fixtures/regenerate-index-readback-fixtures.sh` |
+| `tests/fixtures/tomcat-access-duration-spread.txt` | Tomcat 9 (synthetic) | milliseconds (%D) | duration, bytes | 52KB | 434 | Deterministic synthetic fixture for `tests/validate-duration-display.sh`: 12 generic endpoints over a 14.5 h span with duration values chosen to render every cell class (0ms, 1ms, 58ms, 166ms, 1s, 1.4s, 5.5s). TEST-NET addresses, no real hosts or paths. Regenerate via `tests/duration-display/generate-fixture.py` |
 | `really-big/*` | Tomcat 10 | milliseconds (%D) | duration, bytes | 8.5GB | — | Really big access logs from 4 servers over 28 days |
 
 **Format**: Apache combined log with duration at end (units vary by server)
@@ -220,7 +221,7 @@ These logs contain `durationMS=`, `result bytes=`, and `result count=` fields en
 | File | Metrics | Size | Lines | Use Case |
 |---|---|---|---|---|
 | `ScriptLog-DPMExtended-clean.log` | duration, bytes, count | 29MB | 122,808 | Cleaned DPM ScriptLog - ideal for all heatmap types |
-| `ScriptLog-DPMExtended-clean-5k.log` | duration, bytes, count | 1.1MB | 5,000 | 5k-line slice from DPMExtended-clean; used by `tests/validate-index-read-back.sh`. Regenerate via `tests/fixtures/regenerate-index-readback-fixtures.sh` |
+| `ScriptLog-DPMExtended-clean-5k.log` | duration, bytes, count | 1.1MB | 5,000 | 5k-line slice from DPMExtended-clean; used by `tests/validate-index-read-back.sh`, `validate-heatmap-palette.sh` and the ScriptLog runs of `validate-regression.sh` / `capture-regression.sh` (at `-bs 1`). Regenerate via `tests/fixtures/regenerate-index-readback-fixtures.sh` |
 | `ScriptLog.2025-04-09.1.log` | duration, bytes, count | 98MB | 252,640 | Large ScriptLog with full metrics |
 | `ScriptLog.2025-04-09.2.log` | duration, bytes, count | 98MB | 254,208 | Large ScriptLog with full metrics |
 | `ScriptLog.2025-04-09.3.log` | duration, bytes, count | 98MB | 271,552 | Large ScriptLog with full metrics |

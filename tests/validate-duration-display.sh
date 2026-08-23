@@ -24,7 +24,18 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 CHECKER="$SCRIPT_DIR/duration-display/check-duration-cells.pl"
-ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt"
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# the render invariants read duration CELLS - their unit, zero form and
+# decimal count - across both surfaces, so what the fixture must carry is
+# magnitude diversity (zeros, small integers, ~1 s auto-scaled values,
+# multi-second values) across several timeline rows, not volume. ACCESS_LOG
+# is the committed synthetic Tomcat access log built for exactly that spread
+# (434 lines over a 14.5 h span; tests/duration-display/generate-fixture.py
+# regenerates it byte-for-byte). The no-duration and enhanced-format
+# scenarios derive their fixtures from it, and the resolved-unit probe runs
+# it at `-bs 1440 -oe -n 1`: the unit is a property of the format, and the
+# probe reads one -V line.
+ACCESS_LOG="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread.txt"
 # Apache HTTP2 access log: the %D trailing field is request duration in genuine
 # microseconds, so -du us resolves to a microsecond source (6 decimals). Used to
 # cover a non-ms resolved unit.
@@ -95,7 +106,7 @@ capture_render() {
 read_resolved_unit() {
     local fixture="$1"; shift
     local vfile="$TMP_DIR/csv-output.v"
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress -V csv-output "$@" -o "$fixture" ) > "$vfile" 2>"$vfile.stderr" || true
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -bs 1440 -oe -n 1 -V csv-output "$@" -o "$fixture" ) > "$vfile" 2>"$vfile.stderr" || true
 
     local unit
     unit=$(grep -aE '^duration_unit_resolved:' "$vfile" | awk '{print $2}')
@@ -198,7 +209,7 @@ run_scenario() {
 # standard/common access log — %h %l %u %t "%r" %s %b), no latency surface may
 # render: no timeline latency column, no latency columns in the messages table.
 # The fixture is derived on the fly from ACCESS_LOG by stripping the trailing
-# %D field, so it always mirrors the corpus the positive scenarios use.
+# %D field, so it always mirrors the fixture the positive scenarios use.
 # Issue #345 (bytes-triggered latency display + fabricated 0ms percentiles).
 run_no_duration_scenario() {
     current_scenario="no-duration-w200"

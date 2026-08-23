@@ -37,8 +37,12 @@ SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtend
 # without paying for a full ltl seed run per scenario.
 INDEX_FIXTURE="$SCRIPT_DIR/fixtures/ltl-index-readback.csv"
 
-# Common options: suppress progress and limit top messages.
-COMMON="--disable-progress -osum -n 1"
+# Common options (tests/HARNESS-DESIGN.md section Invocation coherence):
+# every scenario reads the -V index-read-back section or the index CSV;
+# bucket size is not part of the selection signature (serialize_filters()),
+# so the timeline collapses to one non-empty bucket - the two-file scenarios
+# pair fixtures 25 days apart - and the summary table is suppressed.
+COMMON="--disable-progress -bs 1440 -oe -osum -n 1"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"

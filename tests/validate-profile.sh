@@ -269,7 +269,10 @@ run_off_case() {
     current_mode="no-profile"
     echo "[$current_mode]"
     local raw="$TMP_ROOT/off.raw" section="$TMP_ROOT/off.section"
-    if ! "$LTL" --disable-progress -V profile "$LOGFILE" > "$raw" 2>"$TMP_ROOT/off.err"; then
+    # No -pr, so nothing folds the month-long fixture: collapse the axis to
+    # day buckets with no empty ones - only `profile_active: no` is read
+    # (HARNESS-DESIGN.md section Invocation coherence).
+    if ! "$LTL" --disable-progress -bs 1440 -oe -V profile "$LOGFILE" > "$raw" 2>"$TMP_ROOT/off.err"; then
         echo "  FAIL  $current_mode :: ltl exited non-zero emitting -V profile" >&2
         sed 's/^/        /' "$TMP_ROOT/off.err" >&2
         fail=$((fail + 1)); failures+=("$current_mode :: ltl failed"); return
