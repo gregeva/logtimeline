@@ -54,6 +54,7 @@ What does not exist is the coherent frame: **one resolution surface, one cascade
 
 - Processing-model changes (#59 — Phase 2+4 release)
 - Derived metrics as demand participants (#61 — the model leaves room: a derived metric is a consumer of its inputs and a producer for its own consumers; internal-only inputs is the canonical case)
+  - Paired-event metrics (#372, umbrella D58) are derived metrics in this sense: a start-line capture retained only for the end line's composition is an internal-only input, and a pair metric nobody consumes is never captured. Per-format scoping of message metrics (D25) is decided here.
 - Representation degradation under memory pressure (#2 umbrella — visibility decides *where values surface*, never fidelity)
 - Changes to the layout engine's render-time algorithms (widths, linear decay, auto-hide loop — they work; this drop wires to them, not into them)
 
