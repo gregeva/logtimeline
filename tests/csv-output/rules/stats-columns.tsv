@@ -28,6 +28,16 @@ Pause Young	*	int	no	0	level
 Pause Young-HL	*	int	no	0	level
 Pause Full	*	int	no	0	level
 Pause Full-HL	*	int	no	0	level
+CONFIG	*	int	no	0	level
+CONFIG-HL	*	int	no	0	level
+CREATE	*	int	no	0	level
+CREATE-HL	*	int	no	0	level
+DESTROY	*	int	no	0	level
+DESTROY-HL	*	int	no	0	level
+START	*	int	no	0	level
+START-HL	*	int	no	0	level
+FINISH	*	int	no	0	level
+FINISH-HL	*	int	no	0	level
 err-rate_sec	*	float	no	1	level
 err-rate_min	*	float	no	1	level
 err-rate_hr	*	float	no	1	level

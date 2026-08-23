@@ -304,6 +304,7 @@ my %match_type_to_slug = (
     13 => 'csv',                             # CSV via detect_and_parse_csv_header()
     14 => 'httpd_access_with_duration',      # Apache httpd / Tomcat 10.1+ %D in microseconds (variant of 3)
     15 => 'integration_runtime_standard',    # ThingWorx Integration Runtime, yyyy-dd-MM dates (variant of 10)
+    16 => 'wgm_client',                      # Windchill Workgroup Manager client logs (genlwsc / uwgm_client / uwgm)
 );
 
 # Per-file format-detection accumulator. Populated in read_and_process_logs()
@@ -879,6 +880,8 @@ my @log_levels = (
     '1xx', 'Pause Young-HL', 'Pause Young', 'Pause Full-HL', 'Pause Full',
     'Pause Remark-HL', 'Pause Remark', 'Pause Cleanup-HL', 'Pause Cleanup',
     'To-space exhausted-HL', 'To-space exhausted', 'Using G1-HL', 'Using G1',
+    'CONFIG-HL', 'CONFIG', 'CREATE-HL', 'CREATE', 'DESTROY-HL', 'DESTROY',
+    'START-HL', 'START', 'FINISH-HL', 'FINISH',
     'DATA-HL', 'DATA', 'err-rate', 'msg-rate', 'empty'
 );
 
@@ -920,6 +923,11 @@ my %colors = (
     'Pause Cleanup' => "\033[0;32m",
     'To-space exhausted' => "\033[0;31m",
     'Using G1' => "\033[0;34m",
+    'CONFIG'  => "\033[0;36m",
+    'CREATE'  => "\033[0;32m",
+    'DESTROY' => "\033[0;35m",
+    'START'   => "\033[0;36m",
+    'FINISH'  => "\033[0;34m",
     'err-rate' => "\033[91m\033[109m",
     'msg-rate'    => "\033[0m",
     'NC'    => "\033[0m",
@@ -2222,6 +2230,17 @@ my $format_registry_opts;
 # (pay the compile cost before the loop, never inside it).
 my %format_scan_sub_cache;     # order signature => generated scan sub
 
+# Windchill Workgroup Manager msgtype letters → category vocabulary
+# (@log_levels). The severity letters map to the shared levels; the
+# object-lifecycle letters keep their identity as their own categories,
+# the way the GC pause forms do. A letter outside this table is left as
+# captured and falls to the category-vocabulary gate in
+# read_and_process_logs() like any unknown level.
+my %wgm_msgtype_names = (
+    C => 'CONFIG', D => 'DEBUG', E => 'ERROR', F => 'FINISH', I => 'INFO',
+    S => 'START',  T => 'TRACE', W => 'WARN',  X => 'CREATE', Y => 'DESTROY',
+);
+
 # Transform primitives: named post-capture mutation snippets spliced into
 # generated extraction closures. One resolution surface for this
 # vocabulary — new formats reference these names; a new mutation gets a
@@ -2243,6 +2262,7 @@ my %format_transform_code = (
     chop_message        => q{ chop $message; },
     strip_pid           => q{ $message =~ s/\d+ (.*)$/$1/; },
     hoist_cpp_object    => q{ if( $message =~ /\w+\.cpp:\d+ / ) { $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/; $object = $1; } },
+    wgm_msgtype         => q{ $category_bucket = $wgm_msgtype_names{$category_bucket} // $category_bucket; },
 );
 
 # Declarative format definitions, in the static cascade order the elsif
@@ -2348,6 +2368,46 @@ sub format_registry_specs {
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.i.IntegrationRuntimeConfiguration', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted', undef, undef, '0', '0' ],
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.s.SecurityManagerBootstrapper', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'initializing KeyStore provider', undef, undef, '0', '0' ],
       ] },
+    # Windchill Workgroup Manager client logs: one line shape shared by the
+    # genlwsc / uwgm_client / uwgm files (each file's own header block
+    # declares `columns "date time tz msgtype logid tid area message"` and
+    # `columns_sep ": "`). The timestamp is ISO-8601 UTC with a fixed
+    # millisecond fraction and a `Z` suffix outside the capture; the
+    # msgtype letter becomes a category through wgm_msgtype; the `P<hex>`
+    # process id and `T<hex>` thread id keep the prefixes the log prints;
+    # the area (dotted component path, `#`-qualified for sessions and
+    # transactions) is the object. The area never contains a space or a
+    # colon, so `[^ :]+` stops at the field separator and the remainder —
+    # which freely carries further `: ` sub-structure — is the message.
+    # Occurrences only: no duration, bytes or count at the line level.
+    # The bracket-bearing sample is the cross-shadow proof that this group
+    # must stay ahead of mt2 (whose `.*? \[...\]` tail accepts any line
+    # with a bracketed token).
+    { name => 'mt16', slug => 'wgm_client', match_type => 16, scanned => 1, head_class => 'digit',
+      filename => { stem => '(?:genlwsc|uwgm_client|uwgm)', index => 'dot_n', ext => '.log', placement => 'after',
+                    samples => [ 'genlwsc.log.1', 'uwgm_client.log.1', 'uwgm.log.1', 'uwgm_client.log', 'genlwsc.log' ] },
+      pattern_src => '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})Z: ([A-Z]): (P[0-9a-f]+): (T[0-9a-f]+): ([^ :]+): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'platform'],[4,'thread'],[5,'object'],[6,'message'] ],
+      transforms => [ 'wgm_msgtype' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'utc', frac => 'fixed3' },
+      duration_unit => undef, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        '2024-09-16T05:40:41.487Z: C: P3e68: T2950: $default: $generic: columns "date time tz msgtype logid tid area message"',
+        '2024-09-16T05:40:41.540Z: X: P3e68: T2950: UWGM: UWGM created',
+        '2024-09-16T05:40:41.963Z: I: P3e68: T2950: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: WWGM_PREFERENCES: Reading preferences from file: C:\Program Files\PTC\wgm\wgmclient.ini',
+        '2024-09-16T05:40:41.966Z: D: P3e68: T2950: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: UWGMLIB_PREFERENCES: [AutoCAD]',
+        '2024-09-16T05:40:43.416Z: E: P3e68: T2950: UWGM: UWGMCLNT_UI: UwgmEmbedZBrowser::Init Service unavailable',
+        '2024-09-16T05:40:44.602Z: S: P3e68: T2950: uwgm.session1.act#111761707663362.srvtxn#0: Server Transaction started',
+      ],
+      expect => [
+        [ '2024-09-16T05:40:41', 'CONFIG', '$default', undef, undef, undef, 'P3e68', 'T2950', '$generic: columns "date time tz msgtype logid tid area message"', undef, undef, '0', '0' ],
+        [ '2024-09-16T05:40:41', 'CREATE', 'UWGM', undef, undef, undef, 'P3e68', 'T2950', 'UWGM created', undef, undef, '0', '0' ],
+        [ '2024-09-16T05:40:41', 'INFO', 'uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader', undef, undef, undef, 'P3e68', 'T2950', 'WWGM_PREFERENCES: Reading preferences from file: C:\Program Files\PTC\wgm\wgmclient.ini', undef, undef, '0', '0' ],
+        [ '2024-09-16T05:40:41', 'DEBUG', 'uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader', undef, undef, undef, 'P3e68', 'T2950', 'UWGMLIB_PREFERENCES: [AutoCAD]', undef, undef, '0', '0' ],
+        [ '2024-09-16T05:40:43', 'ERROR', 'UWGM', undef, undef, undef, 'P3e68', 'T2950', 'UWGMCLNT_UI: UwgmEmbedZBrowser::Init Service unavailable', undef, undef, '0', '0' ],
+        [ '2024-09-16T05:40:44', 'START', 'uwgm.session1.act#111761707663362.srvtxn#0', undef, undef, undef, 'P3e68', 'T2950', 'Server Transaction started', undef, undef, '0', '0' ],
+      ] },
     { name => 'mt1gen', slug => 'thingworx_standard', match_type => 1, scanned => 1, head_class => 'digit',
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
@@ -2369,7 +2429,7 @@ sub format_registry_specs {
       transforms => [ 't_to_space' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
       duration_unit => undef, stats_eligible => 0,
-      expect_ancestors => [ 'mt1std', 'connection_server', 'mt1gen' ],
+      expect_ancestors => [ 'mt1std', 'connection_server', 'mt16', 'mt1gen' ],
       samples => [
         '[2025-02-04T12:06:22.784] [TRACE] tunnel keepalive sent',
         '2025-03-01 08:00:00.123 tunnel worker [INFO] session established',

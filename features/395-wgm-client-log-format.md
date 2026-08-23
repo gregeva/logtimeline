@@ -1,0 +1,189 @@
+# Feature: Windchill Workgroup Manager client log format (Issue #395)
+
+## Status
+
+Implemented on `395-wgm-client-log-format`, targeting release 0.17.0. Registry
+entry `mt16`, user-facing name `wgm_client`, match_type 16. Decisions D54–D56
+below are proposed and implemented as written; they await the architect's lock.
+
+## Overview
+
+PTC Windchill Workgroup Manager (WGM) writes three client-side diagnostic
+files — `genlwsc.log.N`, `uwgm_client.log.N` and `uwgm.log.N` — in one
+self-describing line format. Each file opens with a header block declaring its
+own schema (`columns "date time tz msgtype logid tid area message"`,
+`columns_sep ": "`, `time_precision 1000`, `use_local_time NO`), followed by
+data lines in that schema. This drop adds one declarative registry entry for
+the shape, filename evidence for the three stems, the category mapping the
+msgtype letters need to survive the read loop, a committed fixture and harness
+scenarios. No hot-loop code changes; the registry does the work.
+
+## Format contract
+
+### Line shape
+
+```
+<YYYY-MM-DD>T<HH:MM:SS.mmm>Z: <msgtype>: P<pid-hex>: T<tid-hex>: <area>: <message>
+```
+
+Every field is separated by the literal `": "` the header declares. Verified
+over all twelve sample files (2,534,326 lines): every line matches; there are
+no continuation lines, no blank lines, no lines without a timestamp, no BOM.
+Some messages end in a carriage return (HTTP response headers echoed into
+trace lines) — that is message content under a `\r?\n` line ending, which the
+read loop already strips.
+
+| Field | Capture | Record field | Notes |
+|---|---|---|---|
+| date + time | `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}` | `timestamp_str` | The `Z` is matched outside the capture. `frac fixed3` strips the fraction at offset 19; the `T` separator is kept (the fixed-offset parser never reads offset 10). |
+| msgtype | `[A-Z]` | `category_bucket` | Mapped through `wgm_msgtype` (D54). |
+| logid | `P[0-9a-f]+` | `platform` | Process id with the `P` prefix the log prints. Captured for the record; no consumer today. |
+| tid | `T[0-9a-f]+` | `thread` | Thread id with its `T` prefix. No `-N` suffix, so no thread-pool grouping is derived. |
+| area | `[^ :]+` | `object` | Dotted component path; `#`-qualified for sessions and transactions (`uwgm.session1.act#…​.srvtxn#0`); `$default` on header lines. Never contains a space or a colon in the corpus, so the class stops at the field separator. |
+| message | `(.*)` | `message` | Free text; freely carries further `: ` sub-structure (`UWGMCLNT_UI: UwgmApp::init Entered`, `$generic: columns "…"`). |
+
+`instance`, `user`, `session`, `bytes`, `duration` are undef; `status_code` and
+`is_access_log` are 0. Occurrences only: no line-level duration, bytes or
+count, `stats_eligible => 0`, `duration_unit => undef`.
+
+### Time contract
+
+`layout iso_ms`, `precision ms`, `tz utc` (the header's `use_local_time NO`
+and the `Z` suffix agree), `frac fixed3`. Every timestamp in the corpus is
+UTC; the time axis is therefore in UTC for these files.
+
+### msgtype vocabulary (D54)
+
+| Letter | Category | Observed meaning |
+|---|---|---|
+| `C` | `CONFIG` | header block (`$default: $generic: …`) |
+| `D` | `DEBUG` | |
+| `E` | `ERROR` | |
+| `F` | `FINISH` | `… finished` (paired with `S`) |
+| `I` | `INFO` | |
+| `S` | `START` | `… started` (paired with `F`) |
+| `T` | `TRACE` | |
+| `W` | `WARN` | |
+| `X` | `CREATE` | `… created` (paired with `Y`) |
+| `Y` | `DESTROY` | `… destroyed` (paired with `X`) |
+
+All ten letters occur in the corpus; the issue listed seven (`E`, `F`, `S`
+were missing). A letter outside the table is left as captured and falls to
+the category-vocabulary gate like any unknown level.
+
+### Filename evidence (D55)
+
+`stem (?:genlwsc|uwgm_client|uwgm)`, `ext .log`, `index dot_n`, `placement
+after` (`stem ext[.N]`). Filename samples: `genlwsc.log.1`, `uwgm_client.log.1`,
+`uwgm.log.1`, `uwgm_client.log`, `genlwsc.log`. No date component — the
+producer never puts one in the name. The nested `Log_PROE_*/` directory is
+path context, which D45 deliberately does not read.
+
+### Scan-order constraint
+
+`mt16` sits after the `connection_server` group and before `mt1gen` in static
+order and declares no ancestors. It is an ancestor of `mt2` (RAC client),
+whose `.*? \[[L: ]*([^\]]*)\]` tail accepts any line carrying a bracketed
+token — 51,757 of the corpus lines (2.0%). The bracket-bearing sample
+(`UWGMLIB_PREFERENCES: [AutoCAD]`) is the executable cross-shadow proof that
+derives the constraint; `mt2` declares `expect_ancestors => [mt1std,
+connection_server, mt16, mt1gen]`.
+
+## Decisions (proposed 2026-08-23; implemented as written)
+
+### D54 — msgtype letters map to categories: severity letters to the shared levels, lifecycle letters to their own identity
+
+The read loop drops any line whose category is not in `@log_levels`, so the
+raw letters cannot be the category — every WGM line would be matched and then
+silently discarded. The mapping is a per-line hash lookup (`wgm_msgtype`,
+one named transform primitive). `D/E/I/T/W` become the shared
+`DEBUG/ERROR/INFO/TRACE/WARN`, so error rates and highlight semantics work as
+for every other format. `C/X/Y/S/F` have no severity; they become `CONFIG`,
+`CREATE`, `DESTROY`, `START`, `FINISH` — five new members of the vocabulary,
+each with a colour and `-HL` variant, following the GC precedent (#382 D42:
+level is identity, not severity). Folding them into an existing level was
+rejected: it loses the lifecycle pairing (`X`/`Y`, `S`/`F`) that is the most
+useful structure these logs carry, and no severity is an honest fit. Only
+categories present in a file become columns, so the five new names appear
+only for WGM input. Their CSV column rules are declared in
+`tests/csv-output/rules/stats-columns.tsv` in the same change.
+
+### D55 — One registry entry with a multi-stem filename family, not a variant group
+
+Variant groups (D47) exist for producers that share a shape but differ in
+*semantics* — date layout (Connection Server vs Integration Runtime) or unit
+(Tomcat vs httpd `%D`) — where picking the wrong member changes what the
+numbers mean. The three WGM files share the shape *and* the semantics: same
+columns, same UTC contract, same vocabulary; they differ only in which
+subsystem writes them and what the `area` values are. Three members would buy
+three user-facing names at the cost of three slugs, three sample sets, and
+the ambiguity note firing on any renamed file for a "consequence class" that
+does not exist. The user already sees which file is which in the file list;
+the `area` values say the rest. One entry whose stem alternation covers the
+family is the honest model; the `filename_evidence:` line in `-V` still names
+which stem matched. Note that the in-file `log_base_name` does *not*
+discriminate either: `uwgm.log.1` declares `log_base_name "uwgm_client"`.
+
+### D56 — Extraction is capture-only apart from the msgtype map
+
+No timestamp normalisation (`t_to_space`) and no `strip_trailing_ws`: the
+fixed-offset parser reads around the `T`, the GC entry already keeps its `T`
+without consequence, and the trailing space some trace messages carry is
+invisible in every rendered surface. Each transform is a per-line cost on
+files that run to 842k lines; none of these buys the analyst anything.
+
+## Verification (2026-08-23)
+
+Corpus: the twelve files under `logs/WGM/` (gitignored; `docs/test-logs.md`).
+
+| Check | Result |
+|---|---|
+| Pattern over every line of every file | 2,534,326 / 2,534,326 matched |
+| Lines also accepted by `mt2` | 51,757 (2.0%) — hence the ancestor constraint |
+| D24 load-time gates (samples, parity, cross-shadow, filename samples, whitespace dispatch) | pass on every run |
+
+`ltl --disable-progress -ni -bs 1440 -oe -n 1 -osum -V format-detection -V benchmark-data <file>`,
+one file per stem (the smallest triple) plus the largest `uwgm_client`:
+
+| File | lines | matched | included | filename_evidence | stderr |
+|---|---|---|---|---|---|
+| `genlwsc.log.1` | 7,766 | 7,766 | 7,766 | `stem=mt16 ext=match date=- index=present` | clean |
+| `uwgm_client.log.1` | 155,541 | 155,541 | 155,541 | same | clean |
+| `Log_PROE_*/uwgm.log.1` | 31,756 | 31,756 | 31,756 | same | clean |
+| `uwgm_client.log.1` (second set) | 474,278 | 474,278 | 474,278 | same | clean |
+
+`included = matched` is the proof of D54: the category gate passed every
+line. Sabotage: removing `CONFIG` from `@log_levels` leaves `matched_lines`
+at 44 on the fixture and drops `lines_included` to 33 — caught by the
+`wgm-client` scenario's `lines_included` assertion and by nothing else;
+disabling the transform is caught earlier by D24 gate 2 (expected records).
+
+Harness: `tests/validate-format-detection.sh` — scenarios `wgm-client` (9
+assertions) and `wgm-filename-family` (6 assertions) green; `entries: 14`.
+CSV rules: the WGM STATS CSV is refused by the previous
+`stats-columns.tsv` (`unknown column FINISH`) and accepted by the updated one.
+
+## What the issue got wrong about the data
+
+- msgtype vocabulary is ten letters, not seven: `E` (error), `F` (finish),
+  `S` (start) occur in every `uwgm.log.1` and in most `uwgm_client.log.1`.
+- `log_base_name` does not identify the subsystem: `uwgm.log.1` declares
+  `"uwgm_client"`. Only the file name separates `uwgm.log` from
+  `uwgm_client.log`.
+- Areas are not purely dotted: session/transaction areas carry `#`
+  qualifiers (`act#…`, `srvtxn#N`, `merge#N`) — thousands of distinct such
+  values across the corpus.
+- Some lines end `\r\n` (HTTP headers echoed into trace messages); harmless.
+
+## Open items
+
+- D54–D56 await the architect's lock; D54 changes a user-facing vocabulary
+  (five new category names and colours) and is the one to review first.
+- The `S`/`F` and `X`/`Y` pairs are natural inter-line duration sources
+  (`Server Transaction started` → `finished` on the same `srvtxn#` area);
+  out of scope here, noted for the derived-metrics phase.
+- `tests/csv-output/rules/stats-columns.tsv` still lacks rows for the #382
+  GC categories (`Pause Remark`, `Pause Cleanup`, `To-space exhausted`,
+  `Using G1`); found while adding the WGM rows, not fixed here.
+- No `-V` section exposes per-category counts; the msgtype mapping is
+  asserted through `benchmark-data`'s `lines_included`.

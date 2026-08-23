@@ -65,9 +65,11 @@ Client-side diagnostic logs from PTC Workgroup Manager for SolidWorks (WGM). One
 2025-10-29T10:56:53.239Z: X: Pa5b4: T8570: UWGM: UWGM created
 2025-10-29T10:56:54.392Z: I: Pa5b4: T8570: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: WWGM_PREFERENCES: Reading preferences from file: C:\Program Files\PTC\wgm 13.1.0.0\wgmclient.ini
 ```
-Fields: `date`(T)`time`(ms precision)`Z` (combined ISO-8601 UTC timestamp), `msgtype` (single-letter: C/D/I/T/W/X/Y — config/debug/info/trace/warn/create/destroy), `logid` (process id, hex-prefixed `P`), `tid` (thread id, hex-prefixed `T`), `area` (dotted component path), `message` (free text, may itself contain `: `-delimited sub-fields).
+Fields: `date`(T)`time`(ms precision)`Z` (combined ISO-8601 UTC timestamp), `msgtype` (single letter, ten values across the set: C/D/E/F/I/S/T/W/X/Y — config/debug/error/finish/info/start/trace/warn/create/destroy), `logid` (process id, hex-prefixed `P`), `tid` (thread id, hex-prefixed `T`), `area` (dotted component path; session and transaction areas carry `#` qualifiers such as `act#…` and `srvtxn#N`), `message` (free text, may itself contain `: `-delimited sub-fields).
 
-**Note**: No `ltl` format entry exists yet for this log type as of 2026-08-22 — tracked by #395 (blocked by #384).
+**Structure**: every line in every file matches the one shape — no continuation lines, no blank lines, ASCII throughout. A minority of trace messages (HTTP response headers echoed into the log) end in a carriage return, which the line reader strips. The `uwgm.log.1` header declares `log_base_name "uwgm_client"`, so the in-file name does not distinguish it from `uwgm_client.log.1` — only the file name does. `D` dominates every file (80–90% of lines); `X`/`Y` and `S`/`F` come in matched create/destroy and start/finish pairs on the same `area`.
+
+**ltl format**: `wgm_client` — one entry for all three filenames; the letters become the `DEBUG`/`ERROR`/`INFO`/`TRACE`/`WARN` levels plus the `CONFIG`/`CREATE`/`DESTROY`/`START`/`FINISH` categories. Occurrences only (no duration, bytes or count at the line level). The committed fixture `tests/fixtures/format-detection/wgm-client.txt` is a scrubbed 44-line slice of an `uwgm_client.log.1`.
 
 ---
 
