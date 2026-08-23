@@ -175,7 +175,7 @@ oracle_json_for_logfile() {
     log_shorthand="$(csv_cache_logfile_shorthand "$logfile")"
     local cache_name="${fmt}_${log_shorthand}_bs${bs_sec}_du${du_unit}_${algorithm}_bpd${bpd}.json"
     local cache_path="$ORACLE_CACHE_DIR/$cache_name"
-    if [[ -f "$cache_path" ]]; then
+    if [[ -s "$cache_path" ]]; then   # -s, not -f: an interrupted producer leaves a 0-byte file
         echo "$cache_path"
         return 0
     fi
@@ -219,7 +219,7 @@ pa_capture_for_scenario() {
     local scenario="$1" logfile="$2" options="$3"
     mkdir -p "$PA_CAPTURE_DIR"
     local cache_path="$PA_CAPTURE_DIR/pa-${scenario}.txt"
-    if [[ -f "$cache_path" ]]; then
+    if [[ -s "$cache_path" ]]; then   # -s, not -f: an interrupted producer leaves a 0-byte file
         echo "$cache_path"
         return 0
     fi
