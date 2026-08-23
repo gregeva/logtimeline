@@ -357,7 +357,7 @@ use constant {
     FR_SAMPLES         => 15,  # sample lines (load-time executable self-tests)
     FR_ANCESTORS       => 16,  # derived pinned-ancestor names (D26 constraints)
     FR_TIME_PARSE      => 17,  # compiled timestamp-parse closure for the entry's
-                               # declared layout (D31; shares %timestamp_cache)
+                               # declared layout (D31; shares %timestamp_date_cache)
     FR_ANC_SET         => 18,  # FR_ANCESTORS as a name-set hashref — the hot
                                # loop's O(ancestors) already-optimal check must
                                # not rebuild a hash per line (P3 lean-loop)
@@ -510,7 +510,10 @@ if ($@ || !$terminal_width) {
 } else {
     $terminal_height_detected = 1;  # Terminal height was successfully detected
 }
-my %timestamp_cache;
+my %timestamp_date_cache;          # date string -> midnight epoch
+my %timestamp_date_cache_added;    # date string -> insertion stamp (eviction order)
+my $timestamp_date_cache_stamp = 0;
+use constant TIMESTAMP_DATE_CACHE_MAX => 100;
 
 # Heatmap data structures
 my $heatmap_enabled = 0;                    # Flag: heatmap mode active
@@ -2203,11 +2206,11 @@ my ( $bytes, $duration );
 my ( $status_code, $is_access_log );
 # Set by the generated blocks alongside the record fields: the parsed
 # whole-second epoch and the fractional milliseconds stripped from
-# $timestamp_str (the strip runs before parsing so cache keys exclude
-# both offset and fraction, exactly as before). The CSV paths in
-# read_and_process_logs() set these directly. The last-seen memo fronts
-# %timestamp_cache: consecutive lines overwhelmingly share a timestamp
-# second, and a string eq is cheaper than two hash ops.
+# $timestamp_str (the strip runs before parsing so the date key excludes
+# both offset and fraction). The CSV paths in read_and_process_logs() set
+# these directly. The last-seen memo fronts the parse: consecutive lines
+# overwhelmingly share a timestamp second, and a string eq is cheaper
+# than the date lookup plus arithmetic.
 my ( $timestamp, $fractional_ms );
 my ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
 
@@ -2676,39 +2679,64 @@ sub format_registry_specs {
     );
 }
 
-# Timestamp-parse closures per declared layout family (D31). Both share
-# the process-wide %timestamp_cache with today's exact semantics: keyed by
-# the post-chop, post-fractional-strip timestamp string, whole seconds
-# only. The iso parser serves every iso_* layout (fixed substr offsets,
-# as before); apache_clf parses the dd/Mon/yyyy:HH:MM:SS form.
+# Timestamp date cache: one midnight epoch per distinct DATE of the
+# post-chop, post-fractional-strip timestamp string, so timegm() runs once
+# per day and the time of day is added arithmetically — exact because
+# timegm() is pure UTC math (no DST, no calendar in the time part).
+# Bounded at TIMESTAMP_DATE_CACHE_MAX entries: every insertion carries a
+# stamp, hits never touch it, and an insertion that overflows the cap
+# evicts the oldest-stamped entries. A date seen again after eviction is
+# simply re-inserted with a fresh stamp. All of this lives on the cold
+# path (a new date), never per line.
+sub timestamp_date_cache_add {
+    my ($date, $midnight) = @_;
+    $timestamp_date_cache{$date} = $midnight;
+    $timestamp_date_cache_added{$date} = ++$timestamp_date_cache_stamp;
+    if (keys %timestamp_date_cache > TIMESTAMP_DATE_CACHE_MAX) {
+        my @oldest = sort { $timestamp_date_cache_added{$a} <=> $timestamp_date_cache_added{$b} } keys %timestamp_date_cache;
+        splice @oldest, -TIMESTAMP_DATE_CACHE_MAX;
+        delete @timestamp_date_cache{@oldest};
+        delete @timestamp_date_cache_added{@oldest};
+    }
+    return $midnight;
+}
+sub timestamp_date_cache_clear {
+    %timestamp_date_cache = ();
+    %timestamp_date_cache_added = ();
+}
+
+# Timestamp-parse closures per declared layout family (D31), each reading
+# the date's midnight from the cache above. The iso parser serves every
+# iso_* layout (fixed substr offsets); apache_clf parses the
+# dd/Mon/yyyy:HH:MM:SS form, keyed on the text before the first colon.
 my %format_month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
 sub compile_format_time_parser {
     my ($layout) = @_;
     if ($layout eq 'apache_clf') {
         return sub {
             my $ts = $_[0];
-            return $timestamp_cache{$ts} if exists $timestamp_cache{$ts};
-            my ($day, $month_str, $year, $hour, $minute, $second) = $ts =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/;
-            my $month = $format_month_map{$month_str};
-            return $timestamp_cache{$ts} = timegm( $second, $minute, $hour, $day, $month - 1, $year );
+            my $colon = index($ts, ':');
+            my $midnight = $timestamp_date_cache{substr($ts, 0, $colon)} // do {
+                my ($day, $month_str, $year) = $ts =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/;
+                timestamp_date_cache_add( substr($ts, 0, $colon), timegm( 0, 0, 0, $day, $format_month_map{$month_str} - 1, $year ) );
+            };
+            return $midnight + substr($ts, $colon + 1, 2) * 3600 + substr($ts, $colon + 4, 2) * 60 + substr($ts, $colon + 7, 2);
         };
     }
     # Every iso_* layout (and csv's ISO fallback path) uses the fixed-offset
-    # substr extraction, exactly as the retired per-match-type branch did.
-    # iso_ms_ddmm reads the two date fields in the other order (yyyy-dd-MM,
-    # the Integration Runtime encoder, #385); everything else is identical.
+    # substr extraction. iso_ms_ddmm reads the two date fields in the other
+    # order (yyyy-dd-MM, the Integration Runtime encoder, #385); everything
+    # else is identical.
     my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);
     return sub {
         my $ts = $_[0];
-        return $timestamp_cache{$ts} if exists $timestamp_cache{$ts};
-        return $timestamp_cache{$ts} = timegm(
-            substr($ts, 17, 2),            # second
-            substr($ts, 14, 2),            # minute
-            substr($ts, 11, 2),            # hour
+        my $midnight = $timestamp_date_cache{substr($ts, 0, 10)} // timestamp_date_cache_add( substr($ts, 0, 10), timegm(
+            0, 0, 0,
             substr($ts, $day_off, 2),      # day
             substr($ts, $month_off, 2) - 1,# month (0-11)
             substr($ts, 0, 4),             # year
-        );
+        ) );
+        return $midnight + substr($ts, 11, 2) * 3600 + substr($ts, 14, 2) * 60 + substr($ts, 17, 2);
     };
 }
 
@@ -3057,7 +3085,7 @@ sub format_registry_set_occupant {
     return 0 unless $changed;
     my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
     $format_scan_sub = $format_scan_sub_cache{$sig} //= compile_format_scan_sub($format_registry_opts);
-    %timestamp_cache = ();
+    timestamp_date_cache_clear();
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
     return 1;
 }
@@ -3187,13 +3215,15 @@ sub format_entry_block_src {
     # Inline timestamp handling (D31 taken to its P8 conclusion: the
     # closure-call overhead disappears when the parse is inlined into the
     # per-format block). Fractional handling first — after the tz-chop
-    # transforms — so %timestamp_cache keys exclude offset and fraction,
-    # exactly as before; the declared frac contract selects the variant:
+    # transforms — so the %timestamp_date_cache key excludes offset and
+    # fraction; the declared frac contract selects the variant:
     #   fixed3  — pattern-guaranteed SS.mmm tail: fixed-offset substr
     #             reads, no regex, no exponent math
     #   none    — layout never carries a fraction: constant zero, no scan
     #   generic — variable/unguaranteed shape: the original s/// strip
-    # Then the layout parse, fronted by the last-seen memo and the cache.
+    # Then the layout parse, fronted by the last-seen memo: the date's
+    # midnight epoch from %timestamp_date_cache (one timegm() per distinct
+    # day) plus the time of day as arithmetic, as compile_format_time_parser.
     my $frac = $spec->{time}{frac} // 'generic';
     if ($frac eq 'fixed3') {
         die "ltl: format registry: entry '$spec->{name}' declares frac 'fixed3' but its pattern does not guarantee a 3-digit fraction\n"
@@ -3209,10 +3239,11 @@ substr($timestamp_str, 19) = '';};
     # iso_ms_ddmm (yyyy-dd-MM, #385): the day and month reads swap offsets.
     my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);
     my $compute = ($layout eq 'apache_clf')
-        ? q{do { my ($day, $month_str, $year, $hour, $minute, $second) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/; timegm( $second, $minute, $hour, $day, $format_month_map{$month_str} - 1, $year ) }}
-        : qq{timegm( substr(\$timestamp_str, 17, 2), substr(\$timestamp_str, 14, 2), substr(\$timestamp_str, 11, 2), substr(\$timestamp_str, $day_off, 2), substr(\$timestamp_str, $month_off, 2) - 1, substr(\$timestamp_str, 0, 4) )};
-    # The cache-miss branch runs once per distinct timestamp string — never
-    # once per line — so it is where the steady-loop content probes live
+        ? q{do { my $colon = index($timestamp_str, ':'); my $midnight = $timestamp_date_cache{substr($timestamp_str, 0, $colon)} // do { my ($day, $month_str, $year) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/; timestamp_date_cache_add( substr($timestamp_str, 0, $colon), timegm( 0, 0, 0, $day, $format_month_map{$month_str} - 1, $year ) ) }; $midnight + substr($timestamp_str, $colon + 1, 2) * 3600 + substr($timestamp_str, $colon + 4, 2) * 60 + substr($timestamp_str, $colon + 7, 2) }}
+        : qq{do { my \$midnight = \$timestamp_date_cache{substr(\$timestamp_str, 0, 10)} // timestamp_date_cache_add( substr(\$timestamp_str, 0, 10), timegm( 0, 0, 0, substr(\$timestamp_str, $day_off, 2), substr(\$timestamp_str, $month_off, 2) - 1, substr(\$timestamp_str, 0, 4) ) ); \$midnight + substr(\$timestamp_str, 11, 2) * 3600 + substr(\$timestamp_str, 14, 2) * 60 + substr(\$timestamp_str, 17, 2) }};
+    # The memo-miss branch runs once per change of timestamp string between
+    # consecutive lines — never once per line on dense streams — so it is
+    # where the steady-loop content probes live
     # (D52/I2): for ISO layouts, an impossible date component under this
     # layout (month > 12, day > 31 — the timegm() guard, #385) and a
     # timestamp earlier than the previous distinct one are reported to
@@ -3234,16 +3265,12 @@ substr($timestamp_str, 19) = '';};
     \$format_last_ts_str = \$timestamp_str;
     return \$format_scan_sub->(\$_[0]) if format_probe_signal(ENTRY_PLACEHOLDER, 'impossible_date', \$timestamp_str);
 } else {
-$prev_src    \$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str} = $compute;
+$prev_src    \$timestamp = \$format_last_ts_epoch = $compute;
     \$format_last_ts_str = \$timestamp_str;
 $mono_src}}
-        : qq{\$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str} = $compute;
+        : qq{\$timestamp = \$format_last_ts_epoch = $compute;
     \$format_last_ts_str = \$timestamp_str;};
     push @body, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
-elsif (exists \$timestamp_cache{\$timestamp_str}) {
-    \$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str};
-    \$format_last_ts_str = \$timestamp_str;
-}
 else {
     $miss_src
 }};
@@ -3611,7 +3638,7 @@ sub build_format_registry {
     ( $status_code, $is_access_log ) = ( 0, 0 );
     ( $timestamp, $fractional_ms ) = ( undef, 0 );
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
-    %timestamp_cache = ();   # validation parsed the samples; start the run with an empty cache
+    timestamp_date_cache_clear();   # validation parsed the samples; start the run with an empty cache
     $format_scan_promotions = 0;   # gate 5's sample stream promoted entries; the
                                    # telemetry counts run promotions only
 }
@@ -10193,8 +10220,8 @@ sub read_and_process_logs {
                         next;
                     }
                     # Declarative time contract (D31): the csv entry's
-                    # compiled layout parser, sharing %timestamp_cache with
-                    # today's exact keying (post-chop, post-fractional-strip).
+                    # compiled layout parser, sharing %timestamp_date_cache
+                    # (post-chop, post-fractional-strip date key).
                     $timestamp = $line_entry->[FR_TIME_PARSE]->($timestamp_str);
                 }
 
