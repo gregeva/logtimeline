@@ -393,6 +393,25 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 Add the trap on the *same logical line* as the `mktemp` so it can't be forgotten between declaration and use. If the harness uses multiple temp dirs, set the trap to clean all of them: `trap 'rm -rf "$DIR1" "$DIR2"' EXIT`.
 
+#### Trap 11: backticks inside double-quoted prose are command substitutions
+
+```bash
+# WRONG — bash RUNS `more`: the harness blocks on a pager waiting for a terminal
+assert_line "$out" \
+    asserts     "fallback for environments where the pager cannot interpret ANSI (notably legacy Windows `more`)" \
+    ...
+```
+
+`asserts`, `produced_by` and `contract` strings are documentation, and documentation habitually quotes identifiers with markdown backticks. Inside a double-quoted bash string a backtick pair is a command substitution: the quoted word is executed, its output is spliced into the string, and if the word happens to be a real command (`more`, `less`, `script`, `time`, …) the harness runs it — silently when it exits at once, as a hang when it waits on a terminal. `validate-explain.sh` stalled an entire suite run for 36 minutes this way (2026-08-23): in an interactive terminal `more` exited immediately, so the defect only surfaced when the suite ran in the background.
+
+```bash
+# RIGHT — escape the backticks, or single-quote the string
+    asserts     "fallback ... (notably legacy Windows \`more\`)" \
+    asserts     'fallback ... (notably legacy Windows `more`)' \
+```
+
+Review gate: `grep -n '`' tests/validate-*.sh` — every backtick on a non-comment line is either escaped or inside single quotes. A harness that needs a variable *and* a backtick in one string escapes the backtick.
+
 ## Invocation coherence: every `ltl` run is shaped to the test that invokes it
 
 A harness does not run `ltl` "the default way" and read off the part it cares about. Every invocation — in a scenario, a capture helper, a probe, a sabotage proof — is tuned so that the tool does exactly the work the assertion needs and nothing else: the fastest runtime, the minimum memory, and an output whose shape is the one being asserted. Anything the run computes that the assertion never reads is waste at best and, on the wrong input, a resource problem at worst.
