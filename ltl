@@ -345,30 +345,29 @@ use constant {
     FR_TRANSFORMS      => 7,   # [ transform primitive names ] (post-capture)
     FR_TIME            => 8,   # { layout, precision, tz } — declarative time contract
     FR_DURATION_UNIT   => 9,   # declared unit of the duration field (undef = none)
-    FR_UNIT_AMBIGUOUS  => 10,  # 1 = unit varies across producers (D18 warning case)
-    FR_STATS           => 11,  # statistics-eligible: sets is_access_log statically
-    FR_GUARD           => 12,  # cheap superset guard closure or undef (D28)
-    FR_EXTRACT         => 13,  # compiled extraction closure (fixed-order list return)
-    FR_MESSAGE_METRICS => 14,  # declared in-message metric probes (D33)
-    FR_EVENT_PAIRS     => 15,  # reserved slot — validated empty in this drop (D23)
-    FR_SAMPLES         => 16,  # sample lines (load-time executable self-tests)
-    FR_ANCESTORS       => 17,  # derived pinned-ancestor names (D26 constraints)
-    FR_TIME_PARSE      => 18,  # compiled timestamp-parse closure for the entry's
+    FR_STATS           => 10,  # statistics-eligible: sets is_access_log statically
+    FR_GUARD           => 11,  # cheap superset guard closure or undef (D28)
+    FR_EXTRACT         => 12,  # compiled extraction closure (fixed-order list return)
+    FR_MESSAGE_METRICS => 13,  # declared in-message metric probes (D33)
+    FR_EVENT_PAIRS     => 14,  # reserved slot — validated empty in this drop (D23)
+    FR_SAMPLES         => 15,  # sample lines (load-time executable self-tests)
+    FR_ANCESTORS       => 16,  # derived pinned-ancestor names (D26 constraints)
+    FR_TIME_PARSE      => 17,  # compiled timestamp-parse closure for the entry's
                                # declared layout (D31; shares %timestamp_cache)
-    FR_ANC_SET         => 19,  # FR_ANCESTORS as a name-set hashref — the hot
+    FR_ANC_SET         => 18,  # FR_ANCESTORS as a name-set hashref — the hot
                                # loop's O(ancestors) already-optimal check must
                                # not rebuild a hash per line (P3 lean-loop)
-    FR_MATCHES         => 20,  # run-total matched-line count for this entry
+    FR_MATCHES         => 19,  # run-total matched-line count for this entry
                                # (scan telemetry; -V format-detection / scan)
-    FR_GROUP           => 21,  # variant-group key (D47/F1); an entry without
+    FR_GROUP           => 20,  # variant-group key (D47/F1); an entry without
                                # variants is a group of one keyed by its name.
                                # Ordering constraints and promotion closures
                                # are keyed by group, never by member.
-    FR_GROUP_DEFAULT   => 22,  # 1 = the member occupying the group's scan
+    FR_GROUP_DEFAULT   => 21,  # 1 = the member occupying the group's scan
                                # slot when no evidence selects another
-    FR_FILENAME        => 23,  # filename evidence (D45): { matcher, stem, date,
+    FR_FILENAME        => 22,  # filename evidence (D45): { matcher, stem, date,
                                # index, ext, placement } or undef
-    FR_FILENAME_SAMPLES=> 24,  # producer-true names the matcher must accept
+    FR_FILENAME_SAMPLES=> 23,  # producer-true names the matcher must accept
 };
 my @format_registry;           # scanned entries, static cascade order: one
                                # occupant per variant-group slot (D47/F1)
@@ -2247,7 +2246,7 @@ my %format_transform_code = (
 # field map, transform list, in-message metric probes (D33: compiled into
 # the closure behind an index() superset gate, never fused into the
 # recognition regex), the three-part time contract (D23/D31), duration
-# unit (D18; unit_ambiguous marks the Tomcat9-vs-Apache %D case),
+# unit (D18; producer variants of one shape are variant-group members, D47),
 # statistics eligibility (static is_access_log; formats whose probes set
 # it per line leave this 0 and set marks_metrics_observed on the probe
 # block), cheap superset guards (D28: only the expensive-to-reject access
@@ -2282,7 +2281,7 @@ sub format_registry_specs {
           marks_metrics_observed => 1,
       },
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
-      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 0,
+      duration_unit => 'ms', stats_eligible => 0,
       expect_ancestors => [],
       samples => [
         '2025-05-05 00:00:00.006+0000 [L: ERROR] [O: c.p.a.u.JobPurgeScheduler] [I: ] [U: SuperUser] [S: ] [P: ] [T: pool-1-thread-1] Job purge completed',
@@ -2306,7 +2305,7 @@ sub format_registry_specs {
           marks_metrics_observed => 1,
       },
       time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
-      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 0,
+      duration_unit => 'ms', stats_eligible => 0,
       expect_ancestors => [],
       samples => [
         '2025-08-14 21:00:34.633 [vert.x-eventloop-thread-12] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size',
@@ -2334,7 +2333,7 @@ sub format_registry_specs {
           marks_metrics_observed => 1,
       },
       time => { layout => 'iso_ms_ddmm', precision => 'ms', tz => 'local', frac => 'fixed3' },
-      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 0,
+      duration_unit => 'ms', stats_eligible => 0,
       expect_ancestors => [],
       samples => [
         '2025-28-01 07:26:36.541 [vert.x-eventloop-thread-0] INFO  c.t.i.IntegrationRuntimeConfiguration - Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted',
@@ -2349,7 +2348,7 @@ sub format_registry_specs {
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
       transforms => [],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
-      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 0,
+      duration_unit => 'ms', stats_eligible => 0,
       expect_ancestors => [ 'mt1std' ],
       samples => [
         '2025-02-04 12:05:57.481+0000 [L: DEBUG] trailing content that does not carry the full bracket sections',
@@ -2364,7 +2363,7 @@ sub format_registry_specs {
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
       transforms => [ 't_to_space' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
-      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      duration_unit => undef, stats_eligible => 0,
       expect_ancestors => [ 'mt1std', 'connection_server', 'mt1gen' ],
       samples => [
         '[2025-02-04T12:06:22.784] [TRACE] tunnel keepalive sent',
@@ -2379,7 +2378,7 @@ sub format_registry_specs {
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[6,'duration'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
-      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 1,
+      duration_unit => 'ms', stats_eligible => 1,
       guard => { lit => 'ms] [' },
       expect_ancestors => [],
       samples => [
@@ -2395,7 +2394,7 @@ sub format_registry_specs {
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
-      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 1,
+      duration_unit => undef, stats_eligible => 1,
       guard => { tail_one_token => 1 },
       expect_ancestors => [],
       samples => [
@@ -2411,7 +2410,7 @@ sub format_registry_specs {
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[8,'duration'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
-      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 1,
+      duration_unit => 'ms', stats_eligible => 1,
       guard => { lit => '" "' },
       expect_ancestors => [],
       samples => [
@@ -2430,7 +2429,7 @@ sub format_registry_specs {
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[6,'duration'],[7,'thread'],[8,'session'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
-      duration_unit => 'ms', unit_ambiguous => 1, stats_eligible => 1,
+      duration_unit => 'ms', stats_eligible => 1,
       expect_ancestors => [ 'mt12', 'mt4', 'mt9' ],
       samples => [
         '43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295',
@@ -2454,7 +2453,7 @@ sub format_registry_specs {
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[6,'duration'],[7,'thread'],[8,'session'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
-      duration_unit => 'us', unit_ambiguous => 0, stats_eligible => 1,
+      duration_unit => 'us', stats_eligible => 1,
       expect_ancestors => [ 'mt12', 'mt4', 'mt9' ],
       samples => [
         '127.0.0.1 - - [22/Jan/2026:08:49:51 +0000] "GET /Windchill/servlet/WindchillGW/wt.httpgw.HTTPServer/ping HTTP/1.1" 200 209 173542',
@@ -2467,7 +2466,7 @@ sub format_registry_specs {
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
       transforms => [ 'chop_tz_colon_offset', 't_to_space' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'generic' },
-      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      duration_unit => undef, stats_eligible => 0,
       expect_ancestors => [],
       samples => [
         '{"@timestamp":"2025-02-02T21:03:06.725+00:00","@version":1,"message":"Error encountered, closing WebSocket: endpointId=2608459","logger_name":"com.thingworx.connectionserver.alwayson.AbstractClientEndpoint","thread_name":"vert.x-eventloop-thread-16","level":"WARN","level_value":30000}',
@@ -2494,7 +2493,7 @@ sub format_registry_specs {
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'message'],[4,'heap_from'],[5,'heap_to'],[6,'heap_size'],[7,'duration'] ],
       transforms => [ 'gc_heap_delta' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
-      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 1,
+      duration_unit => 'ms', stats_eligible => 1,
       expect_ancestors => [],
       samples => [
         '[2025-04-05T11:10:47.867+0000][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 2433M->66M(49152M) 18.406ms',
@@ -2517,7 +2516,7 @@ sub format_registry_specs {
       field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],
       transforms => [ 'comma_to_dot', 't_to_space', 'strip_trailing_ws' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
-      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      duration_unit => undef, stats_eligible => 0,
       expect_ancestors => [],
       samples => [
         'ERROR [2025-02-19 18:31:00,284] com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!',
@@ -2532,7 +2531,7 @@ sub format_registry_specs {
       field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'message'] ],
       transforms => [ 'comma_to_dot', 't_to_space', 'strip_trailing_ws' ],
       time => { layout => 'iso_flex', precision => 's', tz => 'local', frac => 'generic' },
-      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      duration_unit => undef, stats_eligible => 0,
       expect_ancestors => [ 'mt1std', 'connection_server', 'mt1gen' ],
       samples => [
         '2025-02-20 10:06:10 [nioEventLoopGroup-2-1] WARN  io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]',
@@ -2547,7 +2546,7 @@ sub format_registry_specs {
       field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],
       transforms => [ 'chop_message', 'strip_pid', 'hoist_cpp_object' ],
       time => { layout => 'iso_flex_frac', precision => 'ms', tz => 'local', frac => 'generic' },
-      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
+      duration_unit => undef, stats_eligible => 0,
       expect_ancestors => [],
       samples => [
         'INFO 2025-08-09 18:19:04,479 8012 change_notification_source.cpp:11 OnProvisioningChanged provisioning change update received',
@@ -2568,7 +2567,7 @@ sub format_registry_specs {
       pattern_src => undef,
       field_map => [], transforms => [],
       time => { layout => 'csv', precision => 'ms', tz => 'utc' },
-      duration_unit => undef, unit_ambiguous => 0, stats_eligible => 1,
+      duration_unit => undef, stats_eligible => 1,
       expect_ancestors => [],
       samples => [], expect => [] },
     );
@@ -3417,7 +3416,6 @@ sub build_format_registry {
         $entry->[FR_TRANSFORMS]      = $spec->{transforms};
         $entry->[FR_TIME]            = $spec->{time};
         $entry->[FR_DURATION_UNIT]   = $spec->{duration_unit};
-        $entry->[FR_UNIT_AMBIGUOUS]  = $spec->{unit_ambiguous};
         $entry->[FR_STATS]           = $spec->{stats_eligible};
         $entry->[FR_GUARD]           = $guards{ $spec->{name} };
         $entry->[FR_EXTRACT]         = $spec->{scanned}
