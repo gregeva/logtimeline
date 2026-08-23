@@ -393,6 +393,21 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 Add the trap on the *same logical line* as the `mktemp` so it can't be forgotten between declaration and use. If the harness uses multiple temp dirs, set the trap to clean all of them: `trap 'rm -rf "$DIR1" "$DIR2"' EXIT`.
 
+## Invocation coherence: every `ltl` run is shaped to the test that invokes it
+
+A harness does not run `ltl` "the default way" and read off the part it cares about. Every invocation — in a scenario, a capture helper, a probe, a sabotage proof — is tuned so that the tool does exactly the work the assertion needs and nothing else: the fastest runtime, the minimum memory, and an output whose shape is the one being asserted. Anything the run computes that the assertion never reads is waste at best and, on the wrong input, a resource problem at worst.
+
+The mechanical gate before writing any `ltl` command line in a test:
+
+1. **What does this run prove?** Name the surface under assertion (a `-V` section, a rendered block, an exit code, a stderr diagnostic).
+2. **What does that surface NOT depend on?** Everything else is switched off or made trivially cheap through the tool's own options. A format-detection or evidence assertion is identical at any bucket size, so it runs with the coarsest bucket (`-bs 1440`) and no empty buckets (`-oe`); a column-layout assertion runs with `-n 1`; a stderr-diagnostic assertion needs no rendered table at all where an option suppresses it.
+3. **Does the input's shape match the run?** Fixtures spanning months, or a file set whose files sit years apart, make the default time axis allocate thousands of empty buckets — `-oe` and a day-sized bucket are mandatory there unless the time axis *is* the subject. Use the smallest fixture that carries the signal.
+4. **Consult the tool's documentation (`docs/usage.md`, `--help`) for the options that do this** before inventing a workaround in the harness. Where the right shape is not obvious — a scenario that needs the time axis *and* a wide span, say — the choice is an architect decision, recorded in the scenario's comment.
+
+The scenario's comment states the shape and why (one line: *"`-bs 1440 -oe`: detection assertions; fixtures span months"*). A harness run whose options were never chosen against its own assertion is a defect in review, whether or not it passes.
+
+Precedent: #384 (2026-08-23) — ten new format-detection scenarios and the ad-hoc parity checks behind them ran multi-year fixtures at default (and hourly) buckets, building tens of thousands of empty buckets to assert a per-file selection that never reads a bucket. #399 (audit every test harness for invocation coherence) tracks the audit of every existing harness against this rule.
+
 ## Runtime-warning cleanliness
 
 Every harness that invokes `ltl` MUST capture the invocation's stderr and fail the run if it contains a Perl runtime warning. A runtime warning (uninitialized value, substr outside of string, non-numeric argument, out-of-range date field, ...) is an unguarded data path — a bug that has not yet found the input that makes it fatal or wrong — and a harness that discards stderr certifies code it never looked at.
