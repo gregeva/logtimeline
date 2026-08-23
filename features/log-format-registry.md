@@ -809,7 +809,7 @@ Detection-evidence keys (umbrella D53, #388; emitted by `emit_format_detection_s
 
 **Sub-section `=== format-detection / scan ===` (run-level, one per run, emitted inside the parent section before its END marker; closed by `=== END format-detection / scan ===`):**
 
-- `entries: N` — count of scanned registry entries compiled into the scan sub (13 as of this drop; `csv` is outside the scan array by design, D32). Changes only when a scanned format is added/removed — same commit updates this contract and the harness.
+- `entries: N` — count of scanned registry entries compiled into the scan sub (14 since #395 added `mt16`; `csv` is outside the scan array by design, D32). Changes only when a scanned format is added/removed — same commit updates this contract and the harness.
 - `guarded: name,...` — registry entry names (FR_NAME, e.g. `mt12`) carrying a D28 cheap-superset guard, static registry order; `-` if none. Currently `mt12,mt4,mt9`.
 - `window_size: N` — the `--detection-window` override value (hidden; D30/D38); 0 when not given. It is not the size engaged per file — that is the per-file `window:` key, which resolves to `window_fallback` for unsampled files.
 - `window_fallback: N` — `FORMAT_DETECTION_WINDOW_FALLBACK`, the window size engaged for a file that could not be sampled (umbrella D53; 1000).
@@ -1050,6 +1050,7 @@ Discussion established that derived metrics require a fundamental change to the 
 - features/180-named-pipeline-stages.md — Drop 0 (#180)
 - features/58-format-registry-staged-detection.md — Drop 1 (#58)
 - *(no file)* — Drop 1.5 (#384) is recorded in this document, § "Drop 1.5 — #384"
+- features/395-wgm-client-log-format.md — #395: first format added on the Drop 1.5 registry (single entry with a multi-stem filename family; msgtype → category mapping; D54–D56)
 - features/60-metric-visibility-demand-map.md — Drop 2 (#60)
 
 ### Documentation

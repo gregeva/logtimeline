@@ -1,0 +1,44 @@
+2024-09-16T05:40:41.487Z: C: P3e68: T2950: $default: $generic: columns "date time tz msgtype logid tid area message"
+2024-09-16T05:40:41.487Z: C: P3e68: T2950: $default: $generic: columns_sep ": "
+2024-09-16T05:40:41.487Z: C: P3e68: T2950: $default: $generic: date_format "%Y-%m-%d"
+2024-09-16T05:40:41.487Z: C: P3e68: T2950: $default: $generic: log_base_name "uwgm_client"
+2024-09-16T05:40:41.487Z: C: P3e68: T2950: $default: $generic: log_dir_path "."
+2024-09-16T05:40:41.487Z: C: P3e68: T2950: $default: $generic: time_format "%T"
+2024-09-16T05:40:41.488Z: C: P3e68: T2950: $default: $generic: time_precision 1000
+2024-09-16T05:40:41.488Z: C: P3e68: T2950: $default: $generic: tm_comp_sep 'T'
+2024-09-16T05:40:41.488Z: C: P3e68: T2950: $default: $generic: use_hour_logs NO
+2024-09-16T05:40:41.488Z: C: P3e68: T2950: $default: $generic: use_local_time NO
+2024-09-16T05:40:41.488Z: C: P3e68: T2950: $default: $generic: verbose_level 0
+2024-09-16T05:40:41.487Z: X: P3e68: T2950: HTTP_INIT_LOGGER: HTTP Handshake stage logger created
+2024-09-16T05:40:41.487Z: D: P3e68: T2950: HTTP_INIT_LOGGER: HTTP_INIT_AREA: Logger created on demand
+2024-09-16T05:40:41.540Z: X: P3e68: T2950: UWGM: UWGM created
+2024-09-16T05:40:41.540Z: I: P3e68: T2950: UWGM: UWGMCLNT_UI: UwgmApp::init Entered
+2024-09-16T05:40:41.540Z: D: P3e68: T2950: UWGM: UWGMCLNT_UI: UwgmAppCmdArgProcessor::addCmdArg Adding argument: -uwgm_minimized
+2024-09-16T05:40:41.541Z: I: P3e68: T2950: UWGM: UWGMCLNT_UI: UwgmApp::setApplicationDir Entered
+2024-09-16T05:40:41.541Z: I: P3e68: T2950: UWGM: UWGMCLNT_UI: UwgmApp::setApplicationDir Exited
+2024-09-16T05:40:41.541Z: I: P3e68: T2950: UWGM: UWGMCLNT_UI: UwgmApp::initUITK Entered
+2024-09-16T05:40:41.861Z: I: P3e68: T2950: UWGM: UWGMCLNT_UI: UwgmApp::initUITK Exited
+2024-09-16T05:40:41.930Z: I: P3e68: T2950: UWGM: UWGMCLNT_UI: UwgmApp::setupLanguage Entered
+2024-09-16T05:40:41.962Z: I: P3e68: T2950: UWGM: UWGMCLNT_UI: UwgmApp::setupLanguage Exited
+2024-09-16T05:40:41.963Z: X: P3e68: T2950: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: uwgmFilePreferenceReader::readPreferences created
+2024-09-16T05:40:41.963Z: I: P3e68: T2950: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: WWGM_PREFERENCES: Reading preferences from file: C:\Program Files\PTC\wgm\wgmclient.ini
+2024-09-16T05:40:41.963Z: D: P3e68: T2950: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: UWGMLIB_PREFERENCES: save_to_ws.upload=Yes
+2024-09-16T05:40:41.964Z: D: P3e68: T2950: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: UWGMLIB_PREFERENCES: home.page.url=about:blank
+2024-09-16T05:40:41.964Z: D: P3e68: T2950: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: UWGMLIB_PREFERENCES: wf.network.threads=6
+2024-09-16T05:40:41.966Z: D: P3e68: T2950: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: UWGMLIB_PREFERENCES: Date.Type.Parameter.Format=%yyyy-%mm-%dd
+2024-09-16T05:40:41.966Z: D: P3e68: T2950: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: UWGMLIB_PREFERENCES: [AutoCAD]
+2024-09-16T05:40:41.966Z: Y: P3e68: T2950: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: uwgmFilePreferenceReader::readPreferences destroyed
+2024-09-16T05:40:41.967Z: Y: P3e68: T2950: uwgmclnt.clntpref_read.prefmgr_addread: uwgmOrderBasedPreferenceManager::addReadPreferences destroyed
+2024-09-16T05:40:42.175Z: X: P3e68: T2950: UWGM.uwgmAdapter_X12_initialize: uwgmAdapter_X12::initialize created
+2024-09-16T05:40:43.286Z: T: P3e68: T2950: LuLog: ZBU_LEGACY: set_browser_type
+2024-09-16T05:40:43.286Z: T: P3e68: T2950: LuLog: ZBU_STREAM: zbu_bind_browser_api_to_http_stream
+2024-09-16T05:40:43.311Z: W: P3e68: T2950: UWGM: UWGMCLNT_UI: isDebugAllowed Debug resources are missing in uwgm_client installation
+2024-09-16T05:40:43.416Z: E: P3e68: T2950: UWGM: UWGMCLNT_UI: UwgmEmbedZBrowser::Init Service unavailable
+2024-09-16T05:40:44.602Z: X: P3e68: T2950: uwgm.session1.act#111761707663362.act#111761707663363.srvtxn#0: Server Transaction created
+2024-09-16T05:40:44.602Z: S: P3e68: T2950: uwgm.session1.act#111761707663362.act#111761707663363.srvtxn#0: Server Transaction started
+2024-09-16T05:40:47.957Z: X: P3e68: T2950: uwgm.session1.act#111761707663364.srvtxn#1: Server Transaction created
+2024-09-16T05:40:47.957Z: S: P3e68: T2950: uwgm.session1.act#111761707663364.srvtxn#1: Server Transaction started
+2024-09-16T05:40:48.080Z: F: P3e68: T2950: uwgm.session1.act#111761707663364.srvtxn#1: Server Transaction finished
+2024-09-16T05:40:48.921Z: D: P3e68: T2950: uwgm.session1.108: Persistance: Read action [ Remove(110585886703629) <stored-unloaded> : (2024-09-16 07:36:27 - 2024-09-16 07:36:27) ]
+2024-09-16T05:40:48.180Z: F: P3e68: T2950: uwgm.session1.act#111761707663362.act#111761707663363.srvtxn#0: Server Transaction finished
+2024-09-16T05:40:49.001Z: D: P3e68: T2950: uwgm.session1.act#111761707663362.srvpref_convert: UWGMLIB_PREFERENCES: Converting preference wf.network.threads

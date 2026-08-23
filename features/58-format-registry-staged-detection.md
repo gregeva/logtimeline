@@ -526,3 +526,4 @@ The v0.16.0 access-log read-phase regression (+5–10% read_files, per #369's me
 - `docs/regex-best-practices.md` — pattern-count scaling, ordering policies, alternation rejection, qr// handling
 - #369 (fixed by this drop), #17 (declarative half delivered), #179 (detect-stage hints)
 - `features/382-gc-log-g1-format-coverage.md` (#382) — widens the `mt6` entry to the cause-less G1 pause and event forms; carries D41–D43 and the HotSpot-sourced `[info][gc]` vocabulary. First worked example of editing a registry spec rather than hot-loop code.
+- `features/395-wgm-client-log-format.md` (#395) — adds the `mt16` Windchill Workgroup Manager client entry: a new format declared entirely in the registry (pattern, field map, one transform, filename family, samples); carries D54–D56.

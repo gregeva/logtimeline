@@ -18,6 +18,8 @@
 # connection_server_standard) are asserted against fixtures derived from
 # the format registry's own sample lines (issue #58) — the same lines the
 # D24 load-time gates validate, so fixture and registry cannot drift.
+# wgm_client is asserted against the committed wgm-client.txt fixture
+# staged under each of its three producer-true names (issue #395).
 # The `format-detection / scan` sub-section (registry scan telemetry,
 # issue #58) is asserted by the scan-telemetry scenarios.
 #
@@ -665,8 +667,8 @@ scenario_scan_telemetry() {
         contract    'features/log-format-registry.md section -V format-detection section-contract; delimiters per HARNESS-DESIGN.md section Delimiter contract'
 
     assert_line "$out" \
-        pattern     '^entries: 13$' \
-        asserts     'All 13 scanned registry entries are compiled into the scan (csv is outside the scan array by design)' \
+        pattern     '^entries: 14$' \
+        asserts     'All 14 scanned registry entries are compiled into the scan (csv is outside the scan array by design)' \
         produced_by 'build_format_registry() in ltl; emitted by emit_format_detection_verbose()' \
         contract    'features/log-format-registry.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
 
@@ -1113,6 +1115,86 @@ scenario_variant_mixed_legend() {
         contract 'features/log-format-registry.md section Drop 1.5 D50'
 }
 
+# Windchill Workgroup Manager client log (issue #395). The fixture is a
+# scrubbed uwgm_client.log.1 slice: the self-describing header block plus
+# data lines covering every msgtype letter, #-qualified areas and a
+# bracketed message (the mt2 cross-shadow case). `-bs 1440 -oe -n 1 -osum`
+# via run_format_detection: every assertion reads -V format-detection or
+# the benchmark-data line counts; the 8-second span never reads a bucket.
+scenario_wgm_client() {
+    current_scenario="wgm-client"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture wgm-client.txt uwgm_client.log.1) || return
+    local out; out=$(run_format_detection "$log" -V benchmark-data); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  format: wgm_client$' \
+        asserts 'A WGM client log binds the wgm_client format' \
+        produced_by 'read_and_process_logs() in ltl (first-match block); emitted by emit_format_detection_verbose()' \
+        contract '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
+    assert_line "$out" pattern '^  match_type: 16$' \
+        asserts 'Slug wgm_client binds to internal match_type 16' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract - match_type integers are diagnostic; the slug is the user-facing contract'
+    assert_line "$out" pattern '^  matched_lines: 44$' \
+        asserts 'Every line of the fixture - header block and data lines alike - matches the mt16 pattern (no fallthroughs)' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
+        contract 'features/395-wgm-client-log-format.md section Format contract; the fixture and this count change in the same commit'
+    assert_line "$out" pattern '^  unmatched_lines: 0$' \
+        asserts 'No WGM line falls through the scan' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file unmatched_lines field)' \
+        contract 'features/395-wgm-client-log-format.md section Format contract'
+    assert_line "$out" pattern $'^lines_included\t44$' \
+        asserts 'Every matched line survives the category-vocabulary gate: the wgm_msgtype transform maps each msgtype letter to a member of @log_levels (a raw letter would be dropped silently)' \
+        produced_by 'wgm_msgtype transform in %format_transform_code, spliced by format_entry_block_src(); the gate and $total_lines_included in read_and_process_logs(); emitted by the benchmark-data section' \
+        contract 'features/395-wgm-client-log-format.md section D54 (msgtype mapping); @log_levels in ltl GLOBALS'
+    assert_line "$out" pattern '^  filename_evidence: stem=mt16 ext=match date=- index=present$' \
+        asserts 'uwgm_client.log.1 decomposes as stem uwgm_client + .log + rotation index (placement after; no date declared)' \
+        produced_by 'format_filename_decompose() in ltl; emitted by emit_format_detection_evidence_verbose()' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions); features/395-wgm-client-log-format.md section D55 (filename family)'
+    assert_line "$out" pattern '^  sample_whole_file: yes$' \
+        asserts 'A file no larger than sample_parts x sample_bytes_per_part is read once, whole, as a single part' \
+        produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+    assert_line "$out" pattern '^  sample_formats: mt16=44$' \
+        asserts 'The evidence sample recognises every fixture line as mt16 in static cascade order - no earlier entry (mt1std, connection_server) accepts the WGM shape' \
+        produced_by 'sample_file_for_detection() in ltl (direct pattern recognition, static cascade order)' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+    assert_line "$out" pattern '^final_order: mt16,' \
+        asserts 'After the run mt16 (no pinned ancestors) leads the MTF scan order' \
+        produced_by 'format_registry_promote() in ltl; emitted by emit_format_detection_verbose()' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (D26 pinned-closure MTF)'
+}
+
+# The three WGM filenames share one entry (a group of one, D55): each stem
+# decomposes to mt16, `uwgm` is not consumed as a prefix of `uwgm_client`,
+# and a renamed file still binds by shape with the stem signal withheld.
+scenario_wgm_filename_family() {
+    current_scenario="wgm-filename-family"
+    echo "[$current_scenario]"
+    local name log out
+    for name in genlwsc.log.1 uwgm.log.1; do
+        log=$(stage_fixture wgm-client.txt "$name") || return
+        out=$(run_format_detection "$log"); check_capture_warnings "$out"
+        assert_line "$out" pattern '^  filename_evidence: stem=mt16 ext=match date=- index=present$' \
+            asserts "$name decomposes to the wgm_client entry's stem, extension and rotation index" \
+            produced_by 'format_filename_decompose() in ltl; emitted by emit_format_detection_evidence_verbose()' \
+            contract 'features/395-wgm-client-log-format.md section D55 (filename family)'
+        assert_line "$out" pattern '^  format: wgm_client$' \
+            asserts "$name binds the wgm_client format" \
+            produced_by 'read_and_process_logs() in ltl (first-match block)' \
+            contract 'features/log-format-registry.md section -V format-detection section-contract'
+    done
+    log=$(stage_fixture wgm-client.txt renamed.txt) || return
+    out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
+        asserts 'A renamed WGM file matches no declared stem: the name signal is withheld, never contradicting (D45)' \
+        produced_by 'format_filename_decompose() in ltl; emitted by emit_format_detection_evidence_verbose()' \
+        contract 'features/log-format-registry.md section Drop 1.5 D45'
+    assert_line "$out" pattern '^  format: wgm_client$' \
+        asserts 'A group of one binds by line shape alone; filename evidence only reports' \
+        produced_by 'read_and_process_logs() in ltl (first-match block)' \
+        contract 'features/395-wgm-client-log-format.md section D55 (filename family)'
+}
+
 scenario_format_pin() {
     current_scenario="format-pin"
     echo "[$current_scenario]"
@@ -1187,6 +1269,8 @@ scenario_variant_httpd_named; echo ""
 scenario_variant_httpd_renamed; echo ""
 scenario_variant_thingworx_rolled; echo ""
 scenario_variant_mixed_legend; echo ""
+scenario_wgm_client;            echo ""
+scenario_wgm_filename_family;   echo ""
 scenario_format_pin
 
 echo ""
