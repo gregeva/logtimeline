@@ -173,6 +173,77 @@ run_format_detection() {
     echo "$outfile"
 }
 
+
+# assert_command: eval a command; PASS on exit 0. Same self-documenting
+# triple as assert_line (reference: tests/validate-csv-input.sh).
+assert_command() {
+    local command="" label="" asserts="" produced_by="" contract=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            command)     command="$2"; shift 2 ;;
+            label)       label="$2"; shift 2 ;;
+            asserts)     asserts="$2"; shift 2 ;;
+            produced_by) produced_by="$2"; shift 2 ;;
+            contract)    contract="$2"; shift 2 ;;
+            *) echo "assert_command: unknown field '$1'" >&2; exit 2 ;;
+        esac
+    done
+    : "${command:?assert_command requires command}"
+    : "${asserts:?assert_command requires asserts}"
+    : "${produced_by:?assert_command requires produced_by}"
+    : "${contract:?assert_command requires contract}"
+    if eval "$command" >/dev/null 2>&1; then
+        echo "  PASS  $current_scenario :: $label"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario :: $label"
+        echo "        command:     $command"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: $label")
+    fi
+}
+
+# Stage a committed fixture (tests/fixtures/format-detection/<fixture>)
+# under a producer-true name in a per-scenario directory (D51): the
+# committed name is never fed to ltl, and two scenarios may stage the same
+# staged name without colliding. Echoes the staged path.
+FIXTURE_DIR="$REPO_DIR/tests/fixtures/format-detection"
+stage_fixture() {
+    local fixture="$1" staged_as="$2"
+    local dir="$TMP_DIR/$current_scenario"
+    mkdir -p "$dir"
+    if [[ ! -f "$FIXTURE_DIR/$fixture" ]]; then
+        echo "  FAIL  $current_scenario :: fixture $FIXTURE_DIR/$fixture is missing" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: fixture missing"); return 1
+    fi
+    cp "$FIXTURE_DIR/$fixture" "$dir/$staged_as"
+    echo "$dir/$staged_as"
+}
+
+# One variant-selection assertion block: format, selected member, basis.
+assert_variant_selection() {
+    local out="$1" format="$2" selected="$3" basis="$4" confidence="$5"
+    assert_line "$out" pattern "^  format: $format\$" \
+        asserts "The file binds the $format format" \
+        produced_by 'read_and_process_logs() in ltl (first-match block)' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract'
+    assert_line "$out" pattern "^  selected: $selected\$" \
+        asserts "Variant selection put $selected in its group slot for this file (D47)" \
+        produced_by 'select_format_variants() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern "^  selection_basis: $basis\$" \
+        asserts "The selection basis is $basis" \
+        produced_by 'select_format_variants() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern "^  confidence: $confidence\$" \
+        asserts "Confidence = selected score / sum of live members (I1 weights)" \
+        produced_by 'select_format_variants() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 I1 (evidence weights)'
+}
+
 # ---------- Scenarios -----------------------------------------------------
 
 scenario_tomcat9_ms() {
@@ -848,6 +919,220 @@ scenario_unit_ambiguity_warning() {
         contract    'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
 }
 
+
+# ---------- #384 variant selection (committed fixtures, D51) ----------------
+# Every run uses -bs 1440 -oe: the fixtures span months (and the mixed
+# fixture pairs files a year apart), and these scenarios assert detection,
+# not buckets — no empty-bucket memory for a time axis nobody reads.
+
+scenario_variant_connection_server() {
+    current_scenario="variant-connection-server"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture connection-server.txt cxserver.1.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" connection_server_standard mt10 evidence '1\.00'
+    assert_line "$out" pattern '^  filename_evidence: stem=mt10 ext=match date=- index=present$' \
+        asserts 'cxserver.1.log decomposes to the Connection Server stem, the declared extension and a rotation index (D45/I4)' \
+        produced_by 'format_filename_evidence() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^  candidates: mt10=[0-9.]+,mt10ir=0\.00$' \
+        asserts 'The Integration Runtime member is eliminated: day tokens > 12 are impossible under yyyy-dd-MM (D52 probe a)' \
+        produced_by 'format_sample_probes() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D52'
+}
+
+scenario_variant_integration_runtime_named() {
+    current_scenario="variant-integration-runtime-named"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '1\.00'
+    assert_line "$out" pattern '^  filename_evidence: stem=mt10ir ext=match date=- index=-$' \
+        asserts 'The IntegrationRuntime-<uuid>.log name matches the Integration Runtime stem' \
+        produced_by 'format_filename_evidence() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^  matched_lines: 124$' \
+        asserts 'Every timestamped line of the slice is read under yyyy-dd-MM with no fatal (#385)' \
+        produced_by 'compile_format_scan_sub() in ltl (iso_ms_ddmm block)' \
+        contract 'features/log-format-registry.md section Drop 1.5 D47/N10'
+    assert_absent "$out.stderr" pattern '^Note: ' \
+        asserts 'No diagnostic: the layout is right and the decision was made by evidence' \
+        produced_by 'format_probe_signal() / format_variant_ambiguity_note() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D52/I6'
+}
+
+scenario_variant_integration_runtime_unnamed() {
+    current_scenario="variant-integration-runtime-unnamed"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture integration-runtime.txt app.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '1\.00'
+    assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
+        asserts 'app.log carries no name evidence for any entry' \
+        produced_by 'format_filename_evidence() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^  candidates: mt10=0\.00,mt10ir=[0-9.]+$' \
+        asserts 'With no name evidence the sample alone decides: the default is eliminated by impossible months under yyyy-MM-dd (F6)' \
+        produced_by 'format_sample_probes() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 F6'
+}
+
+scenario_variant_tomcat_named() {
+    current_scenario="variant-tomcat-named"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture tomcat-access.txt localhost_access_log.2025-05-05.txt) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" tomcat_access_with_duration mt3 evidence '0\.86'
+    assert_line "$out" pattern '^  filename_evidence: stem=mt3 ext=match date=present index=-$' \
+        asserts 'The Tomcat name decomposes to stem, .txt and a date' \
+        produced_by 'format_filename_evidence() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_absent "$out.stderr" pattern '^Note: ' \
+        asserts 'Stem evidence decided the unit; no ambiguity note' \
+        produced_by 'format_variant_ambiguity_note() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 I6'
+}
+
+scenario_variant_tomcat_extension_only() {
+    current_scenario="variant-tomcat-extension-only"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture tomcat-access.txt whatever.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" tomcat_access_with_duration mt3 default '0\.50'
+    assert_line "$out" pattern '^  candidates: mt3=2\.00,mt3us=2\.00$' \
+        asserts 'An extension alone ties the group default (standing credit = extension weight) and never moves the selection off it (I1)' \
+        produced_by 'select_format_variants() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 I1'
+    assert_line "$out.stderr" pattern '^Note: the detected log format \(tomcat_access_with_duration\) is written by more than one producer' \
+        asserts 'A default-basis selection surfaces the assumption' \
+        produced_by 'format_variant_ambiguity_note() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 I6'
+}
+
+scenario_variant_httpd_named() {
+    current_scenario="variant-httpd-named"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture httpd-access.txt access.log-20260609) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" httpd_access_with_duration mt3us evidence '0\.71'
+    assert_line "$out" pattern '^  filename_evidence: stem=mt3us ext=match date=present index=-$' \
+        asserts 'access.log-20260609 decomposes under after-placement: stem, .log, then the compact date' \
+        produced_by 'format_filename_evidence() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D45/I4'
+    assert_absent "$out.stderr" pattern '^Note: ' \
+        asserts 'Evidence decided the microsecond member; no -du needed and no note' \
+        produced_by 'format_variant_ambiguity_note() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 I6'
+    # The microsecond unit is applied: a -du us run must render identically.
+    local out_du; out_du=$(run_format_detection "$log" -bs 1440 -oe -du us); check_capture_warnings "$out_du"
+    assert_command label "httpd member carries microseconds (output identical to -du us)" \
+        command "diff <(grep -av '^duration_unit_override' '$out') <(grep -av '^duration_unit_override' '$out_du') > /dev/null" \
+        asserts 'The httpd member declares %D in microseconds, so the evidence-selected run equals the explicit -du us run' \
+        produced_by 'read_and_process_logs() in ltl (FR_DURATION_UNIT conversion)' \
+        contract 'features/log-format-registry.md section Drop 1.5 D47 (first variant groups)'
+}
+
+scenario_variant_httpd_renamed() {
+    current_scenario="variant-httpd-renamed"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture httpd-access.txt renamed.txt) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_variant_selection "$out" tomcat_access_with_duration mt3 default '0\.75'
+    assert_line "$out.stderr" pattern '^Note: the detected log format \(tomcat_access_with_duration\) is written by more than one producer' \
+        asserts 'A renamed httpd file falls to the default with the note (D44: visible-or-good-enough)' \
+        produced_by 'format_variant_ambiguity_note() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D44/I6'
+}
+
+scenario_variant_thingworx_rolled() {
+    current_scenario="variant-thingworx-rolled"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture thingworx-application-log.txt ApplicationLog.2025-05-06.0.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  filename_evidence: stem=mt1std ext=match date=match index=present$' \
+        asserts 'A logback-rolled ThingWorx name decomposes to stem, date, index and extension, and the filename date agrees with the first content timestamp (D52 probe c)' \
+        produced_by 'format_filename_evidence() / format_sample_probes() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D45/D52'
+    assert_line "$out" pattern '^  format: thingworx_standard$' \
+        asserts 'A format outside any variant group is unaffected by selection' \
+        produced_by 'read_and_process_logs() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract'
+}
+
+scenario_variant_mixed_legend() {
+    current_scenario="variant-mixed-legend"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture mixed.txt mixed.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  formats: connection_server_standard,tomcat_access_with_duration$' \
+        asserts 'Every format found in the file is listed, first-bound first' \
+        produced_by 'read_and_process_logs() in ltl (per-file formats, N7)' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^legend: 1=connection_server_standard,2=tomcat_access_with_duration$' \
+        asserts 'The legend numbers formats in first-detection order across the run (I8)' \
+        produced_by 'emit_format_detection_verbose() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    local render="$TMP_DIR/$current_scenario/render.out"
+    "$LTL" --disable-progress --terminal-width 160 -bs 1440 -oe "$log" > "$render" 2> "$render.stderr"
+    assert_no_runtime_warnings "$render.stderr" "$current_scenario render"
+    assert_command label "console bracket [1,2] after the file name" \
+        command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q 'mixed.log  *\\[1,2\\]'" \
+        asserts 'The summary file list carries the formats found as legend numbers in brackets (D50)' \
+        produced_by 'print_summary_table() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D50'
+    assert_command label "console legend title" \
+        command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q '  Log Formats *\$'" \
+        asserts 'The legend is introduced by a "Log Formats" title, rendered like the file-list heading (D50)' \
+        produced_by 'print_summary_table() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D50'
+    assert_command label "console legend line" \
+        command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q '  1 connection_server_standard  2 tomcat_access_with_duration *\$'" \
+        asserts 'One legend line below the title names the numbered formats (D50)' \
+        produced_by 'print_summary_table() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D50'
+}
+
+scenario_format_pin() {
+    current_scenario="format-pin"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log) || return
+    local out; out=$(run_format_detection "$log" -bs 1440 -oe -lf connection_server_standard); check_capture_warnings "$out"
+    assert_line "$out" pattern '^format_pin: connection_server_standard$' \
+        asserts 'The run-level pin is reported' \
+        produced_by 'emit_format_detection_verbose() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^  format: connection_server_standard$' \
+        asserts 'The pin outranks stem evidence and the probes (D49): the file reads as the pinned format' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D49/N9'
+    assert_line "$out" pattern '^  selection_basis: pin$' \
+        asserts 'Selection basis is pin under -lf' \
+        produced_by 'emit_format_detection_evidence_verbose() in ltl' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^entries: 1$' \
+        asserts 'The scan is restricted to the entries carrying the pinned name' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 N9'
+    assert_line "$out.stderr" pattern "^Note: .*line [0-9]+: timestamp '[0-9 :-]+' has an impossible date component under the connection_server_standard format's date layout; such lines are kept at the previous line's time - use -lf to pin the correct log format\$" \
+        asserts 'An impossible date under the pinned layout is reported once per file (D52/#385) and never crashes' \
+        produced_by 'format_probe_signal() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D52'
+    local out2; out2=$(run_format_detection "$log" -bs 1440 -oe -lf thingworx_standard); check_capture_warnings "$out2"
+    assert_line "$out2" pattern '^entries: 2$' \
+        asserts 'A name carried by two registry entries pins both (N9)' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 N9'
+    local err="$TMP_DIR/$current_scenario/unknown.stderr"
+    if "$LTL" --disable-progress -bs 1440 -oe -lf nonsense "$log" > /dev/null 2> "$err"; then
+        echo "  FAIL  $current_scenario :: -lf nonsense exited 0"; fail=$((fail + 1)); failures+=("$current_scenario :: -lf nonsense exited 0")
+    else
+        assert_line "$err" pattern '^Error: Unknown log format .nonsense. for -lf\. Known formats: .*connection_server_standard.*integration_runtime_standard.*tomcat_access_with_duration' \
+            asserts 'An unknown pin name is a usage error listing the known format names (D49)' \
+            produced_by 'apply_format_pin() in ltl' \
+            contract 'features/log-format-registry.md section Drop 1.5 D49'
+    fi
+}
+
 # ---------- Run -----------------------------------------------------------
 
 echo "Validating format-detection -V section (issue #228)"
@@ -871,7 +1156,17 @@ scenario_tw_analytics_worker;   echo ""
 scenario_connection_server_standard; echo ""
 scenario_scan_telemetry;        echo ""
 scenario_scan_telemetry_nomatch; echo ""
-scenario_unit_ambiguity_warning
+scenario_unit_ambiguity_warning; echo ""
+scenario_variant_connection_server; echo ""
+scenario_variant_integration_runtime_named; echo ""
+scenario_variant_integration_runtime_unnamed; echo ""
+scenario_variant_tomcat_named; echo ""
+scenario_variant_tomcat_extension_only; echo ""
+scenario_variant_httpd_named; echo ""
+scenario_variant_httpd_renamed; echo ""
+scenario_variant_thingworx_rolled; echo ""
+scenario_variant_mixed_legend; echo ""
+scenario_format_pin
 
 echo ""
 echo "Results: $pass passed, $fail failed"
