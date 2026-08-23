@@ -17,3 +17,4 @@ wgm-client.txt	renamed.txt	(same slice)	no name evidence: a group of one still b
 windchill-method-server.txt	BackgroundMethodServerESI-2507180624-9559-log4j.log	Windchill Background Method Server log4j log, 21 records + 30 continuation lines composed from scrubbed specimen lines (hosts, users, object ids replaced)	producer-true name -> mt17 stem + ext; content-only recognition; continuation lines unmatched
 windchill-method-server.txt	MethodServer-2507180627-9144-log4j.log.2025-07-18_3	(same fixture)	log4j daily-roll suffix after the extension decomposes through the date_n index form; roll date matches the content
 windchill-method-server.txt	app.txt	(same fixture)	no name evidence; recognition by content alone
+windchill-method-server.txt	MethodServer.log	(same fixture)	bare service name earns stem + ext evidence; the producer tail is optional

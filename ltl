@@ -2623,10 +2623,11 @@ sub format_registry_specs {
     # and match nothing, as for every other platform log. Rotation appends
     # `.YYYY-MM-DD_N` after the extension (log4j daily roll; date_n form).
     { name => 'mt17', slug => 'windchill_method_server', match_type => 17, scanned => 1, head_class => 'digit',
-      filename => { stem => '(?:Background)?MethodServer(?:CAD|ESI)?-\d{10}-\d+-log4j', index => 'date_n', ext => '.log', placement => 'after',
+      filename => { stem => '(?:Background)?MethodServer(?:CAD|ESI)?(?:-\d{10}-\d+-log4j)?', index => 'date_n', ext => '.log', placement => 'after',
                     samples => [ 'MethodServer-2507180627-9144-log4j.log', 'BackgroundMethodServer-2507180446-4080664-log4j.log',
                                  'BackgroundMethodServerCAD-2507180624-9566-log4j.log', 'BackgroundMethodServerESI-2507180624-9559-log4j.log',
-                                 'MethodServer-2507260852-2021933-log4j.log.2025-08-05_1', 'BackgroundMethodServer-2507260841-2492136-log4j.log.2025-08-04_6' ] },
+                                 'MethodServer-2507260852-2021933-log4j.log.2025-08-05_1', 'BackgroundMethodServer-2507260841-2492136-log4j.log.2025-08-04_6',
+                                 'MethodServer.log', 'BackgroundMethodServerESI.log' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[.,]\d{3}) (\w+) +\[(.*?)\] (\S+) (\S*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'thread'],[4,'object'],[5,'user'],[6,'message'] ],
       transforms => [],

@@ -3,7 +3,7 @@
 ## Status
 
 Implemented on `396-windchill-method-server-log4j-format`, targeting release 0.17.0.
-Registry entry `mt17`, user-facing format name `windchill_method_server`, match_type 17.
+Registry entry `mt17`, user-facing format name `windchill_method_server`, match_type 17. Decisions D54–D57.
 Built on the Drop 1.5 mechanisms (filename evidence, `features/log-format-registry.md` D45/I4).
 
 ## Overview
@@ -64,10 +64,14 @@ process start time and `<pid>` its process id. Daily rotation appends
 `.YYYY-MM-DD_N` **after** the extension
 (`MethodServer-2507260852-2021933-log4j.log.2025-08-05_1`).
 
-Declared as: `stem '(?:Background)?MethodServer(?:CAD|ESI)?-\d{10}-\d+-log4j'`,
+Declared as: `stem '(?:Background)?MethodServer(?:CAD|ESI)?(?:-\d{10}-\d+-log4j)?'`,
 `ext '.log'`, `placement 'after'`, `index 'date_n'` (no separate `date`
-component — see D55). Six filename samples (one per service member, two
-rolled forms) are the matcher's executable self-test at load.
+component — see D55). The service name alone is the stem; the
+`-<yyMMddHHmm>-<pid>-log4j` tail is optional (D57), so `MethodServer.log`
+and `BackgroundMethodServerESI.log` earn the same stem evidence as a
+producer-true name. Eight filename samples (one producer-true name per
+service member, two rolled forms, two bare names) are the matcher's
+executable self-test at load.
 
 ## Locked decisions
 
@@ -139,6 +143,16 @@ Both match the same 18,627 records; the lazy form is 1.9× cheaper. On the
 backtracking is bounded: a non-matching timestamped line walks the line
 once, and such lines are rare (0 in the specimens, see below).
 
+### D57 — The stem alone matches; the producer tail is optional evidence (LOCKED by the architect 2026-08-23)
+
+The filename-evidence mechanism is `^stem` followed by *optional*
+date/index/extension components — `ApplicationLog.log` matches `mt1std`'s
+stem `ApplicationLog` the same way. Baking the `-\d{10}-\d+-log4j` tail
+into the stem would have denied stem evidence to any file named by its
+service alone. The tail is therefore an optional group inside the stem;
+it is entry data only, `compile_format_filename_matcher()` is unchanged.
+A bare `MethodServer.log` reports `stem=mt17 ext=match`.
+
 ## Verification against the sample sets (2026-08-23)
 
 Structural pass over the full local specimen set (70 files, 2,554,329
@@ -187,7 +201,7 @@ derived constraints agree.
 
 ## Harness
 
-`tests/validate-format-detection.sh` — four scenarios (22 assertions):
+`tests/validate-format-detection.sh` — five scenarios (27 assertions):
 
 - `windchill-method-server`: the entry's own sample lines through
   `assert_registry_sample_scenario` (slug, match_type 17, 3 matched, whole-file sample).
@@ -195,9 +209,10 @@ derived constraints agree.
   fixture `tests/fixtures/format-detection/windchill-method-server.txt`
   (21 records + 30 continuation lines, scrubbed) staged as
   `BackgroundMethodServerESI-2507180624-9559-log4j.log`,
-  `MethodServer-2507180627-9144-log4j.log.2025-07-18_3` and `app.txt`:
-  21/30 matched/unmatched in all three; filename evidence
-  `stem=mt17 ext=match date=- index=-`, `… date=match index=present`, and
+  `MethodServer-2507180627-9144-log4j.log.2025-07-18_3`, `MethodServer.log`
+  (`-bare`, D57) and `app.txt`: 21/30 matched/unmatched in all four;
+  filename evidence `stem=mt17 ext=match date=- index=-`,
+  `… date=match index=present`, `stem=mt17 ext=match date=- index=-`, and
   `stem=- ext=- date=- index=-` respectively.
 - `scan-telemetry`: `entries: 15`.
 
@@ -219,11 +234,6 @@ neither changes.
 
 ## Open items
 
-- The stem requires the producer-true `-<yyMMddHHmm>-<pid>-log4j` tail. A
-  hand-renamed `MethodServer.log` matches by content but carries no name
-  evidence; whether the stem should also accept the bare service name is an
-  architect call (the ThingWorx stem accepts bare names because that is how
-  logback writes the live file; Windchill never writes one).
 - Other Windchill processes (`ServerManager`, the Windchill DS / Info*Engine
   adapters) are believed to share this layout and naming; no specimen was
   available, so they are not declared (same rule as `alwayson-cxserver` in

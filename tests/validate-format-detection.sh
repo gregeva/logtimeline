@@ -1146,6 +1146,18 @@ scenario_windchill_method_server_rolled() {
         contract 'features/396-windchill-method-server-log4j-format.md section Filename evidence (D55)'
 }
 
+scenario_windchill_method_server_bare() {
+    current_scenario="windchill-method-server-bare"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture windchill-method-server.txt MethodServer.log) || return
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_windchill_fixture_detection "$out"
+    assert_line "$out" pattern '^  filename_evidence: stem=mt17 ext=match date=- index=-$' \
+        asserts 'A bare service name (no start-time/pid/-log4j tail) still earns mt16 stem evidence and a matching extension: the stem alone matches, the producer tail is optional' \
+        produced_by 'format_filename_evidence() / compile_format_filename_matcher() in ltl' \
+        contract 'features/396-windchill-method-server-log4j-format.md section Filename evidence (D57, architect-locked 2026-08-23)'
+}
+
 scenario_windchill_method_server_renamed() {
     current_scenario="windchill-method-server-renamed"
     echo "[$current_scenario]"
@@ -1347,6 +1359,7 @@ scenario_variant_httpd_renamed; echo ""
 scenario_variant_thingworx_rolled; echo ""
 scenario_windchill_method_server_named; echo ""
 scenario_windchill_method_server_rolled; echo ""
+scenario_windchill_method_server_bare; echo ""
 scenario_windchill_method_server_renamed; echo ""
 scenario_variant_mixed_legend; echo ""
 scenario_wgm_client;            echo ""
