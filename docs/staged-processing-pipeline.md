@@ -183,5 +183,23 @@ pass inside `pipeline_parse()` recognizes each line by running that scan sub
 (move-to-front ordered, pinned by load-time-derived constraints) instead of a
 hardcoded pattern cascade. Detection remains a per-line role executed inside
 the parse loop; the registry moves *what is known about each format* out of
-code and into declarative entries settled at detect time. #59 (later
-release) adds per-bucket lifecycle hooks inside `finalize`.
+code and into declarative entries settled at detect time.
+
+Per-file provenance evidence (#384): producers that emit one line shape with
+different semantics (Connection Server vs Integration Runtime dates; Tomcat
+vs httpd `%D` units) are separate registry entries tied into a variant
+group, and exactly one member of each group is in the scan at any moment.
+Before a file's first line is processed, the detect role reads the file's
+evidence — the read-only sample taken before the main read (or, on input
+that cannot be sampled, the held first lines), the file name decomposed
+against each entry's declared stem/date/index/extension, and content probes
+over the sampled lines (impossible date component, monotonicity, filename
+date cross-check) — scores every member, and places the best one in its
+group's slot. The decision keeps being re-evaluated during the read: the
+generated scan sub's timestamp cache-miss branch feeds the same probes as
+signals, so hard evidence arriving later flips the member mid-file and the
+line is re-scanned under it. `-lf <name>` pins a format for the run and
+bypasses all of it. The summary's file list shows which formats each file
+used; `-V format-detection` shows the evidence, candidates, selection and
+confidence per file. #59 (later release) adds per-bucket lifecycle hooks
+inside `finalize`.
