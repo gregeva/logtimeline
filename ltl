@@ -3654,9 +3654,9 @@ sub format_registry_classify {
 #   elapsed_us     => wall time of the whole sample
 #
 # The sample also knows the file's size and observes its average line
-# length per part — the inputs a percentage-based per-file progress
-# indicator needs (lines read × average line length ÷ file size). That
-# indicator is #397; nothing here implements it.
+# length per part; the per-file progress percentage does not use them
+# (it reads the production handle's byte position directly), so they
+# remain available to other evidence consumers.
 sub sample_file_for_detection {
     my ($path) = @_;
     return undef unless -f $path;
@@ -9735,6 +9735,7 @@ sub read_and_process_logs {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
         push @files_processed, $in_file;
         my $line_number = 0;
+        my $progress_file_size = (-f $in_file) ? (-s $in_file) : 0;   # >0 enables the per-file percentage (tell($fh) / size); 0 = line count only
         $format_current_file = $in_file;
         $format_current_line_ref = \$line_number;
         my %fr_matches_at_start = map { $_ => $format_registry_entry{$_}[FR_MATCHES] } keys %format_registry_entry;
@@ -9871,14 +9872,28 @@ sub read_and_process_logs {
                     }
                 }
 
+                # Per-file percentage: bytes consumed from the handle over the
+                # file's size — exact and monotonic. Floored, never rounded:
+                # 100% means the file is done, so 99.6% reports as 99%. Only
+                # for sized plain files; anything else shows the line count alone.
+                my $pct_str = "";
+                if ($progress_file_size > 0) {
+                    my $pos = tell($fh);
+                    if (defined $pos && $pos >= 0) {
+                        my $pct = int(100 * $pos / $progress_file_size);
+                        $pct = 100 if $pct > 100;
+                        $pct_str = " (${pct}% complete)";
+                    }
+                }
+
                 # Calculate available space for filename to prevent line wrapping
                 my $line_num_str = $line_number;
                 my $overall_str = format_number($total_lines_read);
-                my $fixed_len = length("Processing line $line_num_str in file  ($overall_str overall$lines_per_sec)");
+                my $fixed_len = length("Processing line $line_num_str$pct_str in file  ($overall_str overall$lines_per_sec)");
                 my $available_for_filename = $terminal_width - $fixed_len - 1;  # -1 for safety margin
                 my $display_filename = shorten_filename($in_file, $available_for_filename, 1);  # strip path, then shorten
 
-                printf("\rProcessing line %d in file %s (%s overall%s)", $line_number, $display_filename, $overall_str, $lines_per_sec);
+                printf("\rProcessing line %d%s in file %s (%s overall%s)", $line_number, $pct_str, $display_filename, $overall_str, $lines_per_sec);
                 $| = 1;                                     # Flush output to stdout
             }
 
