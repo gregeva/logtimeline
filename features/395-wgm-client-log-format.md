@@ -4,7 +4,7 @@
 
 Implemented on `395-wgm-client-log-format`, targeting release 0.17.0. Registry
 entry `mt16`, user-facing name `wgm_client`, match_type 16. Decisions D54–D56
-below are proposed and implemented as written; they await the architect's lock.
+locked by the architect 2026-08-23.
 
 ## Overview
 
@@ -89,9 +89,9 @@ token — 51,757 of the corpus lines (2.0%). The bracket-bearing sample
 derives the constraint; `mt2` declares `expect_ancestors => [mt1std,
 connection_server, mt16, mt1gen]`.
 
-## Decisions (proposed 2026-08-23; implemented as written)
+## Locked decisions
 
-### D54 — msgtype letters map to categories: severity letters to the shared levels, lifecycle letters to their own identity
+### D54 — msgtype letters map to categories: severity letters to the shared levels, lifecycle letters to their own identity (LOCKED 2026-08-23)
 
 The read loop drops any line whose category is not in `@log_levels`, so the
 raw letters cannot be the category — every WGM line would be matched and then
@@ -108,7 +108,24 @@ categories present in a file become columns, so the five new names appear
 only for WGM input. Their CSV column rules are declared in
 `tests/csv-output/rules/stats-columns.tsv` in the same change.
 
-### D55 — One registry entry with a multi-stem filename family, not a variant group
+Colours follow the meaning of the verb, not the order the categories were
+added (architect, 2026-08-23) — new categories that mirror a log's own
+categorisation are the intended process, and the colour must say what the
+event means:
+
+| Category | Colour | Rationale |
+|---|---|---|
+| `DESTROY` | red (`0;31`) | The most destructive event: an object is torn down. Red is the palette's severity ceiling (`ERROR`, `5xx`, `Pause Full`). |
+| `FINISH` | green (`0;32`) | A positive outcome: work completed. Green is the palette's success colour (`INFO`, `2xx`, `Pause Cleanup`). |
+| `CREATE` | cyan (`0;36`) | The beginning of an object's life — a cool, opening colour, and not otherwise used by a level, so creation stands out from every severity. |
+| `START` | blue (`0;34`) | The beginning of an activity on an existing object; a cool colour adjacent to `CREATE` (both are beginnings) but distinct from it so the create/start and destroy/finish pairs read separately. |
+| `CONFIG` | magenta (`0;35`) | Neutral, informational self-description (the header block). Magenta is what the palette already uses for the non-severity informational class (`TRACE`, `Pause Young`). |
+
+The two beginnings share the cool side of the palette and the two endings
+the warm side, so `CREATE`/`DESTROY` and `START`/`FINISH` pairs are
+visually paired.
+
+### D55 — One registry entry with a multi-stem filename family, not a variant group (LOCKED 2026-08-23)
 
 Variant groups (D47) exist for producers that share a shape but differ in
 *semantics* — date layout (Connection Server vs Integration Runtime) or unit
@@ -124,7 +141,7 @@ family is the honest model; the `filename_evidence:` line in `-V` still names
 which stem matched. Note that the in-file `log_base_name` does *not*
 discriminate either: `uwgm.log.1` declares `log_base_name "uwgm_client"`.
 
-### D56 — Extraction is capture-only apart from the msgtype map
+### D56 — Extraction is capture-only apart from the msgtype map (LOCKED 2026-08-23)
 
 No timestamp normalisation (`t_to_space`) and no `strip_trailing_ws`: the
 fixed-offset parser reads around the `T`, the GC entry already keeps its `T`
@@ -177,8 +194,6 @@ CSV rules: the WGM STATS CSV is refused by the previous
 
 ## Open items
 
-- D54–D56 await the architect's lock; D54 changes a user-facing vocabulary
-  (five new category names and colours) and is the one to review first.
 - The `S`/`F` and `X`/`Y` pairs are natural inter-line duration sources
   (`Server Transaction started` → `finished` on the same `srvtxn#` area);
   out of scope here, noted for the derived-metrics phase.
