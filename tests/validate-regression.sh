@@ -41,7 +41,12 @@ COMMON="--disable-progress -osum -n 1"
 # the references were captured against is reproduced on every run.
 ACCESS_LOG="$TMP_DIR/access-sampled.txt"
 derive_sampled_access_log "$ACCESS_LOG"
-SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
+# SCRIPT_LOG is the deterministic 5k-line ScriptLog slice (7-minute span):
+# the heatmap/histogram goldens it feeds render a handful of timeline rows
+# and one histogram, so the slice carries the whole rendered surface; its
+# runs take `-bs 1` so the 7-minute span yields seven timeline rows of
+# heatmap cells (tests/HARNESS-DESIGN.md section Invocation coherence).
+SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
 # Issue #235 — additional fixtures for the extended heatmap/histogram tests
 # below. APACHE_LOG is the canonical clean Apache HTTP2 access log; it ships
 # bytes + microsecond-%D durations and is small (~100 KB), keeping capture
@@ -168,10 +173,10 @@ for w in 120 160 200; do
 done
 
 # --- ScriptLog at various widths ---
-run_test "scriptlog-w100" "$LTL" $COMMON --terminal-width 100 -os -ov "$SCRIPT_LOG"
+run_test "scriptlog-w100" "$LTL" $COMMON --terminal-width 100 -os -ov -bs 1 "$SCRIPT_LOG"
 
 for w in 160 200; do
-    run_test "scriptlog-w${w}" "$LTL" $COMMON --terminal-width $w "$SCRIPT_LOG"
+    run_test "scriptlog-w${w}" "$LTL" $COMMON --terminal-width $w -bs 1 "$SCRIPT_LOG"
 done
 
 # --- Heatmap modes at width 160 ---
@@ -182,7 +187,7 @@ done
 # suite fragile to precision tweaks. Layout coverage is what we want here;
 # bin-counter accuracy is covered by tests/validate-histogram-bin-counters.sh.
 for mode in duration bytes count; do
-    run_test "heatmap-${mode}-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm "$mode" "$SCRIPT_LOG"
+    run_test "heatmap-${mode}-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm "$mode" -bs 1 "$SCRIPT_LOG"
 done
 
 # --- Omit flags at width 160 ---
@@ -195,7 +200,7 @@ run_test "omit-ov-or-w160" "$LTL" $COMMON --terminal-width 160 -ov -or "$ACCESS_
 run_test "autohide-w80" "$LTL" $COMMON --terminal-width 80 "$ACCESS_LOG"
 run_test "autohide-w100" "$LTL" $COMMON --terminal-width 100 "$ACCESS_LOG"
 run_test "noautohide-w80" "$LTL" $COMMON --terminal-width 80 --no-auto-hide "$ACCESS_LOG"
-run_test "autohide-hm-w120" "$LTL" $COMMON -dm raw --terminal-width 120 -hm duration "$SCRIPT_LOG"
+run_test "autohide-hm-w120" "$LTL" $COMMON -dm raw --terminal-width 120 -hm duration -bs 1 "$SCRIPT_LOG"
 
 # --- Millisecond precision ---
 run_test "ms-w160" "$LTL" $COMMON --terminal-width 160 -ms -bs 1000 -st 00:00 -et 00:05 "$ACCESS_LOG"
@@ -215,17 +220,17 @@ run_test "ms-w160" "$LTL" $COMMON --terminal-width 160 -ms -bs 1000 -st 00:00 -e
 # DPM ScriptLog, already in use above) for heatmap and count-axis scenarios.
 
 # --- Heatmap at narrow widths (autohide interaction) ---
-run_test "heatmap-duration-w80"  "$LTL" $COMMON -dm raw --terminal-width 80  -hm duration "$SCRIPT_LOG"
-run_test "heatmap-duration-w100" "$LTL" $COMMON -dm raw --terminal-width 100 -hm duration "$SCRIPT_LOG"
-run_test "heatmap-bytes-w120"    "$LTL" $COMMON -dm raw --terminal-width 120 -hm bytes    "$SCRIPT_LOG"
-run_test "heatmap-count-w100"    "$LTL" $COMMON -dm raw --terminal-width 100 -hm count    "$SCRIPT_LOG"
+run_test "heatmap-duration-w80"  "$LTL" $COMMON -dm raw --terminal-width 80  -hm duration -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-duration-w100" "$LTL" $COMMON -dm raw --terminal-width 100 -hm duration -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-bytes-w120"    "$LTL" $COMMON -dm raw --terminal-width 120 -hm bytes    -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-count-w100"    "$LTL" $COMMON -dm raw --terminal-width 100 -hm count    -bs 1 "$SCRIPT_LOG"
 
 # --- Light-background heatmap ---
-run_test "heatmap-lbg-duration-w160" "$LTL" $COMMON -dm raw --light-background --terminal-width 160 -hm duration "$SCRIPT_LOG"
+run_test "heatmap-lbg-duration-w160" "$LTL" $COMMON -dm raw --light-background --terminal-width 160 -hm duration -bs 1 "$SCRIPT_LOG"
 
 # --- Custom heatmap width ---
-run_test "heatmap-hmw30-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hmw 30 "$SCRIPT_LOG"
-run_test "heatmap-hmw80-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hmw 80 "$SCRIPT_LOG"
+run_test "heatmap-hmw30-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hmw 30 -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-hmw80-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hmw 80 -bs 1 "$SCRIPT_LOG"
 
 # --- Histogram single-metric across widths ---
 run_test "hg-duration-w80"  "$LTL" $COMMON -dm raw --terminal-width 80  -hg duration "$APACHE_LOG"
@@ -234,11 +239,11 @@ run_test "hg-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg dura
 
 # --- Histogram per metric (axis formatters) ---
 run_test "hg-bytes-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg bytes "$APACHE_LOG"
-run_test "hg-count-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg count "$SCRIPT_LOG"
+run_test "hg-count-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg count -bs 1 "$SCRIPT_LOG"
 
 # --- Multi-histogram stacked panels ---
 run_test "hg-multi-duration-bytes-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration,bytes        "$APACHE_LOG"
-run_test "hg-multi-all-w160"            "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration,bytes,count "$SCRIPT_LOG"
+run_test "hg-multi-all-w160"            "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration,bytes,count -bs 1 "$SCRIPT_LOG"
 
 # --- Custom histogram dimensions ---
 run_test "hg-hgw30-duration-w160"     "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration       -hgw 30 "$APACHE_LOG"
@@ -247,7 +252,7 @@ run_test "hg-hgh4-duration-w160"      "$LTL" $COMMON -dm raw --terminal-width 16
 run_test "hg-hgh16-duration-w160"     "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration       -hgh 16 "$APACHE_LOG"
 
 # --- Composition: heatmap + histogram together ---
-run_test "hm-hg-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hg duration "$SCRIPT_LOG"
+run_test "hm-hg-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm duration -hg duration -bs 1 "$SCRIPT_LOG"
 
 # ---------------------------------------------------------------------------
 # Issue #312 — numeric highlight criteria rendering coverage

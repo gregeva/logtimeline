@@ -372,7 +372,9 @@ scenario_E_benchmark_data_section_matches_version_number() {
 
     local bout="$TMP_DIR/benchmark-data.txt"
     set +e
-    "$LTL" --disable-progress -V benchmark-data "$TEST_LOG" > "$bout" 2>"$bout.stderr"
+    # Shape: only the section's version field is read (HARNESS-DESIGN.md
+    # section Invocation coherence).
+    "$LTL" --disable-progress -bs 1440 -oe -n 1 -osum -V benchmark-data "$TEST_LOG" > "$bout" 2>"$bout.stderr"
     local ec=$?
     set -e
     check_stderr_warnings "$bout.stderr" "$current_scenario"

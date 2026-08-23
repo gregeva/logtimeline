@@ -44,6 +44,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 HARNESS_DIR="$SCRIPT_DIR/statistics-drift"
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): each
+# scenario's options and fixture in scenarios.tsv are the subject (the
+# percentile values under test derive from them); nothing is suppressed.
 SCENARIOS_TSV="$HARNESS_DIR/scenarios.tsv"
 ENGINE="$HARNESS_DIR/compare-statistics-drift.pl"
 BASELINES_DIR="$HARNESS_DIR/baselines"

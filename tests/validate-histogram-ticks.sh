@@ -38,6 +38,12 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 # corpus (see tests/lib/fixtures.sh): full-range duration/bytes spread for the
 # log-scale tick assertions.
 ACCESS_LOG="$TMP_DIR/access-sampled.txt"
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# the assertions read the histogram block (ticks vs legend) and scan the
+# rest of the render for stray tick characters, so the timeline collapses
+# to one bucket and the table to one row - both stay rendered as the
+# "nowhere else" surface - while the histogram itself sees every duration.
+SHAPE="-bs 1440 -oe -n 1"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
@@ -210,7 +216,8 @@ test_single_width() {
 
     local out
     out=$(mktemp)
-    "$LTL" --disable-progress --terminal-width 200 -hg duration -hgw "$hgw" "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
+    # shellcheck disable=SC2086
+    "$LTL" --disable-progress $SHAPE --terminal-width 200 -hg duration -hgw "$hgw" "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
     if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
         fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
     fi
@@ -280,7 +287,8 @@ test_multi_histogram() {
 
     local out
     out=$(mktemp)
-    "$LTL" --disable-progress --terminal-width 200 -hg duration,bytes -hgw 95 "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
+    # shellcheck disable=SC2086
+    "$LTL" --disable-progress $SHAPE --terminal-width 200 -hg duration,bytes -hgw 95 "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
     if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
         fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
     fi

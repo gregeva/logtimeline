@@ -23,6 +23,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): per-bucket
+# counting is the subject, so `-bs 1` on a 12-line, 2-minute fixture is the
+# shape; nothing to suppress.
 FIXTURE="$REPO_DIR/tests/fixtures/udm-counting-tokens.txt"
 
 # shellcheck source=lib/runtime-warnings.sh

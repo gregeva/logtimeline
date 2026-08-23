@@ -19,7 +19,18 @@ LTL="$REPO_DIR/ltl"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
-ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt"
+
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# every assertion here reads the -V section's contract surface - which
+# consumer blocks appear, their path: labels, source annotations, the
+# tier -> effective_bpd table, and the telemetry field shapes ([0-9]+) -
+# never a statistic, a count, or the time axis. The 5k slice (5,000 lines,
+# 4-minute span, durations on every line) carries every signal, and
+# `-bs 1440 -oe` keeps the timeline to the one bucket the per-time-bucket
+# partition assertions need. -osum/-hst stay OFF: the summary table and the
+# per-bucket statistics demand are what activate the consumers under test.
+ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+SHAPE="-bs 1440 -oe"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
@@ -41,7 +52,8 @@ current_scenario=""
 run_section() {
     local outfile
     outfile=$(mktemp)
-    "$LTL" --disable-progress -V histogram-bin-counters "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
+    # shellcheck disable=SC2086
+    "$LTL" --disable-progress $SHAPE -V histogram-bin-counters "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
 }
 
@@ -227,7 +239,8 @@ run_pa_section() {
     # Capture -V percentile-algorithm with all four surfaces on the bin model.
     local outfile
     outfile=$(mktemp)
-    "$LTL" --disable-progress -V percentile-algorithm -hg -hm \
+    # shellcheck disable=SC2086
+    "$LTL" --disable-progress $SHAPE -V percentile-algorithm -hg -hm \
         -mdm bin -bdm bin "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
 }
@@ -463,7 +476,7 @@ scenario_bucket_stats_bin() {
     current_scenario="bucket-stats-bin"
     echo "[$current_scenario]"
     local out
-    out=$(run_section -bdm bin -bs 240)
+    out=$(run_section -bdm bin)
     check_capture_warnings "$out"
 
     assert_header_present "$out"
@@ -558,7 +571,7 @@ scenario_bucket_stats_raw() {
     current_scenario="bucket-stats-raw"
     echo "[$current_scenario]"
     local out
-    out=$(run_section -bdm raw -bs 240)
+    out=$(run_section -bdm raw)
     check_capture_warnings "$out"
 
     assert_header_present "$out"

@@ -143,6 +143,12 @@ check_capture_warnings() {
 # any extra args ($2..) before the log. Output captured to a temp file
 # whose path is echoed for the caller.
 #
+# Invocation shape (HARNESS-DESIGN.md section Invocation coherence): every
+# scenario reads the -V format-detection section or a stderr note - which
+# entry bound, on what evidence, with what scan telemetry - so the run
+# takes the coarsest bucket with no empty buckets and the smallest table
+# (`-bs 1440 -oe -n 1 -osum`); the section is identical at any shape.
+#
 # HARNESS-DESIGN.md Trap 1: preserve stderr, check exit code.
 run_format_detection() {
     local log="$1"
@@ -150,7 +156,7 @@ run_format_detection() {
     local outfile
     outfile="$TMP_DIR/$(basename "$log" | tr -c 'A-Za-z0-9._-' '_').out"
     set +e
-    "$LTL" --disable-progress -V format-detection "$@" "$log" > "$outfile" 2>"$outfile.stderr"
+    "$LTL" --disable-progress -bs 1440 -oe -n 1 -osum -V format-detection "$@" "$log" > "$outfile" 2>"$outfile.stderr"
     local ec=$?
     set -e
     if [[ "$ec" -ne 0 ]]; then
@@ -242,6 +248,21 @@ assert_variant_selection() {
         asserts "Confidence = selected score / sum of live members (I1 weights)" \
         produced_by 'select_format_variants() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 I1 (evidence weights)'
+}
+
+# Helper: stage the first 300 lines of a corpus file under $TMP_DIR. The
+# corpus scenarios assert only which entry bound (slug + match_type), and
+# detection samples the file rather than scanning it, so a 300-line head
+# carries the whole signal (HARNESS-DESIGN.md section Invocation coherence).
+# Usage: slice=$(head_slice <source> <staged-name>)
+head_slice() {
+    local src="$1" name="$2" dest="$TMP_DIR/$2"
+    head -300 "$src" > "$dest"
+    if [[ ! -s "$dest" ]]; then
+        echo "FAIL: could not derive 300-line slice from $src" >&2
+        exit 1
+    fi
+    echo "$dest"
 }
 
 # ---------- Scenarios -----------------------------------------------------
@@ -417,7 +438,7 @@ scenario_thingworx_standard() {
     current_scenario="thingworx-standard"
     echo "[$current_scenario]"
 
-    local log="$REPO_DIR/logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log"
+    local log; log=$(head_slice "$REPO_DIR/logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log" ApplicationLog.2025-05-05.0.log)
     local out
     out=$(run_format_detection "$log")
     check_capture_warnings "$out"
@@ -439,7 +460,7 @@ scenario_thingworx_with_metrics() {
     current_scenario="thingworx-with-metrics"
     echo "[$current_scenario]"
 
-    local log="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
+    local log; log=$(head_slice "$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log" ScriptLog-DPMExtended-clean.log)
     local out
     out=$(run_format_detection "$log")
     check_capture_warnings "$out"
@@ -461,7 +482,7 @@ scenario_tw_edge_c_sdk() {
     current_scenario="tw-edge-c-sdk"
     echo "[$current_scenario]"
 
-    local log="$REPO_DIR/logs/UDM/rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log"
+    local log; log=$(head_slice "$REPO_DIR/logs/UDM/rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log" tw-edge-c-sdk-trace.log)
     local out
     out=$(run_format_detection "$log")
     check_capture_warnings "$out"
@@ -483,7 +504,7 @@ scenario_csv_with_udm() {
     current_scenario="csv-with-udm"
     echo "[$current_scenario]"
 
-    local log="$REPO_DIR/logs/UDM/results_data_idonly-timestampMs.csv"
+    local log; log=$(head_slice "$REPO_DIR/logs/UDM/results_data_idonly-timestampMs.csv" results_data_idonly-timestampMs.csv)
     local out
     # CSV detection requires at least one -udm flag for the CSV path to
     # be reached; otherwise ltl treats every CSV line as unmatched log content.
@@ -929,7 +950,7 @@ scenario_variant_connection_server() {
     current_scenario="variant-connection-server"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture connection-server.txt cxserver.1.log) || return
-    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_variant_selection "$out" connection_server_standard mt10 evidence '1\.00'
     assert_line "$out" pattern '^  filename_evidence: stem=mt10 ext=match date=- index=present$' \
         asserts 'cxserver.1.log decomposes to the Connection Server stem, the declared extension and a rotation index (D45/I4)' \
@@ -945,7 +966,7 @@ scenario_variant_integration_runtime_named() {
     current_scenario="variant-integration-runtime-named"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log) || return
-    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '1\.00'
     assert_line "$out" pattern '^  filename_evidence: stem=mt10ir ext=match date=- index=-$' \
         asserts 'The IntegrationRuntime-<uuid>.log name matches the Integration Runtime stem' \
@@ -965,7 +986,7 @@ scenario_variant_integration_runtime_unnamed() {
     current_scenario="variant-integration-runtime-unnamed"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture integration-runtime.txt app.log) || return
-    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '1\.00'
     assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
         asserts 'app.log carries no name evidence for any entry' \
@@ -981,7 +1002,7 @@ scenario_variant_tomcat_named() {
     current_scenario="variant-tomcat-named"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture tomcat-access.txt localhost_access_log.2025-05-05.txt) || return
-    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_variant_selection "$out" tomcat_access_with_duration mt3 evidence '0\.86'
     assert_line "$out" pattern '^  filename_evidence: stem=mt3 ext=match date=present index=-$' \
         asserts 'The Tomcat name decomposes to stem, .txt and a date' \
@@ -997,7 +1018,7 @@ scenario_variant_tomcat_extension_only() {
     current_scenario="variant-tomcat-extension-only"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture tomcat-access.txt whatever.log) || return
-    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_variant_selection "$out" tomcat_access_with_duration mt3 default '0\.50'
     assert_line "$out" pattern '^  candidates: mt3=2\.00,mt3us=2\.00$' \
         asserts 'An extension alone ties the group default (standing credit = extension weight) and never moves the selection off it (I1)' \
@@ -1013,7 +1034,7 @@ scenario_variant_httpd_named() {
     current_scenario="variant-httpd-named"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture httpd-access.txt access.log-20260609) || return
-    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_variant_selection "$out" httpd_access_with_duration mt3us evidence '0\.71'
     assert_line "$out" pattern '^  filename_evidence: stem=mt3us ext=match date=present index=-$' \
         asserts 'access.log-20260609 decomposes under after-placement: stem, .log, then the compact date' \
@@ -1024,7 +1045,7 @@ scenario_variant_httpd_named() {
         produced_by 'format_variant_ambiguity_note() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 I6'
     # The microsecond unit is applied: a -du us run must render identically.
-    local out_du; out_du=$(run_format_detection "$log" -bs 1440 -oe -du us); check_capture_warnings "$out_du"
+    local out_du; out_du=$(run_format_detection "$log" -du us); check_capture_warnings "$out_du"
     assert_command label "httpd member carries microseconds (output identical to -du us)" \
         command "diff <(grep -av '^duration_unit_override' '$out') <(grep -av '^duration_unit_override' '$out_du') > /dev/null" \
         asserts 'The httpd member declares %D in microseconds, so the evidence-selected run equals the explicit -du us run' \
@@ -1036,7 +1057,7 @@ scenario_variant_httpd_renamed() {
     current_scenario="variant-httpd-renamed"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture httpd-access.txt renamed.txt) || return
-    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_variant_selection "$out" tomcat_access_with_duration mt3 default '0\.75'
     assert_line "$out.stderr" pattern '^Note: the detected log format \(tomcat_access_with_duration\) is written by more than one producer' \
         asserts 'A renamed httpd file falls to the default with the note (D44: visible-or-good-enough)' \
@@ -1048,7 +1069,7 @@ scenario_variant_thingworx_rolled() {
     current_scenario="variant-thingworx-rolled"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture thingworx-application-log.txt ApplicationLog.2025-05-06.0.log) || return
-    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=mt1std ext=match date=match index=present$' \
         asserts 'A logback-rolled ThingWorx name decomposes to stem, date, index and extension, and the filename date agrees with the first content timestamp (D52 probe c)' \
         produced_by 'format_filename_evidence() / format_sample_probes() in ltl' \
@@ -1063,7 +1084,7 @@ scenario_variant_mixed_legend() {
     current_scenario="variant-mixed-legend"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture mixed.txt mixed.log) || return
-    local out; out=$(run_format_detection "$log" -bs 1440 -oe); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_line "$out" pattern '^  formats: connection_server_standard,tomcat_access_with_duration$' \
         asserts 'Every format found in the file is listed, first-bound first' \
         produced_by 'read_and_process_logs() in ltl (per-file formats, N7)' \
@@ -1096,7 +1117,7 @@ scenario_format_pin() {
     current_scenario="format-pin"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log) || return
-    local out; out=$(run_format_detection "$log" -bs 1440 -oe -lf connection_server_standard); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log" -lf connection_server_standard); check_capture_warnings "$out"
     assert_line "$out" pattern '^format_pin: connection_server_standard$' \
         asserts 'The run-level pin is reported' \
         produced_by 'emit_format_detection_verbose() in ltl' \
@@ -1117,7 +1138,7 @@ scenario_format_pin() {
         asserts 'An impossible date under the pinned layout is reported once per file (D52/#385) and never crashes' \
         produced_by 'format_probe_signal() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D52'
-    local out2; out2=$(run_format_detection "$log" -bs 1440 -oe -lf thingworx_standard); check_capture_warnings "$out2"
+    local out2; out2=$(run_format_detection "$log" -lf thingworx_standard); check_capture_warnings "$out2"
     assert_line "$out2" pattern '^entries: 2$' \
         asserts 'A name carried by two registry entries pins both (N9)' \
         produced_by 'apply_format_pin() in ltl' \

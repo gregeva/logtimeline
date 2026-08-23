@@ -85,6 +85,10 @@ DOCS=(
 )
 
 # Per-fixture stable terminal width for deterministic invocations.
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): the
+# documented example's own options are the subject, so nothing is injected
+# beyond progress suppression and a pinned width; fixtures are truncated to
+# FIXTURE_LINES lines.
 LTL_INJECT="--disable-progress --terminal-width 120"
 
 pass=0
