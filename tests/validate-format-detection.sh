@@ -454,7 +454,7 @@ assert_registry_sample_scenario() {
         pattern     "^  match_type: $mt\$" \
         asserts     "Slug \`$slug\` binds to internal match_type $mt" \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - match_type integers are diagnostic; the slug is the user-facing contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract - match_type integers are diagnostic; the slug is the user-facing contract'
 
     assert_line "$out" \
         pattern     "^  matched_lines: $nlines\$" \
@@ -468,19 +468,19 @@ assert_registry_sample_scenario() {
         pattern     '^  window: 0$' \
         asserts     'A sampled plain file engages no fallback window (window: 0) — the sample served it' \
         produced_by 'read_and_process_logs() in ltl (window engagement); emitted by emit_format_detection_sample_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_whole_file: yes$' \
         asserts     'A file no larger than sample_parts x sample_bytes_per_part is read once, whole, as a single part' \
         produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     "^  sample_matched_lines: $nlines\$" \
         asserts     "Every line of the whole-file sample is recognised by the registry patterns directly ($nlines lines), without touching scan_attempts" \
         produced_by 'sample_file_for_detection() in ltl (direct pattern recognition, static cascade order)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 }
 
 scenario_thingworx_rac_client() {
@@ -570,25 +570,25 @@ scenario_scan_telemetry() {
         pattern     '^=== format-detection / scan ===$' \
         asserts     'The scan-telemetry sub-section is emitted inside the format-detection section' \
         produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract; delimiters per HARNESS-DESIGN.md section Delimiter contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract; delimiters per HARNESS-DESIGN.md section Delimiter contract'
 
     assert_line "$out" \
         pattern     '^entries: 13$' \
         asserts     'All 13 scanned registry entries are compiled into the scan (csv is outside the scan array by design)' \
         produced_by 'build_format_registry() in ltl; emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
+        contract    'features/log-format-registry.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
 
     assert_line "$out" \
         pattern     '^guarded: mt12,mt4,mt9$' \
         asserts     'Exactly the three cheap-superset-guard entries (D28) carry guards, listed in static registry order' \
         produced_by 'compile_format_guard() wiring in build_format_registry(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (D28 guard set)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (D28 guard set)'
 
     assert_line "$out" \
         pattern     '^window_size: 0$' \
         asserts     'Without --detection-window, the override is 0 (D30/D38); the window engages per file only as the fallback for unsampled input' \
         produced_by 'emit_format_detection_verbose() in ltl ($format_detection_window)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     # Evidence sample (umbrella D53): the dual process's primary path. The
     # 84,857-byte codebeamer fixture is larger than 3 x 8192, so three
@@ -598,7 +598,7 @@ scenario_scan_telemetry() {
         pattern     '^window_fallback: 1000$' \
         asserts     'The fallback two-phase-store window size for unsampled input is 1000 lines (D53)' \
         produced_by 'emit_format_detection_verbose() in ltl (FORMAT_DETECTION_WINDOW_FALLBACK)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract; features/log-format-registry.md D53'
+        contract    'features/log-format-registry.md section -V format-detection section-contract; features/log-format-registry.md D53'
 
     assert_line "$out" \
         pattern     '^sample_parts: 3$' \
@@ -616,91 +616,91 @@ scenario_scan_telemetry() {
         pattern     '^  window: 0$' \
         asserts     'A sampled plain file engages no fallback window (window: 0) — the sample served it' \
         produced_by 'read_and_process_logs() in ltl (window engagement); emitted by emit_format_detection_sample_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample: yes$' \
         asserts     'A plain file is sampled (the primary path of the dual process)' \
         produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_file_bytes: 84857$' \
         asserts     'The sample records the file byte size it divided (the committed codebeamer fixture is 84,857 bytes)' \
         produced_by 'sample_file_for_detection() in ltl (-s on the sample handle)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_whole_file: no$' \
         asserts     'A file larger than sample_parts x sample_bytes_per_part is sampled in parts, not read whole' \
         produced_by 'sample_file_for_detection() in ltl' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_lines: 230$' \
         asserts     'Three 8192-byte parts of the codebeamer fixture yield 230 whole lines after discarding the partial line at each part edge' \
         produced_by 'sample_file_for_detection() in ltl (edge-line discard)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - value is deterministic for the committed fixture at the default sample shape'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - value is deterministic for the committed fixture at the default sample shape'
 
     assert_line "$out" \
         pattern     '^  sample_matched_lines: 230$' \
         asserts     'Every sampled codebeamer line is recognised by the registry patterns directly, without entering the production scan (scan_attempts stays 741)' \
         produced_by 'sample_file_for_detection() in ltl (direct pattern recognition, static cascade order)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_formats: mt12=230$' \
         asserts     'The sample attributes all 230 recognised lines to entry mt12, keyed by entry name in static registry order' \
         produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^  sample_part: 1 offset=0 bytes=8192 lines=86 avg_line=94 matched=86 first_ts="29/Oct/2025:08:03:31 \+0000" last_ts="29/Oct/2025:08:44:07 \+0000"$' \
         asserts     'Part 1 starts at byte 0, keeps 86 whole lines (avg 94 bytes), all recognised, and reports the raw (unparsed) first and last timestamp captures' \
         produced_by 'sample_file_for_detection() in ltl (per-part observations; timestamp_str capture via the field map)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - deterministic for the committed fixture'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - deterministic for the committed fixture'
 
     assert_line "$out" \
         pattern     '^  sample_part: 3 offset=76665 bytes=8192 lines=87 avg_line=94 matched=87 first_ts="29/Oct/2025:11:20:56 \+0000" last_ts="29/Oct/2025:12:04:02 \+0000"$' \
         asserts     'The last part is positioned so its read ends at EOF (offset = size - bytes) and its last_ts is the file'"'"'s final timestamp' \
         produced_by 'sample_file_for_detection() in ltl (end-part placement)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - deterministic for the committed fixture'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53) - deterministic for the committed fixture'
 
     assert_line "$out" \
         pattern     '^  sample_us: [0-9]+\.[0-9]$' \
         asserts     'The sample wall time is reported as a one-decimal microsecond value (nondeterministic: shape asserted, never the value)' \
         produced_by 'emit_format_detection_sample_verbose() in ltl' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$out" \
         pattern     '^final_order: mt12,' \
         asserts     'After the codebeamer run, mt12 (no pinned ancestors) leads the MTF scan order' \
         produced_by 'format_registry_promote() in ltl; emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (D26 pinned-closure MTF)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (D26 pinned-closure MTF)'
 
     assert_line "$out" \
         pattern     '^promotions: 1$' \
         asserts     'A single-format file causes exactly one promotion: the first match reorders, every later line hits the already-optimal front block' \
         produced_by 'format_registry_promote() in ltl (counter incremented only on actual reorders; reset after the D24 build gates)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     assert_line "$out" \
         pattern     '^match_counts: .*mt12=741' \
         asserts     'All 741 codebeamer lines are attributed to entry mt12 in the per-entry match counts' \
         produced_by 'FR_MATCHES increment in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - counts are per registry entry (FR_NAME), static registry order'
+        contract    'features/log-format-registry.md section -V format-detection section-contract - counts are per registry entry (FR_NAME), static registry order'
 
     assert_line "$out" \
         pattern     '^  scan_attempts: 741$' \
         asserts     'Every line of the 741-line fixture entered the registry scan exactly once' \
         produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     assert_line "$out" \
         pattern     '^  scan_failed_attempts: 0$' \
         asserts     'A fully-matched file records zero failed scan attempts' \
         produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 }
 
 scenario_scan_telemetry_nomatch() {
@@ -730,25 +730,25 @@ scenario_scan_telemetry_nomatch() {
         pattern     '^  scan_failed_attempts: 300$' \
         asserts     'Each of the 300 unmatchable lines records one failed scan attempt' \
         produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     assert_line "$out" \
         pattern     '^  scan_attempts: 320$' \
         asserts     'scan_attempts counts matched and failed scans together (300 junk + 20 codebeamer lines)' \
         produced_by 'per-file scan counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     assert_line "$out" \
         pattern     '^nomatch_scan_samples: 1$' \
         asserts     '300 no-match scans cross the 1-in-256 sampling threshold exactly once' \
         produced_by 'no-match sampling in read_and_process_logs() (FORMAT_SCAN_NOMATCH_SAMPLE_EVERY)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract - the sampling interval is part of the contract; changing it changes this count'
+        contract    'features/log-format-registry.md section -V format-detection section-contract - the sampling interval is part of the contract; changing it changes this count'
 
     assert_line "$out" \
         pattern     '^nomatch_scan_avg_us: [0-9]+\.[0-9]$' \
         asserts     'With at least one sample, the average no-match scan cost is reported as a one-decimal microsecond value (dash only when zero samples)' \
         produced_by 'emit_format_detection_verbose() in ltl (sampled no-match accumulator)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 
     # Same fixture through the two-phase-store window path: prefill
     # classifications must fold into the same per-file counters (no
@@ -761,19 +761,19 @@ scenario_scan_telemetry_nomatch() {
         pattern     '^window_size: 8$' \
         asserts     'With --detection-window=8, the sub-section reports the resolved window size' \
         produced_by 'emit_format_detection_verbose() in ltl ($format_detection_window)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (D30/D38 window structure)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (D30/D38 window structure)'
 
     assert_line "$wout" \
         pattern     '^  window: 8$' \
         asserts     'The --detection-window override engages the fallback window for a sampled file too (dual process: both paths exercisable), at the override size' \
         produced_by 'read_and_process_logs() in ltl (window engagement: override > sampled ? 0 : fallback)' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+        contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 
     assert_line "$wout" \
         pattern     '^  scan_attempts: 320$' \
         asserts     'Window prefill classifications count as scan attempts and held-line replays are not re-counted: the total is identical to the windowless run' \
         produced_by 'window prefill + per-file scan counters in read_and_process_logs()' \
-        contract    'features/58-format-registry-staged-detection.md section -V format-detection section-contract'
+        contract    'features/log-format-registry.md section -V format-detection section-contract'
 }
 
 scenario_unit_ambiguity_warning() {

@@ -613,6 +613,21 @@ Sampling barely halves the cost because the counter and mask test still run per 
 
 **Decisions from the prototype:** locked 2026-08-23 — I2 amended per F4 (both probes in the generated block's cache-miss branch; no 1-in-N sampling), I1 values per F7, I4 per F8. F1 locked 2026-08-23 (the group is the unit of ordering; amends D47). D51 table rows corrected per F6 and F9 (locked 2026-08-23). Every prototype-derived decision is now locked.
 
+### Implementation notes N1–N10 (2026-08-23; mechanism-level, below the Dxx/Ixx decisions — strike or lock)
+
+Mechanism choices the locked decisions leave to the implementer, recorded here before any production code. N5 and N9 were settled in dialog with the architect on 2026-08-23; the rest are proposals.
+
+- **N1 — Group as a registry field.** Every entry carries `FR_GROUP` (an entry without variants is a group of one keyed by its own name). Spec keys: `variant_group => '<group>'`, `variant_default => 1` on the default member. Ancestor sets (`FR_ANC_SET`, `expect_ancestors`, `derive_format_constraints()`, gate 4) are keyed by **group** (F1); `derive_format_constraints()` treats a same-group first match as the owner (in-group identical-pattern overlap is expected, D47). `@format_registry` / `@format_scan_order` hold **one occupant per group slot** (the default member at build); all members live in `%format_registry_entry`. The D40 cache signature stays `join ',', FR_NAME` — the occupant's name changes on selection, so "selected members in the key" (D47) falls out of the existing signature with no second key. The eager precompile covers default occupants only (F2).
+- **N2 — Per-file selection is an in-place slot swap.** `select_format_variants($path, \@sample_lines)` runs at the sampling attach point in `read_and_process_logs()`, returns per group `{selected, basis, confidence, candidates, probes, evidence}`; for each group whose selection differs from the current occupant, the occupant is replaced at its position in `@format_scan_order` (F1) and `$format_scan_sub` is taken from the cache or compiled once.
+- **N3 — Timestamp cache invalidation.** `%timestamp_cache` is keyed by the timestamp string alone and the two date layouts disagree on the epoch for the same string, so any occupant change (per-file or mid-file) clears `%timestamp_cache` and resets the last-seen memo (`$format_last_ts_str` / `$format_last_ts_epoch`). Output-neutral for same-layout runs (the cache is a memo); cost is one re-parse per distinct second after a swap.
+- **N4 — Fallback-window path.** When no sample was taken, the held lines are the evidence: `select_format_variants()` runs on them after prefill and before replay; each held `[line, entry]` whose group changed occupant is remapped to the new occupant (same pattern ⇒ the classification stands; the extraction closure differs).
+- **N5 — One selection mechanism, continuously re-evaluated (architect, 2026-08-23).** Per group, every signal updates candidate scores; the best live candidate is the selected member; a change of best is a flip. The steady-loop probes are signal sources feeding that same mechanism — there is no separate flip rule or threshold. The generated block's timestamp cache-miss branch (ISO layouts only, I2) calls a cold sub on the rare events: an **impossible month** eliminates the current member (score 0); a **monotonicity violation** over distinct timestamps applies the I1 penalty (−0.5 per violation, capped at −1.0) to the current member. The group then re-selects; if the best changed → swap occupant (N2), invalidate the cache (N3), `flips++`, and the block returns `$format_scan_sub->($_[0])` so the triggering line is re-scanned under the new member (no recursion: a group with no better live member does not flip). An impossible month with no alternative left → the once-per-file #385 stderr diagnostic (file, line number, offending value; never an ` at … line` suffix) and the epoch falls back to the previous distinct epoch (`// 0`) — this is the `timegm()` guard. Per-file counts and the live confidence are reported in `-V`.
+- **N6 — (merged into N5).**
+- **N7 — `formats:` per file at zero per-line cost.** Every entry's `FR_MATCHES` is snapshotted at file start; the file's format set is the entries whose count grew (plus `csv` when confirmed). Legend numbering = first-detection order across the run (D50).
+- **N8 — `entries:` keeps meaning occupants in the scan sub** (13 today). New keys in the contract: run-level `format_pin:`, `legend:`; sub-section `variant_groups:`.
+- **N9 — Pin semantics (`-lf <format-name>`, architect 2026-08-23).** The pin overrides automatic detection for every file in the run (the industry-standard override, #388 R1). The operand is a user-facing format name and resolves to **every registry entry carrying that name** — `thingworx_standard` names both its strict and generic entries, and choosing it is still choosing something more specific than detection; a group has no user-facing name and is never pinnable. The scan for the run is restricted to the resolved entries (one compiled sub, no evidence pass, no selection, no probes, no MTF alternation); lines not matching are unmatched as usual; `-du` still governs the unit. An unknown name is a usage error listing the known names. `-V`: `format_pin: <name>`; per-file `selection_basis: pin`, `confidence: 1.00`.
+- **N10 — New time layout `iso_ms_ddmm`** (same `frac fixed3`), emitted by `format_entry_block_src()` and `compile_format_time_parser()` from the layout declaration (day/month `substr` offsets 5/8 swapped) — never by patching generated source as the prototype did.
+
 ### Constraints handed to #388 (must be settled and landed before this drop implements)
 
 Rewritten 2026-08-22 under D53 (the original six constraints were framed around sizing a front-only held-line window).
@@ -722,7 +737,7 @@ The **first/last-timestamp span** — the signal that decides the date-layout ca
 
 ### Section contracts owned by this drop
 
-- `-V format-detection`: the per-file and run-level keys in proposal 5 become locked at implementation and are recorded here (consumer: `tests/validate-format-detection.sh`).
+- `-V format-detection`: the owning contract is § "`-V format-detection` section-contract" below (consumer: `tests/validate-format-detection.sh`); the #384 keys (I5, I8, N8) are drafted there and lock at implementation.
 - Console summary: the `[n,m]` bracket and the numbered single-line legend (D50) are a rendered-output shape consumed by `validate-regression.sh` references; the legend line is deterministic (slug order = first-detection order) and is **not** stripped.
 - stderr: the group-default ambiguity note (proposal 6) and the #385 out-of-range diagnostic are intentional diagnostics — never an ` at … line` suffix.
 
@@ -753,6 +768,64 @@ Statistical unit sampling (#17's remaining half); content fingerprinting beyond 
 - [ ] Success criteria from the issue: Tomcat-named and httpd-named identical-shape files resolve to different units with no `-du`; IR-named file reads `yyyy-dd-MM` with no fatal; pin wins; unnamed file behaves as today plus the note; sabotage fails at load; no read-phase regression outside noise.
 - [ ] `--help`, `docs/usage.md`, `docs/staged-processing-pipeline.md` (detect-stage contract), this section, and the `-V` contract updated in the same change; release-notes bullet (user-observable).
 - [ ] #385 closed by this drop; #17's declarative half noted complete on #17.
+
+## `-V format-detection` section-contract
+
+This section is the owning contract for the `format-detection` `-V` section and its `format-detection / scan` sub-section, both emitted by `emit_format_detection_verbose()` and consumed by `tests/validate-format-detection.sh`. All pre-existing keys of the parent section (per-file `format:`, `match_type:`, `is_access_log:`, `matched_lines:`, `unmatched_lines:`, `first_match_line:`; run-level `duration_unit_override:`, `files:`) are byte-preserved from their pre-registry shapes; everything below is additive. Renames and removals are breaking per `tests/HARNESS-DESIGN.md` § Stability contract.
+
+**Per-file keys (inside each `file:` block, two-space indent):**
+
+- `scan_attempts: N` — registry scan-sub invocations for this file. Counts one per line entering the scan, **including** detection-window prefill classifications; **excluding** confirmed-CSV fast-path lines (outside the scan, D32) and held-window replay lines (their classification was already counted at prefill; the replay runs only the entry's extraction). A file the scan never touches (all-CSV after confirmation, empty file) reports 0.
+- `scan_failed_attempts: N` — the subset of `scan_attempts` that matched no entry (the no-match scan — the structural worst case, every entry attempted). Increments on the streaming no-match branch and on prefill classifications returning no entry. A fully-matched file reports 0; `matched_lines + scan_failed_attempts = scan_attempts` holds for non-CSV files with no window.
+
+Detection-evidence keys (umbrella D53, #388; emitted by `emit_format_detection_sample_verbose()` after the keys above, for every file block including the no-bind-attempts form):
+
+- `window: N` — the two-phase-store window size engaged **for this file**: the `--detection-window` override when given; otherwise `window_fallback` when the file could not be sampled; otherwise 0. This is the dual process's "which path served the file" indicator read together with `sample:`.
+- `sample: yes|no` — whether the read-only evidence sample was taken (`no` only when the path is not a plain file; such a file gets the fallback window). When `no`, no further `sample_*` keys follow.
+- `sample_file_bytes: N` — the file's byte size at sampling time.
+- `sample_whole_file: yes|no` — `yes` when the file is no larger than `sample_parts × sample_bytes_per_part` and was read once, whole, as a single part.
+- `sample_lines: N` / `sample_matched_lines: N` — whole lines seen across all parts, and how many of them matched a registry entry (first match in static cascade order; no extraction, no promotion — these never feed `scan_attempts` or `match_counts`).
+- `sample_formats: name=N,...` — per-entry counts across the sample, static registry order, entry names (not slugs); `-` when nothing matched.
+- `sample_part: i offset=O bytes=B lines=L avg_line=A matched=M first_ts="…" last_ts="…"` — one line per part, `i` from 1. `offset` is the byte offset seeked to (part 1 is 0; the last part ends at EOF); `bytes` the bytes read; `lines` the whole lines kept after discarding the partial line at either edge; `avg_line` the integer mean line length over those lines (0 when none); `first_ts`/`last_ts` the **raw** timestamp capture of the first and last matched line in the part (never parsed — interpreting it under a layout is the consumers' job), `-` when no line matched. A part shorter than one line (a stack-trace line longer than the part) legitimately reports `lines=0`.
+- `sample_us: X.X` — wall microseconds for the whole sample (open, seeks, reads, recognition), one decimal. **Nondeterministic** — harnesses assert its shape, never its value.
+
+**Sub-section `=== format-detection / scan ===` (run-level, one per run, emitted inside the parent section before its END marker; closed by `=== END format-detection / scan ===`):**
+
+- `entries: N` — count of scanned registry entries compiled into the scan sub (13 as of this drop; `csv` is outside the scan array by design, D32). Changes only when a scanned format is added/removed — same commit updates this contract and the harness.
+- `guarded: name,...` — registry entry names (FR_NAME, e.g. `mt12`) carrying a D28 cheap-superset guard, static registry order; `-` if none. Currently `mt12,mt4,mt9`.
+- `window_size: N` — the `--detection-window` override value (hidden; D30/D38); 0 when not given. It is not the size engaged per file — that is the per-file `window:` key, which resolves to `window_fallback` for unsampled files.
+- `window_fallback: N` — `FORMAT_DETECTION_WINDOW_FALLBACK`, the window size engaged for a file that could not be sampled (umbrella D53; 1000).
+- `sample_parts: K` / `sample_bytes_per_part: B` — `FORMAT_SAMPLE_PARTS` and `FORMAT_SAMPLE_BYTES`, the evidence sample's shape (umbrella D53; values set by #388's measurements — see `features/log-format-registry.md` § "#388 — detection evidence sampling pass"). Changing either changes every `sample_*` per-file value in the harness in the same commit.
+- `final_order: name,...` — the MTF scan order (`@format_scan_order`) at emission time, front first. Proves promotion end-state: a single-format run shows that format's pinned-ancestor closure + itself at the front, tail in recency order.
+- `promotions: N` — count of actual reorders through `format_registry_promote()`. Increments only when a winner at a non-optimal generated position promotes; steady-state front matches emit no promotion code and do not count. Reset to 0 at the end of `build_format_registry()` so D24 gate-5 sample classification (which promotes) is excluded — the counter reports run promotions only.
+- `match_counts: name=N,...` — per-entry matched-line totals across the run, **static registry order** (comparable across runs regardless of promotion history). Keyed by entry name, not slug: two entries can share a slug (mt1std/mt1gen → `thingworx_standard`) and the scan attributes per entry. CSV-matched lines are not listed (csv is not a scan entry).
+- `nomatch_scan_samples: N` — number of sampled no-match scan timings. Sampling is 1 in `FORMAT_SCAN_NOMATCH_SAMPLE_EVERY` (= 256) no-match lines per file: the sampled line is **re-scanned under a timer** on the already-expensive no-match path. The re-scan is side-effect-safe (no match ⇒ no promotion; failed attempts' empty-capture writes repeat the first scan's end state). Per-line timer pairs around every scan were considered and rejected as an anti-pattern — the clock calls would cost more than many scans they measure.
+- `nomatch_scan_avg_us: X.X` — mean elapsed microseconds across those samples, one decimal; the literal `-` when zero samples. **Nondeterministic when samples exist** — harnesses assert its shape (`[0-9]+\.[0-9]`), never its value, and it must be stripped by any golden-output capture that enables this section.
+
+Vocabulary note: entry names (`mt1std`, `mt3`, …) are the registry's internal scan identity and appear only in this diagnostic sub-section; the user-facing format identity remains the slug vocabulary locked by `%match_type_to_slug`.
+
+**#384 additions (Drop 1.5; drafted at planning 2026-08-23, locked at implementation — I5, I8, N8):**
+
+Per-file keys, emitted after the `sample_*` keys for every file block:
+
+- `filename_evidence: stem=<entry|-> ext=match|absent|other date=match|mismatch|- index=present|-` — the D45 decomposition of the file's basename (compression suffix stripped) against the declared components of every entry carrying filename evidence; `stem=` names the entry whose stem matched (`-` when none).
+- `candidates: name=score,...` — per variant group with ≥2 members whose pattern matched the sample, every member's score after all signals (I1 weights); eliminated members show `0`. Entry names, group order as in the registry.
+- `selected: name` — the entry occupying the group's slot for this file (entry name; the user-facing format name is in `format:`).
+- `selection_basis: pin|evidence|default` — `pin` under `-lf`; `evidence` when a non-default signal (stem, filename date, probe elimination) decided; `default` when the group default holds by standing credit or tie.
+- `confidence: 0.NN` — selected member's score ÷ the sum of the live members' scores; `1.00` under a pin.
+- `flips: N` — occupant changes after the first decision (steady-loop probe signals, N5).
+- `probes: out_of_range=N monotonic_violations=N filename_date=match|mismatch|-` — steady-loop counts for this file (distinct timestamps, selected layout) plus the sample's filename-date cross-check.
+- `formats: name,name` — every registry entry that matched at least one line of the file, first-detection order (the `[n,m]` bracket's content, N7); `-` for a no-match file.
+
+Run-level keys (parent section, after `files:`):
+
+- `format_pin: -|<format-name>` — the `-lf` value.
+- `legend: 1=<format-name>,2=<format-name>` — the console legend, numbered in first-detection order across the run (I8).
+
+Sub-section `format-detection / scan` additions:
+
+- `variant_groups: group=occupant,...` — each variant group with ≥2 members and the entry occupying its slot at emission time.
+- `entries: N` keeps its meaning — occupants compiled into the scan sub (one per group slot), not members.
 
 ## TODOs
 

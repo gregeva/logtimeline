@@ -106,7 +106,7 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `udm-counting` — per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313)
 - `statistics-demand` — per-store resolved statistics-group demand with raising consumers, per-store moment source, per-store statistics-calculation counters (`stats_calls` invocations plus per-group `group_calc` computed/skipped_demand/ineligible outcomes), and calculated-statistic sort selection (`sort_selection` defined/fill/demoted split, `sort_calc` per-pass attribution) (Issues #305, #303)
 - `benchmark-data` — machine-parseable TSV: version, files, line counts, timings, memory, structure counts
-- `format-detection` — per-file detected format slug/match_type and matched/unmatched/scan-attempt counts, plus the `format-detection / scan` sub-section: registry scan-order telemetry (final MTF order, promotions, per-entry match counts, sampled no-match cost) (Issues #228, #58; contract in features/58-format-registry-staged-detection.md)
+- `format-detection` — per-file detected format slug/match_type and matched/unmatched/scan-attempt counts, plus the `format-detection / scan` sub-section: registry scan-order telemetry (final MTF order, promotions, per-entry match counts, sampled no-match cost) (Issues #228, #58, #388, #384; contract in features/log-format-registry.md § `-V format-detection` section-contract)
 
 **Reserved by sub-issues, not yet implemented:**
 - `filter-summary` (Issues #229, #230 — shared section, ownership decided during research)
