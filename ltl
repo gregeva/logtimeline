@@ -423,6 +423,8 @@ my $format_scan_promotions = 0;        # actual reorders via format_registry_pro
 my $format_scan_nomatch_samples = 0;   # sampled no-match scans timed
 my $format_scan_nomatch_sample_us = 0; # summed elapsed us across those samples
 my $format_unit_ambiguity_warned = 0;  # D18 unit-ambiguity note emitted (once per run)
+my $format_current_file = '';          # file being read (steady-loop probe signals, -V)
+my $format_current_line_ref = \0;      # ref to the read loop's line counter (diagnostics)
 
 # Rate unit override (Issue #122)
 my $rate_unit = 'm';                                     # Default: per-minute (preserves existing behavior)
@@ -2798,6 +2800,71 @@ sub select_format_variants {
     return \%out;
 }
 
+# Steady-loop probe signal (N5): called from the generated block's
+# timestamp cache-miss branch — once per distinct timestamp, only on the
+# rare events — so it is a cold path. An impossible date component under
+# the entry's layout eliminates the entry from its variant group; a
+# monotonicity violation applies the graded penalty. The group then
+# re-selects; when the best live member changes, it takes the slot (the
+# caller re-scans the line under the new sub) and the flip is counted.
+# An impossible date with no live alternative is reported once per file
+# on stderr (D52/#385) — an intentional diagnostic, never an
+# ` at ... line` suffix. Returns 1 when the occupant changed.
+sub format_probe_signal {
+    my ($entry, $kind, $value) = @_;
+    return 0 unless $entry;
+    my $ev = $format_detection_evidence{$format_current_file} //= { filename => undef, probes => {}, groups => {} };
+    my $st = $ev->{steady} //= {};
+    my $name = $entry->[FR_NAME];
+    my $g = $ev->{groups}{ $entry->[FR_GROUP] };
+    my $W = \%format_evidence_weights;
+    if ($kind eq 'impossible_date') {
+        $st->{impossible_date}++;
+        if ($g && $g->{live}{$name}) {
+            $g->{live}{$name} = 0;
+            $g->{scores}{$name} = 0;
+            $g->{why}{$name} .= ',steady-a';
+        }
+    } else {
+        $st->{monotonic_violations}++;
+        if ($g && $g->{live}{$name}) {
+            my $pen = $g->{mono_pen}{$name} // 0;
+            if ($pen < $W->{mono_cap}) {
+                my $step = $W->{mono_per_violation};
+                $step = $W->{mono_cap} - $pen if $pen + $step > $W->{mono_cap};
+                $g->{mono_pen}{$name} = $pen + $step;
+                $g->{scores}{$name} -= $step;
+                $g->{why}{$name} .= ',steady-b' if $pen == 0;
+            }
+        }
+    }
+    my $flipped = 0;
+    if ($g) {
+        my $default = $format_variant_groups{ $entry->[FR_GROUP] }{default};
+        my @live = grep { $g->{live}{$_} } @{ $format_variant_groups{ $entry->[FR_GROUP] }{members} };
+        if (@live) {
+            my @rank = sort { $g->{scores}{$b} <=> $g->{scores}{$a} || ($b eq $default) <=> ($a eq $default) } @live;
+            my $tot = 0; $tot += $g->{scores}{$_} for @live;
+            $g->{confidence} = $tot > 0 ? $g->{scores}{ $rank[0] } / $tot : 0;
+            if ($rank[0] ne $g->{selected}) {
+                $g->{selected} = $rank[0];
+                $g->{basis}    = 'evidence';
+                $g->{flips}++;
+                format_registry_set_occupant( $format_registry_entry{ $rank[0] } );
+                $flipped = 1;
+            }
+        }
+    }
+    # While the file's first decision is pending (fallback-window prefill,
+    # before the held lines have been scored) the signal only counts: the
+    # selection that follows sees the same evidence and decides.
+    if ($kind eq 'impossible_date' && !$flipped && %{ $ev->{groups} } && !$st->{impossible_date_reported}++) {
+        print STDERR "Note: $format_current_file line $$format_current_line_ref: timestamp '$value' has an impossible date component under the "
+            . $entry->[FR_SLUG] . " format's date layout; such lines are kept at the previous line's time - use -lf to pin the correct log format\n";
+    }
+    return $flipped;
+}
+
 # Apply a selection record: each group's selected member occupies its slot.
 # Returns the number of occupants that changed.
 sub apply_format_variant_selection {
@@ -2869,6 +2936,10 @@ sub compile_format_extractor {
     my ($spec, $clobbered, $opts) = @_;
 
     my ($aux_decl, $cond_src, $body_src) = format_entry_block_src($spec, $clobbered, $opts);
+    # Per-entry closures run cold (validation, held-line replay): the probe
+    # signals are inert there — format_probe_signal() is a no-op without an
+    # entry, so no re-scan return can fire inside the closure.
+    $body_src =~ s/ENTRY_PLACEHOLDER/undef/g;
     my $src = "sub {\n$aux_decl$cond_src or return;\n$body_src\nreturn 1;\n}";
     my $closure = eval $src;
     die "ltl: format registry: extraction codegen failed for entry '$spec->{name}': $@\nGENERATED SOURCE:\n$src\n"
@@ -2979,14 +3050,35 @@ substr($timestamp_str, 19) = '';};
     my $compute = ($layout eq 'apache_clf')
         ? q{do { my ($day, $month_str, $year, $hour, $minute, $second) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/; timegm( $second, $minute, $hour, $day, $format_month_map{$month_str} - 1, $year ) }}
         : qq{timegm( substr(\$timestamp_str, 17, 2), substr(\$timestamp_str, 14, 2), substr(\$timestamp_str, 11, 2), substr(\$timestamp_str, $day_off, 2), substr(\$timestamp_str, $month_off, 2) - 1, substr(\$timestamp_str, 0, 4) )};
+    # The cache-miss branch runs once per distinct timestamp string — never
+    # once per line — so it is where the steady-loop content probes live
+    # (D52/I2): for ISO layouts, an impossible date component under this
+    # layout (month > 12, day > 31 — the timegm() guard, #385) and a
+    # timestamp earlier than the previous distinct one are reported to
+    # format_probe_signal(), which feeds the one selection mechanism (N5);
+    # when the signal flips the group's occupant, the line is re-scanned
+    # under the new sub. The impossible-date line is carried at the previous
+    # distinct epoch and is memoised but never cached.
+    my $miss_src = $layout =~ /^iso_/
+        ? qq{if (substr(\$timestamp_str, $month_off, 2) > 12 || substr(\$timestamp_str, $day_off, 2) > 31) {
+    \$timestamp = \$format_last_ts_epoch // 0;
+    \$format_last_ts_str = \$timestamp_str;
+    return \$format_scan_sub->(\$_[0]) if format_probe_signal(ENTRY_PLACEHOLDER, 'impossible_date', \$timestamp_str);
+} else {
+    my \$prev = \$format_last_ts_epoch;
+    \$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str} = $compute;
+    \$format_last_ts_str = \$timestamp_str;
+    return \$format_scan_sub->(\$_[0]) if defined \$prev && \$timestamp < \$prev && format_probe_signal(ENTRY_PLACEHOLDER, 'monotonicity', \$timestamp_str);
+}}
+        : qq{\$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str} = $compute;
+    \$format_last_ts_str = \$timestamp_str;};
     push @body, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
 elsif (exists \$timestamp_cache{\$timestamp_str}) {
     \$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str};
     \$format_last_ts_str = \$timestamp_str;
 }
 else {
-    \$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str} = $compute;
-    \$format_last_ts_str = \$timestamp_str;
+    $miss_src
 }};
 
     return ($aux_decl, $cond_src, join("\n", @body), \@aux);
@@ -3037,6 +3129,7 @@ sub compile_format_scan_sub {
         my $return_src = $optimal
             ? "return \$entries[$si];\n"
             : "my \$winner = \$entries[$si];\nformat_registry_promote($si);\nreturn \$winner;\n";
+        $body_src =~ s/ENTRY_PLACEHOLDER/\$entries[$si]/g;
         my $block = "if ( $guard_src$cond_src ) {\n$body_src\n$return_src}";
         push @blocks, $block;
         # Tab-led lines can only match heads that accept a tab first char
@@ -3580,6 +3673,7 @@ sub emit_format_detection_sample_verbose {
     push @verbose_output, "  window: $w";
     if (!$s) {
         push @verbose_output, "  sample: no";
+        emit_format_detection_evidence_verbose($file);
         return;
     }
     push @verbose_output, "  sample: yes";
@@ -3626,8 +3720,10 @@ sub emit_format_detection_evidence_verbose {
         push @verbose_output, "  selection_basis: $r->{basis}";
         push @verbose_output, sprintf('  confidence: %.2f', $r->{confidence});
         push @verbose_output, "  flips: $r->{flips}";
-        push @verbose_output, sprintf('  probes: out_of_range=%d monotonic_violations=%d filename_date=%s',
-            $pr ? $pr->{oor} : 0, $pr ? $pr->{viol} : 0, ($pr && $pr->{fdate}) ? $pr->{fdate} : '-');
+        push @verbose_output, sprintf('  probes: sample_out_of_range=%d sample_monotonic_violations=%d out_of_range=%d monotonic_violations=%d filename_date=%s',
+            $pr ? $pr->{oor} : 0, $pr ? $pr->{viol} : 0,
+            $ev->{steady}{impossible_date} // 0, $ev->{steady}{monotonic_violations} // 0,
+            ($pr && $pr->{fdate}) ? $pr->{fdate} : '-');
     }
     return;
 }
@@ -9455,6 +9551,8 @@ sub read_and_process_logs {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
         push @files_processed, $in_file;
         my $line_number = 0;
+        $format_current_file = $in_file;
+        $format_current_line_ref = \$line_number;
 
         # Index file: capture file metadata and initialize per-file counters (Issue #46)
         my @file_stat = stat($in_file);
@@ -9517,9 +9615,11 @@ sub read_and_process_logs {
         # replay — then switches to the streaming path. N=0: no lines held.
         my ( $file_scan_attempts, $file_scan_failed ) = ( 0, 0 );  # scan telemetry (Issue #228)
         my @window_held;
+        my $window_replay_started = 0;
         if ($window_n > 0) {
             while (@window_held < $window_n && defined(my $wline = <$fh>)) {
                 (my $wstripped = $wline) =~ s/[\r\n]+$//;
+                $line_number++;   # diagnostics cite file lines; the replay recounts from 0
                 my ($wentry) = format_registry_classify($wstripped);
                 $file_scan_attempts++;
                 $file_scan_failed++ unless $wentry;
@@ -9530,6 +9630,7 @@ sub read_and_process_logs {
             # occupant of their group (same pattern — only extraction differs).
             if (!$sample && @window_held) {
                 my $selection = select_format_variants($in_file, [ map { (my $l = $_->[0]) =~ s/[\r\n]+$//; $l } @window_held ]);
+                $selection->{steady} = $format_detection_evidence{$in_file}{steady} if $format_detection_evidence{$in_file};
                 if (apply_format_variant_selection($selection)) {
                     my %occupant = map { $_->[FR_GROUP] => $_ } @format_scan_order;
                     $_->[1] = $occupant{ $_->[1][FR_GROUP] } for grep { $_->[1] } @window_held;
@@ -9550,6 +9651,7 @@ sub read_and_process_logs {
                 $_ = $held->[0];
                 $window_entry = $held->[1];
                 $from_window = 1;
+                $line_number = 0 if $line_number >= 0 && !$window_replay_started++;
             } else {
                 last unless defined( $_ = <$fh> );
             }
