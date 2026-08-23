@@ -18,7 +18,7 @@
 # connection_server_standard, windchill_method_server) are asserted against fixtures derived from
 # the format registry's own sample lines (issue #58) — the same lines the
 # D24 load-time gates validate, so fixture and registry cannot drift.
-# wgm_client is asserted against the committed wgm-client.txt fixture
+# windchill_workgroup_manager is asserted against the committed wgm-client.txt fixture
 # staged under each of its three producer-true names (issue #395).
 # The `format-detection / scan` sub-section (registry scan telemetry,
 # issue #58) is asserted by the scan-telemetry scenarios.
@@ -1209,17 +1209,17 @@ scenario_variant_mixed_legend() {
 # bracketed message (the mt2 cross-shadow case). `-bs 1440 -oe -n 1 -osum`
 # via run_format_detection: every assertion reads -V format-detection or
 # the benchmark-data line counts; the 8-second span never reads a bucket.
-scenario_wgm_client() {
+scenario_windchill_workgroup_manager() {
     current_scenario="wgm-client"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture wgm-client.txt uwgm_client.log.1) || return
     local out; out=$(run_format_detection "$log" -V benchmark-data); check_capture_warnings "$out"
-    assert_line "$out" pattern '^  format: wgm_client$' \
-        asserts 'A WGM client log binds the wgm_client format' \
+    assert_line "$out" pattern '^  format: windchill_workgroup_manager$' \
+        asserts 'A WGM client log binds the windchill_workgroup_manager format' \
         produced_by 'read_and_process_logs() in ltl (first-match block); emitted by emit_format_detection_verbose()' \
         contract '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
     assert_line "$out" pattern '^  match_type: 16$' \
-        asserts 'Slug wgm_client binds to internal match_type 16' \
+        asserts 'Slug windchill_workgroup_manager binds to internal match_type 16' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
         contract 'features/log-format-registry.md section -V format-detection section-contract - match_type integers are diagnostic; the slug is the user-facing contract'
     assert_line "$out" pattern '^  matched_lines: 44$' \
@@ -1263,11 +1263,11 @@ scenario_wgm_filename_family() {
         log=$(stage_fixture wgm-client.txt "$name") || return
         out=$(run_format_detection "$log"); check_capture_warnings "$out"
         assert_line "$out" pattern '^  filename_evidence: stem=mt16 ext=match date=- index=present$' \
-            asserts "$name decomposes to the wgm_client entry's stem, extension and rotation index" \
+            asserts "$name decomposes to the windchill_workgroup_manager entry's stem, extension and rotation index" \
             produced_by 'format_filename_decompose() in ltl; emitted by emit_format_detection_evidence_verbose()' \
             contract 'features/395-wgm-client-log-format.md section D55 (filename family)'
-        assert_line "$out" pattern '^  format: wgm_client$' \
-            asserts "$name binds the wgm_client format" \
+        assert_line "$out" pattern '^  format: windchill_workgroup_manager$' \
+            asserts "$name binds the windchill_workgroup_manager format" \
             produced_by 'read_and_process_logs() in ltl (first-match block)' \
             contract 'features/log-format-registry.md section -V format-detection section-contract'
     done
@@ -1277,7 +1277,7 @@ scenario_wgm_filename_family() {
         asserts 'A renamed WGM file matches no declared stem: the name signal is withheld, never contradicting (D45)' \
         produced_by 'format_filename_decompose() in ltl; emitted by emit_format_detection_evidence_verbose()' \
         contract 'features/log-format-registry.md section Drop 1.5 D45'
-    assert_line "$out" pattern '^  format: wgm_client$' \
+    assert_line "$out" pattern '^  format: windchill_workgroup_manager$' \
         asserts 'A group of one binds by line shape alone; filename evidence only reports' \
         produced_by 'read_and_process_logs() in ltl (first-match block)' \
         contract 'features/395-wgm-client-log-format.md section D55 (filename family)'
@@ -1362,7 +1362,7 @@ scenario_windchill_method_server_rolled; echo ""
 scenario_windchill_method_server_bare; echo ""
 scenario_windchill_method_server_renamed; echo ""
 scenario_variant_mixed_legend; echo ""
-scenario_wgm_client;            echo ""
+scenario_windchill_workgroup_manager; echo ""
 scenario_wgm_filename_family;   echo ""
 scenario_format_pin
 

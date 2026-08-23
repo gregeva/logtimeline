@@ -69,7 +69,7 @@ Fields: `date`(T)`time`(ms precision)`Z` (combined ISO-8601 UTC timestamp), `msg
 
 **Structure**: every line in every file matches the one shape — no continuation lines, no blank lines, ASCII throughout. A minority of trace messages (HTTP response headers echoed into the log) end in a carriage return, which the line reader strips. The `uwgm.log.1` header declares `log_base_name "uwgm_client"`, so the in-file name does not distinguish it from `uwgm_client.log.1` — only the file name does. `D` dominates every file (80–90% of lines); `X`/`Y` and `S`/`F` come in matched create/destroy and start/finish pairs on the same `area`.
 
-**ltl format**: `wgm_client` — one entry for all three filenames; the letters become the `DEBUG`/`ERROR`/`INFO`/`TRACE`/`WARN` levels plus the `CONFIG`/`CREATE`/`DESTROY`/`START`/`FINISH` categories. Occurrences only (no duration, bytes or count at the line level). The committed fixture `tests/fixtures/format-detection/wgm-client.txt` is a scrubbed 44-line slice of an `uwgm_client.log.1`.
+**ltl format**: `windchill_workgroup_manager` — one entry for all three filenames; the letters become the `DEBUG`/`ERROR`/`INFO`/`TRACE`/`WARN` levels plus the `CONFIG`/`CREATE`/`DESTROY`/`START`/`FINISH` categories. Occurrences only (no duration, bytes or count at the line level). The committed fixture `tests/fixtures/format-detection/wgm-client.txt` is a scrubbed 44-line slice of an `uwgm_client.log.1`.
 
 ---
 

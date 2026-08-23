@@ -3,7 +3,7 @@
 ## Status
 
 Implemented on `395-wgm-client-log-format`, targeting release 0.17.0. Registry
-entry `mt16`, user-facing name `wgm_client`, match_type 16. Decisions D54–D56
+entry `mt16`, user-facing name `windchill_workgroup_manager`, match_type 16. Decisions D54–D56
 locked by the architect 2026-08-23.
 
 ## Overview
