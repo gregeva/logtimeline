@@ -15,7 +15,7 @@
 # referrer/user-agent + trailing duration appended, issue #365). The
 # remaining slugs (thingworx_rac_client, connection_server_json,
 # java_gc_g1, tw_analytics_v2, tw_analytics_worker,
-# connection_server_standard) are asserted against fixtures derived from
+# connection_server_standard, windchill_method_server) are asserted against fixtures derived from
 # the format registry's own sample lines (issue #58) — the same lines the
 # D24 load-time gates validate, so fixture and registry cannot drift.
 # wgm_client is asserted against the committed wgm-client.txt fixture
@@ -647,6 +647,18 @@ EOF
     assert_registry_sample_scenario "$log" connection_server_standard 10 2
 }
 
+scenario_windchill_method_server() {
+    current_scenario="windchill-method-server"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/MethodServer-2507180627-9144-log4j.log"
+    cat > "$log" <<'EOF'
+2025-07-18 04:46:41,354 INFO  [main] wt.method.server.startup  - Starting BackgroundMethodServer
+2025-07-18 08:19:31,762 ERROR [ActiveMQ Session Task-3] com.ptc.windchill.esi.txn.ESITransactionUtility wcadmin - Exception while fetching a transaction from the input parameters. (wt.federation.federationResource/109) wt.util.WTException: Unable to find target object "OR:wt.part.WTPart:123456789".
+2025-07-18 04:52:55,260 WARN  [JMX Monitor ThreadGroup<main> Executor Pool [Thread-21]] wt.jmx.notif.methodContextGauge  - Time=2025-07-18 04:52:55.257 +0000, Name=MethodContextsGaugeNotifier
+EOF
+    assert_registry_sample_scenario "$log" windchill_method_server 17 3
+}
+
 scenario_scan_telemetry() {
     current_scenario="scan-telemetry"
     echo "[$current_scenario]"
@@ -667,8 +679,8 @@ scenario_scan_telemetry() {
         contract    'features/log-format-registry.md section -V format-detection section-contract; delimiters per HARNESS-DESIGN.md section Delimiter contract'
 
     assert_line "$out" \
-        pattern     '^entries: 14$' \
-        asserts     'All 14 scanned registry entries are compiled into the scan (csv is outside the scan array by design)' \
+        pattern     '^entries: 15$' \
+        asserts     'All 15 scanned registry entries are compiled into the scan (csv is outside the scan array by design)' \
         produced_by 'build_format_registry() in ltl; emitted by emit_format_detection_verbose()' \
         contract    'features/log-format-registry.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
 
@@ -1082,6 +1094,82 @@ scenario_variant_thingworx_rolled() {
         contract 'features/log-format-registry.md section -V format-detection section-contract'
 }
 
+# Windchill method-server fixture: 21 log4j records and 30 continuation
+# lines (tab-indented frames, `Nested exception is:` / `Caused by:`,
+# property-dump and blank lines). `-bs 1440 -oe`: detection assertions
+# only; the fixture spans one day.
+assert_windchill_fixture_detection() {
+    local out="$1"
+    assert_line "$out" pattern '^  format: windchill_method_server$' \
+        asserts 'The log4j method-server layout binds the windchill_method_server format' \
+        produced_by 'read_and_process_logs() in ltl (first-match block); registry entry mt17 in format_registry_specs()' \
+        contract 'features/396-windchill-method-server-log4j-format.md section Format contract; %match_type_to_slug in ltl'
+    assert_line "$out" pattern '^  match_type: 17$' \
+        asserts 'windchill_method_server binds to internal match_type 17' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract'
+    assert_line "$out" pattern '^  matched_lines: 21$' \
+        asserts 'Every timestamped record of the fixture matches, including the nested-bracket thread name and the empty NDC (user) slot' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
+        contract 'features/396-windchill-method-server-log4j-format.md section Format contract (thread and user slots)'
+    assert_line "$out" pattern '^  unmatched_lines: 30$' \
+        asserts 'Continuation lines (stack-trace frames, Nested exception is:, Caused by:, property dumps, blank lines) carry no timestamp and match no entry' \
+        produced_by 'read_and_process_logs() in ltl (no-match branch)' \
+        contract 'features/396-windchill-method-server-log4j-format.md section Format contract (continuation lines)'
+}
+
+scenario_windchill_method_server_named() {
+    current_scenario="windchill-method-server-named"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture windchill-method-server.txt BackgroundMethodServerESI-2507180624-9559-log4j.log) || return
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_windchill_fixture_detection "$out"
+    assert_line "$out" pattern '^  filename_evidence: stem=mt17 ext=match date=- index=-$' \
+        asserts 'A producer-true method-server name (service stem, start-time and pid tokens, -log4j, .log) decomposes to the mt17 stem and a matching extension; an unrolled file carries no date or index' \
+        produced_by 'format_filename_evidence() / compile_format_filename_matcher() in ltl' \
+        contract 'features/396-windchill-method-server-log4j-format.md section Filename evidence (D54/D55)'
+    assert_line "$out" pattern '^  formats: windchill_method_server$' \
+        asserts 'The file reports exactly one format in its bracket' \
+        produced_by 'read_and_process_logs() in ltl (N7 snapshot); emit_format_detection_evidence_verbose()' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+}
+
+scenario_windchill_method_server_rolled() {
+    current_scenario="windchill-method-server-rolled"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture windchill-method-server.txt MethodServer-2507180627-9144-log4j.log.2025-07-18_3) || return
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_windchill_fixture_detection "$out"
+    assert_line "$out" pattern '^  filename_evidence: stem=mt17 ext=match date=match index=present$' \
+        asserts 'A log4j daily-rolled name (.YYYY-MM-DD_N after the extension) decomposes through the date_n index form, and the roll date agrees with the first content timestamp (D52 probe c)' \
+        produced_by 'format_filename_decompose() / format_sample_probes() in ltl (date_n in %format_filename_index_re)' \
+        contract 'features/396-windchill-method-server-log4j-format.md section Filename evidence (D55)'
+}
+
+scenario_windchill_method_server_bare() {
+    current_scenario="windchill-method-server-bare"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture windchill-method-server.txt MethodServer.log) || return
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_windchill_fixture_detection "$out"
+    assert_line "$out" pattern '^  filename_evidence: stem=mt17 ext=match date=- index=-$' \
+        asserts 'A bare service name (no start-time/pid/-log4j tail) still earns mt16 stem evidence and a matching extension: the stem alone matches, the producer tail is optional' \
+        produced_by 'format_filename_evidence() / compile_format_filename_matcher() in ltl' \
+        contract 'features/396-windchill-method-server-log4j-format.md section Filename evidence (D57, architect-locked 2026-08-23)'
+}
+
+scenario_windchill_method_server_renamed() {
+    current_scenario="windchill-method-server-renamed"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture windchill-method-server.txt app.txt) || return
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_windchill_fixture_detection "$out"
+    assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
+        asserts 'A renamed file yields no filename evidence; recognition is decided by content alone' \
+        produced_by 'format_filename_evidence() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D44/D45 (a missing name signal withholds, never contradicts)'
+}
+
 scenario_variant_mixed_legend() {
     current_scenario="variant-mixed-legend"
     echo "[$current_scenario]"
@@ -1257,6 +1345,7 @@ scenario_java_gc_g1;            echo ""
 scenario_tw_analytics_v2;       echo ""
 scenario_tw_analytics_worker;   echo ""
 scenario_connection_server_standard; echo ""
+scenario_windchill_method_server; echo ""
 scenario_scan_telemetry;        echo ""
 scenario_scan_telemetry_nomatch; echo ""
 scenario_unit_ambiguity_warning; echo ""
@@ -1268,6 +1357,10 @@ scenario_variant_tomcat_extension_only; echo ""
 scenario_variant_httpd_named; echo ""
 scenario_variant_httpd_renamed; echo ""
 scenario_variant_thingworx_rolled; echo ""
+scenario_windchill_method_server_named; echo ""
+scenario_windchill_method_server_rolled; echo ""
+scenario_windchill_method_server_bare; echo ""
+scenario_windchill_method_server_renamed; echo ""
 scenario_variant_mixed_legend; echo ""
 scenario_wgm_client;            echo ""
 scenario_wgm_filename_family;   echo ""
