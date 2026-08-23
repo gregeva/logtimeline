@@ -396,6 +396,22 @@ my $format_detection_window = 0; # hidden --detection-window=N override; 0 = the
                                  # FORMAT_DETECTION_WINDOW_FALLBACK
 my %format_detection_sample;     # in_file => sample observations (sample_file_for_detection())
 my %format_detection_window_engaged;  # in_file => window size actually engaged for that file
+my %format_detection_evidence;   # in_file => per-file variant selection record (select_format_variants())
+# Evidence weights (D46/I1): one table, fixed per evidence class, the same
+# for every format. Every signal is additive and independent. The group
+# default's standing credit equals the extension weight, so an extension
+# alone ties and ties stay on the default; an impossible date component
+# or a filename-date mismatch eliminates a member outright.
+my %format_evidence_weights = (
+    shape              => 1.0,   # the member's pattern matched sampled lines (necessary)
+    stem               => 3.0,   # filename stem matched the member's declared stem
+    ext                => 1.0,   # filename extension matched the declared extension
+    filename_date      => 0.5,   # date in the filename agrees with the first content timestamp
+    index              => 0.25,  # rotation index present in the filename
+    group_default      => 1.0,   # standing credit of the group's default member
+    mono_per_violation => 0.5,   # monotonicity violation per distinct timestamp (comparative)
+    mono_cap           => 1.0,   # ceiling on the total monotonicity penalty
+);
 # Scan telemetry for -V format-detection / scan. The no-match scan is the
 # structural worst case (every entry attempted, nothing matches), so its
 # cost is instrumented by sampling: 1 in FORMAT_SCAN_NOMATCH_SAMPLE_EVERY
@@ -2272,8 +2288,8 @@ sub format_registry_specs {
       ] },
     { name => 'mt10', slug => 'connection_server_standard', match_type => 10, scanned => 1, head_class => 'digit',
       variant_group => 'connection_server', variant_default => 1,
-      filename => { stem => 'cxserver', index => 'dash_n_n', ext => '.log', placement => 'before',
-                    samples => [ 'cxserver.1-16.log', 'cxserver.log' ] },
+      filename => { stem => 'cxserver', index => 'dot_n_dash_n', ext => '.log', placement => 'before',
+                    samples => [ 'cxserver.1-16.log', 'cxserver.1.log', 'cxserver.log' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'object'],[5,'message'] ],
       transforms => [ 'mask_ephemeral_port' ],
@@ -2597,7 +2613,7 @@ sub compile_format_time_parser {
 # compression suffix is stripped as a constant, never declared. These two
 # tables are the only vocabulary for the date/index forms.
 my %format_filename_date_re  = ( iso => '\d{4}-\d{2}-\d{2}', compact => '\d{8}' );
-my %format_filename_index_re = ( dot_n => '\d+', dash_n_n => '\d+-\d+' );
+my %format_filename_index_re = ( dot_n => '\d+', dash_n_n => '\d+-\d+', dot_n_dash_n => '\d+(?:-\d+)?' );
 use constant FORMAT_FILENAME_COMPRESSION_RE => qr/\.(?:gz|bz2|xz|zst)\z/;
 
 sub compile_format_filename_matcher {
@@ -2623,8 +2639,11 @@ sub compile_format_filename_matcher {
     my $re = $placement eq 'before'
         ? "^(?<stem>$d->{stem})" . ($date ? "(?:\\.(?<date>$date))?" : '') . ($idx ? "(?:\\.(?<index>$idx))?" : '') . "$ext_alt\\z"
         : "^(?<stem>$d->{stem})$ext_alt" . ($date ? "(?:-(?<date>$date))?" : '') . ($idx ? "(?:\\.(?<index>$idx))?" : '') . "\\z";
-    return { matcher => qr/$re/, stem => $d->{stem}, date => $d->{date}, index => $d->{index},
-             ext => $d->{ext}, placement => $placement };
+    # The extension signal is independent of the stem (I1): a second
+    # matcher with the stem relaxed reports the extension for a renamed file.
+    (my $re_any_stem = $re) =~ s/\(\?<stem>.*?\)(?=\(\?:|\(\?<|\\z)/(?<stem>[^\/]*?)/;
+    return { matcher => qr/$re/, ext_matcher => qr/$re_any_stem/, stem => $d->{stem}, date => $d->{date},
+             index => $d->{index}, ext => $d->{ext}, placement => $placement };
 }
 
 # Decompose a file's basename against one entry's filename evidence.
@@ -2639,6 +2658,155 @@ sub format_filename_decompose {
     return undef unless $name =~ $fn->{matcher};
     return { ext   => defined $+{ext} ? 'match' : defined $+{oext} ? 'other' : 'absent',
              date  => $+{date}, index => $+{index} };
+}
+
+# Content corroboration probes over a list of sample lines (D52; never a
+# file position — the D53 sample and the fallback window are
+# interchangeable here). Every ISO-dated line is read under BOTH date
+# layouts: (a) an impossible component (month > 12, or a date timegm()
+# rejects) counts against that layout; (b) a timestamp earlier than the
+# previous one under that layout counts a monotonicity violation; (c) the
+# date the filename declares is compared with the first parsed timestamp.
+# Silence proves nothing: a file whose dates all sit on or before the 12th
+# is valid under both layouts, and that is recorded as such.
+# Returns { mmdd => { n, oor, viol, fdate }, ddmm => { ... } }.
+sub format_sample_probes {
+    my ($lines, $filename_date) = @_;
+    my %res = map { $_ => { n => 0, oor => 0, viol => 0, fdate => undef } } qw(mmdd ddmm);
+    my (%prev, %first);
+    for my $line (@$lines) {
+        my ($y, $a, $b, $h, $mi, $sec) = $line =~ /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/ or next;
+        for my $lay ( [ mmdd => $a, $b ], [ ddmm => $b, $a ] ) {
+            my ($k, $mo, $dy) = @$lay;
+            my $r = $res{$k};
+            $r->{n}++;
+            if ($mo > 12 || $dy > 31) { $r->{oor}++; next }
+            my $epoch = eval { timegm($sec, $mi, $h, $dy, $mo - 1, $y) };
+            if (!defined $epoch) { $r->{oor}++; next }
+            $r->{viol}++ if defined $prev{$k} && $epoch < $prev{$k};
+            $prev{$k} = $epoch;
+            $first{$k} //= $epoch;
+        }
+    }
+    if (defined $filename_date && $filename_date =~ /^(\d{4})-?(\d{2})-?(\d{2})$/) {
+        my ($fy, $fm, $fd) = ($1, $2, $3);
+        for my $k (qw(mmdd ddmm)) {
+            next unless defined $first{$k};
+            my @g = gmtime($first{$k});
+            $res{$k}{fdate} = ($g[5] + 1900 == $fy && $g[4] + 1 == $fm && $g[3] == $fd) ? 'match' : 'mismatch';
+        }
+    }
+    return \%res;
+}
+
+# Which probe layout an entry's time contract reads under; undef for
+# layouts the date probes do not apply to (apache_clf, csv).
+sub format_probe_layout {
+    my ($entry) = @_;
+    my $layout = $entry->[FR_TIME]{layout} // '';
+    return $layout eq 'iso_ms_ddmm' ? 'ddmm' : $layout =~ /^iso_/ ? 'mmdd' : undef;
+}
+
+# Decompose a file's basename against every entry declaring filename
+# evidence (static member order). Returns the per-file filename evidence
+# record: { stem => <entry name>|undef, ext => match|absent|other|undef,
+# date => <string>|undef, index => <string>|undef, by => { name => decomposition } }.
+sub format_filename_evidence {
+    my ($path) = @_;
+    my $basename = (split m{[/\\]}, $path)[-1] // $path;
+    my %rec = ( basename => $basename, stem => undef, ext => undef, date => undef, index => undef, by => {} );
+    for my $e (@format_registry_members) {
+        my $fn = $e->[FR_FILENAME] or next;
+        my $d = format_filename_decompose($fn, $basename);
+        if ($d) {
+            $rec{by}{ $e->[FR_NAME] } = $d;
+            if (!defined $rec{stem}) { @rec{qw(stem ext date index)} = ($e->[FR_NAME], @$d{qw(ext date index)}) }
+            next;
+        }
+        # Stem mismatch: the extension still counts on its own (I1).
+        (my $name = $basename) =~ s/${\FORMAT_FILENAME_COMPRESSION_RE}//;
+        $rec{by}{ $e->[FR_NAME] } = { ext => ($name =~ $fn->{ext_matcher} && defined $+{ext}) ? 'match' : 'other', stem_miss => 1 };
+    }
+    return \%rec;
+}
+
+# Per-file variant selection (D44/D47/I1): score every member of every
+# variant group from the accumulated signals — content shape, filename
+# components, the content probes — and select the best live member per
+# group. Ties stay on the default. Confidence is the selected score over
+# the sum of the live members' scores; basis records what decided:
+#   evidence — a non-default signal (stem, filename date, an elimination)
+#   default  — the standing credit or a tie held the default
+# Returns { group => { selected, basis, confidence, scores, why, live } }
+# plus the filename record and the probe results under 'filename'/'probes'.
+sub select_format_variants {
+    my ($path, $lines) = @_;
+    my $W = \%format_evidence_weights;
+    my $fn = format_filename_evidence($path);
+    my $probes = format_sample_probes($lines, $fn->{date});
+    my %out = ( filename => $fn, probes => $probes, groups => {} );
+    for my $g (sort { $format_variant_groups{$a}{slot} <=> $format_variant_groups{$b}{slot} } keys %format_variant_groups) {
+        my @members = map { $format_registry_entry{$_} } @{ $format_variant_groups{$g}{members} };
+        my (%score, %why, %live);
+        for my $m (@members) {
+            my $name = $m->[FR_NAME];
+            my $pat  = $m->[FR_PATTERN];
+            my $shape = grep { $_ =~ $pat } @$lines;
+            if (!$shape) { $score{$name} = 0; $why{$name} = 'no-shape'; next }
+            my $sc = $W->{shape}; my @why = ('shape');
+            if ($m->[FR_GROUP_DEFAULT]) { $sc += $W->{group_default}; push @why, 'default' }
+            my $d = $fn->{by}{$name};
+            if ($d && !$d->{stem_miss}) {
+                $sc += $W->{stem}; push @why, 'stem';
+                if (defined $d->{index}) { $sc += $W->{index}; push @why, 'index' }
+            }
+            if ($d && $d->{ext} eq 'match') { $sc += $W->{ext}; push @why, 'ext' }
+            my $eliminated = 0;
+            if (my $lay = format_probe_layout($m)) {
+                my $pr = $probes->{$lay};
+                if ($pr->{n}) {
+                    if ($pr->{oor}) { $eliminated = 1; push @why, "probe-a:oor=$pr->{oor}" }
+                    elsif (($pr->{fdate} // '') eq 'mismatch') { $eliminated = 1; push @why, 'probe-c:mismatch' }
+                    else {
+                        if (($pr->{fdate} // '') eq 'match') { $sc += $W->{filename_date}; push @why, 'fdate' }
+                        my $pen = $pr->{viol} * $W->{mono_per_violation};
+                        $pen = $W->{mono_cap} if $pen > $W->{mono_cap};
+                        if ($pen) { $sc -= $pen; push @why, "probe-b:viol=$pr->{viol}" }
+                    }
+                }
+            }
+            $score{$name} = $eliminated ? 0 : $sc;
+            $live{$name}  = 1 unless $eliminated;
+            $why{$name}   = join ',', @why;
+        }
+        my $default = $format_variant_groups{$g}{default};
+        my @live = grep { $live{$_} } map { $_->[FR_NAME] } @members;
+        my ($sel, $basis, $conf);
+        if (!@live) {
+            ($sel, $basis, $conf) = ($default, 'default', 0);
+        } else {
+            my @rank = sort { $score{$b} <=> $score{$a} || ($b eq $default) <=> ($a eq $default) } @live;
+            $sel = $rank[0];
+            my $tot = 0; $tot += $score{$_} for @live;
+            $conf = $tot > 0 ? $score{$sel} / $tot : 0;
+            my $decided = ($why{$sel} =~ /\b(?:stem|fdate)\b/) || (grep { !$live{$_} && $why{$_} ne 'no-shape' } map { $_->[FR_NAME] } @members);
+            $basis = $decided ? 'evidence' : 'default';
+        }
+        $out{groups}{$g} = { selected => $sel, basis => $basis, confidence => $conf,
+                             scores => \%score, why => \%why, live => \%live, flips => 0 };
+    }
+    return \%out;
+}
+
+# Apply a selection record: each group's selected member occupies its slot.
+# Returns the number of occupants that changed.
+sub apply_format_variant_selection {
+    my ($sel) = @_;
+    my $changed = 0;
+    for my $g (keys %{ $sel->{groups} }) {
+        $changed += format_registry_set_occupant( $format_registry_entry{ $sel->{groups}{$g}{selected} } );
+    }
+    return $changed;
 }
 
 # Place the given member into its group's scan slot (D47/F1): same position
@@ -3127,7 +3295,8 @@ sub build_format_registry {
         $format_registry_entry{ $spec->{name} } = $entry;
     }
     for my $g (grep { @{ $group_members{$_} } > 1 } keys %group_members) {
-        $format_variant_groups{$g} = { default => $group_default{$g}, members => $group_members{$g} };
+        my ($slot) = grep { $format_registry[$_][FR_GROUP] eq $g } 0 .. $#format_registry;
+        $format_variant_groups{$g} = { default => $group_default{$g}, members => $group_members{$g}, slot => $slot };
     }
     @format_scan_order = @format_registry;
     %format_registry_spec      = map { $_->{name} => $_ } @specs;
@@ -3431,6 +3600,35 @@ sub emit_format_detection_sample_verbose {
             $p->{first_ts} // '-', $p->{last_ts} // '-');
     }
     push @verbose_output, sprintf('  sample_us: %.1f', $s->{elapsed_us});
+    emit_format_detection_evidence_verbose($file);
+    return;
+}
+
+# Per-file variant-selection keys (#384, I5): the filename decomposition,
+# every variant group's candidates with their scores, the selected member,
+# what decided it, the confidence, flips, and the probe counts.
+sub emit_format_detection_evidence_verbose {
+    my ($file) = @_;
+    my $ev = $format_detection_evidence{$file} or return;
+    my $fn = $ev->{filename};
+    push @verbose_output, sprintf('  filename_evidence: stem=%s ext=%s date=%s index=%s',
+        $fn->{stem} // '-', $fn->{ext} // '-',
+        defined $fn->{date} ? 'present' : '-', defined $fn->{index} ? 'present' : '-');
+    for my $g (sort { $format_variant_groups{$a}{slot} <=> $format_variant_groups{$b}{slot} } keys %{ $ev->{groups} }) {
+        my $r = $ev->{groups}{$g};
+        next unless grep { $_ ne 'no-shape' } values %{ $r->{why} };   # the group's shape never appeared in the sample
+        my $sel_entry = $format_registry_entry{ $r->{selected} };
+        my $lay = format_probe_layout($sel_entry);
+        my $pr = $lay ? $ev->{probes}{$lay} : undef;
+        push @verbose_output, "  variant_group: $g";
+        push @verbose_output, '  candidates: ' . join(',', map { "$_=" . sprintf('%.2f', $r->{scores}{$_}) } @{ $format_variant_groups{$g}{members} });
+        push @verbose_output, "  selected: $r->{selected}";
+        push @verbose_output, "  selection_basis: $r->{basis}";
+        push @verbose_output, sprintf('  confidence: %.2f', $r->{confidence});
+        push @verbose_output, "  flips: $r->{flips}";
+        push @verbose_output, sprintf('  probes: out_of_range=%d monotonic_violations=%d filename_date=%s',
+            $pr ? $pr->{oor} : 0, $pr ? $pr->{viol} : 0, ($pr && $pr->{fdate}) ? $pr->{fdate} : '-');
+    }
     return;
 }
 
@@ -9299,7 +9497,12 @@ sub read_and_process_logs {
         # hidden --detection-window=N override, which engages it regardless.
         my $sample = sample_file_for_detection($in_file);
         if ($sample) {
-            delete $sample->{lines};   # no consumer in this drop (#384, #17 attach here)
+            # Variant selection (D47/D48): the first decision for this file is
+            # made here, from the sample, before any line is processed.
+            my $selection = select_format_variants($in_file, $sample->{lines});
+            apply_format_variant_selection($selection);
+            $format_detection_evidence{$in_file} = $selection;
+            delete $sample->{lines};   # conclusions are retained, lines are not (#17 attaches here)
             $format_detection_sample{$in_file} = $sample;
         }
         my $window_n = $format_detection_window > 0 ? $format_detection_window
@@ -9321,6 +9524,17 @@ sub read_and_process_logs {
                 $file_scan_attempts++;
                 $file_scan_failed++ unless $wentry;
                 push @window_held, [ $wline, $wentry ];
+            }
+            # Fallback evidence (D53): with no sample, the held lines decide
+            # the variants; held classifications are remapped to the new
+            # occupant of their group (same pattern — only extraction differs).
+            if (!$sample && @window_held) {
+                my $selection = select_format_variants($in_file, [ map { (my $l = $_->[0]) =~ s/[\r\n]+$//; $l } @window_held ]);
+                if (apply_format_variant_selection($selection)) {
+                    my %occupant = map { $_->[FR_GROUP] => $_ } @format_scan_order;
+                    $_->[1] = $occupant{ $_->[1][FR_GROUP] } for grep { $_->[1] } @window_held;
+                }
+                $format_detection_evidence{$in_file} = $selection;
             }
         }
 
