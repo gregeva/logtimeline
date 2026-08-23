@@ -75,24 +75,25 @@ Fields: `date`(T)`time`(ms precision)`Z` (combined ISO-8601 UTC timestamp), `msg
 
 ## MethodServer/ - Windchill Method Server / Background Method Server Logs
 
-Server-side `log4j` diagnostic logs from Windchill Method Server and Background Method Server processes. One shared log4j pattern-layout format across the MethodServer/BackgroundMethodServer filename family (including `BackgroundMethodServerCAD` and `BackgroundMethodServerESI` variants), differing by which Windchill process/queue-worker writes the file. Two capture sets are present: a QA-tier set covering all four filename variants, and a multi-node production set spanning several days of rotation.
+Server-side `log4j` diagnostic logs from Windchill Method Server and Background Method Server processes. One shared log4j pattern layout across the service family (`MethodServer`, `BackgroundMethodServer`, `BackgroundMethodServerCAD`, `BackgroundMethodServerESI`) — the service shows only in the file name and in startup lines. Two capture sets are present: a four-tier set covering all four service names, and a multi-node set spanning two days of rotation.
 
-| Folder | Scenario | Files | Total Size | Use Case |
-|---|---|---|---|---|
-| `queue-worker-tiers/18Jul2025_QA_BGMS_Logs/` | QA App1–4 tiers, all four filename variants present in one set | 18 files (MethodServer, BackgroundMethodServer, BackgroundMethodServerCAD, BackgroundMethodServerESI) | 10MB | Full variant coverage at manageable size; ESI files carry multi-line stack-trace continuation records (see Format note) |
-| `multi-node-prod/04-05Aug2025/` | PROD Node1–4, multi-day rotation | 48 files (MethodServer, BackgroundMethodServer) | ~410MB | Large-scale, multi-node, multi-rotation production example |
-| `multi-node-prod/06Aug2025/` | PROD Node2–4, single file per node | 4 files (MethodServer) | ~21MB | Smaller single-rotation slice of the same set |
+| Folder | Scenario | Files | Total Size | Lines | Use Case |
+|---|---|---|---|---|---|
+| `queue-worker-tiers/18Jul2025_QA_BGMS_Logs/` | App1–4 tiers, all four service names in one set | 18 (12 MethodServer, 4 BackgroundMethodServer, 1 CAD, 1 ESI) | 10MB | 83,001 | Full family coverage at manageable size; the ESI file is 98% stack-trace continuation lines (1,356 records in 65,088 lines), the others 66–73% records |
+| `multi-node-prod/04-05Aug2025/` | Node1–4, two days, daily rotation (`.YYYY-MM-DD_N` suffix after the extension) | 48 (45 MethodServer, 3 BackgroundMethodServer) | ~410MB | 2,360,942 | Large multi-node, multi-rotation set; ~78% records (1.84M), 96–99% of them carrying a user token; rolled names exercise the filename-date cross-check |
+| `multi-node-prod/06Aug2025/` | Node2–4, one unrolled file per node | 4 (MethodServer) | ~21MB | 110,386 | Smaller single-rotation slice of the same set (88% records) |
 
-**Format**: `log4j` pattern layout — one line per record, no self-describing header (unlike WGM's format above).
+**Format**: `windchill_method_server` — `log4j` pattern layout `%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%t] %c %x - %m`, one line per record, no self-describing header (unlike WGM's format above). Occurrences only: no line-level duration, bytes or count.
 ```
-2025-01-27 14:22:28,785 INFO  [main] wt.method.server.startup  - Starting BackgroundMethodServer
-2025-10-29 09:48:57,149 ERROR [ajp-nio-127.0.0.1-8010-exec-2312] com.ptc.windchill.uwgm.proesrv.rrc.RequestResultCache ITSALAN1 - UwgmObjectFactory.createPartIteration :: Unsupported PartType: RAW_MATERIAL
+2025-07-18 04:46:41,354 INFO  [main] wt.method.server.startup  - Starting BackgroundMethodServer
+2025-07-18 06:28:01,115 ERROR [ajp-nio-127.0.0.1-8010-exec-2312] com.ptc.windchill.uwgm.proesrv.rrc.RequestResultCache user01 - UwgmObjectFactory.createPartIteration :: Unsupported PartType: RAW_MATERIAL
+2025-07-18 04:52:55,260 WARN  [JMX Monitor ThreadGroup<main> Executor Pool [Thread-21]] wt.jmx.notif.methodContextGauge  - Time=2025-07-18 04:52:55.257 +0000, Name=MethodContextsGaugeNotifier
 ```
-Fields: `date time,ms` (space-separated, millisecond precision, no explicit timezone — local server time), `LEVEL` (`INFO`/`ERROR`/`WARN`/`DEBUG` etc.), `[thread]` (bracketed thread name, e.g. `main` or an app-server worker id like `ajp-nio-127.0.0.1-8010-exec-2312`), `logger` (dotted Java class/category, e.g. `wt.method.server.startup` or `com.ptc.windchill.uwgm.proesrv.rrc.RequestResultCache`), an optional `user` token before the ` - ` separator (present on some lines, e.g. `ITSALAN1`, absent on others, e.g. startup lines), then free-text `message`.
+Fields: `date time,ms` (space-separated, millisecond precision, no explicit timezone — local server time), `LEVEL` (`INFO`/`ERROR`/`WARN`/`FATAL`/`TRACE`, padded to five characters), `[thread]` (bracketed thread name — `main`, an app-server worker id like `ajp-nio-127.0.0.1-8010-exec-2312`, or a nested-bracket pool name like `JMX Monitor ThreadGroup<main> Executor Pool [Thread-21]`), `logger` (dotted Java category), then the user-context slot before the ` - ` separator — always present, a user token on request-handling lines and empty on startup/monitor lines (which is why those show two spaces before ` - `) — then free-text `message` (may be empty).
 
-**Note**: `BackgroundMethodServerESI` files contain multi-line stack-trace continuation records — an `ERROR` line ending in an exception class/message, followed by unindented `Nested exception is:` lines and tab-indented `\tat ...` frames, none carrying their own leading timestamp (same continuation-line shape ltl already handles for ThingWorx's `ScriptErrorLog`).
+**Filenames**: `<Service>-<yyMMddHHmm>-<pid>-log4j.log` (process start time and pid); daily rotation appends `.YYYY-MM-DD_N` after the extension, and the roll date is the content date.
 
-**Note**: No `ltl` format entry exists yet for this log type as of 2026-08-22 — tracked by #396 (blocked by #384).
+**Note**: every file carries multi-line continuation records — tab-indented `\tat ...` frames, unindented `Nested exception is:` / `Caused by:` lines, multi-line property dumps and version tables after a startup line, and blank lines — none carrying a leading timestamp. They are unmatched lines (same treatment as ThingWorx's `ScriptErrorLog`); `BackgroundMethodServerESI` is the extreme case. Committed fixture: `tests/fixtures/format-detection/windchill-method-server.txt` (scrubbed, 21 records + 30 continuation lines).
 
 ---
 
@@ -302,7 +303,7 @@ request_timestamp,response_timestamp,latency_ms,request_size,response_size,reque
 | **Security events** | `ThingworxLogs/SecurityLog.*`, `ThingworxLogs/AuthLog.*` |
 | **Database issues** | `ThingworxLogs/DatabaseLog.*` |
 | **GC pause analysis** | `GC/logs-gc/gc-twx01-twx-thingworx-2.out.8` (largest) |
-| **Stack-trace/continuation (no-match) lines** | `ThingworxLogs/ScriptErrorLog.2025-05-05.0.log`, `ScriptErrorLog.2025-05-06.0.log` |
+| **Stack-trace/continuation (no-match) lines** | `ThingworxLogs/ScriptErrorLog.2025-05-05.0.log`, `ScriptErrorLog.2025-05-06.0.log`, `MethodServer/queue-worker-tiers/.../BackgroundMethodServerESI-*-log4j.log` |
 | **Quick tests (small files)** | `AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt`, `Codebeamber/*`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log` |
 | **Adversarial/malformed input** | `AccessLogs/localhost_access_log.2025-03-21.txt` (corrupt concatenated records — see AccessLogs table note) |
 | **Large file stress tests** | `AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.*.log` |

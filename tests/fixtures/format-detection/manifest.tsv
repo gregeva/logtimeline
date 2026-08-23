@@ -14,3 +14,6 @@ wgm-client.txt	uwgm_client.log.1	Windchill Workgroup Manager uwgm_client.log.1, 
 wgm-client.txt	genlwsc.log.1	(same slice)	the second WGM filename stem decomposes to the same entry
 wgm-client.txt	uwgm.log.1	(same slice)	the third WGM filename stem decomposes to the same entry (and is not consumed as a prefix of uwgm_client)
 wgm-client.txt	renamed.txt	(same slice)	no name evidence: a group of one still binds by shape alone; filename_evidence reports stem=-
+windchill-method-server.txt	BackgroundMethodServerESI-2507180624-9559-log4j.log	Windchill Background Method Server log4j log, 21 records + 30 continuation lines composed from scrubbed specimen lines (hosts, users, object ids replaced)	producer-true name -> mt17 stem + ext; content-only recognition; continuation lines unmatched
+windchill-method-server.txt	MethodServer-2507180627-9144-log4j.log.2025-07-18_3	(same fixture)	log4j daily-roll suffix after the extension decomposes through the date_n index form; roll date matches the content
+windchill-method-server.txt	app.txt	(same fixture)	no name evidence; recognition by content alone

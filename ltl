@@ -305,6 +305,7 @@ my %match_type_to_slug = (
     14 => 'httpd_access_with_duration',      # Apache httpd / Tomcat 10.1+ %D in microseconds (variant of 3)
     15 => 'integration_runtime_standard',    # ThingWorx Integration Runtime, yyyy-dd-MM dates (variant of 10)
     16 => 'wgm_client',                      # Windchill Workgroup Manager client logs (genlwsc / uwgm_client / uwgm)
+    17 => 'windchill_method_server',         # Windchill Method Server / Background Method Server log4j
 );
 
 # Per-file format-detection accumulator. Populated in read_and_process_logs()
@@ -2606,6 +2607,42 @@ sub format_registry_specs {
         [ '2025-02-20 10:06:10', 'WARN', undef, undef, undef, undef, undef, 'nioEventLoopGroup-2-1', 'io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]', undef, undef, '0', '0' ],
         [ '2025-02-20 10:06:11', 'INFO', undef, undef, undef, undef, undef, 'pool-2-thread-1', 'io.netty.util.ResourceLeakDetector - Leak detection level set to SIMPLE.', undef, undef, '0', '0' ],
       ] },
+    # Windchill Method Server / Background Method Server log4j diagnostic
+    # log: `%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%t] %c %x - %m`. One layout
+    # for the whole service family (MethodServer, BackgroundMethodServer,
+    # BackgroundMethodServerCAD, BackgroundMethodServerESI) — the service
+    # shows only in the file name and in startup lines, so the family is
+    # one entry with an OR-set stem (features/396-windchill-method-server-
+    # log4j-format.md D54). The NDC slot between logger and ` - ` carries
+    # the user context and is empty (two spaces) when none is set; thread
+    # names may nest brackets (`[... Pool [Thread-21]]`), so the thread is
+    # captured lazily up to the first `] ` that the logger/NDC/separator
+    # tail follows (measured ~1.9x cheaper per matched line than the
+    # per-character `(?:\](?! )|[^\]])*` idiom). Local time, no offset.
+    # Stack-trace and property-dump continuation lines carry no timestamp
+    # and match nothing, as for every other platform log. Rotation appends
+    # `.YYYY-MM-DD_N` after the extension (log4j daily roll; date_n form).
+    { name => 'mt17', slug => 'windchill_method_server', match_type => 17, scanned => 1, head_class => 'digit',
+      filename => { stem => '(?:Background)?MethodServer(?:CAD|ESI)?-\d{10}-\d+-log4j', index => 'date_n', ext => '.log', placement => 'after',
+                    samples => [ 'MethodServer-2507180627-9144-log4j.log', 'BackgroundMethodServer-2507180446-4080664-log4j.log',
+                                 'BackgroundMethodServerCAD-2507180624-9566-log4j.log', 'BackgroundMethodServerESI-2507180624-9559-log4j.log',
+                                 'MethodServer-2507260852-2021933-log4j.log.2025-08-05_1', 'BackgroundMethodServer-2507260841-2492136-log4j.log.2025-08-04_6' ] },
+      pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[.,]\d{3}) (\w+) +\[(.*?)\] (\S+) (\S*) - (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'thread'],[4,'object'],[5,'user'],[6,'message'] ],
+      transforms => [],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
+      duration_unit => undef, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        '2025-07-18 04:46:41,354 INFO  [main] wt.method.server.startup  - Starting BackgroundMethodServer',
+        '2025-07-18 08:19:31,762 ERROR [ActiveMQ Session Task-3] com.ptc.windchill.esi.txn.ESITransactionUtility wcadmin - Exception while fetching a transaction from the input parameters. (wt.federation.federationResource/109) wt.util.WTException: Unable to find target object "OR:wt.part.WTPart:123456789".',
+        '2025-07-18 04:52:55,260 WARN  [JMX Monitor ThreadGroup<main> Executor Pool [Thread-21]] wt.jmx.notif.methodContextGauge  - Time=2025-07-18 04:52:55.257 +0000, Name=MethodContextsGaugeNotifier',
+      ],
+      expect => [
+        [ '2025-07-18 04:46:41', 'INFO', 'wt.method.server.startup', undef, '', undef, undef, 'main', 'Starting BackgroundMethodServer', undef, undef, '0', '0' ],
+        [ '2025-07-18 08:19:31', 'ERROR', 'com.ptc.windchill.esi.txn.ESITransactionUtility', undef, 'wcadmin', undef, undef, 'ActiveMQ Session Task-3', 'Exception while fetching a transaction from the input parameters. (wt.federation.federationResource/109) wt.util.WTException: Unable to find target object "OR:wt.part.WTPart:123456789".', undef, undef, '0', '0' ],
+        [ '2025-07-18 04:52:55', 'WARN', 'wt.jmx.notif.methodContextGauge', undef, '', undef, undef, 'JMX Monitor ThreadGroup<main> Executor Pool [Thread-21]', 'Time=2025-07-18 04:52:55.257 +0000, Name=MethodContextsGaugeNotifier', undef, undef, '0', '0' ],
+      ] },
     { name => 'mt11', slug => 'tw_edge_c_sdk', match_type => 11, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+) (\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}[,.]\d+) (.*)',
       field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],
@@ -2681,9 +2718,14 @@ sub compile_format_time_parser {
 #   after  — stem ext[-date][.index]       (httpd logrotate, HotSpot GC)
 # The resolver composes one full-name matcher from the components; a
 # compression suffix is stripped as a constant, never declared. These two
-# tables are the only vocabulary for the date/index forms.
+# tables are the only vocabulary for the date/index forms. The date_n
+# index form is log4j's daily-rolled counter (`.YYYY-MM-DD_N` after the
+# extension): the roll date it carries is the file's content date, so the
+# form exposes it as the filename date for the D52 cross-check — an entry
+# declaring date_n declares no separate date component.
 my %format_filename_date_re  = ( iso => '\d{4}-\d{2}-\d{2}', compact => '\d{8}' );
-my %format_filename_index_re = ( dot_n => '\d+', dash_n_n => '\d+-\d+', dot_n_dash_n => '\d+(?:-\d+)?' );
+my %format_filename_index_re = ( dot_n => '\d+', dash_n_n => '\d+-\d+', dot_n_dash_n => '\d+(?:-\d+)?',
+                                 date_n => '(?<date>\d{4}-\d{2}-\d{2})_\d+' );
 use constant FORMAT_FILENAME_COMPRESSION_RE => qr/\.(?:gz|bz2|xz|zst)\z/;
 
 sub compile_format_filename_matcher {
@@ -2696,6 +2738,8 @@ sub compile_format_filename_matcher {
         die "ltl: format registry: entry '$spec->{name}' filename $k form '$d->{$k}' is not in the vocabulary (" . join(', ', sort keys %$vocab) . ")\n"
             unless $vocab->{ $d->{$k} };
     }
+    die "ltl: format registry: entry '$spec->{name}' filename index form 'date_n' carries the date itself; declare no separate date component\n"
+        if defined $d->{index} && $d->{index} eq 'date_n' && defined $d->{date};
     my $placement = $d->{placement} // 'before';
     die "ltl: format registry: entry '$spec->{name}' filename placement '$placement' must be before|after\n"
         unless $placement eq 'before' || $placement eq 'after';
