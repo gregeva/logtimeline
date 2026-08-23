@@ -3111,17 +3111,23 @@ substr($timestamp_str, 19) = '';};
     # when the signal flips the group's occupant, the line is re-scanned
     # under the new sub. The impossible-date line is carried at the previous
     # distinct epoch and is memoised but never cached.
+    # The monotonicity probe feeds variant selection, which exists only for
+    # variant-group members; a group of one gets the impossible-date guard
+    # alone (sparse-timestamp streams such as GC logs miss the cache on
+    # nearly every line, so every op here is effectively per line there).
+    my $mono_src = defined $spec->{variant_group}
+        ? qq{    return \$format_scan_sub->(\$_[0]) if defined \$prev && \$timestamp < \$prev && format_probe_signal(ENTRY_PLACEHOLDER, 'monotonicity', \$timestamp_str);\n}
+        : '';
+    my $prev_src = defined $spec->{variant_group} ? "    my \$prev = \$format_last_ts_epoch;\n" : '';
     my $miss_src = $layout =~ /^iso_/
         ? qq{if (substr(\$timestamp_str, $month_off, 2) > 12 || substr(\$timestamp_str, $day_off, 2) > 31) {
     \$timestamp = \$format_last_ts_epoch // 0;
     \$format_last_ts_str = \$timestamp_str;
     return \$format_scan_sub->(\$_[0]) if format_probe_signal(ENTRY_PLACEHOLDER, 'impossible_date', \$timestamp_str);
 } else {
-    my \$prev = \$format_last_ts_epoch;
-    \$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str} = $compute;
+$prev_src    \$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str} = $compute;
     \$format_last_ts_str = \$timestamp_str;
-    return \$format_scan_sub->(\$_[0]) if defined \$prev && \$timestamp < \$prev && format_probe_signal(ENTRY_PLACEHOLDER, 'monotonicity', \$timestamp_str);
-}}
+$mono_src}}
         : qq{\$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str} = $compute;
     \$format_last_ts_str = \$timestamp_str;};
     push @body, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
