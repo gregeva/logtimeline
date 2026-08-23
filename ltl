@@ -268,6 +268,7 @@ my %pattern_file_status;                                 # {filter_type}{filenam
 
 # Duration unit override (Issue #17)
 my $duration_unit_override = undef;                      # User-specified unit via -du (ns, us, ms, s)
+my $log_format_pin = undef;                              # -lf: the log format to use for every file (D49)
 
 # Format-detection observability (Issue #228).
 #
@@ -2858,7 +2859,7 @@ sub format_probe_signal {
     # While the file's first decision is pending (fallback-window prefill,
     # before the held lines have been scored) the signal only counts: the
     # selection that follows sees the same evidence and decides.
-    if ($kind eq 'impossible_date' && !$flipped && %{ $ev->{groups} } && !$st->{impossible_date_reported}++) {
+    if ($kind eq 'impossible_date' && !$flipped && (defined $log_format_pin || %{ $ev->{groups} }) && !$st->{impossible_date_reported}++) {
         print STDERR "Note: $format_current_file line $$format_current_line_ref: timestamp '$value' has an impossible date component under the "
             . $entry->[FR_SLUG] . " format's date layout; such lines are kept at the previous line's time - use -lf to pin the correct log format\n";
     }
@@ -2874,6 +2875,25 @@ sub apply_format_variant_selection {
         $changed += format_registry_set_occupant( $format_registry_entry{ $sel->{groups}{$g}{selected} } );
     }
     return $changed;
+}
+
+# Run-level format pin (D49/N9): -lf names a user-facing format; the scan
+# for the run is restricted to every registry entry carrying that name —
+# automatic detection, the evidence pass and variant selection are all
+# bypassed. An unknown name is a usage error listing the known names.
+sub apply_format_pin {
+    my %known;
+    $known{ $_->[FR_SLUG] } = 1 for values %format_registry_entry;
+    if (!$known{$log_format_pin}) {
+        print_usage("Unknown log format '$log_format_pin' for -lf. Known formats: " . join(', ', sort keys %known));
+        exit 1;
+    }
+    @format_registry   = grep { $_->[FR_SLUG] eq $log_format_pin } @format_registry_members;
+    @format_scan_order = @format_registry;
+    %format_scan_sub_cache = ();
+    $format_scan_sub = $format_scan_sub_cache{ join ',', map { $_->[FR_NAME] } @format_scan_order }
+                     = compile_format_scan_sub($format_registry_opts);
+    return;
 }
 
 # Place the given member into its group's scan slot (D47/F1): same position
@@ -3600,6 +3620,7 @@ sub emit_format_detection_verbose {
     # cross-reference -V runtime-config.
     push @verbose_output, "duration_unit_override: " .
         (defined $duration_unit_override ? $duration_unit_override : '-');
+    push @verbose_output, "format_pin: " . ($log_format_pin // '-');
     push @verbose_output, "files: " . scalar(@in_files);
 
     # Per-file blocks in input order; @in_files is the canonical order.
@@ -3703,6 +3724,11 @@ sub emit_format_detection_sample_verbose {
 # what decided it, the confidence, flips, and the probe counts.
 sub emit_format_detection_evidence_verbose {
     my ($file) = @_;
+    if (defined $log_format_pin) {
+        push @verbose_output, "  selection_basis: pin";
+        push @verbose_output, "  confidence: 1.00";
+        return;
+    }
     my $ev = $format_detection_evidence{$file} or return;
     my $fn = $ev->{filename};
     push @verbose_output, sprintf('  filename_evidence: stem=%s ext=%s date=%s index=%s',
@@ -5837,7 +5863,8 @@ sub print_help {
     $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto a single day or week so every date overlays into one profile. day/workday show time-of-day only; week/workweek prefix the weekday. workday/workweek keep work days only (Mon-Fri); the -alt variants use a Sunday-anchored week (Sun-Thu work days). Modes: day, week, week-alt, workweek, workweek-alt, workday, workday-alt");
     $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A full date (YYYY-MM-DD HH:MM:SS[.mmm]) is an absolute cutoff; a bare time (HH:MM[:SS[.mmm]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight.");
     $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a full date is an absolute cutoff; a bare time applies to every day.");
-    $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when auto-detection is not possible (ns, us, ms, s)");
+    $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when it cannot be determined from the format or the file name (ns, us, ms, s)");
+    $out .= help_opt("-lf,  --log-format <name>",     "Read every file as this log format instead of detecting it - the escape hatch when detection picks the wrong variant; an unknown name lists the known formats");
     $out .= help_opt("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: s (second), m (minute, default), h (hour), d (day)");
 
     # Filtering
@@ -8904,6 +8931,7 @@ sub adapt_to_command_line_options {
         'duration-min|dmin=i' => \$filter_duration_min,
         'duration-max|dmax=i' => \$filter_duration_max,
         'duration-unit|du=s' => \$duration_unit_override,
+        'log-format|lf=s'    => \$log_format_pin,
         'rate-unit|ru=s' => \$rate_unit,
         'bytes-min|bmin=i' => \$filter_bytes_min,
         'bytes-max|bmax=i' => \$filter_bytes_max,
@@ -9597,9 +9625,11 @@ sub read_and_process_logs {
         if ($sample) {
             # Variant selection (D47/D48): the first decision for this file is
             # made here, from the sample, before any line is processed.
-            my $selection = select_format_variants($in_file, $sample->{lines});
-            apply_format_variant_selection($selection);
-            $format_detection_evidence{$in_file} = $selection;
+            if (!defined $log_format_pin) {
+                my $selection = select_format_variants($in_file, $sample->{lines});
+                apply_format_variant_selection($selection);
+                $format_detection_evidence{$in_file} = $selection;
+            }
             delete $sample->{lines};   # conclusions are retained, lines are not (#17 attaches here)
             $format_detection_sample{$in_file} = $sample;
         }
@@ -9628,7 +9658,7 @@ sub read_and_process_logs {
             # Fallback evidence (D53): with no sample, the held lines decide
             # the variants; held classifications are remapped to the new
             # occupant of their group (same pattern — only extraction differs).
-            if (!$sample && @window_held) {
+            if (!$sample && @window_held && !defined $log_format_pin) {
                 my $selection = select_format_variants($in_file, [ map { (my $l = $_->[0]) =~ s/[\r\n]+$//; $l } @window_held ]);
                 $selection->{steady} = $format_detection_evidence{$in_file}{steady} if $format_detection_evidence{$in_file};
                 if (apply_format_variant_selection($selection)) {
@@ -15188,6 +15218,7 @@ sub pipeline_detect {
     # option parsing — extraction closures bake CLI-gated behavior.
     my $registry_build_start = [gettimeofday];
     build_format_registry();
+    apply_format_pin() if defined $log_format_pin;
     $elapsed_detect_registry_build = tv_interval($registry_build_start);
 
     # Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
