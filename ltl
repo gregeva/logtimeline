@@ -299,6 +299,8 @@ my %match_type_to_slug = (
     11 => 'tw_edge_c_sdk',                   # ThingWorx Edge C SDK
     12 => 'tomcat_codebeamer',               # Tomcat/CodeBeamer [%Dms] [%Ts]
     13 => 'csv',                             # CSV via detect_and_parse_csv_header()
+    14 => 'httpd_access_with_duration',      # Apache httpd / Tomcat 10.1+ %D in microseconds (variant of 3)
+    15 => 'integration_runtime_standard',    # ThingWorx Integration Runtime, yyyy-dd-MM dates (variant of 10)
 );
 
 # Per-file format-detection accumulator. Populated in read_and_process_logs()
@@ -357,9 +359,23 @@ use constant {
                                # not rebuild a hash per line (P3 lean-loop)
     FR_MATCHES         => 20,  # run-total matched-line count for this entry
                                # (scan telemetry; -V format-detection / scan)
+    FR_GROUP           => 21,  # variant-group key (D47/F1); an entry without
+                               # variants is a group of one keyed by its name.
+                               # Ordering constraints and promotion closures
+                               # are keyed by group, never by member.
+    FR_GROUP_DEFAULT   => 22,  # 1 = the member occupying the group's scan
+                               # slot when no evidence selects another
+    FR_FILENAME        => 23,  # filename evidence (D45): { matcher, stem, date,
+                               # index, ext, placement } or undef
+    FR_FILENAME_SAMPLES=> 24,  # producer-true names the matcher must accept
 };
-my @format_registry;           # scanned entries, static cascade order (frozen at build)
+my @format_registry;           # scanned entries, static cascade order: one
+                               # occupant per variant-group slot (D47/F1)
+my @format_registry_members;   # every scanned entry incl. non-occupant variant
+                               # members, spec order (telemetry, match_counts)
 my %format_registry_entry;     # name => entry (includes non-scanned entries)
+my %format_variant_groups;     # group => { default => name, members => [names] }
+                               # for groups with two or more members
 my @format_scan_order;         # live MTF scan state: @format_registry reordered by
                                # pinned-closure promotion (D26); global across files
                                # (change points converge in one match, D20)
@@ -2230,6 +2246,9 @@ my %format_transform_code = (
 sub format_registry_specs {
     return (
     { name => 'mt1std', slug => 'thingworx_standard', match_type => 1, scanned => 1, head_class => 'digit',
+      filename => { stem => '(?:Application|Error|ScriptError|Script|Communication|AkkaCommunication|Auth|Configuration|Database|Security)Log',
+                    date => 'iso', index => 'dot_n', ext => '.log', placement => 'before',
+                    samples => [ 'ApplicationLog.log', 'ApplicationLog.2025-05-05.0.log', 'ErrorLog.2025-05-05.1.log', 'ScriptLog.2025-04-09.4.log', 'AkkaCommunicationLog.log', 'ApplicationLog.2025-05-05.0.log.gz' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ((?:\](?! )|[^\]])*)] (.*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'instance'],[5,'user'],[6,'session'],[7,'platform'],[8,'thread'],[9,'message'] ],
       transforms => [],
@@ -2252,6 +2271,9 @@ sub format_registry_specs {
         [ '2025-05-05 00:00:01', 'INFO', 'S.c.t.d.e.DSLScript', '', 'Administrator', 'F0000000-0000-0000-0000-00000000000F', 'platform-1', 'TWEventProcessor-4', 'Executed service durationMs=? result bytes=? count=7', '1024', '42', '0', '1' ],
       ] },
     { name => 'mt10', slug => 'connection_server_standard', match_type => 10, scanned => 1, head_class => 'digit',
+      variant_group => 'connection_server', variant_default => 1,
+      filename => { stem => 'cxserver', index => 'dash_n_n', ext => '.log', placement => 'before',
+                    samples => [ 'cxserver.1-16.log', 'cxserver.log' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'object'],[5,'message'] ],
       transforms => [ 'mask_ephemeral_port' ],
@@ -2271,6 +2293,34 @@ sub format_registry_specs {
       expect => [
         [ '2025-08-14 21:00:34', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-12', 'Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size', undef, undef, '0', '0' ],
         [ '2025-08-14 21:00:35', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in ? millseconds', undef, '152', '0', '1' ],
+      ] },
+    # Integration Runtime: byte-identical line shape to Connection Server
+    # (same Vert.x/logback encoder) but its dates are yyyy-dd-MM (#385).
+    # Selected per file by provenance evidence (D47); its samples carry
+    # day tokens > 12 so the D24 gates prove the layout reads them.
+    { name => 'mt10ir', slug => 'integration_runtime_standard', match_type => 15, scanned => 1, head_class => 'digit',
+      variant_group => 'connection_server',
+      filename => { stem => 'IntegrationRuntime-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', ext => '.log', placement => 'before',
+                    samples => [ 'IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log' ] },
+      pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'object'],[5,'message'] ],
+      transforms => [ 'mask_ephemeral_port' ],
+      message_metrics => {
+          gate_lit => ' milliseconds',
+          probes => [ { name => 'duration', field => 'duration', guard_lit => undef, pattern => ' (\d+) milliseconds', unit => 'ms' } ],
+          mask => { pattern => ' (\d+) milliseconds', replace => ' ? millseconds' },
+          marks_metrics_observed => 1,
+      },
+      time => { layout => 'iso_ms_ddmm', precision => 'ms', tz => 'local', frac => 'fixed3' },
+      duration_unit => 'ms', unit_ambiguous => 0, stats_eligible => 0,
+      expect_ancestors => [],
+      samples => [
+        '2025-28-01 07:26:36.541 [vert.x-eventloop-thread-0] INFO  c.t.i.IntegrationRuntimeConfiguration - Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted',
+        '2025-28-01 07:26:36.635 [vert.x-eventloop-thread-0] INFO  c.t.s.SecurityManagerBootstrapper - initializing KeyStore provider',
+      ],
+      expect => [
+        [ '2025-28-01 07:26:36', 'INFO', 'c.t.i.IntegrationRuntimeConfiguration', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted', undef, undef, '0', '0' ],
+        [ '2025-28-01 07:26:36', 'INFO', 'c.t.s.SecurityManagerBootstrapper', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'initializing KeyStore provider', undef, undef, '0', '0' ],
       ] },
     { name => 'mt1gen', slug => 'thingworx_standard', match_type => 1, scanned => 1, head_class => 'digit',
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]',
@@ -2293,7 +2343,7 @@ sub format_registry_specs {
       transforms => [ 't_to_space' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
       duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
-      expect_ancestors => [ 'mt1std', 'mt10', 'mt1gen' ],
+      expect_ancestors => [ 'mt1std', 'connection_server', 'mt1gen' ],
       samples => [
         '[2025-02-04T12:06:22.784] [TRACE] tunnel keepalive sent',
         '2025-03-01 08:00:00.123 tunnel worker [INFO] session established',
@@ -2351,6 +2401,9 @@ sub format_registry_specs {
         [ '13/Mar/2025:09:02:42', '2xx', undef, undef, undef, undef, undef, undef, 'POST /async/prediction/jobs', '88', '12', '201', '1' ],
       ] },
     { name => 'mt3', slug => 'tomcat_access_with_duration', match_type => 3, scanned => 1, head_class => 'any',
+      variant_group => 'access_with_duration', variant_default => 1,
+      filename => { stem => 'localhost_access_log', date => 'iso', ext => '.txt', placement => 'before',
+                    samples => [ 'localhost_access_log.2025-03-21.txt', 'localhost_access_log.txt' ] },
       pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?',
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[6,'duration'],[7,'thread'],[8,'session'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
@@ -2366,6 +2419,26 @@ sub format_registry_specs {
         [ '02/Feb/2025:00:00:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Thingworx/Metrics', '17626', '295', '200', '1' ],
         [ '05/May/2025:00:00:00', '2xx', undef, undef, undef, undef, undef, undef, 'POST /Thingworx/WS', '261', '1', '200', '1' ],
         [ '05/May/2025:00:00:01', '2xx', undef, undef, undef, 'AB12CD34EF', undef, 'http-nio-8443-exec-3', 'GET /Thingworx/Things/T1', '100', '25', '200', '1' ],
+      ] },
+    # Apache HTTP Server 2.x / Tomcat 10.1+: same `%h %l %u %t "%r" %s %b %D`
+    # shape as Tomcat 6-9 but %D is microseconds (#17). Selected per file by
+    # provenance evidence (D47) — httpd names its log `access_log` /
+    # `access.log`, logrotate appends the date after the extension.
+    { name => 'mt3us', slug => 'httpd_access_with_duration', match_type => 14, scanned => 1, head_class => 'any',
+      variant_group => 'access_with_duration',
+      filename => { stem => 'access(?:_log)?', date => 'compact', index => 'dot_n', ext => '.log', placement => 'after',
+                    samples => [ 'access.log-20260609', 'access_log', 'access.log', 'access_log.1' ] },
+      pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?',
+      field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[6,'duration'],[7,'thread'],[8,'session'] ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
+      time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
+      duration_unit => 'us', unit_ambiguous => 0, stats_eligible => 1,
+      expect_ancestors => [ 'mt12', 'mt4', 'mt9' ],
+      samples => [
+        '127.0.0.1 - - [22/Jan/2026:08:49:51 +0000] "GET /Windchill/servlet/WindchillGW/wt.httpgw.HTTPServer/ping HTTP/1.1" 200 209 173542',
+      ],
+      expect => [
+        [ '22/Jan/2026:08:49:51', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Windchill/servlet/WindchillGW/wt.httpgw.HTTPServer/ping', '209', '173542', '200', '1' ],
       ] },
     { name => 'mt5', slug => 'connection_server_json', match_type => 5, scanned => 1, head_class => 'brace',
       pattern_src => '^{"\@timestamp":"([^"]*).*"level":"([^"]*)',
@@ -2393,6 +2466,8 @@ sub format_registry_specs {
     # `To-space exhausted`/`Using G1` with neither. `Using G1` is also the
     # only form with no `GC(n)` prefix.
     { name => 'mt6', slug => 'java_gc_g1', match_type => 6, scanned => 1, head_class => 'bracket_digit',
+      filename => { stem => 'gc(?:-[^.]+)?', index => 'dot_n', ext => '.out', placement => 'after',
+                    samples => [ 'gc-2025-01-01.out.3', 'gc.out' ] },
       pattern_src => '^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}.*?\[info\]\[gc\s*\] (?:GC\(\d+\) )?(Pause (?:Young|Full|Remark|Cleanup)|To-space exhausted|Using G1)(?: (\(.+?\)))?(?: (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms)?$',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'message'],[4,'heap_from'],[5,'heap_to'],[6,'heap_size'],[7,'duration'] ],
       transforms => [ 'gc_heap_delta' ],
@@ -2436,7 +2511,7 @@ sub format_registry_specs {
       transforms => [ 'comma_to_dot', 't_to_space', 'strip_trailing_ws' ],
       time => { layout => 'iso_flex', precision => 's', tz => 'local', frac => 'generic' },
       duration_unit => undef, unit_ambiguous => 0, stats_eligible => 0,
-      expect_ancestors => [ 'mt1std', 'mt10', 'mt1gen' ],
+      expect_ancestors => [ 'mt1std', 'connection_server', 'mt1gen' ],
       samples => [
         '2025-02-20 10:06:10 [nioEventLoopGroup-2-1] WARN  io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]',
         '2025-02-20 10:06:11,123 [pool-2-thread-1] INFO  io.netty.util.ResourceLeakDetector - Leak detection level set to SIMPLE.  ',
@@ -2496,18 +2571,99 @@ sub compile_format_time_parser {
     }
     # Every iso_* layout (and csv's ISO fallback path) uses the fixed-offset
     # substr extraction, exactly as the retired per-match-type branch did.
+    # iso_ms_ddmm reads the two date fields in the other order (yyyy-dd-MM,
+    # the Integration Runtime encoder, #385); everything else is identical.
+    my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);
     return sub {
         my $ts = $_[0];
         return $timestamp_cache{$ts} if exists $timestamp_cache{$ts};
         return $timestamp_cache{$ts} = timegm(
-            substr($ts, 17, 2),     # second
-            substr($ts, 14, 2),     # minute
-            substr($ts, 11, 2),     # hour
-            substr($ts, 8, 2),      # day
-            substr($ts, 5, 2) - 1,  # month (0-11)
-            substr($ts, 0, 4),      # year
+            substr($ts, 17, 2),            # second
+            substr($ts, 14, 2),            # minute
+            substr($ts, 11, 2),            # hour
+            substr($ts, $day_off, 2),      # day
+            substr($ts, $month_off, 2) - 1,# month (0-11)
+            substr($ts, 0, 4),             # year
         );
     };
+}
+
+# Filename evidence (D45/I4): an entry declares optional name components —
+# stem (pattern; OR-able), date layout, rotation index form, extension —
+# and where the rotation/date suffixes sit relative to the extension:
+#   before — stem[.date][.index]ext        (logback, Tomcat)
+#   after  — stem ext[-date][.index]       (httpd logrotate, HotSpot GC)
+# The resolver composes one full-name matcher from the components; a
+# compression suffix is stripped as a constant, never declared. These two
+# tables are the only vocabulary for the date/index forms.
+my %format_filename_date_re  = ( iso => '\d{4}-\d{2}-\d{2}', compact => '\d{8}' );
+my %format_filename_index_re = ( dot_n => '\d+', dash_n_n => '\d+-\d+' );
+use constant FORMAT_FILENAME_COMPRESSION_RE => qr/\.(?:gz|bz2|xz|zst)\z/;
+
+sub compile_format_filename_matcher {
+    my ($spec) = @_;
+    my $d = $spec->{filename} or return undef;
+    die "ltl: format registry: entry '$spec->{name}' filename evidence declares no stem\n" unless defined $d->{stem};
+    for my $k (qw(date index)) {
+        next unless defined $d->{$k};
+        my $vocab = $k eq 'date' ? \%format_filename_date_re : \%format_filename_index_re;
+        die "ltl: format registry: entry '$spec->{name}' filename $k form '$d->{$k}' is not in the vocabulary (" . join(', ', sort keys %$vocab) . ")\n"
+            unless $vocab->{ $d->{$k} };
+    }
+    my $placement = $d->{placement} // 'before';
+    die "ltl: format registry: entry '$spec->{name}' filename placement '$placement' must be before|after\n"
+        unless $placement eq 'before' || $placement eq 'after';
+    my $ext   = defined $d->{ext} ? quotemeta $d->{ext} : undef;
+    my $date  = defined $d->{date}  ? $format_filename_date_re{ $d->{date} }   : undef;
+    my $idx   = defined $d->{index} ? $format_filename_index_re{ $d->{index} } : undef;
+    # The extension alternation keeps a renamed file matching on its stem:
+    # the declared extension captures as <ext>; any other extension is
+    # consumed without capturing; no extension at all is also accepted.
+    my $ext_alt = '(?:' . (defined $ext ? "(?<ext>$ext)|" : '') . '(?<oext>\.[A-Za-z][A-Za-z0-9]*))?';
+    my $re = $placement eq 'before'
+        ? "^(?<stem>$d->{stem})" . ($date ? "(?:\\.(?<date>$date))?" : '') . ($idx ? "(?:\\.(?<index>$idx))?" : '') . "$ext_alt\\z"
+        : "^(?<stem>$d->{stem})$ext_alt" . ($date ? "(?:-(?<date>$date))?" : '') . ($idx ? "(?:\\.(?<index>$idx))?" : '') . "\\z";
+    return { matcher => qr/$re/, stem => $d->{stem}, date => $d->{date}, index => $d->{index},
+             ext => $d->{ext}, placement => $placement };
+}
+
+# Decompose a file's basename against one entry's filename evidence.
+# Returns undef when the stem does not match; otherwise
+#   { ext => match|absent|other, date => <string>|undef, index => <string>|undef }
+# ext 'absent' = no extension at all, 'other' = an undeclared extension;
+# neither contradicts (D45) — they withhold the extension signal.
+sub format_filename_decompose {
+    my ($fn, $basename) = @_;
+    return undef unless $fn;
+    (my $name = $basename) =~ s/${\FORMAT_FILENAME_COMPRESSION_RE}//;
+    return undef unless $name =~ $fn->{matcher};
+    return { ext   => defined $+{ext} ? 'match' : defined $+{oext} ? 'other' : 'absent',
+             date  => $+{date}, index => $+{index} };
+}
+
+# Place the given member into its group's scan slot (D47/F1): same position
+# in both the static and the live order, so ordering constraints (keyed by
+# group) are untouched. The generated sub for the resulting order is
+# selected from the signature cache or compiled once. Any occupant change
+# invalidates the timestamp memo — the cache is keyed by the timestamp
+# string alone and two date layouts disagree on its epoch (N3).
+sub format_registry_set_occupant {
+    my ($member) = @_;
+    my $group = $member->[FR_GROUP];
+    my $changed = 0;
+    for my $arr (\@format_registry, \@format_scan_order) {
+        for my $i (0 .. $#$arr) {
+            next unless $arr->[$i][FR_GROUP] eq $group;
+            if ($arr->[$i] != $member) { $arr->[$i] = $member; $changed = 1 }
+            last;
+        }
+    }
+    return 0 unless $changed;
+    my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
+    $format_scan_sub = $format_scan_sub_cache{$sig} //= compile_format_scan_sub($format_registry_opts);
+    %timestamp_cache = ();
+    ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
+    return 1;
 }
 
 # Compile a declarative guard spec (D28) into a closure over the raw line.
@@ -2649,9 +2805,12 @@ substr($timestamp_str, 19) = '';};
     } else {
         push @body, q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); } else { $fractional_ms = 0; }};
     }
-    my $compute = (($spec->{time}{layout} // '') eq 'apache_clf')
+    my $layout = $spec->{time}{layout} // '';
+    # iso_ms_ddmm (yyyy-dd-MM, #385): the day and month reads swap offsets.
+    my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);
+    my $compute = ($layout eq 'apache_clf')
         ? q{do { my ($day, $month_str, $year, $hour, $minute, $second) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/; timegm( $second, $minute, $hour, $day, $format_month_map{$month_str} - 1, $year ) }}
-        : q{timegm( substr($timestamp_str, 17, 2), substr($timestamp_str, 14, 2), substr($timestamp_str, 11, 2), substr($timestamp_str, 8, 2), substr($timestamp_str, 5, 2) - 1, substr($timestamp_str, 0, 4) )};
+        : qq{timegm( substr(\$timestamp_str, 17, 2), substr(\$timestamp_str, 14, 2), substr(\$timestamp_str, 11, 2), substr(\$timestamp_str, $day_off, 2), substr(\$timestamp_str, $month_off, 2) - 1, substr(\$timestamp_str, 0, 4) )};
     push @body, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
 elsif (exists \$timestamp_cache{\$timestamp_str}) {
     \$timestamp = \$format_last_ts_epoch = \$timestamp_cache{\$timestamp_str};
@@ -2703,7 +2862,7 @@ sub compile_format_scan_sub {
         my $guard_src = format_guard_cond_src($spec->{guard});
         my $optimal = 1;
         for my $sj (0 .. $si - 1) {
-            if (!$e->[FR_ANC_SET]{ $format_scan_order[$sj][FR_NAME] }) { $optimal = 0; last }
+            if (!$e->[FR_ANC_SET]{ $format_scan_order[$sj][FR_GROUP] }) { $optimal = 0; last }
         }
         # The winner is captured before promotion switches the active sub;
         # @entries is this sub's own immutable snapshot of its order.
@@ -2739,39 +2898,44 @@ sub compile_format_scan_sub {
 # becomes a pinned-ordering constraint, and the transitive closure of
 # those pairs is the entry's ancestor set the MTF promotion preserves.
 # Returns { name => [ ancestor names, static order ] }.
+# Constraints are between GROUPS (D47/F1): every member's samples are
+# tested, a same-group first match is the owner (identical patterns within
+# a group are expected), and the derived sets name groups. Returns
+# { group => [ ancestor groups, static order ] }.
 sub derive_format_constraints {
     my ($specs, $patterns) = @_;
     my @scanned = grep { $_->{scanned} } @$specs;
-    my %idx = map { $scanned[$_]{name} => $_ } 0 .. $#scanned;
-    my %must_precede;   # $must_precede{later}{earlier} = 1
+    my %idx;   # group => static slot position (first member's position)
+    for my $i (0 .. $#scanned) { $idx{ $scanned[$i]{group} } //= scalar keys %idx }
+    my %must_precede;   # $must_precede{later_group}{earlier_group} = 1
 
     for my $owner (@scanned) {
         for my $sample (@{ $owner->{samples} }) {
-            # The owning entry must be the first static match — otherwise the
+            # The owning group must be the first static match — otherwise the
             # sample is mislabeled and every derivation from it is suspect.
             my ($first) = grep { $sample =~ $patterns->{$_->{name}} } @scanned;
             die "ltl: format registry: sample of entry '$owner->{name}' first matches '"
                 . ($first ? $first->{name} : 'nothing') . "' under static order — mislabeled sample or pattern drift:\n  $sample\n"
-                unless $first && $first->{name} eq $owner->{name};
+                unless $first && $first->{group} eq $owner->{group};
             for my $other (@scanned) {
-                next if $other->{name} eq $owner->{name};
-                next unless $idx{ $other->{name} } > $idx{ $owner->{name} };
-                $must_precede{ $other->{name} }{ $owner->{name} } = 1
+                next if $other->{group} eq $owner->{group};
+                next unless $idx{ $other->{group} } > $idx{ $owner->{group} };
+                $must_precede{ $other->{group} }{ $owner->{group} } = 1
                     if $sample =~ $patterns->{ $other->{name} };
             }
         }
     }
 
     my %ancestors;
-    for my $s (@scanned) {
+    for my $g (keys %idx) {
         my %seen;
-        my @queue = keys %{ $must_precede{ $s->{name} } // {} };
+        my @queue = keys %{ $must_precede{$g} // {} };
         while (@queue) {
             my $p = shift @queue;
             next if $seen{$p}++;
             push @queue, keys %{ $must_precede{$p} // {} };
         }
-        $ancestors{ $s->{name} } = [ sort { $idx{$a} <=> $idx{$b} } keys %seen ];
+        $ancestors{$g} = [ sort { $idx{$a} <=> $idx{$b} } keys %seen ];
     }
     return \%ancestors;
 }
@@ -2785,20 +2949,42 @@ sub derive_format_constraints {
 sub build_format_registry {
     my @specs = format_registry_specs();
 
+    # Variant groups (D47/F1): every entry belongs to a group — its
+    # variant_group key, or its own name. The default member occupies the
+    # group's scan slot and must be declared first, its variants
+    # immediately after it, so static order is a sequence of group slots.
+    my (%group_default, %group_members, %seen_name);
+    for my $i (0 .. $#specs) {
+        my $spec = $specs[$i];
+        die "ltl: format registry: duplicate entry name '$spec->{name}'\n" if $seen_name{ $spec->{name} }++;
+        $spec->{group} = $spec->{variant_group} // $spec->{name};
+        if ($spec->{variant_default} || !defined $spec->{variant_group}) {
+            die "ltl: format registry: variant group '$spec->{group}' declares two defaults ('$group_default{$spec->{group}}', '$spec->{name}')\n"
+                if defined $group_default{ $spec->{group} };
+            $group_default{ $spec->{group} } = $spec->{name};
+        } else {
+            die "ltl: format registry: variant member '$spec->{name}' of group '$spec->{group}' must follow its default member in format_registry_specs()\n"
+                unless defined $group_default{ $spec->{group} } && $i > 0 && $specs[$i - 1]{group} eq $spec->{group};
+        }
+        push @{ $group_members{ $spec->{group} } }, $spec->{name};
+    }
+
     # Compile recognition patterns once; validate reserved slots.
     my %patterns;
     for my $spec (@specs) {
-        die "ltl: format registry: entry '$spec->{name}' declares event_pairs, which is reserved and not yet consumed (features/58-format-registry-staged-detection.md D23)\n"
+        die "ltl: format registry: entry '$spec->{name}' declares event_pairs, which is reserved and not yet consumed (features/log-format-registry.md D23)\n"
             if $spec->{event_pairs} && @{ $spec->{event_pairs} };
         next unless $spec->{scanned};
         $patterns{ $spec->{name} } = qr/$spec->{pattern_src}/;
     }
 
     # Per-entry clobbered-field sets from static order (see section header).
+    # Members of one group share its slot: the union advances once per group.
     my %is_record = map { $_ => 1 } @format_record_fields;
-    my (%clobbered_by, %clobber_union);
+    my (%clobbered_by, %clobber_union, %group_clobber_done);
     for my $spec (grep { $_->{scanned} } @specs) {
         $clobbered_by{ $spec->{name} } = { %clobber_union };
+        next if $group_clobber_done{ $spec->{group} }++;
         $clobber_union{ $_->[1] } = 1 for grep { $is_record{ $_->[1] } } @{ $spec->{field_map} };
     }
 
@@ -2849,13 +3035,38 @@ sub build_format_registry {
     }
 
     # D24 gate 4: cross-shadow ordering constraints match the declared
-    # expectations (D26 pinned-ancestor sets).
+    # expectations (D26 pinned-ancestor sets, keyed by group — F1).
     my $ancestors = derive_format_constraints(\@specs, \%patterns);
     for my $spec (grep { $_->{scanned} } @specs) {
-        my $derived  = join(',', @{ $ancestors->{ $spec->{name} } });
+        my $derived  = join(',', @{ $ancestors->{ $spec->{group} } });
         my $declared = join(',', @{ $spec->{expect_ancestors} // [] });
-        die "ltl: format registry: derived pinned-ancestor set for entry '$spec->{name}' is [$derived] but the spec declares [$declared] — the sample cross-shadow test disagrees with the declared ordering constraints; reconcile before shipping (produced_by derive_format_constraints())\n"
+        die "ltl: format registry: derived pinned-ancestor set for group '$spec->{group}' is [$derived] but entry '$spec->{name}' declares [$declared] — the sample cross-shadow test disagrees with the declared ordering constraints; reconcile before shipping (produced_by derive_format_constraints())\n"
             if $derived ne $declared;
+    }
+
+    # D24 gates 7/8 (D45): filename evidence is executable — every declared
+    # filename sample decomposes through its own entry's matcher, and no
+    # sample of one group member is accepted by another member of the same
+    # group (in-group name overlap would make the stem signal undecidable).
+    my %filename;
+    for my $spec (grep { $_->{scanned} } @specs) {
+        $filename{ $spec->{name} } = compile_format_filename_matcher($spec);
+        next unless $filename{ $spec->{name} };
+        my @samples = @{ $spec->{filename}{samples} // [] };
+        die "ltl: format registry: entry '$spec->{name}' declares filename evidence without filename samples (the sample set is the matcher's executable self-test)\n"
+            unless @samples;
+        for my $sample (@samples) {
+            die "ltl: format registry: entry '$spec->{name}' filename sample '$sample' does not match its own filename evidence (produced_by compile_format_filename_matcher())\n"
+                unless format_filename_decompose($filename{ $spec->{name} }, $sample);
+        }
+    }
+    for my $spec (grep { $_->{scanned} && $filename{ $_->{name} } } @specs) {
+        for my $other (grep { $_->{scanned} && $_->{group} eq $spec->{group} && $_->{name} ne $spec->{name} } @specs) {
+            for my $sample (@{ $spec->{filename}{samples} }) {
+                die "ltl: format registry: filename sample '$sample' of entry '$spec->{name}' is also accepted by '$other->{name}' in the same variant group — in-group filename overlap leaves the stem signal undecidable\n"
+                    if format_filename_decompose($filename{ $other->{name} }, $sample);
+            }
+        }
     }
 
     # D24 gate 6: whitespace-dispatch soundness. A space-prefixed sample
@@ -2878,7 +3089,9 @@ sub build_format_registry {
     # Freeze the live registry (CLI-gated options baked into extractors).
     my $opts = { include_query_string => $include_query_string, include_session => $include_session };
     @format_registry = ();
+    @format_registry_members = ();
     %format_registry_entry = ();
+    %format_variant_groups = ();
     for my $spec (@specs) {
         my $entry = [];
         $entry->[FR_NAME]            = $spec->{name};
@@ -2899,12 +3112,22 @@ sub build_format_registry {
         $entry->[FR_MESSAGE_METRICS] = $spec->{message_metrics};
         $entry->[FR_EVENT_PAIRS]     = $spec->{event_pairs};
         $entry->[FR_SAMPLES]         = $spec->{samples};
-        $entry->[FR_ANCESTORS]       = $ancestors->{ $spec->{name} } // [];
+        $entry->[FR_ANCESTORS]       = $ancestors->{ $spec->{group} } // [];
         $entry->[FR_TIME_PARSE]      = compile_format_time_parser( $spec->{time}{layout} );
         $entry->[FR_ANC_SET]         = { map { $_ => 1 } @{ $entry->[FR_ANCESTORS] } };
         $entry->[FR_MATCHES]         = 0;
-        push @format_registry, $entry if $spec->{scanned};
+        $entry->[FR_GROUP]           = $spec->{group};
+        $entry->[FR_GROUP_DEFAULT]   = $group_default{ $spec->{group} } eq $spec->{name} ? 1 : 0;
+        $entry->[FR_FILENAME]        = $filename{ $spec->{name} };
+        $entry->[FR_FILENAME_SAMPLES]= $spec->{filename}{samples} // [];
+        if ($spec->{scanned}) {
+            push @format_registry_members, $entry;
+            push @format_registry, $entry if $entry->[FR_GROUP_DEFAULT];
+        }
         $format_registry_entry{ $spec->{name} } = $entry;
+    }
+    for my $g (grep { @{ $group_members{$_} } > 1 } keys %group_members) {
+        $format_variant_groups{$g} = { default => $group_default{$g}, members => $group_members{$g} };
     }
     @format_scan_order = @format_registry;
     %format_registry_spec      = map { $_->{name} => $_ } @specs;
@@ -2920,10 +3143,10 @@ sub build_format_registry {
     # reachable in multi-format interleaved streams) cache on first
     # occurrence and are reused for the rest of the run.
     for my $e (@format_registry) {
-        my %front = ( %{ $e->[FR_ANC_SET] }, $e->[FR_NAME] => 1 );
+        my %front = ( %{ $e->[FR_ANC_SET] }, $e->[FR_GROUP] => 1 );
         my (@f, @r);
         for my $o (@format_registry) {
-            if ($front{ $o->[FR_NAME] }) { push @f, $o } else { push @r, $o }
+            if ($front{ $o->[FR_GROUP] }) { push @f, $o } else { push @r, $o }
         }
         my @save = @format_scan_order;
         @format_scan_order = (@f, @r);
@@ -2933,8 +3156,12 @@ sub build_format_registry {
     }
 
     # D24 gate 5: the generated scan sub (the production truth) classifies
-    # every sample to its owning entry under the initial (static) order.
+    # every sample to its owning entry under the initial (static) order —
+    # with the sample's own member occupying its group's slot, so a variant
+    # member's samples (e.g. yyyy-dd-MM dates) are the executable proof that
+    # its generated block reads them.
     for my $spec (grep { $_->{scanned} } @specs) {
+        format_registry_set_occupant( $format_registry_entry{ $spec->{name} } );
         for my $sample (@{ $spec->{samples} }) {
             my $winner = $format_scan_sub->($sample);
             die "ltl: format registry: generated scan sub classifies a sample of '$spec->{name}' as '"
@@ -2942,6 +3169,7 @@ sub build_format_registry {
               . "' (produced_by compile_format_scan_sub())\n"
                 unless $winner && $winner->[FR_NAME] eq $spec->{name};
         }
+        format_registry_set_occupant( $format_registry_entry{ $group_default{ $spec->{group} } } );
     }
     # Gate 5's format-alternating sample stream promoted entries (warming
     # deeper recency orders); restore the static order and its sub.
@@ -3076,10 +3304,10 @@ sub sample_file_for_detection {
 sub format_registry_promote {
     my ($si) = @_;
     my $e = $format_scan_order[$si];
-    my %front = ( %{ $e->[FR_ANC_SET] }, $e->[FR_NAME] => 1 );
+    my %front = ( %{ $e->[FR_ANC_SET] }, $e->[FR_GROUP] => 1 );
     my (@f, @r);
     for my $o (@format_scan_order) {
-        if ($front{ $o->[FR_NAME] }) { push @f, $o } else { push @r, $o }
+        if ($front{ $o->[FR_GROUP] }) { push @f, $o } else { push @r, $o }
     }
     @format_scan_order = (@f, @r);
     $format_scan_promotions++;
