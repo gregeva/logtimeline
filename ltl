@@ -8662,8 +8662,6 @@ sub resolve_csv_column_family {
     return 'level' if $column =~ /^(err|msg)-rate(_(sec|min|hr|day))?$/;
     # Log-level columns: matched against the configured log levels.
     return 'level' if grep { $_ eq $column } @log_levels;
-    return 'level' if $column =~ /^[1-5]xx$/;  # HTTP status family
-    return 'level' if $column =~ /^Pause (Young|Full)$/;
     # UDM dynamic columns: <name>_<aggregate>; family follows the underlying
     # metric, which for UDM today is 'count' (raw numeric) — leave to caller
     # to override if a typed UDM lands.

@@ -192,13 +192,36 @@ CSV rules: the WGM STATS CSV is refused by the previous
   values across the corpus.
 - Some lines end `\r\n` (HTTP headers echoed into trace messages); harmless.
 
+## Log-category consistency
+
+A log category lives on three surfaces that must agree: `@log_levels` in
+`ltl` (the read loop keeps only lines whose category is listed), `%colors`
+(rendering; the `-HL` twin derives automatically) and
+`tests/csv-output/rules/stats-columns.tsv` (the CSV structural validator
+refuses any column it does not know). A new category updates all three in the
+same commit. Found while adding the WGM categories: the four #382 GC
+categories (`Pause Remark`, `Pause Cleanup`, `To-space exhausted`, `Using G1`)
+had no rules rows; closed here. `resolve_csv_column_family()` now resolves
+every category through the `@log_levels` lookup alone — its `Pause
+(Young|Full)` and `[1-5]xx` special cases duplicated entries already in the
+list.
+
+What enforces it: the `validate-csv-output.sh` scenario `gc-g1-categories`
+(`tests/fixtures/gc-g1-categories.txt`, seven lines carrying all six GC
+categories, `-bs 1440 -oe -n 1`) drives every GC category through the
+validator, so a category reaching the CSV without a rules row fails the
+harness; the WGM categories are covered the same way by the `wgm-client`
+fixture through the format-detection harness and by the rules rows declared
+above. A structural assertion that every non-`empty`, non-rate member of
+`@log_levels` has a rules row is not built: nothing exposes the vocabulary
+outside the Perl source (no `-V` key lists it), so it would need new
+machinery — a `log_levels:` key in the `csv-output` section plus a one-line
+harness check is the cheapest option if wanted.
+
 ## Open items
 
 - The `S`/`F` and `X`/`Y` pairs are natural inter-line duration sources
   (`Server Transaction started` → `finished` on the same `srvtxn#` area);
   out of scope here, noted for the derived-metrics phase.
-- `tests/csv-output/rules/stats-columns.tsv` still lacks rows for the #382
-  GC categories (`Pause Remark`, `Pause Cleanup`, `To-space exhausted`,
-  `Using G1`); found while adding the WGM rows, not fixed here.
 - No `-V` section exposes per-category counts; the msgtype mapping is
   asserted through `benchmark-data`'s `lines_included`.

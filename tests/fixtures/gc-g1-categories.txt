@@ -1,0 +1,7 @@
+[2025-04-05T11:10:47.867+0000][info][gc] Using G1
+[2025-04-05T11:10:48.012+0000][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 2433M->66M(49152M) 18.406ms
+[2025-04-05T11:10:50.305+0000][info][gc] GC(2) Pause Remark 74M->74M(320M) 2.422ms
+[2025-04-05T11:10:50.309+0000][info][gc] GC(2) Pause Cleanup 82M->82M(320M) 0.204ms
+[2025-04-05T11:12:56.233+0000][info][gc] GC(9) To-space exhausted
+[2025-04-05T11:12:56.233+0000][info][gc] GC(9) Pause Young (Prepare Mixed) (G1 Evacuation Pause) 49138M->30591M(49152M) 148.622ms
+[2025-04-05T11:13:03.101+0000][info][gc] GC(10) Pause Full (G1 Compaction Pause) 49000M->128M(49152M) 1207.250ms
