@@ -398,6 +398,9 @@ my $format_detection_window = 0; # hidden --detection-window=N override; 0 = the
 my %format_detection_sample;     # in_file => sample observations (sample_file_for_detection())
 my %format_detection_window_engaged;  # in_file => window size actually engaged for that file
 my %format_detection_evidence;   # in_file => per-file variant selection record (select_format_variants())
+my %format_detection_formats;    # in_file => [ format names found in the file, first-bound first ] (D50)
+my %format_legend;               # format name => legend number, first-detection order across the run
+my @format_legend_order;         # legend numbers -> format names
 # Evidence weights (D46/I1): one table, fixed per evidence class, the same
 # for every format. Every signal is additive and independent. The group
 # default's standing credit equals the extension weight, so an extension
@@ -2866,6 +2869,35 @@ sub format_probe_signal {
     return $flipped;
 }
 
+# Variant ambiguity note (D47/I6): the first time in the run a file binds
+# a variant-group member that was selected by default — no evidence
+# decided between the producers — say which consequence the assumption
+# carries and how to override it. Phrased run-level with no filename: the
+# assumption covers every file the format binds (#390). Intentional
+# diagnostic: never an ` at ... line` suffix.
+sub format_variant_ambiguity_note {
+    my ($entry) = @_;
+    return if $format_unit_ambiguity_warned || defined $log_format_pin;
+    my $g = $format_variant_groups{ $entry->[FR_GROUP] } or return;
+    my $sel = $format_detection_evidence{$format_current_file}{groups}{ $entry->[FR_GROUP] } or return;
+    return unless $sel->{basis} eq 'default';
+    my @others = grep { $_ ne $entry->[FR_NAME] } @{ $g->{members} };
+    my $alt = $format_registry_entry{ $others[0] };
+    my ($consequence, $override);
+    if (($alt->[FR_TIME]{layout} // '') ne ($entry->[FR_TIME]{layout} // '')) {
+        $consequence = 'the date layout differs between them';
+        $override = '-lf ' . $alt->[FR_SLUG];
+    } else {
+        return if defined $duration_unit_override;   # -du removes the unit assumption
+        $consequence = 'the duration unit differs between them (assumed ' . ($entry->[FR_DURATION_UNIT] // 'ms') . ')';
+        $override = '-du <unit> or -lf ' . $alt->[FR_SLUG];
+    }
+    $format_unit_ambiguity_warned = 1;
+    print STDERR "Note: the detected log format (" . $entry->[FR_SLUG] . ") is written by more than one producer and " . $consequence
+        . "; nothing in the file names or content decided which - use $override if the files come from the other producer\n";
+    return;
+}
+
 # Apply a selection record: each group's selected member occupies its slot.
 # Returns the number of occupants that changed.
 sub apply_format_variant_selection {
@@ -3621,6 +3653,7 @@ sub emit_format_detection_verbose {
     push @verbose_output, "duration_unit_override: " .
         (defined $duration_unit_override ? $duration_unit_override : '-');
     push @verbose_output, "format_pin: " . ($log_format_pin // '-');
+    push @verbose_output, "legend: " . (join(',', map { "$format_legend{$_}=$_" } @format_legend_order) || '-');
     push @verbose_output, "files: " . scalar(@in_files);
 
     # Per-file blocks in input order; @in_files is the canonical order.
@@ -3671,7 +3704,10 @@ sub emit_format_detection_verbose {
     push @verbose_output, "final_order: " . join(',', map { $_->[FR_NAME] } @format_scan_order);
     push @verbose_output, "promotions: $format_scan_promotions";
     push @verbose_output, "match_counts: " .
-        join(',', map { $_->[FR_NAME] . '=' . $_->[FR_MATCHES] } @format_registry);
+        join(',', map { $_->[FR_NAME] . '=' . $_->[FR_MATCHES] } @format_registry_members);
+    push @verbose_output, "variant_groups: " .
+        (join(',', map { my $g = $_; "$g=" . (grep { $_->[FR_GROUP] eq $g } @format_scan_order)[0][FR_NAME] }
+                   sort { $format_variant_groups{$a}{slot} <=> $format_variant_groups{$b}{slot} } keys %format_variant_groups) || '-');
     push @verbose_output, "nomatch_scan_samples: $format_scan_nomatch_samples";
     push @verbose_output, "nomatch_scan_avg_us: " .
         ($format_scan_nomatch_samples
@@ -3706,7 +3742,7 @@ sub emit_format_detection_sample_verbose {
     push @verbose_output, "  sample_matched_lines: $matched";
     push @verbose_output, "  sample_formats: " .
         (join(',', map { $_->[FR_NAME] . '=' . $s->{formats}{ $_->[FR_NAME] } }
-                   grep { $s->{formats}{ $_->[FR_NAME] } } @format_registry) || '-');
+                   grep { $s->{formats}{ $_->[FR_NAME] } } @format_registry_members) || '-');
     my $i = 0;
     for my $p (@{ $s->{part_obs} }) {
         $i++;
@@ -3724,13 +3760,14 @@ sub emit_format_detection_sample_verbose {
 # what decided it, the confidence, flips, and the probe counts.
 sub emit_format_detection_evidence_verbose {
     my ($file) = @_;
+    push @verbose_output, "  formats: " . (join(',', @{ $format_detection_formats{$file} // [] }) || '-');
     if (defined $log_format_pin) {
         push @verbose_output, "  selection_basis: pin";
         push @verbose_output, "  confidence: 1.00";
         return;
     }
     my $ev = $format_detection_evidence{$file} or return;
-    my $fn = $ev->{filename};
+    my $fn = $ev->{filename} // {};
     push @verbose_output, sprintf('  filename_evidence: stem=%s ext=%s date=%s index=%s',
         $fn->{stem} // '-', $fn->{ext} // '-',
         defined $fn->{date} ? 'present' : '-', defined $fn->{index} ? 'present' : '-');
@@ -9581,6 +9618,7 @@ sub read_and_process_logs {
         my $line_number = 0;
         $format_current_file = $in_file;
         $format_current_line_ref = \$line_number;
+        my %fr_matches_at_start = map { $_ => $format_registry_entry{$_}[FR_MATCHES] } keys %format_registry_entry;
 
         # Index file: capture file metadata and initialize per-file counters (Issue #46)
         my @file_stat = stat($in_file);
@@ -9952,11 +9990,7 @@ sub read_and_process_logs {
                     # Intentional diagnostic: must never carry an
                     # ` at ... line` suffix (runtime-warning discriminator,
                     # HARNESS-DESIGN.md).
-                    if ($line_entry && $line_entry->[FR_UNIT_AMBIGUOUS]
-                        && !defined $duration_unit_override && !$format_unit_ambiguity_warned) {
-                        $format_unit_ambiguity_warned = 1;
-                        print STDERR "Note: the detected log format's duration unit varies across producers; durations are assumed to be milliseconds - use -du to specify the appropriate duration unit for the files being analyzed\n";
-                    }
+                    format_variant_ambiguity_note($line_entry) if $line_entry;
                 }
                 $fdd->{matched_lines}++;
                 $fdd->{is_access_log} = 1 if $is_access_log;
@@ -10777,6 +10811,23 @@ sub read_and_process_logs {
             };
             $fdd->{scan_attempts}        = $file_scan_attempts;
             $fdd->{scan_failed_attempts} = $file_scan_failed;
+            # Formats found in this file (D50, N7): every entry whose run
+            # total grew while this file was read, by format name, the
+            # first-bound format first, then spec order. Legend numbers are
+            # assigned in first-detection order across the run.
+            my (%seen, @found);
+            push @found, $fdd->{slug} if defined $fdd->{slug};
+            for my $e (@format_registry_members, $format_registry_entry{csv}) {
+                next unless $e->[FR_MATCHES] > $fr_matches_at_start{ $e->[FR_NAME] };
+                push @found, $e->[FR_SLUG];
+            }
+            @found = grep { !$seen{$_}++ } @found;
+            $format_detection_formats{$in_file} = \@found;
+            for my $slug (@found) {
+                next if $format_legend{$slug};
+                push @format_legend_order, $slug;
+                $format_legend{$slug} = scalar @format_legend_order;
+            }
         }
 
         if ($csv_skipped_timestamp_rows > 1) {
@@ -14742,11 +14793,21 @@ sub print_summary_table {
     }
 
     push @file_details, "\n";
+    # Each file name is followed by the formats found in it, as legend
+    # numbers in brackets (D50): [1] / [1,2] / [-] for no match. The bracket
+    # width is reserved before the name is shortened, so a long path never
+    # pushes the bracket off the line.
+    my %bracket = map { $_ => '[' . (join(',', map { $format_legend{$_} } @{ $format_detection_formats{$_} // [] }) || '-') . ']' } @files_processed;
+    my $bracket_width = max(map { length $bracket{$_} } @files_processed) // 0;
     foreach my $in_file (@files_processed) {
-         my $filename_max_length = $file_detail_width - length($column_padding) - length($padding) - 4;  # -4 for '[x] '
+         my $filename_max_length = $file_detail_width - length($column_padding) - length($padding) - 4 - $bracket_width - 1;  # -4 for '[x] ', bracket, space
          $filename_max_length = 10 if $filename_max_length < 10;  # Minimum reasonable length
          my $filename = shorten_filename($in_file, $filename_max_length);
-         push @file_details, sprintf("$column_padding$padding$colors{'white'}\[%s$colors{'NC'}$colors{'white'}\] %-${filename_max_length}s$colors{'NC'}\n", $match_char[$in_files_matched{$in_file}], $filename);
+         push @file_details, sprintf("$column_padding$padding$colors{'white'}\[%s$colors{'NC'}$colors{'white'}\] %-${filename_max_length}s %s$colors{'NC'}\n", $match_char[$in_files_matched{$in_file}], $filename, $bracket{$in_file});
+    }
+    if (@format_legend_order) {
+        push @file_details, "\n";
+        push @file_details, "$column_padding$padding$colors{'white'}" . join('  ', map { "$format_legend{$_} $_" } @format_legend_order) . "$colors{'NC'}\n";
     }
 
     for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {

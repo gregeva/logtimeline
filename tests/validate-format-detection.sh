@@ -780,20 +780,29 @@ scenario_unit_ambiguity_warning() {
     current_scenario="unit-ambiguity-warning"
     echo "[$current_scenario]"
 
-    # D18 (#58 S7): binding a format whose duration unit varies across
-    # producers without -du emits one stderr note naming the assumption.
-    # The note is an intentional diagnostic — it never carries an
-    # ` at ... line` suffix, so check_capture_warnings stays clean.
+    # D47/I6 (#384): binding a variant-group member that was selected by
+    # default — nothing in the file name or content decided between the
+    # producers — emits one stderr note naming the consequence (here the
+    # duration unit) and the overrides. The note is an intentional
+    # diagnostic — it never carries an ` at ... line` suffix, so
+    # check_capture_warnings stays clean. The Tomcat file's name does not
+    # carry the producer's stem, so the group default holds by its standing
+    # credit (basis default).
     local tomcat="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
     local out
     out=$(run_format_detection "$tomcat")
     check_capture_warnings "$out"
 
     assert_line "$out.stderr" \
-        pattern     '^Note: the detected log format'"'"'s duration unit varies across producers; durations are assumed to be milliseconds - use -du to specify the appropriate duration unit for the files being analyzed$' \
-        asserts     'Binding a unit-ambiguous format without -du emits the run-level note on stderr: format-generic (the condition is the registry ambiguity flag, not any specific log type), no filename, naming the milliseconds assumption and pointing at -du generically (not prescribing a unit)' \
-        produced_by 'read_and_process_logs() in ltl (first-match block, FR_UNIT_AMBIGUOUS gate)' \
-        contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18); the note text is part of the contract'
+        pattern     '^Note: the detected log format \(tomcat_access_with_duration\) is written by more than one producer and the duration unit differs between them \(assumed ms\); nothing in the file names or content decided which - use -du <unit> or -lf httpd_access_with_duration if the files come from the other producer$' \
+        asserts     'Binding a default-selected variant-group member without deciding evidence emits the run-level note on stderr: no filename, naming the consequence class (unit) and the assumption, pointing at -du and at -lf with the other member' \
+        produced_by 'format_variant_ambiguity_note() in ltl (first-match block)' \
+        contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note); the note text is part of the contract'
+    assert_line "$out" \
+        pattern     '^  selection_basis: default$' \
+        asserts     'The note fires only when the selection basis is default' \
+        produced_by 'select_format_variants() in ltl' \
+        contract    'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
 
     # Contracted absence 1: an explicit -du suppresses the note — the user
     # has stated the unit, so there is no assumption to surface.
@@ -802,22 +811,41 @@ scenario_unit_ambiguity_warning() {
     check_capture_warnings "$out_du"
 
     assert_absent "$out_du.stderr" \
-        pattern     '^Note: the detected log format.s duration unit varies' \
-        asserts     'With -du given (any unit), the unit-ambiguity note is contracted ABSENT: the note exists only to surface an assumption, and -du removes the assumption' \
-        produced_by 'read_and_process_logs() in ltl (first-match block, duration_unit_override gate)' \
-        contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18)'
+        pattern     '^Note: the detected log format' \
+        asserts     'With -du given (any unit), the unit note is contracted ABSENT: the note exists only to surface an assumption, and -du removes the assumption' \
+        produced_by 'format_variant_ambiguity_note() in ltl (duration_unit_override gate)' \
+        contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
 
-    # Contracted absence 2: an unambiguous format (codebeamer declares ms
-    # unconditionally) never triggers the note.
+    # Contracted absence 2: a format outside any variant group (codebeamer)
+    # never triggers the note.
     local out_cb
     out_cb=$(run_format_detection "$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt")
     check_capture_warnings "$out_cb"
 
     assert_absent "$out_cb.stderr" \
-        pattern     '^Note: the detected log format.s duration unit varies' \
-        asserts     'A format without the unit-ambiguity flag is contracted to never emit the note — the gate is the registry declaration, not the presence of durations' \
-        produced_by 'read_and_process_logs() in ltl (first-match block, FR_UNIT_AMBIGUOUS gate)' \
-        contract    'features/58-format-registry-staged-detection.md section S7 unit-ambiguity note (D18) - only entries declaring unit_ambiguous carry it'
+        pattern     '^Note: the detected log format' \
+        asserts     'A format that is not a member of a variant group is contracted to never emit the note — the gate is group membership plus a default-basis selection' \
+        produced_by 'format_variant_ambiguity_note() in ltl (variant-group gate)' \
+        contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
+
+    # Contracted absence 3: the same content under the producer-true name
+    # is decided by evidence (stem), so no assumption is in effect.
+    local staged="$TMP_DIR/localhost_access_log.2025-05-05.txt"
+    cp "$tomcat" "$staged"
+    local out_named
+    out_named=$(run_format_detection "$staged")
+    check_capture_warnings "$out_named"
+
+    assert_absent "$out_named.stderr" \
+        pattern     '^Note: the detected log format' \
+        asserts     'Filename stem evidence decides the variant (basis evidence), so the default-selection note is contracted ABSENT' \
+        produced_by 'format_variant_ambiguity_note() in ltl (selection-basis gate)' \
+        contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
+    assert_line "$out_named" \
+        pattern     '^  selection_basis: evidence$' \
+        asserts     'The producer-true Tomcat name selects the Tomcat member by stem evidence' \
+        produced_by 'select_format_variants() in ltl' \
+        contract    'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
 }
 
 # ---------- Run -----------------------------------------------------------

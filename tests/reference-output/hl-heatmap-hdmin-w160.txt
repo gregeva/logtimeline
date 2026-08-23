@@ -16,9 +16,9 @@ command-line options: --disable-progress -n 1 -dm raw --terminal-width 160 -hm d
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-04-10 06:00 and 2025-04-10 06:07
   ─────────────────────────────────────────   
-  ERROR                                  23      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs/T...tomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log
+  ERROR                                  23      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs...mThingworxLogs/ScriptLog-DPMExtended-clean-5k.log [1]
   WARN-HL                               498   
-  WARN                                 4474   
+  WARN                                 4474      1 thingworx_standard
   INFO-HL                                 4   
   INFO                                    1   
   ─────────────────────────────────────────   
