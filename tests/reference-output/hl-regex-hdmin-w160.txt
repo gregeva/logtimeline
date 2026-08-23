@@ -53,9 +53,9 @@ command-line options: --disable-progress -n 1 --terminal-width 160 -du us -h Bom
   ─────────────────────────────────────────   
   4xx                                     4      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs...rver-access_log-Windchill_Navigate.2026-01-25.log [1]
   3xx                                     7   
-  2xx-HL                                 19      1 tomcat_access_with_duration
+  2xx-HL                                 19      Log Formats
   2xx                                   647   
-  ─────────────────────────────────────────   
+  ─────────────────────────────────────────      1 tomcat_access_with_duration
   HIGHLIGHTED                            19   
   LINES INCLUDED                        677   
   LINES READ                            677   

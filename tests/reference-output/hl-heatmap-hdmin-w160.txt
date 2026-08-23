@@ -18,9 +18,9 @@ command-line options: --disable-progress -n 1 -dm raw --terminal-width 160 -hm d
   ─────────────────────────────────────────   
   ERROR                                  23      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs...mThingworxLogs/ScriptLog-DPMExtended-clean-5k.log [1]
   WARN-HL                               498   
-  WARN                                 4474      1 thingworx_standard
+  WARN                                 4474      Log Formats
   INFO-HL                                 4   
-  INFO                                    1   
+  INFO                                    1      1 thingworx_standard
   ─────────────────────────────────────────   
   HIGHLIGHTED                           502   
   LINES INCLUDED                       5000   

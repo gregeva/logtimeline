@@ -939,6 +939,7 @@ my %colors = (
     # 'bright-cyan' => "\033[96m\033[109m",
     'bright-cyan' => "\033[96m",
     'bright-white' => "\033[97m\033[109m",
+    'periwinkle' => "\033[38;5;111m",         # log-format identity: the legend numbers
     'black-underline' => "\033[4;30m",
     'red-underline' => "\033[4;31m",
     'green-underline' => "\033[4;32m",
@@ -3704,7 +3705,7 @@ sub emit_format_detection_verbose {
     push @verbose_output, "match_counts: " .
         join(',', map { $_->[FR_NAME] . '=' . $_->[FR_MATCHES] } @format_registry_members);
     push @verbose_output, "variant_groups: " .
-        (join(',', map { my $g = $_; "$g=" . (grep { $_->[FR_GROUP] eq $g } @format_scan_order)[0][FR_NAME] }
+        (join(',', map { my $g = $_; my ($o) = grep { $_->[FR_GROUP] eq $g } @format_scan_order; "$g=" . ($o ? $o->[FR_NAME] : '-') }
                    sort { $format_variant_groups{$a}{slot} <=> $format_variant_groups{$b}{slot} } keys %format_variant_groups) || '-');
     push @verbose_output, "nomatch_scan_samples: $format_scan_nomatch_samples";
     push @verbose_output, "nomatch_scan_avg_us: " .
@@ -3766,9 +3767,12 @@ sub emit_format_detection_evidence_verbose {
     }
     my $ev = $format_detection_evidence{$file} or return;
     my $fn = $ev->{filename} // {};
+    # date= reports the cross-check against the first content timestamp
+    # when one could run (ISO-dated content, yyyy-MM-dd), else 'present'.
+    my $date = !defined $fn->{date} ? '-'
+             : ($ev->{probes}{mmdd}{fdate} // 'present');
     push @verbose_output, sprintf('  filename_evidence: stem=%s ext=%s date=%s index=%s',
-        $fn->{stem} // '-', $fn->{ext} // '-',
-        defined $fn->{date} ? 'present' : '-', defined $fn->{index} ? 'present' : '-');
+        $fn->{stem} // '-', $fn->{ext} // '-', $date, defined $fn->{index} ? 'present' : '-');
     for my $g (sort { $format_variant_groups{$a}{slot} <=> $format_variant_groups{$b}{slot} } keys %{ $ev->{groups} }) {
         my $r = $ev->{groups}{$g};
         next unless grep { $_ ne 'no-shape' } values %{ $r->{why} };   # the group's shape never appeared in the sample
@@ -14795,17 +14799,19 @@ sub print_summary_table {
     # numbers in brackets (D50): [1] / [1,2] / [-] for no match. The bracket
     # width is reserved before the name is shortened, so a long path never
     # pushes the bracket off the line.
-    my %bracket = map { $_ => '[' . (join(',', map { $format_legend{$_} } @{ $format_detection_formats{$_} // [] }) || '-') . ']' } @files_processed;
-    my $bracket_width = max(map { length $bracket{$_} } @files_processed) // 0;
+    my %bracket = map { $_ => (join(',', map { $format_legend{$_} } @{ $format_detection_formats{$_} // [] }) || '-') } @files_processed;
+    my $bracket_width = (max(map { length $bracket{$_} } @files_processed) // 0) + 2;
     foreach my $in_file (@files_processed) {
          my $filename_max_length = $file_detail_width - length($column_padding) - length($padding) - 4 - $bracket_width - 1;  # -4 for '[x] ', bracket, space
          $filename_max_length = 10 if $filename_max_length < 10;  # Minimum reasonable length
          my $filename = shorten_filename($in_file, $filename_max_length);
-         push @file_details, sprintf("$column_padding$padding$colors{'white'}\[%s$colors{'NC'}$colors{'white'}\] %-${filename_max_length}s %s$colors{'NC'}\n", $match_char[$in_files_matched{$in_file}], $filename, $bracket{$in_file});
+         push @file_details, sprintf("$column_padding$padding$colors{'white'}\[%s$colors{'NC'}$colors{'white'}\] %-${filename_max_length}s [$colors{'periwinkle'}%s$colors{'white'}]$colors{'NC'}\n", $match_char[$in_files_matched{$in_file}], $filename, $bracket{$in_file});
     }
     if (@format_legend_order) {
         push @file_details, "\n";
-        push @file_details, "$column_padding$padding$colors{'white'}" . join('  ', map { "$format_legend{$_} $_" } @format_legend_order) . "$colors{'NC'}\n";
+        push @file_details, "$column_padding$padding$colors{'white-underline'}Log Formats$colors{'NC'}\n";
+        push @file_details, "\n";
+        push @file_details, "$column_padding$padding" . join('  ', map { "$colors{'periwinkle'}$format_legend{$_}$colors{'white'} $_" } @format_legend_order) . "$colors{'NC'}\n";
     }
 
     for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {
