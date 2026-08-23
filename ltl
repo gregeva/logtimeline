@@ -304,7 +304,7 @@ my %match_type_to_slug = (
     13 => 'csv',                             # CSV via detect_and_parse_csv_header()
     14 => 'httpd_access_with_duration',      # Apache httpd / Tomcat 10.1+ %D in microseconds (variant of 3)
     15 => 'integration_runtime_standard',    # ThingWorx Integration Runtime, yyyy-dd-MM dates (variant of 10)
-    16 => 'wgm_client',                      # Windchill Workgroup Manager client logs (genlwsc / uwgm_client / uwgm)
+    16 => 'windchill_workgroup_manager', # Windchill Workgroup Manager client logs (genlwsc / uwgm_client / uwgm)
     17 => 'windchill_method_server',         # Windchill Method Server / Background Method Server log4j
 );
 
@@ -2384,7 +2384,7 @@ sub format_registry_specs {
     # The bracket-bearing sample is the cross-shadow proof that this group
     # must stay ahead of mt2 (whose `.*? \[...\]` tail accepts any line
     # with a bracketed token).
-    { name => 'mt16', slug => 'wgm_client', match_type => 16, scanned => 1, head_class => 'digit',
+    { name => 'mt16', slug => 'windchill_workgroup_manager', match_type => 16, scanned => 1, head_class => 'digit',
       filename => { stem => '(?:genlwsc|uwgm_client|uwgm)', index => 'dot_n', ext => '.log', placement => 'after',
                     samples => [ 'genlwsc.log.1', 'uwgm_client.log.1', 'uwgm.log.1', 'uwgm_client.log', 'genlwsc.log' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})Z: ([A-Z]): (P[0-9a-f]+): (T[0-9a-f]+): ([^ :]+): (.*)',

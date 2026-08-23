@@ -10,7 +10,7 @@ httpd-access.txt	access.log-20260609	Apache httpd 2.x access log with %D in micr
 httpd-access.txt	renamed.txt	(same slice)	ext absent -> default Tomcat member (confidence 0.75) + ambiguity note
 thingworx-application-log.txt	ApplicationLog.2025-05-06.0.log	ThingWorx ApplicationLog.2025-05-06.0.log, first 300 lines	filename date/index decomposition; filename-date cross-check matches the content
 mixed.txt	mixed.log	connection-server.txt + tomcat-access.txt concatenated	[1,2] bracket and legend
-wgm-client.txt	uwgm_client.log.1	Windchill Workgroup Manager uwgm_client.log.1, header block + 33 representative data lines (every msgtype letter, #-qualified areas, a bracketed message; pid/tid kept, no hosts or user paths)	wgm_client binds; every msgtype letter survives the category gate (lines_included = matched_lines); stem + .log + rotation index decompose
+wgm-client.txt	uwgm_client.log.1	Windchill Workgroup Manager uwgm_client.log.1, header block + 33 representative data lines (every msgtype letter, #-qualified areas, a bracketed message; pid/tid kept, no hosts or user paths)	windchill_workgroup_manager binds; every msgtype letter survives the category gate (lines_included = matched_lines); stem + .log + rotation index decompose
 wgm-client.txt	genlwsc.log.1	(same slice)	the second WGM filename stem decomposes to the same entry
 wgm-client.txt	uwgm.log.1	(same slice)	the third WGM filename stem decomposes to the same entry (and is not consumed as a prefix of uwgm_client)
 wgm-client.txt	renamed.txt	(same slice)	no name evidence: a group of one still binds by shape alone; filename_evidence reports stem=-
