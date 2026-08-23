@@ -72,9 +72,9 @@ run_section() {
     local outfile
     outfile=$(mktemp)
     # shellcheck disable=SC2086
-    "$LTL" --disable-progress $SHAPE -V heatmap-palette "$@" "$SCRIPT_LOG" > "$outfile" 2>"$outfile.stderr" || true
+    "$LTL" --disable-progress -ni $SHAPE -V heatmap-palette "$@" "$SCRIPT_LOG" > "$outfile" 2>"$outfile.stderr" || true
     if [[ ! -s "$outfile" ]]; then
-        echo "FAIL: captured output is empty for: $LTL --disable-progress $SHAPE -V heatmap-palette $* $SCRIPT_LOG" >&2
+        echo "FAIL: captured output is empty for: $LTL --disable-progress -ni $SHAPE -V heatmap-palette $* $SCRIPT_LOG" >&2
         exit 1
     fi
     echo "$outfile"

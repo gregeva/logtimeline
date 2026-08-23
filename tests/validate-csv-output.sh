@@ -147,7 +147,7 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
     # shellcheck disable=SC2086  # word-splitting on $options is intentional
     (
         cd "$v_capture_dir"
-        "$LTL" --disable-progress -V csv-output $options -o "$abs_log" \
+        "$LTL" --disable-progress -ni -V csv-output $options -o "$abs_log" \
             >"$v_capture_dir/ltl.stdout" 2>"$v_capture_dir/ltl.stderr"
     )
     vrc=$?

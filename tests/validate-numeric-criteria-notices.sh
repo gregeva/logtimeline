@@ -58,7 +58,7 @@ capture_stderr() {
     set +e
     # Run inside TMP_DIR so cwd artifacts (ltl-index.csv) never land in the
     # repo (HARNESS-DESIGN.md Trap 9: temp artifacts stay out of deliverables).
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress "$@" ) > "$stdoutfile" 2>"$errfile"
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" ) > "$stdoutfile" 2>"$errfile"
     local rc=$?
     set -e
     if [[ "$rc" -ne 0 ]]; then

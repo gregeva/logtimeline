@@ -53,7 +53,7 @@ run_section() {
     local outfile
     outfile=$(mktemp)
     # shellcheck disable=SC2086
-    "$LTL" --disable-progress $SHAPE -V histogram-bin-counters "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
+    "$LTL" --disable-progress -ni $SHAPE -V histogram-bin-counters "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
 }
 
@@ -240,7 +240,7 @@ run_pa_section() {
     local outfile
     outfile=$(mktemp)
     # shellcheck disable=SC2086
-    "$LTL" --disable-progress $SHAPE -V percentile-algorithm -hg -hm \
+    "$LTL" --disable-progress -ni $SHAPE -V percentile-algorithm -hg -hm \
         -mdm bin -bdm bin "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
 }

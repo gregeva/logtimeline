@@ -48,6 +48,7 @@ my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
 my $impact_time_exponent = 7;		            # it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $time_bucket_size, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
+my $no_index = 0;                                                       # -ni: neither read nor update ltl-index.csv in the working directory
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_detect_registry_build, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0,0 );
@@ -1859,7 +1860,7 @@ sub _classify_argv_provenance {
                 'exclude|e', 'include|i', 'highlight|h',
                 'exclude-file|ef', 'include-file|if', 'highlight-file|hf',
                 'verbose|V', 'top-messages|n',
-                'omit-values|ov', 'omit-stats|os', 'omit-empty|oe',
+                'omit-values|ov', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
                 'omit-summary|osum', 'omit-rate|or', 'omit-durations|od',
                 'omit-bytes|ob', 'omit-count|oc', 'include-count|ic',
                 'include-query-string|iqs', 'include-session|is',
@@ -1965,6 +1966,7 @@ sub emit_runtime_config_verbose {
         'omit-values'                       => $omit_values,
         'omit-stats'                        => $omit_stats,
         'omit-empty'                        => $omit_empty,
+        'no-index'                          => $no_index,
         'omit-summary'                      => $omit_summary,
         'omit-rate'                         => $omit_rate,
         'omit-durations'                    => $omit_durations,
@@ -5941,6 +5943,7 @@ sub print_help {
     $out .= help_opt("-ov,  --omit-values",           "Hide the per-bucket numeric values on the bar graph");
     $out .= help_opt("-os,  --omit-stats",            "Deprecated: use -od, --omit-durations to skip capturing durations, or -hst, --hide-stats to hide the statistics panel");
     $out .= help_opt("-oe,  --omit-empty",            "Skip time buckets that contain zero log entries");
+    $out .= help_opt("-ni,  --no-index",              "Do not read or update ltl-index.csv, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it");
     $out .= help_opt("-or,  --omit-rate",             "Hide the error/message rate from the legend");
     $out .= help_opt("-od,  --omit-durations",        "Suppress duration extraction and related columns (significantly reduces memory and processing time on large files)");
     $out .= help_opt("-ob,  --omit-bytes",            "Suppress byte-size extraction and related columns");
@@ -8955,6 +8958,7 @@ sub adapt_to_command_line_options {
         'omit-values|ov' => \$omit_values,
         'omit-stats|os' => \$omit_stats,
         'omit-empty|oe' => \$omit_empty,
+        'no-index|ni' => \$no_index,
         'omit-summary|osum' => \$omit_summary,
         'omit-rate|or' => \$omit_rate,
         'omit-durations|od' => \$omit_durations,
@@ -15293,7 +15297,7 @@ sub pipeline_detect {
     $elapsed_detect_registry_build = tv_interval($registry_build_start);
 
     # Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
-    read_index_file();
+    read_index_file() unless $no_index;
 
     memory_debug_decomposition("startup");
 }
@@ -15656,7 +15660,7 @@ sub pipeline_render {
     measure_memory_structures();
     memory_debug_decomposition("end");
 
-    write_index_file();  # Write persistent index file with per-file metadata (Issue #46)
+    write_index_file() unless $no_index;  # Write persistent index file with per-file metadata (Issue #46)
 }
 
 ## MAIN ##

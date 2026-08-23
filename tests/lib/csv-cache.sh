@@ -179,7 +179,7 @@ csv_cache_produce() {
     (
         cd "$tmp_dir"
         # shellcheck disable=SC2086  # word-splitting on $options is intentional
-        "$_CSV_CACHE_LTL" --disable-progress $options -o "$abs_log" >/dev/null 2>"$tmp_dir/ltl.stderr"
+        "$_CSV_CACHE_LTL" --disable-progress -ni $options -o "$abs_log" >/dev/null 2>"$tmp_dir/ltl.stderr"
     )
     rc=$?
 

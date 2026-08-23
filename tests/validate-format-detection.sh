@@ -156,7 +156,7 @@ run_format_detection() {
     local outfile
     outfile="$TMP_DIR/$(basename "$log" | tr -c 'A-Za-z0-9._-' '_').out"
     set +e
-    "$LTL" --disable-progress -bs 1440 -oe -n 1 -osum -V format-detection "$@" "$log" > "$outfile" 2>"$outfile.stderr"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum -V format-detection "$@" "$log" > "$outfile" 2>"$outfile.stderr"
     local ec=$?
     set -e
     if [[ "$ec" -ne 0 ]]; then
@@ -1094,7 +1094,7 @@ scenario_variant_mixed_legend() {
         produced_by 'emit_format_detection_verbose() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
     local render="$TMP_DIR/$current_scenario/render.out"
-    "$LTL" --disable-progress --terminal-width 160 -bs 1440 -oe "$log" > "$render" 2> "$render.stderr"
+    "$LTL" --disable-progress -ni --terminal-width 160 -bs 1440 -oe "$log" > "$render" 2> "$render.stderr"
     assert_no_runtime_warnings "$render.stderr" "$current_scenario render"
     assert_command label "console bracket [1,2] after the file name" \
         command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q 'mixed.log  *\\[1,2\\]'" \
@@ -1144,7 +1144,7 @@ scenario_format_pin() {
         produced_by 'apply_format_pin() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 N9'
     local err="$TMP_DIR/$current_scenario/unknown.stderr"
-    if "$LTL" --disable-progress -bs 1440 -oe -lf nonsense "$log" > /dev/null 2> "$err"; then
+    if "$LTL" --disable-progress -ni -bs 1440 -oe -lf nonsense "$log" > /dev/null 2> "$err"; then
         echo "  FAIL  $current_scenario :: -lf nonsense exited 0"; fail=$((fail + 1)); failures+=("$current_scenario :: -lf nonsense exited 0")
     else
         assert_line "$err" pattern '^Error: Unknown log format .nonsense. for -lf\. Known formats: .*connection_server_standard.*integration_runtime_standard.*tomcat_access_with_duration' \

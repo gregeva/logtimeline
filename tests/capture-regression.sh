@@ -2,7 +2,7 @@
 # capture-regression.sh — Capture reference output for column layout regression testing
 # Usage: ./tests/capture-regression.sh [output_dir]
 #
-# Runs ltl with --disable-progress and --terminal-width against test logs,
+# Runs ltl with --disable-progress -ni and --terminal-width against test logs,
 # strips ANSI escape codes, and saves output to reference files.
 # Uses -osum -n 1 to suppress summary table and limit top messages (not under test).
 #
@@ -17,7 +17,7 @@ LTL="$REPO_DIR/ltl"
 REF_DIR="${1:-$SCRIPT_DIR/reference-output}"
 
 # Common options: suppress progress, summary table, and limit top messages
-COMMON="--disable-progress -osum -n 1"
+COMMON="--disable-progress -ni -osum -n 1"
 
 # shellcheck source=lib/fixtures.sh
 source "$SCRIPT_DIR/lib/fixtures.sh"
@@ -209,7 +209,7 @@ run_test "hm-hg-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm d
 # rendering, the TOP HIGHLIGHTED MESSAGES block, the per-file highlight
 # indicator in the file legend, and the histogram/heatmap HL overlays.
 # -dm raw on overlay scenarios for the same byte-stability reason as above.
-HL_COMMON="--disable-progress -n 1"
+HL_COMMON="--disable-progress -ni -n 1"
 
 echo "Numeric highlight criteria (Issue #312):"
 run_test "hl-regex-only-w160"      "$LTL" $HL_COMMON --terminal-width 160 -du us -h BomTransformation "$APACHE_LOG"

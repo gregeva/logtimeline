@@ -232,7 +232,7 @@ pa_capture_for_scenario() {
     local tmp
     tmp="$(mktemp)"
     # shellcheck disable=SC2086  # word-splitting on $options is intentional
-    if ! "$LTL" --disable-progress -V percentile-algorithm $options "$abs_log" \
+    if ! "$LTL" --disable-progress -ni -V percentile-algorithm $options "$abs_log" \
             >"$tmp" 2>"$tmp.stderr"; then
         echo "ERROR: ltl -V percentile-algorithm failed for scenario=$scenario" >&2
         sed 's/^/        /' "$tmp.stderr" >&2
