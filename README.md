@@ -125,3 +125,13 @@ sudo apt-get install git-filter-repo  # Debian/Ubuntu
 ```
 
 Not needed for normal development.
+
+## License
+
+LogTimeLine is licensed under the [Apache License, Version 2.0](LICENSE).
+
+You may use, modify, and redistribute it — including as part of a commercial
+product — provided you retain the copyright notice, the license text, and the
+[NOTICE](NOTICE) file, and state any changes you made. The license grants no
+rights to the names "LogTimeLine" or "ltl", or to the name of the copyright
+owner, for endorsing or promoting derived products.
