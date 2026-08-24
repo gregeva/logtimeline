@@ -837,6 +837,20 @@ Instrumented split (env-gated scratch copy, 2-line probe): full = **28 compiles 
 5. Edge paths: unknown-format fallback, non-seekable stdin, mid-file flip fixture, `-lf` exactly-one-compile.
 6. Harnesses during work: `validate-format-detection.sh` (159 assertions untouched) and the new `validate-format-registry.sh` only; the full suite is the release gate.
 
+### Implementation plan (approved by the architect, 2026-08-24) — branch `413-eager-scan-order-precompile`
+
+Each stage is its own commit with its verification run before the next begins. Consumer harnesses during work: `validate-format-detection.sh` + the new `validate-format-registry.sh` ONLY; the full suite is the release gate.
+
+- **S1 — Shared interpreted classifier.** Factor the classification walk (guard + `qr//` first-match over a given order) into one named sub; `sample_file_for_detection()` and the startup gate both call it (one resolution surface). No behavior change; verify byte parity + `validate-format-detection.sh`.
+- **S2 — Remove startup codegen.** Delete the D40 eager loop; gate 5's sample classification moves to the interpreted classifier; the default-config scan compile and gate-5 warming removed. Interim state: the run still compiles the static sub before line 1, so every fixture stays green mid-train.
+- **S3 — Compile points + per-compile validation (D60/D61).** Promotion-suppressed per-compile sample validation inside `compile_format_scan_sub()`; election compiles the winner-front order pre-line-1; static-order fallback; `apply_format_pin()` compile-at-pin with early error on unknown operand. Compiles drop to 1–2 per typical run here.
+- **S4 — D62 memory measurement.** Compile-boundary RSS-delta capture (armed at option parse only when a memory-reporting surface is requested), compiled-sub count, `format_scan_subs` `-mem` category.
+- **S5 — D63 observability.** `-V format-registry` emitter (inventory / structure / compile state), `benchmark-data` re-emission from the same variables (one source, two surfaces), section contract added to this doc, new `tests/validate-format-registry.sh` with self-documenting assertions (election invariants: single-format ≤ 2 compiles, `-lf` = exactly 1).
+- **S6 — D64 timing + doc sweep.** `TIMING detect/scan_sub_compile` accumulator; user-facing doc surfaces that enumerate `-V` sections updated in the same commit.
+- **S7 — Validation plan F1–F6** (§ Validation plan above): byte-parity battery, gain probes (expect ~28 MB / ~14 ms vs 44.5 MB / 101 ms), hot-loop parity median-of-3, sabotage proofs, edge paths (unknown-format fallback, non-seekable stdin, mid-file flip, `-lf`).
+
+Then the per-feature workflow (PR into `release/0.17.0` when the architect directs). #415's re-measure is downstream and NOT this issue's scope.
+
 ## `-V format-detection` section-contract
 
 This section is the owning contract for the `format-detection` `-V` section and its `format-detection / scan` sub-section, both emitted by `emit_format_detection_verbose()` and consumed by `tests/validate-format-detection.sh`. All pre-existing keys of the parent section (per-file `format:`, `match_type:`, `is_access_log:`, `matched_lines:`, `unmatched_lines:`, `first_match_line:`; run-level `duration_unit_override:`, `files:`) are byte-preserved from their pre-registry shapes; everything below is additive. Renames and removals are breaking per `tests/HARNESS-DESIGN.md` § Stability contract.
