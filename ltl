@@ -435,6 +435,9 @@ my %format_evidence_weights = (
 use constant FORMAT_SCAN_NOMATCH_SAMPLE_EVERY => 256;
 my $format_scan_promotions = 0;        # actual reorders via format_registry_promote()
 my $format_scan_validating  = 0;       # per-compile validation in flight: promotion is suppressed
+my $format_scan_subs_compiled = 0;     # generated scan subs minted this run
+my $format_scan_subs_rss      = 0;     # D62: accumulated compile-boundary RSS delta, bytes
+my $format_scan_measure_rss   = 0;     # armed at option parse when a memory surface is requested
 my $format_scan_nomatch_samples = 0;   # sampled no-match scans timed
 my $format_scan_nomatch_sample_us = 0; # summed elapsed us across those samples
 my $format_unit_ambiguity_warned = 0;  # D18 unit-ambiguity note emitted (once per run)
@@ -3411,7 +3414,20 @@ sub compile_format_scan_sub {
         . "if (\$head_ord == 9) {\n" . join("\n", @tab_blocks) . "\nreturn undef;\n}\n";
     my @entries = @format_scan_order;
     my $src = "sub {\n$aux_decls$ws_dispatch" . join("\n", @blocks) . "\nreturn undef;\n}";
+    # D62: the compiled sub's real cost is its op tree and pads, which a
+    # structure walker cannot see (Devel::Size reaches ~55% of it). RSS
+    # delta across the eval is the accurate instrument — nothing else
+    # allocates between the two reads — so that is what the
+    # format_scan_subs memory category reports, paired with the count so
+    # the total reads against the per-sub constant. Armed only when a
+    # memory surface was requested; a plain run takes no RSS reading.
+    my $rss_before = $format_scan_measure_rss ? get_memory_usage() : undef;
     my $sub = eval $src;
+    if (defined $rss_before) {
+        my $delta = ( get_memory_usage() // 0 ) - $rss_before;
+        $format_scan_subs_rss += $delta if $delta > 0;
+    }
+    $format_scan_subs_compiled++;
     die "ltl: format registry: scan-sub codegen failed: $@\nGENERATED SOURCE:\n$src\n"
         if $@ || ref $sub ne 'CODE';
     format_validate_scan_sub($sub, \@entries);
@@ -8516,6 +8532,13 @@ sub measure_memory_structures {
 
     my %current_sizes = named_structure_sizes();
 
+    # D62: the generated scan subs are closures — a structure walk cannot
+    # see their op trees or pads, so this category carries the accumulated
+    # compile-boundary RSS delta instead of a Devel::Size value. It is
+    # already a running total, not a sampled size, so it flows through the
+    # same high-water-mark update monotonically.
+    $current_sizes{format_scan_subs} = $format_scan_subs_rss if $format_scan_subs_rss;
+
     # Update high-water marks (only if current value is larger)
     for my $struct (keys %current_sizes) {
         my $current = $current_sizes{$struct};
@@ -9405,6 +9428,14 @@ sub adapt_to_command_line_options {
             unshift @ARGV, $memory_usage_operand;
         }
     }
+
+    # D62: arm the compile-boundary RSS measurement whenever a surface that
+    # reports memory was requested — -mem, or a -V section that emits
+    # MEMORY rows. Every compile then costs two RSS readings; a plain run
+    # pays nothing. Decided here because the first compile happens before
+    # line 1 of the first file.
+    $format_scan_measure_rss = ( $show_memory || section_requested('benchmark-data')
+                                              || section_requested('format-registry') ) ? 1 : 0;
 
     # Consolidation option processing (Issue #96)
     if ($group_similar_sensitivity ne "none") {
