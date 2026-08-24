@@ -49,6 +49,8 @@ my ( @ORIGINAL_ARGV, @files_processed );
 my $impact_time_exponent = 7;		            # it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $time_bucket_size, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
 my $no_index = 0;                                                       # -ni: neither read nor update ltl-index.csv in the working directory
+my $recursive_files = 0;                                                # -r: expand each file argument's filename component against every depth beneath its directory part
+my @unreadable_directories;                                             # -r sweep: directories that could not be opened, reported once at the tail of read_and_process_logs()
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_detect_registry_build, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0,0 );
@@ -1904,6 +1906,7 @@ sub _classify_argv_provenance {
                 'exclude-file|ef', 'include-file|if', 'highlight-file|hf',
                 'verbose|V', 'top-messages|n',
                 'omit-values|ov', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
+                'recursive|r',
                 'omit-summary|osum', 'omit-rate|or', 'omit-durations|od',
                 'omit-bytes|ob', 'omit-count|oc', 'include-count|ic',
                 'include-query-string|iqs', 'include-session|is',
@@ -2010,6 +2013,7 @@ sub emit_runtime_config_verbose {
         'omit-stats'                        => $omit_stats,
         'omit-empty'                        => $omit_empty,
         'no-index'                          => $no_index,
+        'recursive'                         => $recursive_files,
         'omit-summary'                      => $omit_summary,
         'omit-rate'                         => $omit_rate,
         'omit-durations'                    => $omit_durations,
@@ -6323,6 +6327,7 @@ sub print_help {
     $out .= help_opt("-os,  --omit-stats",            "Deprecated: use -od, --omit-durations to skip capturing durations, or -hst, --hide-stats to hide the statistics panel");
     $out .= help_opt("-oe,  --omit-empty",            "Skip time buckets that contain zero log entries");
     $out .= help_opt("-ni,  --no-index",              "Do not read or update ltl-index.csv, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it");
+    $out .= help_opt("-r,   --recursive",             "Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. logs/access/*.log becomes every .log file anywhere under logs/access; *.log recurses from the current directory. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end.");
     $out .= help_opt("-or,  --omit-rate",             "Hide the error/message rate from the legend");
     $out .= help_opt("-od,  --omit-durations",        "Suppress duration extraction and related columns (significantly reduces memory and processing time on large files)");
     $out .= help_opt("-ob,  --omit-bytes",            "Suppress byte-size extraction and related columns");
@@ -9344,6 +9349,7 @@ sub adapt_to_command_line_options {
         'omit-stats|os' => \$omit_stats,
         'omit-empty|oe' => \$omit_empty,
         'no-index|ni' => \$no_index,
+        'recursive|r' => \$recursive_files,
         'omit-summary|osum' => \$omit_summary,
         'omit-rate|or' => \$omit_rate,
         'omit-durations|od' => \$omit_durations,
@@ -9722,10 +9728,24 @@ sub adapt_to_command_line_options {
     # $explain_arg, and $print_version are populated here but no longer read.
 
     foreach my $pattern (@ARGV) {									# do in process file globbing for common experience across environments (Windows doesn't glob in the shell, passes in the parameters)
-        push @in_files, bsd_glob($pattern);						    # bsd_glob: wildcard/brace/tilde expansion without treating whitespace as a pattern separator, so paths containing spaces survive as one candidate
+        if ($recursive_files) {
+            push @in_files, expand_recursive_pattern($pattern);      # -r: the filename component matches at every depth beneath the pattern's directory component
+        }
+        else {
+            push @in_files, bsd_glob($pattern);					    # bsd_glob: wildcard/brace/tilde expansion without treating whitespace as a pattern separator, so paths containing spaces survive as one candidate
+        }
     }
 
 	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
+
+    # A recursive sweep can reach one file from two patterns whose roots nest
+    # ('-r logs/*.888 logs/access/*.888'), and reading a file twice doubles its
+    # lines into the analysis. Deduplication is -r-only: the non-recursive path
+    # keeps its existing behaviour, where a file named twice is read twice.
+    if ($recursive_files) {
+        my %seen_in_file;
+        @in_files = grep { !$seen_in_file{$_}++ } @in_files;
+    }
 
     do { print_usage( "unable to open any files" ); exit 2; } unless @in_files;
     do { print_usage( "invalid sort type used" ); exit 1; } unless grep { $_ eq $sort_type } qw(
@@ -11296,6 +11316,18 @@ sub read_and_process_logs {
         print STDERR "Note: " . format_number( $numeric_filter_no_metric{$metric} )
             . " lines carried no $metric value and were excluded by the $metric filter"
             . " (numeric filters only keep lines that carry the filtered metric)\n";
+    }
+
+    # Surface the directories a recursive sweep could not open. The sweep
+    # continued past them, so the file selection is silently narrower than the
+    # tree the pattern describes unless the gap is reported.
+    if (@unreadable_directories) {
+        my $count = scalar @unreadable_directories;
+        print STDERR "Note: " . format_number($count)
+            . ( $count == 1 ? " directory" : " directories" )
+            . " could not be read and " . ( $count == 1 ? "was" : "were" )
+            . " skipped during recursive file selection: "
+            . join( ', ', @unreadable_directories ) . "\n";
     }
 
     return;
@@ -16151,6 +16183,152 @@ sub pipeline_render {
     memory_debug_decomposition("end");
 
     write_index_file() unless $no_index;  # Write persistent index file with per-file metadata (Issue #46)
+}
+
+# Expand one file argument to every file matching its filename component at
+# any depth beneath its directory component (-r / --recursive).
+#
+# The pattern splits at its last '/': the directory part is globbed exactly as
+# the non-recursive path globs the whole pattern, yielding the set of roots to
+# descend (an empty directory part makes the root '.'); the final component
+# becomes a filename filter applied to basenames at every depth beneath each
+# root. A pattern naming only directories carries no filename component and so
+# matches nothing, recursive or not.
+#
+# Traversal is breadth-first: every match at one level is collected before any
+# match one level down. Within a level, matching files are emitted in
+# alphanumeric order and subdirectories are queued in alphanumeric order, so
+# the result is identical on every platform - which File::Find's default
+# (depth-first, in filesystem-read order) is not.
+#
+# Directory symlinks are not followed: a symlink to an ancestor would loop, and
+# two distinct paths to the same tree would collect its files twice, neither of
+# which path-based deduplication can catch. Symlinks to files are collected,
+# since -f follows the link.
+#
+# Directories that cannot be opened are recorded in @unreadable_directories and
+# the sweep continues past them; they are reported once at the tail of
+# read_and_process_logs(). A permission-denied directory partway through a
+# legitimate tree must not abort the run, but the gap must not be silent.
+sub expand_recursive_pattern {
+    my ($pattern) = @_;
+
+    # Split at the last '/'. Windows callers may supply '\' separators, which
+    # File::Spec understands but bsd_glob's grammar treats as an escape, so the
+    # split accepts both while the reassembled paths use '/' throughout.
+    my ( $dir_part, $file_part );
+    if ( $pattern =~ m{^(.*)[/\\]([^/\\]*)$} ) {
+        ( $dir_part, $file_part ) = ( $1, $2 );
+    }
+    else {
+        ( $dir_part, $file_part ) = ( '', $pattern );
+    }
+
+    # A trailing separator ('logs/access/') leaves no filename component, so
+    # there is nothing to match - the same outcome as a bare directory name.
+    return () unless length $file_part;
+
+    # Empty directory part means the current directory. Root globbing uses the
+    # same bsd_glob call as the non-recursive path so wildcards in the
+    # directory part ('logs/*/access') need no special handling here.
+    my @roots = length($dir_part) ? bsd_glob($dir_part) : ('.');
+    @roots = grep { -d $_ && !-l $_ } @roots;
+
+    my @matched;
+    my %queued;                                             # guards against a root set that nests ('logs' and 'logs/access')
+    my @level = grep { !$queued{$_}++ } @roots;
+
+    while (@level) {
+        my @next_level;
+        for my $dir (@level) {
+            my $dh;
+            unless ( opendir( $dh, $dir ) ) {
+                push @unreadable_directories, $dir;
+                next;
+            }
+            my @entries = sort grep { $_ ne '.' && $_ ne '..' } readdir($dh);
+            closedir($dh);
+
+            # Files first, then subdirectories queued for the next level: the
+            # two passes are what make the traversal breadth-first rather than
+            # interleaving a directory's own matches with its children's.
+            for my $entry (@entries) {
+                my $path = ( $dir eq '.' ) ? $entry : "$dir/$entry";
+                next unless -f $path;
+                push @matched, $path if basename_matches_glob( $entry, $file_part );
+            }
+            for my $entry (@entries) {
+                my $path = ( $dir eq '.' ) ? $entry : "$dir/$entry";
+                next unless -d $path;
+                next if -l $path;                           # directory symlinks are not followed
+                push @next_level, $path unless $queued{$path}++;
+            }
+        }
+        @level = @next_level;
+    }
+
+    return @matched;
+}
+
+# Test one basename against the filename component of a file argument, using
+# the same wildcard/brace/tilde grammar bsd_glob applies to the non-recursive
+# path - the pattern a user writes means the same thing at every depth as it
+# does at the top level.
+#
+# bsd_glob cannot be asked to match a name in a directory other than the one
+# the pattern names, so the pattern is compiled to an equivalent regular
+# expression, cached per pattern (a sweep tests every basename it encounters
+# against the same handful of patterns).
+#
+# A leading dot is only matched by a pattern that spells it out, matching
+# bsd_glob's default: '*.888' does not select '.hidden.888', '.*.888' does.
+{
+    my %compiled;
+    sub basename_matches_glob {
+        my ( $basename, $pattern ) = @_;
+
+        return 0 if $basename =~ /\A\./ && $pattern !~ /\A\./;
+
+        my $re = $compiled{$pattern};
+        unless ( defined $re ) {
+            my $expr = '';
+            my @chars = split //, $pattern;
+            my @alternation_depth;
+            while ( defined( my $c = shift @chars ) ) {
+                if ( $c eq '\\' ) {
+                    my $next = shift @chars;
+                    $expr .= defined($next) ? quotemeta($next) : quotemeta($c);
+                }
+                elsif ( $c eq '*' ) { $expr .= '[^/]*'; }
+                elsif ( $c eq '?' ) { $expr .= '[^/]'; }
+                elsif ( $c eq '[' ) {
+                    # Character class: copied through with its negation form
+                    # normalized ('!' to '^'), so '[!0-9]' means the same here
+                    # as it does to bsd_glob.
+                    my $class = '';
+                    if ( @chars && ( $chars[0] eq '!' || $chars[0] eq '^' ) ) {
+                        shift @chars;
+                        $class .= '^';
+                    }
+                    $class .= ']' if @chars && $chars[0] eq ']' && do { shift @chars; 1 };
+                    while ( @chars && $chars[0] ne ']' ) {
+                        my $cc = shift @chars;
+                        $class .= ( $cc =~ /[\w\-]/ ) ? $cc : quotemeta($cc);
+                    }
+                    if ( @chars ) { shift @chars; $expr .= "[$class]"; }
+                    else          { $expr .= quotemeta('[') . $class; }   # unterminated class is a literal '['
+                }
+                elsif ( $c eq '{' ) { push @alternation_depth, 1; $expr .= '(?:'; }
+                elsif ( $c eq ',' && @alternation_depth ) { $expr .= '|'; }
+                elsif ( $c eq '}' && @alternation_depth ) { pop @alternation_depth; $expr .= ')'; }
+                else { $expr .= quotemeta($c); }
+            }
+            $expr .= ')' x scalar(@alternation_depth);      # unterminated brace group closes at end of pattern
+            $re = $compiled{$pattern} = qr/\A$expr\z/;
+        }
+
+        return $basename =~ $re;
+    }
 }
 
 ## MAIN ##

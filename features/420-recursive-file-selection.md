@@ -167,3 +167,76 @@ against the tiny fixture tree.
 
 `print_help()` and the options reference in `docs/usage.md` updated in the
 same commit — parity enforced by `tests/validate-help-content.sh`.
+
+## Implementation notes
+
+- **N1 — The sweep is an explicit breadth-first queue, not `File::Find`.**
+  D5 requires shallower-before-deeper with alphanumeric ordering within each
+  level; `File::Find` is depth-first in filesystem-read order and offers no
+  option that produces D5's order. `expand_recursive_pattern()` therefore
+  walks the tree itself with `opendir`/`readdir`, sorting each directory's
+  entries once and making two passes over them — matching files first, then
+  subdirectories queued for the next level. The two passes are what keep the
+  traversal breadth-first rather than interleaving a directory's own matches
+  with its children's.
+
+  `opendir` is also what makes D8 implementable: a directory that cannot be
+  opened reports the error, whereas `bsd_glob` on an unreadable directory
+  returns an empty list indistinguishable from one that legitimately holds no
+  matches.
+
+- **N2 — The filename filter is a compiled regex that agrees with `bsd_glob`.**
+  `bsd_glob` cannot be asked to match a basename in a directory other than the
+  one its pattern names, so `basename_matches_glob()` compiles the filename
+  component to an equivalent regular expression, cached per pattern. Agreement
+  with `bsd_glob` is the contract — "the same filename pattern" means the
+  pattern a user writes selects the same names at depth that it selects at the
+  top level — and was verified against `bsd_glob` itself over `*`, `?`,
+  `[...]`, `[!...]`, `{a,b}`, escapes, and literal names.
+
+- **N3 — A leading dot is only matched by a pattern that spells it out.**
+  Not specified in the contract; resolved by N2's agreement rule. `bsd_glob`
+  excludes dotfiles from `*` by default, so `-r *.888` does not select
+  `.hidden.888` while `-r .*.888` does — the same as the non-recursive path.
+
+- **N4 — Root globbing and root-set nesting.** The directory part is globbed
+  with the same `bsd_glob` call the non-recursive path uses, then filtered to
+  directories that are not symlinks (D7 applies to roots as well as to
+  descended directories). The queue carries a seen-set from the start, so a
+  root set that nests (`logs` and `logs/access` both matching the directory
+  part) descends the shared subtree once.
+
+- **N5 — Deduplication is a separate pass over `@in_files`, not per-pattern.**
+  D6 dedups across the whole run, so the pass runs after the argument loop and
+  after the `-f` filter, and only when `-r` is given.
+
+## Verification record
+
+Harness `tests/validate-recursive-file-selection.sh`: 17 assertions, all
+passing, over the committed fixture tree at
+`tests/fixtures/recursive-file-selection/` (eight `.888` files across four
+levels, with `.123`/`.000` siblings at each level, numerically-named archive
+directories for D4, and a directory holding only non-matching files).
+
+Each asserted property was proved able to fail by sabotaging the code it
+covers (HARNESS-DESIGN.md § "Proving a new assertion can fail"):
+
+| Sabotage | Assertions that failed |
+|---|---|
+| Reverse the within-level sort | breadth-first/alphanumeric ordering (1) |
+| Remove the `-r` deduplication pass | both dedup assertions (2) |
+| Gate directory descent on the filename filter | depth, D4, ordering, `.` root, dedup, unreadable-note (9) |
+
+**Completion gate** (both run on the merged commit's content): the complete
+`tests/validate-*.sh` suite exits 0 — 22 harnesses — and
+`single-day-access-log-standard` against the `v0.16.0` baseline shows no
+metric worse by more than 5% (`TIMING/total` -20.1%, `MEMORY/rss_peak` +2.6%;
+both reflect the release span rather than this change, which does no work when
+`-r` is unset).
+
+Note for anyone re-running the suite from a git worktree:
+`validate-regression.sh` compares rendered output byte-for-byte, and the
+rendered file legend embeds the absolute path of the input file, so all eight
+`hl-*` scenarios fail on the checkout path alone. They pass when the same
+modified `ltl` runs from the main checkout, where the reference outputs were
+captured.
