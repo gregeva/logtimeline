@@ -1,0 +1,255 @@
+[0;37m [90m[109m
+──────────────────────────────────────────────────────────────────────────────────────────────
+   ,:: ltl ::' log timeline [0.16.0] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
+──────────────────────────────────────────────────────────────────────────────────────────────
+[0m
+
+=== runtime-config ===
+include (merged): (not set)
+exclude (merged): (not set)
+highlight (merged): (not set)
+threadpool-activity (merged): (not set)
+bucket-duration-stats-demand: 1
+message-duration-stats-demand: 1
+=== runtime-config / command-line ===
+bucket-size: 60
+data-model: raw
+memory-usage: 1
+sort-on: p99
+=== END runtime-config / command-line ===
+=== runtime-config / environment-variable ===
+=== END runtime-config / environment-variable ===
+=== END runtime-config ===
+
+=== index-read-back ===
+index_used: no
+index_filter_signature: -
+file: /private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9ab811e2-58c8-4bd2-b751-f9228acd39b2/scratchpad/wt-v0.16.0/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-10000.log
+  lookup: none
+  matched_entry_date: -
+  freshness: no_entry
+  preseed_duration_min: -
+  preseed_duration_max: -
+  preseed_bytes_min: -
+  preseed_bytes_max: -
+  preseed_count_min: -
+  preseed_count_max: -
+  preseed_first_timestamp: -
+  preseed_last_timestamp: -
+=== END index-read-back ===
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: user_opt_out
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: feature_not_active
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+=== format-detection ===
+duration_unit_override: -
+files: 1
+file: /private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9ab811e2-58c8-4bd2-b751-f9228acd39b2/scratchpad/wt-v0.16.0/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-10000.log
+  format: thingworx_standard
+  match_type: 1
+  is_access_log: no
+  matched_lines: 10000
+  unmatched_lines: 0
+  first_match_line: 1
+=== END format-detection ===
+=== heatmap-palette ===
+heatmap_active: no
+metric: n/a
+light_bg: 0
+light_bg_source: default
+color_name: n/a
+gradient_dark: n/a
+gradient_light: n/a
+gradient_active: n/a
+=== END heatmap-palette ===
+=== csv-output ===
+csv_active: no
+=== END csv-output ===
+=== percentile-algorithm ===
+=== percentile-algorithm / histogram ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / histogram ===
+=== percentile-algorithm / heatmap ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / heatmap ===
+=== percentile-algorithm / message-stats ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / message-stats ===
+=== percentile-algorithm / bucket-stats ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / bucket-stats ===
+=== END percentile-algorithm ===
+=== statistics-demand ===
+store: bucket
+  store_demand: 1
+  group terminal_core: demanded=1 consumers=timeline-latency-column
+  group csv_body: demanded=0 consumers=-
+  group extended_percentiles: demanded=0 consumers=-
+  group shape_moments: demanded=0 consumers=-
+  moment_source: none
+  stats_calls: 0
+  group_calc terminal_core: computed=0 skipped_demand=0 ineligible=0
+  group_calc csv_body: computed=0 skipped_demand=0 ineligible=0
+  group_calc extended_percentiles: computed=0 skipped_demand=0 ineligible=0
+  group_calc shape_moments: computed=0 skipped_demand=0 ineligible=0
+store: message
+  store_demand: 1
+  group terminal_core: demanded=1 consumers=messages-table,sort-on:p99
+  group csv_body: demanded=0 consumers=-
+  group extended_percentiles: demanded=0 consumers=-
+  group shape_moments: demanded=0 consumers=-
+  moment_source: none
+  stats_calls: 0
+  group_calc terminal_core: computed=0 skipped_demand=0 ineligible=0
+  group_calc csv_body: computed=0 skipped_demand=0 ineligible=0
+  group_calc extended_percentiles: computed=0 skipped_demand=0 ineligible=0
+  group_calc shape_moments: computed=0 skipped_demand=0 ineligible=0
+  sort_selection: statistic=p99 defined=0 fill=9963 demoted=0
+  sort_calc: population=0 topn=0
+=== END statistics-demand ===
+=== profile ===
+profile_active: no
+=== END profile ===
+=== udm-counting ===
+counting_udms: none
+=== END udm-counting ===
+=== benchmark-data ===
+version	0.16.0
+FILES	/private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9ab811e2-58c8-4bd2-b751-f9228acd39b2/scratchpad/wt-v0.16.0/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-10000.log	3518283
+lines_read	10000
+lines_included	10000
+TIMING	read_files	0.246
+TIMING	initialize_buckets	0.000
+TIMING	group_similar	0.000
+TIMING	calculate_statistics	0.072
+TIMING	heatmap_statistics	0.000
+TIMING	histogram_statistics	0.000
+TIMING	normalize_data	0.001
+TIMING	total	0.318
+MEMORY	rss_peak	36356096
+MEMORY	bucket_stats_counters	120
+MEMORY	bucket_stats_counters_hl	120
+MEMORY	consolidation_clusters	120
+MEMORY	consolidation_key_message	120
+MEMORY	consolidation_key_trigrams	120
+MEMORY	consolidation_key_trigrams_norm	120
+MEMORY	consolidation_ngram_index	120
+MEMORY	consolidation_patterns	120
+MEMORY	consolidation_posting_size	120
+MEMORY	consolidation_unmatched	120
+MEMORY	heatmap_counters	120
+MEMORY	heatmap_counters_hl	120
+MEMORY	heatmap_data	120
+MEMORY	heatmap_data_hl	120
+MEMORY	heatmap_raw	120
+MEMORY	heatmap_raw_hl	120
+MEMORY	histogram_counters	120
+MEMORY	histogram_counters_hl	120
+MEMORY	histogram_values	576
+MEMORY	log_analysis	232
+MEMORY	log_messages	4614201
+MEMORY	log_messages_counters	120
+MEMORY	log_occurrences	2039
+MEMORY	log_sessions	120
+MEMORY	log_stats	120
+MEMORY	log_threadpools	232
+MEMORY	message_key_order	2729548
+MEMORY	threadpool_activity	762
+MEMORY	udm_distinct	120
+MEMORY	udm_last_value	120
+MEMORY	unattributed	29005746
+MEMORY_FINAL	log_messages	4614201
+MEMORY_FINAL	log_analysis	232
+MEMORY_FINAL	consolidation_clusters	120
+MEMORY_FINAL	consolidation_patterns	120
+MEMORY_FINAL	consolidation_key_message	120
+MEMORY_FINAL	consolidation_unmatched	120
+MEMORY_FINAL	consolidation_ngram_index	120
+MEMORY_FINAL	consolidation_key_trigrams	120
+MEMORY_FINAL	consolidation_key_trigrams_norm	120
+COUNTS	log_messages_entries	9963
+COUNTS	log_occurrences_entries	2
+COUNTS	log_stats_entries	2
+CONFIG	terminal_width	200
+CONFIG	terminal_height	24
+CONFIG	max_log_message_length	200
+CONFIG	time_bucket_size	60
+CONFIG	bucket_size_seconds	3600.00
+=== END benchmark-data ===
+
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[90m[109m     timestamp                       legend                                                                                   occurrences                                                               
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+ 2025-02-27 23:00 [0;31mERROR: 1[0m                              [91m[109m0[0m[90m[109m:[0m[0m0[0m[90m[109m/m[0m [90m[109m│[0m [0;31m[0m                                                                                                                                        
+ 2025-02-28 00:00 [0;31mERROR: 9984[0m [0;33mWARN: 11[0m [0;32mINFO: 4[0m  [91m[109m166.4[0m[90m[109m:[0m[0m166.6[0m[90m[109m/m[0m [90m[109m│[0m [0;31m███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████[0m[0;33m[0m[0;32m[0m 
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+
+[90m[109mcommand-line options: -V all --disable-progress --verbose=benchmark-data,statistics-demand --memory-usage --terminal-width=200 -bs 60 --data-model=raw --sort-on=p99 [0m
+
+  ─────────────────────────────────────────   
+  Category                            Total      [4;37mThese file(s) were processed with analysis including results between 2025-02-27 23:59 and 2025-02-28 00:06[0m
+  ─────────────────────────────────────────   
+  ERROR                                9985      [36m[37m[[0;32m√[0m[36m[37m] /private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9a....16.0/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-10000.log[0m
+  WARN                                   11   
+  INFO                                    4   
+  ─────────────────────────────────────────   
+  LINES INCLUDED                      10000   
+  LINES READ                          10000   
+  FILE PROCESSING TIME           245.8 msec   
+  INITIALIZE EMPTY BUCKETS          45 usec   
+  CALCULATE STATISTICS            71.6 msec   
+  SCALE DATA TO TERMINAL           581 usec   
+  TOTAL TIME                       318 msec   
+  MAXIMUM MEMORY USED              34.8 MiB   
+   log_messages              (13%)    4 MiB   
+   message_key_order         ( 7%)    3 MiB   
+   log_occurrences           (<1%)    4 KiB   
+   unattributed              (80%)   28 MiB   
+  ─────────────────────────────────────────   
+
+ [96m[49m TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)                                                                                           Occurre. [0m[96m
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+  [ERROR] [TWEventProcessor] [c.t.s.s.e.EventInstance] Error Executing Event Handler 'CheckHeartbeat' for event Type.Thing:Entity.HeartBeatMonitoringTimer:Event.Timer                             22 
+  [ERROR] [TWEventProcessor] [c.t.s.s.e.EventInstance] Error Executing Event Handler 'CheckOverallStatuses' for event Type.Thing:Entity.ConnectivityMonitoringScheduler:Event.ScheduledEve          6 
+  [ERROR] [https-jsse-nio-8443-] [c.t.w.Things] Execution error in service script [GetDowntimeEvents_IFG] :: TypeError: Cannot read property "DowntimeDurationLimit" from null (GetDowntim          5 
+  [WARN] [https-jsse-nio-8443-] [c.t.w.BaseService] Transaction has been marked as a failure for request /Thingworx/Things/IFG_DowntimeSystemDatabaseExt/Services/GetDowntimeEvents_IFG             5 
+  [ERROR] [TWEventProcessor] [c.t.s.s.e.EventInstance] Error Executing Event Handler 'CheckUserActivitySubscription' for event Type.Thing:Entity.GrafanaUserMonitoringSchedule:Event.Sched          2 
+  [ERROR] [TWEventProcessor] [c.t.s.s.e.EventInstance] Error Executing Event Handler 'ProcessCantThicknessAlarmSubscription' for event Type.Thing:Entity.BAT_SawmillTbl1_ProcessLogTurning          2 
+  [WARN] [https-jsse-nio-8443-] [IntrusionDetector] [SECURITY FAILURE Anonymous:@unknown -> /ExampleApplication/IntrusionDetector] Invalid input: context=HTTP header value: cookie, type(          2 
+  [ERROR] [DefaultQuartzSchedul] [c.p.a.u.JobPurgeScheduler] Failed to initialize archiving for analysis service framework :                                                                        1 
+  [ERROR] [TWEventProcessor] [t.c.p.ReflectionProcessor] ErrorCode(00007269-9456-4789-bdd0-5b0bc5d9965f), Cause(null), Reason(Access was attempted on a null reference variable.), Possibl          1 
+  [ERROR] [TWEventProcessor] [t.c.p.ReflectionProcessor] ErrorCode(0000c2fb-14d1-47ca-9d6e-eafd8ff7b929), Cause(null), Reason(Access was attempted on a null reference variable.), Possibl          1 
+
+

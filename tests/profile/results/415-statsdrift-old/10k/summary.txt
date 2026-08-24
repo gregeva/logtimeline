@@ -1,0 +1,49 @@
+====================================================================================================
+Profile:  /private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9ab811e2-58c8-4bd2-b751-f9228acd39b2/scratchpad/wt-v0.16.0/tests/profile/results/415-statsdrift-old/10k/nytprof.out
+Script:   /private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9ab811e2-58c8-4bd2-b751-f9228acd39b2/scratchpad/wt-v0.16.0/ltl
+Perl:     5.42.2
+CPU time: 0.2753 s (sum of exclusive times)
+Subs:     25 shown of 385 matching (from 1102 total)
+Sort:     incl time | Filter: Perl subs only
+ltl -V:   lines_read=10000  total=0.318s  rss=35 MB
+====================================================================================================
+
+Rank  Subroutine                                               Calls   Incl(s)   Excl(s)   ms/call   %Tot
+----------------------------------------------------------------------------------------------------
+   1  read_and_process_logs                                        1    0.1581    0.1245   158.078   57.4
+   2  calculate_all_statistics                                     1    0.0356    0.0080    35.617   12.9
+   3  measure_memory_structures                                    5    0.0247    0.0002     4.939    9.0
+   4  get_memory_usage                                             5    0.0196    0.0002     3.911    7.1
+   5  Term::ReadKey::GetTerminalSize                               1    0.0140    0.0001    14.005    5.1
+   6  BEGIN@51                                                     1    0.0070    0.0003     7.011    2.5
+   7  Text::CSV::_load                                             2    0.0067  0.000044     3.329    2.4
+   8  Text::CSV::_load_pp                                          1    0.0066  0.000001     6.619    2.4
+   9  Text::CSV::BEGIN@1.1                                         1    0.0066    0.0063     6.588    2.4
+  10  BEGIN@38                                                     1    0.0058    0.0015     5.752    2.1
+  11  BEGIN@39                                                     1    0.0052    0.0016     5.157    1.9
+  12  named_structure_sizes                                        5    0.0049    0.0002     0.987    1.8
+  13  BEGIN@42                                                     1    0.0046    0.0031     4.569    1.7
+  14  write_index_file                                             1    0.0044  0.000094     4.373    1.6
+  15  XSLoader::load                                               9    0.0042    0.0042     0.465    1.5
+  16  Text::CSV_PP::print                                          3    0.0028    0.0008     0.929    1.0
+  17  BEGIN@41                                                     1    0.0023    0.0012     2.325    0.8
+  18  BEGIN@43                                                     1    0.0019    0.0016     1.910    0.7
+  19  adapt_to_command_line_options                                1    0.0018    0.0001     1.768    0.6
+  20  Tie::Hash::BEGIN@190                                         1    0.0017    0.0014     1.670    0.6
+  21  BEGIN@49                                                     1    0.0016    0.0011     1.567    0.6
+  22  Time::Local::timegm                                        370    0.0015    0.0011     0.004    0.6
+  23  Exporter::import                                            33    0.0015    0.0008     0.046    0.6
+  24  Time::Piece::BEGIN@6                                         1    0.0013    0.0003     1.314    0.5
+  25  BEGIN@37                                                     1    0.0012    0.0012     1.242    0.5
+
+Note: %Tot = incl_time / 0.2753 s (total Perl CPU time)
+      Use --all to include XSubs [xs] and opcodes [op]
+      Use --sort excl to rank by exclusive time
+
+====================================================================================================
+Cross-Validation: NYTProf call counts vs ltl -V output
+----------------------------------------------------------------------------------------------------
+  read_and_process_logs                     NYTProf calls=1  ltl-V lines_read=10000
+    (called once; loops internally over lines)
+
+  [OK] All cross-validation checks within tolerance.

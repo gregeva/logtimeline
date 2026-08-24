@@ -1,0 +1,49 @@
+====================================================================================================
+Profile:  /Users/gregeva/Documents/GitHub/logtimeline/tests/profile/results/415-statsdrift-new-nosort/100k/nytprof.out
+Script:   /Users/gregeva/Documents/GitHub/logtimeline/ltl
+Perl:     5.42.2
+CPU time: 2.0118 s (sum of exclusive times)
+Subs:     25 shown of 452 matching (from 1188 total)
+Sort:     incl time | Filter: Perl subs only
+ltl -V:   lines_read=100000  total=2.821s  rss=110 MB
+====================================================================================================
+
+Rank  Subroutine                                               Calls   Incl(s)   Excl(s)   ms/call   %Tot
+----------------------------------------------------------------------------------------------------
+   1  pipeline_parse                                               1    1.6353  0.000019  1635.274   81.3
+   2  read_and_process_logs                                        1    1.6094    1.1366  1609.380   80.0
+   3  __ANON__[(eval 44)[/Users/gregeva/Documents/GitHu...    100009    0.3432    0.2013     0.003   17.1
+   4  measure_memory_structures                                    5    0.1287    0.0003    25.748    6.4
+   5  pipeline_detect                                              1    0.1101  0.000015   110.116    5.5
+   6  build_format_registry                                        1    0.1100    0.0023   110.019    5.5
+   7  pipeline_finalize                                            1    0.1100  0.000081   109.965    5.5
+   8  compile_format_scan_sub                                     28    0.0977    0.0907     3.491    4.9
+   9  named_structure_sizes                                        5    0.0974    0.0003    19.488    4.8
+  10  calculate_all_statistics                                     1    0.0829    0.0171    82.911    4.1
+  11  pipeline_render                                              1    0.0814    0.0001    81.445    4.0
+  12  format_registry_promote                                     13    0.0414    0.0001     3.188    2.1
+  13  get_memory_usage                                             5    0.0310    0.0002     6.207    1.5
+  14  pipeline_accumulate                                          1    0.0257  0.000049    25.718    1.3
+  15  print_verbose_output                                         1    0.0222    0.0003    22.244    1.1
+  16  Term::ReadKey::GetTerminalSize                               1    0.0138    0.0001    13.824    0.7
+  17  format_entry_block_src                                     454    0.0073    0.0071     0.016    0.4
+  18  BEGIN@35                                                     1    0.0072    0.0003     7.156    0.4
+  19  format_registry_set_occupant                                36    0.0070    0.0001     0.194    0.3
+  20  Text::CSV::_load                                             2    0.0068  0.000040     3.403    0.3
+  21  Text::CSV::_load_pp                                          1    0.0068  0.000001     6.768    0.3
+  22  Text::CSV::BEGIN@1.1                                         1    0.0067    0.0064     6.743    0.3
+  23  BEGIN@21                                                     1    0.0061    0.0016     6.128    0.3
+  24  compile_format_extractor                                    34    0.0055    0.0048     0.163    0.3
+  25  BEGIN@22                                                     1    0.0052    0.0015     5.151    0.3
+
+Note: %Tot = incl_time / 2.0118 s (total Perl CPU time)
+      Use --all to include XSubs [xs] and opcodes [op]
+      Use --sort excl to rank by exclusive time
+
+====================================================================================================
+Cross-Validation: NYTProf call counts vs ltl -V output
+----------------------------------------------------------------------------------------------------
+  read_and_process_logs                     NYTProf calls=1  ltl-V lines_read=100000
+    (called once; loops internally over lines)
+
+  [OK] All cross-validation checks within tolerance.
