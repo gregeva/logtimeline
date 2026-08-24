@@ -319,6 +319,40 @@ Each scenario is a named test case with explicit setup, action, and assertions. 
 
 Tests parse the `=== INDEX READ-BACK ===` section from `-V` output and assert specific keys equal specific values. The format defined in **`-V` verbose output** above is the contract. Tests do not assert against rendered bar-graph output (that's the existing regression suite's job); they assert against the read-back section.
 
+### Fixture lifecycle: corpus location and freshness
+
+The prebuilt `tests/fixtures/ltl-index-readback.csv` and the two 5k sample
+logs it describes are generated, gitignored artifacts. Both the harness and
+`tests/fixtures/regenerate-index-readback-fixtures.sh` resolve the log
+corpus through `LTL_LOGS_DIR`, defaulting to `logs/` under the repo root.
+The two must agree: the fixture records absolute `file_path` values, so a
+harness resolving the corpus differently from the script that built the
+fixture finds no matching rows. Setting `LTL_LOGS_DIR` lets a checkout with
+no corpus of its own — a second clone, a git worktree — run against the
+real one.
+
+Freshness is a precondition of every pre-seeded scenario, not a property
+that can be assumed. `read_index_file()` accepts a row only when both the
+recorded `file_size` and `file_mtime` still match the file on disk, so a
+fixture that exists but no longer describes the logs drives every
+pre-seeded scenario down the "no usable entry" path — failing assertions
+that describe correct behaviour, and presenting as a functional break in
+the read-back path rather than as a fixture problem.
+
+The harness therefore treats staleness exactly as it treats absence: before
+any scenario runs, `fixture_staleness_reason()` compares each recorded
+size/mtime pair against the live logs and reports the first divergence;
+a non-empty reason regenerates the fixture, printing the reason so the
+repair is visible rather than silent. Three divergences are detected —
+no file row for the path (fixture built against a different corpus or in a
+checkout that resolved `LTL_LOGS_DIR` elsewhere), `file_size` drift (the
+sample was re-sliced), and `file_mtime` drift (the sample was rewritten,
+copied or touched without changing its length). Any touch of the sample
+logs invalidates the pair, including the regenerate script's own re-slice
+run from another checkout. The same check is asserted in the helper
+self-test, so a mismatch surfaces as one named assertion rather than as a
+broad failure across the pre-seeded scenarios.
+
 ### `-V` instrumentation as the validation surface
 
 The labels and structure defined in this document are the test contract. Without that level of detail in `-V`, scenarios like `multi-file-all-fresh-tier2-unfiltered` (which must assert "the global `duration_max` came from `<F1>`") are not assertable.

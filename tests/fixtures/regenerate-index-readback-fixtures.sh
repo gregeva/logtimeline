@@ -9,8 +9,11 @@
 #     ltl-index.csv fixture becomes incompatible
 #   - You need to refresh the fixtures for any other reason
 #
-# It is intentional that the fixtures (sample logs + prebuilt index CSV)
-# are checked into git, so test runs do not need to rebuild them.
+# The fixtures (sample logs + prebuilt index CSV) are gitignored, generated
+# artifacts. tests/validate-index-read-back.sh runs this script itself when
+# they are missing or when the index no longer describes the logs it was
+# built from, so a run repairs the previous run's damage rather than
+# failing assertions against correct code.
 #
 # Produces:
 #   - logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt
@@ -34,13 +37,20 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LTL="$REPO_DIR/ltl"
 
-# --- Source logs (production data in logs/) ---
-TOMCAT_SOURCE="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt"
-SCRIPT_SOURCE="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
+# Location of the log corpus. Defaults to logs/ under the repo root; set
+# LTL_LOGS_DIR to point a checkout that has no corpus of its own (a second
+# clone, a git worktree) at the real one. The prebuilt index records
+# absolute paths, so this script and tests/validate-index-read-back.sh must
+# resolve the logs the same way or the harness will regenerate on every run.
+LOGS_DIR="${LTL_LOGS_DIR:-$REPO_DIR/logs}"
+
+# --- Source logs (production data in the corpus) ---
+TOMCAT_SOURCE="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt"
+SCRIPT_SOURCE="$LOGS_DIR/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
 
 # --- Sample-log targets ---
-TOMCAT_SAMPLE="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
-SCRIPT_SAMPLE="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
+TOMCAT_SAMPLE="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+SCRIPT_SAMPLE="$LOGS_DIR/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
 
 # --- Prebuilt index target ---
 INDEX_FIXTURE="$SCRIPT_DIR/ltl-index-readback.csv"
