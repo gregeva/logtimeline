@@ -851,9 +851,9 @@ Each stage is its own commit with its verification run before the next begins. C
 
 Then the per-feature workflow (PR into `release/0.17.0` when the architect directs). #415's re-measure is downstream and NOT this issue's scope.
 
-### Implementation progress (as of 2026-08-24) — S1–S6 delivered, resume at S7
+### Implementation progress (as of 2026-08-24) — S1–S7 delivered; awaiting the architect's direction on the per-feature workflow
 
-Branch `413-eager-scan-order-precompile`. S1–S6 are committed. **Work resumes at S7** (the validation plan F1–F6 above).
+Branch `413-eager-scan-order-precompile`. All seven stages are committed and the locked validation plan F1–F6 is discharged (results below). **Nothing is pushed and no PR is open** — the per-feature workflow runs when the architect directs.
 
 | Stage | Commit | State |
 |---|---|---|
@@ -862,12 +862,10 @@ Branch `413-eager-scan-order-precompile`. S1–S6 are committed. **Work resumes 
 | S3 — compile points + per-compile validation | `d8576c6` | delivered |
 | S4 — `format_scan_subs` memory category | `7f33d97` | delivered |
 | S5 — `-V format-registry` + its harness | `9566cc4` | delivered |
-| S6 — D64 timing + doc sweep | see git log | delivered |
-| S7 — validation plan F1–F6 | — | **next** |
+| S6 — D64 timing + doc sweep | `f2f8c9e` | delivered |
+| S7 — validation plan F1–F6 | `835631a` + this | delivered |
 
-**Gains measured at S5** (2-line probe, median of 3, against the pre-branch tree): peak RSS 42.2 → 26.2 MiB; `TIMING detect/registry_build` 0.101 → 0.008 s. Both beat D60's expectation (~28 MB / ~14 ms). Compiles per run: single-format 1, `-lf` exactly 1, invalid `-lf` 0, mixed-format fixture 3.
-
-**Verification standing at S5:** byte parity across `tests/fixtures/format-detection/` (all eight fixtures, `-bs 1440 -oe`) with one deliberate exception, `validate-format-detection.sh` 192/192, `validate-format-registry.sh` 22/22, `validate-help-content.sh` 11/11.
+Gains and verification are recorded once, under § S7 validation results below (F2 for the gain probe, F1 for parity, F3 for read-phase cost, F5 for the compile-count table).
 
 #### Findings carried forward
 
@@ -883,6 +881,32 @@ Branch `413-eager-scan-order-precompile`. S1–S6 are committed. **Work resumes 
 Baseline for every comparison is the pre-branch tree at `c730931` (the merge-base with `release/0.17.0`), not an intermediate stage.
 
 **F1 — byte-parity battery: 27/27 fixtures identical.** The regenerated #58 prototype dataset (`prototype/58-generate-fixtures.sh` → `/tmp/ltl-58-fixtures/`), all seven families × all four sizes, plus the eight committed `tests/fixtures/format-detection/` fixtures already covered stage by stage. Shape: `--terminal-width 160 -ni -V format-detection`, full rendered output compared (no `-oe`/`-n` narrowing — the timeline and tables are part of the assertion here), with only nondeterministic rows and the documented `promotions:` change (F10) filtered. Includes both MTF change-point families at 1m (`concat-pair`, `interleave-100`), which are the promotion-churn stress cases. Exit codes matched, captures verified non-empty, stderr runtime-warning-clean throughout.
+
+**F2 — gains re-confirmed on the delivered tree** (2-line probe, 3 runs each, against `c730931`). The registry's whole cost is now two rows, so both are shown:
+
+| run | build | compile | peak RSS |
+|---|---|---|---|
+| baseline | 0.105 s | — | 42.5 MiB |
+| delivered | 0.008 s | 0.004 s | 26.4 MiB |
+| baseline, `-lf` | 0.107 s | — | 42.2 MiB |
+| delivered, `-lf` | 0.015 s | 0.001 s | 25.5 MiB |
+
+Total registry cost 0.105 s → 0.012 s and 42.5 → 26.4 MiB; both beat D60's ~28 MB / ~14 ms expectation. The `-lf` case is where D60's argument was sharpest — the pin previously ran *after* the full build and so saved nothing — and it is now 0.107 s → 0.016 s / 42.2 → 25.5 MiB. An invalid `-lf` errors in 0.08 s against 0.18 s, having compiled nothing at all.
+
+**F3 — no new hot-loop cost.** `TIMING parse/read_files`, median-of-3 with ranges, all six 1m families, under `caffeinate -s`:
+
+| family (1m) | baseline | delivered | Δ | ranges separated? | compile |
+|---|---|---|---|---|---|
+| pure-access | 11.899 s [11.891–11.930] | 11.817 s [11.787–11.839] | **−0.7%** | yes | 0.004 s |
+| interleave-100 | 10.475 s [10.451–10.889] | 10.361 s [10.350–10.364] | **−1.1%** | yes | 0.008 s |
+| pure-gc | 11.907 s [11.605–12.047] | 11.634 s [11.571–11.819] | −2.3% | no (noise) | 0.004 s |
+| concat-pair | 10.391 s [10.316–10.469] | 10.335 s [10.320–10.369] | −0.5% | no (noise) | 0.008 s |
+| twx-blend | 6.845 s [6.808–7.024] | 6.883 s [6.813–7.008] | +0.6% | no (noise) | 0.004 s |
+| pure-scriptlog | 9.705 s [9.690–9.812] | 9.808 s [9.713–9.819] | +1.1% | no (noise) | 0.004 s |
+
+**Both positive deltas have ranges that overlap the baseline's and are noise; the only two families whose ranges are actually separated are both improvements.** The read phase is unchanged or faster everywhere — election moves *when* a sub is compiled, never what the hot loop executes, and the compile itself is now attributed in its own row (4–8 ms) instead of hiding inside startup.
+
+The two separated improvements are small and their mechanism is **not established**. It is not promotion: the counts are unchanged bar the one reorder election now performs up front (pure-access 1 → 0, interleave-100 10000 → 9999). The plausible remaining explanation is that ~16 MB less startup allocation leaves a smaller, less fragmented heap for the read phase — plausible, unproven, and not claimed as a result. What F3 establishes is the absence of a regression, which is what the item exists for.
 
 **F4 — gate equivalence by sabotage: both halves of the D61 pair fire, at the right moment.** Recorded as F15 below, including the two codegen sabotages that did NOT fire and why.
 
@@ -901,16 +925,11 @@ Baseline for every comparison is the pre-branch tree at `c730931` (the merge-bas
 
 Byte parity with the baseline confirmed on the unknown-format, both flip fixtures, the `--detection-window` run and the `-lf` run. Non-seekable input is not reachable — see F14.
 
-#### S7 scope reminders
+**F6 — harnesses during work.** `validate-format-detection.sh` 192/192 and `validate-format-registry.sh` 22/22 throughout; `validate-regression.sh` 46/46 with goldens byte-identical, and `validate-help-content.sh` 11/11, at S6. Per the locked plan and the full-suite rule, the complete `tests/validate-*.sh` suite is the **release gate**, run once at that point — not during the work.
 
-The validation plan's six items are listed under § Validation plan above. Items 1, 2 and 4 are partly discharged by the stage-by-stage verification already run (byte parity across the eight `tests/fixtures/format-detection/` fixtures at every stage; the 2-line gain probe; the sabotage proofs behind `validate-format-registry.sh`'s election invariants). S7 still owes:
+#### Outstanding
 
-- **F1** the wider byte-parity battery — the #58 S9 fixture families beyond `tests/fixtures/format-detection/`.
-- **F3** read-phase timing parity, median-of-3 on one 1m-line fixture: election must add no hot-loop cost.
-- **F4** the gate-equivalence sabotage pair on a scratch copy: a broken sample must die at startup via the interpreted gate, and sabotaged codegen must die at first compile via per-compile validation. (The harness-level sabotages run so far prove the *assertions* fail; these prove the *gates* fire.)
-- **F5** edge paths: unknown-format fallback, non-seekable stdin, mid-file flip fixture, `-lf` exactly-one-compile.
-
-Then the per-feature workflow, when the architect directs.
+Nothing in the issue's scope. The per-feature workflow (push, PR into `release/0.17.0`, release-note bullet, completion comment, close, release the dependents) runs when the architect directs. #415's drift re-measure is `blocked_by` this issue and is explicitly NOT in scope here.
 
 ## `-V format-detection` section-contract
 
