@@ -17,6 +17,11 @@ questions) are the input to a mandatory prototype; the prototype's measurements 
 convert open questions Q1…Q12 into locked `Dxx` decisions. No implementation begins
 before that.
 
+**Prototype stage completed 2026-08-24** — measurements and per-aspect analysis in
+`prototype/426-per-message-store-validation-report.md`; answers and proposed decisions
+in § Prototype findings below. The decisions there are *proposed*, awaiting the
+architect's lock.
+
 Scope note: this is the store for *per-message-key* statistics. The bucket-scoped store
 (`%log_analysis` / `%log_stats`) is a different structure with a different cardinality
 profile and is out of scope.
@@ -284,6 +289,12 @@ baseline wrapped in a convenience sub would measure the wrapper.
 | **D — columnar (SoA)** | message→ordinal hash + per-field arrays | the issue's proposal; L2 says a denser layout is ~5× on traversal | write-side cost exceeds the traversal saving; or F3 deletion forces tombstones whose memory cost negates the win |
 | **E — hybrid** | ordinal + packed hot numeric fields, hash for the cold/rare tail | mitigates F2's four variants and F7's arbitrary key set; keeps a hashref view cheap for F4 | complexity without a measurable advantage over D |
 
+Two further columnar variants were added during the prototype: **D2** (one hash
+operation per line — `//=` insert — and the ordinal→key column built with `keys` +
+slices) and **D3** (D2 with the ordinal→key column written at insert time, a second
+copy of every key string). E was folded into D: the lazy per-ordinal cold hash for
+rare fields is never written on the fixtures, so D and E measure identically.
+
 Prior art in this repo: `prototype/58-entry-struct-mini.pl` already compares
 `aoh` / `hoh` / `aoa` / **`soa` (parallel arrays indexed by entry id)** across build,
 memory and scan phases, asserting classification parity per shape before any timing. It
@@ -293,22 +304,23 @@ at load, integers on the hot path.
 
 ## Open questions (the prototype's exit criteria)
 
-Numbered so the later locked decisions map one-for-one. **None is answered here.**
+Numbered so the later locked decisions map one-for-one. Status after the prototype
+(2026-08-24; report section in parentheses):
 
-| id | question | blocked on |
+| id | question | status |
 |---|---|---|
-| **Q1** | Does a columnar store actually realise the L2 traversal gain, or does L2 measure something (fresh contiguous hashes) that SoA does not reproduce? | D vs A at 100k/1M |
-| **Q2** | What does the ordinal scheme cost on the write side, per line, at 1M lines? | D/E vs A build metric |
-| **Q3** | Are column arrays allocated by demand at option-resolution time, or lazily on first write? What does an undemanded column cost in each case? | D/E memory metric |
-| **Q4** | How is deletion represented — tombstones, compaction pass, or restructuring consolidation to avoid deletion? What is the memory and time cost of each under `-g` churn? (F3) | dedicated deletion metric |
-| **Q5** | Does `merge_consolidation_stats` receive a materialized hashref row view, or is the merge surface rewritten? (F4) | parity + one-shot cost |
-| **Q6** | How is F7's arbitrary runtime key set written into a fixed column layout? | D/E design |
-| **Q7** | Is `%log_messages_counters` re-keyed by ordinal, or does it keep its `\x1f` composite key? | Q4's answer; `snapshot_counter_telemetry` walks it wholesale |
-| **Q8** | Do the four variants (F2) get four column sets, or one superset with unallocated columns? | Q3 |
-| **Q9** | Does the two-valued category (F1) fold into the ordinal space, or stay a separate dimension? | D/E design |
-| **Q10** | Do B/C alone close enough of the gap that D/E are not justified? | B+C vs D at 100k/1M |
-| **Q11** | What happens to `MEMORY log_messages` attribution, which #2 consumes as a controller signal — is per-column attribution preserved? | #2's requirement |
-| **Q12** | ~~How much of the 465 B/key is the key string, and therefore untouched?~~ **Answered 2026-08-24**: inner entry hash 213.0 B (45.8%); keys + outer hash overhead 251.6 B (54.2%), keys cap-saturated at the terminal width. Remaining sub-question: does the compact store's own per-field array overhead eat into the 45.8%? | measured; residual on D/E memory metric |
+| **Q1** | Does a columnar store actually realise the L2 traversal gain, or does L2 measure something (fresh contiguous hashes) that SoA does not reproduce? | **Answered (V1)** — yes, and beyond it: on the real as-built store, walk 5.7× and sort 10× faster than L0, 3× and 4.4× faster than L2. |
+| **Q2** | What does the ordinal scheme cost on the write side, per line, at 1M lines? | **Answered (V2)** — indistinguishable from A on the single-field path (±3%, inside A's own spread); −14%/line on the multi-field access path, all of it aliasing. |
+| **Q3** | Are column arrays allocated by demand at option-resolution time, or lazily on first write? What does an undemanded column cost in each case? | **Answered (V3)** — per family/demand at option-resolution time; an undemanded column that is never instantiated costs nothing and nothing is tested per line. |
+| **Q4** | How is deletion represented — tombstones, compaction pass, or restructuring consolidation to avoid deletion? What is the memory and time cost of each under `-g` churn? (F3) | **Answered (V4)** — tombstones (cheaper than hash deletes, 0.23 vs 0.30 s at 287k) plus one 0.064 s compaction after the `-g` final pass; compacted store smaller than the hash's. |
+| **Q5** | Does `merge_consolidation_stats` receive a materialized hashref row view, or is the merge surface rewritten? (F4) | **Deferred to implementation planning** — not a measurement question; consolidation is off the hot path. |
+| **Q6** | How is F7's arbitrary runtime key set written into a fixed column layout? | **Deferred** — the lazy per-ordinal cold hash (E policy, folded into D) takes a hash-slice write unchanged; not exercised by the fixtures. |
+| **Q7** | Is `%log_messages_counters` re-keyed by ordinal, or does it keep its `\x1f` composite key? | **Answered (V7)** — neither: it stops being a separate store. Partition state, overflow/underflow and the bins become columns on the record's row; the composite key and the two-store sync invariant go away. Measured output-identical (K2–K4). |
+| **Q8** | Do the four variants (F2) get four column sets, or one superset with unallocated columns? | **Answered by Q3** — one superset of column *names*; only the demanded ones are instantiated. |
+| **Q9** | Does the two-valued category (F1) fold into the ordinal space, or stay a separate dimension? | **Measured in one shape only** — separate per-category stores, the handle selected in the branch that assigns `$category` (zero per-line cost); folding was not measured. |
+| **Q10** | Do B/C alone close enough of the gap that D/E are not justified? | **Answered (V5)** — no: B is *slower* than A at 287k keys; C is a write-side gain only. |
+| **Q11** | What happens to `MEMORY log_messages` attribution, which #2 consumes as a controller signal — is per-column attribution preserved? | **Deferred** — `Devel::Size` per column is trivially available but overcounts the HEK-sharing key column (V3); the attribution rule is #2's to specify. |
+| **Q12** | ~~How much of the 465 B/key is the key string, and therefore untouched?~~ Answered at spec stage: inner entry hash 213.0 B (45.8%); keys + outer hash 251.6 B (54.2%). Residual: does the compact store's own per-field array overhead eat into the 45.8%? | **Residual answered (V3)** — yes, ≈ 80 B/key; realised saving −25% RSS at 287k keys (≈ 62% of the ceiling). |
 
 ## Measurement protocol (for the prototype stage)
 
@@ -331,6 +343,131 @@ Numbered so the later locked decisions map one-for-one. **None is answered here.
 - **Exit**: medians with ranges for every arm; Q1…Q12 answered or explicitly deferred;
   `Dxx` locked only where a measurement grounds them. Findings are delivered as an
   attributed analysis **before** any keep/revert or scope question.
+
+## Prototype findings (2026-08-24)
+
+Report: `prototype/426-per-message-store-validation-report.md` (per-aspect V1–V6,
+medians with ranges, reproduction commands). Instruments: `prototype/426-store-mini.pl`
+(arms A/B/C/D/D2/D3, one arm and one fixture per process, cross-arm parity digests),
+`prototype/426-asbuilt-probe.pl` (injected into a throwaway `ltl` before
+`calculate_all_statistics();` — measures the real as-built store), fixtures from
+`prototype/426-generate-fixtures.sh`. Results: `prototype/426-results/`.
+
+- **F12 — The columnar shape beats the ladder's floor on the real heap.** Inside `ltl`
+  on the 286,659-key construct: walk L0 0.260 s / L2 0.135 s / columnar 0.046 s; fill
+  sort 0.236 / 0.101 / 0.023 s. The probe's L0 shapes match ltl's own `population_walk`
+  0.254 and `sort_selection` 0.245 from the same process within 3%.
+- **F13 — Write side is neutral where it matters and −14% on multi-field entries.**
+  Non-access path: D/D2/D3 within ±3% of A at 100k and full (A's own min–max spread is
+  ±5–8%). Access path: C, D, D2, D3 all −13…−15% per line at 10k/100k/1M — the gain is
+  the single resolution of the entry per line (F6), available to any store shape.
+- **F14 — Memory −24% RSS at 287k keys** (146–149 → 111.4 MB); D's own per-key overhead
+  ≈ 80 B (ordinal column + HEK-sharing key column). `Devel::Size` overcounts the key
+  column (79 MB reported, ≈ 14 MB real) — RSS is the truth for this store.
+- **F15 — The comparator hoist (arm B) is falsified.** Within run-to-run noise of A
+  at 287k keys (−8% / +3% in the final matrix, +19% / +44% in the previous) against
+  the columnar store's 15×: the extraction pass dereferences every scattered entry
+  once — the cost the ladder measured — and adds list/array construction on top. B
+  wins only where the keys are not all tied and the sort does O(n log n)
+  comparisons (0.41× at 10k).
+- **F16 — Deletion: tombstones are cheaper than hash deletes** (0.23 vs 0.30 s for
+  258k deletes + 2.9k injects); compaction 0.064 s at 287k; the compacted store is
+  smaller than the hash's post-delete store; tombstoned traversals are still 1.6×/9×
+  faster than the hash's.
+- **F17 — The ordinal→key column is the columnar store's one real overhead**: 0.13 s
+  at 287k keys to materialise the hash's keys once (450 ns/key — the same cost A pays
+  inside `foreach (keys %{…})`). Writing it at insert time instead (D3) costs +29% RSS
+  (+80 MB) and makes the tiebreaker sorts 2.4× slower. Total columnar traversal on the
+  construct: 0.040 + 0.130 + 0.023 = 0.19 s vs A's 0.54 s.
+- **F18 — D2's single hash operation per line is not measurably faster than D's two**;
+  it is the cleaner hot-path shape, not a performance decision.
+- **F19 — Bin mode: the counter store is the dominant per-message cost, and its bins
+  array is the lever** (report V7). Today, at 287k keys with durations: record 344 MB
+  (1,200 B/key), counters 683 MB (2,383 B/key — #354's figure reproduced), 1.13 GB
+  RSS, 23 s for the `-so p99` population pass. Counters keyed by row as columns on
+  the record store with span-only bins (`[base_index, counts…]`): 455 MB RSS, 2.15 s,
+  output-identical; on the real DPM log 17.4 → 11.0 MB and 0.350 → 0.073 s. The read
+  loop is 25% cheaper per line (the composite key string and the primitive call
+  shape are on the per-line path today).
+- **F20 — `count_*` is a hot column family on ScriptLog data** (every line carries
+  `count=`), so P7's cold-hash policy must not cover it: columns are instantiated when
+  the count producer is active (`!$omit_count` and a format with count in its
+  message). Found because the first bin-mode fixture keying missed production's
+  `count=` mask and thread-pool reduction; both are now reproduced exactly.
+- **F21 — Shared log-spaced grid** (report V8): against the exact percentiles on the
+  DPM log, at least as accurate per message as today's per-key partitions (lower
+  median error at every quantile; the one-bin bound held at p95–p999 where today's
+  widenings break it at p95) and strictly better after merging (one-bin bound held on
+  100% of merged pairs vs 94.5% — today's union remap costs up to 1.5 bins at p99).
+  82% of merges needed a remap. Adaptivity is preserved (no range up front; span grows
+  on demand; counts never move). Reopens #187 D5 — architect's decision.
+- **F22 — Columnar tombstoning is slower than hash deletion in bin mode** (1.3–1.6 vs
+  1.0 s for 258k deletes): `undef` into 26 columns per row. A dead-row bitmap instead
+  of per-column undef is the obvious fix; not measured.
+
+### Proposed decisions (NOT locked — for the architect)
+
+Each is grounded in a report section; none takes effect until locked as `Dxx`.
+
+| # | proposal | grounded by |
+|---|---|---|
+| P1 | Replace the per-message entry hash with per-category ordinal stores: `message → ordinal` hash + one array per demanded field. | V1, V2, V3 |
+| P2 | Columns are instantiated per family and demand group at option-resolution time (one column on the non-access path; seven on the raw access path; bin sidecars as further columns); no per-line existence tests. | V3 (Q3/Q8) |
+| P3 | Deletion is a tombstone (undef the ordinal's occurrences slot, delete the hash entry); one compaction pass (in-place column slices + in-place renumbering of the ordinal hash) runs at the end of the `-g` final pass. Field-level `delete` (#330) becomes an `undef` of the slot. | V4 (Q4) |
+| P4 | The ordinal→key column is built after the read loop from the hash's own keys (HEK-sharing scalars), lazily on first consumer need, per category; never written at insert time. | V6 |
+| P5 | The category dimension stays a separate store per category; the store handle is selected in the branch that assigns `$category` (zero per-line cost). | V2 (Q9, one shape) |
+| P6 | Arm B (comparator hoist) is rejected; the aliasing of arm C is adopted by construction in the columnar write block. | V5 (Q10) |
+| P7 | Rare and arbitrary fields (udm_*, the 21 statistics outputs on top-N keys, `is_consolidated`) go to a lazily created per-ordinal cold hash — the E policy — so F7's hash-slice write stays a hash-slice write. `count_*` is excluded: it is a hot column family, instantiated when the count producer is active (F20). | design; not exercised by the fixtures (Q6) |
+| P8 | Under `-mdm bin` the counter store is not a separate keyed hash: partition state, overflow/underflow and the bins are columns on the same row as the record (Q7). `%log_messages_counters`, its composite key, and the `bin_entry` attach/detach in `merge_log_message_entry_into_cluster` disappear. | V7 |
+| P9 | Bins are stored span-only — `[base_index, c0, c1, …]` covering the occupied indices — with the verbatim geometry and percentile arithmetic. | V7 (K4: output-identical, 4.8–10.6× on the population pass, 2.5–4.9× less counter memory) |
+| P10 | **Proposal requiring #187 D5 to be reopened**: one log-spaced grid per store (`index = floor(bpd × log10(value))`), shared by every message and time bucket; per-key storage is the occupied span; merge is an index-wise add; no per-key partition state, no widening remap. | V8 (fidelity ≥ today per key, strictly better after merge) |
+
+Not covered by the prototype and carried to implementation planning: Q5 (merge
+surface), Q11 (per-column memory attribution for #2), the dead-row bitmap (F22), and
+the time-bucket stores under P10 (same shape, bounded cardinality — not measured).
+
+## Next step — revalidating the bin-counter primitives (#189) before implementation
+
+**The tension.** The histogram bin-counter primitives (`partition_new`, `bin_assign`,
+`partition_extend`, `partition_rebin`, `bin_boundary`, `counter_update`, `percentile`,
+`merge_bin_counter_entries`) were designed under #187 (locked decisions in
+`features/187-histogram-bin-counter-percentiles.md`, D5 in particular: per-key
+partitions seeded on the first sample, HdrHistogram doubling on out-of-range) and
+validated under #189 through `prototype/189-bin-counter-primitives.pl` and its report
+`prototype/189-bin-counter-primitives-validation-report.md`, across five aspects:
+calculation accuracy against the `calculate_statistics` oracle (its V5), in-bin
+formula edge cases with the R2 cross-check (V1), the seeding heuristic and the
+overflow/underflow audit (V3), per-key fan-out at scale with the R2 algorithm benchmark
+(V2), and the `-V` percentile-mode output (V4). Those results attach to the primitives
+*as they operate on today's containers and geometry*.
+
+This prototype's bin-mode arms (K2–K4, report V7) re-container those primitives
+without changing their arithmetic and are digest-identical to production, so the #189
+validation carries over to them by construction. **P10 (the shared grid) does not**: it
+is a different geometry, and this prototype's fidelity probe (report V8) covers only
+the accuracy-against-exact aspect, on one log. The other #189 aspects — edge cases,
+seeding/overflow audit, fan-out at scale, `-V` output — have not been exercised against
+a shared grid, and the #187 decisions that the shared grid would replace have not been
+re-examined.
+
+**Decision (architect, 2026-08-24).** Implementation of the store proposed here is not
+blessed until the bin-counter primitives have been revalidated for the proposed
+representation:
+
+1. Read `prototype/189-bin-counter-primitives.pl`, its report, and the #187 decision
+   record; list every validation aspect and every locked decision the columnar /
+   span-only / shared-grid representation touches.
+2. Build the prototypes for those aspects against the proposed representation, in the
+   approach used here (production primitives verbatim as the baseline arm; parity
+   digests before any timing; medians with ranges; the exact-percentile oracle), and
+   go through **all** of them, not the accuracy aspect alone.
+3. Adjust the primitives where the prototypes say to; record the outcome as `Dxx`
+   decisions here and, where a #187 decision changes, as an explicit amendment there.
+4. Only then: the blessing to try the implementation of P1–P10.
+
+The raw-mode decisions (P1–P7) do not depend on the primitives, but the
+implementation is one change to one store; it waits for step 4 rather than shipping a
+store the bin path then has to be retrofitted onto.
 
 ## Verification instrument
 
@@ -366,7 +503,18 @@ computed, and that distinction is re-recorded here when it does.
 - **#415 — statistics-phase drift** (closed). Origin of the finding; record at
   `tests/profile/results/415-statsdrift-new/analysis.md`.
 - **#354 — `-mdm bin` uses more message-stats memory than raw** (on hold, behind #2).
-  Source of the per-entry byte figures.
+  Source of the per-entry byte figures — reproduced by this prototype (F19: 2,383 B of
+  counter entry per message at 287k keys) and addressed by P8/P9.
+- **#189 — unified histogram bin-counter primitives** (closed) and **#187 — primitive
+  contract for percentile and histogram consumers** (closed). The primitives this
+  store's bin path calls; their validation record
+  (`prototype/189-bin-counter-primitives-validation-report.md`) and locked decisions
+  (`features/187-histogram-bin-counter-percentiles.md`) are what § Next step
+  revalidates against the proposed representation. #201
+  (`features/201-display-geometry-bound-consumers.md`) owns `partition_rebin`, which
+  the shared grid (P10) would retire; #287
+  (`features/287-message-stats-bin-counter-data-model.md`) owns the per-message bin
+  data model this store replaces.
 - **#323 — dynamic bins-per-decade** (on hold). Same distribution evidence.
 - **#428 — `-so mean_bytes` / `-so count_mean` rank nothing** (F8). Found during this
   survey; independent of the store's representation. A compact store with a declared
@@ -396,10 +544,18 @@ For **this specification stage**:
 - [x] Issue-cited artifacts verified; corrections recorded (F9).
 - [x] Verification instrument confirmed present on the current tree.
 
-For the **prototype stage** (not started): Q1…Q12 answered with medians and ranges;
-`Dxx` locked; findings report delivered before any disposition question.
+For the **prototype stage** (measurements complete 2026-08-24):
 
-For **implementation** (not started): full `tests/validate-*.sh` suite exits 0;
+- [x] Q1–Q4, Q8, Q10, Q12 answered with medians and ranges (report V1–V6).
+- [x] Q5, Q6, Q7, Q9 (one shape measured), Q11 explicitly deferred with the reason.
+- [x] Findings report delivered before any disposition question.
+- [x] Bin-mode stores measured (V7) and shared-grid fidelity measured (V8).
+- [ ] Bin-counter primitives revalidated against the proposed representation through
+      every #189 validation aspect (§ Next step) — **gate for implementation**.
+- [ ] `Dxx` locked by the architect from § Proposed decisions.
+
+For **implementation** (not started; gated on the #189 revalidation above): full
+`tests/validate-*.sh` suite exits 0;
 runtime-warning-clean stderr; benchmark regression check against the last released
 baseline; F16 rewritten; `compare-results.sh` `tmap` updated in the same commit if any
 `TIMING`/`MEMORY` label changes.

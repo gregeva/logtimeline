@@ -1,0 +1,120 @@
+PARITY	twx-unique-1k.log	arm-A	store=85b12d05e6cc8cd8be9993a652fad4eb rows=993 avail=01653f8300da4d48d7a77c4b6e1dd385 fill=01653f8300da4d48d7a77c4b6e1dd385
+PARITY	twx-unique-1k.log	arm-A	churn=d5f6588efb214da89250c055e0809227 absorbed=900 churn_fill=1410a72e0003d48b5967e54838d7c263
+PARITY	twx-unique-1k.log	arm-B	store=85b12d05e6cc8cd8be9993a652fad4eb rows=993 avail=01653f8300da4d48d7a77c4b6e1dd385 fill=01653f8300da4d48d7a77c4b6e1dd385
+PARITY	twx-unique-1k.log	arm-B	churn=d5f6588efb214da89250c055e0809227 absorbed=900 churn_fill=1410a72e0003d48b5967e54838d7c263
+PARITY	twx-unique-1k.log	arm-C	store=85b12d05e6cc8cd8be9993a652fad4eb rows=993 avail=01653f8300da4d48d7a77c4b6e1dd385 fill=01653f8300da4d48d7a77c4b6e1dd385
+PARITY	twx-unique-1k.log	arm-C	churn=d5f6588efb214da89250c055e0809227 absorbed=900 churn_fill=1410a72e0003d48b5967e54838d7c263
+PARITY	twx-unique-1k.log	arm-D	store=85b12d05e6cc8cd8be9993a652fad4eb rows=993 avail=01653f8300da4d48d7a77c4b6e1dd385 fill=01653f8300da4d48d7a77c4b6e1dd385
+PARITY	twx-unique-1k.log	arm-D	churn=d5f6588efb214da89250c055e0809227 absorbed=900 churn_fill=1410a72e0003d48b5967e54838d7c263
+PARITY	twx-unique-1k.log	arm-D	compact=d5f6588efb214da89250c055e0809227 compact_fill=1410a72e0003d48b5967e54838d7c263
+PARITY	twx-unique-1k.log	arm-D2	store=85b12d05e6cc8cd8be9993a652fad4eb rows=993 avail=01653f8300da4d48d7a77c4b6e1dd385 fill=01653f8300da4d48d7a77c4b6e1dd385
+PARITY	twx-unique-1k.log	arm-D2	churn=d5f6588efb214da89250c055e0809227 absorbed=900 churn_fill=1410a72e0003d48b5967e54838d7c263
+PARITY	twx-unique-1k.log	arm-D2	compact=d5f6588efb214da89250c055e0809227 compact_fill=1410a72e0003d48b5967e54838d7c263
+PARITY	twx-unique-1k.log	arm-D3	store=85b12d05e6cc8cd8be9993a652fad4eb rows=993 avail=01653f8300da4d48d7a77c4b6e1dd385 fill=01653f8300da4d48d7a77c4b6e1dd385
+PARITY	twx-unique-1k.log	arm-D3	churn=d5f6588efb214da89250c055e0809227 absorbed=900 churn_fill=1410a72e0003d48b5967e54838d7c263
+PARITY	twx-unique-1k.log	arm-D3	compact=d5f6588efb214da89250c055e0809227 compact_fill=1410a72e0003d48b5967e54838d7c263
+PARITY	twx-unique-10k.log	arm-A	store=441b56adfeda6e285822a09158005802 rows=9963 avail=153dec1f393dc3cdd692f85a1d8dcbf9 fill=153dec1f393dc3cdd692f85a1d8dcbf9
+PARITY	twx-unique-10k.log	arm-A	churn=4f53c6e5e36e9c3bdfa357030eb5e2e2 absorbed=8994 churn_fill=4b3dbbd7a6792247efd1e193e0343a28
+PARITY	twx-unique-10k.log	arm-B	store=441b56adfeda6e285822a09158005802 rows=9963 avail=153dec1f393dc3cdd692f85a1d8dcbf9 fill=153dec1f393dc3cdd692f85a1d8dcbf9
+PARITY	twx-unique-10k.log	arm-B	churn=4f53c6e5e36e9c3bdfa357030eb5e2e2 absorbed=8994 churn_fill=4b3dbbd7a6792247efd1e193e0343a28
+PARITY	twx-unique-10k.log	arm-C	store=441b56adfeda6e285822a09158005802 rows=9963 avail=153dec1f393dc3cdd692f85a1d8dcbf9 fill=153dec1f393dc3cdd692f85a1d8dcbf9
+PARITY	twx-unique-10k.log	arm-C	churn=4f53c6e5e36e9c3bdfa357030eb5e2e2 absorbed=8994 churn_fill=4b3dbbd7a6792247efd1e193e0343a28
+PARITY	twx-unique-10k.log	arm-D	store=441b56adfeda6e285822a09158005802 rows=9963 avail=153dec1f393dc3cdd692f85a1d8dcbf9 fill=153dec1f393dc3cdd692f85a1d8dcbf9
+PARITY	twx-unique-10k.log	arm-D	churn=4f53c6e5e36e9c3bdfa357030eb5e2e2 absorbed=8994 churn_fill=4b3dbbd7a6792247efd1e193e0343a28
+PARITY	twx-unique-10k.log	arm-D	compact=4f53c6e5e36e9c3bdfa357030eb5e2e2 compact_fill=4b3dbbd7a6792247efd1e193e0343a28
+PARITY	twx-unique-10k.log	arm-D2	store=441b56adfeda6e285822a09158005802 rows=9963 avail=153dec1f393dc3cdd692f85a1d8dcbf9 fill=153dec1f393dc3cdd692f85a1d8dcbf9
+PARITY	twx-unique-10k.log	arm-D2	churn=4f53c6e5e36e9c3bdfa357030eb5e2e2 absorbed=8994 churn_fill=4b3dbbd7a6792247efd1e193e0343a28
+PARITY	twx-unique-10k.log	arm-D2	compact=4f53c6e5e36e9c3bdfa357030eb5e2e2 compact_fill=4b3dbbd7a6792247efd1e193e0343a28
+PARITY	twx-unique-10k.log	arm-D3	store=441b56adfeda6e285822a09158005802 rows=9963 avail=153dec1f393dc3cdd692f85a1d8dcbf9 fill=153dec1f393dc3cdd692f85a1d8dcbf9
+PARITY	twx-unique-10k.log	arm-D3	churn=4f53c6e5e36e9c3bdfa357030eb5e2e2 absorbed=8994 churn_fill=4b3dbbd7a6792247efd1e193e0343a28
+PARITY	twx-unique-10k.log	arm-D3	compact=4f53c6e5e36e9c3bdfa357030eb5e2e2 compact_fill=4b3dbbd7a6792247efd1e193e0343a28
+PARITY	twx-unique-100k.log	arm-A	store=81f6e094ffd1dd4a0ec381bf7b1b78dd rows=99487 avail=6f0d28eadce72a5158816a3836fb7c51 fill=6f0d28eadce72a5158816a3836fb7c51
+PARITY	twx-unique-100k.log	arm-A	churn=3b572c292210932e2a7cb54e6f8476d1 absorbed=89839 churn_fill=d33082a7ce840cdb6a08874694acdea1
+PARITY	twx-unique-100k.log	arm-B	store=81f6e094ffd1dd4a0ec381bf7b1b78dd rows=99487 avail=6f0d28eadce72a5158816a3836fb7c51 fill=6f0d28eadce72a5158816a3836fb7c51
+PARITY	twx-unique-100k.log	arm-B	churn=3b572c292210932e2a7cb54e6f8476d1 absorbed=89839 churn_fill=d33082a7ce840cdb6a08874694acdea1
+PARITY	twx-unique-100k.log	arm-C	store=81f6e094ffd1dd4a0ec381bf7b1b78dd rows=99487 avail=6f0d28eadce72a5158816a3836fb7c51 fill=6f0d28eadce72a5158816a3836fb7c51
+PARITY	twx-unique-100k.log	arm-C	churn=3b572c292210932e2a7cb54e6f8476d1 absorbed=89839 churn_fill=d33082a7ce840cdb6a08874694acdea1
+PARITY	twx-unique-100k.log	arm-D	store=81f6e094ffd1dd4a0ec381bf7b1b78dd rows=99487 avail=6f0d28eadce72a5158816a3836fb7c51 fill=6f0d28eadce72a5158816a3836fb7c51
+PARITY	twx-unique-100k.log	arm-D	churn=3b572c292210932e2a7cb54e6f8476d1 absorbed=89839 churn_fill=d33082a7ce840cdb6a08874694acdea1
+PARITY	twx-unique-100k.log	arm-D	compact=3b572c292210932e2a7cb54e6f8476d1 compact_fill=d33082a7ce840cdb6a08874694acdea1
+PARITY	twx-unique-100k.log	arm-D2	store=81f6e094ffd1dd4a0ec381bf7b1b78dd rows=99487 avail=6f0d28eadce72a5158816a3836fb7c51 fill=6f0d28eadce72a5158816a3836fb7c51
+PARITY	twx-unique-100k.log	arm-D2	churn=3b572c292210932e2a7cb54e6f8476d1 absorbed=89839 churn_fill=d33082a7ce840cdb6a08874694acdea1
+PARITY	twx-unique-100k.log	arm-D2	compact=3b572c292210932e2a7cb54e6f8476d1 compact_fill=d33082a7ce840cdb6a08874694acdea1
+PARITY	twx-unique-100k.log	arm-D3	store=81f6e094ffd1dd4a0ec381bf7b1b78dd rows=99487 avail=6f0d28eadce72a5158816a3836fb7c51 fill=6f0d28eadce72a5158816a3836fb7c51
+PARITY	twx-unique-100k.log	arm-D3	churn=3b572c292210932e2a7cb54e6f8476d1 absorbed=89839 churn_fill=d33082a7ce840cdb6a08874694acdea1
+PARITY	twx-unique-100k.log	arm-D3	compact=3b572c292210932e2a7cb54e6f8476d1 compact_fill=d33082a7ce840cdb6a08874694acdea1
+PARITY	twx-unique-full.log	arm-A	store=36f50925627b4b18edc1c8a1ebf3c07f rows=286659 avail=48786e683f97f606ec8f15289793cc90 fill=48786e683f97f606ec8f15289793cc90
+PARITY	twx-unique-full.log	arm-A	churn=51827d315243cfa8964cff9247bbee8e absorbed=258747 churn_fill=16a8167ebb570152d4312b322d47d29b
+PARITY	twx-unique-full.log	arm-B	store=36f50925627b4b18edc1c8a1ebf3c07f rows=286659 avail=48786e683f97f606ec8f15289793cc90 fill=48786e683f97f606ec8f15289793cc90
+PARITY	twx-unique-full.log	arm-B	churn=51827d315243cfa8964cff9247bbee8e absorbed=258747 churn_fill=16a8167ebb570152d4312b322d47d29b
+PARITY	twx-unique-full.log	arm-C	store=36f50925627b4b18edc1c8a1ebf3c07f rows=286659 avail=48786e683f97f606ec8f15289793cc90 fill=48786e683f97f606ec8f15289793cc90
+PARITY	twx-unique-full.log	arm-C	churn=51827d315243cfa8964cff9247bbee8e absorbed=258747 churn_fill=16a8167ebb570152d4312b322d47d29b
+PARITY	twx-unique-full.log	arm-D	store=36f50925627b4b18edc1c8a1ebf3c07f rows=286659 avail=48786e683f97f606ec8f15289793cc90 fill=48786e683f97f606ec8f15289793cc90
+PARITY	twx-unique-full.log	arm-D	churn=51827d315243cfa8964cff9247bbee8e absorbed=258747 churn_fill=16a8167ebb570152d4312b322d47d29b
+PARITY	twx-unique-full.log	arm-D	compact=51827d315243cfa8964cff9247bbee8e compact_fill=16a8167ebb570152d4312b322d47d29b
+PARITY	twx-unique-full.log	arm-D2	store=36f50925627b4b18edc1c8a1ebf3c07f rows=286659 avail=48786e683f97f606ec8f15289793cc90 fill=48786e683f97f606ec8f15289793cc90
+PARITY	twx-unique-full.log	arm-D2	churn=51827d315243cfa8964cff9247bbee8e absorbed=258747 churn_fill=16a8167ebb570152d4312b322d47d29b
+PARITY	twx-unique-full.log	arm-D2	compact=51827d315243cfa8964cff9247bbee8e compact_fill=16a8167ebb570152d4312b322d47d29b
+PARITY	twx-unique-full.log	arm-D3	store=36f50925627b4b18edc1c8a1ebf3c07f rows=286659 avail=48786e683f97f606ec8f15289793cc90 fill=48786e683f97f606ec8f15289793cc90
+PARITY	twx-unique-full.log	arm-D3	churn=51827d315243cfa8964cff9247bbee8e absorbed=258747 churn_fill=16a8167ebb570152d4312b322d47d29b
+PARITY	twx-unique-full.log	arm-D3	compact=51827d315243cfa8964cff9247bbee8e compact_fill=16a8167ebb570152d4312b322d47d29b
+PARITY	access-1k.log	arm-A	store=c183017f2792d37fca445774d60a086b rows=48 avail=486a67ec5d26d070ee3fb9cb5413897d fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1k.log	arm-A	churn=59b4fd1fbf9f1cfd42de10c40ef6c29a absorbed=976 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-1k.log	arm-B	store=c183017f2792d37fca445774d60a086b rows=48 avail=486a67ec5d26d070ee3fb9cb5413897d fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1k.log	arm-B	churn=59b4fd1fbf9f1cfd42de10c40ef6c29a absorbed=976 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-1k.log	arm-C	store=c183017f2792d37fca445774d60a086b rows=48 avail=486a67ec5d26d070ee3fb9cb5413897d fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1k.log	arm-C	churn=59b4fd1fbf9f1cfd42de10c40ef6c29a absorbed=976 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-1k.log	arm-D	store=c183017f2792d37fca445774d60a086b rows=48 avail=486a67ec5d26d070ee3fb9cb5413897d fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1k.log	arm-D	churn=59b4fd1fbf9f1cfd42de10c40ef6c29a absorbed=976 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-1k.log	arm-D	compact=59b4fd1fbf9f1cfd42de10c40ef6c29a compact_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-1k.log	arm-D2	store=c183017f2792d37fca445774d60a086b rows=48 avail=486a67ec5d26d070ee3fb9cb5413897d fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1k.log	arm-D2	churn=59b4fd1fbf9f1cfd42de10c40ef6c29a absorbed=976 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-1k.log	arm-D2	compact=59b4fd1fbf9f1cfd42de10c40ef6c29a compact_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-1k.log	arm-D3	store=c183017f2792d37fca445774d60a086b rows=48 avail=486a67ec5d26d070ee3fb9cb5413897d fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1k.log	arm-D3	churn=59b4fd1fbf9f1cfd42de10c40ef6c29a absorbed=976 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-1k.log	arm-D3	compact=59b4fd1fbf9f1cfd42de10c40ef6c29a compact_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-10k.log	arm-A	store=ec43af5dda16c12ebfd9c195e1efae3b rows=71 avail=03faeb29af73a3c273010f3e9e1b0613 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-10k.log	arm-A	churn=03b62d8c6f3c80141214bf955109973d absorbed=9802 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-10k.log	arm-B	store=ec43af5dda16c12ebfd9c195e1efae3b rows=71 avail=03faeb29af73a3c273010f3e9e1b0613 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-10k.log	arm-B	churn=03b62d8c6f3c80141214bf955109973d absorbed=9802 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-10k.log	arm-C	store=ec43af5dda16c12ebfd9c195e1efae3b rows=71 avail=03faeb29af73a3c273010f3e9e1b0613 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-10k.log	arm-C	churn=03b62d8c6f3c80141214bf955109973d absorbed=9802 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-10k.log	arm-D	store=ec43af5dda16c12ebfd9c195e1efae3b rows=71 avail=03faeb29af73a3c273010f3e9e1b0613 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-10k.log	arm-D	churn=03b62d8c6f3c80141214bf955109973d absorbed=9802 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-10k.log	arm-D	compact=03b62d8c6f3c80141214bf955109973d compact_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-10k.log	arm-D2	store=ec43af5dda16c12ebfd9c195e1efae3b rows=71 avail=03faeb29af73a3c273010f3e9e1b0613 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-10k.log	arm-D2	churn=03b62d8c6f3c80141214bf955109973d absorbed=9802 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-10k.log	arm-D2	compact=03b62d8c6f3c80141214bf955109973d compact_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-10k.log	arm-D3	store=ec43af5dda16c12ebfd9c195e1efae3b rows=71 avail=03faeb29af73a3c273010f3e9e1b0613 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-10k.log	arm-D3	churn=03b62d8c6f3c80141214bf955109973d absorbed=9802 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-10k.log	arm-D3	compact=03b62d8c6f3c80141214bf955109973d compact_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-100k.log	arm-A	store=d71cd7b6f12dd860ccc50feffcb57118 rows=82 avail=1a09150ec340b68e01fcc7d8ba708be2 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-100k.log	arm-A	churn=3d5291a7b5a8efa6d0d1982727b5dcb3 absorbed=99719 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-100k.log	arm-B	store=d71cd7b6f12dd860ccc50feffcb57118 rows=82 avail=1a09150ec340b68e01fcc7d8ba708be2 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-100k.log	arm-B	churn=3d5291a7b5a8efa6d0d1982727b5dcb3 absorbed=99719 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-100k.log	arm-C	store=d71cd7b6f12dd860ccc50feffcb57118 rows=82 avail=1a09150ec340b68e01fcc7d8ba708be2 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-100k.log	arm-C	churn=3d5291a7b5a8efa6d0d1982727b5dcb3 absorbed=99719 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-100k.log	arm-D	store=d71cd7b6f12dd860ccc50feffcb57118 rows=82 avail=1a09150ec340b68e01fcc7d8ba708be2 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-100k.log	arm-D	churn=3d5291a7b5a8efa6d0d1982727b5dcb3 absorbed=99719 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-100k.log	arm-D	compact=3d5291a7b5a8efa6d0d1982727b5dcb3 compact_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-100k.log	arm-D2	store=d71cd7b6f12dd860ccc50feffcb57118 rows=82 avail=1a09150ec340b68e01fcc7d8ba708be2 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-100k.log	arm-D2	churn=3d5291a7b5a8efa6d0d1982727b5dcb3 absorbed=99719 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-100k.log	arm-D2	compact=3d5291a7b5a8efa6d0d1982727b5dcb3 compact_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-100k.log	arm-D3	store=d71cd7b6f12dd860ccc50feffcb57118 rows=82 avail=1a09150ec340b68e01fcc7d8ba708be2 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-100k.log	arm-D3	churn=3d5291a7b5a8efa6d0d1982727b5dcb3 absorbed=99719 churn_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-100k.log	arm-D3	compact=3d5291a7b5a8efa6d0d1982727b5dcb3 compact_fill=439cd93e44cd5af6cff0d5d98dbe89d3
+PARITY	access-1m.log	arm-A	store=219527e2a819a133e971d034b0ed16d6 rows=3562 avail=113ea5c7392c13bf1c17bda03a7b64a6 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1m.log	arm-A	churn=8d5dcea6e780d3eda2998ba3025c344d absorbed=989260 churn_fill=d2d0c55a3cbd872c5d9e8a50fccf041c
+PARITY	access-1m.log	arm-B	store=219527e2a819a133e971d034b0ed16d6 rows=3562 avail=113ea5c7392c13bf1c17bda03a7b64a6 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1m.log	arm-B	churn=8d5dcea6e780d3eda2998ba3025c344d absorbed=989260 churn_fill=d2d0c55a3cbd872c5d9e8a50fccf041c
+PARITY	access-1m.log	arm-C	store=219527e2a819a133e971d034b0ed16d6 rows=3562 avail=113ea5c7392c13bf1c17bda03a7b64a6 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1m.log	arm-C	churn=8d5dcea6e780d3eda2998ba3025c344d absorbed=989260 churn_fill=d2d0c55a3cbd872c5d9e8a50fccf041c
+PARITY	access-1m.log	arm-D	store=219527e2a819a133e971d034b0ed16d6 rows=3562 avail=113ea5c7392c13bf1c17bda03a7b64a6 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1m.log	arm-D	churn=8d5dcea6e780d3eda2998ba3025c344d absorbed=989260 churn_fill=d2d0c55a3cbd872c5d9e8a50fccf041c
+PARITY	access-1m.log	arm-D	compact=8d5dcea6e780d3eda2998ba3025c344d compact_fill=d2d0c55a3cbd872c5d9e8a50fccf041c
+PARITY	access-1m.log	arm-D2	store=219527e2a819a133e971d034b0ed16d6 rows=3562 avail=113ea5c7392c13bf1c17bda03a7b64a6 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1m.log	arm-D2	churn=8d5dcea6e780d3eda2998ba3025c344d absorbed=989260 churn_fill=d2d0c55a3cbd872c5d9e8a50fccf041c
+PARITY	access-1m.log	arm-D2	compact=8d5dcea6e780d3eda2998ba3025c344d compact_fill=d2d0c55a3cbd872c5d9e8a50fccf041c
+PARITY	access-1m.log	arm-D3	store=219527e2a819a133e971d034b0ed16d6 rows=3562 avail=113ea5c7392c13bf1c17bda03a7b64a6 fill=d41d8cd98f00b204e9800998ecf8427e
+PARITY	access-1m.log	arm-D3	churn=8d5dcea6e780d3eda2998ba3025c344d absorbed=989260 churn_fill=d2d0c55a3cbd872c5d9e8a50fccf041c
+PARITY	access-1m.log	arm-D3	compact=8d5dcea6e780d3eda2998ba3025c344d compact_fill=d2d0c55a3cbd872c5d9e8a50fccf041c

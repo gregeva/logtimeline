@@ -1,0 +1,66 @@
+PARITY	bin-dpm-1k.log	arm-K1	store=7e595f9953a280c58d9d93c07854fb44 rows=720 avail=bb254a139f7e37cae46b298c5c2317dc fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-1k.log	arm-K1	churn=8a6a757224a3f11f0754531919a23ef8 absorbed=928 churn_fill=1641b9535d0f76889fe768da63056884
+PARITY	bin-dpm-1k.log	arm-K2	store=7e595f9953a280c58d9d93c07854fb44 rows=720 avail=bb254a139f7e37cae46b298c5c2317dc fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-1k.log	arm-K2	churn=8a6a757224a3f11f0754531919a23ef8 absorbed=928 churn_fill=1641b9535d0f76889fe768da63056884
+PARITY	bin-dpm-1k.log	arm-K2	compact=8a6a757224a3f11f0754531919a23ef8
+PARITY	bin-dpm-1k.log	arm-K3	store=7e595f9953a280c58d9d93c07854fb44 rows=720 avail=bb254a139f7e37cae46b298c5c2317dc fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-1k.log	arm-K3	churn=8a6a757224a3f11f0754531919a23ef8 absorbed=928 churn_fill=1641b9535d0f76889fe768da63056884
+PARITY	bin-dpm-1k.log	arm-K3	compact=8a6a757224a3f11f0754531919a23ef8
+PARITY	bin-dpm-1k.log	arm-K4	store=7e595f9953a280c58d9d93c07854fb44 rows=720 avail=bb254a139f7e37cae46b298c5c2317dc fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-1k.log	arm-K4	churn=8a6a757224a3f11f0754531919a23ef8 absorbed=928 churn_fill=1641b9535d0f76889fe768da63056884
+PARITY	bin-dpm-1k.log	arm-K4	compact=8a6a757224a3f11f0754531919a23ef8
+PARITY	bin-dpm-10k.log	arm-K1	store=af262cda4b37e4cccf6494182592ee66 rows=2515 avail=9c1e7e15214e8d0c5ac36b7695e67c7a fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-10k.log	arm-K1	churn=8cf5eecbd4a9569f425b80023929a8c2 absorbed=9254 churn_fill=5c893e0bce32586d44469e47c55202ff
+PARITY	bin-dpm-10k.log	arm-K2	store=af262cda4b37e4cccf6494182592ee66 rows=2515 avail=9c1e7e15214e8d0c5ac36b7695e67c7a fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-10k.log	arm-K2	churn=8cf5eecbd4a9569f425b80023929a8c2 absorbed=9254 churn_fill=5c893e0bce32586d44469e47c55202ff
+PARITY	bin-dpm-10k.log	arm-K2	compact=8cf5eecbd4a9569f425b80023929a8c2
+PARITY	bin-dpm-10k.log	arm-K3	store=af262cda4b37e4cccf6494182592ee66 rows=2515 avail=9c1e7e15214e8d0c5ac36b7695e67c7a fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-10k.log	arm-K3	churn=8cf5eecbd4a9569f425b80023929a8c2 absorbed=9254 churn_fill=5c893e0bce32586d44469e47c55202ff
+PARITY	bin-dpm-10k.log	arm-K3	compact=8cf5eecbd4a9569f425b80023929a8c2
+PARITY	bin-dpm-10k.log	arm-K4	store=af262cda4b37e4cccf6494182592ee66 rows=2515 avail=9c1e7e15214e8d0c5ac36b7695e67c7a fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-10k.log	arm-K4	churn=8cf5eecbd4a9569f425b80023929a8c2 absorbed=9254 churn_fill=5c893e0bce32586d44469e47c55202ff
+PARITY	bin-dpm-10k.log	arm-K4	compact=8cf5eecbd4a9569f425b80023929a8c2
+PARITY	bin-dpm-100k.log	arm-K1	store=86bfcecc87138b503ccfd62b28996495 rows=3312 avail=572938bbc209be7be7fbf4c1e4d41b87 fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-100k.log	arm-K1	churn=119047361969304f7b7f9c879843461d absorbed=91566 churn_fill=3acb5be8ce95da1d739f25f189567c58
+PARITY	bin-dpm-100k.log	arm-K2	store=86bfcecc87138b503ccfd62b28996495 rows=3312 avail=572938bbc209be7be7fbf4c1e4d41b87 fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-100k.log	arm-K2	churn=119047361969304f7b7f9c879843461d absorbed=91566 churn_fill=3acb5be8ce95da1d739f25f189567c58
+PARITY	bin-dpm-100k.log	arm-K2	compact=119047361969304f7b7f9c879843461d
+PARITY	bin-dpm-100k.log	arm-K3	store=86bfcecc87138b503ccfd62b28996495 rows=3312 avail=572938bbc209be7be7fbf4c1e4d41b87 fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-100k.log	arm-K3	churn=119047361969304f7b7f9c879843461d absorbed=91566 churn_fill=3acb5be8ce95da1d739f25f189567c58
+PARITY	bin-dpm-100k.log	arm-K3	compact=119047361969304f7b7f9c879843461d
+PARITY	bin-dpm-100k.log	arm-K4	store=86bfcecc87138b503ccfd62b28996495 rows=3312 avail=572938bbc209be7be7fbf4c1e4d41b87 fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-100k.log	arm-K4	churn=119047361969304f7b7f9c879843461d absorbed=91566 churn_fill=3acb5be8ce95da1d739f25f189567c58
+PARITY	bin-dpm-100k.log	arm-K4	compact=119047361969304f7b7f9c879843461d
+PARITY	bin-dpm-full.log	arm-K1	store=3f3ad229d4c7f6f86d4c102202a24be9 rows=3421 avail=0f14aed88546e0dc0312aff3f7ed862f fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-full.log	arm-K1	churn=f38692ab9c67f61196eba23c086b37c1 absorbed=112175 churn_fill=81a12428ac856a7068cac75cec533956
+PARITY	bin-dpm-full.log	arm-K2	store=3f3ad229d4c7f6f86d4c102202a24be9 rows=3421 avail=0f14aed88546e0dc0312aff3f7ed862f fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-full.log	arm-K2	churn=f38692ab9c67f61196eba23c086b37c1 absorbed=112175 churn_fill=81a12428ac856a7068cac75cec533956
+PARITY	bin-dpm-full.log	arm-K2	compact=f38692ab9c67f61196eba23c086b37c1
+PARITY	bin-dpm-full.log	arm-K3	store=3f3ad229d4c7f6f86d4c102202a24be9 rows=3421 avail=0f14aed88546e0dc0312aff3f7ed862f fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-full.log	arm-K3	churn=f38692ab9c67f61196eba23c086b37c1 absorbed=112175 churn_fill=81a12428ac856a7068cac75cec533956
+PARITY	bin-dpm-full.log	arm-K3	compact=f38692ab9c67f61196eba23c086b37c1
+PARITY	bin-dpm-full.log	arm-K4	store=3f3ad229d4c7f6f86d4c102202a24be9 rows=3421 avail=0f14aed88546e0dc0312aff3f7ed862f fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-dpm-full.log	arm-K4	churn=f38692ab9c67f61196eba23c086b37c1 absorbed=112175 churn_fill=81a12428ac856a7068cac75cec533956
+PARITY	bin-dpm-full.log	arm-K4	compact=f38692ab9c67f61196eba23c086b37c1
+PARITY	bin-twxdur-100k.log	arm-K1	store=28a21f34cc8fabbde5757159b979e390 rows=99487 avail=f3a99891dcb793018a4b68698b63f54e fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-twxdur-100k.log	arm-K1	churn=70104d882e3a2fc9ba5837b6237d9139 absorbed=89839 churn_fill=e59878800c800ac9b3ac84183c640be2
+PARITY	bin-twxdur-100k.log	arm-K2	store=28a21f34cc8fabbde5757159b979e390 rows=99487 avail=f3a99891dcb793018a4b68698b63f54e fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-twxdur-100k.log	arm-K2	churn=70104d882e3a2fc9ba5837b6237d9139 absorbed=89839 churn_fill=e59878800c800ac9b3ac84183c640be2
+PARITY	bin-twxdur-100k.log	arm-K2	compact=70104d882e3a2fc9ba5837b6237d9139
+PARITY	bin-twxdur-100k.log	arm-K3	store=28a21f34cc8fabbde5757159b979e390 rows=99487 avail=f3a99891dcb793018a4b68698b63f54e fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-twxdur-100k.log	arm-K3	churn=70104d882e3a2fc9ba5837b6237d9139 absorbed=89839 churn_fill=e59878800c800ac9b3ac84183c640be2
+PARITY	bin-twxdur-100k.log	arm-K3	compact=70104d882e3a2fc9ba5837b6237d9139
+PARITY	bin-twxdur-100k.log	arm-K4	store=28a21f34cc8fabbde5757159b979e390 rows=99487 avail=f3a99891dcb793018a4b68698b63f54e fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-twxdur-100k.log	arm-K4	churn=70104d882e3a2fc9ba5837b6237d9139 absorbed=89839 churn_fill=e59878800c800ac9b3ac84183c640be2
+PARITY	bin-twxdur-100k.log	arm-K4	compact=70104d882e3a2fc9ba5837b6237d9139
+PARITY	bin-twxdur-full.log	arm-K1	store=73cb138442975fd2585d0d3b6a2da760 rows=286659 avail=b5d9fe8abf8573fe633c0a3a659943ac fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-twxdur-full.log	arm-K1	churn=c05cae90c5f6de66264448d9cf398043 absorbed=258747 churn_fill=563eddee5aebdea8717cd89d0a35492e
+PARITY	bin-twxdur-full.log	arm-K2	store=73cb138442975fd2585d0d3b6a2da760 rows=286659 avail=b5d9fe8abf8573fe633c0a3a659943ac fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-twxdur-full.log	arm-K2	churn=c05cae90c5f6de66264448d9cf398043 absorbed=258747 churn_fill=563eddee5aebdea8717cd89d0a35492e
+PARITY	bin-twxdur-full.log	arm-K2	compact=c05cae90c5f6de66264448d9cf398043
+PARITY	bin-twxdur-full.log	arm-K3	store=73cb138442975fd2585d0d3b6a2da760 rows=286659 avail=b5d9fe8abf8573fe633c0a3a659943ac fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-twxdur-full.log	arm-K3	churn=c05cae90c5f6de66264448d9cf398043 absorbed=258747 churn_fill=563eddee5aebdea8717cd89d0a35492e
+PARITY	bin-twxdur-full.log	arm-K3	compact=c05cae90c5f6de66264448d9cf398043
+PARITY	bin-twxdur-full.log	arm-K4	store=73cb138442975fd2585d0d3b6a2da760 rows=286659 avail=b5d9fe8abf8573fe633c0a3a659943ac fill=cfcd208495d565ef66e7dff9f98764da
+PARITY	bin-twxdur-full.log	arm-K4	churn=c05cae90c5f6de66264448d9cf398043 absorbed=258747 churn_fill=563eddee5aebdea8717cd89d0a35492e
+PARITY	bin-twxdur-full.log	arm-K4	compact=c05cae90c5f6de66264448d9cf398043
