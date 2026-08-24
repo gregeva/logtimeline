@@ -21,11 +21,28 @@ REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LTL="$REPO_DIR/ltl"
 RESULTS_DIR="$SCRIPT_DIR/results"
 
-# Run from the repo root and glob the logs relatively, so the paths handed to
-# ltl — and recorded verbatim in the benchmark TSV's FILES rows — are
-# repo-relative and the baseline stays portable across machines (#209).
-cd "$REPO_DIR"
-LOGS_DIR="logs"
+# Glob the logs relatively and run from the directory that contains the
+# corpus, so the paths handed to ltl — and recorded verbatim in the
+# benchmark TSV's FILES rows — stay relative and the baseline remains
+# portable across machines (#209).
+#
+# The corpus is logs/ under the repo root unless LTL_LOGS_DIR names another
+# one, which lets a checkout with no corpus of its own (a second clone, a
+# git worktree) benchmark against the real logs (#436). Running from the
+# corpus's parent rather than the repo root keeps the recorded paths
+# relative either way, so an override does not reintroduce the absolute
+# paths #209 removed.
+if [[ -n "${LTL_LOGS_DIR:-}" ]]; then
+    if [[ ! -d "$LTL_LOGS_DIR" ]]; then
+        echo "ERROR: LTL_LOGS_DIR is not a directory: $LTL_LOGS_DIR" >&2
+        exit 1
+    fi
+    LOGS_DIR="$(basename "$LTL_LOGS_DIR")"
+    cd "$(cd "$(dirname "$LTL_LOGS_DIR")" && pwd)"
+else
+    cd "$REPO_DIR"
+    LOGS_DIR="logs"
+fi
 
 # Default label is timestamp
 LABEL="$(date +%Y%m%d-%H%M%S)"
