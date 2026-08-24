@@ -434,6 +434,7 @@ my %format_evidence_weights = (
 # NOT used — the clock calls would cost more than many scans they measure.
 use constant FORMAT_SCAN_NOMATCH_SAMPLE_EVERY => 256;
 my $format_scan_promotions = 0;        # actual reorders via format_registry_promote()
+my $format_scan_validating  = 0;       # per-compile validation in flight: promotion is suppressed
 my $format_scan_nomatch_samples = 0;   # sampled no-match scans timed
 my $format_scan_nomatch_sample_us = 0; # summed elapsed us across those samples
 my $format_unit_ambiguity_warned = 0;  # D18 unit-ambiguity note emitted (once per run)
@@ -2712,6 +2713,21 @@ sub timestamp_date_cache_clear {
     %timestamp_date_cache_added = ();
 }
 
+# Snapshot/restore for validation paths that parse sample timestamps
+# against the live cache. The cache is keyed by the date string alone and
+# two layouts disagree on its epoch (N3), so a sample parsed under one
+# entry's layout must never be left behind for the run to read.
+sub timestamp_date_cache_snapshot {
+    return [ { %timestamp_date_cache }, { %timestamp_date_cache_added }, $timestamp_date_cache_stamp ];
+}
+sub timestamp_date_cache_restore {
+    my ($snap) = @_;
+    %timestamp_date_cache       = %{ $snap->[0] };
+    %timestamp_date_cache_added = %{ $snap->[1] };
+    $timestamp_date_cache_stamp = $snap->[2];
+    return;
+}
+
 # Timestamp-parse closures per declared layout family (D31), each reading
 # the date's midnight from the cache above. The iso parser serves every
 # iso_* layout (fixed substr offsets); apache_clf parses the
@@ -2961,6 +2977,11 @@ sub select_format_variants {
 sub format_probe_signal {
     my ($entry, $kind, $value) = @_;
     return 0 unless $entry;
+    # Per-compile validation (D61) runs the registry's own samples through
+    # the generated sub; their timestamps are not the file's observations
+    # and must not score its variants, eliminate a member or flip an
+    # occupant. Suppressed for the same reason promotion is.
+    return 0 if $format_scan_validating;
     my $ev = $format_detection_evidence{$format_current_file} //= { filename => undef, probes => {}, groups => {} };
     my $st = $ev->{steady} //= {};
     my $name = $entry->[FR_NAME];
@@ -3053,10 +3074,6 @@ sub apply_format_variant_selection {
     return $changed;
 }
 
-# Run-level format pin (D49/N9): -lf names a user-facing format; the scan
-# for the run is restricted to every registry entry carrying that name —
-# automatic detection, the evidence pass and variant selection are all
-# bypassed. An unknown name is a usage error listing the known names.
 # Resolve the active scan sub for the current @format_scan_order (D60):
 # cache hit by order signature, or one compile. Every point that changes
 # the order and needs the sub live again routes through here — occupant
@@ -3068,6 +3085,42 @@ sub format_scan_sub_resolve {
                           //= compile_format_scan_sub($format_registry_opts);
 }
 
+# Elevation by election (D60): the file's evidence names the format its
+# lines will overwhelmingly be, so the winner-front order is known before
+# line 1 — front it here and compile that one order, rather than entering
+# on the static order and paying a promotion-driven compile on the first
+# line. The order produced is exactly what format_registry_promote()
+# would build (the winner's pinned-ancestor closure ahead of it, the rest
+# in their current relative order), so the D26 constraints hold and the
+# result shares the promotion path's signature cache.
+#
+# $counts maps entry name => matched lines across the evidence. The
+# entry with the most matches is elected; nothing elected (no evidence,
+# or a file nothing recognised) leaves the static order standing, which
+# the caller resolves as the fallback.
+sub format_elect_scan_front {
+    my ($counts) = @_;
+    return 0 unless $counts && %$counts;
+    my ($best) = sort { $counts->{$b} <=> $counts->{$a} || $a cmp $b } keys %$counts;
+    my $elected = $format_registry_entry{$best} or return 0;
+    # The evidence counts members; the scan order holds one occupant per
+    # group. Front the elected member's group, whoever the file's variant
+    # selection seated in it.
+    my ($entry) = grep { $_->[FR_GROUP] eq $elected->[FR_GROUP] } @format_scan_order;
+    return 0 unless $entry;
+    my %front = ( %{ $entry->[FR_ANC_SET] }, $entry->[FR_GROUP] => 1 );
+    my (@f, @r);
+    for my $o (@format_scan_order) {
+        if ($front{ $o->[FR_GROUP] }) { push @f, $o } else { push @r, $o }
+    }
+    @format_scan_order = (@f, @r);
+    return 1;
+}
+
+# Run-level format pin (D49/N9): -lf names a user-facing format; the scan
+# for the run is restricted to every registry entry carrying that name —
+# automatic detection, the evidence pass and variant selection are all
+# bypassed. An unknown name is a usage error listing the known names.
 sub apply_format_pin {
     my %known;
     $known{ $_->[FR_SLUG] } = 1 for values %format_registry_entry;
@@ -3361,7 +3414,70 @@ sub compile_format_scan_sub {
     my $sub = eval $src;
     die "ltl: format registry: scan-sub codegen failed: $@\nGENERATED SOURCE:\n$src\n"
         if $@ || ref $sub ne 'CODE';
+    format_validate_scan_sub($sub, \@entries);
     return $sub;
+}
+
+# Restore the record lexicals, the timestamp memo and the date cache to
+# their pristine per-run state. Validation runs the write-direct
+# extraction closures against the same lexicals the read loop reads, so
+# every gate that executes them ends here.
+sub format_record_reset {
+    ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = ("") x 9;
+    ( $bytes, $duration ) = ( undef, undef );
+    ( $status_code, $is_access_log ) = ( 0, 0 );
+    ( $timestamp, $fractional_ms ) = ( undef, 0 );
+    ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
+    timestamp_date_cache_clear();
+    return;
+}
+
+# D24 gate 5, per-compile half (D61). The generated sub is the production
+# truth, so every sub is proven the moment it is generated: every sample
+# of every entry compiled into it must classify to its owning entry.
+# Extraction is not re-checked — gate 2 proved it per entry at startup —
+# and D26's pinned-ancestor closures make owner-wins valid under any
+# reachable order, so this holds for a promoted order as much as the
+# static one.
+#
+# Runs under promotion suppression: the sample stream alternates formats
+# and would otherwise reorder (and recursively compile) the very order
+# being validated.
+#
+# Compiles happen mid-run as well as before line 1 (election, promotion,
+# an occupant flip), so this leaves NOTHING of the run's state disturbed:
+# the record lexicals, the timestamp memo and the date cache the samples
+# write through are saved and put back exactly as they were. Resetting
+# them instead would clear the memo mid-file and make the next real line
+# re-parse its timestamp — a cache miss that fires the steady-loop probes
+# and changes what the run observes.
+sub format_validate_scan_sub {
+    my ($sub, $entries) = @_;
+    my $was_validating = $format_scan_validating;
+    $format_scan_validating = 1;
+    my @saved_record = ( $timestamp_str, $category_bucket, $object, $instance, $user,
+                         $session, $platform, $thread, $message, $bytes, $duration,
+                         $status_code, $is_access_log, $timestamp, $fractional_ms,
+                         $format_last_ts_str, $format_last_ts_epoch );
+    my $saved_cache = timestamp_date_cache_snapshot();
+    for my $e (@$entries) {
+        my $spec = $format_registry_spec{ $e->[FR_NAME] } or next;
+        for my $sample (@{ $spec->{samples} }) {
+            my $winner = $sub->($sample);
+            die "ltl: format registry: generated scan sub classifies a sample of '$e->[FR_NAME]' as '"
+              . ($winner ? $winner->[FR_NAME] : 'no match')
+              . "' under scan order [" . join(',', map { $_->[FR_NAME] } @$entries)
+              . "] (produced_by compile_format_scan_sub())\n"
+                unless $winner && $winner->[FR_NAME] eq $e->[FR_NAME];
+        }
+    }
+    $format_scan_validating = $was_validating;
+    ( $timestamp_str, $category_bucket, $object, $instance, $user,
+      $session, $platform, $thread, $message, $bytes, $duration,
+      $status_code, $is_access_log, $timestamp, $fractional_ms,
+      $format_last_ts_str, $format_last_ts_epoch ) = @saved_record;
+    timestamp_date_cache_restore($saved_cache);
+    return;
 }
 
 # Cross-shadow constraint derivation (D24/D26): every entry's samples are
@@ -3626,14 +3742,9 @@ sub build_format_registry {
         }
     }
 
-    # Validation ran the write-direct closures against the record lexicals;
+    # Gate 2 ran the write-direct closures against the record lexicals;
     # restore their pristine per-run state before any line is read.
-    ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = ("") x 9;
-    ( $bytes, $duration ) = ( undef, undef );
-    ( $status_code, $is_access_log ) = ( 0, 0 );
-    ( $timestamp, $fractional_ms ) = ( undef, 0 );
-    ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
-    timestamp_date_cache_clear();   # validation parsed the samples; start the run with an empty cache
+    format_record_reset();
     $format_scan_promotions = 0;   # the telemetry counts run promotions only
 }
 
@@ -3778,6 +3889,12 @@ sub sample_file_for_detection {
 # state never enters here.
 sub format_registry_promote {
     my ($si) = @_;
+    # Per-compile validation (D61) runs samples through a freshly
+    # generated sub to prove classification; the winner is captured before
+    # promotion in the generated code, so suppressing the reorder here
+    # leaves the answer intact and keeps validation from mutating the
+    # order it is validating (or recursing into another compile).
+    return if $format_scan_validating;
     my $e = $format_scan_order[$si];
     my %front = ( %{ $e->[FR_ANC_SET] }, $e->[FR_GROUP] => 1 );
     my (@f, @r);
@@ -9844,9 +9961,19 @@ sub read_and_process_logs {
                 apply_format_variant_selection($selection);
                 $format_detection_evidence{$in_file} = $selection;
             }
+            # Election (D60): the sample named the file's format — front it
+            # and compile that order now, so line 1 already scans under
+            # the order the whole file will use.
+            format_elect_scan_front( $sample->{formats} ) unless defined $log_format_pin;
             delete $sample->{lines};   # conclusions are retained, lines are not (#17 attaches here)
             $format_detection_sample{$in_file} = $sample;
         }
+        # Whatever the evidence decided — an election, a variant swap, or
+        # nothing at all (unsampled file, unrecognised content, pin) — the
+        # order standing here is the one line 1 scans, so resolve its sub
+        # before the loop. A cache hit costs nothing; a new order is the
+        # one compile this file pays.
+        format_scan_sub_resolve();
         my $window_n = $format_detection_window > 0 ? $format_detection_window
                      : $sample                      ? 0
                      :                                FORMAT_DETECTION_WINDOW_FALLBACK;
@@ -15521,10 +15648,6 @@ sub pipeline_detect {
     my $registry_build_start = [gettimeofday];
     build_format_registry();
     apply_format_pin() if defined $log_format_pin;
-    # The build itself emits no code (D60). Until per-file election owns
-    # the compile points (S3), the static order is resolved here so the
-    # read loop always enters holding a compiled sub.
-    format_scan_sub_resolve() unless defined $log_format_pin;
     $elapsed_detect_registry_build = tv_interval($registry_build_start);
 
     # Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.

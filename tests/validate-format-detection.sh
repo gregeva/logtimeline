@@ -785,10 +785,10 @@ scenario_scan_telemetry() {
         contract    'features/log-format-registry.md section -V format-detection section-contract (D26 pinned-closure MTF)'
 
     assert_line "$out" \
-        pattern     '^promotions: 1$' \
-        asserts     'A single-format file causes exactly one promotion: the first match reorders, every later line hits the already-optimal front block' \
-        produced_by 'format_registry_promote() in ltl (counter incremented only on actual reorders; reset after the D24 build gates)' \
-        contract    'features/log-format-registry.md section -V format-detection section-contract'
+        pattern     '^promotions: 0$' \
+        asserts     'A single-format file causes NO promotion: election fronts the format the evidence named before line 1, so every line hits the already-optimal front block' \
+        produced_by 'format_elect_scan_front() in ltl fronts the elected group; format_registry_promote() increments only on actual reorders' \
+        contract    'features/log-format-registry.md section -V format-detection section-contract (D60 elevation by election)'
 
     assert_line "$out" \
         pattern     '^match_counts: .*mt12=741' \
