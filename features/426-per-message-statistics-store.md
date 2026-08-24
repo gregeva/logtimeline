@@ -553,13 +553,40 @@ correction (327 of 328 at bpd 256); A6 the `> 0` guard is contract; A7 G index
 convention; A8 `undef` downward fill; A9 `lower = upper` unreachable; A10 D7/D8 vs
 shipped emitter drift; A11 D2 memory guidance is T-layout-specific.
 
-**Not covered**: display-geometry-bound consumers (F2 heatmap / F3 histogram, D5's
-F2/F3 contract, R12 as a finalize re-bin) under G; a second log surface for V1/V3/V5
-(all on the Tomcat file; DPM not re-run); real ltl end-to-end under G (no baseline
-re-bless enumerated); a native span-array merge for S (the harness shape was
-measured); fan-out beyond 51,469 keys.
+**Not yet covered — IN SCOPE, the next prototype work (architect, 2026-08-24).** The
+report's § *What the evidence does not cover* is not a boundary; every item in it is
+part of step 2 and is prototyped and analysed before step 3 begins. Nothing is skipped.
+The resumption plan, in the order to take them:
 
-**Step 3 is the architect's.** Nothing above is a `Dxx`; P1–P10 remain proposals.
+| # | gap | what to build / measure | surfaces |
+|---|---|---|---|
+| N1 | **Display-geometry-bound consumers under S and G** — F2 heatmap (`heatmap_cells`, `heatmap_markers`, per-`time_bucket` keying), F3 histogram (`histogram_view`, `histogram_bins`, per-metric global keying); #187 D5's F2/F3 stream → finalize-rebin contract; #189 R12 `partition_rebin` as the finalize step | A V6 aspect: the same three arms keyed by time bucket and globally; the F2/F3 finalize re-bin (`partition_rebin` to display geometry) from T/S, and its G equivalent (grid span → display bins); parity of finalized cells/markers/bins T↔S; fidelity of G's finalized display against T's and against the exact values (mass retention, peak retention, peak X-offset — the #201 measures); `-hm` / `-hg` `-V` sections from each arm vs real ltl. Reads `features/201-display-geometry-bound-consumers.md` and `prototype/201-projection-comparison-report.md` first. | 148 MB Tomcat (#201's canonical), 2.6 MB iteration file |
+| N2 | **Native span-array merge for S** (P9) | Write the O(occupied span) merge (remap source span into target span directly; no dense view, zero-fill, or full-width add) and re-run V2's merge-pair and `-g` fold measurements for S; T↔S digest parity on merge/fold must still hold | fan-out file (51,469 keys), bpd 53 / 616 |
+| N3 | **Second log surface for V1 / V3 / V5** | Re-run the three aspects on the DPM ScriptLog (the #426 V7/V8 fixture; ThingWorx keying, real durations, 3,421 keys) and on the 148 MB Tomcat file; the power-of-ten spike behaviour (V5 § F) and the R2 disagreement set (V1 Part B) characterised on more than one data shape | DPM ScriptLog, 148 MB Tomcat |
+| N4 | **Real ltl end-to-end under G** | A throwaway `ltl` carrying the grid on the summary-table path (probe-injection as `426-asbuilt-probe.pl` did), enumerating the per-baseline percentile shift in `tests/validate-*.sh` bin-mode baselines — the re-bless the architect would sign | the harness fixtures |
+| N5 | **Merge shapes beyond consecutive pairs and the `-g` fold** — time-bucket and global rollups; keys with disjoint value ranges | Add to V2/V6: rollup merges keyed by bucket → global; pairs chosen for disjoint spans; time and accuracy per arm | fan-out file, 148 MB Tomcat |
+| N6 | **Fan-out beyond 51,469 keys** | Build a ≥ 10⁵-key store per arm (the synthetic `bin-twxdur` fixture from `426-generate-fixtures.sh` has 286,659 keys with durations) and measure directly instead of projecting | `bin-twxdur-full` |
+| N7 | **`-V` audit aggregation scope** | Aggregate `out_of_range_bounded` over the keys the statistics pass walks (as ltl does), not every key, under the growth cap where the audit fires; show identical to ltl | 2.6 MB file |
+| N8 | **Memory measure** | RSS delta per arm-process is the number of record; report Devel::Size only alongside it, and note its seed dependence for hash-backed stores | all |
+
+**Resumption notes for the next session.** Start here, not from the issue thread.
+Branch `426-per-message-statistics-store`; the work lives in
+`prototype/426-revalidate-lib.pm` (add arms/keying there — one interface for T/S/G;
+read its header for the API and gotchas), new aspects as
+`prototype/426-revalidate-v6.pl`… with a `.sh` driver each, captures under
+`prototype/426-results/revalidate-vN-*`, results markdown per aspect, then fold into
+`prototype/426-bin-primitives-revalidation-report.md` (new aspect sections, the
+per-decision table, findings, § not covered shrinks). Protocol unchanged: production
+subs verbatim as arm T, parity before timing, medians of 3 with ranges, oracle,
+independent verification of every aspect against its captured files, every number
+traceable to a capture. `logs/` is a symlink to the shared corpus in the main checkout
+(recreate with `ln -s ../../../logs logs` from the worktree; never commit it). The
+large per-row TSVs are regenerable and stay uncommitted. Subagents run on Opus 5 at
+medium effort. When N1–N8 are shipped, the findings (F23–F32 and the new ones) are
+iterated on with the architect before any step-3 decision is asked for.
+
+**Step 3 is the architect's**, after N1–N8. Nothing above is a `Dxx`; P1–P10 remain
+proposals.
 
 ## Verification instrument
 
