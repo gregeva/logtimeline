@@ -86,3 +86,40 @@ back-to-back. Runtime-config byte-identical to the earlier arms.
   `build_format_registry()`, re-run this construct) remains the one unproven
   link and still awaits approval — alternatively, #413's fix landing in this
   release provides the same discrimination for free at the next re-measure.
+
+## Re-measure after #413 (2026-08-24, branch at release/0.17.0 head `30371a4`)
+
+Same construct (humungous `-so p99`, `-dm raw`, `-mem`, harness-shaped), median-of-3
+ABAB, v0.16.0 worktree binary vs release/0.17.0 head (carrying #413 and #417), same
+machine, back-to-back. `COUNTS format_scan_subs_compiled 1` confirms the lazy
+compile is in effect; work counts identical across arms
+(`log_messages_population 286659`); no runtime warnings either arm.
+
+| row | old (v0.16.0) | new (0.17.0 + #413) | delta |
+|---|---|---|---|
+| calculate_statistics (parent) | 0.473 s (0.471–0.476) | 0.555 s (0.537–0.558) | **+17.3%** |
+| ├ population_walk | — | 0.274 s (0.258–0.282) | 49% of phase |
+| ├ sort_selection | — | 0.267 s (0.263–0.269) | 48% of phase |
+| ├ bucket_stats / group_calc / threadpool_stats | — | 0.000 s each | 0% |
+| parse/read_files | 2.404 s (2.403–2.407) | 2.493 s (2.481–2.513) | +3.7% |
+| total | 2.878 s | 3.056 s | +6.2% |
+| rss_peak | 206.0 MB | 207.0 MB (205.8–207.7) | +1 MB (was +20 MB) |
+
+- **Locality-via-eager-precompile hypothesis refuted.** #413 removed the +20 MB
+  pre-hash heap (rss gap 20 MB → 1 MB) and the drift stepped down only
+  +20.4% → +17.3%, still non-overlapping. The heap was at most a minor
+  contributor; the dominant cause is elsewhere.
+- Shape unchanged: 97% of the phase in the two `%log_messages` traversal
+  blocks, zero per-key computation cost.
+- `parse/read_files` is also +3.7% in the same runs with identical line
+  counts — the read-phase symptom #414 tracks. Whether the two phases share a
+  per-operation cause is the open question; #414's staged NYTProf attribution
+  runs first (see the cross-link comments on both issues, 2026-08-24).
+
+## Status
+
+Paused 2026-08-24 (architect decision) pending #414's attribution. Resumption:
+if #414 finds a whole-process per-operation slowdown, attribute #415 to it;
+if #414's cause is scan-path-specific, profile `population_walk` /
+`sort_selection` across both arms at 100k with the #413 heap out of the
+picture.
