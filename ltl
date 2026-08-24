@@ -1,5 +1,21 @@
 #!/opt/homebrew/bin/perl
 
+# LogTimeLine (ltl) - command-line log analysis and time-bucket visualization
+#
+# Copyright 2025-2026 Greg EVA
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # TO DO
 # - Filter options for min/max impact (count*duration)
 # - new command line options for "show-bytes and show-counts" to add these columns to the message table instead of the duration statistics (plan forward for unknown custom metric as well)
