@@ -3650,6 +3650,34 @@ sub build_format_registry {
                                    # telemetry counts run promotions only
 }
 
+# Interpreted classification (D61): the one resolution surface answering
+# "which entry owns this line" without codegen. Walks the given order —
+# guard, then compiled pattern — and returns the first match, the same
+# first-match answer the generated scan sub gives, with no extraction and
+# no promotion. The generated sub's whitespace dispatch is reproduced
+# here (space-led lines are a proven no-match; tab-led lines see only the
+# head_class 'any' subset), so the two surfaces agree line for line; both
+# facts are build-verified against the samples by D24 gate 6.
+#
+# In list context returns ($entry, @captures) so callers needing the
+# pattern's capture list (detection sampling's raw timestamp) do not
+# re-match. Returns undef / the empty list when nothing matches.
+sub format_classify_interpreted {
+    my ($line, $order) = @_;
+    my $head_ord = ord($line);
+    return wantarray ? () : undef if $head_ord == 32;
+    my $tab_only = $head_ord == 9;
+    for my $e (@$order) {
+        next if $tab_only
+            && ( $format_registry_spec{ $e->[FR_NAME] }{head_class} // 'any' ) ne 'any';
+        next if $e->[FR_GUARD] && !$e->[FR_GUARD]->($line);
+        if (my @c = $line =~ $e->[FR_PATTERN]) {
+            return wantarray ? ($e, @c) : $e;
+        }
+    }
+    return wantarray ? () : undef;
+}
+
 # Classify one line through the generated scan sub (detection-window
 # prefill's named entry point). Returns the winning entry or undef; as a
 # side effect the winning entry's extraction writes the record lexicals
@@ -3668,9 +3696,9 @@ sub format_registry_classify {
 # whole, as a single part.
 #
 # Completely decorrelated from the production read: own handle, own
-# counters, nothing held or replayed. Lines are recognised by matching the
-# registry entries' compiled patterns directly in static cascade order —
-# the same first-match answer the generated scan sub gives — with no
+# counters, nothing held or replayed. Lines are recognised through
+# format_classify_interpreted() in static cascade order — the same
+# first-match answer the generated scan sub gives — with no
 # extraction, no promotion, and no timestamp parsing (the raw timestamp
 # string is kept; interpreting it under a layout is the consumers' job,
 # and parsing here would both share the production cache and die on a
@@ -3730,17 +3758,15 @@ sub sample_file_for_detection {
             $line_bytes += length($line) + 1;
             $obs->{lines}++;
             push @lines, $line;
-            for my $e (@format_registry) {
-                if (my @c = $line =~ $e->[FR_PATTERN]) {
-                    $obs->{matched}++;
-                    $obs->{formats}{ $e->[FR_NAME] }++;
-                    $formats{ $e->[FR_NAME] }++;
-                    my $o = $ts_ordinal{ $e->[FR_NAME] };
-                    if (defined $o && defined $c[$o]) {
-                        $obs->{first_ts} //= $c[$o];
-                        $obs->{last_ts}    = $c[$o];
-                    }
-                    last;
+            my ($e, @c) = format_classify_interpreted( $line, \@format_registry );
+            if ($e) {
+                $obs->{matched}++;
+                $obs->{formats}{ $e->[FR_NAME] }++;
+                $formats{ $e->[FR_NAME] }++;
+                my $o = $ts_ordinal{ $e->[FR_NAME] };
+                if (defined $o && defined $c[$o]) {
+                    $obs->{first_ts} //= $c[$o];
+                    $obs->{last_ts}    = $c[$o];
                 }
             }
         }
