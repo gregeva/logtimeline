@@ -88,6 +88,9 @@ my %verbose_section_registry = (
     'format-detection' => {
         description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts, plus registry scan telemetry: order, promotions, per-entry match counts, sampled no-match cost (Issues #228, #58).',
     },
+    'format-registry' => {
+        description => 'The compiled format registry itself: entry inventory, variant groups and their occupants, static scan order and derived ancestor constraints, and scan-sub compile state (Issue #413).',
+    },
     'heatmap-palette' => {
         description => 'Heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250).',
     },
@@ -117,6 +120,7 @@ my @verbose_section_order = qw(
     histogram-bin-counters
     message-grouping
     format-detection
+    format-registry
     heatmap-palette
     csv-output
     percentile-algorithm
@@ -434,6 +438,21 @@ my %format_evidence_weights = (
 # NOT used — the clock calls would cost more than many scans they measure.
 use constant FORMAT_SCAN_NOMATCH_SAMPLE_EVERY => 256;
 my $format_scan_promotions = 0;        # actual reorders via format_registry_promote()
+my $format_scan_validating  = 0;       # per-compile validation in flight: promotion is suppressed
+my $format_scan_subs_compiled = 0;     # generated scan subs minted this run
+my $format_scan_sub_cache_hits = 0;    # resolves served from the signature cache
+# D64: wall time in compile_format_scan_sub() across the run, wherever a
+# compile fires (election before line 1, mid-read promotion, the pin). An
+# ACCUMULATOR, not a pipeline stage: compiles happen INSIDE other stages,
+# so this attributes cost within them and is never summed into the stage
+# total. It measures the compile itself — building the source, generating
+# the sub, validating it — with the D62 RSS readings deliberately outside
+# the boundary, so an armed run and a plain run report the same cost
+# (finding F12: get_memory_usage() shells out to ps on macOS and would
+# otherwise dominate the row on exactly the runs that read it).
+my $elapsed_detect_scan_sub_compile = 0;
+my $format_scan_subs_rss      = 0;     # D62: accumulated compile-boundary RSS delta, bytes
+my $format_scan_measure_rss   = 0;     # armed at option parse when a memory surface is requested
 my $format_scan_nomatch_samples = 0;   # sampled no-match scans timed
 my $format_scan_nomatch_sample_us = 0; # summed elapsed us across those samples
 my $format_unit_ambiguity_warned = 0;  # D18 unit-ambiguity note emitted (once per run)
@@ -2236,9 +2255,9 @@ my $format_registry_opts;
 # file alternating between two or three formats scans only those formats
 # before the tail. Alternation cycles through a tiny set of orders, so
 # every order's generated sub is compiled at most once per run and
-# selected by signature ever after; the static order and every
-# first-promotion-from-static order are precompiled eagerly at startup
-# (pay the compile cost before the loop, never inside it).
+# selected by signature ever after. Nothing is compiled speculatively
+# (D60): an order is generated when a caller is about to scan with it,
+# through format_scan_sub_resolve().
 my %format_scan_sub_cache;     # order signature => generated scan sub
 
 # Windchill Workgroup Manager msgtype letters → category vocabulary
@@ -2712,6 +2731,21 @@ sub timestamp_date_cache_clear {
     %timestamp_date_cache_added = ();
 }
 
+# Snapshot/restore for validation paths that parse sample timestamps
+# against the live cache. The cache is keyed by the date string alone and
+# two layouts disagree on its epoch (N3), so a sample parsed under one
+# entry's layout must never be left behind for the run to read.
+sub timestamp_date_cache_snapshot {
+    return [ { %timestamp_date_cache }, { %timestamp_date_cache_added }, $timestamp_date_cache_stamp ];
+}
+sub timestamp_date_cache_restore {
+    my ($snap) = @_;
+    %timestamp_date_cache       = %{ $snap->[0] };
+    %timestamp_date_cache_added = %{ $snap->[1] };
+    $timestamp_date_cache_stamp = $snap->[2];
+    return;
+}
+
 # Timestamp-parse closures per declared layout family (D31), each reading
 # the date's midnight from the cache above. The iso parser serves every
 # iso_* layout (fixed substr offsets); apache_clf parses the
@@ -2961,6 +2995,11 @@ sub select_format_variants {
 sub format_probe_signal {
     my ($entry, $kind, $value) = @_;
     return 0 unless $entry;
+    # Per-compile validation (D61) runs the registry's own samples through
+    # the generated sub; their timestamps are not the file's observations
+    # and must not score its variants, eliminate a member or flip an
+    # occupant. Suppressed for the same reason promotion is.
+    return 0 if $format_scan_validating;
     my $ev = $format_detection_evidence{$format_current_file} //= { filename => undef, probes => {}, groups => {} };
     my $st = $ev->{steady} //= {};
     my $name = $entry->[FR_NAME];
@@ -3053,6 +3092,50 @@ sub apply_format_variant_selection {
     return $changed;
 }
 
+# Resolve the active scan sub for the current @format_scan_order (D60):
+# cache hit by order signature, or one compile. Every point that changes
+# the order and needs the sub live again routes through here — occupant
+# swaps, promotion, election, the pre-line-1 fallback — so codegen happens
+# exactly where an order is about to be scanned with, never speculatively.
+sub format_scan_sub_resolve {
+    my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
+    $format_scan_sub_cache_hits++ if exists $format_scan_sub_cache{$sig};
+    return $format_scan_sub = $format_scan_sub_cache{$sig}
+                          //= compile_format_scan_sub($format_registry_opts);
+}
+
+# Elevation by election (D60): the file's evidence names the format its
+# lines will overwhelmingly be, so the winner-front order is known before
+# line 1 — front it here and compile that one order, rather than entering
+# on the static order and paying a promotion-driven compile on the first
+# line. The order produced is exactly what format_registry_promote()
+# would build (the winner's pinned-ancestor closure ahead of it, the rest
+# in their current relative order), so the D26 constraints hold and the
+# result shares the promotion path's signature cache.
+#
+# $counts maps entry name => matched lines across the evidence. The
+# entry with the most matches is elected; nothing elected (no evidence,
+# or a file nothing recognised) leaves the static order standing, which
+# the caller resolves as the fallback.
+sub format_elect_scan_front {
+    my ($counts) = @_;
+    return 0 unless $counts && %$counts;
+    my ($best) = sort { $counts->{$b} <=> $counts->{$a} || $a cmp $b } keys %$counts;
+    my $elected = $format_registry_entry{$best} or return 0;
+    # The evidence counts members; the scan order holds one occupant per
+    # group. Front the elected member's group, whoever the file's variant
+    # selection seated in it.
+    my ($entry) = grep { $_->[FR_GROUP] eq $elected->[FR_GROUP] } @format_scan_order;
+    return 0 unless $entry;
+    my %front = ( %{ $entry->[FR_ANC_SET] }, $entry->[FR_GROUP] => 1 );
+    my (@f, @r);
+    for my $o (@format_scan_order) {
+        if ($front{ $o->[FR_GROUP] }) { push @f, $o } else { push @r, $o }
+    }
+    @format_scan_order = (@f, @r);
+    return 1;
+}
+
 # Run-level format pin (D49/N9): -lf names a user-facing format; the scan
 # for the run is restricted to every registry entry carrying that name —
 # automatic detection, the evidence pass and variant selection are all
@@ -3067,8 +3150,7 @@ sub apply_format_pin {
     @format_registry   = grep { $_->[FR_SLUG] eq $log_format_pin } @format_registry_members;
     @format_scan_order = @format_registry;
     %format_scan_sub_cache = ();
-    $format_scan_sub = $format_scan_sub_cache{ join ',', map { $_->[FR_NAME] } @format_scan_order }
-                     = compile_format_scan_sub($format_registry_opts);
+    format_scan_sub_resolve();
     return;
 }
 
@@ -3309,10 +3391,16 @@ sub format_guard_cond_src {
 # from its own captured entry snapshot. Promotion is emitted ONLY into
 # blocks whose generation-time position is not already optimal (some
 # non-ancestor ahead), so steady state runs no promotion code at all.
-# Returns the compiled sub; callers cache it per front format (D40) so
-# each possible order is compiled at most once per run.
+# Returns the compiled sub; format_scan_sub_resolve() caches it by order
+# signature (D60), so each order is compiled at most once per run.
 sub compile_format_scan_sub {
     my ($opts) = @_;
+    # D62's RSS readings bracket the whole sub and sit OUTSIDE D64's timer
+    # (F12): each is a `ps` subprocess on macOS, several times the cost of
+    # the compile it measures. Nothing but the compile allocates between
+    # them, so the delta is the generated sub's real footprint.
+    my $rss_before = $format_scan_measure_rss ? get_memory_usage() : undef;
+    my $compile_start = [gettimeofday];
     my (@blocks, @tab_blocks, %aux_seen, @aux_all);
     for my $si (0 .. $#format_scan_order) {
         my $e = $format_scan_order[$si];
@@ -3349,9 +3437,83 @@ sub compile_format_scan_sub {
     my @entries = @format_scan_order;
     my $src = "sub {\n$aux_decls$ws_dispatch" . join("\n", @blocks) . "\nreturn undef;\n}";
     my $sub = eval $src;
+    $format_scan_subs_compiled++;
     die "ltl: format registry: scan-sub codegen failed: $@\nGENERATED SOURCE:\n$src\n"
         if $@ || ref $sub ne 'CODE';
+    format_validate_scan_sub($sub, \@entries);
+    $elapsed_detect_scan_sub_compile += tv_interval($compile_start);
+    # The compiled sub's real cost is its op tree and pads, which a
+    # structure walker cannot see (Devel::Size reaches ~55% of it), so the
+    # format_scan_subs memory category reports this delta instead, paired
+    # with the compile count so the total reads against the per-sub
+    # constant. Armed only when a memory surface was requested.
+    if (defined $rss_before) {
+        my $delta = ( get_memory_usage() // 0 ) - $rss_before;
+        $format_scan_subs_rss += $delta if $delta > 0;
+    }
     return $sub;
+}
+
+# Restore the record lexicals, the timestamp memo and the date cache to
+# their pristine per-run state. Validation runs the write-direct
+# extraction closures against the same lexicals the read loop reads, so
+# every gate that executes them ends here.
+sub format_record_reset {
+    ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = ("") x 9;
+    ( $bytes, $duration ) = ( undef, undef );
+    ( $status_code, $is_access_log ) = ( 0, 0 );
+    ( $timestamp, $fractional_ms ) = ( undef, 0 );
+    ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
+    timestamp_date_cache_clear();
+    return;
+}
+
+# D24 gate 5, per-compile half (D61). The generated sub is the production
+# truth, so every sub is proven the moment it is generated: every sample
+# of every entry compiled into it must classify to its owning entry.
+# Extraction is not re-checked — gate 2 proved it per entry at startup —
+# and D26's pinned-ancestor closures make owner-wins valid under any
+# reachable order, so this holds for a promoted order as much as the
+# static one.
+#
+# Runs under promotion suppression: the sample stream alternates formats
+# and would otherwise reorder (and recursively compile) the very order
+# being validated.
+#
+# Compiles happen mid-run as well as before line 1 (election, promotion,
+# an occupant flip), so this leaves NOTHING of the run's state disturbed:
+# the record lexicals, the timestamp memo and the date cache the samples
+# write through are saved and put back exactly as they were. Resetting
+# them instead would clear the memo mid-file and make the next real line
+# re-parse its timestamp — a cache miss that fires the steady-loop probes
+# and changes what the run observes.
+sub format_validate_scan_sub {
+    my ($sub, $entries) = @_;
+    my $was_validating = $format_scan_validating;
+    $format_scan_validating = 1;
+    my @saved_record = ( $timestamp_str, $category_bucket, $object, $instance, $user,
+                         $session, $platform, $thread, $message, $bytes, $duration,
+                         $status_code, $is_access_log, $timestamp, $fractional_ms,
+                         $format_last_ts_str, $format_last_ts_epoch );
+    my $saved_cache = timestamp_date_cache_snapshot();
+    for my $e (@$entries) {
+        my $spec = $format_registry_spec{ $e->[FR_NAME] } or next;
+        for my $sample (@{ $spec->{samples} }) {
+            my $winner = $sub->($sample);
+            die "ltl: format registry: generated scan sub classifies a sample of '$e->[FR_NAME]' as '"
+              . ($winner ? $winner->[FR_NAME] : 'no match')
+              . "' under scan order [" . join(',', map { $_->[FR_NAME] } @$entries)
+              . "] (produced_by compile_format_scan_sub())\n"
+                unless $winner && $winner->[FR_NAME] eq $e->[FR_NAME];
+        }
+    }
+    $format_scan_validating = $was_validating;
+    ( $timestamp_str, $category_bucket, $object, $instance, $user,
+      $session, $platform, $thread, $message, $bytes, $duration,
+      $status_code, $is_access_log, $timestamp, $fractional_ms,
+      $format_last_ts_str, $format_last_ts_epoch ) = @saved_record;
+    timestamp_date_cache_restore($saved_cache);
+    return;
 }
 
 # Cross-shadow constraint derivation (D24/D26): every entry's samples are
@@ -3596,58 +3758,58 @@ sub build_format_registry {
     %format_registry_clobbered = %clobbered_by;
     $format_registry_opts      = $opts;
     %format_scan_sub_cache     = ();
-    $format_scan_sub = $format_scan_sub_cache{ join ',', map { $_->[FR_NAME] } @format_scan_order }
-                     = compile_format_scan_sub($opts);
-    # Eager precompilation (D40): every first-promotion-from-static order
-    # (winner's ancestors, winner, rest in static relative order) is known
-    # up front — compile them all now so the compile cost is paid before
-    # the read loop, never inside it. Deeper recency permutations (only
-    # reachable in multi-format interleaved streams) cache on first
-    # occurrence and are reused for the rest of the run.
-    for my $e (@format_registry) {
-        my %front = ( %{ $e->[FR_ANC_SET] }, $e->[FR_GROUP] => 1 );
-        my (@f, @r);
-        for my $o (@format_registry) {
-            if ($front{ $o->[FR_GROUP] }) { push @f, $o } else { push @r, $o }
-        }
-        my @save = @format_scan_order;
-        @format_scan_order = (@f, @r);
-        my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
-        $format_scan_sub_cache{$sig} //= compile_format_scan_sub($opts);
-        @format_scan_order = @save;
-    }
 
-    # D24 gate 5: the generated scan sub (the production truth) classifies
-    # every sample to its owning entry under the initial (static) order —
-    # with the sample's own member occupying its group's slot, so a variant
-    # member's samples (e.g. yyyy-dd-MM dates) are the executable proof that
-    # its generated block reads them.
+    # D24 gate 5, startup half (D61): every sample classifies to its owning
+    # entry through the interpreted classifier — with the sample's own
+    # member seated in its group's slot, so a variant member's samples
+    # (e.g. yyyy-dd-MM dates) are proven readable under the order the run
+    # would scan them with. No codegen happens here: the generated block's
+    # own proof is the per-compile half, run the first time the entry is
+    # compiled into any sub (D61).
     for my $spec (grep { $_->{scanned} } @specs) {
-        format_registry_set_occupant( $format_registry_entry{ $spec->{name} } );
+        my @order = map { $_->[FR_GROUP] eq $spec->{group} ? $format_registry_entry{ $spec->{name} } : $_ }
+                    @format_registry;
         for my $sample (@{ $spec->{samples} }) {
-            my $winner = $format_scan_sub->($sample);
-            die "ltl: format registry: generated scan sub classifies a sample of '$spec->{name}' as '"
+            my $winner = format_classify_interpreted( $sample, \@order );
+            die "ltl: format registry: interpreted classifier resolves a sample of '$spec->{name}' to '"
               . ($winner ? $winner->[FR_NAME] : 'no match')
-              . "' (produced_by compile_format_scan_sub())\n"
+              . "' (produced_by format_classify_interpreted())\n"
                 unless $winner && $winner->[FR_NAME] eq $spec->{name};
         }
-        format_registry_set_occupant( $format_registry_entry{ $group_default{ $spec->{group} } } );
     }
-    # Gate 5's format-alternating sample stream promoted entries (warming
-    # deeper recency orders); restore the static order and its sub.
-    @format_scan_order = @format_registry;
-    $format_scan_sub = $format_scan_sub_cache{ join ',', map { $_->[FR_NAME] } @format_scan_order };
 
-    # Validation ran the write-direct closures against the record lexicals;
+    # Gate 2 ran the write-direct closures against the record lexicals;
     # restore their pristine per-run state before any line is read.
-    ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = ("") x 9;
-    ( $bytes, $duration ) = ( undef, undef );
-    ( $status_code, $is_access_log ) = ( 0, 0 );
-    ( $timestamp, $fractional_ms ) = ( undef, 0 );
-    ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
-    timestamp_date_cache_clear();   # validation parsed the samples; start the run with an empty cache
-    $format_scan_promotions = 0;   # gate 5's sample stream promoted entries; the
-                                   # telemetry counts run promotions only
+    format_record_reset();
+    $format_scan_promotions = 0;   # the telemetry counts run promotions only
+}
+
+# Interpreted classification (D61): the one resolution surface answering
+# "which entry owns this line" without codegen. Walks the given order —
+# guard, then compiled pattern — and returns the first match, the same
+# first-match answer the generated scan sub gives, with no extraction and
+# no promotion. The generated sub's whitespace dispatch is reproduced
+# here (space-led lines are a proven no-match; tab-led lines see only the
+# head_class 'any' subset), so the two surfaces agree line for line; both
+# facts are build-verified against the samples by D24 gate 6.
+#
+# In list context returns ($entry, @captures) so callers needing the
+# pattern's capture list (detection sampling's raw timestamp) do not
+# re-match. Returns undef / the empty list when nothing matches.
+sub format_classify_interpreted {
+    my ($line, $order) = @_;
+    my $head_ord = ord($line);
+    return wantarray ? () : undef if $head_ord == 32;
+    my $tab_only = $head_ord == 9;
+    for my $e (@$order) {
+        next if $tab_only
+            && ( $format_registry_spec{ $e->[FR_NAME] }{head_class} // 'any' ) ne 'any';
+        next if $e->[FR_GUARD] && !$e->[FR_GUARD]->($line);
+        if (my @c = $line =~ $e->[FR_PATTERN]) {
+            return wantarray ? ($e, @c) : $e;
+        }
+    }
+    return wantarray ? () : undef;
 }
 
 # Classify one line through the generated scan sub (detection-window
@@ -3668,9 +3830,9 @@ sub format_registry_classify {
 # whole, as a single part.
 #
 # Completely decorrelated from the production read: own handle, own
-# counters, nothing held or replayed. Lines are recognised by matching the
-# registry entries' compiled patterns directly in static cascade order —
-# the same first-match answer the generated scan sub gives — with no
+# counters, nothing held or replayed. Lines are recognised through
+# format_classify_interpreted() in static cascade order — the same
+# first-match answer the generated scan sub gives — with no
 # extraction, no promotion, and no timestamp parsing (the raw timestamp
 # string is kept; interpreting it under a layout is the consumers' job,
 # and parsing here would both share the production cache and die on a
@@ -3730,17 +3892,15 @@ sub sample_file_for_detection {
             $line_bytes += length($line) + 1;
             $obs->{lines}++;
             push @lines, $line;
-            for my $e (@format_registry) {
-                if (my @c = $line =~ $e->[FR_PATTERN]) {
-                    $obs->{matched}++;
-                    $obs->{formats}{ $e->[FR_NAME] }++;
-                    $formats{ $e->[FR_NAME] }++;
-                    my $o = $ts_ordinal{ $e->[FR_NAME] };
-                    if (defined $o && defined $c[$o]) {
-                        $obs->{first_ts} //= $c[$o];
-                        $obs->{last_ts}    = $c[$o];
-                    }
-                    last;
+            my ($e, @c) = format_classify_interpreted( $line, \@format_registry );
+            if ($e) {
+                $obs->{matched}++;
+                $obs->{formats}{ $e->[FR_NAME] }++;
+                $formats{ $e->[FR_NAME] }++;
+                my $o = $ts_ordinal{ $e->[FR_NAME] };
+                if (defined $o && defined $c[$o]) {
+                    $obs->{first_ts} //= $c[$o];
+                    $obs->{last_ts}    = $c[$o];
                 }
             }
         }
@@ -3765,6 +3925,12 @@ sub sample_file_for_detection {
 # state never enters here.
 sub format_registry_promote {
     my ($si) = @_;
+    # Per-compile validation (D61) runs samples through a freshly
+    # generated sub to prove classification; the winner is captured before
+    # promotion in the generated code, so suppressing the reorder here
+    # leaves the answer intact and keeps validation from mutating the
+    # order it is validating (or recursing into another compile).
+    return if $format_scan_validating;
     my $e = $format_scan_order[$si];
     my %front = ( %{ $e->[FR_ANC_SET] }, $e->[FR_GROUP] => 1 );
     my (@f, @r);
@@ -3773,8 +3939,7 @@ sub format_registry_promote {
     }
     @format_scan_order = (@f, @r);
     $format_scan_promotions++;
-    my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
-    $format_scan_sub = $format_scan_sub_cache{$sig} //= compile_format_scan_sub($format_registry_opts);
+    format_scan_sub_resolve();
     return;
 }
 
@@ -3864,6 +4029,65 @@ sub emit_format_detection_verbose {
     push @verbose_output, "=== END format-detection / scan ===";
 
     push @verbose_output, "=== END format-detection ===";
+}
+
+# The registry itself (D63): what was compiled from the declarative specs,
+# how it is structured, and what codegen the run actually paid for. The
+# per-file detection telemetry — which format each file bound, and the
+# scan's per-line behaviour — lives in -V format-detection; this section
+# is the run-level view of the registry as an object.
+#
+# Entry names (FR_NAME) throughout, not slugs: the registry orders and
+# compiles entries, and two entries can share a slug (mt1std/mt1gen).
+sub emit_format_registry_verbose {
+    return unless section_requested('format-registry');
+
+    push @verbose_output, "=== format-registry ===";
+
+    # Inventory: one line per registry entry, static spec order.
+    push @verbose_output, "entries: " . scalar(keys %format_registry_entry);
+    push @verbose_output, "scanned_entries: " . scalar(@format_registry_members);
+    push @verbose_output, "scan_slots: " . scalar(@format_registry);
+    for my $spec (format_registry_specs()) {
+        my $e = $format_registry_entry{ $spec->{name} } or next;
+        push @verbose_output, sprintf(
+            "  entry: %s slug=%s group=%s default=%s role=%s",
+            $e->[FR_NAME], $e->[FR_SLUG], $e->[FR_GROUP],
+            ( $e->[FR_GROUP_DEFAULT] ? 'yes' : 'no' ),
+            ( $e->[FR_SCANNED] ? 'scanned' : 'stateful' ) );
+    }
+
+    # Structure: variant groups with their live occupants, the static scan
+    # order, and the derived pinned-ancestor constraints that order must
+    # respect under promotion (D26). A group with no ancestors shows '-'.
+    push @verbose_output, "variant_groups: " .
+        (join(',', map { my $g = $_; my ($o) = grep { $_->[FR_GROUP] eq $g } @format_scan_order; "$g=" . ($o ? $o->[FR_NAME] : '-') }
+                   sort { $format_variant_groups{$a}{slot} <=> $format_variant_groups{$b}{slot} } keys %format_variant_groups) || '-');
+    for my $g (sort { $format_variant_groups{$a}{slot} <=> $format_variant_groups{$b}{slot} } keys %format_variant_groups) {
+        push @verbose_output, sprintf( "  group: %s slot=%d default=%s members=%s",
+            $g, $format_variant_groups{$g}{slot}, $format_variant_groups{$g}{default},
+            join(',', @{ $format_variant_groups{$g}{members} }) );
+    }
+    push @verbose_output, "static_order: " . join(',', map { $_->[FR_NAME] } @format_registry);
+    for my $e (@format_registry) {
+        push @verbose_output, sprintf( "  ancestors: %s <- %s",
+            $e->[FR_GROUP], ( join(',', @{ $e->[FR_ANCESTORS] }) || '-' ) );
+    }
+
+    # Compile state: how much codegen this run paid for. Under elevation by
+    # election (D60) nothing is compiled at startup — a single-format run
+    # compiles the one order it scans with, a pinned run exactly one, and
+    # an invalid -lf none at all. scan_subs_rss_bytes is the accumulated
+    # compile-boundary RSS delta (D62), 0 when unarmed; read against the
+    # count it gives the per-sub cost.
+    push @verbose_output, "scan_subs_compiled: $format_scan_subs_compiled";
+    push @verbose_output, "scan_sub_cache_hits: $format_scan_sub_cache_hits";
+    push @verbose_output, "scan_subs_rss_bytes: $format_scan_subs_rss";
+    push @verbose_output, "scan_sub_rss_measured: " . ( $format_scan_measure_rss ? 'yes' : 'no' );
+    push @verbose_output, "compiled_orders: " .
+        (join(';', sort keys %format_scan_sub_cache) || '-');
+
+    push @verbose_output, "=== END format-registry ===";
 }
 
 # Per-file detection-evidence keys inside the file block of -V
@@ -8387,6 +8611,13 @@ sub measure_memory_structures {
 
     my %current_sizes = named_structure_sizes();
 
+    # D62: the generated scan subs are closures — a structure walk cannot
+    # see their op trees or pads, so this category carries the accumulated
+    # compile-boundary RSS delta instead of a Devel::Size value. It is
+    # already a running total, not a sampled size, so it flows through the
+    # same high-water-mark update monotonically.
+    $current_sizes{format_scan_subs} = $format_scan_subs_rss if $format_scan_subs_rss;
+
     # Update high-water marks (only if current value is larger)
     for my $struct (keys %current_sizes) {
         my $current = $current_sizes{$struct};
@@ -9277,6 +9508,14 @@ sub adapt_to_command_line_options {
         }
     }
 
+    # D62: arm the compile-boundary RSS measurement whenever a surface that
+    # reports memory was requested — -mem, or a -V section that emits
+    # MEMORY rows. Every compile then costs two RSS readings; a plain run
+    # pays nothing. Decided here because the first compile happens before
+    # line 1 of the first file.
+    $format_scan_measure_rss = ( $show_memory || section_requested('benchmark-data')
+                                              || section_requested('format-registry') ) ? 1 : 0;
+
     # Consolidation option processing (Issue #96)
     if ($group_similar_sensitivity ne "none") {
         if ($group_similar_sensitivity eq '') {
@@ -9832,9 +10071,19 @@ sub read_and_process_logs {
                 apply_format_variant_selection($selection);
                 $format_detection_evidence{$in_file} = $selection;
             }
+            # Election (D60): the sample named the file's format — front it
+            # and compile that order now, so line 1 already scans under
+            # the order the whole file will use.
+            format_elect_scan_front( $sample->{formats} ) unless defined $log_format_pin;
             delete $sample->{lines};   # conclusions are retained, lines are not (#17 attaches here)
             $format_detection_sample{$in_file} = $sample;
         }
+        # Whatever the evidence decided — an election, a variant swap, or
+        # nothing at all (unsampled file, unrecognised content, pin) — the
+        # order standing here is the one line 1 scans, so resolve its sub
+        # before the loop. A cache hit costs nothing; a new order is the
+        # one compile this file pays.
+        format_scan_sub_resolve();
         my $window_n = $format_detection_window > 0 ? $format_detection_window
                      : $sample                      ? 0
                      :                                FORMAT_DETECTION_WINDOW_FALLBACK;
@@ -13745,6 +13994,11 @@ sub print_verbose_output {
 
     # Timing rows (raw seconds)
     printf "TIMING\tdetect/registry_build\t%.3f\n", $elapsed_detect_registry_build;
+    # #413/D64: an accumulator over every scan-sub compile, wherever it
+    # fired. Compiles happen inside other stages (election before a file's
+    # first line, promotion mid-read), so this row attributes cost within
+    # them and is deliberately NOT part of the stage total below.
+    printf "TIMING\tdetect/scan_sub_compile\t%.3f\n", $elapsed_detect_scan_sub_compile;
     printf "TIMING\tparse/read_files\t%.3f\n", $elapsed_parse_read_files;
     printf "TIMING\taccumulate/initialize_buckets\t%.3f\n", $elapsed_accumulate_initialize_buckets;
     printf "TIMING\tfinalize/group_similar\t%.3f\n", $elapsed_finalize_group_similar;
@@ -13769,6 +14023,14 @@ sub print_verbose_output {
 
     # Memory rows (raw bytes)
     printf "MEMORY\trss_peak\t%d\n", $max_memory_usage;
+    # #413/D62: a compile-boundary RSS delta, not a structure walk, so it is
+    # available whenever a memory surface armed it — with no -mem it would
+    # otherwise be missing, since the per-structure rows below are gated on
+    # the Devel::Size pass. Under -mem it rides that loop instead (the
+    # category is in %memory_high_water_marks), so emit it here only when
+    # that loop will not.
+    printf "MEMORY\tformat_scan_subs\t%d\n", $format_scan_subs_rss
+        if $format_scan_measure_rss && !( $show_memory && %memory_high_water_marks );
 
     # Per-structure HWMs (only with -mem)
     if ($show_memory && %memory_high_water_marks) {
@@ -13813,6 +14075,13 @@ sub print_verbose_output {
     printf "COUNTS\tlog_analysis_entries\t%d\n", $stats_population_buckets;
     printf "COUNTS\tlog_messages_population\t%d\n", $stats_population_messages;
     printf "COUNTS\tthreadpool_entries\t%d\n", $stats_population_threadpools;
+    # #413: scan-sub codegen this run — the same variables -V format-registry
+    # reads, never recomputed here (one source, two surfaces). Under
+    # elevation by election (D60) these attribute the run's registry cost:
+    # the compile count against the ~0.6 MB/sub constant, and the RSS delta
+    # as the measured MEMORY row below.
+    printf "COUNTS\tformat_scan_subs_compiled\t%d\n", $format_scan_subs_compiled;
+    printf "COUNTS\tformat_scan_sub_cache_hits\t%d\n", $format_scan_sub_cache_hits;
 
     # Terminal and bucket settings (for benchmark reproducibility)
     printf "CONFIG\tterminal_width\t%d\n", $terminal_width;
@@ -15797,6 +16066,8 @@ sub pipeline_render {
     emit_bin_counter_mode_verbose();
 
     emit_format_detection_verbose();
+
+    emit_format_registry_verbose();
 
     emit_heatmap_palette_verbose();
 

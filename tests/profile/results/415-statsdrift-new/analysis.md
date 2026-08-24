@@ -51,3 +51,38 @@ Implication for the sort-on-statistic cost model: on singleton-dominated logs, t
 ## Tooling fix landed under this ticket
 
 `run-profile.sh` classified any non-dash token as an input file, truncating option values (`-V` section lists, `-so` operands, long-option values) into empty samples → zero-line profiled runs. Both arg walkers now apply one on-disk test (`-e` / glob expansion) before treating a token as a sample source. Commit eefda5a on branch 415-calculate-statistics-drift.
+
+## Re-measure with the #417 sub-stage instrument (2026-08-24, post-merge of release/0.17.0)
+
+Same construct (humungous `-so p99`, `-dm raw`, `-mem`, harness-shaped), median-of-3
+ABAB, v0.16.0 worktree binary vs this branch (now carrying #417), same machine,
+back-to-back. Runtime-config byte-identical to the earlier arms.
+
+| row | old (v0.16.0) | new (0.17.0 + #417) | delta |
+|---|---|---|---|
+| calculate_statistics (parent) | 0.465 s (0.461–0.501) | 0.560 s (0.533–0.563) | **+20.4%** |
+| ├ population_walk | — | 0.264 s (0.259–0.269) | 47% of phase |
+| ├ sort_selection | — | 0.282 s (0.261–0.283) | 50% of phase |
+| ├ bucket_stats / group_calc / threadpool_stats | — | 0.000 s each | 0% |
+| └ untimed | — | 0.013 s | 2% |
+| total | 2.934 s | 3.155 s | +7.5% |
+
+- Drift reproduces at the same magnitude as the earlier raw-pinned measurement
+  (+19.9% then, +20.4% now) — stable, not session noise.
+- The instrument attributes 97% of the phase to exactly the two blocks the
+  NYTProf statement-level analysis identified: the per-key eligibility walk over
+  `%log_messages` (population_walk) and the 286,659-key fill-block occurrences
+  sort (sort_selection). Denominators: `COUNTS log_messages_population 286659`,
+  `sort_selection: statistic=p99 defined=0 fill=286659` — zero statistical yield,
+  as before. Every sub-stage that does per-key *computation* (group_calc,
+  bucket_stats) is 0.000: the drift lives entirely in hash traversal + sort.
+- `-mem` in the same runs: rss_peak 212.5 MB (old) → 232.6 MB (new), unattributed
+  76 → 95 MiB — the ~+20 MB pre-hash heap the locality hypothesis (#413 eager
+  precompile) predicts is present in these exact runs.
+- Cross-version conclusion now rests on comparable TIMING rows (the pause
+  condition): identical work counts, identical sub-stage shape expected, cost
+  concentrated where large-hash traversal locality would put it. The
+  discriminating probe (scratch-copy disable of the eager precompile loop in
+  `build_format_registry()`, re-run this construct) remains the one unproven
+  link and still awaits approval — alternatively, #413's fix landing in this
+  release provides the same discrimination for free at the next re-measure.
