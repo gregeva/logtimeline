@@ -1,0 +1,49 @@
+====================================================================================================
+Profile:  /Users/gregeva/Documents/GitHub/logtimeline/tests/profile/results/414-readphase-new/1k/nytprof.out
+Script:   /Users/gregeva/Documents/GitHub/logtimeline/ltl
+Perl:     5.42.2
+CPU time: 0.1133 s (sum of exclusive times)
+Subs:     25 shown of 443 matching (from 1175 total)
+Sort:     incl time | Filter: Perl subs only
+ltl -V:   lines_read=1000  total=0.058s  rss=32 MB
+====================================================================================================
+
+Rank  Subroutine                                               Calls   Incl(s)   Excl(s)   ms/call   %Tot
+----------------------------------------------------------------------------------------------------
+   1  pipeline_parse                                               1    0.0320  0.000026    32.013   28.3
+   2  read_and_process_logs                                        1    0.0286    0.0107    28.579   25.2
+   3  get_memory_usage                                             7    0.0209    0.0001     2.985   18.4
+   4  measure_memory_structures                                    5    0.0147  0.000053     2.943   13.0
+   5  Term::ReadKey::GetTerminalSize                               1    0.0125    0.0001    12.472   11.0
+   6  pipeline_render                                              1    0.0121  0.000072    12.125   10.7
+   7  pipeline_detect                                              1    0.0112  0.000006    11.213    9.9
+   8  build_format_registry                                        1    0.0112    0.0021    11.152    9.8
+   9  format_scan_sub_resolve                                      1    0.0107  0.000014    10.661    9.4
+  10  compile_format_scan_sub                                      1    0.0106    0.0034    10.647    9.4
+  11  BEGIN@35                                                     1    0.0072    0.0003     7.155    6.3
+  12  Text::CSV::_load                                             2    0.0068  0.000043     3.397    6.0
+  13  Text::CSV::_load_pp                                          1    0.0068  0.000001     6.753    6.0
+  14  Text::CSV::BEGIN@1.1                                         1    0.0067    0.0064     6.726    5.9
+  15  BEGIN@21                                                     1    0.0066    0.0017     6.554    5.8
+  16  BEGIN@22                                                     1    0.0055    0.0017     5.543    4.9
+  17  pipeline_finalize                                            1    0.0055  0.000044     5.458    4.8
+  18  compile_format_extractor                                    34    0.0052    0.0046     0.153    4.6
+  19  __ANON__[(eval 44)[/Users/gregeva/Documents/GitHu...      1041    0.0050    0.0024     0.005    4.4
+  20  BEGIN@25                                                     1    0.0048    0.0033     4.759    4.2
+  21  XSLoader::load                                               9    0.0043    0.0043     0.479    3.8
+  22  write_index_file                                             1    0.0043    0.0001     4.299    3.8
+  23  pipeline_accumulate                                          1    0.0029  0.000043     2.887    2.5
+  24  Text::CSV_PP::print                                          3    0.0028    0.0009     0.927    2.5
+  25  calculate_all_statistics                                     1    0.0026    0.0004     2.616    2.3
+
+Note: %Tot = incl_time / 0.1133 s (total Perl CPU time)
+      Use --all to include XSubs [xs] and opcodes [op]
+      Use --sort excl to rank by exclusive time
+
+====================================================================================================
+Cross-Validation: NYTProf call counts vs ltl -V output
+----------------------------------------------------------------------------------------------------
+  read_and_process_logs                     NYTProf calls=1  ltl-V lines_read=1000
+    (called once; loops internally over lines)
+
+  [OK] All cross-validation checks within tolerance.
