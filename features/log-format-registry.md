@@ -851,6 +851,36 @@ Each stage is its own commit with its verification run before the next begins. C
 
 Then the per-feature workflow (PR into `release/0.17.0` when the architect directs). #415's re-measure is downstream and NOT this issue's scope.
 
+### Implementation progress (as of 2026-08-24) — S1–S5 delivered, resume at S6
+
+Branch `413-eager-scan-order-precompile`. S1–S5 are committed; the tree stands at S5. **Work resumes at S6.**
+
+| Stage | Commit | State |
+|---|---|---|
+| S1 — shared interpreted classifier | `001a00b` | delivered |
+| S2 — no codegen at startup | `beba4b1` | delivered |
+| S3 — compile points + per-compile validation | `d8576c6` | delivered |
+| S4 — `format_scan_subs` memory category | `7f33d97` | delivered |
+| S5 — `-V format-registry` + its harness | `9566cc4` | delivered |
+| S6 — D64 timing + doc sweep | — | **next** |
+| S7 — validation plan F1–F6 | — | not started |
+
+**Gains measured at S5** (2-line probe, median of 3, against the pre-branch tree): peak RSS 42.2 → 26.2 MiB; `TIMING detect/registry_build` 0.101 → 0.008 s. Both beat D60's expectation (~28 MB / ~14 ms). Compiles per run: single-format 1, `-lf` exactly 1, invalid `-lf` 0, mixed-format fixture 3.
+
+**Verification standing at S5:** byte parity across `tests/fixtures/format-detection/` (all eight fixtures, `-bs 1440 -oe`) with one deliberate exception, `validate-format-detection.sh` 192/192, `validate-format-registry.sh` 22/22, `validate-help-content.sh` 11/11.
+
+#### Findings carried forward
+
+- **F10 — `promotions:` legitimately drops from 1 to 0 for a single-format file.** Election fronts the elected group before line 1, so the first match already sits at an optimal position and emits no promotion code. The `format-detection` scan-telemetry assertion was updated to `^promotions: 0$` with the stronger invariant in its `asserts` text. Any future reading of promotion telemetry must account for election having already done the first reorder.
+- **F11 — per-compile validation must disturb NOTHING of the run's state, because compiles now happen mid-run.** D61's per-compile gate was originally written to reset the record lexicals, the timestamp memo and the date cache the way the startup gates do. That is correct only when validation runs exclusively before line 1. Under D60 a compile also fires at election and at mid-read promotion, and resetting there cleared the timestamp memo mid-file: the next real line re-parsed its timestamp, the cache miss fired the steady-loop probes, and the mixed fixture's variant scores changed *and* its included line count dropped from 450 to 448. The fix, and the contract for any future work inside `compile_format_scan_sub()`: suppress `format_probe_signal()` alongside `format_registry_promote()`, and snapshot/restore (never reset) the record lexicals, `$format_last_ts_str`/`$format_last_ts_epoch` and the date cache. The date cache is keyed by date string alone and two layouts disagree on its epoch (N3), so a sample parsed under one entry's layout must never be left behind for the run to read.
+- **F12 — the D62 RSS instrument distorts the D64 timing row if both boundaries coincide.** Measured while starting S6: with `TIMING detect/scan_sub_compile` bracketing the whole of `compile_format_scan_sub()`, the mixed fixture reported 0.032 s for 3 compiles (~10.7 ms each) against a codegen+validation cost of 3.4 ms each (codegen 3.1 ms, per-compile validation 0.3 ms — the latter measured, and cheap). The gap is `get_memory_usage()`, which shells out to `ps` on macOS and is called twice per compile when D62 measurement is armed. **S6 must place the D64 timing boundary so it excludes the D62 RSS readings** — otherwise the timing row reports the cost of measuring memory rather than the cost of compiling, and only on armed runs, which is exactly where a reader would compare the two. Note also that this makes the row's value depend on whether measurement was armed; the S6 contract text should say which it measures.
+- **F13 — `TIMING detect/scan_sub_compile` is an accumulator, not a pipeline stage.** Compiles fire inside other stages (election before a file's first line, promotion mid-read), so the row attributes cost *within* those stages and must NOT be added to `$elapsed_total`, which sums disjoint stage timings.
+
+#### S6 scope reminders
+
+- The D64 boundary placement per F12 above.
+- Doc sweep: `docs/usage.md`'s `-V` prose and `tests/HARNESS-DESIGN.md`'s reserved-names list already carry `format-registry` (landed with S5). S6's sweep covers whatever the timing row adds — the `benchmark-data` contract and any surface enumerating `TIMING` rows.
+
 ## `-V format-detection` section-contract
 
 This section is the owning contract for the `format-detection` `-V` section and its `format-detection / scan` sub-section, both emitted by `emit_format_detection_verbose()` and consumed by `tests/validate-format-detection.sh`. All pre-existing keys of the parent section (per-file `format:`, `match_type:`, `is_access_log:`, `matched_lines:`, `unmatched_lines:`, `first_match_line:`; run-level `duration_unit_override:`, `files:`) are byte-preserved from their pre-registry shapes; everything below is additive. Renames and removals are breaking per `tests/HARNESS-DESIGN.md` § Stability contract.
