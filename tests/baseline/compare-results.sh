@@ -13,7 +13,17 @@
 #   --markdown — output tables in markdown format for release notes
 #   --save     — write full markdown report to tests/baseline/results/comparison-{baseline}-vs-{current}.md
 #
-# Issue #56: Memory Baseline Profiling
+# MAINTENANCE — renaming a TIMING row is a breaking change to this script.
+# Committed baselines are kept for years and carry whatever labels their
+# release emitted. When a TIMING label in ltl is renamed, add an
+# old -> new entry to the tmap block below IN THE SAME COMMIT; otherwise
+# every comparison spanning the rename silently stops pairing that row and
+# reports it as two half-empty N/A rows instead of a delta. The script
+# reports unpaired TIMING labels on stderr after each run as a backstop,
+# but the note cannot distinguish a missed rename from a genuinely new row
+# — that judgement is the author's.
+#
+# Issue #56: Memory Baseline Profiling. Rename maintenance: Issue #422.
 
 set -euo pipefail
 
@@ -160,9 +170,17 @@ run_comparison() {
     local filter_mode="$1"
 
     awk -F'\t' -v filter="$filter_mode" '
-    # TIMING label compat map: pre-v0.17.0 TSVs carry flat stage labels; the
-    # #180 named-pipeline-stages rename moved them to stage/step form. Rows are
-    # canonicalized to the new labels on read so cross-version rows still pair.
+    # TIMING label compat map: old label -> the label in use today. Baselines
+    # are kept for years and carry whatever labels their release emitted, so
+    # every rename of a TIMING row must add an entry here IN THE SAME CHANGE
+    # or cross-version rows stop pairing — the old and new names each become
+    # a half-empty N/A row and the metric silently drops out of every
+    # comparison spanning the rename.
+    #
+    # Chains are resolved (a -> b -> c collapses to c), so a second rename of
+    # an already-renamed row only needs its own new entry.
+    #
+    # #180 moved the flat stage labels to stage/step form:
     BEGIN {
         tmap["read_files"] = "parse/read_files"
         tmap["initialize_buckets"] = "accumulate/initialize_buckets"
@@ -172,7 +190,15 @@ run_comparison() {
         tmap["histogram_statistics"] = "finalize/histogram_statistics"
         tmap["normalize_data"] = "render/normalize_data"
     }
-    { if ($3 == "TIMING" && $4 in tmap) $4 = tmap[$4] }
+    {
+        if ($3 == "TIMING") {
+            # Follow the chain so a label renamed more than once still lands
+            # on the current name; the guard stops a mistaken cycle looping.
+            hops = 0
+            while ($4 in tmap && hops++ < 10) $4 = tmap[$4]
+            if (NR == FNR) timing_base[$4] = 1; else timing_cur[$4] = 1
+        }
+    }
     # Skip headers
     NR == FNR && FNR == 1 { next }
     NR != FNR && FNR == 1 { next }
@@ -204,6 +230,7 @@ run_comparison() {
         }
         if (val != "") {
             current[key] = val
+            current_test[$1] = 1
             if (!(key in seen)) {
                 keys_order[++n] = key
                 seen[key] = 1
@@ -231,6 +258,18 @@ run_comparison() {
                     !(mtype == "lines_read" || mtype == "lines_included")) continue
             }
 
+            # A test case the current run did not execute has nothing to
+            # report: with a single-case gate run against the full baseline,
+            # those produced 248 N/A rows around 4 useful ones. Skip the
+            # whole case.
+            #
+            # A METRIC missing on one side is kept and shown as N/A: it means
+            # the metric was added, removed or renamed between the two
+            # versions, which is exactly what a comparison should surface
+            # (the #180 timing rename appears here as the old names leaving
+            # and the stage/step names arriving).
+            if (!(test in current_test)) continue
+
             b = (key in baseline) ? baseline[key] : "N/A"
             c = (key in current) ? current[key] : "N/A"
 
@@ -238,23 +277,36 @@ run_comparison() {
                 delta = "N/A"
                 pct = "N/A"
                 ind = "?"
-            } else {
-                delta = c - b
-                if (b != 0) {
-                    pct = sprintf("%.1f%%", (delta / b) * 100)
-                } else if (c == 0) {
-                    pct = "0.0%"
-                } else {
-                    pct = "NEW"
+                if (mtype == mname) metric = mtype
+                if (mtype == "MEMORY") {
+                    if (b != "N/A") b = format_bytes(b)
+                    if (c != "N/A") c = format_bytes(c)
+                } else if (mtype == "TIMING") {
+                    if (b != "N/A") b = format_time(b)
+                    if (c != "N/A") c = format_time(c)
+                } else if (mtype == "lines_read" || mtype == "lines_included") {
+                    if (b != "N/A") b = format_number(b)
+                    if (c != "N/A") c = format_number(c)
                 }
+                printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", test, metric, b, c, delta, pct, ind
+                continue
+            }
 
-                if (delta > 0) {
-                    ind = "REGRESS"
-                } else if (delta < 0) {
-                    ind = "IMPROVE"
-                } else {
-                    ind = ""
-                }
+            delta = c - b
+            if (b != 0) {
+                pct = sprintf("%.1f%%", (delta / b) * 100)
+            } else if (c == 0) {
+                pct = "0.0%"
+            } else {
+                pct = "NEW"
+            }
+
+            if (delta > 0) {
+                ind = "REGRESS"
+            } else if (delta < 0) {
+                ind = "IMPROVE"
+            } else {
+                ind = ""
             }
 
             # Skip rows where both values are 0
@@ -265,20 +317,40 @@ run_comparison() {
 
             # Format values for display
             if (mtype == "MEMORY") {
-                if (b != "N/A") b = format_bytes(b)
-                if (c != "N/A") c = format_bytes(c)
-                if (delta != "N/A") delta = format_bytes_signed(delta)
+                b = format_bytes(b)
+                c = format_bytes(c)
+                delta = format_bytes_signed(delta)
             } else if (mtype == "TIMING") {
-                if (b != "N/A") b = format_time(b)
-                if (c != "N/A") c = format_time(c)
-                if (delta != "N/A") delta = format_time_signed(delta)
+                b = format_time(b)
+                c = format_time(c)
+                delta = format_time_signed(delta)
             } else if (mtype == "lines_read" || mtype == "lines_included") {
-                if (b != "N/A") b = format_number(b)
-                if (c != "N/A") c = format_number(c)
-                if (delta != "N/A") delta = format_number(delta)
+                b = format_number(b)
+                c = format_number(c)
+                delta = format_number(delta)
             }
 
             printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", test, metric, b, c, delta, pct, ind
+        }
+
+        # Rename self-check. A TIMING label on one side only is either a row
+        # genuinely added/removed this cycle, or a rename whose tmap entry was
+        # forgotten. The script cannot tell those apart, so it reports rather
+        # than guesses — but an unpaired PAIR (one label gone, one arrived) is
+        # the shape of a missed rename and is worth a look before the numbers
+        # are trusted.
+        nb = 0; nc = 0
+        for (t in timing_base) if (!(t in timing_cur)) unpaired_base[nb++] = t
+        for (t in timing_cur)  if (!(t in timing_base)) unpaired_cur[nc++] = t
+        if (nb > 0 || nc > 0) {
+            printf "\n" > "/dev/stderr"
+            printf "NOTE: TIMING labels present on only one side of this comparison.\n" > "/dev/stderr"
+            printf "      If a row was RENAMED, add old -> new to tmap in compare-results.sh\n" > "/dev/stderr"
+            printf "      so baselines spanning the rename keep pairing.\n" > "/dev/stderr"
+            for (i = 0; i < nb; i++)
+                printf "      baseline only: %s\n", unpaired_base[i] > "/dev/stderr"
+            for (i = 0; i < nc; i++)
+                printf "      current  only: %s\n", unpaired_cur[i] > "/dev/stderr"
         }
     }
 
