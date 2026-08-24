@@ -5,16 +5,10 @@
 # Re-runs the same ltl commands as capture-regression.sh and diffs against
 # the stored reference output. Any difference is a regression.
 #
-# Known acceptable failure — capture-location dependency (#209): ltl
-# absolutizes input file paths and renders them in the file legend, so the
-# stored references embed the absolute paths of the checkout where they
-# were captured. Run from any other location, the legend-bearing scenarios
-# fail with diffs on exactly the `[√] /abs/path...` legend lines. Those
-# legend-line diffs are the ONLY acceptable differences; any other diff
-# line is a real regression. The durable fix (relative path emission in
-# ltl + this harness passing repo-relative paths) is #209's scope; until
-# it lands, references are fully reproducible only from the capture
-# checkout, and rebaselining stays a per-release activity.
+# The references are reproducible from any checkout: ltl renders input paths
+# in the file legend exactly as it received them, and this harness passes
+# repo-relative log paths from the repo root, so no absolute path reaches
+# the captured output (#209).
 
 set -euo pipefail
 
@@ -22,6 +16,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 REF_DIR="${1:-$SCRIPT_DIR/reference-output}"
+
+# Run from the repo root so the log paths handed to ltl below are
+# repo-relative; must match capture-regression.sh, which captured the
+# references the same way.
+cd "$REPO_DIR"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -46,17 +45,17 @@ derive_sampled_access_log "$ACCESS_LOG"
 # and one histogram, so the slice carries the whole rendered surface; its
 # runs take `-bs 1` so the 7-minute span yields seven timeline rows of
 # heatmap cells (tests/HARNESS-DESIGN.md section Invocation coherence).
-SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
+SCRIPT_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
 # Issue #235 — additional fixtures for the extended heatmap/histogram tests
 # below. APACHE_LOG is the canonical clean Apache HTTP2 access log; it ships
 # bytes + microsecond-%D durations and is small (~100 KB), keeping capture
 # time tight.
-APACHE_LOG="$REPO_DIR/logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
+APACHE_LOG="logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
 # Issue #312 — numeric-highlight rendering fixtures. PLOT_LOG has sparse metric
 # presence (durationMS/count on 220 of 2,992 lines); DPM5K_LOG is the
 # deterministic 5k-line ScriptLog slice with durationMS on every line.
-PLOT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log"
-DPM5K_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
+PLOT_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log"
+DPM5K_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
 
 # Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin
 strip_nondeterministic() {

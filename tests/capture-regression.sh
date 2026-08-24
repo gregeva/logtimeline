@@ -16,6 +16,12 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 REF_DIR="${1:-$SCRIPT_DIR/reference-output}"
 
+# Run from the repo root so the log paths handed to ltl below are
+# repo-relative. ltl records paths verbatim and the file legend renders them,
+# so relative paths keep the captured references portable across checkouts
+# (#209). Everything else here is absolute and unaffected by the cd.
+cd "$REPO_DIR"
+
 # Common options: suppress progress, summary table, and limit top messages
 COMMON="--disable-progress -ni -osum -n 1"
 
@@ -38,17 +44,17 @@ derive_sampled_access_log "$ACCESS_LOG"
 # and one histogram, so the slice carries the whole rendered surface; its
 # runs take `-bs 1` so the 7-minute span yields seven timeline rows of
 # heatmap cells (tests/HARNESS-DESIGN.md section Invocation coherence).
-SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
+SCRIPT_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
 # Issue #235 — additional fixtures for the extended heatmap/histogram tests
 # below. APACHE_LOG is the canonical clean Apache HTTP2 access log; it ships
 # bytes + microsecond-%D durations and is small (~100 KB), keeping capture
 # time tight.
-APACHE_LOG="$REPO_DIR/logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
+APACHE_LOG="logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
 # Issue #312 — numeric-highlight rendering fixtures. PLOT_LOG has sparse metric
 # presence (durationMS/count on 220 of 2,992 lines); DPM5K_LOG is the
 # deterministic 5k-line ScriptLog slice with durationMS on every line.
-PLOT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log"
-DPM5K_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
+PLOT_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log"
+DPM5K_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
 
 # Verify test files exist
 for f in "$ACCESS_LOG" "$SCRIPT_LOG" "$APACHE_LOG" "$PLOT_LOG" "$DPM5K_LOG"; do

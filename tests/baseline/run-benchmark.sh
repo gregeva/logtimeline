@@ -17,9 +17,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LTL="$SCRIPT_DIR/../../ltl"
+REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LTL="$REPO_DIR/ltl"
 RESULTS_DIR="$SCRIPT_DIR/results"
-LOGS_DIR="$SCRIPT_DIR/../../logs"
+
+# Run from the repo root and glob the logs relatively, so the paths handed to
+# ltl — and recorded verbatim in the benchmark TSV's FILES rows — are
+# repo-relative and the baseline stays portable across machines (#209).
+cd "$REPO_DIR"
+LOGS_DIR="logs"
 
 # Default label is timestamp
 LABEL="$(date +%Y%m%d-%H%M%S)"
