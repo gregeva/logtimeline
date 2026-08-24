@@ -88,6 +88,9 @@ my %verbose_section_registry = (
     'format-detection' => {
         description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts, plus registry scan telemetry: order, promotions, per-entry match counts, sampled no-match cost (Issues #228, #58).',
     },
+    'format-registry' => {
+        description => 'The compiled format registry itself: entry inventory, variant groups and their occupants, static scan order and derived ancestor constraints, and scan-sub compile state (Issue #413).',
+    },
     'heatmap-palette' => {
         description => 'Heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250).',
     },
@@ -117,6 +120,7 @@ my @verbose_section_order = qw(
     histogram-bin-counters
     message-grouping
     format-detection
+    format-registry
     heatmap-palette
     csv-output
     percentile-algorithm
@@ -436,6 +440,7 @@ use constant FORMAT_SCAN_NOMATCH_SAMPLE_EVERY => 256;
 my $format_scan_promotions = 0;        # actual reorders via format_registry_promote()
 my $format_scan_validating  = 0;       # per-compile validation in flight: promotion is suppressed
 my $format_scan_subs_compiled = 0;     # generated scan subs minted this run
+my $format_scan_sub_cache_hits = 0;    # resolves served from the signature cache
 my $format_scan_subs_rss      = 0;     # D62: accumulated compile-boundary RSS delta, bytes
 my $format_scan_measure_rss   = 0;     # armed at option parse when a memory surface is requested
 my $format_scan_nomatch_samples = 0;   # sampled no-match scans timed
@@ -3084,6 +3089,7 @@ sub apply_format_variant_selection {
 # exactly where an order is about to be scanned with, never speculatively.
 sub format_scan_sub_resolve {
     my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
+    $format_scan_sub_cache_hits++ if exists $format_scan_sub_cache{$sig};
     return $format_scan_sub = $format_scan_sub_cache{$sig}
                           //= compile_format_scan_sub($format_registry_opts);
 }
@@ -4009,6 +4015,65 @@ sub emit_format_detection_verbose {
     push @verbose_output, "=== END format-detection / scan ===";
 
     push @verbose_output, "=== END format-detection ===";
+}
+
+# The registry itself (D63): what was compiled from the declarative specs,
+# how it is structured, and what codegen the run actually paid for. The
+# per-file detection telemetry — which format each file bound, and the
+# scan's per-line behaviour — lives in -V format-detection; this section
+# is the run-level view of the registry as an object.
+#
+# Entry names (FR_NAME) throughout, not slugs: the registry orders and
+# compiles entries, and two entries can share a slug (mt1std/mt1gen).
+sub emit_format_registry_verbose {
+    return unless section_requested('format-registry');
+
+    push @verbose_output, "=== format-registry ===";
+
+    # Inventory: one line per registry entry, static spec order.
+    push @verbose_output, "entries: " . scalar(keys %format_registry_entry);
+    push @verbose_output, "scanned_entries: " . scalar(@format_registry_members);
+    push @verbose_output, "scan_slots: " . scalar(@format_registry);
+    for my $spec (format_registry_specs()) {
+        my $e = $format_registry_entry{ $spec->{name} } or next;
+        push @verbose_output, sprintf(
+            "  entry: %s slug=%s group=%s default=%s role=%s",
+            $e->[FR_NAME], $e->[FR_SLUG], $e->[FR_GROUP],
+            ( $e->[FR_GROUP_DEFAULT] ? 'yes' : 'no' ),
+            ( $e->[FR_SCANNED] ? 'scanned' : 'stateful' ) );
+    }
+
+    # Structure: variant groups with their live occupants, the static scan
+    # order, and the derived pinned-ancestor constraints that order must
+    # respect under promotion (D26). A group with no ancestors shows '-'.
+    push @verbose_output, "variant_groups: " .
+        (join(',', map { my $g = $_; my ($o) = grep { $_->[FR_GROUP] eq $g } @format_scan_order; "$g=" . ($o ? $o->[FR_NAME] : '-') }
+                   sort { $format_variant_groups{$a}{slot} <=> $format_variant_groups{$b}{slot} } keys %format_variant_groups) || '-');
+    for my $g (sort { $format_variant_groups{$a}{slot} <=> $format_variant_groups{$b}{slot} } keys %format_variant_groups) {
+        push @verbose_output, sprintf( "  group: %s slot=%d default=%s members=%s",
+            $g, $format_variant_groups{$g}{slot}, $format_variant_groups{$g}{default},
+            join(',', @{ $format_variant_groups{$g}{members} }) );
+    }
+    push @verbose_output, "static_order: " . join(',', map { $_->[FR_NAME] } @format_registry);
+    for my $e (@format_registry) {
+        push @verbose_output, sprintf( "  ancestors: %s <- %s",
+            $e->[FR_GROUP], ( join(',', @{ $e->[FR_ANCESTORS] }) || '-' ) );
+    }
+
+    # Compile state: how much codegen this run paid for. Under elevation by
+    # election (D60) nothing is compiled at startup — a single-format run
+    # compiles the one order it scans with, a pinned run exactly one, and
+    # an invalid -lf none at all. scan_subs_rss_bytes is the accumulated
+    # compile-boundary RSS delta (D62), 0 when unarmed; read against the
+    # count it gives the per-sub cost.
+    push @verbose_output, "scan_subs_compiled: $format_scan_subs_compiled";
+    push @verbose_output, "scan_sub_cache_hits: $format_scan_sub_cache_hits";
+    push @verbose_output, "scan_subs_rss_bytes: $format_scan_subs_rss";
+    push @verbose_output, "scan_sub_rss_measured: " . ( $format_scan_measure_rss ? 'yes' : 'no' );
+    push @verbose_output, "compiled_orders: " .
+        (join(';', sort keys %format_scan_sub_cache) || '-');
+
+    push @verbose_output, "=== END format-registry ===";
 }
 
 # Per-file detection-evidence keys inside the file block of -V
@@ -13939,6 +14004,14 @@ sub print_verbose_output {
 
     # Memory rows (raw bytes)
     printf "MEMORY\trss_peak\t%d\n", $max_memory_usage;
+    # #413/D62: a compile-boundary RSS delta, not a structure walk, so it is
+    # available whenever a memory surface armed it — with no -mem it would
+    # otherwise be missing, since the per-structure rows below are gated on
+    # the Devel::Size pass. Under -mem it rides that loop instead (the
+    # category is in %memory_high_water_marks), so emit it here only when
+    # that loop will not.
+    printf "MEMORY\tformat_scan_subs\t%d\n", $format_scan_subs_rss
+        if $format_scan_measure_rss && !( $show_memory && %memory_high_water_marks );
 
     # Per-structure HWMs (only with -mem)
     if ($show_memory && %memory_high_water_marks) {
@@ -13983,6 +14056,13 @@ sub print_verbose_output {
     printf "COUNTS\tlog_analysis_entries\t%d\n", $stats_population_buckets;
     printf "COUNTS\tlog_messages_population\t%d\n", $stats_population_messages;
     printf "COUNTS\tthreadpool_entries\t%d\n", $stats_population_threadpools;
+    # #413: scan-sub codegen this run — the same variables -V format-registry
+    # reads, never recomputed here (one source, two surfaces). Under
+    # elevation by election (D60) these attribute the run's registry cost:
+    # the compile count against the ~0.6 MB/sub constant, and the RSS delta
+    # as the measured MEMORY row below.
+    printf "COUNTS\tformat_scan_subs_compiled\t%d\n", $format_scan_subs_compiled;
+    printf "COUNTS\tformat_scan_sub_cache_hits\t%d\n", $format_scan_sub_cache_hits;
 
     # Terminal and bucket settings (for benchmark reproducibility)
     printf "CONFIG\tterminal_width\t%d\n", $terminal_width;
@@ -15967,6 +16047,8 @@ sub pipeline_render {
     emit_bin_counter_mode_verbose();
 
     emit_format_detection_verbose();
+
+    emit_format_registry_verbose();
 
     emit_heatmap_palette_verbose();
 

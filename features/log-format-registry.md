@@ -913,6 +913,36 @@ Sub-section `format-detection / scan` additions:
 - `variant_groups: group=occupant,...|-` — each variant group with ≥ 2 members and the entry occupying its slot at emission time (slot order); `-` for the occupant when the pin excluded the group.
 - `entries: N` keeps its meaning — occupants compiled into the scan sub (one per group slot; 15), not members.
 
+## `-V format-registry` section-contract
+
+This section is the owning contract for the `format-registry` `-V` section, emitted by `emit_format_registry_verbose()` and consumed by `tests/validate-format-registry.sh`. It closes the registry-observability gap #58 left: `format-detection` reports what each *file* bound and how the scan behaved per line, but nothing reported what the registry **is** or what codegen a run paid for. Renames and removals are breaking per `tests/HARNESS-DESIGN.md` § Stability contract.
+
+Entry names (`mt1std`, `mt3us`, …) throughout, never slugs — the registry orders and compiles entries, and two entries can share a slug (mt1std/mt1gen → `thingworx_standard`), the same vocabulary rule the `format-detection / scan` sub-section follows.
+
+**Inventory** — what was compiled from the declarative specs:
+
+- `entries: N` — every entry in `format_registry_specs()`, scanned and stateful alike (18: 17 scanned + `csv`).
+- `scanned_entries: N` — entries the scan can recognise, variant members included (17). Changes only when a scanned format is added or removed — same commit updates this contract and the harness.
+- `scan_slots: N` — slots in the live scan array (15). One per variant group, since only one member of a group is seated at a time (D47), so `scan_slots ≤ scanned_entries`. Equals `entries: N` in `format-detection / scan`, which counts the same slots. Under `-lf` this narrows to the pinned format's member count.
+- `  entry: <name> slug=<slug> group=<group> default=yes|no role=scanned|stateful` — one line per entry, static spec order. `group` is the entry's `variant_group` or its own name; `default=yes` marks the member holding the group's slot by default; `role=stateful` marks an entry outside the generated scan (`csv` alone today, D32).
+
+**Structure** — how the scan is organised and what constrains its ordering:
+
+- `variant_groups: group=occupant,...|-` — each variant group with ≥ 2 members and the entry occupying its slot at emission time (slot order). Same key and semantics as the `format-detection / scan` line of the same name; here it heads the per-group detail below.
+- `  group: <group> slot=N default=<name> members=<name>,...` — one line per variant group: its position in the scan array, its default member, and every member in declaration order.
+- `static_order: name,...` — the declaration order of the group slots: the order every run starts from and that promotion permutes. It is **not** the run's end-state order — that is `final_order:` in `format-detection / scan`.
+- `  ancestors: <group> <- <group>,...|-` — the derived pinned-ancestor set per scan slot, static order: the groups whose patterns shadow this one, which promotion may never move it behind (D26). `-` means nothing shadows the group, so it may promote to the very front. Derived by `derive_format_constraints()` and cross-checked against each entry's declared `expect_ancestors` by D24 gate 4, so a drift fails the build before it reaches this line.
+
+**Compile state** — what codegen the run actually paid for. Under D60 nothing is generated at startup, so these are the run's real registry cost:
+
+- `scan_subs_compiled: N` — generated scan subs minted this run, counted at the codegen boundary in `compile_format_scan_sub()`. The election invariants: a single-format file ⇒ ≤ 2; `-lf` ⇒ exactly 1; an invalid `-lf` ⇒ 0 (the operand is validated before any codegen). A multi-format file compiles one sub per distinct recency order its stream visits, never one per registry entry.
+- `scan_sub_cache_hits: N` — resolves served from the order-signature cache (`format_scan_sub_resolve()` found the order already compiled). A run that revisits an order it has scanned with before pays a cache hit (~52 ns), not a compile (~2.5 ms).
+- `scan_subs_rss_bytes: N` — the accumulated compile-boundary RSS delta (D62), bytes. **Nondeterministic** — harnesses assert its shape, never its value. Read against `scan_subs_compiled` it gives the per-sub cost, which calibrates at ~0.6 MB. `0` when measurement was not armed.
+- `scan_sub_rss_measured: yes|no` — whether the D62 measurement was armed at option parse (a memory-reporting surface was requested: `-mem`, `-V benchmark-data`, or this section). `no` is why `scan_subs_rss_bytes` reads 0 on a plain run; the two keys are read together so a zero is never mistaken for a measurement.
+- `compiled_orders: sig;...|-` — every compiled order's signature (joined entry names), sorted. The compile count read against which orders the run actually needed.
+
+**Re-emission (one source, two surfaces per `tests/HARNESS-DESIGN.md`):** `benchmark-data` emits `COUNTS format_scan_subs_compiled` and `COUNTS format_scan_sub_cache_hits` from the same variables this section reads, and `MEMORY format_scan_subs` from the same accumulator — never an independent recount. The `MEMORY` row is emitted whenever measurement was armed, including without `-mem`: it is a compile-boundary RSS delta, not a structure walk, so it does not depend on the `Devel::Size` pass the other `MEMORY` rows are gated on. Under `-mem` the category rides `%memory_high_water_marks` (appearing in the `-mem` terminal breakdown) and the standalone row stands down, so exactly one row is emitted either way.
+
 ## TODOs
 
 - [x] Research fuzzy matching algorithms for message identity grouping (section 9) — completed via #96/#54, see `docs/similarity-engine-best-practices.md`

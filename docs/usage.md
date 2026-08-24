@@ -402,7 +402,7 @@ ltl -tpa "http-" -tpa "async-" app.log
 
 ### Verbose output (`-V`)
 
-The `-V` flag emits diagnostic sections describing internal state — effective configuration (CLI + environment), index pre-seed lookups, bin-counter feature state, message-grouping statistics, log-format detection, heatmap palette resolution, benchmark data. Each section is named and bracketed by `=== <name> ===` / `=== END <name> ===` markers so it can be extracted by `grep`, `sed`, or `awk`.
+The `-V` flag emits diagnostic sections describing internal state — effective configuration (CLI + environment), index pre-seed lookups, bin-counter feature state, message-grouping statistics, log-format detection, the compiled format registry, heatmap palette resolution, benchmark data. Each section is named and bracketed by `=== <name> ===` / `=== END <name> ===` markers so it can be extracted by `grep`, `sed`, or `awk`.
 
 | Form | Behavior |
 |------|----------|
