@@ -102,6 +102,7 @@ These options control which metrics logtimeline extracts and computes during pro
 | `-os, --omit-stats` | Deprecated: use `-od, --omit-durations` to skip capturing durations, or `-hst, --hide-stats` to hide the statistics panel |
 | `-oe, --omit-empty` | Skip time buckets that contain zero log entries |
 | `-ni, --no-index` | Do not read or update `ltl-index.csv`, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it |
+| `-r, --recursive` | Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. `logs/access/*.log` becomes every `.log` file anywhere under `logs/access`; `*.log` recurses from the current directory. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end. |
 | `-or, --omit-rate` | Hide the error/message rate from the legend |
 | `-od, --omit-durations` | Suppress duration extraction and related columns (significantly reduces memory and processing time on large files) |
 | `-ob, --omit-bytes` | Suppress byte-size extraction and related columns |
