@@ -9267,7 +9267,10 @@ sub _dash_prefix {
 sub classify_option_error {
     my ($warnings) = @_;
     for my $w (@{ $warnings || [] }) {
-        if ($w =~ /^Unknown option:\s+(\S+)/) {
+        if ($w =~ /^Unknown option:\s+(.+?)\s*$/) {
+            # The whole token, not its first word: an argument that itself
+            # contains whitespace (a quoted option string) is reported
+            # verbatim rather than truncated into the name of a valid option.
             return "unknown option '" . _dash_prefix($1) . "'";
         }
         if ($w =~ /^Option\s+(\S+)\s+requires an argument/) {

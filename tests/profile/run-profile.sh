@@ -117,6 +117,53 @@ size_to_lines() {
     esac
 }
 
+# Which ltl options take a value is read from ltl's own Getopt::Long specs
+# ('name|alias=s' takes a required value, 'name|alias:s' an optional one), so
+# the walkers below never carry a hand-maintained option list that can drift
+# from the tool. Each spec name is emitted in both -name and --name spellings.
+# Output: two space-padded strings, one per arity, consumed by option_arity().
+build_value_option_sets() {
+    local specs
+    specs=$(grep -o "'[A-Za-z0-9|-]*[=:][sif]@\{0,1\}'" "$LTL" | tr -d "'")
+    REQUIRED_VALUE_OPTS=" "
+    OPTIONAL_VALUE_OPTS=" "
+    local spec names arity name
+    for spec in $specs; do
+        names="${spec%[=:]*}"
+        arity="${spec#"$names"}"
+        for name in ${names//|/ }; do
+            if [[ "$arity" == =* ]]; then
+                REQUIRED_VALUE_OPTS+="-$name --$name "
+            else
+                OPTIONAL_VALUE_OPTS+="-$name --$name "
+            fi
+        done
+    done
+}
+
+# Print "required", "optional" or nothing for an option token, mirroring how
+# Getopt::Long consumes the following argument: a required value is always
+# taken; an optional one only when the next token does not start with '-'.
+# A joined form (--opt=value) carries its value and consumes nothing.
+option_arity() {
+    local tok="$1"
+    [[ "$tok" == *=* ]] && return 0
+    [[ "$REQUIRED_VALUE_OPTS" == *" $tok "* ]] && { echo required; return 0; }
+    [[ "$OPTIONAL_VALUE_OPTS" == *" $tok "* ]] && { echo optional; return 0; }
+    return 0
+}
+
+# Whether the token following option $1 is its value (next token is $2).
+option_consumes_next() {
+    local arity
+    arity=$(option_arity "$1")
+    [[ "$arity" == required ]] && return 0
+    [[ "$arity" == optional && -n "$2" && "$2" != -* ]] && return 0
+    return 1
+}
+
+build_value_option_sets
+
 # Detect file arguments from the ltl args (last N args that look like paths or globs)
 # Strategy: args starting with - are options; remaining positional args are files
 detect_file_args() {
@@ -126,23 +173,19 @@ detect_file_args() {
     while [[ $i -lt ${#args[@]} ]]; do
         local arg="${args[$i]}"
         if [[ "$arg" == -* ]]; then
-            # Option — skip it and possibly its value
-            # Known options that take a value
-            case "$arg" in
-                -n|-b|-bs|-g|-hm|-hmw|-du|-dmin|-dmax|-st|-et|-if|-ef|-hf|-include|-exclude|-terminal-width)
-                    ((i+=2)) || true
-                    ;;
-                *)
-                    ((i+=1)) || true
-                    ;;
-            esac
+            # Option — skip it and, when it takes one, its value
+            if option_consumes_next "$arg" "${args[$((i+1))]:-}"; then
+                ((i+=2)) || true
+            else
+                ((i+=1)) || true
+            fi
         else
             # Positional token: treat it as an input file only if it names
             # something on disk (literal path or glob that expands). A value
-            # belonging to an option missing from the case list above (e.g. a
-            # -V section list or a numeric operand) falls through to here and
-            # must not become a sample source — truncating it would create an
-            # empty sample and profile a run that reads zero lines.
+            # whose option is not in the derived sets (e.g. a spec the grep
+            # did not match) falls through to here and must not become a sample
+            # source — truncating it would create an empty sample and profile a
+            # run that reads zero lines.
             if [[ -e "$arg" ]] || compgen -G "$arg" > /dev/null; then
                 file_args+=("$arg")
             fi
@@ -166,14 +209,14 @@ make_sample() {
     local sample_path="$SAMPLES_DIR/$sample_name"
 
     if [[ ! -f "$sample_path" ]]; then
-        echo "  Creating sample: $sample_path ($lines lines from $orig)"
+        echo "  Creating sample: $sample_path ($lines lines from $orig)" >&2
         mkdir -p "$SAMPLES_DIR"
         head -n "$lines" "$orig" > "$sample_path"
         local actual
         actual=$(wc -l < "$sample_path")
-        echo "  Sample created: $actual lines"
+        echo "  Sample created: $actual lines" >&2
     else
-        echo "  Using existing sample: $sample_path"
+        echo "  Using existing sample: $sample_path" >&2
     fi
     echo "$sample_path"
 }
@@ -192,12 +235,10 @@ replace_files_in_args() {
         local arg="${orig_args[$i]}"
         if [[ "$arg" == -* ]]; then
             result+=("$arg")
-            case "$arg" in
-                -n|-b|-bs|-g|-hm|-hmw|-du|-dmin|-dmax|-st|-et|-if|-ef|-hf|-include|-exclude|-terminal-width)
-                    ((i+=1)) || true
-                    result+=("${orig_args[$i]}")
-                    ;;
-            esac
+            if option_consumes_next "$arg" "${orig_args[$((i+1))]:-}"; then
+                ((i+=1)) || true
+                result+=("${orig_args[$i]}")
+            fi
         else
             # Positional token: same classification as detect_file_args() —
             # only a token that names something on disk is an input file to
