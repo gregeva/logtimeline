@@ -50,4 +50,4 @@ Implication for the sort-on-statistic cost model: on singleton-dominated logs, t
 
 ## Tooling fix landed under this ticket
 
-`run-profile.sh` classified any non-dash token as an input file, truncating option values (`-V` section lists, `-so` operands, long-option values) into empty samples → zero-line profiled runs. Both arg walkers now apply one on-disk test (`-e` / glob expansion) before treating a token as a sample source. Commit 391e198 on branch 415-calculate-statistics-drift.
+`run-profile.sh` classified any non-dash token as an input file, truncating option values (`-V` section lists, `-so` operands, long-option values) into empty samples → zero-line profiled runs. Both arg walkers now apply one on-disk test (`-e` / glob expansion) before treating a token as a sample source. Commit eefda5a on branch 415-calculate-statistics-drift.
