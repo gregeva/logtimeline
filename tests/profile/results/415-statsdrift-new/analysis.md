@@ -203,6 +203,35 @@ Findings:
    (per-message stats as one small hash each), not a 0.17.0 regression, and
    belongs with the #349 demand-contract / #2 message-stats design, not here.
 
+### Bisect with the L0 lookup metric (2026-08-24)
+
+Metric: `bisect-l0-probe.pl` injected before `calculate_all_statistics()` on each
+commit's `ltl` (extracted with `git show sha:ltl`, no checkout), 100k sample,
+best-of-5 in each of 2 runs (`bisect-measure-l0.sh`). Session endpoints:
+v0.16.0 0.0355 s, release head 0.0404 s (+14%); threshold 0.038.
+
+First-parent merges on `release/0.17.0` (22 commits touching `ltl`):
+
+| step | commit | L0 | verdict |
+|---|---|---|---|
+| [10] | `ab264c8` merge #402 (#384 filename evidence) | 0.0418 | bad |
+| [4] | `12f29d6` merge #381 (#379 glob paths) | 0.0357 | good |
+| [7] | `1bee009` merge #392 (#390 wording) | 0.0421 | bad |
+| [5] | `a78ec23` merge #389 (#58 format registry) | 0.0407 | **first bad** |
+
+Inside the #58 branch (7 commits touching `ltl`):
+
+| step | commit | L0 | verdict |
+|---|---|---|---|
+| [3] | `bd8a972` Replace the match-type cascade with the format-registry scan (#58 S5) | 0.0411 | **first bad** |
+| [1] | `4ee50a1` detect-stage TIMING row (#58 S3) | 0.0360 | good |
+| [2] | `b6495c2` shadow mode proving registry/cascade parity | 0.0366 | good |
+
+The layout change enters with the generated scan sub replacing the inline
+cascade in the read loop (S5): same keys, same entry shape, different per-line
+allocation/free sequence around each entry's creation. Consistent with the
+ladder: the statistics code is untouched by that commit.
+
 ### Tooling fixes landed under this section
 
 - `classify_option_error()` reported only the first word of a rejected token
@@ -220,9 +249,8 @@ Findings:
 
 ## Status
 
-Resumed 2026-08-24 after #414 closed. Cause attributed to heap placement of the
-per-message entry hashes produced by the read loop (locality ladder above);
-statistics code exonerated. Open: which read-loop change in the 0.17.0 range
-produces the layout difference (bisectable with the L0 lookup metric, ~2% noise
-against a 13–20% gap), and whether the finding 3 compaction effect is worth a
-data-model follow-up. Disposition pending architect.
+Attributed 2026-08-24: heap placement of the per-message entry hashes, changed
+by the read loop's generated scan sub (`bd8a972`, #58 S5); statistics code
+exonerated. Finding 3 (as-built layout costs 5× on keyed traversal in both
+versions) is filed as a data-model follow-up. Disposition of #415 itself: see
+the issue thread.
