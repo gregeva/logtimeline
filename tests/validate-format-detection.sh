@@ -32,10 +32,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="$REPO_DIR/ltl"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 
 # Temp dir for captured outputs; cleaned up on EXIT per HARNESS-DESIGN.md Trap 10.
 TMP_DIR=$(mktemp -d)
@@ -273,7 +277,7 @@ scenario_tomcat9_ms() {
     current_scenario="tomcat9-ms"
     echo "[$current_scenario]"
 
-    local log="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+    local log="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
     local out
     out=$(run_format_detection "$log")
     check_capture_warnings "$out"
@@ -305,7 +309,7 @@ scenario_tomcat_common() {
     # field). Derived on the fly from the canonical Tomcat 9 fixture by
     # stripping the trailing %D field, so the two scenarios cannot drift
     # apart and no near-duplicate corpus file is needed. Issue #345.
-    local src="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+    local src="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
     local log="$TMP_DIR/tomcat-access-common-5k.txt"
     awk '{NF=NF-1; print}' "$src" > "$log"
     if [[ ! -s "$log" ]]; then
@@ -347,7 +351,7 @@ scenario_jboss_enhanced() {
     # near-duplicate corpus file is needed. Lines with "-" bytes are excluded:
     # the match_type 9 regex requires numeric bytes, and such lines fall through
     # to match_type 3 by design. Issue #365.
-    local src="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+    local src="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
     local log="$TMP_DIR/jboss-enhanced-access.txt"
     awk '$(NF-1) ~ /^[0-9]+$/ {dur=$NF; $NF="\"-\" \"Jersey/2.37 (HttpUrlConnection 11.0.22)\" " dur; print}' "$src" > "$log"
     if [[ ! -s "$log" ]]; then
@@ -388,7 +392,7 @@ scenario_apache_httpd_us() {
     current_scenario="apache-httpd-us"
     echo "[$current_scenario]"
 
-    local log="$REPO_DIR/logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
+    local log="$LOGS_DIR/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
     local out
     # Run with -du us per the documented workaround. Apache HTTP %D is
     # microseconds; without -du us, durations are 1000x off.
@@ -412,7 +416,7 @@ scenario_codebeamer() {
     current_scenario="codebeamer"
     echo "[$current_scenario]"
 
-    local log="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
+    local log="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
     local out
     out=$(run_format_detection "$log")
     check_capture_warnings "$out"
@@ -440,7 +444,7 @@ scenario_thingworx_standard() {
     current_scenario="thingworx-standard"
     echo "[$current_scenario]"
 
-    local log; log=$(head_slice "$REPO_DIR/logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log" ApplicationLog.2025-05-05.0.log)
+    local log; log=$(head_slice "$LOGS_DIR/ThingworxLogs/ApplicationLog.2025-05-05.0.log" ApplicationLog.2025-05-05.0.log)
     local out
     out=$(run_format_detection "$log")
     check_capture_warnings "$out"
@@ -462,7 +466,7 @@ scenario_thingworx_with_metrics() {
     current_scenario="thingworx-with-metrics"
     echo "[$current_scenario]"
 
-    local log; log=$(head_slice "$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log" ScriptLog-DPMExtended-clean.log)
+    local log; log=$(head_slice "$LOGS_DIR/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log" ScriptLog-DPMExtended-clean.log)
     local out
     out=$(run_format_detection "$log")
     check_capture_warnings "$out"
@@ -484,7 +488,7 @@ scenario_tw_edge_c_sdk() {
     current_scenario="tw-edge-c-sdk"
     echo "[$current_scenario]"
 
-    local log; log=$(head_slice "$REPO_DIR/logs/UDM/rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log" tw-edge-c-sdk-trace.log)
+    local log; log=$(head_slice "$LOGS_DIR/UDM/rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log" tw-edge-c-sdk-trace.log)
     local out
     out=$(run_format_detection "$log")
     check_capture_warnings "$out"
@@ -506,7 +510,7 @@ scenario_csv_with_udm() {
     current_scenario="csv-with-udm"
     echo "[$current_scenario]"
 
-    local log; log=$(head_slice "$REPO_DIR/logs/UDM/results_data_idonly-timestampMs.csv" results_data_idonly-timestampMs.csv)
+    local log; log=$(head_slice "$LOGS_DIR/UDM/results_data_idonly-timestampMs.csv" results_data_idonly-timestampMs.csv)
     local out
     # CSV detection requires at least one -udm flag for the CSV path to
     # be reached; otherwise ltl treats every CSV line as unmatched log content.
@@ -667,7 +671,7 @@ scenario_scan_telemetry() {
     # four non-ancestors in the static order, so the first match promotes
     # it to the front (exactly one promotion), after which every line hits
     # the front block and no further promotion occurs.
-    local log="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
+    local log="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
     local out
     out=$(run_format_detection "$log")
     check_capture_warnings "$out"
@@ -817,7 +821,7 @@ scenario_scan_telemetry_nomatch() {
     # sampling threshold, so exactly one sampled timing must be recorded;
     # 20 codebeamer lines appended after them prove failed attempts and
     # matches coexist in one file's counters.
-    local src="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
+    local src="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
     local log="$TMP_DIR/scan-nomatch-mixed.txt"
     {
         for i in $(seq 1 300); do echo "junk unmatched line $i without any timestamp"; done
@@ -894,7 +898,7 @@ scenario_unit_ambiguity_warning() {
     # check_capture_warnings stays clean. The Tomcat file's name does not
     # carry the producer's stem, so the group default holds by its standing
     # credit (basis default).
-    local tomcat="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+    local tomcat="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
     local out
     out=$(run_format_detection "$tomcat")
     check_capture_warnings "$out"
@@ -925,7 +929,7 @@ scenario_unit_ambiguity_warning() {
     # Contracted absence 2: a format outside any variant group (codebeamer)
     # never triggers the note.
     local out_cb
-    out_cb=$(run_format_detection "$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt")
+    out_cb=$(run_format_detection "$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt")
     check_capture_warnings "$out_cb"
 
     assert_absent "$out_cb.stderr" \

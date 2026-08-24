@@ -436,6 +436,21 @@ Every harness invocation also passes `-ni` (`--no-index`) unless the index is th
 
 Precedent: #384 (2026-08-23) — ten new format-detection scenarios and the ad-hoc parity checks behind them ran multi-year fixtures at default (and hourly) buckets, building tens of thousands of empty buckets to assert a per-file selection that never reads a bucket. #399 (audit every test harness for invocation coherence) tracks the audit of every existing harness against this rule.
 
+## The log corpus is resolved, never composed
+
+Harnesses read their inputs from the log corpus: `logs/` under the repo root by default, or wherever `LTL_LOGS_DIR` points. A harness never builds that location itself — no `"$REPO_DIR/logs/..."`, no bare `logs/...` assumed relative to the repo root. It sources `tests/lib/logs-dir.sh` and reads `$LOGS_DIR`, or calls `resolve_log_path` for a path that arrives as data (a scenario-table column, a fixture-source list).
+
+Two reasons this is a rule and not a preference:
+
+1. **`logs/` is gitignored, so it exists only in the checkout that populated it.** A second clone or a git worktree has no corpus, and every harness that composes the repo-root path is unrunnable there — the failure is an unrelated-looking "file not found" or, worse, a pass. `LTL_LOGS_DIR` points such a checkout at the real corpus.
+2. **A partially-applied override is worse than none.** When only some call sites honour it, the harness finds its inputs through one path and silently skips the work gated on another. During #436 exactly this happened: `validate-statistics.sh` reported 18/18 passing while the L3 oracle was skipped on all 36 cells (`L3=N/A`), because one of two copies of the same path-resolution logic had been updated. The suite was green and proving materially less than it claimed.
+
+Consequences for harness authors:
+
+- **One resolution surface.** `resolve_log_path` is it. A new `if [[ "$logfile" = /* ]]` ladder is a review defect — that duplication is what produced the silent skip above.
+- **Verify an override end-to-end, not by exit code.** A harness that resolves its corpus correctly and one that quietly skips its most expensive layer both exit 0. Check the counters the run reports (`L3=OK`, assertion counts, scenario counts) against a known-good run on the default path.
+- **Where the recorded path is part of the assertion, keep it relative.** `validate-regression.sh`, `capture-regression.sh` and `tests/baseline/run-benchmark.sh` pass repo-relative paths so no absolute path reaches captured references or the benchmark TSV (#209). These run from the directory *containing* the corpus rather than resolving an absolute path, which keeps `logs/...` intact under an override; because the captured prefix is the literal string `logs/`, an overriding corpus directory must itself be named `logs`, and they fail fast when it is not.
+
 ## Runtime-warning cleanliness
 
 Every harness that invokes `ltl` MUST capture the invocation's stderr and fail the run if it contains a Perl runtime warning. A runtime warning (uninitialized value, substr outside of string, non-numeric argument, out-of-range date field, ...) is an unguarded data path — a bug that has not yet found the input that makes it fatal or wrong — and a harness that discards stderr certifies code it never looked at.

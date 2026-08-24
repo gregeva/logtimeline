@@ -24,6 +24,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
+
 LTL="$REPO_DIR/ltl"
 EXTRACTOR="$SCRIPT_DIR/extract-doc-examples.pl"
 
@@ -66,10 +70,11 @@ FIXTURE_KEYS=(
     "app.log"
     "error.log"
 )
+# Paths within the log corpus ($LOGS_DIR), not the repo.
 FIXTURE_SOURCES=(
-    "logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
-    "logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log"
-    "logs/ThingworxLogs/ErrorLog.log"
+    "AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
+    "ThingworxLogs/ApplicationLog.2025-05-05.0.log"
+    "ThingworxLogs/ErrorLog.log"
 )
 FIXTURE_WINDOWS=(
     '\[25/Jan/2026:07:'          # one hour, 667 lines (the file's dense day)
@@ -258,7 +263,7 @@ run_doc_example() {
 # Build truncated fixtures (HARNESS-DESIGN.md Trap 9: transient artifacts
 # live under $TMP_DIR, never alongside deliverables).
 for i in "${!FIXTURE_KEYS[@]}"; do
-    src="${REPO_DIR}/${FIXTURE_SOURCES[$i]}"
+    src="${LOGS_DIR}/${FIXTURE_SOURCES[$i]}"
     if [[ ! -f "$src" ]]; then
         echo "ERROR: fixture source not found: $src"
         exit 1

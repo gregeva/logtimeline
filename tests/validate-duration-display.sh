@@ -22,6 +22,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="$REPO_DIR/ltl"
 CHECKER="$SCRIPT_DIR/duration-display/check-duration-cells.pl"
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
@@ -39,12 +42,13 @@ ACCESS_LOG="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread.txt"
 # Apache HTTP2 access log: the %D trailing field is request duration in genuine
 # microseconds, so -du us resolves to a microsecond source (6 decimals). Used to
 # cover a non-ms resolved unit.
-APACHE_LOG="$REPO_DIR/logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
+APACHE_LOG="$LOGS_DIR/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
 PERL="${PERL:-/opt/homebrew/bin/perl}"
 command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1

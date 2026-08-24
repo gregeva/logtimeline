@@ -22,14 +22,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="$REPO_DIR/ltl"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): the
 # -V runtime-config section echoes the resolved options, so -bs/-dmp/-mdm on
 # each run ARE the subject; the 741-line, 4-hour fixture is already minimal.
-TEST_LOG="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
+TEST_LOG="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
 
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT

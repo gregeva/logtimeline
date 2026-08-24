@@ -15,7 +15,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 fi
 
 _FIXTURES_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_FIXTURES_REPO_DIR="$(cd "$_FIXTURES_LIB_DIR/../.." && pwd)"
+
+# shellcheck source=logs-dir.sh
+source "$_FIXTURES_LIB_DIR/logs-dir.sh"
 
 # derive_sampled_access_log DEST
 #   Writes the deterministic sampled Tomcat 9 access-log fixture to DEST:
@@ -26,7 +28,7 @@ _FIXTURES_REPO_DIR="$(cd "$_FIXTURES_LIB_DIR/../.." && pwd)"
 #   Hard-fails if the corpus file is missing or the derivation is empty.
 derive_sampled_access_log() {
     local dest="$1"
-    local src="$_FIXTURES_REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt"
+    local src="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt"
     if [[ ! -f "$src" ]]; then
         echo "ERROR: fixture corpus file missing: $src" >&2
         return 1

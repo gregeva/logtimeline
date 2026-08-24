@@ -31,6 +31,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="$REPO_DIR/ltl"
 HARNESS_DIR="$SCRIPT_DIR/csv-output"
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): each
@@ -45,6 +48,7 @@ PROFILE_GENERATOR="$SCRIPT_DIR/profile/generate-profile-log.py"
 
 # shellcheck source=lib/csv-cache.sh
 source "$SCRIPT_DIR/lib/csv-cache.sh"
+
 
 # End-of-run cleanup runs only when standalone (CI unset). Trap covers
 # both clean exit and error paths.
@@ -97,7 +101,7 @@ fi
 APPLOG_HEAD="$SCRIPT_DIR/.artifacts/applicationlog-head-100k.log"
 if grep -q '@APPLOG_HEAD@' "$SCENARIOS_TSV"; then
     mkdir -p "$(dirname "$APPLOG_HEAD")"
-    head -100000 "$REPO_DIR/logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log" > "$APPLOG_HEAD"
+    head -100000 "$LOGS_DIR/ThingworxLogs/ApplicationLog.2025-05-05.0.log" > "$APPLOG_HEAD"
     if [[ ! -s "$APPLOG_HEAD" ]]; then
         echo "ERROR: could not stage the ApplicationLog head fixture at $APPLOG_HEAD" >&2
         exit 1

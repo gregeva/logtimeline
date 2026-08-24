@@ -15,10 +15,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="$REPO_DIR/ltl"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
 # every assertion here reads the -V section's contract surface - which
@@ -29,7 +33,7 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # `-bs 1440 -oe` keeps the timeline to the one bucket the per-time-bucket
 # partition assertions need. -osum/-hst stay OFF: the summary table and the
 # per-bucket statistics demand are what activate the consumers under test.
-ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+ACCESS_LOG="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
 SHAPE="-bs 1440 -oe"
 
 if [[ ! -x "$LTL" ]]; then

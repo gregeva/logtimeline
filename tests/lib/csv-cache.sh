@@ -62,6 +62,9 @@ _CSV_CACHE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_CSV_CACHE_LIB_DIR/runtime-warnings.sh"
 _CSV_CACHE_TESTS_DIR="$(cd "$_CSV_CACHE_LIB_DIR/.." && pwd)"
 _CSV_CACHE_REPO_DIR="$(cd "$_CSV_CACHE_TESTS_DIR/.." && pwd)"
+
+# shellcheck source=logs-dir.sh
+source "$_CSV_CACHE_LIB_DIR/logs-dir.sh"
 _CSV_CACHE_DIR="$_CSV_CACHE_TESTS_DIR/.artifacts/csv"
 _CSV_CACHE_CLEANUP="$_CSV_CACHE_TESTS_DIR/cleanup-test-artifacts.sh"
 _CSV_CACHE_LTL="$_CSV_CACHE_REPO_DIR/ltl"
@@ -168,11 +171,7 @@ csv_cache_produce() {
     mkdir -p "$_CSV_CACHE_DIR"
 
     local abs_log
-    if [[ "$logfile" = /* ]]; then
-        abs_log="$logfile"
-    else
-        abs_log="$_CSV_CACHE_REPO_DIR/$logfile"
-    fi
+    abs_log="$(resolve_log_path "$logfile")"
 
     if [[ ! -f "$abs_log" ]]; then
         echo "csv-cache: logfile missing: $abs_log" >&2
