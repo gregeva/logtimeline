@@ -792,21 +792,7 @@ Statistical unit sampling (#17's remaining half); content fingerprinting beyond 
 
 ## #413 — lazy scan-sub compilation (elevation by election)
 
-### Status
-
-- **Design locked (architect, 2026-08-24): D60–D64 below.** Audit + prototype findings below. Branch `413-eager-scan-order-precompile` (cut from the #415 branch — #415's drift re-measure is the downstream discriminator, native `blocked_by` recorded on #415).
-
-### The problem (measured, current tree)
-
-Every run pays a fixed ~20 MB peak RSS and ~0.1 s (`TIMING detect/registry_build`) compiling scan-order subs it may never use: 2-line probe, v0.16.0 24.7 MB vs 0.17.0 44.5 MB / 0.101 s. `-lf` saves nothing — `apply_format_pin()` runs after the full build; even an invalid `-lf` operand pays the full cost before erroring.
-
-### Audit finding: three compile sources at startup, not one
-
-1. **D40 eager loop** in `build_format_registry()` — the static order plus one first-promotion order per scanned entry.
-2. **Gate 5 validation** — `format_registry_set_occupant()` swaps compile per variant member, and the sample stream *promotes* entries mid-validation, compiling deeper recency orders ("warming").
-3. **`apply_format_pin()`** — clears the cache and compiles the single-entry order on top of everything above.
-
-Instrumented split (env-gated scratch copy, 2-line probe): full = **28 compiles / 44.8 MB peak**; eager loop off = **17 compiles / 37.9 MB** (gate 5 alone mints 16 subs ≈ 10 MB); both off = **2 compiles / 28.4 MB** (static + the parallel default-configuration validation compile). Removing only the eager loop recovers barely half the regression.
+Delivered in 0.17.0 (PR #421). Scan subs are compiled when detection elects a format, not eagerly at startup. The investigation that produced these decisions — the problem measurement, the three-compile-source audit, the staged implementation plan and its per-stage results — is recorded on [issue #413](https://github.com/gregeva/logtimeline/issues/413).
 
 ### Memory cost constants (prototype, 2026-08-24 — the gap in the original #58 implementation, which measured compile *time* but never sub *size*)
 
@@ -820,6 +806,7 @@ Instrumented split (env-gated scratch copy, 2-line probe): full = **28 compiles 
 - Every sub is the same size (one block per scanned group), so cache memory is linear: ~0.6 MB x orders-compiled.
 - Time constants already on record (#384 prototype F-findings): cold compile 2.54 ms, warm cache hit 52 ns.
 
+
 ### Locked decisions (architect, 2026-08-24)
 
 - **D60 — Elevation by election: zero codegen at startup; a format's scan sub is compiled when detection elects it.** `build_format_registry()` compiles nothing (the D40 eager loop, gate 5's warming, and the parallel default-configuration scan compile are all removed from startup). Compile points: (1) per-file election — the sampling pass elects, occupants are seated, and the winner-front order compiles through the existing promotion machinery (`//=` cache); (2) mid-file flips — the existing probe → promote → lazy compile path, untouched; (3) `apply_format_pin()` compiles its single-entry sub at pin time (an invalid `-lf` operand now errors before any codegen); (4) fallback — a file with no election compiles the static order before line 1. Invariant: the hot loop always holds a compiled sub for the current order; there is NO interpreted per-line extraction path (a second implementation of the extraction semantics would reopen the parity surface #58 closed with 241 shadow runs). Detection/evidence remains fully interpreted (`sample_file_for_detection()`, `format_sample_probes()` — plain per-entry `qr//`); startup sample classification and the sampling pass share one interpreted classifier (one resolution surface). *Amends D40, which is superseded: "pay the compile cost before the loop" bought ~20 MB resident and ~0.1 s on every run for orders mostly never used; a ~2.5 ms once-per-signature compile at election is the better trade.*
@@ -828,108 +815,16 @@ Instrumented split (env-gated scratch copy, 2-line probe): full = **28 compiles 
 - **D63 — New `-V format-registry` section (registered after `format-detection`) closes the registry-observability miss: the registry itself had no surface.** Contents: inventory (one line per entry — name, slug, group, variant-default, scanned/CSV role); structure (variant groups with occupants, static scan order, derived ancestor constraints); compile state (`scan_subs_compiled`, `scan_sub_cache_hits`, `scan_subs_rss_bytes`, compiled order signatures). The compile counters are computed once at their block boundaries in registry machinery and re-emitted by `benchmark-data` as `COUNTS`/`MEMORY` rows from the same variables (one source, two surfaces per tests/HARNESS-DESIGN.md). New consuming harness `tests/validate-format-registry.sh` (name tracks the section) with self-documenting assertions, including election invariants: single-format file ⇒ `scan_subs_compiled` ≤ 2; `-lf` ⇒ exactly 1. Per-file detection telemetry stays in `format-detection / scan`.
 - **D64 — Timing rows: `TIMING detect/registry_build` keeps its name and meaning** (build without codegen, ~14 ms expected); a new accumulator row `detect/scan_sub_compile` sums all `compile_format_scan_sub()` calls wherever they fire (election pre-line-1, mid-read promotion) — one boundary pair inside the compile sub, ~2 timer calls per compile.
 
-### Validation plan (locked with the design)
 
-1. Byte parity: full-output diff, current tree vs branch, across the format fixture families (`tests/fixtures/format-detection/`, #58 S9 battery, multi-format interleave) — election changes when subs compile, never what any line produces. Invocation-coherent shapes (`-bs 1440 -oe`, smallest carrying fixture).
-2. Gains measured: 2-line RSS/timing probe on the branch (expect ~28 MB / ~14 ms vs 44.5 MB / 101 ms), plus `-lf` and invalid-`-lf` probes.
-3. No new hot-loop cost: read-phase timing parity, median-of-3, one 1m fixture.
-4. Gate equivalence by sabotage (scratch copy): a broken sample dies at startup via the interpreted gate; sabotaged codegen dies at first compile via per-compile validation.
-5. Edge paths: unknown-format fallback, non-seekable stdin, mid-file flip fixture, `-lf` exactly-one-compile.
-6. Harnesses during work: `validate-format-detection.sh` (159 assertions untouched) and the new `validate-format-registry.sh` only; the full suite is the release gate.
-
-### Implementation plan (approved by the architect, 2026-08-24) — branch `413-eager-scan-order-precompile`
-
-Each stage is its own commit with its verification run before the next begins. Consumer harnesses during work: `validate-format-detection.sh` + the new `validate-format-registry.sh` ONLY; the full suite is the release gate.
-
-- **S1 — Shared interpreted classifier.** Factor the classification walk (guard + `qr//` first-match over a given order) into one named sub; `sample_file_for_detection()` and the startup gate both call it (one resolution surface). No behavior change; verify byte parity + `validate-format-detection.sh`.
-- **S2 — Remove startup codegen.** Delete the D40 eager loop; gate 5's sample classification moves to the interpreted classifier; the default-config scan compile and gate-5 warming removed. Interim state: the run still compiles the static sub before line 1, so every fixture stays green mid-train.
-- **S3 — Compile points + per-compile validation (D60/D61).** Promotion-suppressed per-compile sample validation inside `compile_format_scan_sub()`; election compiles the winner-front order pre-line-1; static-order fallback; `apply_format_pin()` compile-at-pin with early error on unknown operand. Compiles drop to 1–2 per typical run here.
-- **S4 — D62 memory measurement.** Compile-boundary RSS-delta capture (armed at option parse only when a memory-reporting surface is requested), compiled-sub count, `format_scan_subs` `-mem` category.
-- **S5 — D63 observability.** `-V format-registry` emitter (inventory / structure / compile state), `benchmark-data` re-emission from the same variables (one source, two surfaces), section contract added to this doc, new `tests/validate-format-registry.sh` with self-documenting assertions (election invariants: single-format ≤ 2 compiles, `-lf` = exactly 1).
-- **S6 — D64 timing + doc sweep.** `TIMING detect/scan_sub_compile` accumulator; user-facing doc surfaces that enumerate `-V` sections updated in the same commit.
-- **S7 — Validation plan F1–F6** (§ Validation plan above): byte-parity battery, gain probes (expect ~28 MB / ~14 ms vs 44.5 MB / 101 ms), hot-loop parity median-of-3, sabotage proofs, edge paths (unknown-format fallback, non-seekable stdin, mid-file flip, `-lf`).
-
-Then the per-feature workflow (PR into `release/0.17.0` when the architect directs). #415's re-measure is downstream and NOT this issue's scope.
-
-### Implementation progress (as of 2026-08-24) — S1–S7 delivered; awaiting the architect's direction on the per-feature workflow
-
-Branch `413-eager-scan-order-precompile`. All seven stages are committed and the locked validation plan F1–F6 is discharged (results below). **Nothing is pushed and no PR is open** — the per-feature workflow runs when the architect directs.
-
-| Stage | Commit | State |
-|---|---|---|
-| S1 — shared interpreted classifier | `001a00b` | delivered |
-| S2 — no codegen at startup | `beba4b1` | delivered |
-| S3 — compile points + per-compile validation | `d8576c6` | delivered |
-| S4 — `format_scan_subs` memory category | `7f33d97` | delivered |
-| S5 — `-V format-registry` + its harness | `9566cc4` | delivered |
-| S6 — D64 timing + doc sweep | `f2f8c9e` | delivered |
-| S7 — validation plan F1–F6 | `835631a` + this | delivered |
-
-Gains and verification are recorded once, under § S7 validation results below (F2 for the gain probe, F1 for parity, F3 for read-phase cost, F5 for the compile-count table).
-
-#### Findings carried forward
+### Traps and contracts for future work in this area
 
 - **F10 — `promotions:` legitimately drops from 1 to 0 for a single-format file.** Election fronts the elected group before line 1, so the first match already sits at an optimal position and emits no promotion code. The `format-detection` scan-telemetry assertion was updated to `^promotions: 0$` with the stronger invariant in its `asserts` text. Any future reading of promotion telemetry must account for election having already done the first reorder.
 - **F11 — per-compile validation must disturb NOTHING of the run's state, because compiles now happen mid-run.** D61's per-compile gate was originally written to reset the record lexicals, the timestamp memo and the date cache the way the startup gates do. That is correct only when validation runs exclusively before line 1. Under D60 a compile also fires at election and at mid-read promotion, and resetting there cleared the timestamp memo mid-file: the next real line re-parsed its timestamp, the cache miss fired the steady-loop probes, and the mixed fixture's variant scores changed *and* its included line count dropped from 450 to 448. The fix, and the contract for any future work inside `compile_format_scan_sub()`: suppress `format_probe_signal()` alongside `format_registry_promote()`, and snapshot/restore (never reset) the record lexicals, `$format_last_ts_str`/`$format_last_ts_epoch` and the date cache. The date cache is keyed by date string alone and two layouts disagree on its epoch (N3), so a sample parsed under one entry's layout must never be left behind for the run to read.
-- **F12 — the D62 RSS instrument distorts the D64 timing row if both boundaries coincide.** Measured while starting S6: with `TIMING detect/scan_sub_compile` bracketing the whole of `compile_format_scan_sub()`, the mixed fixture reported 0.032 s for 3 compiles (~10.7 ms each) against a codegen+validation cost of 3.4 ms each (codegen 3.1 ms, per-compile validation 0.3 ms — the latter measured, and cheap). The gap is `get_memory_usage()`, which shells out to `ps` on macOS and is called twice per compile when D62 measurement is armed. **S6 must place the D64 timing boundary so it excludes the D62 RSS readings** — otherwise the timing row reports the cost of measuring memory rather than the cost of compiling, and only on armed runs, which is exactly where a reader would compare the two. Note also that this makes the row's value depend on whether measurement was armed; the S6 contract text should say which it measures. **Resolved in S6:** one timer pair spans the whole compile (source build, `eval`, per-compile validation) with the RSS readings hoisted outside it on both sides, so the row reports the same value armed or not. Measured split per compile: source build 0.2 ms, `eval` 3.2 ms, validation 0.3 ms; the mixed fixture's three compiles report 0.012 s either way, against 0.032 s under the naive boundary.
-- **F15 — the D61 gate pair is sabotage-proven to fire at the right moment, and the samples do not cover the whitespace dispatch.** Startup half: removing the per-sample member seating in gate 5 makes `mt10ir`'s samples resolve to `mt10`, and the run dies before line 1 naming `format_classify_interpreted()`. Per-compile half: reversing the emitted block order (specs, `@format_scan_order` and every interpreted gate untouched — only the generated cascade disagrees with the order it was generated from) dies at the first compile, and the diagnostic names the *election* order, proving the gate ran at the election compile rather than at startup; on an empty file the same sabotage dies under the *static* order, proving it also covers the pre-line-1 fallback compile. Two further codegen sabotages did NOT fire and are the honest coverage boundary: dropping the emitted guards changes no sample's owner (D24 gate 3 already proves pattern-match implies guard-pass, so removing a guard only widens matching for lines the pattern rejects anyway), and collapsing the tab branch of the whitespace dispatch into the space fast-reject is invisible because **no registry sample is tab-led**. The tab subset scan is guarded at build by D24 gate 6 (which synthesises tab-prefixed samples) but not by per-compile validation. Not a defect — gate 6 owns that surface — but a reader must not read "every generated sub is proven" as covering the dispatch prologue.
-- **F14 — the D53 "input that cannot be repositioned" fallback is not reachable through non-seekable input.** S7's F5 edge path called for a non-seekable-stdin case. `ltl` has no stdin input mode (`-` is treated as a filename), and a named pipe is rejected at input validation — `Error: unable to open any files`, identically on the pre-branch tree and this one, before the detection path is reached. So the held-line window fallback is reachable only via the hidden `--detection-window=N` override, which is how it was exercised instead (window engaged at 50, all 300 lines matched, 1 compile, byte parity with baseline). The dual process's fallback arm therefore guards `sample_file_for_detection()` returning undef for a path that is not a plain file — a state today's input validation makes unreachable, and which would become live if `ltl` ever accepts a stream. Not a defect; recorded so the next reader does not go looking for a case that cannot be built.
+- **F12 — the D62 RSS instrument distorts the D64 timing row if both boundaries coincide.** With `TIMING detect/scan_sub_compile` bracketing the whole of `compile_format_scan_sub()`, the mixed fixture reported 0.032 s for 3 compiles (~10.7 ms each) against a codegen+validation cost of 3.4 ms each (codegen 3.1 ms, per-compile validation 0.3 ms — the latter measured, and cheap). The gap is `get_memory_usage()`, which shells out to `ps` on macOS and is called twice per compile when D62 measurement is armed. **The D64 timing boundary must exclude the D62 RSS readings** — otherwise the timing row reports the cost of measuring memory rather than the cost of compiling, and only on armed runs, which is exactly where a reader would compare the two. It would also make the row's value depend on whether measurement was armed. **As delivered:** one timer pair spans the whole compile (source build, `eval`, per-compile validation) with the RSS readings hoisted outside it on both sides, so the row reports the same value armed or not. Measured split per compile: source build 0.2 ms, `eval` 3.2 ms, validation 0.3 ms; the mixed fixture's three compiles report 0.012 s either way, against 0.032 s under the naive boundary.
 - **F13 — `TIMING detect/scan_sub_compile` is an accumulator, not a pipeline stage.** Compiles fire inside other stages (election before a file's first line, promotion mid-read), so the row attributes cost *within* those stages and must NOT be added to `$elapsed_total`, which sums disjoint stage timings.
+- **F14 — the D53 "input that cannot be repositioned" fallback is not reachable through non-seekable input.** `ltl` has no stdin input mode (`-` is treated as a filename), and a named pipe is rejected at input validation — `Error: unable to open any files`, identically on the pre-branch tree and this one, before the detection path is reached. So the held-line window fallback is reachable only via the hidden `--detection-window=N` override, which is how it is exercised instead (window engaged at 50, all 300 lines matched, 1 compile, byte parity with baseline). The dual process's fallback arm therefore guards `sample_file_for_detection()` returning undef for a path that is not a plain file — a state today's input validation makes unreachable, and which would become live if `ltl` ever accepts a stream. Not a defect; recorded so the next reader does not go looking for a case that cannot be built.
+- **F15 — the D61 gate pair is sabotage-proven to fire at the right moment, and the samples do not cover the whitespace dispatch.** Startup half: removing the per-sample member seating in gate 5 makes `mt10ir`'s samples resolve to `mt10`, and the run dies before line 1 naming `format_classify_interpreted()`. Per-compile half: reversing the emitted block order (specs, `@format_scan_order` and every interpreted gate untouched — only the generated cascade disagrees with the order it was generated from) dies at the first compile, and the diagnostic names the *election* order, proving the gate ran at the election compile rather than at startup; on an empty file the same sabotage dies under the *static* order, proving it also covers the pre-line-1 fallback compile. Two further codegen sabotages did NOT fire and are the honest coverage boundary: dropping the emitted guards changes no sample's owner (D24 gate 3 already proves pattern-match implies guard-pass, so removing a guard only widens matching for lines the pattern rejects anyway), and collapsing the tab branch of the whitespace dispatch into the space fast-reject is invisible because **no registry sample is tab-led**. The tab subset scan is guarded at build by D24 gate 6 (which synthesises tab-prefixed samples) but not by per-compile validation. Not a defect — gate 6 owns that surface — but a reader must not read "every generated sub is proven" as covering the dispatch prologue.
 
-#### S7 validation results (2026-08-24)
-
-Baseline for every comparison is the pre-branch tree at `c730931` (the merge-base with `release/0.17.0`), not an intermediate stage.
-
-**F1 — byte-parity battery: 27/27 fixtures identical.** The regenerated #58 prototype dataset (`prototype/58-generate-fixtures.sh` → `/tmp/ltl-58-fixtures/`), all seven families × all four sizes, plus the eight committed `tests/fixtures/format-detection/` fixtures already covered stage by stage. Shape: `--terminal-width 160 -ni -V format-detection`, full rendered output compared (no `-oe`/`-n` narrowing — the timeline and tables are part of the assertion here), with only nondeterministic rows and the documented `promotions:` change (F10) filtered. Includes both MTF change-point families at 1m (`concat-pair`, `interleave-100`), which are the promotion-churn stress cases. Exit codes matched, captures verified non-empty, stderr runtime-warning-clean throughout.
-
-**F2 — gains re-confirmed on the delivered tree** (2-line probe, 3 runs each, against `c730931`). The registry's whole cost is now two rows, so both are shown:
-
-| run | build | compile | peak RSS |
-|---|---|---|---|
-| baseline | 0.105 s | — | 42.5 MiB |
-| delivered | 0.008 s | 0.004 s | 26.4 MiB |
-| baseline, `-lf` | 0.107 s | — | 42.2 MiB |
-| delivered, `-lf` | 0.015 s | 0.001 s | 25.5 MiB |
-
-Total registry cost 0.105 s → 0.012 s and 42.5 → 26.4 MiB; both beat D60's ~28 MB / ~14 ms expectation. The `-lf` case is where D60's argument was sharpest — the pin previously ran *after* the full build and so saved nothing — and it is now 0.107 s → 0.016 s / 42.2 → 25.5 MiB. An invalid `-lf` errors in 0.08 s against 0.18 s, having compiled nothing at all.
-
-**F3 — no new hot-loop cost.** `TIMING parse/read_files`, median-of-3 with ranges, all six 1m families, under `caffeinate -s`:
-
-| family (1m) | baseline | delivered | Δ | ranges separated? | compile |
-|---|---|---|---|---|---|
-| pure-access | 11.899 s [11.891–11.930] | 11.817 s [11.787–11.839] | **−0.7%** | yes | 0.004 s |
-| interleave-100 | 10.475 s [10.451–10.889] | 10.361 s [10.350–10.364] | **−1.1%** | yes | 0.008 s |
-| pure-gc | 11.907 s [11.605–12.047] | 11.634 s [11.571–11.819] | −2.3% | no (noise) | 0.004 s |
-| concat-pair | 10.391 s [10.316–10.469] | 10.335 s [10.320–10.369] | −0.5% | no (noise) | 0.008 s |
-| twx-blend | 6.845 s [6.808–7.024] | 6.883 s [6.813–7.008] | +0.6% | no (noise) | 0.004 s |
-| pure-scriptlog | 9.705 s [9.690–9.812] | 9.808 s [9.713–9.819] | +1.1% | no (noise) | 0.004 s |
-
-**Both positive deltas have ranges that overlap the baseline's and are noise; the only two families whose ranges are actually separated are both improvements.** The read phase is unchanged or faster everywhere — election moves *when* a sub is compiled, never what the hot loop executes, and the compile itself is now attributed in its own row (4–8 ms) instead of hiding inside startup.
-
-The two separated improvements are small and their mechanism is **not established**. It is not promotion: the counts are unchanged bar the one reorder election now performs up front (pure-access 1 → 0, interleave-100 10000 → 9999). The plausible remaining explanation is that ~16 MB less startup allocation leaves a smaller, less fragmented heap for the read phase — plausible, unproven, and not claimed as a result. What F3 establishes is the absence of a regression, which is what the item exists for.
-
-**F4 — gate equivalence by sabotage: both halves of the D61 pair fire, at the right moment.** Recorded as F15 below, including the two codegen sabotages that did NOT fire and why.
-
-**F5 — edge paths.** Compile counts, end to end on the delivered tree:
-
-| path | compiles | outcome |
-|---|---|---|
-| single-format file, no pin | 1 | election fronts the format, one order scanned |
-| mixed-format file | 3 | one per distinct recency order the stream visits |
-| unknown format (nothing matches) | 1 | static-order fallback; all lines reported as failed scan attempts |
-| mid-file variant flip | 2 | `flips: 1` — sample seated the default, steady-loop probe reseated `mt10ir` mid-read |
-| `--detection-window=50` (held-line window) | 1 | window engaged, all 300 lines matched |
-| empty file | 1 | fallback compile, exit 0, clean stderr |
-| `-lf <valid>` (three formats tried) | 1 each | pin compiles its single-entry order and nothing else |
-| `-lf nonsense` | **0** | usage error before any codegen |
-
-Byte parity with the baseline confirmed on the unknown-format, both flip fixtures, the `--detection-window` run and the `-lf` run. Non-seekable input is not reachable — see F14.
-
-**F6 — harnesses during work.** `validate-format-detection.sh` 192/192 and `validate-format-registry.sh` 22/22 throughout; `validate-regression.sh` 46/46 with goldens byte-identical, and `validate-help-content.sh` 11/11, at S6. Per the locked plan and the full-suite rule, the complete `tests/validate-*.sh` suite is the **release gate**, run once at that point — not during the work.
-
-#### Outstanding
-
-Nothing in the issue's scope. The per-feature workflow (push, PR into `release/0.17.0`, release-note bullet, completion comment, close, release the dependents) runs when the architect directs. #415's drift re-measure is `blocked_by` this issue and is explicitly NOT in scope here.
 
 ## `-V format-detection` section-contract
 
