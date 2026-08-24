@@ -851,9 +851,9 @@ Each stage is its own commit with its verification run before the next begins. C
 
 Then the per-feature workflow (PR into `release/0.17.0` when the architect directs). #415's re-measure is downstream and NOT this issue's scope.
 
-### Implementation progress (as of 2026-08-24) — S1–S5 delivered, resume at S6
+### Implementation progress (as of 2026-08-24) — S1–S6 delivered, resume at S7
 
-Branch `413-eager-scan-order-precompile`. S1–S5 are committed; the tree stands at S5. **Work resumes at S6.**
+Branch `413-eager-scan-order-precompile`. S1–S6 are committed. **Work resumes at S7** (the validation plan F1–F6 above).
 
 | Stage | Commit | State |
 |---|---|---|
@@ -862,8 +862,8 @@ Branch `413-eager-scan-order-precompile`. S1–S5 are committed; the tree stands
 | S3 — compile points + per-compile validation | `d8576c6` | delivered |
 | S4 — `format_scan_subs` memory category | `7f33d97` | delivered |
 | S5 — `-V format-registry` + its harness | `9566cc4` | delivered |
-| S6 — D64 timing + doc sweep | — | **next** |
-| S7 — validation plan F1–F6 | — | not started |
+| S6 — D64 timing + doc sweep | see git log | delivered |
+| S7 — validation plan F1–F6 | — | **next** |
 
 **Gains measured at S5** (2-line probe, median of 3, against the pre-branch tree): peak RSS 42.2 → 26.2 MiB; `TIMING detect/registry_build` 0.101 → 0.008 s. Both beat D60's expectation (~28 MB / ~14 ms). Compiles per run: single-format 1, `-lf` exactly 1, invalid `-lf` 0, mixed-format fixture 3.
 
@@ -873,13 +873,19 @@ Branch `413-eager-scan-order-precompile`. S1–S5 are committed; the tree stands
 
 - **F10 — `promotions:` legitimately drops from 1 to 0 for a single-format file.** Election fronts the elected group before line 1, so the first match already sits at an optimal position and emits no promotion code. The `format-detection` scan-telemetry assertion was updated to `^promotions: 0$` with the stronger invariant in its `asserts` text. Any future reading of promotion telemetry must account for election having already done the first reorder.
 - **F11 — per-compile validation must disturb NOTHING of the run's state, because compiles now happen mid-run.** D61's per-compile gate was originally written to reset the record lexicals, the timestamp memo and the date cache the way the startup gates do. That is correct only when validation runs exclusively before line 1. Under D60 a compile also fires at election and at mid-read promotion, and resetting there cleared the timestamp memo mid-file: the next real line re-parsed its timestamp, the cache miss fired the steady-loop probes, and the mixed fixture's variant scores changed *and* its included line count dropped from 450 to 448. The fix, and the contract for any future work inside `compile_format_scan_sub()`: suppress `format_probe_signal()` alongside `format_registry_promote()`, and snapshot/restore (never reset) the record lexicals, `$format_last_ts_str`/`$format_last_ts_epoch` and the date cache. The date cache is keyed by date string alone and two layouts disagree on its epoch (N3), so a sample parsed under one entry's layout must never be left behind for the run to read.
-- **F12 — the D62 RSS instrument distorts the D64 timing row if both boundaries coincide.** Measured while starting S6: with `TIMING detect/scan_sub_compile` bracketing the whole of `compile_format_scan_sub()`, the mixed fixture reported 0.032 s for 3 compiles (~10.7 ms each) against a codegen+validation cost of 3.4 ms each (codegen 3.1 ms, per-compile validation 0.3 ms — the latter measured, and cheap). The gap is `get_memory_usage()`, which shells out to `ps` on macOS and is called twice per compile when D62 measurement is armed. **S6 must place the D64 timing boundary so it excludes the D62 RSS readings** — otherwise the timing row reports the cost of measuring memory rather than the cost of compiling, and only on armed runs, which is exactly where a reader would compare the two. Note also that this makes the row's value depend on whether measurement was armed; the S6 contract text should say which it measures.
+- **F12 — the D62 RSS instrument distorts the D64 timing row if both boundaries coincide.** Measured while starting S6: with `TIMING detect/scan_sub_compile` bracketing the whole of `compile_format_scan_sub()`, the mixed fixture reported 0.032 s for 3 compiles (~10.7 ms each) against a codegen+validation cost of 3.4 ms each (codegen 3.1 ms, per-compile validation 0.3 ms — the latter measured, and cheap). The gap is `get_memory_usage()`, which shells out to `ps` on macOS and is called twice per compile when D62 measurement is armed. **S6 must place the D64 timing boundary so it excludes the D62 RSS readings** — otherwise the timing row reports the cost of measuring memory rather than the cost of compiling, and only on armed runs, which is exactly where a reader would compare the two. Note also that this makes the row's value depend on whether measurement was armed; the S6 contract text should say which it measures. **Resolved in S6:** one timer pair spans the whole compile (source build, `eval`, per-compile validation) with the RSS readings hoisted outside it on both sides, so the row reports the same value armed or not. Measured split per compile: source build 0.2 ms, `eval` 3.2 ms, validation 0.3 ms; the mixed fixture's three compiles report 0.012 s either way, against 0.032 s under the naive boundary.
 - **F13 — `TIMING detect/scan_sub_compile` is an accumulator, not a pipeline stage.** Compiles fire inside other stages (election before a file's first line, promotion mid-read), so the row attributes cost *within* those stages and must NOT be added to `$elapsed_total`, which sums disjoint stage timings.
 
-#### S6 scope reminders
+#### S7 scope reminders
 
-- The D64 boundary placement per F12 above.
-- Doc sweep: `docs/usage.md`'s `-V` prose and `tests/HARNESS-DESIGN.md`'s reserved-names list already carry `format-registry` (landed with S5). S6's sweep covers whatever the timing row adds — the `benchmark-data` contract and any surface enumerating `TIMING` rows.
+The validation plan's six items are listed under § Validation plan above. Items 1, 2 and 4 are partly discharged by the stage-by-stage verification already run (byte parity across the eight `tests/fixtures/format-detection/` fixtures at every stage; the 2-line gain probe; the sabotage proofs behind `validate-format-registry.sh`'s election invariants). S7 still owes:
+
+- **F1** the wider byte-parity battery — the #58 S9 fixture families beyond `tests/fixtures/format-detection/`.
+- **F3** read-phase timing parity, median-of-3 on one 1m-line fixture: election must add no hot-loop cost.
+- **F4** the gate-equivalence sabotage pair on a scratch copy: a broken sample must die at startup via the interpreted gate, and sabotaged codegen must die at first compile via per-compile validation. (The harness-level sabotages run so far prove the *assertions* fail; these prove the *gates* fire.)
+- **F5** edge paths: unknown-format fallback, non-seekable stdin, mid-file flip fixture, `-lf` exactly-one-compile.
+
+Then the per-feature workflow, when the architect directs.
 
 ## `-V format-detection` section-contract
 
@@ -970,6 +976,12 @@ Entry names (`mt1std`, `mt3us`, …) throughout, never slugs — the registry or
 - `scan_subs_rss_bytes: N` — the accumulated compile-boundary RSS delta (D62), bytes. **Nondeterministic** — harnesses assert its shape, never its value. Read against `scan_subs_compiled` it gives the per-sub cost, which calibrates at ~0.6 MB. `0` when measurement was not armed.
 - `scan_sub_rss_measured: yes|no` — whether the D62 measurement was armed at option parse (a memory-reporting surface was requested: `-mem`, `-V benchmark-data`, or this section). `no` is why `scan_subs_rss_bytes` reads 0 on a plain run; the two keys are read together so a zero is never mistaken for a measurement.
 - `compiled_orders: sig;...|-` — every compiled order's signature (joined entry names), sorted. The compile count read against which orders the run actually needed.
+
+**Timing rows (D64, emitted by `benchmark-data`, not by this section):**
+
+- `TIMING detect/registry_build` keeps its name and meaning: `build_format_registry()` inside `pipeline_detect()` — the declarative build and D24 gates 1–4 plus gate 5's interpreted startup half. Under D60 it no longer contains any codegen, which is the bulk of the 0.101 s → 0.008 s it drops by.
+- `TIMING detect/scan_sub_compile` — an **accumulator** summing every `compile_format_scan_sub()` call wherever it fires: election before a file's first line, promotion mid-read, the pin. It is not a pipeline stage and not a sub-stage — those compiles happen *inside* other stages, so the row attributes cost within stages it does not own and is deliberately excluded from `TIMING total` (which sums disjoint stage timings). See `features/180-named-pipeline-stages.md` § stage-coherent timing nomenclature for the row-kind taxonomy.
+- **The boundary excludes D62's RSS readings** (finding F12). One timer pair spans the whole compile — building the generated source, the `eval`, and per-compile validation — while `get_memory_usage()` is called outside it on both sides. Each of those readings is a `ps` subprocess on macOS costing several times the compile it measures; inside the boundary they made an armed run report ~10.7 ms per compile against a real 3.7 ms, and only on the runs that read the row. Measured split per compile on the mixed fixture: source build 0.2 ms, `eval` 3.2 ms, per-compile validation 0.3 ms. The row therefore reports the same value armed or not.
 
 **Re-emission (one source, two surfaces per `tests/HARNESS-DESIGN.md`):** `benchmark-data` emits `COUNTS format_scan_subs_compiled` and `COUNTS format_scan_sub_cache_hits` from the same variables this section reads, and `MEMORY format_scan_subs` from the same accumulator — never an independent recount. The `MEMORY` row is emitted whenever measurement was armed, including without `-mem`: it is a compile-boundary RSS delta, not a structure walk, so it does not depend on the `Devel::Size` pass the other `MEMORY` rows are gated on. Under `-mem` the category rides `%memory_high_water_marks` (appearing in the `-mem` terminal breakdown) and the standalone row stands down, so exactly one row is emitted either way.
 

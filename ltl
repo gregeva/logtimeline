@@ -441,6 +441,16 @@ my $format_scan_promotions = 0;        # actual reorders via format_registry_pro
 my $format_scan_validating  = 0;       # per-compile validation in flight: promotion is suppressed
 my $format_scan_subs_compiled = 0;     # generated scan subs minted this run
 my $format_scan_sub_cache_hits = 0;    # resolves served from the signature cache
+# D64: wall time in compile_format_scan_sub() across the run, wherever a
+# compile fires (election before line 1, mid-read promotion, the pin). An
+# ACCUMULATOR, not a pipeline stage: compiles happen INSIDE other stages,
+# so this attributes cost within them and is never summed into the stage
+# total. It measures the compile itself — building the source, generating
+# the sub, validating it — with the D62 RSS readings deliberately outside
+# the boundary, so an armed run and a plain run report the same cost
+# (finding F12: get_memory_usage() shells out to ps on macOS and would
+# otherwise dominate the row on exactly the runs that read it).
+my $elapsed_detect_scan_sub_compile = 0;
 my $format_scan_subs_rss      = 0;     # D62: accumulated compile-boundary RSS delta, bytes
 my $format_scan_measure_rss   = 0;     # armed at option parse when a memory surface is requested
 my $format_scan_nomatch_samples = 0;   # sampled no-match scans timed
@@ -3385,6 +3395,12 @@ sub format_guard_cond_src {
 # signature (D60), so each order is compiled at most once per run.
 sub compile_format_scan_sub {
     my ($opts) = @_;
+    # D62's RSS readings bracket the whole sub and sit OUTSIDE D64's timer
+    # (F12): each is a `ps` subprocess on macOS, several times the cost of
+    # the compile it measures. Nothing but the compile allocates between
+    # them, so the delta is the generated sub's real footprint.
+    my $rss_before = $format_scan_measure_rss ? get_memory_usage() : undef;
+    my $compile_start = [gettimeofday];
     my (@blocks, @tab_blocks, %aux_seen, @aux_all);
     for my $si (0 .. $#format_scan_order) {
         my $e = $format_scan_order[$si];
@@ -3420,23 +3436,21 @@ sub compile_format_scan_sub {
         . "if (\$head_ord == 9) {\n" . join("\n", @tab_blocks) . "\nreturn undef;\n}\n";
     my @entries = @format_scan_order;
     my $src = "sub {\n$aux_decls$ws_dispatch" . join("\n", @blocks) . "\nreturn undef;\n}";
-    # D62: the compiled sub's real cost is its op tree and pads, which a
-    # structure walker cannot see (Devel::Size reaches ~55% of it). RSS
-    # delta across the eval is the accurate instrument — nothing else
-    # allocates between the two reads — so that is what the
-    # format_scan_subs memory category reports, paired with the count so
-    # the total reads against the per-sub constant. Armed only when a
-    # memory surface was requested; a plain run takes no RSS reading.
-    my $rss_before = $format_scan_measure_rss ? get_memory_usage() : undef;
     my $sub = eval $src;
-    if (defined $rss_before) {
-        my $delta = ( get_memory_usage() // 0 ) - $rss_before;
-        $format_scan_subs_rss += $delta if $delta > 0;
-    }
     $format_scan_subs_compiled++;
     die "ltl: format registry: scan-sub codegen failed: $@\nGENERATED SOURCE:\n$src\n"
         if $@ || ref $sub ne 'CODE';
     format_validate_scan_sub($sub, \@entries);
+    $elapsed_detect_scan_sub_compile += tv_interval($compile_start);
+    # The compiled sub's real cost is its op tree and pads, which a
+    # structure walker cannot see (Devel::Size reaches ~55% of it), so the
+    # format_scan_subs memory category reports this delta instead, paired
+    # with the compile count so the total reads against the per-sub
+    # constant. Armed only when a memory surface was requested.
+    if (defined $rss_before) {
+        my $delta = ( get_memory_usage() // 0 ) - $rss_before;
+        $format_scan_subs_rss += $delta if $delta > 0;
+    }
     return $sub;
 }
 
@@ -13980,6 +13994,11 @@ sub print_verbose_output {
 
     # Timing rows (raw seconds)
     printf "TIMING\tdetect/registry_build\t%.3f\n", $elapsed_detect_registry_build;
+    # #413/D64: an accumulator over every scan-sub compile, wherever it
+    # fired. Compiles happen inside other stages (election before a file's
+    # first line, promotion mid-read), so this row attributes cost within
+    # them and is deliberately NOT part of the stage total below.
+    printf "TIMING\tdetect/scan_sub_compile\t%.3f\n", $elapsed_detect_scan_sub_compile;
     printf "TIMING\tparse/read_files\t%.3f\n", $elapsed_parse_read_files;
     printf "TIMING\taccumulate/initialize_buckets\t%.3f\n", $elapsed_accumulate_initialize_buckets;
     printf "TIMING\tfinalize/group_similar\t%.3f\n", $elapsed_finalize_group_similar;
