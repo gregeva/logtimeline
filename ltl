@@ -2236,9 +2236,9 @@ my $format_registry_opts;
 # file alternating between two or three formats scans only those formats
 # before the tail. Alternation cycles through a tiny set of orders, so
 # every order's generated sub is compiled at most once per run and
-# selected by signature ever after; the static order and every
-# first-promotion-from-static order are precompiled eagerly at startup
-# (pay the compile cost before the loop, never inside it).
+# selected by signature ever after. Nothing is compiled speculatively
+# (D60): an order is generated when a caller is about to scan with it,
+# through format_scan_sub_resolve().
 my %format_scan_sub_cache;     # order signature => generated scan sub
 
 # Windchill Workgroup Manager msgtype letters → category vocabulary
@@ -3057,6 +3057,17 @@ sub apply_format_variant_selection {
 # for the run is restricted to every registry entry carrying that name —
 # automatic detection, the evidence pass and variant selection are all
 # bypassed. An unknown name is a usage error listing the known names.
+# Resolve the active scan sub for the current @format_scan_order (D60):
+# cache hit by order signature, or one compile. Every point that changes
+# the order and needs the sub live again routes through here — occupant
+# swaps, promotion, election, the pre-line-1 fallback — so codegen happens
+# exactly where an order is about to be scanned with, never speculatively.
+sub format_scan_sub_resolve {
+    my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
+    return $format_scan_sub = $format_scan_sub_cache{$sig}
+                          //= compile_format_scan_sub($format_registry_opts);
+}
+
 sub apply_format_pin {
     my %known;
     $known{ $_->[FR_SLUG] } = 1 for values %format_registry_entry;
@@ -3067,8 +3078,7 @@ sub apply_format_pin {
     @format_registry   = grep { $_->[FR_SLUG] eq $log_format_pin } @format_registry_members;
     @format_scan_order = @format_registry;
     %format_scan_sub_cache = ();
-    $format_scan_sub = $format_scan_sub_cache{ join ',', map { $_->[FR_NAME] } @format_scan_order }
-                     = compile_format_scan_sub($format_registry_opts);
+    format_scan_sub_resolve();
     return;
 }
 
@@ -3309,8 +3319,8 @@ sub format_guard_cond_src {
 # from its own captured entry snapshot. Promotion is emitted ONLY into
 # blocks whose generation-time position is not already optimal (some
 # non-ancestor ahead), so steady state runs no promotion code at all.
-# Returns the compiled sub; callers cache it per front format (D40) so
-# each possible order is compiled at most once per run.
+# Returns the compiled sub; format_scan_sub_resolve() caches it by order
+# signature (D60), so each order is compiled at most once per run.
 sub compile_format_scan_sub {
     my ($opts) = @_;
     my (@blocks, @tab_blocks, %aux_seen, @aux_all);
@@ -3596,47 +3606,25 @@ sub build_format_registry {
     %format_registry_clobbered = %clobbered_by;
     $format_registry_opts      = $opts;
     %format_scan_sub_cache     = ();
-    $format_scan_sub = $format_scan_sub_cache{ join ',', map { $_->[FR_NAME] } @format_scan_order }
-                     = compile_format_scan_sub($opts);
-    # Eager precompilation (D40): every first-promotion-from-static order
-    # (winner's ancestors, winner, rest in static relative order) is known
-    # up front — compile them all now so the compile cost is paid before
-    # the read loop, never inside it. Deeper recency permutations (only
-    # reachable in multi-format interleaved streams) cache on first
-    # occurrence and are reused for the rest of the run.
-    for my $e (@format_registry) {
-        my %front = ( %{ $e->[FR_ANC_SET] }, $e->[FR_GROUP] => 1 );
-        my (@f, @r);
-        for my $o (@format_registry) {
-            if ($front{ $o->[FR_GROUP] }) { push @f, $o } else { push @r, $o }
-        }
-        my @save = @format_scan_order;
-        @format_scan_order = (@f, @r);
-        my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
-        $format_scan_sub_cache{$sig} //= compile_format_scan_sub($opts);
-        @format_scan_order = @save;
-    }
 
-    # D24 gate 5: the generated scan sub (the production truth) classifies
-    # every sample to its owning entry under the initial (static) order —
-    # with the sample's own member occupying its group's slot, so a variant
-    # member's samples (e.g. yyyy-dd-MM dates) are the executable proof that
-    # its generated block reads them.
+    # D24 gate 5, startup half (D61): every sample classifies to its owning
+    # entry through the interpreted classifier — with the sample's own
+    # member seated in its group's slot, so a variant member's samples
+    # (e.g. yyyy-dd-MM dates) are proven readable under the order the run
+    # would scan them with. No codegen happens here: the generated block's
+    # own proof is the per-compile half, run the first time the entry is
+    # compiled into any sub (D61).
     for my $spec (grep { $_->{scanned} } @specs) {
-        format_registry_set_occupant( $format_registry_entry{ $spec->{name} } );
+        my @order = map { $_->[FR_GROUP] eq $spec->{group} ? $format_registry_entry{ $spec->{name} } : $_ }
+                    @format_registry;
         for my $sample (@{ $spec->{samples} }) {
-            my $winner = $format_scan_sub->($sample);
-            die "ltl: format registry: generated scan sub classifies a sample of '$spec->{name}' as '"
+            my $winner = format_classify_interpreted( $sample, \@order );
+            die "ltl: format registry: interpreted classifier resolves a sample of '$spec->{name}' to '"
               . ($winner ? $winner->[FR_NAME] : 'no match')
-              . "' (produced_by compile_format_scan_sub())\n"
+              . "' (produced_by format_classify_interpreted())\n"
                 unless $winner && $winner->[FR_NAME] eq $spec->{name};
         }
-        format_registry_set_occupant( $format_registry_entry{ $group_default{ $spec->{group} } } );
     }
-    # Gate 5's format-alternating sample stream promoted entries (warming
-    # deeper recency orders); restore the static order and its sub.
-    @format_scan_order = @format_registry;
-    $format_scan_sub = $format_scan_sub_cache{ join ',', map { $_->[FR_NAME] } @format_scan_order };
 
     # Validation ran the write-direct closures against the record lexicals;
     # restore their pristine per-run state before any line is read.
@@ -3646,8 +3634,7 @@ sub build_format_registry {
     ( $timestamp, $fractional_ms ) = ( undef, 0 );
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
     timestamp_date_cache_clear();   # validation parsed the samples; start the run with an empty cache
-    $format_scan_promotions = 0;   # gate 5's sample stream promoted entries; the
-                                   # telemetry counts run promotions only
+    $format_scan_promotions = 0;   # the telemetry counts run promotions only
 }
 
 # Interpreted classification (D61): the one resolution surface answering
@@ -3799,8 +3786,7 @@ sub format_registry_promote {
     }
     @format_scan_order = (@f, @r);
     $format_scan_promotions++;
-    my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
-    $format_scan_sub = $format_scan_sub_cache{$sig} //= compile_format_scan_sub($format_registry_opts);
+    format_scan_sub_resolve();
     return;
 }
 
@@ -15535,6 +15521,10 @@ sub pipeline_detect {
     my $registry_build_start = [gettimeofday];
     build_format_registry();
     apply_format_pin() if defined $log_format_pin;
+    # The build itself emits no code (D60). Until per-file election owns
+    # the compile points (S3), the static order is resolved here so the
+    # read loop always enters holding a compiled sub.
+    format_scan_sub_resolve() unless defined $log_format_pin;
     $elapsed_detect_registry_build = tv_interval($registry_build_start);
 
     # Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
