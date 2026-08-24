@@ -1,0 +1,5 @@
+--- parity pass (no timing)
+PASS bpd=53 T==S fill digest c87c98222bf02b2b7c7933efb0fe6f91 keys=51469
+PASS bpd=616 T==S fill digest a0ac7c4c98d2cbf7f3dd7cd9f5585c20 keys=51469
+--- timed pass (runs=3)
+run: arm=T bpd=53 -> /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-results/revalidate-v2-T-bpd53.txt

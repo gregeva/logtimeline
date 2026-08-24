@@ -85,6 +85,16 @@ Before #189 begins production implementation of the primitives, **the locked arc
 
 The `prototype/96-fuzzy-consolidation.pl` work is the precedent for this pattern. Issue #96 used a standalone prototype to validate algorithmic choices against real D2 data before its production consolidation code was written; lessons from the prototype shaped the production implementation directly. #189 follows the same pattern for #187's contract.
 
+### Revalidation under #426 (2026-08-24)
+
+Issue #426 (compact per-message statistics store) proposes to re-container these primitives (P8: counters as columns on the record row; P9: span-only bins `[base_index, c0, c1, …]`) and, as a separate proposal, to replace the per-key partition lifecycle with one shared log-spaced grid per store (P10). The architect required the five aspects above to be re-run against those representations before any implementation. The record of that work is `features/426-per-message-statistics-store.md` § *Step 2 delivered — revalidation findings* (F23–F32) and its report `prototype/426-bin-primitives-revalidation-report.md` (instruments `prototype/426-revalidate-*`). What it established for this feature's contract:
+
+- **P8+P9 (span-only, verbatim geometry) are digest-identical to today's primitives** on every fixture and scenario exercised — this feature's validation carries over by construction; R1–R12 hold verbatim.
+- **P10 (shared grid) contradicts no locked arithmetic**: Decision 1's walk is grid-agnostic (92/92 edge cases; same rank-convention crossover at bpd ≈ 256). It makes D4, D5 and R6 vacuous (no out-of-range state, no seed, no rebin) and requires an explicit amendment if adopted; D8's rebin/overflow fields become inert.
+- **Corrections to this feature's validation report regardless of #426** (proposed, not applied): V5 finding 1 held for 327 of 328 N ≥ 100 keys at bpd 256 (one key at 0.934% vs the 0.904% bound, via a `partition_extend` remap — visible in V5's own table); R4's "structural" bound is not met once a partition has been remapped by widening or by `merge_bin_counter_entries` (up to ~2 bins after merges on the primary surface); the primitives are undefined for v ≤ 0 (`partition_extend` never terminates on a negative value, dies on 0) — the caller-side `> 0` guard is part of the contract; Decision 2's ~212 MB / ~2.1 KB-per-partition guidance describes today's dense layout only (S ≈ 0.96 KB, G ≈ 0.6 KB per key at bpd 53; T grows 5.8× from bpd 53 to 616, S 1.2×, G 1.4×); merge-driven rebins reset `rebins` to 0 and are invisible to `-V` rebin telemetry.
+
+No decision in this file changes until the architect locks one in the #426 record and, where a #187 decision changes, amends #187.
+
 ## Requirements
 
 The requirements below define the **contract surface** that #189's primitive implementations must satisfy. Each requirement either restates a #187-locked decision (referenced explicitly) or specifies #189-internal contract surface for the primitives.

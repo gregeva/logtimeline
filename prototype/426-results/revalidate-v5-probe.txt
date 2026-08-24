@@ -1,0 +1,49 @@
+## probe 1: first-sample boundary placement in T's seed partition (seed_decades=5)
+bpd   v0      bin_count  bc/2       assigned  lower                  upper                  spike percentile (fraction=1) -> value, rel err
+53    1       265        132.5      132       0.97851173352677689    1.0219601520727559     1.0215162578986543  +2.1516%  (v0 inside bin)
+53    10      265        132.5      132       9.7851173352677687     10.21960152072756      10.215162578986543  +2.1516%  (v0 inside bin)
+53    100     265        132.5      132       97.851173352677677     102.19601520727558     102.15162578986542  +2.1516%  (v0 inside bin)
+53    1000    265        132.5      132       978.51173352677688     1021.9601520727559     1021.5162578986543  +2.1516%  (v0 inside bin)
+115   1       575        287.5      287       0.99003870611218547    1.0100615196419249     1.0098593005308805  +0.9859%  (v0 inside bin)
+115   10      575        287.5      287       9.9003870611218545     10.10061519641925      10.098593005308805  +0.9859%  (v0 inside bin)
+115   100     575        287.5      287       99.003870611218545     101.0061519641925      100.98593005308805  +0.9859%  (v0 inside bin)
+115   1000    575        287.5      287       990.03870611218542     1010.061519641925      1009.8593005308805  +0.9859%  (v0 inside bin)
+256   1       1280       640        640       1                      1.0090350448414478     1.008944291538034  +0.8944%  (v0 at BOTTOM of bin)
+256   10      1280       640        640       10                     10.090350448414478     10.08944291538034  +0.8944%  (v0 at BOTTOM of bin)
+256   100     1280       640        640       100                    100.90350448414478     100.8944291538034  +0.8944%  (v0 at BOTTOM of bin)
+256   1000    1280       640        640       1000                   1009.0350448414478     1008.944291538034  +0.8944%  (v0 at BOTTOM of bin)
+616   1       3080       1540       1539      0.99626901467312579    0.99999999999999911    0.99996262107047584  -0.0037%  (v0 inside bin)
+616   10      3080       1540       1539      9.9626901467312585     9.9999999999999911     9.9996262107047578  -0.0037%  (v0 inside bin)
+616   100     3080       1540       1539      99.626901467312578     99.999999999999901     99.996262107047556  -0.0037%  (v0 inside bin)
+616   1000    3080       1540       1539      996.26901467312575     999.99999999999909     999.96262107047585  -0.0037%  (v0 inside bin)
+G: grid_index(v0) and boundaries
+bpd=53   v0=1     index=0 checked=0(corrected=0) lower=1 upper=1.0444025524245693 spike p99 -> 1.0439489102669002 +4.3949%
+bpd=53   v0=10    index=53 checked=53(corrected=0) lower=10 upper=10.444025524245694 spike p99 -> 10.439489102669004 +4.3949%
+bpd=53   v0=100   index=106 checked=106(corrected=0) lower=100 upper=104.44025524245698 spike p99 -> 104.39489102669009 +4.3949%
+bpd=53   v0=1000  index=158 checked=159(corrected=1) lower=957.48521264957674 upper=1000 spike p99 -> 999.5656443421974 -0.0434%
+bpd=115  v0=1     index=0 checked=0(corrected=0) lower=1 upper=1.0202242734613562 spike p99 -> 1.0200200197187541 +2.0020%
+bpd=115  v0=10    index=115 checked=115(corrected=0) lower=10 upper=10.202242734613561 spike p99 -> 10.200200197187538 +2.0020%
+bpd=115  v0=100   index=230 checked=230(corrected=0) lower=100 upper=102.0224273461356 spike p99 -> 102.00200197187539 +2.0020%
+bpd=115  v0=1000  index=344 checked=345(corrected=1) lower=980.17663960029074 upper=1000 spike p99 -> 999.7997952529505 -0.0200%
+bpd=256  v0=1     index=0 checked=0(corrected=0) lower=1 upper=1.0090350448414473 spike p99 -> 1.0089442915380336 +0.8944%
+bpd=256  v0=10    index=256 checked=256(corrected=0) lower=10 upper=10.090350448414474 spike p99 -> 10.089442915380335 +0.8944%
+bpd=256  v0=100   index=512 checked=512(corrected=0) lower=100 upper=100.90350448414475 spike p99 -> 100.89442915380337 +0.8944%
+bpd=256  v0=1000  index=767 checked=768(corrected=1) lower=991.0458562488609 upper=1000 spike p99 -> 999.91005931471079 -0.0090%
+bpd=616  v0=1     index=0 checked=0(corrected=0) lower=1 upper=1.0037449577091369 spike p99 -> 1.0037074387971032 +0.3707%
+bpd=616  v0=10    index=616 checked=616(corrected=0) lower=10 upper=10.037449577091369 spike p99 -> 10.037074387971032 +0.3707%
+bpd=616  v0=100   index=1232 checked=1232(corrected=0) lower=100 upper=100.37449577091363 spike p99 -> 100.37074387971026 +0.3707%
+bpd=616  v0=1000  index=1847 checked=1848(corrected=1) lower=996.26901467312621 upper=1000 spike p99 -> 999.96262107047676 -0.0037%
+
+## probe 2: key ordinal 75 (sorted, N>=100) at bpd=256, q=0.75
+key: 2xx | [200] GET /Thingworx/Runtime/index.html
+N=413 first_sample=1 oracle=sorted[int(N*q)]=1 (0-based index 309); min=1 max=576 distinct=19
+seed partition [0.00316228, 316.228] bin_count=1280; first out-of-range sample: 576 (arrival position 174 of 413; 173 samples precede it)
+value histogram (value:count): 1:353 3:5 4:2 5:1 7:6 8:9 9:7 10:2 11:1 40:1 41:9 42:8 43:3 45:1 46:1 47:1 49:1 51:1 576:1
+T geometry: bin_count=1919 decades=5 log_ratio=17.2693881974553 max=100000 min=0.00316227766016838 overflow=0 rebins=1 underflow=0
+T bins: 639:210 640:143 761:2 762:3 793:1 794:1 818:1 855:3 856:3 870:5 871:4 883:2 884:5 895:1 896:1 906:1 1049:1 1051:4 1052:5 1054:4 1055:4 1057:3 1062:1 1064:1 1067:1 1071:1 1076:1 1345:1
+T int  target_rank=310 bin: lower=1.0030042236895869 upper=1.0120711554564703 count=143 rank_in_bin=100 fraction=0.699301 -> value=1.0093361514552366 audit=none rel_err_vs_oracle=+0.9336%  bin_width=0.9040%
+T ceil target_rank=310 bin: lower=1.0030042236895869 upper=1.0120711554564703 count=143 rank_in_bin=100 fraction=0.699301 -> value=1.0093361514552366 audit=none rel_err_vs_oracle=+0.9336%  bin_width=0.9040%
+G geometry: base=0 hi_index=706 lo_index=0 span=707
+G bins: 0:353 122:5 154:2 178:1 216:6 231:9 244:7 256:2 266:1 410:1 412:9 415:8 418:3 423:1 425:1 428:1 432:1 437:1 706:1
+G int  target_rank=310 bin: lower=1 upper=1.0090350448414473 count=353 rank_in_bin=310 fraction=0.878187 -> value=1.0079301070461493 audit=none rel_err_vs_oracle=+0.7930%  bin_width=0.9035%
+G ceil target_rank=310 bin: lower=1 upper=1.0090350448414473 count=353 rank_in_bin=310 fraction=0.878187 -> value=1.0079301070461493 audit=none rel_err_vs_oracle=+0.7930%  bin_width=0.9035%

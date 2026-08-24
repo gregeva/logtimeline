@@ -1,0 +1,72 @@
+--- scenario 1 arm T vs revalidate-v4-ltl-real.txt (counter_memory_bytes masked)
+IDENTICAL
+counter_memory_bytes real=1522959 proto_T=1598689
+--- scenario 1 arm S vs revalidate-v4-ltl-real.txt (counter_memory_bytes masked)
+IDENTICAL
+counter_memory_bytes real=1522959 proto_S=650952
+--- scenario 1 arm G (locked field set) vs revalidate-v4-ltl-real.txt: field NAMES
+FIELD NAMES IDENTICAL
+--- scenario 1 arm G (locked field set) vs revalidate-v4-ltl-real.txt: VALUES (unmasked)
+8,9c8,9
+<   total_rebin_events: 1
+<   max_partition_bins: 397
+---
+>   total_rebin_events: 0
+>   max_partition_bins: 0
+12,13c12,13
+<   counter_memory_bytes: 1522959
+<   rebins_per_partition: p50=0 p95=0 p99=0 max=1
+---
+>   counter_memory_bytes: 445386
+>   rebins_per_partition: p50=0 p95=0 p99=0 max=0
+--- scenario 2 arm T vs revalidate-v4-ltl-real-dmp7.txt (counter_memory_bytes masked)
+IDENTICAL
+counter_memory_bytes real=2353215 proto_T=2451241
+--- scenario 2 arm S vs revalidate-v4-ltl-real-dmp7.txt (counter_memory_bytes masked)
+IDENTICAL
+counter_memory_bytes real=2353215 proto_S=793600
+--- scenario 2 arm G (locked field set) vs revalidate-v4-ltl-real-dmp7.txt: field NAMES
+FIELD NAMES IDENTICAL
+--- scenario 2 arm G (locked field set) vs revalidate-v4-ltl-real-dmp7.txt: VALUES (unmasked)
+8,9c8,9
+<   total_rebin_events: 1
+<   max_partition_bins: 862
+---
+>   total_rebin_events: 0
+>   max_partition_bins: 0
+12,13c12,13
+<   counter_memory_bytes: 2353215
+<   rebins_per_partition: p50=0 p95=0 p99=0 max=1
+---
+>   counter_memory_bytes: 587274
+>   rebins_per_partition: p50=0 p95=0 p99=0 max=0
+--- scenario 3 arm T vs revalidate-v4-ltl-real-dmp9.txt (counter_memory_bytes masked)
+IDENTICAL
+counter_memory_bytes real=9180903 proto_T=9336673
+--- scenario 3 arm S vs revalidate-v4-ltl-real-dmp9.txt (counter_memory_bytes masked)
+IDENTICAL
+counter_memory_bytes real=9180903 proto_S=1938664
+--- scenario 3 arm G (locked field set) vs revalidate-v4-ltl-real-dmp9.txt: field NAMES
+FIELD NAMES IDENTICAL
+--- scenario 3 arm G (locked field set) vs revalidate-v4-ltl-real-dmp9.txt: VALUES (unmasked)
+8,9c8,9
+<   total_rebin_events: 1
+<   max_partition_bins: 4619
+---
+>   total_rebin_events: 0
+>   max_partition_bins: 0
+12,13c12,13
+<   counter_memory_bytes: 9180903
+<   rebins_per_partition: p50=0 p95=0 p99=0 max=1
+---
+>   counter_memory_bytes: 1728466
+>   rebins_per_partition: p50=0 p95=0 p99=0 max=0
+--- scenario 6 arm T vs revalidate-v4-ltl-real-raw.txt (counter_memory_bytes masked)
+IDENTICAL
+counter_memory_bytes real= proto_T=
+--- scenario 6 arm S vs revalidate-v4-ltl-real-raw.txt (counter_memory_bytes masked)
+IDENTICAL
+counter_memory_bytes real= proto_S=
+--- scenario 6 arm G (locked field set) vs revalidate-v4-ltl-real-raw.txt: field NAMES
+FIELD NAMES IDENTICAL
+--- scenario 6 arm G (locked field set) vs revalidate-v4-ltl-real-raw.txt: VALUES (unmasked)

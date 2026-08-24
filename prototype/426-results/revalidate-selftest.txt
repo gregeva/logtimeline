@@ -1,0 +1,41 @@
+file: localhost_access_log.2025-03-21.txt format=access lines=22264 matched=22256 unparsed=8 no_duration=7 positive=14062 zero=8187 negative=0 keys_any=664 keys_positive=635 distinct_values=1109
+
+--- bpd=53 (one bin = 4.4403%)
+digest T=fefe624fd6730efe1c907c420958c2de S=fefe624fd6730efe1c907c420958c2de G=08d50beda3990fcffd2fff6e4dfe2cb5 keys T=635 S=635 G=635
+PASS (a) bpd=53 T and S digests identical
+PASS (a) bpd=53 T vs S percentiles: 8890 compared (635 keys x 7 q x 2 conventions), 0 beyond 1e-12 or audit mismatch, max rel diff 0
+T telemetry: partitions=635 rebin_events=1 max_bins=397 over=0 under=0 rebins p50=0 p95=0 p99=0 max=1 mem=1598689
+PASS (a) bpd=53 T and S telemetry fields identical (excluding counter_memory_bytes: T=1598689 S=714459)
+G telemetry: partitions=635 span p50=1 p95=51 p99=80 max=191 index_range=[0,231] mem=450877
+memory_bytes: T=1598689 S=714459 G=450877
+PASS (b) bpd=53 G bound 10**(i/bpd) <= v < 10**((i+1)/bpd) holds after grid_index_checked on 14062 values; closed-form indices corrected: 7
+PASS (c) bpd=53 G ('int' rank) vs oracle on 20 largest keys (N 2972..87): 140 compared, 0 beyond one bin width, max rel err 4.4403% (bound 4.4403%); T for reference: 0 beyond, max 4.3791%
+PASS (d) bpd=53 T merge == standalone verbatim merge_bin_counter_entries (geometry 1.22380145448516/122380.145448516/265 -> 0.00316227766016838/122380.145448516/402, remap=yes)
+PASS (d) bpd=53 S merge canonical == T merge canonical; source dropped in both
+PASS (d) bpd=53 T and S whole-store digests identical after merge
+PASS (d) bpd=53 T and S identical after a post-merge out-of-range add (extend on merged geometry; rebins now 1)
+PASS (d) bpd=53 G merge == index-wise sum of spans == fresh G over the union of samples (N=4505)
+PASS (e) bpd=53 max_rebins=0: T and S digests identical; rebin_events=0 partitions_with_overflow=1 partitions_with_underflow=0 overflow_total=6 underflow_total=0
+
+--- bpd=616 (one bin = 0.3745%)
+digest T=bb067777ac62edd46bc020af33921d9c S=bb067777ac62edd46bc020af33921d9c G=12d69796548f97a0cadf54fe3602d1a1 keys T=635 S=635 G=635
+PASS (a) bpd=616 T and S digests identical
+PASS (a) bpd=616 T vs S percentiles: 8890 compared (635 keys x 7 q x 2 conventions), 0 beyond 1e-12 or audit mismatch, max rel diff 0
+T telemetry: partitions=635 rebin_events=1 max_bins=4619 over=0 under=0 rebins p50=0 p95=0 p99=0 max=1 mem=9341745
+PASS (a) bpd=616 T and S telemetry fields identical (excluding counter_memory_bytes: T=9341745 S=2762611)
+G telemetry: partitions=635 span p50=1 p95=588 p99=923 max=2202 index_range=[0,2695] mem=1733963
+memory_bytes: T=9341745 S=2762611 G=1733963
+PASS (b) bpd=616 G bound 10**(i/bpd) <= v < 10**((i+1)/bpd) holds after grid_index_checked on 14062 values; closed-form indices corrected: 7
+PASS (c) bpd=616 G ('int' rank) vs oracle on 20 largest keys (N 2972..87): 140 compared, 0 beyond one bin width, max rel err 0.3745% (bound 0.3745%); T for reference: 0 beyond, max 0.3745%
+PASS (d) bpd=616 T merge == standalone verbatim merge_bin_counter_entries (geometry 1.22380145448516/122380.145448516/3080 -> 0.00316227766016838/122380.145448516/4674, remap=yes)
+PASS (d) bpd=616 S merge canonical == T merge canonical; source dropped in both
+PASS (d) bpd=616 T and S whole-store digests identical after merge
+PASS (d) bpd=616 T and S identical after a post-merge out-of-range add (extend on merged geometry; rebins now 1)
+PASS (d) bpd=616 G merge == index-wise sum of spans == fresh G over the union of samples (N=4505)
+PASS (e) bpd=616 max_rebins=0: T and S digests identical; rebin_events=0 partitions_with_overflow=1 partitions_with_underflow=0 overflow_total=6 underflow_total=0
+
+--- twx parser
+file: ScriptLog-DPMExtended-clean.log format=twx lines=122808 matched=122808 unparsed=0 positive=122798 zero=10 negative=0 keys_any=3421 keys_positive=3419
+PASS (f) twx parser: keys_positive=3419 keys_any=3421 (report says 3,419 positive / 3,421 total)
+
+ALL PASS

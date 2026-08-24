@@ -1,0 +1,38 @@
+=== Part C: non-positive values in every arm (caller guard today: ltl skips duration <= 0 before counter_update) ===
+value=0
+  grid_index(0,53): DIES: Can't take log of 0 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 639.
+  T add: DIES: Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 243.
+  S add: DIES: Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 923.
+  G add: DIES: Can't take log of 0 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161.
+  T add after add(100): DIES: Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 274.; n=1 min=0.316228 max=31622.8 bin_count=265 rebins=0 over=0 under=0
+  S add after add(100): DIES: Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 274.; n=1 min=0.316228 max=31622.8 bin_count=265 rebins=0 over=0 under=0
+  G add after add(100): DIES: Can't take log of 0 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161.; n=1 lo=106 hi=106 span=1
+value=-1
+  grid_index(-1,53): DIES: Can't take log of -1 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 639.
+  T add: HANGS: no return within 5s (infinite loop)
+  S add: HANGS: no return within 5s (infinite loop)
+  G add: DIES: Can't take log of -1 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161.
+  T add after add(100): HANGS: no return within 5s (infinite loop); n=1 min=0.316228 max=31622.8 bin_count=265 rebins=0 over=0 under=0
+  S add after add(100): HANGS: no return within 5s (infinite loop); n=1 min=0.316228 max=31622.8 bin_count=265 rebins=0 over=0 under=0
+  G add after add(100): DIES: Can't take log of -1 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161.; n=1 lo=106 hi=106 span=1
+value=9.99989e-321
+  grid_index(9.99989e-321,53): index=-16961
+  T add: accepted geometry min=2.96439e-323 max=3.16224e-318 bin_count=265 over=0 under=0 p50=1.03359e-320[none] then add(100): DIES: Can't take log of 0 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 286.
+  S add: accepted geometry min=2.96439e-323 max=3.16224e-318 bin_count=265 over=0 under=0 p50=1.03359e-320[none] then add(100): DIES: Can't take log of 0 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 286.
+  G add: accepted geometry lo=-16961 hi=-16961 span=1 p50=9.99989e-321[none] then add(100): accepted
+  T add after add(100): accepted; n=2 min=3.16202e-321 max=31622.8 bin_count=Inf rebins=1 over=0 under=0
+Non-finite repeat count does nothing at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 952.
+  S add after add(100): accepted; n=2 min=3.16202e-321 max=31622.8 bin_count=Inf rebins=1 over=0 under=0
+  G add after add(100): accepted; n=2 lo=-16961 hi=106 span=17068
+value=1e+308
+  grid_index(1e+308,53): index=16324
+  T add: accepted geometry min=3.16228e+305 max=Inf bin_count=265 over=0 under=0 p50=NaN[none] then add(100): accepted
+Non-finite repeat count does nothing at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 952.
+  S add: accepted geometry min=3.16228e+305 max=Inf bin_count=265 over=0 under=0 p50=NaN[none] then add(100): accepted
+  G add: accepted geometry lo=16324 hi=16324 span=1 p50=1.0444e+308[none] then add(100): accepted
+  T add after add(100): accepted; n=2 min=0.316228 max=Inf bin_count=Inf rebins=1 over=0 under=0
+Non-finite repeat count does nothing at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 952.
+  S add after add(100): accepted; n=2 min=0.316228 max=Inf bin_count=Inf rebins=1 over=0 under=0
+  G add after add(100): accepted; n=2 lo=106 hi=16324 span=16219
+
+ALL PASS

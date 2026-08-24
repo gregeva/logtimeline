@@ -1,0 +1,6 @@
+  partition_count: 635
+  counter_memory_bytes: 1522959
+  partition_count: 635
+  counter_memory_bytes: 1482319
+  partition_count: 635
+  counter_memory_bytes: 1482319

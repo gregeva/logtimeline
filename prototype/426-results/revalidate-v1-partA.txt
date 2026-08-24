@@ -1,0 +1,189 @@
+=== Part A: hand-computable edge cases (arms T, S, G) ===
+
+--- bpd=53 (one bin = 4.4403%)
+PASS A1 bpd=53 bin_count=1 q=0.5 T returns upper of bin 132 (102.1960152) audit=none
+PASS A1 bpd=53 bin_count=1 q=0.5 G returns grid upper of index 106 (104.4402552) audit=none
+PASS A1 bpd=53 bin_count=1 q=0.99 T returns upper of bin 132 (102.1960152) audit=none
+PASS A1 bpd=53 bin_count=1 q=0.99 G returns grid upper of index 106 (104.4402552) audit=none
+PASS A1 bpd=53 G single occupied index: span=1 lo=106 (closed form 106)
+PASS A1 bpd=53: T and S digests identical
+PASS A2 bpd=53 lower=upper synthetic T q=0.1 returns 1 (1)
+PASS A2 bpd=53 lower=upper synthetic T q=0.5 returns 1 (1)
+PASS A2 bpd=53 lower=upper synthetic T q=0.9 returns 1 (1)
+PASS A2 bpd=53 lower=upper synthetic T q=0.99 returns 1 (1)
+PASS A2 bpd=53 T lower=upper unreachable via partition_new: min=0.00316227766 < max=316.227766
+PASS A2 bpd=53 G lower=upper cannot occur: 10**(i/bpd) < 10**((i+1)/bpd) for i in [-2000,2000] (vacuous on the grid)
+PASS A3 bpd=53 single observation T q=0.5 -> upper of bin 132 = 42.92232639 (v=42, rel 2.1960%)
+PASS A3 bpd=53 single observation G q=0.5 -> grid upper of 86 = 43.80356263 (rel 4.2942%)
+PASS A3 bpd=53: T and S digests identical
+NOTE A4 bpd=53 fraction=0 unreachable in both walks (target_rank <= cum => rank_in_bin in [1,c]); G's walk is the same code shape
+PASS A5 bpd=53 zero-count T entry -> (undef,'none')
+PASS A5 bpd=53 zero-count store key -> (undef,'none') in T, S, G
+NOTE A5 bpd=53 G has no partition state to be zero-count; a key exists only after its first add
+PASS A6/7 bpd=53 all-overflow direct T entry q=0.9 -> boundary 316.227766 audit=high
+PASS A6/7 bpd=53 store cap=0 seed 1 + 5x1000000: T overflow=5 rebins=0 q=0.9 -> 316.227766 audit=high
+PASS A6/7 bpd=53 same inputs G: span=318 [0..317] q=0.9 -> 1000000 audit=none (within one bin of 1000000; index 317)
+PASS A6/7 bpd=53 over cap=0: T and S digests identical
+INFO A6/7 bpd=53 overflow: T returns 316.227766 for a true q=0.9 value of 1000000 (rel err 1 = 22.5 bins); G rel err 0
+PASS A6/7 bpd=53 all-underflow direct T entry q=0.1 -> boundary 0.00316227766 audit=low
+PASS A6/7 bpd=53 store cap=0 seed 1 + 5x1e-06: T underflow=5 rebins=0 q=0.1 -> 0.00316227766 audit=low
+PASS A6/7 bpd=53 same inputs G: span=319 [-318..0] q=0.1 -> 1.008726859e-06 audit=none (within one bin of 1e-06; index -318)
+PASS A6/7 bpd=53 under cap=0: T and S digests identical
+INFO A6/7 bpd=53 underflow: T returns 0.00316227766 for a true q=0.1 value of 1e-06 (rel err 3.16e+03 = 71195.9 bins); G rel err 0.00873
+
+A8 bpd=53 powers of ten: value | closed i | checked i | lower(closed) upper(closed) | v in [lower,upper)? | G q=0.5 (single add) | T bin (single add) T q=0.5
+A8 bpd=53 1      |     0 |     0  | 1 1.044402552 | yes | 1.044402552 (rel +4.4403%) | bin 132 1.021960152 (rel +2.1960%)
+A8 bpd=53 10     |    53 |    53  | 10 10.44402552 | yes | 10.44402552 (rel +4.4403%) | bin 132 10.21960152 (rel +2.1960%)
+A8 bpd=53 100    |   106 |   106  | 100 104.4402552 | yes | 104.4402552 (rel +4.4403%) | bin 132 102.1960152 (rel +2.1960%)
+A8 bpd=53 1000   |   158 |   159* | 957.4852126 1000 | NO | 1000 (rel +0.0000%) | bin 132 1021.960152 (rel +2.1960%)
+A8 bpd=53 10000  |   212 |   212  | 10000 10444.02552 | yes | 10444.02552 (rel +4.4403%) | bin 132 10219.60152 (rel +2.1960%)
+A8 bpd=53 100000 |   264 |   265* | 95748.52126 100000 | NO | 100000 (rel +0.0000%) | bin 132 102196.0152 (rel +2.1960%)
+A8 bpd=53 1e+06  |   317 |   318* | 957485.2126 1000000 | NO | 1000000 (rel +0.0000%) | bin 132 1021960.152 (rel +2.1960%)
+A8 bpd=53 1e+09  |   476 |   477* | 957485212.6 1000000000 | NO | 1000000000 (rel +0.0000%) | bin 132 1021960152 (rel +2.1960%)
+INFO A8 bpd=53 powers of ten with closed-form != boundary-checked: 4 of 8
+
+A9 bpd=53 boundary values v=10**(i/bpd): i | v | closed i | checked i | G q=0.5 rel err | T bin | T q=0.5 rel err
+A9 bpd=53 i=1    | 1.04440255242 |     0 |     1* | +0.0000% | 132 | +2.1960%
+A9 bpd=53 i=7    | 1.35542493764 |     7 |     7  | +4.4403% | 132 | +2.1960%
+A9 bpd=53 i=53   | 10 |    53 |    53  | +4.4403% | 132 | +2.1960%
+A9 bpd=53 i=100  | 77.0535146153 |   100 |   100  | +4.4403% | 132 | +2.1960%
+A9 bpd=53 i=106  | 100 |   106 |   106  | +4.4403% | 132 | +2.1960%
+A9 bpd=53 i=159  | 1000 |   158 |   159* | +0.0000% | 132 | +2.1960%
+A9 bpd=53 i=200  | 5937.24411457 |   200 |   200  | +4.4403% | 132 | +2.1960%
+A9 bpd=53 i=265  | 100000 |   264 |   265* | +0.0000% | 132 | +2.1960%
+INFO A9 bpd=53 boundary values: closed form == i for 5, != i for 3 of 8
+PASS A9 bpd=53 boundary values recorded (informational; the G store uses the closed form, both neighbours are within one bin)
+
+A10 bpd=53 tiny/huge single-key adds: value | G index | T seed min..max bin_count | T q=0.5 | G q=0.5
+A10 bpd=53 0.001  |   -159 | 3.16228e-06..0.316228 265 | 0.00102196 | 0.0010444
+PASS A10 bpd=53 v=0.001: T and S digests identical
+A10 bpd=53 1e-06  |   -318 | 3.16228e-09..0.000316228 265 | 1.02196e-06 | 1.0444e-06
+PASS A10 bpd=53 v=1e-06: T and S digests identical
+A10 bpd=53 1e+12  |    635 | 3.16228e+09..3.16228e+14 265 | 1.02196e+12 | 1e+12
+PASS A10 bpd=53 v=1000000000000: T and S digests identical
+A10 bpd=53 one key {1e-6,1e-3,1,1e12}: T min=3.16228e-09 max=1e+14 bin_count=1192 rebins=3 over=0 under=0; G span=954 [-318..635] slots; memory T=11362 S=18636 G=9262
+A10 bpd=53 q=0.01  oracle=1e-06  T=1.02444e-06 (0.55 bins) G=1.0444e-06 (1.00 bins)
+A10 bpd=53 q=0.5   oracle=1      T=1.03039 (0.68 bins) G=1.0444 (1.00 bins)
+A10 bpd=53 q=0.75  oracle=1e+12  T=1.04241e+12 (0.96 bins) G=1e+12 (0.00 bins)
+A10 bpd=53 q=0.9   oracle=1e+12  T=1.04241e+12 (0.96 bins) G=1e+12 (0.00 bins)
+A10 bpd=53 q=0.95  oracle=1e+12  T=1.04241e+12 (0.96 bins) G=1e+12 (0.00 bins)
+A10 bpd=53 q=0.99  oracle=1e+12  T=1.04241e+12 (0.96 bins) G=1e+12 (0.00 bins)
+A10 bpd=53 q=0.999 oracle=1e+12  T=1.04241e+12 (0.96 bins) G=1e+12 (0.00 bins)
+PASS A10 bpd=53 wide-range key: G every quantile within one bin (max 1.00 bins); T max 0.96 bins after 3 rebins (recorded, not asserted)
+PASS A10 bpd=53 wide: T and S digests identical
+
+A11 bpd=53 value 0 and negative under a 5 s alarm guard
+A11 bpd=53 T v=0   first-sample: died  Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 243. | on existing partition(100): died  Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 274.
+PASS A11 bpd=53 T v=0: never accepted silently (first-sample died, existing died)
+A11 bpd=53 S v=0   first-sample: died  Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 923. | on existing partition(100): died  Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 274.
+PASS A11 bpd=53 S v=0: never accepted silently (first-sample died, existing died)
+A11 bpd=53 G v=0   first-sample: died  Can't take log of 0 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161. | on existing partition(100): died  Can't take log of 0 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161.
+PASS A11 bpd=53 G v=0: never accepted silently (first-sample died, existing died)
+A11 bpd=53 T v=-5  first-sample: alarm ALARM | on existing partition(100): alarm ALARM
+PASS A11 bpd=53 T v=-5: never accepted silently (first-sample alarm, existing alarm) -- UNBOUNDED LOOP, alarm fired
+A11 bpd=53 S v=-5  first-sample: alarm ALARM | on existing partition(100): alarm ALARM
+PASS A11 bpd=53 S v=-5: never accepted silently (first-sample alarm, existing alarm) -- UNBOUNDED LOOP, alarm fired
+A11 bpd=53 G v=-5  first-sample: died  Can't take log of -5 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161. | on existing partition(100): died  Can't take log of -5 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161.
+PASS A11 bpd=53 G v=-5: never accepted silently (first-sample died, existing died)
+INFO A11 bpd=53 loop replica: from seed min=0.3162 the doubling loop reaches new_min=0 after 130 steps (then log(new_max/0) dies); negative values take the same path
+PASS A12 bpd=53 1 x 250: T max rel err 2.1960% (0.49 bins, 1 occupied bin), G max rel err 4.0290% (0.91 bins, span 1)
+PASS A12 bpd=53 N=1: T and S digests identical
+PASS A12 bpd=53 2 x 250: T max rel err 2.1960% (0.49 bins, 1 occupied bin), G max rel err 4.0290% (0.91 bins, span 1)
+PASS A12 bpd=53 N=2: T and S digests identical
+PASS A12 bpd=53 1000 x 250: T max rel err 2.1960% (0.49 bins, 1 occupied bin), G max rel err 4.0290% (0.91 bins, span 1)
+PASS A12 bpd=53 N=1000: T and S digests identical
+
+--- bpd=616 (one bin = 0.3745%)
+PASS A1 bpd=616 bin_count=1 q=0.5 T returns upper of bin 1539 (100) audit=none
+PASS A1 bpd=616 bin_count=1 q=0.5 G returns grid upper of index 1232 (100.3744958) audit=none
+PASS A1 bpd=616 bin_count=1 q=0.99 T returns upper of bin 1539 (100) audit=none
+PASS A1 bpd=616 bin_count=1 q=0.99 G returns grid upper of index 1232 (100.3744958) audit=none
+PASS A1 bpd=616 G single occupied index: span=1 lo=1232 (closed form 1232)
+PASS A1 bpd=616: T and S digests identical
+PASS A2 bpd=616 lower=upper synthetic T q=0.1 returns 1 (1)
+PASS A2 bpd=616 lower=upper synthetic T q=0.5 returns 1 (1)
+PASS A2 bpd=616 lower=upper synthetic T q=0.9 returns 1 (1)
+PASS A2 bpd=616 lower=upper synthetic T q=0.99 returns 1 (1)
+PASS A2 bpd=616 T lower=upper unreachable via partition_new: min=0.00316227766 < max=316.227766
+PASS A2 bpd=616 G lower=upper cannot occur: 10**(i/bpd) < 10**((i+1)/bpd) for i in [-2000,2000] (vacuous on the grid)
+PASS A3 bpd=616 single observation T q=0.5 -> upper of bin 1539 = 42 (v=42, rel 0.0000%)
+PASS A3 bpd=616 single observation G q=0.5 -> grid upper of 999 = 42.012316 (rel 0.0293%)
+PASS A3 bpd=616: T and S digests identical
+NOTE A4 bpd=616 fraction=0 unreachable in both walks (target_rank <= cum => rank_in_bin in [1,c]); G's walk is the same code shape
+PASS A5 bpd=616 zero-count T entry -> (undef,'none')
+PASS A5 bpd=616 zero-count store key -> (undef,'none') in T, S, G
+NOTE A5 bpd=616 G has no partition state to be zero-count; a key exists only after its first add
+PASS A6/7 bpd=616 all-overflow direct T entry q=0.9 -> boundary 316.227766 audit=high
+PASS A6/7 bpd=616 store cap=0 seed 1 + 5x1000000: T overflow=5 rebins=0 q=0.9 -> 316.227766 audit=high
+PASS A6/7 bpd=616 same inputs G: span=3696 [0..3695] q=0.9 -> 1000000 audit=none (within one bin of 1000000; index 3695)
+PASS A6/7 bpd=616 over cap=0: T and S digests identical
+INFO A6/7 bpd=616 overflow: T returns 316.227766 for a true q=0.9 value of 1000000 (rel err 1 = 266.9 bins); G rel err 1.16e-16
+PASS A6/7 bpd=616 all-underflow direct T entry q=0.1 -> boundary 0.00316227766 audit=low
+PASS A6/7 bpd=616 store cap=0 seed 1 + 5x1e-06: T underflow=5 rebins=0 q=0.1 -> 0.00316227766 audit=low
+PASS A6/7 bpd=616 same inputs G: span=3697 [-3696..0] q=0.1 -> 1.000747872e-06 audit=none (within one bin of 1e-06; index -3696)
+PASS A6/7 bpd=616 under cap=0: T and S digests identical
+INFO A6/7 bpd=616 underflow: T returns 0.00316227766 for a true q=0.1 value of 1e-06 (rel err 3.16e+03 = 844142.4 bins); G rel err 0.000748
+
+A8 bpd=616 powers of ten: value | closed i | checked i | lower(closed) upper(closed) | v in [lower,upper)? | G q=0.5 (single add) | T bin (single add) T q=0.5
+A8 bpd=616 1      |     0 |     0  | 1 1.003744958 | yes | 1.003744958 (rel +0.3745%) | bin 1539 1 (rel -0.0000%)
+A8 bpd=616 10     |   616 |   616  | 10 10.03744958 | yes | 10.03744958 (rel +0.3745%) | bin 1539 10 (rel -0.0000%)
+A8 bpd=616 100    |  1232 |  1232  | 100 100.3744958 | yes | 100.3744958 (rel +0.3745%) | bin 1539 100 (rel -0.0000%)
+A8 bpd=616 1000   |  1847 |  1848* | 996.2690147 1000 | NO | 1000 (rel +0.0000%) | bin 1539 1000 (rel -0.0000%)
+A8 bpd=616 10000  |  2464 |  2464  | 10000 10037.44958 | yes | 10037.44958 (rel +0.3745%) | bin 1539 10000 (rel -0.0000%)
+A8 bpd=616 100000 |  3079 |  3080* | 99626.90147 100000 | NO | 100000 (rel +0.0000%) | bin 1539 100000 (rel -0.0000%)
+A8 bpd=616 1e+06  |  3695 |  3696* | 996269.0147 1000000 | NO | 1000000 (rel -0.0000%) | bin 1539 1000000 (rel -0.0000%)
+A8 bpd=616 1e+09  |  5543 |  5544* | 996269014.7 1000000000 | NO | 1000000000 (rel +0.0000%) | bin 1539 1000000000 (rel -0.0000%)
+INFO A8 bpd=616 powers of ten with closed-form != boundary-checked: 4 of 8
+
+A9 bpd=616 boundary values v=10**(i/bpd): i | v | closed i | checked i | G q=0.5 rel err | T bin | T q=0.5 rel err
+A9 bpd=616 i=1    | 1.00374495771 |     1 |     1  | +0.3745% | 1539 | -0.0000%
+A9 bpd=616 i=7    | 1.026511068 |     6 |     7* | +0.0000% | 1539 | -0.0000%
+A9 bpd=616 i=616  | 10 |   616 |   616  | +0.3745% | 1539 | -0.0000%
+A9 bpd=616 i=1000 | 42.0123159962 |   999 |  1000* | +0.0000% | 1539 | -0.0000%
+A9 bpd=616 i=1232 | 100 |  1232 |  1232  | +0.3745% | 1539 | -0.0000%
+A9 bpd=616 i=1848 | 1000 |  1847 |  1848* | +0.0000% | 1539 | -0.0000%
+A9 bpd=616 i=3000 | 74153.1953659 |  2999 |  3000* | +0.0000% | 1539 | -0.0000%
+A9 bpd=616 i=3080 | 100000 |  3079 |  3080* | +0.0000% | 1539 | -0.0000%
+INFO A9 bpd=616 boundary values: closed form == i for 3, != i for 5 of 8
+PASS A9 bpd=616 boundary values recorded (informational; the G store uses the closed form, both neighbours are within one bin)
+
+A10 bpd=616 tiny/huge single-key adds: value | G index | T seed min..max bin_count | T q=0.5 | G q=0.5
+A10 bpd=616 0.001  |  -1848 | 3.16228e-06..0.316228 3080 | 0.001 | 0.00100374
+PASS A10 bpd=616 v=0.001: T and S digests identical
+A10 bpd=616 1e-06  |  -3696 | 3.16228e-09..0.000316228 3080 | 1e-06 | 1.00374e-06
+PASS A10 bpd=616 v=1e-06: T and S digests identical
+A10 bpd=616 1e+12  |   7391 | 3.16228e+09..3.16228e+14 3080 | 1e+12 | 1e+12
+PASS A10 bpd=616 v=1000000000000: T and S digests identical
+A10 bpd=616 one key {1e-6,1e-3,1,1e12}: T min=3.16228e-09 max=1e+14 bin_count=13859 rebins=3 over=0 under=0; G span=11088 [-3696..7391] slots; memory T=112434 S=186212 G=96278
+A10 bpd=616 q=0.01  oracle=1e-06  T=1.00042e-06 (0.11 bins) G=1.00374e-06 (1.00 bins)
+A10 bpd=616 q=0.5   oracle=1      T=1.00516 (1.38 bins) G=1.00374 (1.00 bins)
+A10 bpd=616 q=0.75  oracle=1e+12  T=1.00341e+12 (0.91 bins) G=1e+12 (0.00 bins)
+A10 bpd=616 q=0.9   oracle=1e+12  T=1.00341e+12 (0.91 bins) G=1e+12 (0.00 bins)
+A10 bpd=616 q=0.95  oracle=1e+12  T=1.00341e+12 (0.91 bins) G=1e+12 (0.00 bins)
+A10 bpd=616 q=0.99  oracle=1e+12  T=1.00341e+12 (0.91 bins) G=1e+12 (0.00 bins)
+A10 bpd=616 q=0.999 oracle=1e+12  T=1.00341e+12 (0.91 bins) G=1e+12 (0.00 bins)
+PASS A10 bpd=616 wide-range key: G every quantile within one bin (max 1.00 bins); T max 1.38 bins after 3 rebins (recorded, not asserted)
+PASS A10 bpd=616 wide: T and S digests identical
+
+A11 bpd=616 value 0 and negative under a 5 s alarm guard
+A11 bpd=616 T v=0   first-sample: died  Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 243. | on existing partition(100): died  Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 274.
+PASS A11 bpd=616 T v=0: never accepted silently (first-sample died, existing died)
+A11 bpd=616 S v=0   first-sample: died  Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 923. | on existing partition(100): died  Illegal division by zero at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 274.
+PASS A11 bpd=616 S v=0: never accepted silently (first-sample died, existing died)
+A11 bpd=616 G v=0   first-sample: died  Can't take log of 0 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161. | on existing partition(100): died  Can't take log of 0 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161.
+PASS A11 bpd=616 G v=0: never accepted silently (first-sample died, existing died)
+A11 bpd=616 T v=-5  first-sample: alarm ALARM | on existing partition(100): alarm ALARM
+PASS A11 bpd=616 T v=-5: never accepted silently (first-sample alarm, existing alarm) -- UNBOUNDED LOOP, alarm fired
+A11 bpd=616 S v=-5  first-sample: alarm ALARM | on existing partition(100): alarm ALARM
+PASS A11 bpd=616 S v=-5: never accepted silently (first-sample alarm, existing alarm) -- UNBOUNDED LOOP, alarm fired
+A11 bpd=616 G v=-5  first-sample: died  Can't take log of -5 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161. | on existing partition(100): died  Can't take log of -5 at /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/426-revalidate-lib.pm line 1161.
+PASS A11 bpd=616 G v=-5: never accepted silently (first-sample died, existing died)
+INFO A11 bpd=616 loop replica: from seed min=0.3162 the doubling loop reaches new_min=0 after 130 steps (then log(new_max/0) dies); negative values take the same path
+PASS A12 bpd=616 1 x 250: T max rel err 0.0000% (0.00 bins, 1 occupied bin), G max rel err 0.3253% (0.87 bins, span 1)
+PASS A12 bpd=616 N=1: T and S digests identical
+PASS A12 bpd=616 2 x 250: T max rel err 0.1867% (0.50 bins, 1 occupied bin), G max rel err 0.3253% (0.87 bins, span 1)
+PASS A12 bpd=616 N=2: T and S digests identical
+PASS A12 bpd=616 1000 x 250: T max rel err 0.3694% (0.99 bins, 1 occupied bin), G max rel err 0.3253% (0.87 bins, span 1)
+PASS A12 bpd=616 N=1000: T and S digests identical
+
+ALL PASS

@@ -1,0 +1,108 @@
+[0;37m [90m[109m
+──────────────────────────────────────────────────────────────────────────────────────────────
+   ,:: ltl ::' log timeline [0.17.0] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
+──────────────────────────────────────────────────────────────────────────────────────────────
+[0m
+
+=== histogram-bin-counters ===
+data_model_precision: 7 (--data-model-precision 7)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 1
+  max_partition_bins: 862
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 2353215
+  rebins_per_partition: p50=0 p95=0 p99=0 max=1
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+=== percentile-algorithm ===
+=== percentile-algorithm / histogram ===
+data_model: bin
+effective_algorithm: exponential_interpolation_within_bucket
+effective_bpd: 616
+formula: rank_in_bin = ceil(q * total_N) - cum_before_bin; fraction = rank_in_bin / bin_count; value = lower * (upper/lower)^fraction
+algorithm_source: features/187-histogram-bin-counter-percentiles.md § Decision 1 (Prometheus histogram_quantile native-exponential rule)
+=== END percentile-algorithm / histogram ===
+=== percentile-algorithm / heatmap ===
+data_model: bin
+effective_algorithm: exponential_interpolation_within_bucket
+effective_bpd: 616
+formula: rank_in_bin = ceil(q * total_N) - cum_before_bin; fraction = rank_in_bin / bin_count; value = lower * (upper/lower)^fraction
+algorithm_source: features/187-histogram-bin-counter-percentiles.md § Decision 1 (Prometheus histogram_quantile native-exponential rule)
+=== END percentile-algorithm / heatmap ===
+=== percentile-algorithm / message-stats ===
+data_model: bin
+effective_algorithm: exponential_interpolation_within_bucket
+effective_bpd: 115
+formula: rank_in_bin = ceil(q * total_N) - cum_before_bin; fraction = rank_in_bin / bin_count; value = lower * (upper/lower)^fraction
+algorithm_source: features/187-histogram-bin-counter-percentiles.md § Decision 1 (Prometheus histogram_quantile native-exponential rule)
+=== END percentile-algorithm / message-stats ===
+=== percentile-algorithm / bucket-stats ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / bucket-stats ===
+=== END percentile-algorithm ===
+
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[90m[109m     timestamp                         legend                                       occurrences                      duration          bytes                         latency statistics                 
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+ 2010-03-21 00:00 [0;32m2xx: 1[0m                                    [91m[109m0[0m[90m[109m:[0m[0m0[0m[90m[109m/m[0m [90m[109m│[0m [0;32m[0m                                             [48;5;226m[38;5;0m[48;5;184m[38;5;0m[0m[93m 25 millisecond[0m[0m  [48;5;46m[38;5;0m[48;5;34m[38;5;0m[0m[32m 950 B        [0m[0m [90m[109m│[0m  [36m[49mP50:25ms  [0m [0;33mP95:25ms  [0m [93mP99:25ms  [0m [0;31mP999:25ms  [0m        
+ 2021-03-21 00:00 [0;32m2xx: 1[0m                                    [91m[109m0[0m[90m[109m:[0m[0m0[0m[90m[109m/m[0m [90m[109m│[0m [0;32m[0m                                             [48;5;226m[38;5;0m[48;5;184m[38;5;0m[0m[93m 0 microseconds[0m[0m  [48;5;46m[38;5;0m[48;5;34m[38;5;0m[0m[32m 5 B          [0m[0m [90m[109m│[0m  [36m[49mP50:0ms   [0m [0;33mP95:0ms   [0m [93mP99:0ms   [0m [0;31mP999:0ms   [0m        
+ 2025-03-21 00:00 [0;31m5xx: 2[0m [0;33m4xx: 167[0m [0;35m3xx: 468[0m [0;32m2xx: 21527[0m  [91m[109m0.1[0m[90m[109m:[0m[0m15.4[0m[90m[109m/m[0m [90m[109m│[0m [0;31m[0m[0;33m[0m[0;35m█[0m[0;32m██████████████████████████████████████████[0m  [48;5;226m[38;5;0m[48;5;184m[38;5;0m 56.6 minutes  [0m[0m  [48;5;46m[38;5;0m[48;5;34m[38;5;0m 1.8 GiB      [0m[0m [90m[109m│[0m  [36m[49mP50:4ms   [0m [0;33mP95:963ms [0m [93mP99:2.5s  [0m [0;31mP999:6.7s  [0m [4;37mCV:3.69[0m
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+
+[90m[109mcommand-line options: --disable-progress -ni -V histogram-bin-counters,percentile-algorithm --terminal-width 200 -bs 1440 -oe -mdm bin -dmp 7 [0m
+
+  ─────────────────────────────────────────   
+  Category                            Total      [4;37mThese file(s) were processed with analysis including results between 2010-03-21 02:45 and 2025-03-21 17:56[0m
+  ─────────────────────────────────────────   
+  5xx                                     2      [36m[37m[[0;32m√[0m[36m[37m] logs/AccessLogs/localhost_access_log.2025-03-21.txt                                                                                          [[38;5;111m1[36m[37m][0m
+  4xx                                   167   
+  3xx                                   468      [4;37mLog Formats[0m
+  2xx                                 21529   
+  ─────────────────────────────────────────      [38;5;111m1[36m[37m tomcat_access_with_duration[0m
+  LINES INCLUDED                      22166   
+  LINES READ                          22264   
+  TOTAL TIME                     319.9 msec   
+  MAXIMUM MEMORY USED              33.8 MiB   
+  ─────────────────────────────────────────   
+
+ [96m[49m TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)                                 Occurre.      Min      P50    P99.9     CV %         Duration [0m[96m
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+  [200] GET /Thingworx/ready                                                                                                           5907      0ms      1ms      1ms     1.70          1.5 sec 
+  [200] GET /Thingworx/health                                                                                                          4440      0ms      1ms      1ms     1.78          1.1 sec 
+  [200] GET /Thingworx/Metrics                                                                                                         2966    331ms    482ms     7.3s     1.05         48.4 min 
+  [200] POST /Thingworx/Resources/SubsystemMonitoring/Services/GetSubsystemStatus                                                       754     23ms     34ms     66ms     0.10         25.8 sec 
+  [200] POST /Thingworx/Resources/MetricServices/Services/ConnectionPoolSaturationMetrics                                               698      4ms      8ms     38ms     0.21          5.6 sec 
+  [200] POST /Thingworx/Things/PersistenceProvider.DatabaseUtilities_T/Services/GetActiveOperationMetrics                               379      6ms     14ms     70ms     0.71          7.1 sec 
+  [200] POST /Thingworx/Things/PersistenceProvider.DatabaseUtilities_T/Services/GetUserTableStats                                       374      7ms     20ms     67ms     0.49          8.6 sec 
+  [200] POST /Thingworx/Things/PersistenceProvider.DatabaseUtilities_T/Services/GetTransactionMetrics                                   361      6ms     14ms     61ms     0.69          6.5 sec 
+  [200] POST /Thingworx/Things/thingworx_exporter/Services/GetActiveTransferJobCount                                                    357      6ms     10ms     37ms     0.20          3.5 sec 
+  [200] POST /Thingworx/Things/thingworx_exporter/Services/GetActiveTransferJobsInProgressCount                                         356      6ms     10ms     47ms     0.29          3.6 sec 
+
+
