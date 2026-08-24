@@ -1,0 +1,283 @@
+[0;37m [90m[109m
+──────────────────────────────────────────────────────────────────────────────────────────────
+   ,:: ltl ::' log timeline [0.17.0] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
+──────────────────────────────────────────────────────────────────────────────────────────────
+[0m
+
+=== runtime-config ===
+include (merged): (not set)
+exclude (merged): (not set)
+highlight (merged): (not set)
+threadpool-activity (merged): (not set)
+bucket-duration-stats-demand: 1
+message-duration-stats-demand: 1
+=== runtime-config / command-line ===
+bucket-size: 60
+data-model: raw
+memory-usage: 1
+sort-on: p99
+=== END runtime-config / command-line ===
+=== runtime-config / environment-variable ===
+=== END runtime-config / environment-variable ===
+=== END runtime-config ===
+
+=== index-read-back ===
+index_used: no
+index_filter_signature: -
+file: /Users/gregeva/Documents/GitHub/logtimeline/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-1000.log
+  lookup: none
+  matched_entry_date: -
+  freshness: no_entry
+  preseed_duration_min: -
+  preseed_duration_max: -
+  preseed_bytes_min: -
+  preseed_bytes_max: -
+  preseed_count_min: -
+  preseed_count_max: -
+  preseed_first_timestamp: -
+  preseed_last_timestamp: -
+=== END index-read-back ===
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: user_opt_out
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: feature_not_active
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+=== format-detection ===
+duration_unit_override: -
+format_pin: -
+legend: 1=thingworx_standard
+files: 1
+file: /Users/gregeva/Documents/GitHub/logtimeline/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-1000.log
+  format: thingworx_standard
+  match_type: 1
+  is_access_log: no
+  matched_lines: 1000
+  unmatched_lines: 0
+  first_match_line: 1
+  scan_attempts: 1000
+  scan_failed_attempts: 0
+  window: 0
+  sample: yes
+  sample_file_bytes: 350226
+  sample_whole_file: no
+  sample_lines: 73
+  sample_matched_lines: 73
+  sample_formats: mt1std=73
+  sample_part: 1 offset=0 bytes=8192 lines=26 avg_line=308 matched=26 first_ts="2025-02-28 00:00:00.002" last_ts="2025-02-28 00:00:01.843"
+  sample_part: 2 offset=171017 bytes=8192 lines=22 avg_line=352 matched=22 first_ts="2025-02-28 00:00:26.148" last_ts="2025-02-28 00:00:27.018"
+  sample_part: 3 offset=342034 bytes=8192 lines=25 avg_line=327 matched=25 first_ts="2025-02-28 00:00:41.630" last_ts="2025-02-28 00:00:43.945"
+  sample_us: 482.0
+  formats: thingworx_standard
+  filename_evidence: stem=- ext=- date=- index=-
+=== format-detection / scan ===
+entries: 15
+guarded: mt12,mt4,mt9
+window_size: 0
+window_fallback: 1000
+sample_parts: 3
+sample_bytes_per_part: 8192
+final_order: mt1std,mt10,mt16,mt1gen,mt2,mt12,mt4,mt9,mt3,mt5,mt6,mt7,mt8,mt17,mt11
+promotions: 0
+match_counts: mt1std=1000,mt10=0,mt10ir=0,mt16=0,mt1gen=0,mt2=0,mt12=0,mt4=0,mt9=0,mt3=0,mt3us=0,mt5=0,mt6=0,mt7=0,mt8=0,mt17=0,mt11=0
+variant_groups: connection_server=mt10,access_with_duration=mt3
+nomatch_scan_samples: 0
+nomatch_scan_avg_us: -
+=== END format-detection / scan ===
+=== END format-detection ===
+=== heatmap-palette ===
+heatmap_active: no
+metric: n/a
+light_bg: 0
+light_bg_source: default
+color_name: n/a
+gradient_dark: n/a
+gradient_light: n/a
+gradient_active: n/a
+=== END heatmap-palette ===
+=== csv-output ===
+csv_active: no
+=== END csv-output ===
+=== percentile-algorithm ===
+=== percentile-algorithm / histogram ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / histogram ===
+=== percentile-algorithm / heatmap ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / heatmap ===
+=== percentile-algorithm / message-stats ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / message-stats ===
+=== percentile-algorithm / bucket-stats ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / bucket-stats ===
+=== END percentile-algorithm ===
+=== statistics-demand ===
+store: bucket
+  store_demand: 1
+  group terminal_core: demanded=1 consumers=timeline-latency-column
+  group csv_body: demanded=0 consumers=-
+  group extended_percentiles: demanded=0 consumers=-
+  group shape_moments: demanded=0 consumers=-
+  moment_source: none
+  stats_calls: 0
+  group_calc terminal_core: computed=0 skipped_demand=0 ineligible=0
+  group_calc csv_body: computed=0 skipped_demand=0 ineligible=0
+  group_calc extended_percentiles: computed=0 skipped_demand=0 ineligible=0
+  group_calc shape_moments: computed=0 skipped_demand=0 ineligible=0
+store: message
+  store_demand: 1
+  group terminal_core: demanded=1 consumers=messages-table,sort-on:p99
+  group csv_body: demanded=0 consumers=-
+  group extended_percentiles: demanded=0 consumers=-
+  group shape_moments: demanded=0 consumers=-
+  moment_source: none
+  stats_calls: 0
+  group_calc terminal_core: computed=0 skipped_demand=0 ineligible=0
+  group_calc csv_body: computed=0 skipped_demand=0 ineligible=0
+  group_calc extended_percentiles: computed=0 skipped_demand=0 ineligible=0
+  group_calc shape_moments: computed=0 skipped_demand=0 ineligible=0
+  sort_selection: statistic=p99 defined=0 fill=993 demoted=0
+  sort_calc: population=0 topn=0
+=== END statistics-demand ===
+=== profile ===
+profile_active: no
+=== END profile ===
+=== udm-counting ===
+counting_udms: none
+=== END udm-counting ===
+=== benchmark-data ===
+version	0.17.0
+FILES	/Users/gregeva/Documents/GitHub/logtimeline/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-1000.log	350226
+lines_read	1000
+lines_included	1000
+TIMING	detect/registry_build	0.113
+TIMING	parse/read_files	0.028
+TIMING	accumulate/initialize_buckets	0.000
+TIMING	finalize/group_similar	0.000
+TIMING	finalize/calculate_statistics	0.006
+TIMING	finalize/heatmap_statistics	0.000
+TIMING	finalize/histogram_statistics	0.000
+TIMING	render/normalize_data	0.001
+TIMING	total	0.147
+MEMORY	rss_peak	52969472
+MEMORY	bucket_stats_counters	120
+MEMORY	bucket_stats_counters_hl	120
+MEMORY	consolidation_clusters	120
+MEMORY	consolidation_key_message	120
+MEMORY	consolidation_key_trigrams	120
+MEMORY	consolidation_key_trigrams_norm	120
+MEMORY	consolidation_ngram_index	120
+MEMORY	consolidation_patterns	120
+MEMORY	consolidation_posting_size	120
+MEMORY	consolidation_unmatched	120
+MEMORY	heatmap_counters	120
+MEMORY	heatmap_counters_hl	120
+MEMORY	heatmap_data	120
+MEMORY	heatmap_data_hl	120
+MEMORY	heatmap_raw	120
+MEMORY	heatmap_raw_hl	120
+MEMORY	histogram_counters	120
+MEMORY	histogram_counters_hl	120
+MEMORY	histogram_values	576
+MEMORY	log_analysis	232
+MEMORY	log_messages	463195
+MEMORY	log_messages_counters	120
+MEMORY	log_occurrences	2039
+MEMORY	log_sessions	120
+MEMORY	log_stats	120
+MEMORY	log_threadpools	232
+MEMORY	message_key_order	271950
+MEMORY	threadpool_activity	762
+MEMORY	udm_distinct	120
+MEMORY	udm_last_value	120
+MEMORY	unattributed	52227726
+MEMORY_FINAL	log_messages	463195
+MEMORY_FINAL	log_analysis	232
+MEMORY_FINAL	consolidation_clusters	120
+MEMORY_FINAL	consolidation_patterns	120
+MEMORY_FINAL	consolidation_key_message	120
+MEMORY_FINAL	consolidation_unmatched	120
+MEMORY_FINAL	consolidation_ngram_index	120
+MEMORY_FINAL	consolidation_key_trigrams	120
+MEMORY_FINAL	consolidation_key_trigrams_norm	120
+COUNTS	log_messages_entries	993
+COUNTS	log_occurrences_entries	2
+COUNTS	log_stats_entries	2
+CONFIG	terminal_width	200
+CONFIG	terminal_height	24
+CONFIG	max_log_message_length	200
+CONFIG	time_bucket_size	60
+CONFIG	bucket_size_seconds	3600.00
+=== END benchmark-data ===
+
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[90m[109m     timestamp                     legend                                                                                   occurrences                                                                 
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+ 2025-02-27 23:00 [0;31mERROR: 1[0m                          [91m[109m0[0m[90m[109m:[0m[0m0[0m[90m[109m/m[0m [90m[109m│[0m [0;31m[0m                                                                                                                                            
+ 2025-02-28 00:00 [0;31mERROR: 992[0m [0;33mWARN: 3[0m [0;32mINFO: 4[0m  [91m[109m16.5[0m[90m[109m:[0m[0m16.7[0m[90m[109m/m[0m [90m[109m│[0m [0;31m██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████[0m[0;33m[0m[0;32m█[0m 
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+
+[90m[109mcommand-line options: -V all --disable-progress --verbose=benchmark-data,statistics-demand --memory-usage --terminal-width=200 -bs 60 --data-model=raw --sort-on=p99 [0m
+
+  ─────────────────────────────────────────   
+  Category                            Total      [4;37mThese file(s) were processed with analysis including results between 2025-02-27 23:59 and 2025-02-28 00:00[0m
+  ─────────────────────────────────────────   
+  ERROR                                 993      [36m[37m[[0;32m√[0m[36m[37m] /Users/gregeva/Documents/GitHub/logtimeline/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-1000.log                                 [[38;5;111m1[36m[37m][0m
+  WARN                                    3   
+  INFO                                    4      [4;37mLog Formats[0m
+  ─────────────────────────────────────────   
+  LINES INCLUDED                       1000      [38;5;111m1[36m[37m thingworx_standard[0m
+  LINES READ                           1000   
+  TOTAL TIME                     146.6 msec   
+  MAXIMUM MEMORY USED              50.6 MiB   
+   log_messages              (<1%)  452 KiB   
+   message_key_order         (<1%)  266 KiB   
+   log_occurrences           (<1%)    4 KiB   
+   unattributed              (99%)   50 MiB   
+  ─────────────────────────────────────────   
+
+ [96m[49m TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)                                                                                           Occurre. [0m[96m
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+  [ERROR] [TWEventProcessor] [c.t.s.s.e.EventInstance] Error Executing Event Handler 'CheckHeartbeat' for event Type.Thing:Entity.HeartBeatMonitoringTimer:Event.Timer                              6 
+  [ERROR] [TWEventProcessor] [c.t.s.s.e.EventInstance] Error Executing Event Handler 'CheckOverallStatuses' for event Type.Thing:Entity.ConnectivityMonitoringScheduler:Event.ScheduledEve          3 
+  [ERROR] [DefaultQuartzSchedul] [c.p.a.u.JobPurgeScheduler] Failed to initialize archiving for analysis service framework :                                                                        1 
+  [ERROR] [TWEventProcessor] [t.c.p.ReflectionProcessor] ErrorCode(0030ea97-0ce7-47f1-b544-e4519fd85580), Cause(null), Reason(Access was attempted on a null reference variable.), Possibl          1 
+  [ERROR] [TWEventProcessor] [t.c.p.ReflectionProcessor] ErrorCode(008afac1-1b7b-46be-b996-9eb5d68ed43e), Cause(null), Reason(Access was attempted on a null reference variable.), Possibl          1 
+  [ERROR] [TWEventProcessor] [t.c.p.ReflectionProcessor] ErrorCode(010f48b2-36a4-4661-96d6-c75a416f0c6b), Cause(null), Reason(Access was attempted on a null reference variable.), Possibl          1 
+  [ERROR] [TWEventProcessor] [t.c.p.ReflectionProcessor] ErrorCode(01b4bc64-82ca-4fed-9de1-41fb9464b723), Cause(null), Reason(Access was attempted on a null reference variable.), Possibl          1 
+  [ERROR] [TWEventProcessor] [t.c.p.ReflectionProcessor] ErrorCode(01da83d0-11aa-4999-bf49-cd966a444959), Cause(null), Reason(Access was attempted on a null reference variable.), Possibl          1 
+  [ERROR] [TWEventProcessor] [t.c.p.ReflectionProcessor] ErrorCode(025d0f9a-5a12-4127-b69e-77e6029e702f), Cause(null), Reason(Access was attempted on a null reference variable.), Possibl          1 
+  [ERROR] [TWEventProcessor] [t.c.p.ReflectionProcessor] ErrorCode(02a21586-630d-4419-83df-0591949d8a04), Cause(null), Reason(Access was attempted on a null reference variable.), Possibl          1 
+
+

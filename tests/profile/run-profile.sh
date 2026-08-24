@@ -137,7 +137,15 @@ detect_file_args() {
                     ;;
             esac
         else
-            file_args+=("$arg")
+            # Positional token: treat it as an input file only if it names
+            # something on disk (literal path or glob that expands). A value
+            # belonging to an option missing from the case list above (e.g. a
+            # -V section list or a numeric operand) falls through to here and
+            # must not become a sample source — truncating it would create an
+            # empty sample and profile a run that reads zero lines.
+            if [[ -e "$arg" ]] || compgen -G "$arg" > /dev/null; then
+                file_args+=("$arg")
+            fi
             ((i+=1)) || true
         fi
     done
@@ -191,10 +199,17 @@ replace_files_in_args() {
                     ;;
             esac
         else
-            # It's a file path — replace with sample
-            local sample
-            sample=$(make_sample "$arg" "$sample_lines")
-            result+=("$sample")
+            # Positional token: same classification as detect_file_args() —
+            # only a token that names something on disk is an input file to
+            # replace with its sample; anything else is an option value and
+            # passes through unchanged.
+            if [[ -e "$arg" ]] || compgen -G "$arg" > /dev/null; then
+                local sample
+                sample=$(make_sample "$arg" "$sample_lines")
+                result+=("$sample")
+            else
+                result+=("$arg")
+            fi
         fi
         ((i+=1)) || true
     done

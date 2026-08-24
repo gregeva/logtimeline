@@ -27,6 +27,12 @@ The contract is two-way:
 
 This avoids the anti-pattern where harnesses scrape display output and break every time the display layout shifts. It also keeps `-V` itself comprehensible: each section is owned by one or more harnesses (or by the user for interactive debugging) with a clear purpose.
 
+### Counters serving benchmark attribution: one source, two surfaces
+
+A counter that serves benchmark attribution (a denominator for per-element cost, a population size a release comparison normalizes by) has ONE computation site — the block boundary in its owning functional category. It is exposed in that category's own `-V` section (the development-time assertion surface, with semantics recorded in the owning feature-doc section contract) and re-emitted by `benchmark-data` as a `COUNTS` row reading the same variable (the attribution surface, captured into the benchmark TSVs).
+
+Single source, two surfaces: `benchmark-data` never computes an independent duplicate of a functional counter, and a functional counter that a benchmark comparison needs is never benchmark-only. This keeps the value assertable during development of the functional category and directly attributable in benchmarking data, without the two surfaces drifting apart. (Pre-existing `COUNTS` rows that measure final structure state at emission time — e.g. `log_messages_entries` — are a different quantity from a block-boundary population and are not silently converged; where both exist, the owning feature doc records the distinction.)
+
 ## Render-invariant harnesses
 
 A render-invariant harness asserts that the *rendered terminal output* obeys the rules required for visual consistency and determinism — properties that exist only in the rendered surface and have no internal-state equivalent to read from `-V`. For these harnesses, grepping the (ANSI-stripped) display output is the correct and required approach: the rendered surface is the system under test, not a proxy for it.
@@ -104,8 +110,8 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `heatmap-palette` — heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250)
 - `profile` — timeline folding (--profile): resolved mode, fold period, included weekdays, included vs dropped sample counts (Issue #256)
 - `udm-counting` — per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313)
-- `statistics-demand` — per-store resolved statistics-group demand with raising consumers, per-store moment source, per-store statistics-calculation counters (`stats_calls` invocations plus per-group `group_calc` computed/skipped_demand/ineligible outcomes), and calculated-statistic sort selection (`sort_selection` defined/fill/demoted split, `sort_calc` per-pass attribution) (Issues #305, #303)
-- `benchmark-data` — machine-parseable TSV: version, files, line counts, timings, memory, structure counts
+- `statistics-demand` — per-store resolved statistics-group demand with raising consumers, per-store moment source, per-store statistics-calculation counters (`stats_calls` invocations plus per-group `group_calc` computed/skipped_demand/ineligible outcomes), calculated-statistic sort selection (`sort_selection` defined/fill/demoted split, `sort_calc` per-pass attribution), and block-boundary populations (per-store `population`, phase-level `threadpool_population` — the sub-stage timing denominators, Issue #417) (Issues #305, #303, #417)
+- `benchmark-data` — machine-parseable TSV: version, files, line counts, timings (per-stage `TIMING` rows plus the `finalize/calculate_statistics/*` sub-stage rows, Issue #417; contract in features/417-substage-statistics-timing.md), memory, structure counts (including the re-emitted block-boundary populations per the one-source-two-surfaces rule above)
 - `format-detection` — per-file detected format slug/match_type and matched/unmatched/scan-attempt counts, plus the `format-detection / scan` sub-section: registry scan-order telemetry (final MTF order, promotions, per-entry match counts, sampled no-match cost) (Issues #228, #58, #388, #384; contract in features/log-format-registry.md § `-V format-detection` section-contract)
 
 **Reserved by sub-issues, not yet implemented:**
