@@ -9758,31 +9758,31 @@ sub adapt_to_command_line_options {
         iqr skewness kurtosis bimodality_coef
     );
 
-    if( $sort_type =~ /^duration|time$/i ) {
+    if( $sort_type =~ /^(?:duration|time)$/i ) {
         $sort_key = "total_duration_num";
     } elsif( $sort_type =~ /^min$/i ) {
         $sort_key = "min";
-    } elsif( $sort_type =~ /^mean|avg$/i ) {
+    } elsif( $sort_type =~ /^(?:mean|avg)$/i ) {
         $sort_key = "mean";
     } elsif( $sort_type =~ /^max$/i ) {
         $sort_key = "max";
-    } elsif( $sort_type =~ /^std_dev|stddev$/i ) {
+    } elsif( $sort_type =~ /^(?:std_dev|stddev)$/i ) {
         $sort_key = "std_dev";
-    } elsif( $sort_type =~ /^occurrences|total$/i ) {
+    } elsif( $sort_type =~ /^(?:occurrences|total)$/i ) {
         $sort_key = "occurrences";
-    } elsif( $sort_type =~ /^bytes|size$/i ) {
+    } elsif( $sort_type =~ /^(?:bytes|size)$/i ) {
         $sort_key = "total_bytes";
     } elsif( $sort_type =~ /^impact$/i ) {
         $sort_key = "impact";
     } elsif( $sort_type =~ /^cv$/i ) {
         $sort_key = "cv";
-    } elsif( $sort_type =~ /^count_occurrences|count_total$/i ) {
+    } elsif( $sort_type =~ /^(?:count_occurrences|count_total)$/i ) {
         $sort_key = "count_occurrences";
-    } elsif( $sort_type =~ /^count|count_sum$/i ) {
+    } elsif( $sort_type =~ /^(?:count|count_sum)$/i ) {
         $sort_key = "count_sum";
     } elsif( $sort_type =~ /^count_min$/i ) {
         $sort_key = "count_min";
-    } elsif( $sort_type =~ /^count_mean|count_avg$/i ) {
+    } elsif( $sort_type =~ /^(?:count_mean|count_avg)$/i ) {
         $sort_key = "count_mean";
     } elsif( $sort_type =~ /^count_max$/i ) {
         $sort_key = "count_max";
@@ -12259,6 +12259,34 @@ sub calculate_all_statistics {
             # #417 sub-stage boundary: per-category population (walk/sort denominator).
             $stats_population_messages += scalar keys %{$log_messages{$category}};
 
+            # Two -so operands name a mean that no earlier stage has written onto
+            # the entry by the time the comparator runs (#428), so ranking on
+            # either compared undef against undef for every key and fell through
+            # to the string tiebreaker — a "top N" in lexicographic order.
+            # mean_bytes is only ever computed as a display local in the message
+            # summary, after selection; count_mean is written by the group-calc
+            # loop further down this sub, likewise after selection (and only for
+            # the keys that already survived it). Both are ratios of fields the
+            # read loop accumulates per key, so derive whichever one is being
+            # ranked on here: an O(n) pass ahead of the comparator rather than a
+            # division inside an O(n log n) comparison. Full precision, unlike the
+            # rounded display value — rounding at rank time would manufacture
+            # ties. A key with no observations of the underlying metric is left
+            # undef, which the comparator's // 0 handles.
+            if( $sort_key eq 'mean_bytes' ) {
+                foreach my $entry (values %{$log_messages{$category}}) {
+                    $entry->{mean_bytes} = ( defined $entry->{total_bytes} && $entry->{occurrences} )
+                        ? ( $entry->{total_bytes} / $entry->{occurrences} )
+                        : undef;
+                }
+            } elsif( $sort_key eq 'count_mean' ) {
+                foreach my $entry (values %{$log_messages{$category}}) {
+                    $entry->{count_mean} = ( defined $entry->{count_sum} && $entry->{count_occurrences} )
+                        ? ( $entry->{count_sum} / $entry->{count_occurrences} )
+                        : undef;
+                }
+            }
+
             # A calculated-statistic sort key is exactly a key of the #305
             # group registry (%STAT_FIELD_GROUP covers the full 22-field
             # duration ladder); available-value sort keys (occurrences,
@@ -13420,9 +13448,9 @@ sub normalize_data_for_output {
 
         foreach my $category_bucket (keys %{$log_occurrences{$bucket}}) {
             my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
-            next unless $occurrences > 0 && $category_bucket !~ /^empty|err-rate|msg-rate$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
+            next unless $occurrences > 0 && $category_bucket !~ /^(?:empty|err-rate|msg-rate)$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
             $total_occurrences += $occurrences;
-            $error_occurrences += $occurrences if $category_bucket =~ /^ERROR|5xx|4xx$/i;
+            $error_occurrences += $occurrences if $category_bucket =~ /^(?:ERROR|5xx|4xx)$/i;
         }
 
         # this part takes the time windows error and message counts and converts them to a rate (unit controlled by -ru, default per minute)
@@ -13640,7 +13668,7 @@ sub normalize_data_for_output {
 
         # Scale the log message counts for printing the graph
         foreach my $category_bucket (keys %{$log_occurrences{$bucket}}) {
-            next if $category_bucket =~ /^(err|msg)-rate|empty$/;
+            next if $category_bucket =~ /^(?:(?:err|msg)-rate|empty)$/;
             my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
             next if !defined $occurrences;										                # skip scaling where varible was left or is undefined (ie; no error or message rate)
             my $scaled_occurrences = $max_total{occurrences} != 0 ? int(($occurrences / $max_total{occurrences}) * $occ_width + 0.5) : 0;
@@ -14311,7 +14339,7 @@ sub print_bar_graph {
                 } elsif ($col_id eq 'occurrences') {
                     # Print category-colored blocks
                     foreach my $category_bucket (@log_levels) {
-                        next unless $category_bucket !~ /^empty|err-rate|msg-rate$/;
+                        next unless $category_bucket !~ /^(?:empty|err-rate|msg-rate)$/;
                         if (exists $log_occurrences{$bucket}{$category_bucket}) {
                             my $scaled_occurrences = $log_occurrences{$bucket}{$category_bucket}{scaled_occurrences};
                             $scaled_occurrences = 0 if $scaled_occurrences < 0;
