@@ -37,12 +37,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LTL="$REPO_DIR/ltl"
 
-# Location of the log corpus. Defaults to logs/ under the repo root; set
-# LTL_LOGS_DIR to point a checkout that has no corpus of its own (a second
-# clone, a git worktree) at the real one. The prebuilt index records
-# absolute paths, so this script and tests/validate-index-read-back.sh must
-# resolve the logs the same way or the harness will regenerate on every run.
-LOGS_DIR="${LTL_LOGS_DIR:-$REPO_DIR/logs}"
+# The prebuilt index records absolute paths, so this script and
+# tests/validate-index-read-back.sh must resolve the corpus the same way or
+# the harness will regenerate on every run — both read $LOGS_DIR from the
+# shared resolver.
+# shellcheck source=../lib/logs-dir.sh
+source "$REPO_DIR/tests/lib/logs-dir.sh"
 
 # --- Source logs (production data in the corpus) ---
 TOMCAT_SOURCE="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt"

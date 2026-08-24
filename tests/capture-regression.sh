@@ -16,11 +16,28 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 REF_DIR="${1:-$SCRIPT_DIR/reference-output}"
 
-# Run from the repo root so the log paths handed to ltl below are
-# repo-relative. ltl records paths verbatim and the file legend renders them,
-# so relative paths keep the captured references portable across checkouts
-# (#209). Everything else here is absolute and unaffected by the cd.
-cd "$REPO_DIR"
+# Run from the directory containing the log corpus so the log paths handed
+# to ltl below stay relative. ltl records paths verbatim and the file legend
+# renders them, so relative paths keep the captured references portable
+# across checkouts (#209). That is the repo root unless LTL_LOGS_DIR names a
+# corpus elsewhere (#436); it must be named `logs` so the captured prefix is
+# unchanged. Must match validate-regression.sh, which replays these commands.
+# Everything else here is absolute and unaffected by the cd.
+if [[ -n "${LTL_LOGS_DIR:-}" ]]; then
+    if [[ ! -d "$LTL_LOGS_DIR" ]]; then
+        echo "ERROR: LTL_LOGS_DIR is not a directory: $LTL_LOGS_DIR" >&2
+        exit 1
+    fi
+    if [[ "$(basename "$LTL_LOGS_DIR")" != "logs" ]]; then
+        echo "ERROR: LTL_LOGS_DIR must be a directory named 'logs' for this harness;" >&2
+        echo "       the captured references embed the literal path prefix 'logs/'." >&2
+        echo "       Got: $LTL_LOGS_DIR" >&2
+        exit 1
+    fi
+    cd "$(cd "$(dirname "$LTL_LOGS_DIR")" && pwd)"
+else
+    cd "$REPO_DIR"
+fi
 
 # Common options: suppress progress, summary table, and limit top messages
 COMMON="--disable-progress -ni -osum -n 1"

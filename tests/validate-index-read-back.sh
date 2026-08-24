@@ -24,12 +24,11 @@ LTL="$REPO_DIR/ltl"
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 
-# Location of the log corpus. Defaults to logs/ under the repo root; set
-# LTL_LOGS_DIR to point a checkout that has no corpus of its own (a second
-# clone, a git worktree) at the real one. The fixture records absolute
-# paths, so this harness and the regenerate script must resolve the logs
-# the same way or the recorded rows will not match the files under test.
-LOGS_DIR="${LTL_LOGS_DIR:-$REPO_DIR/logs}"
+# The fixture records absolute paths, so this harness and the regenerate
+# script must resolve the corpus the same way or the recorded rows will not
+# match the files under test — both read $LOGS_DIR from lib/logs-dir.sh.
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 
 # 5k-line samples of real production logs, sliced from the middle of the
 # corresponding logs/<source>/ files. See docs/test-logs.md and

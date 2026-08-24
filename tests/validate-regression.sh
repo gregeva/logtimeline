@@ -17,10 +17,28 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 REF_DIR="${1:-$SCRIPT_DIR/reference-output}"
 
-# Run from the repo root so the log paths handed to ltl below are
-# repo-relative; must match capture-regression.sh, which captured the
-# references the same way.
-cd "$REPO_DIR"
+# Run from the directory containing the log corpus so the log paths handed
+# to ltl below stay relative; must match capture-regression.sh, which
+# captured the references the same way. That is the repo root unless
+# LTL_LOGS_DIR names a corpus elsewhere (#436), in which case its parent
+# serves the same role — the reference output embeds the literal prefix
+# `logs/`, so an overriding corpus directory has to be named `logs` for the
+# captured paths to match.
+if [[ -n "${LTL_LOGS_DIR:-}" ]]; then
+    if [[ ! -d "$LTL_LOGS_DIR" ]]; then
+        echo "ERROR: LTL_LOGS_DIR is not a directory: $LTL_LOGS_DIR" >&2
+        exit 1
+    fi
+    if [[ "$(basename "$LTL_LOGS_DIR")" != "logs" ]]; then
+        echo "ERROR: LTL_LOGS_DIR must be a directory named 'logs' for this harness;" >&2
+        echo "       the reference output embeds the literal path prefix 'logs/'." >&2
+        echo "       Got: $LTL_LOGS_DIR" >&2
+        exit 1
+    fi
+    cd "$(cd "$(dirname "$LTL_LOGS_DIR")" && pwd)"
+else
+    cd "$REPO_DIR"
+fi
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"

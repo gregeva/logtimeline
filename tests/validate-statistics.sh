@@ -51,6 +51,9 @@ SCENARIOS_TSV="$HARNESS_DIR/scenarios.tsv"
 ENGINE="$HARNESS_DIR/compare-statistics-drift.pl"
 BASELINES_DIR="$HARNESS_DIR/baselines"
 
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
+
 # shellcheck source=lib/csv-cache.sh
 source "$SCRIPT_DIR/lib/csv-cache.sh"
 
@@ -181,11 +184,7 @@ oracle_json_for_logfile() {
     fi
     mkdir -p "$ORACLE_CACHE_DIR"
     local abs_log
-    if [[ "$logfile" = /* ]]; then
-        abs_log="$logfile"
-    else
-        abs_log="$REPO_DIR/$logfile"
-    fi
+    abs_log="$(resolve_log_path "$logfile")"
     if ! python3 "$ORACLE_SCRIPT" \
             --log "$abs_log" \
             --bucket-size-seconds "$bs_sec" \
@@ -224,11 +223,7 @@ pa_capture_for_scenario() {
         return 0
     fi
     local abs_log
-    if [[ "$logfile" = /* ]]; then
-        abs_log="$logfile"
-    else
-        abs_log="$REPO_DIR/$logfile"
-    fi
+    abs_log="$(resolve_log_path "$logfile")"
     local tmp
     tmp="$(mktemp)"
     # shellcheck disable=SC2086  # word-splitting on $options is intentional

@@ -323,13 +323,13 @@ Tests parse the `=== INDEX READ-BACK ===` section from `-V` output and assert sp
 
 The prebuilt `tests/fixtures/ltl-index-readback.csv` and the two 5k sample
 logs it describes are generated, gitignored artifacts. Both the harness and
-`tests/fixtures/regenerate-index-readback-fixtures.sh` resolve the log
-corpus through `LTL_LOGS_DIR`, defaulting to `logs/` under the repo root.
-The two must agree: the fixture records absolute `file_path` values, so a
-harness resolving the corpus differently from the script that built the
-fixture finds no matching rows. Setting `LTL_LOGS_DIR` lets a checkout with
-no corpus of its own — a second clone, a git worktree — run against the
-real one.
+`tests/fixtures/regenerate-index-readback-fixtures.sh` read `$LOGS_DIR`
+from `tests/lib/logs-dir.sh`, the one place the corpus location is resolved
+(`logs/` under the repo root, or `LTL_LOGS_DIR`). The two must agree: the
+fixture records absolute `file_path` values, so a harness resolving the
+corpus differently from the script that built the fixture finds no matching
+rows — which is why neither composes the path itself. See
+`tests/HARNESS-DESIGN.md` § *The log corpus is resolved, never composed*.
 
 Freshness is a precondition of every pre-seeded scenario, not a property
 that can be assumed. `read_index_file()` accepts a row only when both the

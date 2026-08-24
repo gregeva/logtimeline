@@ -24,15 +24,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="$REPO_DIR/ltl"
 USAGE_MD="$REPO_DIR/docs/usage.md"
 # Test log: tiny clean access log (~83 KB). Per repo memory
 # (feedback_test_logs.md) avoid the corrupt 2025-03-21 file; Codebeamer's
 # log is the smallest clean fixture available.
-TEST_LOG="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
+TEST_LOG="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 
 # Temp dir for captured outputs; cleaned up on EXIT (HARNESS-DESIGN.md Trap 10).
 TMP_DIR=$(mktemp -d)
