@@ -52,6 +52,13 @@ my $no_index = 0;                                                       # -ni: n
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_detect_registry_build, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0,0 );
+# Statistics-phase sub-stage timing (#417): accumulated wall-clock per block,
+# start/stop pairs at block boundaries only — never inside a per-key loop.
+# The population variables are the sub-stages' element-count denominators,
+# captured once per block boundary (one source, two surfaces: exposed in
+# -V statistics-demand and re-emitted as -V benchmark-data COUNTS rows).
+my ( $elapsed_stats_bucket_stats, $elapsed_stats_population_walk, $elapsed_stats_sort_selection, $elapsed_stats_group_calc, $elapsed_stats_threadpool_stats ) = ( 0,0,0,0,0 );
+my ( $stats_population_buckets, $stats_population_messages, $stats_population_threadpools ) = ( 0,0,0 );
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 my @verbose_output;           # Accumulated verbose output lines (Issue #56)
 
@@ -4228,10 +4235,15 @@ sub emit_statistics_demand_verbose {
         message => $message_stats_demand_shape,
     );
     my %store_surface = ( bucket => 'bucket-stats', message => 'message-stats' );
+    # #417: block-boundary populations (the sub-stage timing denominators),
+    # exposed here as the functional surface and re-emitted in benchmark-data
+    # COUNTS (one source, two surfaces; see tests/HARNESS-DESIGN.md).
+    my %store_population = ( bucket => $stats_population_buckets, message => $stats_population_messages );
 
     for my $store (qw( bucket message )) {
         push @verbose_output, "store: $store";
         push @verbose_output, "  store_demand: " . ($store_demand{$store} ? 1 : 0);
+        push @verbose_output, "  population: " . $store_population{$store};
         for my $group (qw( terminal_core csv_body extended_percentiles shape_moments )) {
             my $consumers = $stats_group_demand{$store}{$group};
             my $demanded  = ($consumers && @$consumers) ? 1 : 0;
@@ -4275,6 +4287,11 @@ sub emit_statistics_demand_verbose {
                 . " topn=" . (($t->{stats_calls} // 0) - ($s->{population_calls} // 0));
         }
     }
+
+    # #417: threadpool population (denominator for the threadpool_stats
+    # sub-stage). Phase-level line — no threadpool -V section exists, and the
+    # statistics phase's calculation telemetry lives here.
+    push @verbose_output, "threadpool_population: " . $stats_population_threadpools;
 
     push @verbose_output, "=== END statistics-demand ===";
 }
@@ -11755,6 +11772,9 @@ sub calculate_all_statistics {
 
     print "\rCalculating statistics..." unless $disable_progress;
 
+    # #417 sub-stage boundary: per-time-bucket statistics block.
+    $stats_population_buckets = scalar keys %log_analysis;
+    my $t0_bucket_stats = [gettimeofday];
     foreach my $bucket (sort { $a <=> $b } keys %log_analysis) {
         my $aggregated_data = {
             occurrences         => 0,
@@ -11941,12 +11961,16 @@ sub calculate_all_statistics {
         }
         delete $udm_distinct{$bucket};
     }
+    $elapsed_stats_bucket_stats += tv_interval($t0_bucket_stats);
 
     ## STATS FOR TOP LOG MESSAGES ##
     # if( $durations_observed ) {
         foreach my $category (sort keys %log_messages) {
             # Collect and sort the log keys based on the count within each log_key
             my (@sorted_log_keys, @top_keys);
+
+            # #417 sub-stage boundary: per-category population (walk/sort denominator).
+            $stats_population_messages += scalar keys %{$log_messages{$category}};
 
             # A calculated-statistic sort key is exactly a key of the #305
             # group registry (%STAT_FIELD_GROUP covers the full 22-field
@@ -11985,6 +12009,8 @@ sub calculate_all_statistics {
                 # -sa landing on all-occurrences-1 keys) does the pool grow to all
                 # tied keys, which is unavoidable to pick the right rows and was
                 # never fast in any version.
+                # #417 sub-stage boundary: sort_selection (available-value branch).
+                my $t0_sort_selection = [gettimeofday];
                 my @by_metric = sort {
                     my $occurrences_a = $log_messages{$category}{$a}{$sort_key} // 0;
                     my $occurrences_b = $log_messages{$category}{$b}{$sort_key} // 0;
@@ -12018,6 +12044,7 @@ sub calculate_all_statistics {
                 $message_key_order{$category} = \@sorted_log_keys;
                 # Capture only the top N log keys for calculations if possible
                 @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)];
+                $elapsed_stats_sort_selection += tv_interval($t0_sort_selection);
             } else {
                 # Calculated-statistic sort (#303): the sort value does not
                 # exist until statistics are computed, so the pool selection
@@ -12057,6 +12084,9 @@ sub calculate_all_statistics {
 
                 my (%sort_value, @fill_block);
                 my ($demoted, $population_calls) = (0, 0);
+                # #417 sub-stage boundary: population_walk (eligibility +
+                # per-key sort-statistic computation over the whole store).
+                my $t0_population_walk = [gettimeofday];
                 foreach my $log_key (keys %{$log_messages{$category}}) {
                     memory_debug_sample("stats_population_keys") if $show_memory_debug && ++$memory_debug_key_samples % 10000 == 0;
                     my $entry = $log_messages{$category}{$log_key};
@@ -12096,6 +12126,10 @@ sub calculate_all_statistics {
                         push @fill_block, $log_key;
                     }
                 }
+                $elapsed_stats_population_walk += tv_interval($t0_population_walk);
+                # #417 sub-stage boundary: sort_selection (calculated-statistic
+                # branch: defined-block and fill-block sorts).
+                my $t0_sort_selection = [gettimeofday];
 
                 # Defined block: the same two-stage display-cut selection as
                 # the available-value branch above, on the transient values.
@@ -12151,6 +12185,7 @@ sub calculate_all_statistics {
                 @sorted_log_keys = (@defined_sorted, @fill_sorted);
                 $message_key_order{$category} = \@sorted_log_keys;
                 @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)];
+                $elapsed_stats_sort_selection += tv_interval($t0_sort_selection);
 
                 if ($stats_demand_telemetry_active) {
                     my $t = $stats_demand_telemetry{message} //= {};
@@ -12163,6 +12198,9 @@ sub calculate_all_statistics {
                 }
             }
 
+            # #417 sub-stage boundary: group_calc (full statistics for the
+            # keys that won a display slot, plus per-message UDM means).
+            my $t0_group_calc = [gettimeofday];
             foreach my $log_key (@top_keys) {
                 memory_debug_sample("stats_top_keys") if $show_memory_debug && ++$memory_debug_key_samples % 10000 == 0;
                 my $aggregated_data = {};
@@ -12264,12 +12302,16 @@ sub calculate_all_statistics {
                 # undef $log_messages{$category}{$log_key}{durations};
                 # delete $log_messages{$category}{$log_key}{durations};
             }
+            $elapsed_stats_group_calc += tv_interval($t0_group_calc);
         # }
     }
 
     ## STATS FOR THREAD POOL ACTIVITY ##
     my %threadpools;
     my ( @ordered_threadpools );
+    # #417 sub-stage boundary: threadpool activity statistics.
+    $stats_population_threadpools = (scalar keys %{$threadpool_activity{highlight} // {}}) + (scalar keys %{$threadpool_activity{plain} // {}});
+    my $t0_threadpool_stats = [gettimeofday];
     foreach my $category ( qw( highlight plain ) ) {
         foreach my $threadpool ( keys %{$threadpool_activity{$category}} ) {
             $threadpools{$threadpool}{threads} += scalar keys %{$threadpool_activity{$category}{$threadpool}};
@@ -12304,6 +12346,7 @@ sub calculate_all_statistics {
             delete $log_threadpools{$bucket}{$threadpool};
         }
     }
+    $elapsed_stats_threadpool_stats += tv_interval($t0_threadpool_stats);
 
     ## STATS FOR SESSION ACTIVITY (Issue #26) ##
     if ($session_data_found) {
@@ -13706,6 +13749,19 @@ sub print_verbose_output {
     printf "TIMING\taccumulate/initialize_buckets\t%.3f\n", $elapsed_accumulate_initialize_buckets;
     printf "TIMING\tfinalize/group_similar\t%.3f\n", $elapsed_finalize_group_similar;
     printf "TIMING\tfinalize/calculate_statistics\t%.3f\n", $elapsed_finalize_calculate_statistics;
+    # #417: sub-stage rows nested under finalize/calculate_statistics (their
+    # time is inside the parent row, so they are excluded from TIMING total).
+    # 'untimed' is derived, never measured: the parent's remainder, clamped
+    # at zero so sub-stages can never appear to exceed their parent.
+    my $substage_sum = $elapsed_stats_bucket_stats + $elapsed_stats_population_walk + $elapsed_stats_sort_selection + $elapsed_stats_group_calc + $elapsed_stats_threadpool_stats;
+    my $substage_untimed = $elapsed_finalize_calculate_statistics - $substage_sum;
+    $substage_untimed = 0 if $substage_untimed < 0;
+    printf "TIMING\tfinalize/calculate_statistics/bucket_stats\t%.3f\n", $elapsed_stats_bucket_stats;
+    printf "TIMING\tfinalize/calculate_statistics/population_walk\t%.3f\n", $elapsed_stats_population_walk;
+    printf "TIMING\tfinalize/calculate_statistics/sort_selection\t%.3f\n", $elapsed_stats_sort_selection;
+    printf "TIMING\tfinalize/calculate_statistics/group_calc\t%.3f\n", $elapsed_stats_group_calc;
+    printf "TIMING\tfinalize/calculate_statistics/threadpool_stats\t%.3f\n", $elapsed_stats_threadpool_stats;
+    printf "TIMING\tfinalize/calculate_statistics/untimed\t%.3f\n", $substage_untimed;
     printf "TIMING\tfinalize/heatmap_statistics\t%.3f\n", $elapsed_finalize_heatmap_statistics;
     printf "TIMING\tfinalize/histogram_statistics\t%.3f\n", $elapsed_finalize_histogram_statistics;
     printf "TIMING\trender/normalize_data\t%.3f\n", $elapsed_render_normalize_data;
@@ -13749,6 +13805,14 @@ sub print_verbose_output {
     printf "COUNTS\tlog_messages_entries\t%d\n", $log_messages_entries;
     printf "COUNTS\tlog_occurrences_entries\t%d\n", scalar keys %log_occurrences;
     printf "COUNTS\tlog_stats_entries\t%d\n", scalar keys %log_stats;
+    # #417: sub-stage element-count denominators — re-emitted from the block
+    # boundaries in calculate_all_statistics, never recomputed here (one
+    # source, two surfaces; see tests/HARNESS-DESIGN.md). log_messages_population
+    # is the walk-time key population, distinct from log_messages_entries
+    # (final structure state at emission time).
+    printf "COUNTS\tlog_analysis_entries\t%d\n", $stats_population_buckets;
+    printf "COUNTS\tlog_messages_population\t%d\n", $stats_population_messages;
+    printf "COUNTS\tthreadpool_entries\t%d\n", $stats_population_threadpools;
 
     # Terminal and bucket settings (for benchmark reproducibility)
     printf "CONFIG\tterminal_width\t%d\n", $terminal_width;

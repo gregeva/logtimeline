@@ -62,15 +62,35 @@ tests/HARNESS-DESIGN.md). Locked line shapes:
 === statistics-demand ===
 store: <bucket|message>
   store_demand: <0|1>
+  population: <N>
   group <name>: demanded=<0|1> consumers=<comma-joined|->
   moment_source: <second_pass|sidecar|none>
   stats_calls: <N>
   group_calc <name>: computed=<N> skipped_demand=<N> ineligible=<N>
   sort_selection: statistic=<field> defined=<N> fill=<N> demoted=<N>
   sort_calc: population=<N> topn=<N>
+threadpool_population: <N>
 === END statistics-demand ===
 ```
 
+- `population` (#417) — the store's block-boundary element count in the
+  statistics phase: for `bucket`, time buckets iterated by the per-bucket
+  statistics block (`%log_analysis` keys — duration-bearing buckets only, 0
+  when no durations were observed); for `message`, message keys at
+  population-walk/sort time (summed across categories). These are the
+  denominators for the `finalize/calculate_statistics/*` sub-stage TIMING
+  rows and are re-emitted as benchmark-data `COUNTS` rows
+  (`log_analysis_entries`, `log_messages_population`) from the same
+  variables — one source, two surfaces per tests/HARNESS-DESIGN.md.
+  `log_messages_population` is distinct from the pre-existing
+  `COUNTS log_messages_entries` (final structure state at emission time).
+- `threadpool_population` (#417) — phase-level line after both store rows:
+  threadpool keys iterated by the threadpool-stats block (both categories
+  summed). Lives here because no threadpool `-V` section exists; re-emitted
+  as benchmark-data `COUNTS threadpool_entries`. Denominator for the
+  `finalize/calculate_statistics/threadpool_stats` sub-stage row. The
+  sub-stage TIMING row contract itself is owned by
+  features/417-substage-statistics-timing.md.
 - Group order fixed: terminal_core, csv_body, extended_percentiles,
   shape_moments (both for the `group` demand lines and the `group_calc`
   counter lines). Store order fixed: bucket, message.

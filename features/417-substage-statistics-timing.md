@@ -160,3 +160,28 @@ threadpool_population: <n> # threadpool keys (both categories); phase-level line
   this lands; branch merges back into `415-calculate-statistics-drift`.
 - #418 (degenerate-case sort cost): `population_walk`/`sort_selection` rows
   quantify the case it describes.
+
+## Implementation record (2026-08-24)
+
+Implemented per plan; every added statement sits outside loop bodies (16
+timer calls per run, accumulated across the two categories). Validation:
+
+- **Zero in-loop cost**: median-of-3 ABAB on the high-cardinality construct
+  (~288k lines, ~287k unique keys), pre-change vs post-change binaries:
+  `finalize/calculate_statistics` 0.304s (0.300–0.323) → 0.299s
+  (0.295–0.306); `total` 2.864s → 2.865s. Within noise, both directions.
+- **Coherence**: default sort 0.307 (sort_selection) + 0.012 (untimed) =
+  0.319 = parent; `-so p99` 0.261 (population_walk) + 0.252 (sort_selection)
+  + 0.012 = 0.525 vs parent 0.524 — sub-1ms independent-rounding skew is the
+  expected tolerance at %.3f; raw values cohere by construction (D3).
+- **Alignment behavior**: `population_walk` 0.000 under the default sort,
+  0.261s under `-so p99` on the same input; populations correct on both a
+  duration-bearing fixture (bucket population 1) and the no-durations
+  construct (bucket population 0 — `%log_analysis` holds duration-bearing
+  buckets only; the denominator honestly counts what the block iterates).
+- **Harnesses**: `validate-statistics-demand.sh` 48/48,
+  `validate-regression.sh` 46/46, both exit 0. Zero runtime warnings on all
+  probe runs.
+- The instrument already reproduces the #415/#418 findings without a
+  profiler: the `-so p99` cost lands 0.261 walk / 0.252 fill-sort on a
+  population with zero eligible contenders.
