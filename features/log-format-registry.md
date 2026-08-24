@@ -790,6 +790,40 @@ Statistical unit sampling (#17's remaining half); content fingerprinting beyond 
 - [x] `--help`, `docs/usage.md`, `docs/staged-processing-pipeline.md` (detect-stage contract), this section, and the `-V` contract updated in the same change; release-notes bullet (user-observable). *(Release-notes bullet at merge, per-feature workflow step 6.)*
 - [ ] #385 closed by this drop; #17's declarative half noted complete on #17. *(At merge.)*
 
+## #413 — lazy scan-sub compilation (elevation by election)
+
+### Status
+
+- **Audit + prototype complete (2026-08-24)**, findings below; design decisions not yet locked. Branch `413-eager-scan-order-precompile` (cut from the #415 branch — #415's drift re-measure is the downstream discriminator, native `blocked_by` recorded on #415).
+
+### The problem (measured, current tree)
+
+Every run pays a fixed ~20 MB peak RSS and ~0.1 s (`TIMING detect/registry_build`) compiling scan-order subs it may never use: 2-line probe, v0.16.0 24.7 MB vs 0.17.0 44.5 MB / 0.101 s. `-lf` saves nothing — `apply_format_pin()` runs after the full build; even an invalid `-lf` operand pays the full cost before erroring.
+
+### Audit finding: three compile sources at startup, not one
+
+1. **D40 eager loop** in `build_format_registry()` — the static order plus one first-promotion order per scanned entry.
+2. **Gate 5 validation** — `format_registry_set_occupant()` swaps compile per variant member, and the sample stream *promotes* entries mid-validation, compiling deeper recency orders ("warming").
+3. **`apply_format_pin()`** — clears the cache and compiles the single-entry order on top of everything above.
+
+Instrumented split (env-gated scratch copy, 2-line probe): full = **28 compiles / 44.8 MB peak**; eager loop off = **17 compiles / 37.9 MB** (gate 5 alone mints 16 subs ≈ 10 MB); both off = **2 compiles / 28.4 MB** (static + the parallel default-configuration validation compile). Removing only the eager loop recovers barely half the regression.
+
+### Memory cost constants (prototype, 2026-08-24 — the gap in the original #58 implementation, which measured compile *time* but never sub *size*)
+
+| measure | per compiled sub |
+|---|---|
+| generated source | ~29 KB |
+| `Devel::Size::total_size` of the closure | 354 KB |
+| actual RSS delta per compile | ~610–980 KB, median ~620 KB |
+
+- `Devel::Size` reaches only ~55% of the real cost (op-tree and pad storage are invisible to it). A `-mem` category for `%format_scan_sub_cache` must pair the measured `Devel::Size` value with a compiled-sub count (readable against the ~0.6 MB/sub calibrated constant); measurement alone under-reports ~2x.
+- Every sub is the same size (one block per scanned group), so cache memory is linear: ~0.6 MB x orders-compiled.
+- Time constants already on record (#384 prototype F-findings): cold compile 2.54 ms, warm cache hit 52 ns.
+
+### Design direction (architect, 2026-08-24 — decisions to be locked before implementation)
+
+Elevation by election: detection already runs entirely on interpreted per-entry `qr//` matching (`sample_file_for_detection()`, `format_sample_probes()` — no generated code). Compile nothing at startup; the sampling pass elects the file's format(s) before line 1, and the elected order compiles then (~2.5–6 ms once). The hot loop never runs uncompiled — no interpreted per-line extraction path (that would be a second implementation of the extraction semantics; #58 proved byte parity for this surface once, at the cost of 241 shadow runs). Mid-file flips keep the existing probe → promote → lazy `//=` compile path. Gate 5 restructures: spec validation (samples classified by `qr//`) stays at startup on the interpreted path; generated-code validation runs per compiled sub at compile time, so its cost scales with what the run uses. Observability per `tests/HARNESS-DESIGN.md` § one source, two surfaces: compile counts/sizes exposed in the owning functional `-V` section and re-emitted as `benchmark-data` rows from the same variables.
+
 ## `-V format-detection` section-contract
 
 This section is the owning contract for the `format-detection` `-V` section and its `format-detection / scan` sub-section, both emitted by `emit_format_detection_verbose()` and consumed by `tests/validate-format-detection.sh`. All pre-existing keys of the parent section (per-file `format:`, `match_type:`, `is_access_log:`, `matched_lines:`, `unmatched_lines:`, `first_match_line:`; run-level `duration_unit_override:`, `files:`) are byte-preserved from their pre-registry shapes; everything below is additive. Renames and removals are breaking per `tests/HARNESS-DESIGN.md` § Stability contract.
