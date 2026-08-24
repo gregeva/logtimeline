@@ -161,13 +161,16 @@ that drift.
   `calculate_all_statistics` writes whichever of the 21 statistic fields the #305 demand
   resolution produced. This is the most awkward site to port to a fixed column set.
 
-- **F8 — Latent bug, out of scope here, filed separately.** `mean_bytes` is an accepted
+- **F8 — Latent bug, out of scope here — filed as #428.** `mean_bytes` is an accepted
   `-so` operand (`$sort_key = "mean_bytes"` in `adapt_to_command_line_options`) but is
   **never written** to the entry — it is computed as a local in `print_message_summary`
-  for rendering only. The comparator's `// 0` therefore sorts every key as 0. `count_mean`
-  has the same shape: it is derived in the group-calc loop, which runs *after* the sort.
-  Not folded into this work; a columnar store that validates sort keys against a declared
-  column set would surface it mechanically.
+  for rendering only. The comparator's `// 0` therefore makes every key tie, and the
+  `$a cmp $b` tiebreaker alone decides the displayed order. `count_mean` has the same
+  shape: it is derived in the group-calc loop, which runs *after* the sort in the same
+  sub. Confirmed by observation — with `-so mean_bytes` the ascending run returns keys in
+  plain lexicographic order, and with `-so count_mean` ascending and descending produce
+  byte-identical output. Not folded into this work; a compact store that validates sort
+  keys against a declared column set would surface this class mechanically.
 
 - **F9 — `features/2-memory-ceiling-progressive-eviction.md` is deliberately absent.**
   Issue #2's 2026-08-24 comment states it will be created *starting from the #426 store*.
@@ -350,7 +353,7 @@ computed, and that distinction is re-recorded here when it does.
 
 - **Out of scope**: the bucket-scoped stores (`%log_analysis`, `%log_stats`); the
   heatmap/histogram counter stores; the `mean_bytes` / `count_mean` sort-key bug (F8,
-  filed separately); #273's `total_duration` collapse (adjacent, not folded in).
+  filed as #428); #273's `total_duration` collapse (adjacent, not folded in).
 - **This document does not lock decisions.** `Dxx` entries appear only after the
   prototype that grounds them.
 
@@ -365,6 +368,9 @@ computed, and that distinction is re-recorded here when it does.
 - **#354 — `-mdm bin` uses more message-stats memory than raw** (on hold, behind #2).
   Source of the per-entry byte figures.
 - **#323 — dynamic bins-per-decade** (on hold). Same distribution evidence.
+- **#428 — `-so mean_bytes` / `-so count_mean` rank nothing** (F8). Found during this
+  survey; independent of the store's representation. A compact store with a declared
+  column set would surface this defect class mechanically.
 - **#418 — sort-on-statistic pays full population cost when no key is eligible.**
   Operates on the same `sort_selection` block; strong interaction with arm B.
 - **#273 — collapse `total_duration` / `total_duration_num`.** A compact store makes this
