@@ -1,0 +1,205 @@
+[0;37m [90m[109m
+──────────────────────────────────────────────────────────────────────────────────────────────
+   ,:: ltl ::' log timeline [0.16.0] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
+──────────────────────────────────────────────────────────────────────────────────────────────
+[0m
+
+=== runtime-config ===
+include (merged): (not set)
+exclude (merged): (not set)
+highlight (merged): (not set)
+threadpool-activity (merged): (not set)
+bucket-duration-stats-demand: 1
+message-duration-stats-demand: 1
+=== runtime-config / command-line ===
+bucket-size: 60
+=== END runtime-config / command-line ===
+=== runtime-config / environment-variable ===
+=== END runtime-config / environment-variable ===
+=== END runtime-config ===
+
+=== index-read-back ===
+index_used: no
+index_filter_signature: -
+file: /private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9c025a74-1b22-41cf-bd3d-4322ed792c77/scratchpad/wt-v0.16.0/tests/profile/samples/ScriptLog.2025-04-09.1-1000.log
+  lookup: none
+  matched_entry_date: -
+  freshness: no_entry
+  preseed_duration_min: -
+  preseed_duration_max: -
+  preseed_bytes_min: -
+  preseed_bytes_max: -
+  preseed_count_min: -
+  preseed_count_max: -
+  preseed_first_timestamp: -
+  preseed_last_timestamp: -
+=== END index-read-back ===
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: user_opt_out
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: feature_not_active
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+=== format-detection ===
+duration_unit_override: -
+files: 1
+file: /private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9c025a74-1b22-41cf-bd3d-4322ed792c77/scratchpad/wt-v0.16.0/tests/profile/samples/ScriptLog.2025-04-09.1-1000.log
+  format: thingworx_standard
+  match_type: 1
+  is_access_log: no
+  matched_lines: 1000
+  unmatched_lines: 0
+  first_match_line: 1
+=== END format-detection ===
+=== heatmap-palette ===
+heatmap_active: no
+metric: n/a
+light_bg: 0
+light_bg_source: default
+color_name: n/a
+gradient_dark: n/a
+gradient_light: n/a
+gradient_active: n/a
+=== END heatmap-palette ===
+=== csv-output ===
+csv_active: no
+=== END csv-output ===
+=== percentile-algorithm ===
+=== percentile-algorithm / histogram ===
+data_model: bin
+effective_algorithm: exponential_interpolation_within_bucket
+effective_bpd: 616
+formula: rank_in_bin = ceil(q * total_N) - cum_before_bin; fraction = rank_in_bin / bin_count; value = lower * (upper/lower)^fraction
+algorithm_source: features/187-histogram-bin-counter-percentiles.md § Decision 1 (Prometheus histogram_quantile native-exponential rule)
+=== END percentile-algorithm / histogram ===
+=== percentile-algorithm / heatmap ===
+data_model: bin
+effective_algorithm: exponential_interpolation_within_bucket
+effective_bpd: 616
+formula: rank_in_bin = ceil(q * total_N) - cum_before_bin; fraction = rank_in_bin / bin_count; value = lower * (upper/lower)^fraction
+algorithm_source: features/187-histogram-bin-counter-percentiles.md § Decision 1 (Prometheus histogram_quantile native-exponential rule)
+=== END percentile-algorithm / heatmap ===
+=== percentile-algorithm / message-stats ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / message-stats ===
+=== percentile-algorithm / bucket-stats ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / bucket-stats ===
+=== END percentile-algorithm ===
+=== statistics-demand ===
+store: bucket
+  store_demand: 1
+  group terminal_core: demanded=1 consumers=timeline-latency-column
+  group csv_body: demanded=0 consumers=-
+  group extended_percentiles: demanded=0 consumers=-
+  group shape_moments: demanded=0 consumers=-
+  moment_source: none
+  stats_calls: 0
+  group_calc terminal_core: computed=0 skipped_demand=0 ineligible=0
+  group_calc csv_body: computed=0 skipped_demand=0 ineligible=0
+  group_calc extended_percentiles: computed=0 skipped_demand=0 ineligible=0
+  group_calc shape_moments: computed=0 skipped_demand=0 ineligible=0
+store: message
+  store_demand: 1
+  group terminal_core: demanded=1 consumers=messages-table
+  group csv_body: demanded=0 consumers=-
+  group extended_percentiles: demanded=0 consumers=-
+  group shape_moments: demanded=0 consumers=-
+  moment_source: none
+  stats_calls: 0
+  group_calc terminal_core: computed=0 skipped_demand=0 ineligible=0
+  group_calc csv_body: computed=0 skipped_demand=0 ineligible=0
+  group_calc extended_percentiles: computed=0 skipped_demand=0 ineligible=0
+  group_calc shape_moments: computed=0 skipped_demand=0 ineligible=0
+=== END statistics-demand ===
+=== profile ===
+profile_active: no
+=== END profile ===
+=== udm-counting ===
+counting_udms: none
+=== END udm-counting ===
+=== benchmark-data ===
+version	0.16.0
+FILES	/private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9c025a74-1b22-41cf-bd3d-4322ed792c77/scratchpad/wt-v0.16.0/tests/profile/samples/ScriptLog.2025-04-09.1-1000.log	405536
+lines_read	1000
+lines_included	1000
+TIMING	read_files	0.025
+TIMING	initialize_buckets	0.000
+TIMING	group_similar	0.000
+TIMING	calculate_statistics	0.005
+TIMING	heatmap_statistics	0.000
+TIMING	histogram_statistics	0.000
+TIMING	normalize_data	0.001
+TIMING	total	0.030
+MEMORY	rss_peak	29229056
+COUNTS	log_messages_entries	998
+COUNTS	log_occurrences_entries	1
+COUNTS	log_stats_entries	1
+CONFIG	terminal_width	200
+CONFIG	terminal_height	24
+CONFIG	max_log_message_length	200
+CONFIG	time_bucket_size	60
+CONFIG	bucket_size_seconds	3600.00
+=== END benchmark-data ===
+
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[90m[109m     timestamp              legend                                                                                   occurrences                                                                        
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+ 2025-04-09 04:00 [0;31mERROR: 1000[0m  [91m[109m16.7[0m[90m[109m:[0m[0m16.7[0m[90m[109m/m[0m [90m[109m│[0m [0;31m██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████[0m 
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+
+[90m[109mcommand-line options: -V all --disable-progress -bs=60 --terminal-width=200 [0m
+
+  ─────────────────────────────────────────   
+  Category                            Total      [4;37mThese file(s) were processed with analysis including results between 2025-04-09 04:57 and 2025-04-09 04:57[0m
+  ─────────────────────────────────────────   
+  ERROR                                1000      [36m[37m[[0;32m√[0m[36m[37m] /private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9c...tchpad/wt-v0.16.0/tests/profile/samples/ScriptLog.2025-04-09.1-1000.log[0m
+  ─────────────────────────────────────────   
+  LINES INCLUDED                       1000   
+  LINES READ                           1000   
+  FILE PROCESSING TIME            24.6 msec   
+  INITIALIZE EMPTY BUCKETS          27 usec   
+  CALCULATE STATISTICS             4.9 msec   
+  SCALE DATA TO TERMINAL           506 usec   
+  TOTAL TIME                        30 msec   
+  MAXIMUM MEMORY USED                28 MiB   
+  ─────────────────────────────────────────   
+
+ [96m[49m TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)                                                                                           Occurre. [0m[96m
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+  [ERROR] [WC_MX_0K030012_Proce] [S.c.t.d.e.DSLScript] [WC_MX_0K030012.WU_000050] The following number of events have been ignored because no running job order was found: production even          3 
+  [ERROR] [TWEventProcessor] [S.c.t.d.e.DSLScript] WC_MX_0K005012.VP_000000 - ProductionDataLoss_PacemakerWU:70.0 - Error: For AX Job Order Automatic JobOrder is not needed Joborder = Li          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000001] does not has property: [ScrapCode] at Service: [GetPTCAutomationProperties] , Error: [JavaException:           1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000001] does not has property: [ScrapQuantity] at Service: [GetPTCAutomationProperties] , Error: [JavaExcepti          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000001] does not has property: [SpeedLossTag] at Service: [GetPTCAutomationProperties] , Error: [JavaExceptio          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000005] does not has property: [ScrapCode] at Service: [GetPTCAutomationProperties] , Error: [JavaException:           1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000005] does not has property: [ScrapQuantity] at Service: [GetPTCAutomationProperties] , Error: [JavaExcepti          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000005] does not has property: [SpeedLossTag] at Service: [GetPTCAutomationProperties] , Error: [JavaExceptio          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000010_A] does not has property: [ScrapCode] at Service: [GetPTCAutomationProperties] , Error: [JavaException          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000010_A] does not has property: [ScrapQuantity] at Service: [GetPTCAutomationProperties] , Error: [JavaExcep          1 
+
+

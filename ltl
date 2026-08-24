@@ -914,6 +914,10 @@ my @log_levels = (
     'START-HL', 'START', 'FINISH-HL', 'FINISH',
     'DATA-HL', 'DATA', 'err-rate', 'msg-rate', 'empty'
 );
+# Membership set for the per-line category gate in read_and_process_logs():
+# a hash lookup is constant-time where a grep over the list scans every
+# element per line.
+my %log_level_set = map { $_ => 1 } @log_levels;
 
 # Characters selected and usable for drawing the bar charts
 my %blocks = (
@@ -10463,7 +10467,7 @@ sub read_and_process_logs {
                     $fractional_ms = $frac > 0 ? $frac * 1000 : 0;
                 }
 
-                unless (grep { $_ eq $category_bucket } @log_levels) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
+                unless (exists $log_level_set{$category_bucket}) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     next;
                 } elsif (!$csv_epoch_timestamp && $match_type == 13) {
                     # Extract milliseconds if present (supports . or , separator, 1-6 digits)

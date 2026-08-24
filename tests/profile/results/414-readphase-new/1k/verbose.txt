@@ -1,0 +1,296 @@
+[0;37m [90m[109m
+──────────────────────────────────────────────────────────────────────────────────────────────
+   ,:: ltl ::' log timeline [0.17.0] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
+──────────────────────────────────────────────────────────────────────────────────────────────
+[0m
+
+=== runtime-config ===
+include (merged): (not set)
+exclude (merged): (not set)
+highlight (merged): (not set)
+threadpool-activity (merged): (not set)
+bucket-duration-stats-demand: 1
+message-duration-stats-demand: 1
+=== runtime-config / command-line ===
+bucket-size: 60
+=== END runtime-config / command-line ===
+=== runtime-config / environment-variable ===
+=== END runtime-config / environment-variable ===
+=== END runtime-config ===
+
+=== index-read-back ===
+index_used: no
+index_filter_signature: -
+file: /Users/gregeva/Documents/GitHub/logtimeline/tests/profile/samples/ScriptLog.2025-04-09.1-1000.log
+  lookup: none
+  matched_entry_date: -
+  freshness: no_entry
+  preseed_duration_min: -
+  preseed_duration_max: -
+  preseed_bytes_min: -
+  preseed_bytes_max: -
+  preseed_count_min: -
+  preseed_count_max: -
+  preseed_first_timestamp: -
+  preseed_last_timestamp: -
+=== END index-read-back ===
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: user_opt_out
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: feature_not_active
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+=== format-detection ===
+duration_unit_override: -
+format_pin: -
+legend: 1=thingworx_standard
+files: 1
+file: /Users/gregeva/Documents/GitHub/logtimeline/tests/profile/samples/ScriptLog.2025-04-09.1-1000.log
+  format: thingworx_standard
+  match_type: 1
+  is_access_log: no
+  matched_lines: 1000
+  unmatched_lines: 0
+  first_match_line: 1
+  scan_attempts: 1000
+  scan_failed_attempts: 0
+  window: 0
+  sample: yes
+  sample_file_bytes: 405536
+  sample_whole_file: no
+  sample_lines: 59
+  sample_matched_lines: 59
+  sample_formats: mt1std=59
+  sample_part: 1 offset=0 bytes=8192 lines=20 avg_line=407 matched=20 first_ts="2025-04-09 04:57:45.252" last_ts="2025-04-09 04:57:45.296"
+  sample_part: 2 offset=198672 bytes=8192 lines=19 avg_line=405 matched=19 first_ts="2025-04-09 04:57:48.874" last_ts="2025-04-09 04:57:48.959"
+  sample_part: 3 offset=397344 bytes=8192 lines=20 avg_line=406 matched=20 first_ts="2025-04-09 04:57:53.021" last_ts="2025-04-09 04:57:53.230"
+  sample_us: 588.0
+  formats: thingworx_standard
+  filename_evidence: stem=- ext=- date=- index=-
+=== format-detection / scan ===
+entries: 15
+guarded: mt12,mt4,mt9
+window_size: 0
+window_fallback: 1000
+sample_parts: 3
+sample_bytes_per_part: 8192
+final_order: mt1std,mt10,mt16,mt1gen,mt2,mt12,mt4,mt9,mt3,mt5,mt6,mt7,mt8,mt17,mt11
+promotions: 0
+match_counts: mt1std=1000,mt10=0,mt10ir=0,mt16=0,mt1gen=0,mt2=0,mt12=0,mt4=0,mt9=0,mt3=0,mt3us=0,mt5=0,mt6=0,mt7=0,mt8=0,mt17=0,mt11=0
+variant_groups: connection_server=mt10,access_with_duration=mt3
+nomatch_scan_samples: 0
+nomatch_scan_avg_us: -
+=== END format-detection / scan ===
+=== END format-detection ===
+=== format-registry ===
+entries: 18
+scanned_entries: 17
+scan_slots: 15
+  entry: mt1std slug=thingworx_standard group=mt1std default=yes role=scanned
+  entry: mt10 slug=connection_server_standard group=connection_server default=yes role=scanned
+  entry: mt10ir slug=integration_runtime_standard group=connection_server default=no role=scanned
+  entry: mt16 slug=windchill_workgroup_manager group=mt16 default=yes role=scanned
+  entry: mt1gen slug=thingworx_standard group=mt1gen default=yes role=scanned
+  entry: mt2 slug=thingworx_rac_client group=mt2 default=yes role=scanned
+  entry: mt12 slug=tomcat_codebeamer group=mt12 default=yes role=scanned
+  entry: mt4 slug=tomcat_access_common group=mt4 default=yes role=scanned
+  entry: mt9 slug=jboss_access group=mt9 default=yes role=scanned
+  entry: mt3 slug=tomcat_access_with_duration group=access_with_duration default=yes role=scanned
+  entry: mt3us slug=httpd_access_with_duration group=access_with_duration default=no role=scanned
+  entry: mt5 slug=connection_server_json group=mt5 default=yes role=scanned
+  entry: mt6 slug=java_gc_g1 group=mt6 default=yes role=scanned
+  entry: mt7 slug=tw_analytics_v2 group=mt7 default=yes role=scanned
+  entry: mt8 slug=tw_analytics_worker group=mt8 default=yes role=scanned
+  entry: mt17 slug=windchill_method_server group=mt17 default=yes role=scanned
+  entry: mt11 slug=tw_edge_c_sdk group=mt11 default=yes role=scanned
+  entry: csv slug=csv group=csv default=yes role=stateful
+variant_groups: connection_server=mt10,access_with_duration=mt3
+  group: connection_server slot=1 default=mt10 members=mt10,mt10ir
+  group: access_with_duration slot=8 default=mt3 members=mt3,mt3us
+static_order: mt1std,mt10,mt16,mt1gen,mt2,mt12,mt4,mt9,mt3,mt5,mt6,mt7,mt8,mt17,mt11
+  ancestors: mt1std <- -
+  ancestors: connection_server <- -
+  ancestors: mt16 <- -
+  ancestors: mt1gen <- mt1std
+  ancestors: mt2 <- mt1std,connection_server,mt16,mt1gen
+  ancestors: mt12 <- -
+  ancestors: mt4 <- -
+  ancestors: mt9 <- -
+  ancestors: access_with_duration <- mt12,mt4,mt9
+  ancestors: mt5 <- -
+  ancestors: mt6 <- -
+  ancestors: mt7 <- -
+  ancestors: mt8 <- mt1std,connection_server,mt1gen
+  ancestors: mt17 <- -
+  ancestors: mt11 <- -
+scan_subs_compiled: 1
+scan_sub_cache_hits: 0
+scan_subs_rss_bytes: 966656
+scan_sub_rss_measured: yes
+compiled_orders: mt1std,mt10,mt16,mt1gen,mt2,mt12,mt4,mt9,mt3,mt5,mt6,mt7,mt8,mt17,mt11
+=== END format-registry ===
+=== heatmap-palette ===
+heatmap_active: no
+metric: n/a
+light_bg: 0
+light_bg_source: default
+color_name: n/a
+gradient_dark: n/a
+gradient_light: n/a
+gradient_active: n/a
+=== END heatmap-palette ===
+=== csv-output ===
+csv_active: no
+=== END csv-output ===
+=== percentile-algorithm ===
+=== percentile-algorithm / histogram ===
+data_model: bin
+effective_algorithm: exponential_interpolation_within_bucket
+effective_bpd: 616
+formula: rank_in_bin = ceil(q * total_N) - cum_before_bin; fraction = rank_in_bin / bin_count; value = lower * (upper/lower)^fraction
+algorithm_source: features/187-histogram-bin-counter-percentiles.md § Decision 1 (Prometheus histogram_quantile native-exponential rule)
+=== END percentile-algorithm / histogram ===
+=== percentile-algorithm / heatmap ===
+data_model: bin
+effective_algorithm: exponential_interpolation_within_bucket
+effective_bpd: 616
+formula: rank_in_bin = ceil(q * total_N) - cum_before_bin; fraction = rank_in_bin / bin_count; value = lower * (upper/lower)^fraction
+algorithm_source: features/187-histogram-bin-counter-percentiles.md § Decision 1 (Prometheus histogram_quantile native-exponential rule)
+=== END percentile-algorithm / heatmap ===
+=== percentile-algorithm / message-stats ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / message-stats ===
+=== percentile-algorithm / bucket-stats ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / bucket-stats ===
+=== END percentile-algorithm ===
+=== statistics-demand ===
+store: bucket
+  store_demand: 1
+  population: 0
+  group terminal_core: demanded=1 consumers=timeline-latency-column
+  group csv_body: demanded=0 consumers=-
+  group extended_percentiles: demanded=0 consumers=-
+  group shape_moments: demanded=0 consumers=-
+  moment_source: none
+  stats_calls: 0
+  group_calc terminal_core: computed=0 skipped_demand=0 ineligible=0
+  group_calc csv_body: computed=0 skipped_demand=0 ineligible=0
+  group_calc extended_percentiles: computed=0 skipped_demand=0 ineligible=0
+  group_calc shape_moments: computed=0 skipped_demand=0 ineligible=0
+store: message
+  store_demand: 1
+  population: 998
+  group terminal_core: demanded=1 consumers=messages-table
+  group csv_body: demanded=0 consumers=-
+  group extended_percentiles: demanded=0 consumers=-
+  group shape_moments: demanded=0 consumers=-
+  moment_source: none
+  stats_calls: 0
+  group_calc terminal_core: computed=0 skipped_demand=0 ineligible=0
+  group_calc csv_body: computed=0 skipped_demand=0 ineligible=0
+  group_calc extended_percentiles: computed=0 skipped_demand=0 ineligible=0
+  group_calc shape_moments: computed=0 skipped_demand=0 ineligible=0
+threadpool_population: 0
+=== END statistics-demand ===
+=== profile ===
+profile_active: no
+=== END profile ===
+=== udm-counting ===
+counting_udms: none
+=== END udm-counting ===
+=== benchmark-data ===
+version	0.17.0
+FILES	/Users/gregeva/Documents/GitHub/logtimeline/tests/profile/samples/ScriptLog.2025-04-09.1-1000.log	405536
+lines_read	1000
+lines_included	1000
+TIMING	detect/registry_build	0.013
+TIMING	detect/scan_sub_compile	0.005
+TIMING	parse/read_files	0.040
+TIMING	accumulate/initialize_buckets	0.000
+TIMING	finalize/group_similar	0.000
+TIMING	finalize/calculate_statistics	0.005
+TIMING	finalize/calculate_statistics/bucket_stats	0.000
+TIMING	finalize/calculate_statistics/population_walk	0.000
+TIMING	finalize/calculate_statistics/sort_selection	0.005
+TIMING	finalize/calculate_statistics/group_calc	0.000
+TIMING	finalize/calculate_statistics/threadpool_stats	0.000
+TIMING	finalize/calculate_statistics/untimed	0.000
+TIMING	finalize/heatmap_statistics	0.000
+TIMING	finalize/histogram_statistics	0.000
+TIMING	render/normalize_data	0.000
+TIMING	total	0.058
+MEMORY	rss_peak	33259520
+MEMORY	format_scan_subs	966656
+COUNTS	log_messages_entries	998
+COUNTS	log_occurrences_entries	1
+COUNTS	log_stats_entries	1
+COUNTS	log_analysis_entries	0
+COUNTS	log_messages_population	998
+COUNTS	threadpool_entries	0
+COUNTS	format_scan_subs_compiled	1
+COUNTS	format_scan_sub_cache_hits	0
+CONFIG	terminal_width	200
+CONFIG	terminal_height	24
+CONFIG	max_log_message_length	200
+CONFIG	time_bucket_size	60
+CONFIG	bucket_size_seconds	3600.00
+=== END benchmark-data ===
+
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[90m[109m     timestamp              legend                                                                                   occurrences                                                                        
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+ 2025-04-09 04:00 [0;31mERROR: 1000[0m  [91m[109m16.7[0m[90m[109m:[0m[0m16.7[0m[90m[109m/m[0m [90m[109m│[0m [0;31m██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████[0m 
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+
+[90m[109mcommand-line options: -V all --disable-progress -bs=60 --terminal-width=200 [0m
+
+  ─────────────────────────────────────────   
+  Category                            Total      [4;37mThese file(s) were processed with analysis including results between 2025-04-09 04:57 and 2025-04-09 04:57[0m
+  ─────────────────────────────────────────   
+  ERROR                                1000      [36m[37m[[0;32m√[0m[36m[37m] /Users/gregeva/Documents/GitHub/logtimeline/tests/profile/samples/ScriptLog.2025-04-09.1-1000.log                                            [[38;5;111m1[36m[37m][0m
+  ─────────────────────────────────────────   
+  LINES INCLUDED                       1000      [4;37mLog Formats[0m
+  LINES READ                           1000   
+  TOTAL TIME                      57.7 msec      [38;5;111m1[36m[37m thingworx_standard[0m
+  MAXIMUM MEMORY USED              31.9 MiB   
+  ─────────────────────────────────────────   
+
+ [96m[49m TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)                                                                                           Occurre. [0m[96m
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+  [ERROR] [WC_MX_0K030012_Proce] [S.c.t.d.e.DSLScript] [WC_MX_0K030012.WU_000050] The following number of events have been ignored because no running job order was found: production even          3 
+  [ERROR] [TWEventProcessor] [S.c.t.d.e.DSLScript] WC_MX_0K005012.VP_000000 - ProductionDataLoss_PacemakerWU:70.0 - Error: For AX Job Order Automatic JobOrder is not needed Joborder = Li          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000001] does not has property: [ScrapCode] at Service: [GetPTCAutomationProperties] , Error: [JavaException:           1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000001] does not has property: [ScrapQuantity] at Service: [GetPTCAutomationProperties] , Error: [JavaExcepti          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000001] does not has property: [SpeedLossTag] at Service: [GetPTCAutomationProperties] , Error: [JavaExceptio          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000005] does not has property: [ScrapCode] at Service: [GetPTCAutomationProperties] , Error: [JavaException:           1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000005] does not has property: [ScrapQuantity] at Service: [GetPTCAutomationProperties] , Error: [JavaExcepti          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000005] does not has property: [SpeedLossTag] at Service: [GetPTCAutomationProperties] , Error: [JavaExceptio          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000010_A] does not has property: [ScrapCode] at Service: [GetPTCAutomationProperties] , Error: [JavaException          1 
+  [ERROR] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] Thing [WC_0K001012.WU_000010_A] does not has property: [ScrapQuantity] at Service: [GetPTCAutomationProperties] , Error: [JavaExcep          1 
+
+
