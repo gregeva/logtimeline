@@ -789,7 +789,7 @@ sub iterate_durations {
 # =============================================================================
 sub store_new {
     my ($arm, %opt) = @_;
-    die "arm must be T|S|G\n" unless defined $arm && $arm =~ /^[TSG]$/;
+    die "arm must be T|S|S2|G\n" unless defined $arm && $arm =~ /^(?:T|S2|S|G)$/;
     my $class = "Revalidate426::Store::$arm";
     return $class->new(%opt);
 }
@@ -1292,3 +1292,181 @@ sub telemetry {
 }
 
 1;
+
+# =============================================================================
+package Revalidate426::Store::S2;
+use strict; use warnings;
+use POSIX ();
+use Devel::Size ();
+our @ISA = ('Revalidate426::Store::S');
+#
+# Arm S2 — arm S with a NATIVE span-array merge (#426 N2).
+#
+# Identical to S in every other respect: it inherits add/_extend/percentile/
+# entry/geometry/canonical/telemetry/memory unchanged, so any digest difference
+# between S and S2 is attributable to merge() alone.
+#
+# The mechanism it reproduces is the SHIPPED merge_bin_counter_entries: a UNION
+# geometry (union_min, union_max, int(bpd * union_decades)) into which BOTH
+# sides are rebinned by partition_rebin before an index-wise add. It is not
+# "extend the narrower side".
+#
+# What is native: neither rebin materialises the full new_bin_count array and
+# neither add walks the full partition width. _remap_span walks only the
+# occupied span of its input and writes only the destination slots the input
+# actually reaches; the add grows the target span by exactly the overhang.
+# Cost is O(occupied span of each side), not O(bin_count).
+#
+# Arithmetic fidelity: _remap_span computes each destination index with the
+# same expression partition_rebin uses --
+#     midpoint = sqrt(bin_boundary(p,i) * bin_boundary(p,i+1))
+#     new_i    = int(new_bin_count * log(midpoint/new_min) / new_log_ratio)
+# clamped to [0, new_bin_count-1] -- in the same order, so the doubles are
+# bit-identical, not merely close.
+#
+sub new {
+    my ($class, %opt) = @_;
+    my $self = Revalidate426::Store::S::new($class, %opt);
+    $self->{arm} = 'S2';
+    return $self;
+}
+
+# Remap one occupied span [$base, c0, c1, ...] living in partition $p into the
+# geometry ($new_min, $new_log_ratio, $new_bin_count). Returns a span arrayref
+# in the new geometry (or [] when the input is empty).
+#
+# Only the occupied slots are visited. The projection is monotone non-decreasing
+# in the source index, so destination writes advance monotonically; the result
+# is accumulated into a flat buffer offset by the first destination index and
+# is therefore contiguous by construction.
+sub _remap_span {
+    my ($p, $span, $new_min, $new_log_ratio, $new_bin_count) = @_;
+    return [] unless $span && @$span;
+    my $base = $span->[0];
+    my ($mn, $lr, $bc) = ($p->{min}, $p->{log_ratio}, $p->{bin_count});
+    my ($dbase, @acc);
+    for my $j (1 .. $#$span) {
+        my $count = $span->[$j];
+        next unless defined $count && $count > 0;
+        my $old_i = $base + $j - 1;
+        # Guard: a source slot outside the source partition cannot occur on a
+        # well-formed row, but partition_rebin would have skipped it (its loop
+        # is bounded by bin_count), so skip it here too for exact parity.
+        next if $old_i < 0 || $old_i >= $bc;
+        my $lower    = $mn * exp($lr * $old_i / $bc);
+        my $upper    = $mn * exp($lr * ($old_i + 1) / $bc);
+        my $midpoint = sqrt($lower * $upper);
+        my $new_i    = int($new_bin_count * log($midpoint / $new_min) / $new_log_ratio);
+        $new_i = 0                  if $new_i < 0;
+        $new_i = $new_bin_count - 1 if $new_i >= $new_bin_count;
+        if (!defined $dbase) {
+            $dbase = $new_i;
+            $acc[0] = $count;
+        } elsif ($new_i >= $dbase) {
+            $acc[$new_i - $dbase] = ($acc[$new_i - $dbase] // 0) + $count;
+        } else {
+            my $shift = $dbase - $new_i;
+            unshift @acc, (0) x $shift;
+            $dbase = $new_i;
+            $acc[0] += $count;
+        }
+    }
+    return [] unless defined $dbase;
+    $_ //= 0 for @acc;
+    return [ $dbase, @acc ];
+}
+
+
+sub merge {
+    my ($self, $tk, $sk, %o) = @_;
+    my $si = $self->{row}{$sk};
+    return unless defined $si;
+    my $ti = $self->{row}{$tk};
+
+    my ($pmin, $pmax, $pbc, $plr, $prb, $pdec, $over, $under, $bins)
+        = @$self{qw(pmin pmax pbc plr prb pdec over under bins)};
+
+    # ---- empty-target path -------------------------------------------------
+    # The verbatim merge ADOPTS the source's partition and bins BY REFERENCE
+    # here. S2 COPIES the span instead (columnar rows cannot alias a shared
+    # arrayref without the two rows mutating each other on the next add()).
+    # The observable state -- geometry, counts, digest -- is identical; only
+    # the aliasing is not inherited. See the findings.
+    if (!defined $ti || !defined $pmin->[$ti]) {
+        $ti = $self->_row_new($tk) unless defined $ti;
+        $pmin->[$ti]  = $pmin->[$si];
+        $pmax->[$ti]  = $pmax->[$si];
+        $pbc->[$ti]   = $pbc->[$si];
+        $plr->[$ti]   = $plr->[$si];
+        $prb->[$ti]   = $prb->[$si];
+        $pdec->[$ti]  = $pdec->[$si];
+        $over->[$ti]  = $over->[$si]  // 0;
+        $under->[$ti] = $under->[$si] // 0;
+        my $sb = $bins->[$si];
+        $bins->[$ti] = ($sb && @$sb) ? [ @$sb ] : [];
+        $self->_tombstone($si) if $o{drop_source};
+        return;
+    }
+    # Source with no partition: verbatim returns without touching the target.
+    return unless defined $pmin->[$si];
+
+    # ---- union geometry (verbatim) ----------------------------------------
+    my $union_min = $pmin->[$ti] < $pmin->[$si] ? $pmin->[$ti] : $pmin->[$si];
+    my $union_max = $pmax->[$ti] > $pmax->[$si] ? $pmax->[$ti] : $pmax->[$si];
+    my $bpd       = $self->{bpd};
+    my $union_decades   = log($union_max / $union_min) / log(10);
+    my $union_bin_count = int($bpd * $union_decades);
+    $union_bin_count = 1 if $union_bin_count < 1;
+    my $union_log_ratio = log($union_max / $union_min);
+
+    # ---- rebin the target side, natively ----------------------------------
+    if ($pmin->[$ti] != $union_min || $pmax->[$ti] != $union_max || $pbc->[$ti] != $union_bin_count) {
+        my $tp = { min => $pmin->[$ti], max => $pmax->[$ti], bin_count => $pbc->[$ti], log_ratio => $plr->[$ti] };
+        $bins->[$ti] = _remap_span($tp, $bins->[$ti], $union_min, $union_log_ratio, $union_bin_count);
+        # partition_rebin's returned partition: rebins reset to 0, decades from
+        # the union span. Verbatim.
+        $pmin->[$ti] = $union_min;
+        $pmax->[$ti] = $union_max;
+        $pbc->[$ti]  = $union_bin_count;
+        $plr->[$ti]  = $union_log_ratio;
+        $pdec->[$ti] = $union_decades;
+        $prb->[$ti]  = 0;
+    }
+
+    # ---- align the source side, natively ----------------------------------
+    my $src_span;
+    if ($pmin->[$si] != $union_min || $pmax->[$si] != $union_max || $pbc->[$si] != $union_bin_count) {
+        my $sp = { min => $pmin->[$si], max => $pmax->[$si], bin_count => $pbc->[$si], log_ratio => $plr->[$si] };
+        $src_span = _remap_span($sp, $bins->[$si], $union_min, $union_log_ratio, $union_bin_count);
+    } else {
+        $src_span = $bins->[$si];
+    }
+
+    # ---- index-wise add over the occupied span only -----------------------
+    if ($src_span && @$src_span) {
+        my $t = $bins->[$ti];
+        if (!$t || !@$t) {
+            $bins->[$ti] = [ @$src_span ];
+        } else {
+            my ($tb, $sb) = ($t->[0], $src_span->[0]);
+            if ($sb < $tb) {
+                # grow the target leftwards by exactly the overhang
+                splice @$t, 1, 0, (0) x ($tb - $sb);
+                $t->[0] = $sb;
+                $tb = $sb;
+            }
+            for my $j (1 .. $#$src_span) {
+                my $c = $src_span->[$j];
+                next unless defined $c && $c > 0;
+                my $slot = ($sb + $j - 1) - $tb + 1;
+                $t->[$slot] = ($t->[$slot] // 0) + $c;
+            }
+            $_ //= 0 for @$t;   # fill any gap opened by a rightward overhang
+        }
+    }
+    $over->[$ti]  = ($over->[$ti]  // 0) + ($over->[$si]  // 0);
+    $under->[$ti] = ($under->[$ti] // 0) + ($under->[$si] // 0);
+
+    $self->_tombstone($si) if $o{drop_source};
+    return;
+}

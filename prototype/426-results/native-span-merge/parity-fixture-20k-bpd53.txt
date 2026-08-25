@@ -1,0 +1,48 @@
+# perl 5.42.2  bpd=53  mode=parity
+
+## A. Hand-built edge cases (merge target<-source, digest of whole store)
+A1 empty target (source only)                              T=b9c72cae3a5c S=b9c72cae3a5c S2=b9c72cae3a5c  IDENTICAL
+A2 empty source (target only)                              T=067cbbb9cefc S=067cbbb9cefc S2=067cbbb9cefc  IDENTICAL
+A3 both empty                                              T=d41d8cd98f00 S=d41d8cd98f00 S2=d41d8cd98f00  IDENTICAL
+A4 identical geometry, same values                         T=4520bf68eb67 S=4520bf68eb67 S2=4520bf68eb67  IDENTICAL
+A5 disjoint spans (far apart)                              T=ec1aa8a0d6e2 S=ec1aa8a0d6e2 S2=ec1aa8a0d6e2  IDENTICAL
+A6 source entirely inside target                           T=0bcb1333dbbe S=0bcb1333dbbe S2=0bcb1333dbbe  IDENTICAL
+A7 target entirely inside source                           T=b95bbf36db7f S=b95bbf36db7f S2=b95bbf36db7f  IDENTICAL
+A8 union forces rebin (wide src)                           T=c3c80abe1a1e S=c3c80abe1a1e S2=c3c80abe1a1e  IDENTICAL
+A9 union forces rebin (wide tgt)                           T=5197288d5acd S=5197288d5acd S2=5197288d5acd  IDENTICAL
+A10 single sample each                                     T=6ccb6b4b5ab0 S=6ccb6b4b5ab0 S2=6ccb6b4b5ab0  IDENTICAL
+A11 single sample, far apart                               T=4fd44edfb55d S=4fd44edfb55d S2=4fd44edfb55d  IDENTICAL
+A12 many identical values                                  T=8eaa9d04103c S=8eaa9d04103c S2=8eaa9d04103c  IDENTICAL
+A13 drop_source                                            T=183b4e0db09d S=183b4e0db09d S2=183b4e0db09d  IDENTICAL
+A14 12-decade target                                       T=164cbf04fa41 S=164cbf04fa41 S2=164cbf04fa41  IDENTICAL
+A15 exact powers of ten                                    T=ca4471c64923 S=ca4471c64923 S2=ca4471c64923  IDENTICAL
+A16 tiny spread (all one bin)                              T=1bb85968ad58 S=1bb85968ad58 S2=1bb85968ad58  IDENTICAL
+A17 source after target extend                             T=8ef5d9ed2cac S=8ef5d9ed2cac S2=8ef5d9ed2cac  IDENTICAL
+A18 both after extends                                     T=5639b01f43fb S=5639b01f43fb S2=5639b01f43fb  IDENTICAL
+
+## A19-A21. Post-merge behaviour (adds and chains after a merge)
+A19 merge, drop source, then add (extend after rebin)      T=9bfd67a56a06 S=9bfd67a56a06 S2=9bfd67a56a06  IDENTICAL
+A20 chained fold of 20 keys into one                       T=be35328843b1 S=be35328843b1 S2=be35328843b1  IDENTICAL
+A21 ALIASING PROBE: adopt, then add to both keys           T=c6f0afcb055c S=b782feea4cb2 S2=b782feea4cb2  *** DIVERGENT ***
+    full T  : c6f0afcb055c25eefcaf05525fc907c9
+    full S  : b782feea4cb2eed7d895312970f56140
+    full S2 : b782feea4cb2eed7d895312970f56140
+    TGT p50/p99 : T=30.2783/50.9973  S=20.4796/50.9973  S2=20.4796/50.9973
+    NOTE: T aliases here (verbatim adopt-by-reference); S and S2 copy.
+# parsed /tmp/ltl-426-fixtures/bin-twxdur-full.log: lines=20001 matched=20000 positive=20000 samples=20000
+
+## B. Consecutive-pair merges on the fixture
+#   T   merges=1  keys_after=19927  N=20000
+#   S   merges=1  keys_after=19927  N=20000
+#   S2  merges=1  keys_after=19927  N=20000
+B pair merges (400 requested)                              T=8a52416b746d S=8a52416b746d S2=8a52416b746d  IDENTICAL
+#   N conserved across arms: yes (20000)
+
+## C. Full -g fold (every key into the first)
+#   T   merges=19927  min=0.0063245553203367579 max=9486516.7527391221 bins=486 N=20000
+#   S   merges=19927  min=0.0063245553203367579 max=9486516.7527391221 bins=486 N=20000
+#   S2  merges=19927  min=0.0063245553203367579 max=9486516.7527391221 bins=486 N=20000
+C -g fold digest                                           T=d867ef5ecd2e S=d867ef5ecd2e S2=d867ef5ecd2e  IDENTICAL
+C fold percentiles (7 quantiles)                           IDENTICAL
+
+## PARITY RESULT: FAIL (1 divergence(s))

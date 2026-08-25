@@ -1,0 +1,104 @@
+bin-model scenarios in /Users/gregeva/Documents/GitHub/logtimeline/.claude/worktrees/426-per-message-statistics-store/prototype/../tests/statistics-drift/scenarios.tsv: 5
+  apache-bin-data-model
+  tomcat-bin-data-model
+  tomcat-heatmap-bin
+  thingworx-bin-data-model
+  codebeamer-bin-data-model
+message-stats bpd under test: 53
+
+=== apache-bin-data-model ===
+  file            logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log
+  format          access   keys 55 (compared 55)   observations 675
+  cells compared  605  (55 keys x 11 quantiles)
+  classification against today's values (compare-statistics-drift.pl tiers):
+    T1       309   51.07%
+    T2       164   27.11%
+    T3       132   21.82%   <-- BLOCKING in validate-statistics.sh
+  worst deviation 3.8923% at quantile p1
+  vs the exact oracle: G closer 142 (23.47%)  further 154 (25.45%)  tie 309
+  per-quantile T3 rate:
+    p1       34.55%  (19 of 55)
+    p5       32.73%  (18 of 55)
+    p10      41.82%  (23 of 55)
+    p25      38.18%  (21 of 55)
+    p50      27.27%  (15 of 55)
+    p75      21.82%  (12 of 55)
+    p90      25.45%  (14 of 55)
+    p95      18.18%  (10 of 55)
+    p99       0.00%  (0 of 55)
+    p999      0.00%  (0 of 55)
+    p9999     0.00%  (0 of 55)
+
+=== tomcat-bin-data-model ===
+  file            logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt
+  format          access   keys 3074 (compared 3074)   observations 575800
+  cells compared  33814  (3074 keys x 11 quantiles)
+  classification against today's values (compare-statistics-drift.pl tiers):
+    T1     24796   73.33%
+    T2      3649   10.79%
+    T3      5369   15.88%   <-- BLOCKING in validate-statistics.sh
+  worst deviation 4.1625% at quantile p75
+  vs the exact oracle: G closer 1907 (5.64%)  further 7111 (21.03%)  tie 24796
+  per-quantile T3 rate:
+    p1       16.07%  (494 of 3074)
+    p5       17.34%  (533 of 3074)
+    p10      19.94%  (613 of 3074)
+    p25      34.52%  (1061 of 3074)
+    p50      34.09%  (1048 of 3074)
+    p75      22.77%  (700 of 3074)
+    p90      12.85%  (395 of 3074)
+    p95       8.88%  (273 of 3074)
+    p99       6.05%  (186 of 3074)
+    p999      2.15%  (66 of 3074)
+    p9999     0.00%  (0 of 3074)
+
+=== tomcat-heatmap-bin ===
+  file            logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt
+  format          access   keys 3074 (compared 3074)   observations 575800
+  cells compared  33814  (3074 keys x 11 quantiles)
+  classification against today's values (compare-statistics-drift.pl tiers):
+    T1     24796   73.33%
+    T2      3649   10.79%
+    T3      5369   15.88%   <-- BLOCKING in validate-statistics.sh
+  worst deviation 4.1625% at quantile p75
+  vs the exact oracle: G closer 1907 (5.64%)  further 7111 (21.03%)  tie 24796
+  per-quantile T3 rate:
+    p1       16.07%  (494 of 3074)
+    p5       17.34%  (533 of 3074)
+    p10      19.94%  (613 of 3074)
+    p25      34.52%  (1061 of 3074)
+    p50      34.09%  (1048 of 3074)
+    p75      22.77%  (700 of 3074)
+    p90      12.85%  (395 of 3074)
+    p95       8.88%  (273 of 3074)
+    p99       6.05%  (186 of 3074)
+    p999      2.15%  (66 of 3074)
+    p9999     0.00%  (0 of 3074)
+
+=== thingworx-bin-data-model ===
+  file            logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log
+  format          twx   keys 3419 (compared 3419)   observations 122798
+  cells compared  37609  (3419 keys x 11 quantiles)
+  classification against today's values (compare-statistics-drift.pl tiers):
+    T1     16480   43.82%
+    T2      9220   24.52%
+    T3     11909   31.67%   <-- BLOCKING in validate-statistics.sh
+  worst deviation 4.5191% at quantile p95
+  vs the exact oracle: G closer 8959 (23.82%)  further 12170 (32.36%)  tie 16480
+  per-quantile T3 rate:
+    p1       18.22%  (623 of 3419)
+    p5       25.80%  (882 of 3419)
+    p10      43.84%  (1499 of 3419)
+    p25      57.39%  (1962 of 3419)
+    p50      58.79%  (2010 of 3419)
+    p75      60.34%  (2063 of 3419)
+    p90      43.55%  (1489 of 3419)
+    p95      38.23%  (1307 of 3419)
+    p99       2.16%  (74 of 3419)
+    p999      0.00%  (0 of 3419)
+    p9999     0.00%  (0 of 3419)
+
+NOT COVERED codebeamer-bin-data-model (this prototype's verbatim parsers do not read this
+                              format's bracketed duration; ltl reads it via the
+                              format registry. Not an ltl finding.)
+TSV: prototype/426-results/v8-rebless/rebless-bpd53.tsv

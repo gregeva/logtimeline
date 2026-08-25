@@ -1,0 +1,5 @@
+scenario	logfile	bpd	keys	cells	T1	T2	T3	worst_dev	worst_q	closer	further	tie
+apache-bin-data-model	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	53	55	605	309	164	132	3.89227158064406	p1	142	154	309
+tomcat-bin-data-model	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	53	3074	33814	24796	3649	5369	4.1624833334362	p75	1907	7111	24796
+tomcat-heatmap-bin	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	53	3074	33814	24796	3649	5369	4.1624833334362	p75	1907	7111	24796
+thingworx-bin-data-model	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	53	3419	37609	16480	9220	11909	4.5191378245223	p95	8959	12170	16480

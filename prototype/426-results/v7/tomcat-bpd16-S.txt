@@ -1,0 +1,4 @@
+# V7 bucket-stats surface — file=logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt bpd=16 bucket_size=20000
+input: format=access lines=761698 matched=761698 positive=575800 zero=185898 no_duration=0 unparsed=0
+buckets: count=29 total_N=575800  N per bucket: min=15800 p50=20000 p95=20000 max=20000
+
