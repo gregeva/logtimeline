@@ -1199,6 +1199,31 @@ Recorded here as they were produced; the per-aspect reports carry the tables.
   S2 is 5.0× faster than T where S was 1.9× slower. The 21st case is the aliasing probe
   (F40), which exercises a state ltl does not reach.
 
+- **F52 — the prior stage's small-scale RSS figures measured allocator slack, and the
+  sign inverts with scale.** RSS minus `Devel::Size`, bytes per key: at 51,469 keys the
+  span-only arms read **negative** (S −357, G −402) — their stores fit inside memory the
+  interpreter had already mapped, so the RSS delta was measuring slack rather than the
+  store. At 286,659 keys the gap is firmly positive for every arm (T +532, S +328,
+  G +248). Consequence: **the `Devel::Size` projections from 51,469 keys held at fan-out
+  (−12% to +19%) while the RSS projections failed badly (+68% to +385%)** — the opposite
+  of what the "RSS is the measure of record" rule would suggest in isolation. Both rules
+  survive together only when stated precisely: **RSS is the measure of record, but only
+  measured at the scale being claimed, one arm per process** — never projected from a
+  smaller store, and never read from a process that built more than one arm (F53).
+
+- **F53 — a multi-arm process cannot yield valid per-arm RSS.** In one process building
+  all three arms, S's RSS delta reads 262.7 MB and G's 139.3 MB against 382.8 MB and
+  263.9 MB in their own processes: the second and third arms reuse pages the first one
+  freed. Only one-arm-per-process RSS deltas are valid, and any table mixing them is
+  wrong by up to 47%.
+
+- **F54 — RSS exceeds `Devel::Size` on every arm, surface and bpd measured, by 12.6–40.6%,
+  and the gap fraction is largest where the store is smallest** (Tomcat bpd 53: S 40.6%,
+  G 39.3%; fan-out bpd 53: T 18.4%). So `Devel::Size` systematically understates a
+  compact store's real footprint more than it understates a large one — which cuts
+  *against* the compact arms in the honest accounting, and is why both columns are
+  reported side by side rather than either alone.
+
 - **F47 — the merge parity extends to every merge shape, and S's only divergence from T
   is cost.** Rollup (many keys into one target), maximally disjoint pairs, merge depth and
   order permutations: T and S digests are identical at both bpd on both fixtures,
