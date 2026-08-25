@@ -1199,6 +1199,18 @@ Recorded here as they were produced; the per-aspect reports carry the tables.
   S2 is 5.0× faster than T where S was 1.9× slower. The 21st case is the aliasing probe
   (F40), which exercises a state ltl does not reach.
 
+- **F44 — `counter_memory_bytes` is not deterministic across runs of real ltl, while
+  every other locked D8 field is.** Three identical invocations of ltl on the same file
+  emit identical `partition_count` (2,514), `total_rebin_events` (15),
+  `max_partition_bins` (397) and `rebins_per_partition`, but `counter_memory_bytes` moved
+  between **5,988,852 and 6,149,748 — a 2.7% spread on byte-identical input**. The field
+  is `Devel::Size::total_size($store)` over a hash-backed store, and Perl's per-process
+  hash seed changes the bucket allocation. Two consequences: **(a)** a `-V` diff against
+  ltl must mask that one field (the prototype already does, and the prior stage's
+  byte-identical claims were made with it masked — F44 confirms the masking is necessary,
+  not merely convenient); **(b)** it independently justifies the audit's rule that **RSS
+  is the memory measure of record and `Devel::Size` is reported only alongside it**.
+
 - **F42 — S populates every locked Decision 8 `-V` field identically to T; six go inert
   under G.** Probed rather than asserted (`prototype/426-n7-field-census.pl` asks each
   arm's own store for a populable source per field, on a live store). S: all ten fields
