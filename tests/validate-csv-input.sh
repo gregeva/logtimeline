@@ -19,6 +19,13 @@ LTL="$(cd "$SCRIPT_DIR/.." && pwd)/ltl"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+# shellcheck source=lib/colour-env.sh
+source "$SCRIPT_DIR/lib/colour-env.sh"
+
+# Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
+# against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
+# never inherited; issue #438).
+neutralize_colour_env
 
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT

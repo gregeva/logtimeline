@@ -28,6 +28,13 @@ EXPLAIN_MD="$REPO_DIR/docs/explain/statistics.md"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+# shellcheck source=lib/colour-env.sh
+source "$SCRIPT_DIR/lib/colour-env.sh"
+
+# Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
+# against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
+# never inherited; issue #438).
+neutralize_colour_env
 
 # Temp dir for captured outputs (HARNESS-DESIGN.md Trap 10).
 TMP_DIR=$(mktemp -d)
@@ -700,7 +707,7 @@ scenario_table_border_alignment() {
         # apples-to-apples.
         local raw="$TMP_DIR/border-align-$topic.raw"
         set +e
-        FORCE_COLOR=1 "$LTL" --explain "$topic" > "$raw" 2>"$raw.stderr"
+        with_ansi_colour "$LTL" --explain "$topic" > "$raw" 2>"$raw.stderr"
         set -e
         check_stderr_warnings "$raw.stderr"
 
@@ -847,7 +854,7 @@ scenario_ascii_and_ansi_modes() {
     echo "[$current_scenario]"
     local out_ascii="$TMP_DIR/mode-ascii.raw"
     set +e
-    NO_COLOR=1 "$LTL" --explain mean > "$out_ascii" 2>"$out_ascii.stderr"
+    with_ascii_colour "$LTL" --explain mean > "$out_ascii" 2>"$out_ascii.stderr"
     set -e
     check_stderr_warnings "$out_ascii.stderr"
 
@@ -893,7 +900,7 @@ scenario_ascii_and_ansi_modes() {
     echo "[$current_scenario]"
     local out_ansi="$TMP_DIR/mode-ansi.raw"
     set +e
-    FORCE_COLOR=1 "$LTL" --explain mean > "$out_ansi" 2>"$out_ansi.stderr"
+    with_ansi_colour "$LTL" --explain mean > "$out_ansi" 2>"$out_ansi.stderr"
     set -e
     check_stderr_warnings "$out_ansi.stderr"
 

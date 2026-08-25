@@ -57,6 +57,14 @@ source "$SCRIPT_DIR/lib/logs-dir.sh"
 # shellcheck source=lib/csv-cache.sh
 source "$SCRIPT_DIR/lib/csv-cache.sh"
 
+# shellcheck source=lib/colour-env.sh
+source "$SCRIPT_DIR/lib/colour-env.sh"
+
+# Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
+# against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
+# never inherited; issue #438).
+neutralize_colour_env
+
 # End-of-run cleanup runs only when standalone (CI unset).
 trap csv_cache_maybe_cleanup EXIT
 
