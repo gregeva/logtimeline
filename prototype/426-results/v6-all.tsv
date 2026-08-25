@@ -1,0 +1,91 @@
+file	bpd	geometry	arm	bins	mass	mass_exact	mass_retention	peak	peak_exact	peak_retention	peak_col	peak_col_exact	peak_x_offset	empty_cells	empty_exact	cells_differ	abs_dev	abs_dev_pct	max_cell_dev	overflow	underflow
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	115	heatmap	T	52	122798	122798	1	27896	27896	1	8	8	0	2	2	30	486	0.395771918109415	57	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	115	heatmap	S	52	122798	122798	1	27896	27896	1	8	8	0	2	2	30	486	0.395771918109415	57	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	115	heatmap	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	28	1272	1.03584748937279	174	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	115	histogram	T	42	122798	122798	1	32803	32803	1	6	6	0	1	1	23	948	0.771999543966514	208	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	115	histogram	S	42	122798	122798	1	32803	32803	1	6	6	0	1	1	23	948	0.771999543966514	208	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	115	histogram	G	42	122798	122798	1	32803	32803	1	6	6	0	1	1	27	1708	1.39090213195655	480	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	115	heatmap-keyed	T	52	122798	122798	1	27896	27896	1	8	8	0	1	2	36	8524	6.94148113161452	4082		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	115	heatmap-keyed	S	52	122798	122798	1	27896	27896	1	8	8	0	1	2	36	8524	6.94148113161452	4082		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	115	heatmap-keyed	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	28	1272	1.03584748937279	174		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	256	heatmap	T	52	122798	122798	1	27896	27896	1	8	8	0	2	2	23	354	0.288278310721673	94	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	256	heatmap	S	52	122798	122798	1	27896	27896	1	8	8	0	2	2	23	354	0.288278310721673	94	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	256	heatmap	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	18	400	0.32573820420528	132	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	256	histogram	T	42	122798	122798	1	32803	32803	1	6	6	0	1	1	17	232	0.188928158439063	34	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	256	histogram	S	42	122798	122798	1	32803	32803	1	6	6	0	1	1	17	232	0.188928158439063	34	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	256	histogram	G	42	122798	122798	1	32803	32803	1	6	6	0	1	1	15	236	0.192185540481115	97	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	256	heatmap-keyed	T	52	122798	122798	1	27896	27896	1	8	8	0	1	2	29	492	0.400657991172495	120		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	256	heatmap-keyed	S	52	122798	122798	1	27896	27896	1	8	8	0	1	2	29	492	0.400657991172495	120		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	256	heatmap-keyed	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	18	400	0.32573820420528	132		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	53	heatmap	T	52	122798	122798	1	27896	27896	1	8	8	0	2	2	35	1692	1.37787260378834	332	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	53	heatmap	S	52	122798	122798	1	27896	27896	1	8	8	0	2	2	35	1692	1.37787260378834	332	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	53	heatmap	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	28	2008	1.63520578511051	250	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	53	histogram	T	42	122798	122798	1	32803	32803	1	6	6	0	1	1	29	1156	0.94138341015326	158	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	53	histogram	S	42	122798	122798	1	32803	32803	1	6	6	0	1	1	29	1156	0.94138341015326	158	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	53	histogram	G	42	122798	122798	1	32803	32803	1	6	6	0	1	1	30	3610	2.93978729295265	703	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	53	heatmap-keyed	T	52	122798	122798	1	27894	27896	0.999928305133352	8	8	0	1	2	41	26312	21.4270590726233	11870		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	53	heatmap-keyed	S	52	122798	122798	1	27894	27896	0.999928305133352	8	8	0	1	2	41	26312	21.4270590726233	11870		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	53	heatmap-keyed	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	28	2008	1.63520578511051	250		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	616	heatmap	T	52	122798	122798	1	27896	27896	1	8	8	0	2	2	17	362	0.294793074805779	143	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	616	heatmap	S	52	122798	122798	1	27896	27896	1	8	8	0	2	2	17	362	0.294793074805779	143	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	616	heatmap	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	19	358	0.291535692763726	132	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	616	histogram	T	42	122798	122798	1	32803	32803	1	6	6	0	1	1	14	86	0.0700337139041353	16	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	616	histogram	S	42	122798	122798	1	32803	32803	1	6	6	0	1	1	14	86	0.0700337139041353	16	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	616	histogram	G	42	122798	122798	1	32803	32803	1	6	6	0	1	1	16	118	0.0960927702405577	34	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	616	heatmap-keyed	T	52	122798	122798	1	27896	27896	1	8	8	0	2	2	23	316	0.257333181322171	77		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	616	heatmap-keyed	S	52	122798	122798	1	27896	27896	1	8	8	0	2	2	23	316	0.257333181322171	77		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	616	heatmap-keyed	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	19	358	0.291535692763726	132		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap	T	52	122798	122798	1	27896	27896	1	8	8	0	2	2	36	40696	33.1406048958452	19926	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap	S	52	122798	122798	1	27896	27896	1	8	8	0	2	2	36	40696	33.1406048958452	19926	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	33	40822	33.2432124301699	19926	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	histogram	T	42	122798	122798	1	32803	32803	1	6	6	0	1	1	27	2226	1.81273310640238	484	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	histogram	S	42	122798	122798	1	32803	32803	1	6	6	0	1	1	27	2226	1.81273310640238	484	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	histogram	G	42	122798	122798	1	32803	32803	1	6	6	0	1	1	25	1764	1.43650548054529	480	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap-keyed	T	52	122798	122798	1	27870	27896	0.999067966733582	8	8	0	1	2	36	9922	8.07993615531198	4597		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap-keyed	S	52	122798	122798	1	27870	27896	0.999067966733582	8	8	0	1	2	36	9922	8.07993615531198	4597		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap-keyed	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	33	40822	33.2432124301699	19926		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	115	heatmap	T	52	575800	575800	1	289806	289806	1	0	0	0	7	7	23	8656	1.50329975686002	2229	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	115	heatmap	S	52	575800	575800	1	289806	289806	1	0	0	0	7	7	23	8656	1.50329975686002	2229	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	115	heatmap	G	52	575800	575800	1	289806	289806	1	0	0	0	7	7	6	356	0.0618270232719694	176	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	115	histogram	T	36	575800	575800	1	289806	289806	1	0	0	0	3	3	14	49962	8.67697117054533	24382	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	115	histogram	S	36	575800	575800	1	289806	289806	1	0	0	0	3	3	14	49962	8.67697117054533	24382	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	115	histogram	G	36	575800	575800	1	289806	289806	1	0	0	0	3	3	15	2872	0.498784300104203	925	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	115	heatmap-keyed	T	52	575800	575800	1	289806	289806	1	0	0	0	8	7	31	11714	2.03438693990969	3698		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	115	heatmap-keyed	S	52	575800	575800	1	289806	289806	1	0	0	0	8	7	31	11714	2.03438693990969	3698		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	115	heatmap-keyed	G	52	575800	575800	1	289806	289806	1	0	0	0	7	7	6	356	0.0618270232719694	176		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	256	heatmap	T	52	575800	575800	1	289806	289806	1	0	0	0	7	7	17	4420	0.767627648489059	1583	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	256	heatmap	S	52	575800	575800	1	289806	289806	1	0	0	0	7	7	17	4420	0.767627648489059	1583	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	256	heatmap	G	52	575800	575800	1	289806	289806	1	0	0	0	9	7	18	2220	0.385550538381382	674	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	256	histogram	T	36	575800	575800	1	289806	289806	1	0	0	0	3	3	8	174	0.0302188259812435	83	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	256	histogram	S	36	575800	575800	1	289806	289806	1	0	0	0	3	3	8	174	0.0302188259812435	83	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	256	histogram	G	36	575800	575800	1	289806	289806	1	0	0	0	3	3	4	66	0.0114623133032303	33	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	256	heatmap-keyed	T	52	575800	575800	1	289806	289806	1	0	0	0	9	7	27	12122	2.1052448766933	5821		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	256	heatmap-keyed	S	52	575800	575800	1	289806	289806	1	0	0	0	9	7	27	12122	2.1052448766933	5821		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	256	heatmap-keyed	G	52	575800	575800	1	289806	289806	1	0	0	0	9	7	18	2220	0.385550538381382	674		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	53	heatmap	T	52	575800	575800	1	289806	289806	1	0	0	0	8	7	33	29946	5.20076415422022	5875	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	53	heatmap	S	52	575800	575800	1	289806	289806	1	0	0	0	8	7	33	29946	5.20076415422022	5875	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	53	heatmap	G	52	575800	575800	1	289806	289806	1	0	0	0	9	7	33	18010	3.12782216047239	5180	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	53	histogram	T	36	575800	575800	1	289806	289806	1	0	0	0	3	3	18	56256	9.77005904828065	25155	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	53	histogram	S	36	575800	575800	1	289806	289806	1	0	0	0	3	3	18	56256	9.77005904828065	25155	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	53	histogram	G	36	575800	575800	1	289806	289806	1	0	0	0	3	3	19	57456	9.97846474470302	25155	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	53	heatmap-keyed	T	52	575800	575800	1	289806	289806	1	0	0	0	7	7	34	6510	1.13060090309135	702		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	53	heatmap-keyed	S	52	575800	575800	1	289806	289806	1	0	0	0	7	7	34	6510	1.13060090309135	702		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	53	heatmap-keyed	G	52	575800	575800	1	289806	289806	1	0	0	0	9	7	33	18010	3.12782216047239	5180		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	616	heatmap	T	52	575800	575800	1	289806	289806	1	0	0	0	8	7	12	194	0.0336922542549496	89	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	616	heatmap	S	52	575800	575800	1	289806	289806	1	0	0	0	8	7	12	194	0.0336922542549496	89	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	616	heatmap	G	52	575800	575800	1	289806	289806	1	0	0	0	7	7	9	464	0.0805835359499826	211	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	616	histogram	T	36	575800	575800	1	289806	289806	1	0	0	0	3	3	12	426	0.073984022229941	126	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	616	histogram	S	36	575800	575800	1	289806	289806	1	0	0	0	3	3	12	426	0.073984022229941	126	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	616	histogram	G	36	575800	575800	1	289806	289806	1	0	0	0	3	3	2	2	0.000347342827370615	1	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	616	heatmap-keyed	T	52	575800	575800	1	289806	289806	1	0	0	0	7	7	13	1246	0.216394581451893	465		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	616	heatmap-keyed	S	52	575800	575800	1	289806	289806	1	0	0	0	7	7	13	1246	0.216394581451893	465		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	616	heatmap-keyed	G	52	575800	575800	1	289806	289806	1	0	0	0	7	7	9	464	0.0805835359499826	211		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap	T	52	575800	575800	1	289806	289806	1	0	0	0	9	7	33	20408	3.54428621048975	4553	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap	S	52	575800	575800	1	289806	289806	1	0	0	0	9	7	33	20408	3.54428621048975	4553	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap	G	52	575800	575800	1	289806	289806	1	0	0	0	6	7	26	11394	1.97881208753039	1838	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	histogram	T	36	575800	575800	1	289806	289806	1	0	0	0	3	3	18	43836	7.61306009030914	20837	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	histogram	S	36	575800	575800	1	289806	289806	1	0	0	0	3	3	18	43836	7.61306009030914	20837	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	histogram	G	36	575800	575800	1	289806	289806	1	0	0	0	3	3	16	6380	1.10802361931226	2045	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap-keyed	T	52	575800	575800	1	289806	289806	1	0	0	0	6	7	31	16912	2.93713094824592	6388		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap-keyed	S	52	575800	575800	1	289806	289806	1	0	0	0	6	7	31	16912	2.93713094824592	6388		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap-keyed	G	52	575800	575800	1	289806	289806	1	0	0	0	6	7	26	11394	1.97881208753039	1838		

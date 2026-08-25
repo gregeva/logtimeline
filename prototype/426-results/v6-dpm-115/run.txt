@@ -1,0 +1,42 @@
+file            logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log
+format          twx
+lines           122808  matched 122808  positive 122798  unparsed 0
+observations    122798
+bpd             115   (streaming resolution, both T/S and G)
+observed range  [1, 184696]  (5.266 decades)
+N per arm       T=122798 S=122798 G=122798
+T geometry      min=0.5281 max=1.67e+07 bins=862 rebins=1 over=0 under=0
+G geometry      grid indices [0, 605]  span=606
+
+=== heatmap display geometry: bins=52 range [1, 184696] ===
+PART A  T vs S finalized display bins: IDENTICAL (all 52 cells)
+PART B  fidelity against the exact display (122798 observations)
+  arm        mass   mass_ret peak_ret  peak_dx    empty  exact_e   abs_dev%  maxcell
+  T        122798   1.000000   1.0000        0        2        2     0.3958       57
+  S        122798   1.000000   1.0000        0        2        2     0.3958       57
+  G        122798   1.000000   1.0000        0        2        2     1.0358      174
+
+=== histogram display geometry: bins=42 range [1, 184696] ===
+PART A  T vs S finalized display bins: IDENTICAL (all 42 cells)
+PART B  fidelity against the exact display (122798 observations)
+  arm        mass   mass_ret peak_ret  peak_dx    empty  exact_e   abs_dev%  maxcell
+  T        122798   1.000000   1.0000        0        1        1     0.7720      208
+  S        122798   1.000000   1.0000        0        1        1     0.7720      208
+  G        122798   1.000000   1.0000        0        1        1     1.3909      480
+
+=== PART D  per-time-bucket keying: 25 buckets, 5000 lines each, one shared 52-cell display ===
+PART D  T vs S per-bucket finalized cells: IDENTICAL across every bucket
+PART D  distinct T/S partition anchors across the 25 buckets: 13
+        (G uses one global grid anchor by construction — #201 Dimension B)
+PART D  aggregate display (all buckets summed) vs exact:
+  arm        mass   mass_ret peak_ret  peak_dx    empty   abs_dev%  maxcell
+  T        122798   1.000000   1.0000        0        1     6.9415     4082
+  S        122798   1.000000   1.0000        0        1     6.9415     4082
+  G        122798   1.000000   1.0000        0        2     1.0358      174
+PART D  per-bucket deviation from that bucket's exact display (% of its mass):
+  arm     median       p95       max      mean
+  T       0.8800   35.8400   36.0800    7.3108
+  S       0.8800   35.8400   36.0800    7.3108
+  G       1.0800    1.5200    1.5600    1.0484
+
+TSV: prototype/426-results/v6-dpm-115/revalidate-v6.tsv

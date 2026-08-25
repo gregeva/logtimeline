@@ -1,0 +1,42 @@
+file            logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt
+format          access
+lines           761698  matched 761698  positive 575800  unparsed 0
+observations    575800
+bpd             256   (streaming resolution, both T/S and G)
+observed range  [1, 33288]  (4.522 decades)
+N per arm       T=575800 S=575800 G=575800
+T geometry      min=0.173925 max=5.5e+06 bins=1919 rebins=1 over=0 under=0
+G geometry      grid indices [0, 1157]  span=1158
+
+=== heatmap display geometry: bins=52 range [1, 33288] ===
+PART A  T vs S finalized display bins: IDENTICAL (all 52 cells)
+PART B  fidelity against the exact display (575800 observations)
+  arm        mass   mass_ret peak_ret  peak_dx    empty  exact_e   abs_dev%  maxcell
+  T        575800   1.000000   1.0000        0        7        7     0.7676     1583
+  S        575800   1.000000   1.0000        0        7        7     0.7676     1583
+  G        575800   1.000000   1.0000        0        9        7     0.3856      674
+
+=== histogram display geometry: bins=36 range [1, 33288] ===
+PART A  T vs S finalized display bins: IDENTICAL (all 36 cells)
+PART B  fidelity against the exact display (575800 observations)
+  arm        mass   mass_ret peak_ret  peak_dx    empty  exact_e   abs_dev%  maxcell
+  T        575800   1.000000   1.0000        0        3        3     0.0302       83
+  S        575800   1.000000   1.0000        0        3        3     0.0302       83
+  G        575800   1.000000   1.0000        0        3        3     0.0115       33
+
+=== PART D  per-time-bucket keying: 24 buckets, 24000 lines each, one shared 52-cell display ===
+PART D  T vs S per-bucket finalized cells: IDENTICAL across every bucket
+PART D  distinct T/S partition anchors across the 24 buckets: 13
+        (G uses one global grid anchor by construction — #201 Dimension B)
+PART D  aggregate display (all buckets summed) vs exact:
+  arm        mass   mass_ret peak_ret  peak_dx    empty   abs_dev%  maxcell
+  T        575800   1.000000   1.0000        0        9     2.1052     5821
+  S        575800   1.000000   1.0000        0        9     2.1052     5821
+  G        575800   1.000000   1.0000        0        9     0.3856      674
+PART D  per-bucket deviation from that bucket's exact display (% of its mass):
+  arm     median       p95       max      mean
+  T       0.8583    5.4667    5.5583    2.1837
+  S       0.8583    5.4667    5.5583    2.1837
+  G       0.4167    0.6667    0.7667    0.3922
+
+TSV: prototype/426-results/v6-tomcat-256/revalidate-v6.tsv

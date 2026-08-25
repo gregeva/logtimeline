@@ -1,0 +1,10 @@
+file	bpd	geometry	arm	bins	mass	mass_exact	mass_retention	peak	peak_exact	peak_retention	peak_col	peak_col_exact	peak_x_offset	empty_cells	empty_exact	cells_differ	abs_dev	abs_dev_pct	max_cell_dev	overflow	underflow
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap	T	52	122798	122798	1	27896	27896	1	8	8	0	2	2	36	40696	33.1406048958452	19926	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap	S	52	122798	122798	1	27896	27896	1	8	8	0	2	2	36	40696	33.1406048958452	19926	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	33	40822	33.2432124301699	19926	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	histogram	T	42	122798	122798	1	32803	32803	1	6	6	0	1	1	27	2226	1.81273310640238	484	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	histogram	S	42	122798	122798	1	32803	32803	1	6	6	0	1	1	27	2226	1.81273310640238	484	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	histogram	G	42	122798	122798	1	32803	32803	1	6	6	0	1	1	25	1764	1.43650548054529	480	0	0
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap-keyed	T	52	122798	122798	1	27870	27896	0.999067966733582	8	8	0	1	2	36	9922	8.07993615531198	4597		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap-keyed	S	52	122798	122798	1	27870	27896	0.999067966733582	8	8	0	1	2	36	9922	8.07993615531198	4597		
+logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	80	heatmap-keyed	G	52	122798	122798	1	27896	27896	1	8	8	0	2	2	33	40822	33.2432124301699	19926		
