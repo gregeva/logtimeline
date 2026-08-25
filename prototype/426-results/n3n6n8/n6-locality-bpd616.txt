@@ -1,0 +1,6 @@
+=== N6 locality probe: arm T bpd 616 (N=1 per key, one quantile per key) ===
+      keys       RSS_MB    us/eval_med    us/eval_min  us/eval_max
+      5000         75.8        209.633        209.606      210.434
+     20000        227.8        210.532        210.252      210.774
+     80000        910.2        210.560        210.510      210.582
+OK

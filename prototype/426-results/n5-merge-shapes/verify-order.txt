@@ -1,0 +1,6 @@
+off=0: T distinct_canonicals=1 S distinct_canonicals=1 G distinct_canonicals=1 
+off=8: T distinct_canonicals=3 S distinct_canonicals=3 G distinct_canonicals=1 
+off=16: T distinct_canonicals=4 S distinct_canonicals=4 G distinct_canonicals=1 
+off=24: T distinct_canonicals=3 S distinct_canonicals=3 G distinct_canonicals=1 
+off=32: T distinct_canonicals=4 S distinct_canonicals=4 G distinct_canonicals=1 
+off=40: T distinct_canonicals=3 S distinct_canonicals=3 G distinct_canonicals=1 

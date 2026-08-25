@@ -1,0 +1,7 @@
+T distinct_canonicals=4
+S distinct_canonicals=4
+G distinct_canonicals=1
+T d15 q0.5 est=47.0655 exact=46 bins=0.5271 n=461
+T d15 q0.99 est=207.465 exact=209 bins=0.1697 n=461
+G d15 q0.5 est=46.7118 exact=46 bins=0.3534 n=461
+G d15 q0.99 est=209.293 exact=209 bins=0.0322 n=461

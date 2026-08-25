@@ -1,2 +1,9 @@
 === N6 fan-out: arm T bpd 616 ===
 file: /tmp/ltl-426-fixtures/bin-twxdur-full.log
+TERMINATED after 6h30m of 100% CPU (constant 4.5 GB RSS, zero swapouts) without
+completing the timed sweeps. Not reported as a measurement.
+Controlled probes (n6-locality-bpd53.txt / n6-locality-bpd616.txt) put arm T at
+~20.6 us/eval at bpd 53 and ~210.5 us/eval at bpd 616, flat in key count to
+200k / 80k keys respectively, which predicts ~12 min for this cell's 4 x 859,977
+evaluations. The 32x discrepancy against that prediction is unexplained by the
+probes and is recorded as an open question, not as a result.

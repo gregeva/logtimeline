@@ -1199,6 +1199,50 @@ Recorded here as they were produced; the per-aspect reports carry the tables.
   S2 is 5.0× faster than T where S was 1.9× slower. The 21st case is the aliasing probe
   (F40), which exercises a state ltl does not reach.
 
+- **F47 — the merge parity extends to every merge shape, and S's only divergence from T
+  is cost.** Rollup (many keys into one target), maximally disjoint pairs, merge depth and
+  order permutations: T and S digests are identical at both bpd on both fixtures,
+  including the order-dependence counts and every error distribution. P8+P9 carry the
+  production merge semantics exactly in shapes the prior stage never tested; the dense-view
+  round trip made S 1.4–2.0× slower per merge, which is what the native span merge (F41)
+  removes.
+
+- **F48 — the one-bin breach is a merge-DEPTH effect, not a disjointness effect.** A
+  *single* merge of two maximally disjoint keys (gaps to 4.84 decades, union geometry to
+  6,068 bins) stays within one bin on 3,999 of 4,000 evaluations (worst 1.0008). It is
+  *successive* merges that break the bound, because each remap re-projects
+  already-remapped counts by geometric midpoint and the displacement compounds. This
+  sharpens the attribution behind proposed amendment A4.
+
+- **F49 — G's merge-cost advantage widens with union width, to three orders of
+  magnitude.** Per merge, G against T: 0.96 vs 53.8 µs (56×) at bpd 53 on the fan-out
+  fixture; 1.24 vs 589.7 µs (**475×**) at bpd 616; on disjoint pairs 81× to **745×**.
+  T's per-merge cost scales with the union `bin_count` (461 → 5,358 slots from bpd 53 to
+  616 gives 53.8 → 589.7 µs); G's scales with occupied span, which is far smaller and
+  grows sub-linearly. Under the rollup shape G is also *more accurate* than T (p50 error
+  0.08–0.11 bins against 0.09–0.47, max 0.60–0.99 against 0.52–1.41), so on that shape
+  it is not a speed/accuracy trade at all.
+
+- **F50 — several locked `-V` fields have no discriminating power as parity assertions,
+  because they are constant in shipped ltl.** `counter_update`'s own header records that
+  the over/underflow counters are unreachable without a growth cap — the extend-and-reassign
+  path always succeeds — so `percentile` never takes its `'low'`/`'high'` exits from a
+  streaming store. Every ltl run captured (default sort, `-so p99`, and `-o`) emits twelve
+  `none`. Forcing the audit at all required the library's `max_rebins` hook. So
+  `partitions_with_overflow_count`, `partitions_with_underflow_count` and
+  `out_of_range_bounded` pass trivially for T *and* S; **the fields that actually
+  discriminate are `partition_count`, `total_rebin_events`, `max_partition_bins` and
+  `rebins_per_partition`** — all four exact for S. A harness asserting only on the
+  constant fields would be asserting on invariants, not on agreement.
+
+- **F51 — `percentiles_emitted` is a static table and must be reproduced as one.**
+  `emit_bin_counter_mode_verbose` reads a hardcoded per-consumer list, while
+  `calculate_statistics_bin` derives a demand-narrowed ladder (terminal_core alone when
+  `csv_body` and `extended` are both off). ltl printed the full twelve in every run,
+  including runs where only four quantiles were actually computed. A replacement must emit
+  the **static** list, not the derived one, or it will diverge on a field that never
+  depended on the store.
+
 - **F45 — today's shipped merge is order-dependent, and the dependence is the common
   case, not the corner case.** Merging the same key set in different orders
   (`prototype/426-results/n5-merge-shapes/`, 25 groups × 8 keys × 4 permutations):
