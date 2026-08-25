@@ -1,0 +1,36 @@
+file=/tmp/ltl-426-fixtures/bin-dpm-full.log bs=2000 bpd=16 buckets=62  bin_width=1.154782
+arm      lo_max_gap     lo_med_gap     hi_max_gap     hi_med_gap
+T          1.145155       1.071333       1.152896       1.065130
+S          1.145155       1.071333       1.152896       1.065130
+G          1.117270       1.083744       1.147144       1.074760
+
+file=/tmp/ltl-426-fixtures/bin-dpm-full.log bs=2000 bpd=53 buckets=62  bin_width=1.044403
+arm      lo_max_gap     lo_med_gap     hi_max_gap     hi_med_gap
+T          1.037030       1.014983       1.045830       1.019195
+S          1.037030       1.014983       1.045830       1.019195
+G          1.040265       1.026194       1.042968       1.022267
+
+file=/tmp/ltl-426-fixtures/bin-dpm-full.log bs=2000 bpd=616 buckets=62  bin_width=1.003745
+arm      lo_max_gap     lo_med_gap     hi_max_gap     hi_med_gap
+T          1.002423       1.000875       1.003983       1.001462
+S          1.002423       1.000875       1.003983       1.001462
+G          1.001453       1.001244       1.003728       1.001589
+
+file=logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt bs=20000 bpd=16 buckets=29  bin_width=1.154782
+arm      lo_max_gap     lo_med_gap     hi_max_gap     hi_med_gap
+T          1.136384       1.071616       1.147557       1.080125
+S          1.136384       1.071616       1.147557       1.080125
+G          0.000000       0.000000       1.152357       1.128445
+
+file=logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt bs=20000 bpd=53 buckets=29  bin_width=1.044403
+arm      lo_max_gap     lo_med_gap     hi_max_gap     hi_med_gap
+T          1.037941       1.013563       1.040525       1.026535
+S          1.037941       1.013563       1.040525       1.026535
+G          0.000000       0.000000       1.042285       1.035832
+
+file=logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt bs=20000 bpd=616 buckets=29  bin_width=1.003745
+arm      lo_max_gap     lo_med_gap     hi_max_gap     hi_med_gap
+T          1.003431       1.001730       1.002741       1.000852
+S          1.003431       1.001730       1.002741       1.000852
+G          0.000000       0.000000       1.001739       1.001663
+

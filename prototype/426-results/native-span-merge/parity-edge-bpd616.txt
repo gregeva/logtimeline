@@ -29,20 +29,5 @@ A21 ALIASING PROBE: adopt, then add to both keys           T=098d77a72f15 S=aba2
     full S2 : aba22dfaa07f364578e9da52dbc60d58
     TGT p50/p99 : T=30.0105/50.0813  S=20.0423/50.0813  S2=20.0423/50.0813
     NOTE: T aliases here (verbatim adopt-by-reference); S and S2 copy.
-# parsed /tmp/ltl-426-fixtures/bin-twxdur-full.log: lines=50001 matched=50000 positive=50000 samples=50000
-
-## B. Consecutive-pair merges on the fixture
-#   T   merges=5000  keys_after=44843  N=50000
-#   S   merges=5000  keys_after=44843  N=50000
-#   S2  merges=5000  keys_after=44843  N=50000
-B pair merges (5000 requested)                             T=6c78f00ae480 S=6c78f00ae480 S2=6c78f00ae480  IDENTICAL
-#   N conserved across arms: yes (50000)
-
-## C. Full -g fold (every key into the first)
-#   T   merges=49842  min=0.003162277660168379 max=9486832.9805051386 bins=5837 N=50000
-#   S   merges=49842  min=0.003162277660168379 max=9486832.9805051386 bins=5837 N=50000
-#   S2  merges=49842  min=0.003162277660168379 max=9486832.9805051386 bins=5837 N=50000
-C -g fold digest                                           T=3568616d5ef6 S=3568616d5ef6 S2=3568616d5ef6  IDENTICAL
-C fold percentiles (7 quantiles)                           IDENTICAL
 
 ## PARITY RESULT: FAIL (1 divergence(s))

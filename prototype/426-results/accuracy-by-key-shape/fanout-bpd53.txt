@@ -1,0 +1,7 @@
+band                           cells T mean err G mean err G closer G further
+N<10 / spread<0.1dec          573026    0.0000%    0.0000%        0        0
+N<10 / spread<1dec               184    0.9372%    0.8754%       44       36
+N<10 / spread>=1dec               88    1.0121%    1.0127%       19       24
+N<100 / spread<1dec                2    2.1491%    1.0441%        1        0
+N<100 / spread>=1dec              16    1.4606%    1.0149%        8        4
+N<1000 / spread>=1dec              2    0.3516%    0.2594%        2        0
