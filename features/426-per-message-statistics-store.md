@@ -1040,7 +1040,8 @@ make it impossible to *prove* a container change is safe from the harness suite 
   which is the **default**, has no byte-level coverage at all.
 
 Both are pre-existing gaps, not #426's creation — but a container change lands on
-precisely them.
+precisely them. **Filed as #450** (2026-08-25) and kept out of #426's scope, so a
+data-model change does not absorb independent test-coverage work.
 
 ---
 
@@ -1147,6 +1148,9 @@ computed, and that distinction is re-recorded here when it does.
   (`features/287-message-stats-bin-counter-data-model.md`) owns the per-message bin
   data model this store replaces.
 - **#323 — dynamic bins-per-decade** (on hold). Same distribution evidence.
+- **#450 — the shipped bin-model display renders and the `-g` × `-mdm bin` merge path
+  are asserted by nothing.** Found by this issue's pre-prototype audit; pre-existing and
+  out of scope here, but they are the two harness gaps a container change lands on.
 - **#428 — `-so mean_bytes` / `-so count_mean` rank nothing** (F8). Found during this
   survey; independent of the store's representation. A compact store with a declared
   column set would surface this defect class mechanically.
