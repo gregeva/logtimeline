@@ -24,15 +24,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="$REPO_DIR/ltl"
 USAGE_MD="$REPO_DIR/docs/usage.md"
 # Test log: tiny clean access log (~83 KB). Per repo memory
 # (feedback_test_logs.md) avoid the corrupt 2025-03-21 file; Codebeamer's
 # log is the smallest clean fixture available.
-TEST_LOG="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
+TEST_LOG="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 
 # Temp dir for captured outputs; cleaned up on EXIT (HARNESS-DESIGN.md Trap 10).
 TMP_DIR=$(mktemp -d)
@@ -276,7 +280,7 @@ HELP_SHORTS_FILE="$TMP_DIR/help-shorts.txt"
 # Pin terminal width for deterministic capture (matches validate-help-layout.sh).
 # HARNESS-DESIGN.md Trap 1: preserve stderr, check exit code.
 set +e
-"$LTL" --disable-progress --terminal-width 160 --help > "$HELP_OUT" 2>"$TMP_DIR/help.stderr"
+"$LTL" --disable-progress -ni --terminal-width 160 --help > "$HELP_OUT" 2>"$TMP_DIR/help.stderr"
 help_ec=$?
 set -e
 if [[ "$help_ec" -ne 0 ]]; then
@@ -343,7 +347,7 @@ scenario_D_dash_v_matches_version_number() {
 
     local vout="$TMP_DIR/dash-v.txt"
     set +e
-    "$LTL" --disable-progress -v > "$vout" 2>"$vout.stderr"
+    "$LTL" --disable-progress -ni -v > "$vout" 2>"$vout.stderr"
     local ec=$?
     set -e
     check_stderr_warnings "$vout.stderr" "$current_scenario"
@@ -372,7 +376,9 @@ scenario_E_benchmark_data_section_matches_version_number() {
 
     local bout="$TMP_DIR/benchmark-data.txt"
     set +e
-    "$LTL" --disable-progress -V benchmark-data "$TEST_LOG" > "$bout" 2>"$bout.stderr"
+    # Shape: only the section's version field is read (HARNESS-DESIGN.md
+    # section Invocation coherence).
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum -V benchmark-data "$TEST_LOG" > "$bout" 2>"$bout.stderr"
     local ec=$?
     set -e
     check_stderr_warnings "$bout.stderr" "$current_scenario"

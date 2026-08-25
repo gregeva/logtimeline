@@ -11,16 +11,16 @@
  2025-04-10 06:00 ERROR: 23 498 WARN: 4474 4 INFO: 1  0.2:41.7/m │ ████████████████████   31.5m    16.4 K │ █  ██ █|█████ ████████████████████|████|██| ██    ██
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────┴─1ms───────14ms─────────244ms────────4.3s────────1.5m
 
-command-line options: --disable-progress -n 1 -dm raw --terminal-width 160 -hm duration -hdmin 963 
+command-line options: --disable-progress -ni -n 1 -dm raw --terminal-width 160 -hm duration -hdmin 963 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-04-10 06:00 and 2025-04-10 06:07
   ─────────────────────────────────────────   
-  ERROR                                  23      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs/T...tomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log
+  ERROR                                  23      [√] logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log                            [1]
   WARN-HL                               498   
-  WARN                                 4474   
+  WARN                                 4474      Log Formats
   INFO-HL                                 4   
-  INFO                                    1   
+  INFO                                    1      1 thingworx_standard
   ─────────────────────────────────────────   
   HIGHLIGHTED                           502   
   LINES INCLUDED                       5000   

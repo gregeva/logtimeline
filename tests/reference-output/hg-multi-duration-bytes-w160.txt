@@ -61,5 +61,5 @@
 
                 P50: 47.1s   P90: 9m   P95: 22m   P99: 1.5h   P99.9: 2h                         P50: 3 KiB   P99: 10.2 KiB   P99.9: 163.6 KiB           
 
-command-line options: --disable-progress -osum -n 1 -dm raw --terminal-width 160 -hg duration,bytes 
+command-line options: --disable-progress -ni -osum -n 1 -dm raw --terminal-width 160 -hg duration,bytes 
 

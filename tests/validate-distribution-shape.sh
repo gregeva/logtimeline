@@ -31,6 +31,9 @@
 # anchor supplies BC well above 0.555. Normal and bimodal bracket the
 # threshold cleanly.
 #
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# every anchor line carries one timestamp, so the run is a single bucket
+# by construction; the MESSAGES CSV shape columns are the subject.
 # Usage:
 #   ./tests/validate-distribution-shape.sh                 # all anchors
 #   ./tests/validate-distribution-shape.sh --anchor normal # single anchor
@@ -116,7 +119,7 @@ generate_and_run() {
         exit 1
     fi
 
-    if ! ( cd "$rundir" && "$LTL" --disable-progress -o "$logfile" \
+    if ! ( cd "$rundir" && "$LTL" --disable-progress -ni -o "$logfile" \
            >/dev/null 2>"$TMP_ROOT/$anchor.ltl.err" ); then
         echo "ERROR: ltl failed for anchor '$anchor':" >&2
         sed 's/^/    /' "$TMP_ROOT/$anchor.ltl.err" >&2

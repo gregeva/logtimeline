@@ -24,11 +24,22 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="$REPO_DIR/ltl"
-SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log"
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# every assertion reads the -V heatmap-palette section - the resolved
+# metric, palette and background source, all option-derived - never a
+# heatmap cell. The 5k ScriptLog slice (durationMS, bytes and count on
+# every line, so each -hm metric resolves) at `-bs 1440 -oe -n 1 -osum`
+# produces the identical section.
+SCRIPT_LOG="$LOGS_DIR/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
+SHAPE="-bs 1440 -oe -n 1 -osum"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
@@ -64,9 +75,10 @@ current_scenario=""
 run_section() {
     local outfile
     outfile=$(mktemp)
-    "$LTL" --disable-progress -V heatmap-palette "$@" "$SCRIPT_LOG" > "$outfile" 2>"$outfile.stderr" || true
+    # shellcheck disable=SC2086
+    "$LTL" --disable-progress -ni $SHAPE -V heatmap-palette "$@" "$SCRIPT_LOG" > "$outfile" 2>"$outfile.stderr" || true
     if [[ ! -s "$outfile" ]]; then
-        echo "FAIL: captured output is empty for: $LTL --disable-progress -V heatmap-palette $* $SCRIPT_LOG" >&2
+        echo "FAIL: captured output is empty for: $LTL --disable-progress -ni $SHAPE -V heatmap-palette $* $SCRIPT_LOG" >&2
         exit 1
     fi
     echo "$outfile"

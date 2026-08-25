@@ -1,0 +1,20 @@
+# fixture	staged_as	source	proves
+# Committed slices are scrubbed (IPs, session ids, customer and host names replaced); the harness copies each
+# fixture to $TMP_DIR/<scenario>/<staged_as> before invoking ltl — the committed name is never fed to the tool.
+connection-server.txt	cxserver.1.log	ThingWorx Connection Server cxserver.1-16.log, first 300 lines	group default + stem evidence (basis evidence)
+integration-runtime.txt	IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log	ThingWorx Integration Runtime specimen, lines 520-820 (day tokens > 12 and <= 12, file order kept)	stem -> yyyy-dd-MM; no fatal
+integration-runtime.txt	app.log	(same slice)	no name evidence -> the impossible-month probe over the sample eliminates the default; basis evidence
+tomcat-access.txt	localhost_access_log.2025-05-05.txt	Tomcat 9 access log, first 300 lines	stem + .txt -> ms (basis evidence, confidence 0.86)
+tomcat-access.txt	whatever.log	(same slice)	extension alone never decides: tie on the default (confidence 0.50) + ambiguity note
+httpd-access.txt	access.log-20260609	Apache httpd 2.x access log with %D in microseconds (Windchill), first 300 lines	stem + ext -> httpd member, microseconds with no -du
+httpd-access.txt	renamed.txt	(same slice)	ext absent -> default Tomcat member (confidence 0.75) + ambiguity note
+thingworx-application-log.txt	ApplicationLog.2025-05-06.0.log	ThingWorx ApplicationLog.2025-05-06.0.log, first 300 lines	filename date/index decomposition; filename-date cross-check matches the content
+mixed.txt	mixed.log	connection-server.txt + tomcat-access.txt concatenated	[1,2] bracket and legend
+wgm-client.txt	uwgm_client.log.1	Windchill Workgroup Manager uwgm_client.log.1, header block + 33 representative data lines (every msgtype letter, #-qualified areas, a bracketed message; pid/tid kept, no hosts or user paths)	windchill_workgroup_manager binds; every msgtype letter survives the category gate (lines_included = matched_lines); stem + .log + rotation index decompose
+wgm-client.txt	genlwsc.log.1	(same slice)	the second WGM filename stem decomposes to the same entry
+wgm-client.txt	uwgm.log.1	(same slice)	the third WGM filename stem decomposes to the same entry (and is not consumed as a prefix of uwgm_client)
+wgm-client.txt	renamed.txt	(same slice)	no name evidence: a group of one still binds by shape alone; filename_evidence reports stem=-
+windchill-method-server.txt	BackgroundMethodServerESI-2507180624-9559-log4j.log	Windchill Background Method Server log4j log, 21 records + 30 continuation lines composed from scrubbed specimen lines (hosts, users, object ids replaced)	producer-true name -> mt17 stem + ext; content-only recognition; continuation lines unmatched
+windchill-method-server.txt	MethodServer-2507180627-9144-log4j.log.2025-07-18_3	(same fixture)	log4j daily-roll suffix after the extension decomposes through the date_n index form; roll date matches the content
+windchill-method-server.txt	app.txt	(same fixture)	no name evidence; recognition by content alone
+windchill-method-server.txt	MethodServer.log	(same fixture)	bare service name earns stem + ext evidence; the producer tail is optional

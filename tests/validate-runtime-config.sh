@@ -22,11 +22,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="$REPO_DIR/ltl"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
-TEST_LOG="$REPO_DIR/logs/Codebeamber/codebeamer_access_log.2025-10-29.txt"
+
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): the
+# -V runtime-config section echoes the resolved options, so -bs/-dmp/-mdm on
+# each run ARE the subject; the 741-line, 4-hour fixture is already minimal.
+TEST_LOG="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
 
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -150,7 +157,7 @@ run_ltl() {
     RUN_STDOUT="$TMP_DIR/${label}.stdout"
     RUN_STDERR="$TMP_DIR/${label}.stderr"
     set +e
-    "$LTL" --disable-progress "$@" > "$RUN_STDOUT" 2> "$RUN_STDERR"
+    "$LTL" --disable-progress -ni "$@" > "$RUN_STDOUT" 2> "$RUN_STDERR"
     RUN_EXIT=$?
     set -e
     check_stderr_warnings "$RUN_STDERR"
@@ -213,7 +220,7 @@ scenario_runtime_config_env_only() {
     current_scenario="runtime-config-env-only"
     echo "[$current_scenario]"
 
-    LTL_CONFIG='-bs 30' "$LTL" --disable-progress -V runtime-config "$TEST_LOG" > "$TMP_DIR/rc-env.stdout" 2> "$TMP_DIR/rc-env.stderr" || true
+    LTL_CONFIG='-bs 30' "$LTL" --disable-progress -ni -V runtime-config "$TEST_LOG" > "$TMP_DIR/rc-env.stdout" 2> "$TMP_DIR/rc-env.stderr" || true
     check_stderr_warnings "$TMP_DIR/rc-env.stderr"
 
     assert_line "$TMP_DIR/rc-env.stdout" \
@@ -233,7 +240,7 @@ scenario_runtime_config_env_overridden() {
     current_scenario="runtime-config-env-overridden"
     echo "[$current_scenario]"
 
-    LTL_CONFIG='-bs 30' "$LTL" --disable-progress -V runtime-config -bs 60 "$TEST_LOG" > "$TMP_DIR/rc-over.stdout" 2> "$TMP_DIR/rc-over.stderr" || true
+    LTL_CONFIG='-bs 30' "$LTL" --disable-progress -ni -V runtime-config -bs 60 "$TEST_LOG" > "$TMP_DIR/rc-over.stdout" 2> "$TMP_DIR/rc-over.stderr" || true
     check_stderr_warnings "$TMP_DIR/rc-over.stderr"
 
     assert_line "$TMP_DIR/rc-over.stdout" \

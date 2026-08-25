@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # validate-help-layout.sh — Validate `ltl --help` column-alignment layout.
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# --help only - no log input, nothing to shape.
 # Usage: ./tests/validate-help-layout.sh
 #
 # Ensures every option row's description starts at the same column and every

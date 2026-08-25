@@ -1,0 +1,51 @@
+2025-07-18 04:46:41,299 INFO  [main] wt.system.out  - wt.method.serviceName=BackgroundMethodServer
+2025-07-18 04:46:41,302 INFO  [main] wt.system.out  - wt.queue.executeQueues=true
+2025-07-18 04:46:41,303 INFO  [main] wt.system.out  - wt.method.minPort=3000
+2025-07-18 04:46:41,352 INFO  [main] wt.system.out  - ------------------------------------------------------
+2025-07-18 04:46:41,354 INFO  [main] wt.method.server.startup  - Starting BackgroundMethodServer
+2025-07-18 04:46:41,357 INFO  [main] wt.method.server.startup  - JVM id: 4080664
+2025-07-18 04:46:41,374 INFO  [main] wt.method.server.startup  - JVM: OpenJDK 64-Bit Server VM, 11.0.22 (11.0.22+7-LTS), 64-bit
+2025-07-18 04:46:41,387 INFO  [main] wt.method.server.startup  - OS: Linux, amd64, 4.18.0
+2025-07-18 04:46:41,394 INFO  [main] wt.method.server.startup  - Host: APPHOST1 (apphost1)
+2025-07-18 04:46:53,272 INFO  [main] wt.util.version.WindchillVersion  - 
+      Timestamp: July 18, 2025 - 4:46:53 (GMT: Jul 18, 2025, 4:46:53 AM)
+
+      Support                      Support                                                                        Installer
+      Datecode                     Release Number  Release Id                                     Build Number    Sequence   Display Label
+  --  --------                     --------------  ---------------                                --------------  ---------  ---------------------
+  1   2024-01-01                   12.1.2.0        Windchill_12.1.2.0                             1234567         1          Windchill 12.1.2.0
+2025-07-18 04:47:28,493 WARN  [QueueCheckerThread-43] wt.jmx.notif.queue  - Time=2025-07-18 04:47:28.387 +0000, Name=QueueNotifier, SourceObjectName=com.ptc:wt.subsystem=Monitors,wt.monitorType=Queue
+2025-07-18 04:47:28,509 INFO  [wt.jmx.core.SharedScheduledExecutor.worker] wt.methodServer.info  - JVMName=4080664@APPHOST1,
+StartTime=1752813998297,
+MaxHeapBytes=4294967296,
+ServiceName=BackgroundMethodServer,
+JVMArguments=[--add-opens=java.base/java.util=ALL-UNNAMED,
+--add-exports=java.base/sun.util.locale.provider=ALL-UNNAMED,
+--add-modules=java.base]
+2025-07-18 04:52:55,260 WARN  [JMX Monitor ThreadGroup<main> Executor Pool [Thread-21]] wt.jmx.notif.methodContextGauge  - Time=2025-07-18 04:52:55.257 +0000, Name=MethodContextsGaugeNotifier, SourceObjectName=com.ptc:wt.subsystem=Monitors,wt.monitorType=MethodContexts
+2025-07-18 06:28:01,115 ERROR [ajp-nio-127.0.0.1-8010-exec-2312] com.ptc.windchill.uwgm.proesrv.rrc.RequestResultCache user01 - UwgmObjectFactory.createPartIteration :: Unsupported PartType: RAW_MATERIAL
+2025-07-18 06:28:01,118 ERROR [ajp-nio-127.0.0.1-8010-exec-2312] com.ptc.windchill.uwgm.proesrv.rrc.RequestResultCache user01 - UwgmObjectFactory.createPartIteration :: Unsupported PartType: SEMIFINISHED_PRODUCT
+2025-07-18 06:28:02,004 INFO  [ajp-nio-127.0.0.1-8010-exec-2315] wt.servlet.IPRequestTracker user02 - Request completed
+2025-07-18 06:28:02,631 ERROR [ajp-nio-127.0.0.1-8010-exec-2315] wt.servlet.IPRequestTracker user02 - Exception trying to retrieve individual Requests : The request object has been recycled and is no longer associated with this facade
+2025-07-18 08:19:31,762 ERROR [ActiveMQ Session Task-3] com.ptc.windchill.esi.txn.ESITransactionUtility wcadmin - Exception while fetching a transaction from the input parameters. (wt.federation.federationResource/109) wt.util.WTException: Unable to find target object "OR:wt.part.WTPart:123456789:123456789-1234567890123-1234567890-10-0-0-1@host.example".
+	at wt.federation.FederationUtilities.getObjectRefByUfid(FederationUtilities.java:2623)
+	at wt.federation.FederationUtilities.getObjectByUfid(FederationUtilities.java:2653)
+	at com.ptc.windchill.esi.txn.ESITransactionUtility.postResult(ESITransactionUtility.java:1469)
+	at com.ptc.windchill.esi.svc.StandardESIService.postResult(StandardESIService.java:1218)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:566)
+	at com.infoengine.messaging.QueueListener.onMessage(QueueListener.java:354)
+	at org.apache.activemq.thread.PooledTaskRunner$1.run(PooledTaskRunner.java:48)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628)
+	at java.base/java.lang.Thread.run(Thread.java:829)
+
+2025-07-18 08:19:31,764 ERROR [ActiveMQ Session Task-3] wt.adapter.exception wcadmin - WTAdapterImpl com.ptc.windchill.esi.utl.ESIException: (wt.federation.federationResource/109) wt.util.WTException: Unable to find target object "OR:wt.part.WTPart:123456789:123456789-1234567890123-1234567890-10-0-0-1@host.example".
+Nested exception is: (wt.federation.federationResource/109) wt.util.WTException: Unable to find target object "OR:wt.part.WTPart:123456789:123456789-1234567890123-1234567890-10-0-0-1@host.example".
+	at wt.federation.FederationUtilities.getObjectRefByUfid(FederationUtilities.java:2623)
+	at wt.federation.FederationUtilities.getObjectByUfid(FederationUtilities.java:2653)
+	at com.ptc.windchill.esi.txn.ESITransactionUtility.postResult(ESITransactionUtility.java:1469)
+Caused by: wt.util.WTException: Unable to find target object "OR:wt.part.WTPart:123456789:123456789-1234567890123-1234567890-10-0-0-1@host.example".
+	at wt.federation.FederationUtilities.getObjectRefByUfid(FederationUtilities.java:2623)
+	... 12 more
+2025-07-18 08:19:32,010 INFO  [ActiveMQ Session Task-3] com.infoengine.messaging.QueueListener wcadmin - Message processed
+2025-07-18 08:21:22,927 FATAL [main] wt.method.server.startup  - Shutting down BackgroundMethodServer

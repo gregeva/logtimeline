@@ -1,0 +1,256 @@
+[0;37m [90m[109m
+──────────────────────────────────────────────────────────────────────────────────────────────
+   ,:: ltl ::' log timeline [0.16.0] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
+──────────────────────────────────────────────────────────────────────────────────────────────
+[0m
+
+=== runtime-config ===
+include (merged): (not set)
+exclude (merged): (not set)
+highlight (merged): (not set)
+threadpool-activity (merged): (not set)
+bucket-duration-stats-demand: 1
+message-duration-stats-demand: 1
+=== runtime-config / command-line ===
+bucket-size: 60
+data-model: raw
+memory-usage: 1
+sort-on: p99
+=== END runtime-config / command-line ===
+=== runtime-config / environment-variable ===
+=== END runtime-config / environment-variable ===
+=== END runtime-config ===
+
+=== index-read-back ===
+index_used: no
+index_filter_signature: -
+file: /private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9ab811e2-58c8-4bd2-b751-f9228acd39b2/scratchpad/wt-v0.16.0/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-100000.log
+  lookup: none
+  matched_entry_date: -
+  freshness: no_entry
+  preseed_duration_min: -
+  preseed_duration_max: -
+  preseed_bytes_min: -
+  preseed_bytes_max: -
+  preseed_count_min: -
+  preseed_count_max: -
+  preseed_first_timestamp: -
+  preseed_last_timestamp: -
+=== END index-read-back ===
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: user_opt_out
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: feature_not_active
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+=== format-detection ===
+duration_unit_override: -
+files: 1
+file: /private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9ab811e2-58c8-4bd2-b751-f9228acd39b2/scratchpad/wt-v0.16.0/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-100000.log
+  format: thingworx_standard
+  match_type: 1
+  is_access_log: no
+  matched_lines: 100000
+  unmatched_lines: 0
+  first_match_line: 1
+=== END format-detection ===
+=== heatmap-palette ===
+heatmap_active: no
+metric: n/a
+light_bg: 0
+light_bg_source: default
+color_name: n/a
+gradient_dark: n/a
+gradient_light: n/a
+gradient_active: n/a
+=== END heatmap-palette ===
+=== csv-output ===
+csv_active: no
+=== END csv-output ===
+=== percentile-algorithm ===
+=== percentile-algorithm / histogram ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / histogram ===
+=== percentile-algorithm / heatmap ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / heatmap ===
+=== percentile-algorithm / message-stats ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / message-stats ===
+=== percentile-algorithm / bucket-stats ===
+data_model: raw
+effective_algorithm: nearest_rank
+formula: value = sorted[int(n * q)]; q in [0,1]; n = sample count
+algorithm_source: features/272-percentile-algorithm-industry-grounding.md § Nearest-rank
+=== END percentile-algorithm / bucket-stats ===
+=== END percentile-algorithm ===
+=== statistics-demand ===
+store: bucket
+  store_demand: 1
+  group terminal_core: demanded=1 consumers=timeline-latency-column
+  group csv_body: demanded=0 consumers=-
+  group extended_percentiles: demanded=0 consumers=-
+  group shape_moments: demanded=0 consumers=-
+  moment_source: none
+  stats_calls: 0
+  group_calc terminal_core: computed=0 skipped_demand=0 ineligible=0
+  group_calc csv_body: computed=0 skipped_demand=0 ineligible=0
+  group_calc extended_percentiles: computed=0 skipped_demand=0 ineligible=0
+  group_calc shape_moments: computed=0 skipped_demand=0 ineligible=0
+store: message
+  store_demand: 1
+  group terminal_core: demanded=1 consumers=messages-table,sort-on:p99
+  group csv_body: demanded=0 consumers=-
+  group extended_percentiles: demanded=0 consumers=-
+  group shape_moments: demanded=0 consumers=-
+  moment_source: none
+  stats_calls: 0
+  group_calc terminal_core: computed=0 skipped_demand=0 ineligible=0
+  group_calc csv_body: computed=0 skipped_demand=0 ineligible=0
+  group_calc extended_percentiles: computed=0 skipped_demand=0 ineligible=0
+  group_calc shape_moments: computed=0 skipped_demand=0 ineligible=0
+  sort_selection: statistic=p99 defined=0 fill=99487 demoted=0
+  sort_calc: population=0 topn=0
+=== END statistics-demand ===
+=== profile ===
+profile_active: no
+=== END profile ===
+=== udm-counting ===
+counting_udms: none
+=== END udm-counting ===
+=== benchmark-data ===
+version	0.16.0
+FILES	/private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9ab811e2-58c8-4bd2-b751-f9228acd39b2/scratchpad/wt-v0.16.0/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-100000.log	35330105
+lines_read	100000
+lines_included	100000
+TIMING	read_files	2.477
+TIMING	initialize_buckets	0.000
+TIMING	group_similar	0.000
+TIMING	calculate_statistics	0.218
+TIMING	heatmap_statistics	0.000
+TIMING	histogram_statistics	0.000
+TIMING	normalize_data	0.001
+TIMING	total	2.695
+MEMORY	rss_peak	93650944
+MEMORY	bucket_stats_counters	120
+MEMORY	bucket_stats_counters_hl	120
+MEMORY	consolidation_clusters	120
+MEMORY	consolidation_key_message	120
+MEMORY	consolidation_key_trigrams	120
+MEMORY	consolidation_key_trigrams_norm	120
+MEMORY	consolidation_ngram_index	120
+MEMORY	consolidation_patterns	120
+MEMORY	consolidation_posting_size	120
+MEMORY	consolidation_unmatched	120
+MEMORY	heatmap_counters	120
+MEMORY	heatmap_counters_hl	120
+MEMORY	heatmap_data	120
+MEMORY	heatmap_data_hl	120
+MEMORY	heatmap_raw	120
+MEMORY	heatmap_raw_hl	120
+MEMORY	histogram_counters	120
+MEMORY	histogram_counters_hl	120
+MEMORY	histogram_values	576
+MEMORY	log_analysis	232
+MEMORY	log_messages	46864520
+MEMORY	log_messages_counters	120
+MEMORY	log_occurrences	2899
+MEMORY	log_sessions	120
+MEMORY	log_stats	120
+MEMORY	log_threadpools	232
+MEMORY	message_key_order	2909
+MEMORY	threadpool_activity	762
+MEMORY	udm_distinct	120
+MEMORY	udm_last_value	120
+MEMORY	unattributed	46776054
+MEMORY_FINAL	log_messages	46864520
+MEMORY_FINAL	log_analysis	232
+MEMORY_FINAL	consolidation_clusters	120
+MEMORY_FINAL	consolidation_patterns	120
+MEMORY_FINAL	consolidation_key_message	120
+MEMORY_FINAL	consolidation_unmatched	120
+MEMORY_FINAL	consolidation_ngram_index	120
+MEMORY_FINAL	consolidation_key_trigrams	120
+MEMORY_FINAL	consolidation_key_trigrams_norm	120
+COUNTS	log_messages_entries	99487
+COUNTS	log_occurrences_entries	3
+COUNTS	log_stats_entries	3
+CONFIG	terminal_width	200
+CONFIG	terminal_height	24
+CONFIG	max_log_message_length	200
+CONFIG	time_bucket_size	60
+CONFIG	bucket_size_seconds	3600.00
+=== END benchmark-data ===
+
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[90m[109m     timestamp                        legend                                                                                   occurrences                                                              
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+ 2025-02-27 23:00 [0;31mERROR: 1[0m                               [91m[109m0[0m[90m[109m:[0m[0m0[0m[90m[109m/m[0m [90m[109m│[0m [0;31m[0m                                                                                                                                       
+ 2025-02-28 00:00 [0;31mERROR: 88586[0m [0;33mWARN: 295[0m [0;32mINFO: 19[0m  [91m[109m1.5k[0m[90m[109m:[0m[0m1.5k[0m[90m[109m/m[0m [90m[109m│[0m [0;31m██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████[0m[0;33m[0m[0;32m[0m 
+ 2025-02-28 01:00 [0;31mERROR: 11095[0m [0;33mWARN: 4[0m             [91m[109m184.9[0m[90m[109m:[0m[0m185[0m[90m[109m/m[0m [90m[109m│[0m [0;31m█████████████████[0m[0;33m[0m                                                                                                                      
+[90m[109m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+
+[90m[109mcommand-line options: -V all --disable-progress --verbose=benchmark-data,statistics-demand --memory-usage --terminal-width=200 -bs 60 --data-model=raw --sort-on=p99 [0m
+
+  ─────────────────────────────────────────   
+  Category                            Total      [4;37mThese file(s) were processed with analysis including results between 2025-02-27 23:59 and 2025-02-28 01:07[0m
+  ─────────────────────────────────────────   
+  ERROR                               99682      [36m[37m[[0;32m√[0m[36m[37m] /private/tmp/claude-501/-Users-gregeva-Documents-GitHub-logtimeline/9a...16.0/tests/profile/samples/HundredsOfThousandsOfUniqueErrors-100000.log[0m
+  WARN                                  299   
+  INFO                                   19   
+  ─────────────────────────────────────────   
+  LINES INCLUDED                     100000   
+  LINES READ                         100000   
+  FILE PROCESSING TIME              2.5 sec   
+  INITIALIZE EMPTY BUCKETS          43 usec   
+  CALCULATE STATISTICS           217.7 msec   
+  SCALE DATA TO TERMINAL           869 usec   
+  TOTAL TIME                        2.7 sec   
+  MAXIMUM MEMORY USED              89.5 MiB   
+   log_messages              (50%)   45 MiB   
+   log_occurrences           (<1%)    5 KiB   
+   message_key_order         (<1%)    3 KiB   
+   unattributed              (50%)   45 MiB   
+  ─────────────────────────────────────────   
+
+ [96m[49m TOP OVERALL MESSAGES (retained for after inclusion, exclusion, time range, and duration filters)                                                                                           Occurre. [0m[96m
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+  [ERROR] [TWEventProcessor] [c.t.s.s.e.EventInstance] Error Executing Event Handler 'CheckHeartbeat' for event Type.Thing:Entity.HeartBeatMonitoringTimer:Event.Timer                            246 
+  [WARN] [https-jsse-nio-8443-] [IntrusionDetector] [SECURITY FAILURE Anonymous:@unknown -> /ExampleApplication/IntrusionDetector] Invalid input: context=HTTP header value: cookie, type(         32 
+  [ERROR] [TWEventProcessor] [c.t.s.s.e.EventInstance] Error Executing Event Handler 'CheckOverallStatuses' for event Type.Thing:Entity.ConnectivityMonitoringScheduler:Event.ScheduledEve         24 
+  [ERROR] [TWEventProcessor] [c.t.s.s.e.EventInstance] Error Executing Event Handler 'ProcessCantThicknessAlarmSubscription' for event Type.Thing:Entity.BAT_SawmillTbl1_ProcessLogTurning         18 
+  [ERROR] [https-jsse-nio-8443-] [c.t.w.Things] Execution error in service script [GetDowntimeEvents_IFG] :: TypeError: Cannot read property "DowntimeDurationLimit" from null (GetDowntim         11 
+  [WARN] [https-jsse-nio-8443-] [c.t.w.BaseService] Transaction has been marked as a failure for request /Thingworx/Things/IFG_DowntimeSystemDatabaseExt/Services/GetDowntimeEvents_IFG            11 
+  [ERROR] [https-jsse-nio-8443-] [c.t.w.Things] Execution error in service script [GetOperator_RVLHelper] :: JSON does not allow non-finite numbers.                                                9 
+  [WARN] [https-jsse-nio-8443-] [c.t.w.BaseService] Transaction has been marked as a failure for request /Thingworx/Things/Roseburg_DowntimeSystemDatabaseExt/Services/GetOperator_RVLHelp          9 
+  [ERROR] [TWEventProcessor] [c.t.s.s.e.EventInstance] Error Executing Event Handler 'EndOfMainShiftSubscription' for event Type.Thing:Entity.WIN_Site:Event.EndOfMainShiftEvent                    5 
+  [INFO] [pool-8-thread] [c.t.s.ChangeWatcher] @@@@@@ SYNC - [elapsed 2ms] Starting entity reload                                                                                                   5 
+
+

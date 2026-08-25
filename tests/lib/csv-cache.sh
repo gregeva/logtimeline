@@ -62,6 +62,9 @@ _CSV_CACHE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_CSV_CACHE_LIB_DIR/runtime-warnings.sh"
 _CSV_CACHE_TESTS_DIR="$(cd "$_CSV_CACHE_LIB_DIR/.." && pwd)"
 _CSV_CACHE_REPO_DIR="$(cd "$_CSV_CACHE_TESTS_DIR/.." && pwd)"
+
+# shellcheck source=logs-dir.sh
+source "$_CSV_CACHE_LIB_DIR/logs-dir.sh"
 _CSV_CACHE_DIR="$_CSV_CACHE_TESTS_DIR/.artifacts/csv"
 _CSV_CACHE_CLEANUP="$_CSV_CACHE_TESTS_DIR/cleanup-test-artifacts.sh"
 _CSV_CACHE_LTL="$_CSV_CACHE_REPO_DIR/ltl"
@@ -128,7 +131,11 @@ _csv_cache_find_produced() {
 }
 
 # Ensure cached CSVs exist; run `ltl` only on cache miss. Exports
-# CSV_CACHE_MESSAGES and CSV_CACHE_STATS on success.
+# CSV_CACHE_MESSAGES and CSV_CACHE_STATS on success, plus CSV_CACHE_STDOUT:
+# the producing run requests -V csv-output, so the run's own precision
+# contract is captured alongside its CSVs and no consumer needs a second
+# identical ltl run to read it (the section is stdout-only; the CSVs are
+# byte-identical with and without it).
 csv_cache_produce() {
     local scenario="$1" logfile="$2" options="$3" log_shorthand="$4"
 
@@ -152,21 +159,19 @@ csv_cache_produce() {
 
     local msg_path="$_CSV_CACHE_DIR/$msg_name"
     local stats_path="$_CSV_CACHE_DIR/$stats_name"
+    local stdout_path="${msg_path%__messages.csv}__stdout.txt"
 
-    if [[ -f "$msg_path" && -f "$stats_path" ]]; then
+    if [[ -s "$msg_path" && -s "$stats_path" && -s "$stdout_path" ]]; then
         export CSV_CACHE_MESSAGES="$msg_path"
         export CSV_CACHE_STATS="$stats_path"
+        export CSV_CACHE_STDOUT="$stdout_path"
         return 0
     fi
 
     mkdir -p "$_CSV_CACHE_DIR"
 
     local abs_log
-    if [[ "$logfile" = /* ]]; then
-        abs_log="$logfile"
-    else
-        abs_log="$_CSV_CACHE_REPO_DIR/$logfile"
-    fi
+    abs_log="$(resolve_log_path "$logfile")"
 
     if [[ ! -f "$abs_log" ]]; then
         echo "csv-cache: logfile missing: $abs_log" >&2
@@ -179,7 +184,7 @@ csv_cache_produce() {
     (
         cd "$tmp_dir"
         # shellcheck disable=SC2086  # word-splitting on $options is intentional
-        "$_CSV_CACHE_LTL" --disable-progress $options -o "$abs_log" >/dev/null 2>"$tmp_dir/ltl.stderr"
+        "$_CSV_CACHE_LTL" --disable-progress -ni -V csv-output $options -o "$abs_log" >"$tmp_dir/ltl.stdout" 2>"$tmp_dir/ltl.stderr"
     )
     rc=$?
 
@@ -207,10 +212,12 @@ csv_cache_produce() {
 
     mv "$produced_msg" "$msg_path"
     mv "$produced_stats" "$stats_path"
+    mv "$tmp_dir/ltl.stdout" "$stdout_path"
     rm -rf "$tmp_dir"
 
     export CSV_CACHE_MESSAGES="$msg_path"
     export CSV_CACHE_STATS="$stats_path"
+    export CSV_CACHE_STDOUT="$stdout_path"
     return 0
 }
 

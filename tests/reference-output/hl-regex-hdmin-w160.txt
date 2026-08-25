@@ -46,16 +46,16 @@
  2026-01-25 06:00 4xx: 2 3xx: 7 19 2xx: 639  0:5.6/m │ ███████████████████████████   3m         2.5 MiB  │  P50:47.1ms P95:1.3s   P99:5.3s   P999:7.4s   CV:3.13
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-command-line options: --disable-progress -n 1 --terminal-width 160 -du us -h BomTransformation -hdmin 100 
+command-line options: --disable-progress -ni -n 1 --terminal-width 160 -du us -h BomTransformation -hdmin 100 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2026-01-22 08:49 and 2026-01-25 07:41
   ─────────────────────────────────────────   
-  4xx                                     4      [√] /Users/gregeva/Documents/GitHub/logtimeline/logs/A...Server-access_log-Windchill_Navigate.2026-01-25.log
+  4xx                                     4      [√] logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log                       [1]
   3xx                                     7   
-  2xx-HL                                 19   
+  2xx-HL                                 19      Log Formats
   2xx                                   647   
-  ─────────────────────────────────────────   
+  ─────────────────────────────────────────      1 tomcat_access_with_duration
   HIGHLIGHTED                            19   
   LINES INCLUDED                        677   
   LINES READ                            677   

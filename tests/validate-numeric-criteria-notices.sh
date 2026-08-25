@@ -21,16 +21,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="$REPO_DIR/ltl"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+
 # Boundary fixture: exactly one line lacks a duration value (BD-dur-missing),
 # one lacks bytes (BD-bytes-missing), one lacks count (BD-count-missing);
 # every other line carries all three metrics.
 BOUNDARY_FIXTURE="$REPO_DIR/tests/fixtures/numeric-highlight-boundary.txt"
 # Access log on which every line carries a duration value.
-ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+ACCESS_LOG="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
@@ -58,7 +62,7 @@ capture_stderr() {
     set +e
     # Run inside TMP_DIR so cwd artifacts (ltl-index.csv) never land in the
     # repo (HARNESS-DESIGN.md Trap 9: temp artifacts stay out of deliverables).
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress "$@" ) > "$stdoutfile" 2>"$errfile"
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" ) > "$stdoutfile" 2>"$errfile"
     local rc=$?
     set -e
     if [[ "$rc" -ne 0 ]]; then
@@ -120,13 +124,18 @@ assert_command() {
     fi
 }
 
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# every assertion reads a stderr notice (exclusion counts, inverted-range
+# warnings); the rendered timeline and table are never consulted.
+SHAPE="-bs 1440 -oe -n 1"
+
 MISSING_METRIC_CONTRACT='docs/usage.md § Filtering & Highlighting — numeric filters only keep entries that carry the filtered metric; the count of entries excluded this way is reported (Issue #321)'
 
 # --- Scenario: one missing-metric note per filtered metric, with exact count ---
 current_scenario="missing-metric-notes"
 echo "[$current_scenario]"
 errfile="$TMP_DIR/missing-metric.stderr"
-if capture_stderr "$errfile" -bs 240 -n 25 -dmin 1 -bmin 1 -cmin 1 "$BOUNDARY_FIXTURE"; then
+if capture_stderr "$errfile" $SHAPE -dmin 1 -bmin 1 -cmin 1 "$BOUNDARY_FIXTURE"; then
     for metric in duration bytes count; do
         assert_command \
             command     "grep -aq 'Note: 1 lines carried no $metric value and were excluded by the $metric filter' '$errfile'" \
@@ -147,7 +156,7 @@ fi
 current_scenario="silent-when-metric-present"
 echo "[$current_scenario]"
 errfile="$TMP_DIR/all-carry.stderr"
-if capture_stderr "$errfile" -bs 240 -n 25 -dmin 1 "$ACCESS_LOG"; then
+if capture_stderr "$errfile" $SHAPE -dmin 1 "$ACCESS_LOG"; then
     assert_command \
         command     "! grep -aq 'carried no .* value and were excluded' '$errfile'" \
         label       'no missing-metric note when every line carries the metric' \
@@ -162,7 +171,7 @@ INVERTED_RANGE_CONTRACT='docs/usage.md § Filtering & Highlighting — an invert
 current_scenario="inverted-range-warnings"
 echo "[$current_scenario]"
 errfile="$TMP_DIR/inverted.stderr"
-if capture_stderr "$errfile" -bs 240 -n 25 -dmin 500 -dmax 100 -hbmin 6000 -hbmax 5000 "$BOUNDARY_FIXTURE"; then
+if capture_stderr "$errfile" $SHAPE -dmin 500 -dmax 100 -hbmin 6000 -hbmax 5000 "$BOUNDARY_FIXTURE"; then
     assert_command \
         command     "grep -aq 'Warning: -dmin 500 is greater than -dmax 100 - the range is unsatisfiable, no log entries can match' '$errfile'" \
         label       'inverted filter range (-dmin > -dmax) warns as unsatisfiable' \
@@ -187,7 +196,7 @@ fi
 current_scenario="satisfiable-range-silent"
 echo "[$current_scenario]"
 errfile="$TMP_DIR/satisfiable.stderr"
-if capture_stderr "$errfile" -bs 240 -n 25 -dmin 100 -dmax 100 -hbmin 5000 -hbmax 6000 "$BOUNDARY_FIXTURE"; then
+if capture_stderr "$errfile" $SHAPE -dmin 100 -dmax 100 -hbmin 5000 -hbmax 6000 "$BOUNDARY_FIXTURE"; then
     assert_command \
         command     "! grep -aq 'the range is unsatisfiable' '$errfile'" \
         label       'no warning for satisfiable ranges (min == max is a valid single-value band)' \
@@ -200,7 +209,7 @@ fi
 current_scenario="silent-without-numeric-filters"
 echo "[$current_scenario]"
 errfile="$TMP_DIR/no-filters.stderr"
-if capture_stderr "$errfile" -bs 240 -n 25 "$BOUNDARY_FIXTURE"; then
+if capture_stderr "$errfile" $SHAPE "$BOUNDARY_FIXTURE"; then
     assert_command \
         command     "! grep -aq 'carried no .* value and were excluded' '$errfile'" \
         label       'no missing-metric note without numeric filters' \

@@ -7,7 +7,13 @@ The `logs/` directory contains sample log files for testing. **Always use these 
 logs/
 ├── AccessLogs/              # HTTP access logs (duration, bytes, status)
 ├── Codebeamber/             # Codebeamer access logs
+├── GC/logs-gc/              # JVM G1 garbage-collection logs
+├── UDM/                     # User-defined-metric logs (pattern + CSV modes)
+├── WGM/                     # SolidWorks Workgroup Manager client logs
+├── MethodServer/            # Windchill Method Server / Background Method Server logs
+├── IntegrationRuntimeLogs/  # ThingWorx Integration Runtime logs (yyyy-dd-MM dates)
 └── ThingworxLogs/           # ThingWorx application logs
+    ├── CXS/                 # ThingWorx Connection Server logs
     └── CustomThingworxLogs/ # Custom ScriptLogs with durationMS
 ```
 
@@ -15,15 +21,16 @@ logs/
 
 ## AccessLogs/ - HTTP Request Logs (duration, bytes, status)
 
-| File | Server | Latency Unit | Metrics | Size | Use Case |
-|------|--------|--------------|---------|------|----------|
-| `ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` | Apache HTTP Server 2.x | microseconds (%D) | duration, bytes | 658KB | Apache HTTP2 with microsecond latency |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 277MB | Primary Tomcat 9 access log test |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 220MB | Secondary Tomcat 9 access log test |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 148MB | Smaller Tomcat 9 access log test |
-| `localhost_access_log.2025-03-21.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 2.6MB | **CORRUPT — do not use for clean-output testing.** Contains concatenated records (two log lines merged on one line), so field captures pick up fragments of the following record (e.g. an IP fragment where the duration belongs). Useful only as adversarial malformed input; ltl treats such non-numeric duration captures as unobserved (#341, #345). No harness uses this file (the regression/ticks fixture is derived from the 2025-05-07 corpus via `tests/lib/fixtures.sh`) |
-| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 1.0MB | 5k-line slice from 05-05 log; used by `tests/validate-index-read-back.sh`. Regenerate via `tests/fixtures/regenerate-index-readback-fixtures.sh` |
-| `really-big/*` | Tomcat 10 | milliseconds (%D) | duration, bytes | 8.5GB | Really big access logs from 4 servers over 28 days |
+| File | Server | Latency Unit | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|---|---|
+| `ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` | Apache HTTP Server 2.x | microseconds (%D) | duration, bytes | 98KB | 677 | Apache HTTP2 with microsecond latency (the `-FULL` sibling is 658KB) |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 277MB | 1,430,678 | Primary Tomcat 9 access log test |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 220MB | 1,133,132 | Secondary Tomcat 9 access log test |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 148MB | 761,698 | Smaller Tomcat 9 access log test |
+| `localhost_access_log.2025-03-21.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 2.6MB | 22,264 | **CORRUPT — do not use for clean-output testing.** Contains concatenated records (two log lines merged on one line), so field captures pick up fragments of the following record (e.g. an IP fragment where the duration belongs). Useful only as adversarial malformed input; ltl treats such non-numeric duration captures as unobserved (#341, #345). No harness uses this file (the regression/ticks fixture is derived from the 2025-05-07 corpus via `tests/lib/fixtures.sh`) |
+| `localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 1.0MB | 5,000 | 5k-line slice from 05-05 log; the configuration-class fixture for `tests/validate-index-read-back.sh`, `validate-histogram-bin-counters.sh`, `validate-format-detection.sh`, `validate-statistics-demand.sh`, `validate-numeric-criteria-notices.sh`. Regenerate via `tests/fixtures/regenerate-index-readback-fixtures.sh` |
+| `tests/fixtures/tomcat-access-duration-spread.txt` | Tomcat 9 (synthetic) | milliseconds (%D) | duration, bytes | 52KB | 434 | Deterministic synthetic fixture for `tests/validate-duration-display.sh`: 12 generic endpoints over a 14.5 h span with duration values chosen to render every cell class (0ms, 1ms, 58ms, 166ms, 1s, 1.4s, 5.5s). TEST-NET addresses, no real hosts or paths. Regenerate via `tests/duration-display/generate-fixture.py` |
+| `really-big/*` | Tomcat 10 | milliseconds (%D) | duration, bytes | 8.5GB | — | Really big access logs from 4 servers over 28 days |
 
 **Format**: Apache combined log with duration at end (units vary by server)
 ```
@@ -35,19 +42,88 @@ logs/
 ```
 Fields: IP, -, -, [timestamp], "method path protocol", status_code, bytes, duration
 
-**Note**: Apache HTTP Server uses `%D` for microseconds, while Tomcat uses `%D` for milliseconds. The detection regex is the same for both servers, so ltl resolves both to the same internal format (`tomcat_access_with_duration`) and assumes milliseconds. For Apache HTTP Server logs, pass `-du us` to convert microsecond durations into milliseconds for statistics; without it, durations are reported in the wrong unit by a factor of 1000. (Value-range autodetection is tracked separately by issues #17 and #23.)
+**Note**: Apache HTTP Server uses `%D` for microseconds, while Tomcat uses `%D` for milliseconds, and the two line shapes are identical. ltl tells them apart by the file's name: a Tomcat name (`localhost_access_log.<date>.txt`) selects `tomcat_access_with_duration` (ms); an httpd name (`access_log`, `access.log-<date>`) selects `httpd_access_with_duration` (µs). A file named in neither way (this Windchill specimen, as renamed here) falls to the Tomcat default with a note — pass `-du us` or `-lf httpd_access_with_duration` for it. The committed, producer-named slices under `tests/fixtures/format-detection/` exercise both paths.
+
+---
+
+## WGM/ - SolidWorks Workgroup Manager Client Logs
+
+Client-side diagnostic logs from PTC Workgroup Manager for SolidWorks (WGM). One shared structured format across three filenames, each written by a different WGM client subsystem: `genlwsc.log.1` (network/streaming engine), `uwgm_client.log.1` (top-level UWGM client/UI process), and `uwgm.log.1` (the SolidWorks-process-scoped log, nested under a `Log_PROE_*` folder — the richest source, since it's scoped to one SolidWorks session). Two capture sets are present: a large-assembly retrieval captured in both Normal and Lightweight SolidWorks modes, and a pair of sessions from one retry-heavy incident class.
+
+| Folder | Scenario | Files | Lines (genlwsc / uwgm_client / uwgm) | Use Case |
+|---|---|---|---|---|
+| `session-retry-incident/Session_1_1/` | WGM session with heavy indirect-download retry activity | genlwsc.log.1, uwgm_client.log.1, Log_PROE_*/uwgm.log.1 | 5,842 / 474,278 / 232,032 | Primary WGM format development/testing session |
+| `session-retry-incident/Session_2/` | Second WGM session, same class | genlwsc.log.1, uwgm_client.log.1, Log_PROE_*/uwgm.log.1 | 4,971 / 465,746 / 194,313 | Second WGM session for cross-session comparison |
+| `large-assembly-retrieval/Normal Mode/` | Large-assembly retrieval, Normal (non-lightweight) SolidWorks mode | genlwsc.log.1, uwgm_client.log.1, Log_PROE_*/uwgm.log.1 | 8,769 / 842,928 / 110,384 | Largest uwgm_client.log.1 in the set; dense single-session Content Manager VFS activity |
+| `large-assembly-retrieval/Lightweight Mode/` | Same assembly, Lightweight SolidWorks mode | genlwsc.log.1, uwgm_client.log.1, Log_PROE_*/uwgm.log.1 | 7,766 / 155,541 / 31,756 | Smallest complete triple; good for quick format iteration |
+
+**Format**: Self-describing structured log — each file opens with a `$default: $generic:` header block declaring its own schema (`columns`, `columns_sep`, `date_format`, `time_format`, `time_precision`, `log_base_name`), followed by data lines matching that schema.
+```
+2025-10-29T10:56:55.850Z: C: P8254: T248c: $default: $generic: columns "date time tz msgtype logid tid area message"
+2025-10-29T10:56:55.850Z: C: P8254: T248c: $default: $generic: columns_sep ": "
+2025-10-29T10:56:55.850Z: C: P8254: T248c: $default: $generic: time_precision 1000
+2025-10-29T10:56:53.239Z: X: Pa5b4: T8570: UWGM: UWGM created
+2025-10-29T10:56:54.392Z: I: Pa5b4: T8570: uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader: WWGM_PREFERENCES: Reading preferences from file: C:\Program Files\PTC\wgm 13.1.0.0\wgmclient.ini
+```
+Fields: `date`(T)`time`(ms precision)`Z` (combined ISO-8601 UTC timestamp), `msgtype` (single letter, ten values across the set: C/D/E/F/I/S/T/W/X/Y — config/debug/error/finish/info/start/trace/warn/create/destroy), `logid` (process id, hex-prefixed `P`), `tid` (thread id, hex-prefixed `T`), `area` (dotted component path; session and transaction areas carry `#` qualifiers such as `act#…` and `srvtxn#N`), `message` (free text, may itself contain `: `-delimited sub-fields).
+
+**Structure**: every line in every file matches the one shape — no continuation lines, no blank lines, ASCII throughout. A minority of trace messages (HTTP response headers echoed into the log) end in a carriage return, which the line reader strips. The `uwgm.log.1` header declares `log_base_name "uwgm_client"`, so the in-file name does not distinguish it from `uwgm_client.log.1` — only the file name does. `D` dominates every file (80–90% of lines); `X`/`Y` and `S`/`F` come in matched create/destroy and start/finish pairs on the same `area`.
+
+**ltl format**: `windchill_workgroup_manager` — one entry for all three filenames; the letters become the `DEBUG`/`ERROR`/`INFO`/`TRACE`/`WARN` levels plus the `CONFIG`/`CREATE`/`DESTROY`/`START`/`FINISH` categories. Occurrences only (no duration, bytes or count at the line level). The committed fixture `tests/fixtures/format-detection/wgm-client.txt` is a scrubbed 44-line slice of an `uwgm_client.log.1`.
+
+---
+
+## MethodServer/ - Windchill Method Server / Background Method Server Logs
+
+Server-side `log4j` diagnostic logs from Windchill Method Server and Background Method Server processes. One shared log4j pattern layout across the service family (`MethodServer`, `BackgroundMethodServer`, `BackgroundMethodServerCAD`, `BackgroundMethodServerESI`) — the service shows only in the file name and in startup lines. Two capture sets are present: a four-tier set covering all four service names, and a multi-node set spanning two days of rotation.
+
+| Folder | Scenario | Files | Total Size | Lines | Use Case |
+|---|---|---|---|---|---|
+| `queue-worker-tiers/18Jul2025_QA_BGMS_Logs/` | App1–4 tiers, all four service names in one set | 18 (12 MethodServer, 4 BackgroundMethodServer, 1 CAD, 1 ESI) | 10MB | 83,001 | Full family coverage at manageable size; the ESI file is 98% stack-trace continuation lines (1,356 records in 65,088 lines), the others 66–73% records |
+| `multi-node-prod/04-05Aug2025/` | Node1–4, two days, daily rotation (`.YYYY-MM-DD_N` suffix after the extension) | 48 (45 MethodServer, 3 BackgroundMethodServer) | ~410MB | 2,360,942 | Large multi-node, multi-rotation set; ~78% records (1.84M), 96–99% of them carrying a user token; rolled names exercise the filename-date cross-check |
+| `multi-node-prod/06Aug2025/` | Node2–4, one unrolled file per node | 4 (MethodServer) | ~21MB | 110,386 | Smaller single-rotation slice of the same set (88% records) |
+
+**Format**: `windchill_method_server` — `log4j` pattern layout `%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%t] %c %x - %m`, one line per record, no self-describing header (unlike WGM's format above). Occurrences only: no line-level duration, bytes or count.
+```
+2025-07-18 04:46:41,354 INFO  [main] wt.method.server.startup  - Starting BackgroundMethodServer
+2025-07-18 06:28:01,115 ERROR [ajp-nio-127.0.0.1-8010-exec-2312] com.ptc.windchill.uwgm.proesrv.rrc.RequestResultCache user01 - UwgmObjectFactory.createPartIteration :: Unsupported PartType: RAW_MATERIAL
+2025-07-18 04:52:55,260 WARN  [JMX Monitor ThreadGroup<main> Executor Pool [Thread-21]] wt.jmx.notif.methodContextGauge  - Time=2025-07-18 04:52:55.257 +0000, Name=MethodContextsGaugeNotifier
+```
+Fields: `date time,ms` (space-separated, millisecond precision, no explicit timezone — local server time), `LEVEL` (`INFO`/`ERROR`/`WARN`/`FATAL`/`TRACE`, padded to five characters), `[thread]` (bracketed thread name — `main`, an app-server worker id like `ajp-nio-127.0.0.1-8010-exec-2312`, or a nested-bracket pool name like `JMX Monitor ThreadGroup<main> Executor Pool [Thread-21]`), `logger` (dotted Java category), then the user-context slot before the ` - ` separator — always present, a user token on request-handling lines and empty on startup/monitor lines (which is why those show two spaces before ` - `) — then free-text `message` (may be empty).
+
+**Filenames**: `<Service>-<yyMMddHHmm>-<pid>-log4j.log` (process start time and pid); daily rotation appends `.YYYY-MM-DD_N` after the extension, and the roll date is the content date.
+
+**Note**: every file carries multi-line continuation records — tab-indented `\tat ...` frames, unindented `Nested exception is:` / `Caused by:` lines, multi-line property dumps and version tables after a startup line, and blank lines — none carrying a leading timestamp. They are unmatched lines (same treatment as ThingWorx's `ScriptErrorLog`); `BackgroundMethodServerESI` is the extreme case. Committed fixture: `tests/fixtures/format-detection/windchill-method-server.txt` (scrubbed, 21 records + 30 continuation lines).
 
 ---
 
 ## Codebeamber/ - Codebeamer Access Logs
 
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `codebeamer_access_log.2025-10-29.txt` | duration, bytes, count | 83KB | Codebeamer format testing |
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `codebeamer_access_log.2025-10-29.txt` | duration, bytes, count | 83KB | 741 | Codebeamer format testing |
 
 **Format**: Apache-style with duration in brackets
 ```
 127.0.0.1 - - [29/Oct/2025:08:03:31 +0000] "GET /hc/ping.spr HTTP/1.1" 200 112 [293ms] [0.293s]
+```
+
+---
+
+## GC/logs-gc/ - JVM G1 Garbage-Collection Logs
+
+Unified-logging (JDK 9+) G1 logs, `[info]` level throughout (no `[debug]`/`[trace]` detail in any file). Pause lines (`Pause Young`/`Full`/`Remark`/`Cleanup` with heap `N->N(M)` and pause ms) match the GC format; the remainder (`Concurrent Mark Cycle`, `Using G1`, …) do not — in the largest file ~71% of lines are pause lines.
+
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `gc-twx01-twx-thingworx-2.out.8` | duration (pause), heap delta | 79MB | 781,118 | Largest GC log; best single file for scale testing |
+| `gc-twx01-twx-thingworx-3.out.6` | duration (pause), heap delta | 62MB | 599,346 | Second-largest GC log |
+| `gc-twx01-twx-thingworx-0.out.6` | duration (pause), heap delta | 50MB | 495,015 | Third-largest GC log |
+| (many smaller rotations) | duration (pause), heap delta | 1.4KB–33MB | — | Rotated GC logs from 5 servers |
+
+**Format**: JVM unified logging
+```
+[2025-04-05T11:10:47.867+0000][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 2433M->66M(49152M) 18.406ms
 ```
 
 ---
@@ -61,70 +137,83 @@ All ThingWorx logs use this standard format:
 Fields: timestamp [L: level] [O: origin] [I: instance] [U: user] [S: session] [P: process] [T: thread] message
 
 ### ApplicationLog (General platform activity)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ApplicationLog.2025-05-05.0.log` | occurrences only | 85MB | Large Linux ApplicationLog |
-| `ApplicationLog.2025-05-06.0.log` | occurrences only | 6.5MB | Medium ApplicationLog |
-| `ApplicationLog.2025-12-12.282-Windows.log` | occurrences only | 10MB | Windows ApplicationLog |
-| `ApplicationLog.log` | occurrences only | 5.8MB | Current ApplicationLog |
-| `ApplicationLog-improperlyRead.log` | occurrences only | 468B | Edge case - malformed reads |
-| `HundredsOfThousandsOfUniqueErrors.log` | occurrences only | 101.7MB | Hundreds of thousands of unique error messages (group-similar) |
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `ApplicationLog.2025-05-05.0.log` | occurrences only | 85MB | 479,904 | Large Linux ApplicationLog |
+| `ApplicationLog.2025-05-06.0.log` | occurrences only | 6.5MB | 23,604 | Medium ApplicationLog |
+| `ApplicationLog.2025-12-12.282-Windows.log` | occurrences only | 10MB | 608 | Windows ApplicationLog |
+| `ApplicationLog.log` | occurrences only | 5.8MB | 22,904 | Current ApplicationLog |
+| `ApplicationLog-improperlyRead.log` | occurrences only | 468B | 2 | Edge case - malformed reads |
+| `HundredsOfThousandsOfUniqueErrors.log` | occurrences only | 101.7MB | 288,025 | Hundreds of thousands of unique error messages (group-similar) |
 
 ### ScriptLog (Script execution logs)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ScriptLog.2025-05-05.0.log` | occurrences only | 13MB | Standard ScriptLog |
-| `ScriptLog.2025-05-06.0.log` | occurrences only | 15MB | Standard ScriptLog |
-| `ScriptLog.2025-12-17.0.Rolex.log` | occurrences only | 1.6MB | Basic ScriptLog test |
-| `ScriptLog.log` | occurrences only | 4.4MB | Current ScriptLog |
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `ScriptLog.2025-05-05.0.log` | occurrences only | 13MB | 36,973 | Standard ScriptLog |
+| `ScriptLog.2025-05-06.0.log` | occurrences only | 15MB | 41,559 | Standard ScriptLog |
+| `ScriptLog.2025-12-17.0.Rolex.log` | occurrences only | 1.6MB | 6,771 | Basic ScriptLog test |
+| `ScriptLog.log` | occurrences only | 4.4MB | 8,600 | Current ScriptLog |
 
 ### ErrorLog (Error-level messages)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ErrorLog.2025-05-05.1.log` | occurrences only | 61MB | Large error log (auth failures, etc.) |
-| `ErrorLog.2025-05-06.0.log` | occurrences only | 3.3MB | Medium error log |
-| `ErrorLog.log` | occurrences only | 3.7MB | Current error log |
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `ErrorLog.2025-05-05.1.log` | occurrences only | 61MB | 350,192 | Large error log (auth failures, etc.). Every line starts with a timestamp — no stack-trace/continuation lines |
+| `ErrorLog.2025-05-06.0.log` | occurrences only | 3.3MB | 16,020 | Medium error log |
+| `ErrorLog.log` | occurrences only | 3.7MB | 20,217 | Current error log |
 
 ### SecurityLog (Security events)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `SecurityLog.2025-05-05.1.log` | occurrences only | 70MB | Large security log (nonce rejections) |
-| `SecurityLog.2025-05-06.0.log` | occurrences only | 3.0MB | Medium security log |
-| `SecurityLog.log` | occurrences only | 3.6MB | Current security log |
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `SecurityLog.2025-05-05.1.log` | occurrences only | 70MB | 382,097 | Large security log (nonce rejections) |
+| `SecurityLog.2025-05-06.0.log` | occurrences only | 3.0MB | 15,751 | Medium security log |
+| `SecurityLog.log` | occurrences only | 3.6MB | 20,174 | Current security log |
 
 ### ScriptErrorLog (Script-specific errors)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ScriptErrorLog.2025-05-05.0.log` | occurrences only | 14MB | Script error analysis |
-| `ScriptErrorLog.2025-05-06.0.log` | occurrences only | 14MB | Script error analysis |
-| `ScriptErrorLog.log` | occurrences only | 2.5MB | Current script errors |
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `ScriptErrorLog.2025-05-05.0.log` | occurrences only | 14MB | 114,610 | Script error analysis. ~74% of lines are stack-trace/continuation lines (no leading timestamp) — best no-match-population source |
+| `ScriptErrorLog.2025-05-06.0.log` | occurrences only | 14MB | 111,068 | Script error analysis (similarly continuation-heavy) |
+| `ScriptErrorLog.log` | occurrences only | 2.5MB | 5,250 | Current script errors |
 
 ### DatabaseLog (Database operations)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `DatabaseLog.2025-05-05.0.log` | occurrences only | 700KB | Database error tracking |
-| `DatabaseLog.2025-05-06.0.log` | occurrences only | 693KB | Database error tracking |
-| `DatabaseLog.log` | occurrences only | 29KB | Current database log |
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `DatabaseLog.2025-05-05.0.log` | occurrences only | 700KB | 2,136 | Database error tracking |
+| `DatabaseLog.2025-05-06.0.log` | occurrences only | 693KB | 2,107 | Database error tracking |
+| `DatabaseLog.log` | occurrences only | 29KB | 89 | Current database log |
 
 ### AuthLog (Authentication events)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `AuthLog.2025-05-05.0.log` | occurrences only | 324KB | SAML/SSO authentication events |
-| `AuthLog.2025-05-06.0.log` | occurrences only | 257KB | Authentication events |
-| `AuthLog.log` | occurrences only | 167KB | Current auth log |
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `AuthLog.2025-05-05.0.log` | occurrences only | 324KB | 1,296 | SAML/SSO authentication events |
+| `AuthLog.2025-05-06.0.log` | occurrences only | 257KB | 1,021 | Authentication events |
+| `AuthLog.log` | occurrences only | 167KB | 747 | Current auth log |
 
 ### ConfigurationLog (Configuration changes)
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ConfigurationLog.2025-05-05.0.log` | occurrences only | 30KB | Configuration tracking |
-| `ConfigurationLog.2025-05-06.0.log` | occurrences only | 31KB | Configuration tracking |
-| `ConfigurationLog.log` | occurrences only | 31KB | Current configuration log |
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `ConfigurationLog.2025-05-05.0.log` | occurrences only | 30KB | 169 | Configuration tracking |
+| `ConfigurationLog.2025-05-06.0.log` | occurrences only | 31KB | 174 | Configuration tracking |
+| `ConfigurationLog.log` | occurrences only | 31KB | 174 | Current configuration log |
 
 ### Other ThingWorx Logs
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `CommunicationLog.2025-05-06.0.log` | occurrences only | 190B | Communication events (minimal) |
-| `AkkaCommunicationLog.log` | occurrences only | 2.2KB | Akka communication events |
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `CommunicationLog.2025-05-06.0.log` | occurrences only | 190B | 1 | Communication events (minimal) |
+| `AkkaCommunicationLog.log` | occurrences only | 2.2KB | 3 | Akka communication events |
+
+### CXS/ - ThingWorx Connection Server
+| File | Format | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `cxserver.1-16.log` … `cxserver.1-26.log` | `connection_server_standard` (`yyyy-MM-dd`) | 105MB each | ~1,000,000 each | Vert.x/logback platform log; multi-line payloads (about half the lines are continuation lines); the Connection Server member of the `connection_server` variant group |
+
+---
+
+## IntegrationRuntimeLogs/ - ThingWorx Integration Runtime
+| File | Format | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `IntegrationRuntime-46b44bb3-….log` | `integration_runtime_standard` (`yyyy-dd-MM`) | 695KB | 5,416 | Byte-identical line shape to the Connection Server but dates are day-first; the only known true positive for the date-layout transposition (#385). Detection decides it from the sampled content (day tokens > 12) even when renamed; ten runtime sessions, 2023-06 → 2025-01 |
+| `integrationRuntime-logback.xml` | — | 466B | — | The producer's logback encoder configuration (shows the `yyyy-dd-MM` pattern) |
 
 ---
 
@@ -132,28 +221,28 @@ Fields: timestamp [L: level] [O: origin] [I: instance] [U: user] [S: session] [P
 
 These logs contain `durationMS=`, `result bytes=`, and `result count=` fields enabling all metric types for analysis and heatmaps.
 
-| File | Metrics | Size | Use Case |
-|------|---------|------|----------|
-| `ScriptLog-DPMExtended-clean.log` | duration, bytes, count | 29MB | Cleaned DPM ScriptLog - ideal for all heatmap types |
-| `ScriptLog-DPMExtended-clean-5k.log` | duration, bytes, count | 1.1MB | 5k-line slice from DPMExtended-clean; used by `tests/validate-index-read-back.sh`. Regenerate via `tests/fixtures/regenerate-index-readback-fixtures.sh` |
-| `ScriptLog.2025-04-09.1.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
-| `ScriptLog.2025-04-09.2.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
-| `ScriptLog.2025-04-09.3.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
-| `ScriptLog.2025-04-09.4.log` | duration, bytes, count | 72MB | Large ScriptLog with full metrics |
-| `ScriptLog.2025-04-10.0.log` | duration, bytes, count | 98MB | Large ScriptLog with full metrics |
-| `ScriptLog.GetComplexPlotByIndex.log` | duration, bytes, count | 739KB | Specific service analysis |
-| `ScriptLog.log` | duration, bytes, count | 54MB | ScriptLog with full metrics |
+| File | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|
+| `ScriptLog-DPMExtended-clean.log` | duration, bytes, count | 29MB | 122,808 | Cleaned DPM ScriptLog - ideal for all heatmap types |
+| `ScriptLog-DPMExtended-clean-5k.log` | duration, bytes, count | 1.1MB | 5,000 | 5k-line slice from DPMExtended-clean; used by `tests/validate-index-read-back.sh`, `validate-heatmap-palette.sh` and the ScriptLog runs of `validate-regression.sh` / `capture-regression.sh` (at `-bs 1`). Regenerate via `tests/fixtures/regenerate-index-readback-fixtures.sh` |
+| `ScriptLog.2025-04-09.1.log` | duration, bytes, count | 98MB | 252,640 | Large ScriptLog with full metrics |
+| `ScriptLog.2025-04-09.2.log` | duration, bytes, count | 98MB | 254,208 | Large ScriptLog with full metrics |
+| `ScriptLog.2025-04-09.3.log` | duration, bytes, count | 98MB | 271,552 | Large ScriptLog with full metrics |
+| `ScriptLog.2025-04-09.4.log` | duration, bytes, count | 72MB | 320,222 | Large ScriptLog with full metrics |
+| `ScriptLog.2025-04-10.0.log` | duration, bytes, count | 98MB | 431,777 | Large ScriptLog with full metrics |
+| `ScriptLog.GetComplexPlotByIndex.log` | duration, bytes, count | 739KB | 2,992 | Specific service analysis |
+| `ScriptLog.log` | duration, bytes, count | 54MB | 236,497 | ScriptLog with full metrics |
 
 
 ---
 
 ## /UDM - User Defined Metric Test Logs (system_cpu_total, bytes_sent, bytes_received, latency_ms)
 
-| File | Application | Metrics | Size | Use Case |
-|------|-------------|---------|------|----------|
-| `rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log` | ThingWorx Edge C SDK | TSV formatted metrics Recv-Q=0 Send-Q=0 bytes_sent=6185 bytes_retrans=347 bytes_acked=5839 bytes_received=8373 | Use include filer for text "CONN_MON statistics" to target the relevant lines | 2.1 MB | For UDM/user defined metrics testing in pattern mode |
-| `connection-server-custom-metrics.csv` | Custom Monitoring Script | Various CSV formatted system metrics: system_cpu_total, tcp_inuse, tcp_established, tcp_timewait, ctx_switches, ctx_nonvoluntary, tcp_delayed_acks | 29 KB | For UDM/user defined metrics testing in CSV mode |
-| `results_data_idonly-timestampMs.csv` | Custom TCP Packet Data Analysis | Various CSV formatted system metrics: latency_ms, request_size, response_size, request_id, stream | 9.8 MB | For UDM/user defined metrics testing in CSV mode |
+| File | Application | Metrics | Size | Lines | Use Case |
+|---|---|---|---|---|---|
+| `rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log` | ThingWorx Edge C SDK | TSV formatted metrics Recv-Q=0 Send-Q=0 bytes_sent=6185 bytes_retrans=347 bytes_acked=5839 bytes_received=8373 | 2.1 MB | 25,350 | For UDM/user defined metrics testing in pattern mode. Use include filter for text "CONN_MON statistics" to target the relevant lines |
+| `connection-server-custom-metrics.csv` | Custom Monitoring Script | Various CSV formatted system metrics: system_cpu_total, tcp_inuse, tcp_established, tcp_timewait, ctx_switches, ctx_nonvoluntary, tcp_delayed_acks | 29 KB | 119 | For UDM/user defined metrics testing in CSV mode |
+| `results_data_idonly-timestampMs.csv` | Custom TCP Packet Data Analysis | Various CSV formatted system metrics: latency_ms, request_size, response_size, request_id, stream | 9.8 MB | 166,912 | For UDM/user defined metrics testing in CSV mode |
 
 **Format**: ThingWorx Edge SDK agent logs with embedded TCP connection statisits (rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log)
 ```
@@ -205,7 +294,7 @@ request_timestamp,response_timestamp,latency_ms,request_size,response_size,reque
 ## Logs by Use Case
 
 | Use Case | Recommended Log Files |
-|----------|----------------------|
+|---|---|
 | **Duration/latency heatmap** | `AccessLogs/*.txt`, `ThingworxLogs/CustomThingworxLogs/*` |
 | **Bytes/response size analysis** | `AccessLogs/*.txt`, `ThingworxLogs/CustomThingworxLogs/*` |
 | **Count/frequency analysis** | Any log file |
@@ -213,6 +302,8 @@ request_timestamp,response_timestamp,latency_ms,request_size,response_size,reque
 | **Error analysis** | `ThingworxLogs/ErrorLog.*`, `ThingworxLogs/ScriptErrorLog.*` |
 | **Security events** | `ThingworxLogs/SecurityLog.*`, `ThingworxLogs/AuthLog.*` |
 | **Database issues** | `ThingworxLogs/DatabaseLog.*` |
+| **GC pause analysis** | `GC/logs-gc/gc-twx01-twx-thingworx-2.out.8` (largest) |
+| **Stack-trace/continuation (no-match) lines** | `ThingworxLogs/ScriptErrorLog.2025-05-05.0.log`, `ScriptErrorLog.2025-05-06.0.log`, `MethodServer/queue-worker-tiers/.../BackgroundMethodServerESI-*-log4j.log` |
 | **Quick tests (small files)** | `AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt`, `Codebeamber/*`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log` |
 | **Adversarial/malformed input** | `AccessLogs/localhost_access_log.2025-03-21.txt` (corrupt concatenated records — see AccessLogs table note) |
 | **Large file stress tests** | `AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.*.log` |

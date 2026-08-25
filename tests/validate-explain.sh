@@ -5,6 +5,8 @@
 # topics, that unknown topics produce hard errors, that the short -ex alias
 # works, that rendered output respects --terminal-width, and that table
 # blocks render with Unicode box-drawing characters.
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# --explain / --help only - no log input, nothing to shape.
 # Usage: ./tests/validate-explain.sh
 #
 # Follows the self-documenting assertion design from tests/HARNESS-DESIGN.md.
@@ -1032,7 +1034,7 @@ scenario_pager_ansi() {
     grep -nE '^sub strip_ansi\b' "$REPO_DIR/ltl" > "$sym_probe" || true
     assert_line "$sym_probe" \
         pattern     '^[0-9]+:sub strip_ansi' \
-        asserts     "strip_ansi() helper exists in ltl. It is the fallback for environments where the pager cannot interpret ANSI (notably legacy Windows `more`) and for the pager-failure path." \
+        asserts     "strip_ansi() helper exists in ltl. It is the fallback for environments where the pager cannot interpret ANSI (notably legacy Windows \`more\`) and for the pager-failure path." \
         produced_by 'strip_ansi() in ltl' \
         contract    'Issue #261: ANSI-stripping must be available as a fallback so the title banner cannot leak as literal text in any supported configuration'
 

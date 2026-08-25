@@ -44,9 +44,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
 HARNESS_DIR="$SCRIPT_DIR/statistics-drift"
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): each
+# scenario's options and fixture in scenarios.tsv are the subject (the
+# percentile values under test derive from them); nothing is suppressed.
 SCENARIOS_TSV="$HARNESS_DIR/scenarios.tsv"
 ENGINE="$HARNESS_DIR/compare-statistics-drift.pl"
 BASELINES_DIR="$HARNESS_DIR/baselines"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 
 # shellcheck source=lib/csv-cache.sh
 source "$SCRIPT_DIR/lib/csv-cache.sh"
@@ -172,17 +178,13 @@ oracle_json_for_logfile() {
     log_shorthand="$(csv_cache_logfile_shorthand "$logfile")"
     local cache_name="${fmt}_${log_shorthand}_bs${bs_sec}_du${du_unit}_${algorithm}_bpd${bpd}.json"
     local cache_path="$ORACLE_CACHE_DIR/$cache_name"
-    if [[ -f "$cache_path" ]]; then
+    if [[ -s "$cache_path" ]]; then   # -s, not -f: an interrupted producer leaves a 0-byte file
         echo "$cache_path"
         return 0
     fi
     mkdir -p "$ORACLE_CACHE_DIR"
     local abs_log
-    if [[ "$logfile" = /* ]]; then
-        abs_log="$logfile"
-    else
-        abs_log="$REPO_DIR/$logfile"
-    fi
+    abs_log="$(resolve_log_path "$logfile")"
     if ! python3 "$ORACLE_SCRIPT" \
             --log "$abs_log" \
             --bucket-size-seconds "$bs_sec" \
@@ -216,20 +218,16 @@ pa_capture_for_scenario() {
     local scenario="$1" logfile="$2" options="$3"
     mkdir -p "$PA_CAPTURE_DIR"
     local cache_path="$PA_CAPTURE_DIR/pa-${scenario}.txt"
-    if [[ -f "$cache_path" ]]; then
+    if [[ -s "$cache_path" ]]; then   # -s, not -f: an interrupted producer leaves a 0-byte file
         echo "$cache_path"
         return 0
     fi
     local abs_log
-    if [[ "$logfile" = /* ]]; then
-        abs_log="$logfile"
-    else
-        abs_log="$REPO_DIR/$logfile"
-    fi
+    abs_log="$(resolve_log_path "$logfile")"
     local tmp
     tmp="$(mktemp)"
     # shellcheck disable=SC2086  # word-splitting on $options is intentional
-    if ! "$LTL" --disable-progress -V percentile-algorithm $options "$abs_log" \
+    if ! "$LTL" --disable-progress -ni -V percentile-algorithm $options "$abs_log" \
             >"$tmp" 2>"$tmp.stderr"; then
         echo "ERROR: ltl -V percentile-algorithm failed for scenario=$scenario" >&2
         sed 's/^/        /' "$tmp.stderr" >&2

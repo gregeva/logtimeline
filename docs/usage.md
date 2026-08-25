@@ -32,7 +32,8 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 | `-pr, --profile <mode>` | Fold the timeline onto a single day or week so every date overlays into one profile view — e.g. what a typical Tuesday at 09:15 looks like across weeks of logs. `day` and `workday` collapse to a 24-hour axis (time-of-day labels only); `week` and `workweek` collapse to a weekday axis (the weekday is shown once per day, in bold). `workday`/`workweek` keep only work days (Mon–Fri); the `-alt` variants use a Sunday-anchored week and a Sun–Thu work week. Composes with `-bs` (granularity within the period) and the `-st`/`-et`, `-i`/`-e` filters, which apply to the original timestamps before folding. Modes: `day`, `week`, `week-alt`, `workweek`, `workweek-alt`, `workday`, `workday-alt`. |
 | `-st, --start <timestamp>` | Only process log lines at or after this time. A full date (`YYYY-MM-DD HH:MM:SS[.mmm]`) is an absolute cutoff; a bare time (`HH:MM[:SS[.mmm]]`) is a time-of-day window applied to every day, regardless of how the logs are split across files. A bare-time start later than the end wraps past midnight. |
 | `-et, --end <timestamp>` | Only process log lines before this time. Same forms as `-st`: a full date is an absolute cutoff; a bare time applies to every day. |
-| `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when auto-detection is not possible (`ns`, `us`, `ms`, `s`) |
+| `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when it cannot be determined from the format or the file name (`ns`, `us`, `ms`, `s`) |
+| `-lf, --log-format <name>` | Read every file as this log format instead of detecting it — the escape hatch when detection picks the wrong variant; an unknown name lists the known formats |
 | `-ru, --rate-unit <unit>` | Set the time unit for rate normalization: `s` (second), `m` (minute, default), `h` (hour), `d` (day) |
 
 ```bash
@@ -100,6 +101,8 @@ These options control which metrics logtimeline extracts and computes during pro
 | `-ov, --omit-values` | Hide the per-bucket numeric values on the bar graph |
 | `-os, --omit-stats` | Deprecated: use `-od, --omit-durations` to skip capturing durations, or `-hst, --hide-stats` to hide the statistics panel |
 | `-oe, --omit-empty` | Skip time buckets that contain zero log entries |
+| `-ni, --no-index` | Do not read or update `ltl-index.csv`, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it |
+| `-r, --recursive` | Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. `logs/access/*.log` becomes every `.log` file anywhere under `logs/access`; `*.log` recurses from the current directory. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end. |
 | `-or, --omit-rate` | Hide the error/message rate from the legend |
 | `-od, --omit-durations` | Suppress duration extraction and related columns (significantly reduces memory and processing time on large files) |
 | `-ob, --omit-bytes` | Suppress byte-size extraction and related columns |
@@ -400,7 +403,7 @@ ltl -tpa "http-" -tpa "async-" app.log
 
 ### Verbose output (`-V`)
 
-The `-V` flag emits diagnostic sections describing internal state — effective configuration (CLI + environment), index pre-seed lookups, bin-counter feature state, message-grouping statistics, log-format detection, heatmap palette resolution, benchmark data. Each section is named and bracketed by `=== <name> ===` / `=== END <name> ===` markers so it can be extracted by `grep`, `sed`, or `awk`.
+The `-V` flag emits diagnostic sections describing internal state — effective configuration (CLI + environment), index pre-seed lookups, bin-counter feature state, message-grouping statistics, log-format detection, the compiled format registry, heatmap palette resolution, benchmark data. Each section is named and bracketed by `=== <name> ===` / `=== END <name> ===` markers so it can be extracted by `grep`, `sed`, or `awk`.
 
 | Form | Behavior |
 |------|----------|
@@ -460,6 +463,7 @@ Version, help, and diagnostic options.
 | `-?, --help [<topic>]` | Show the help screen and exit; naming a topic (e.g. `statistics`) shows that topic's index |
 | `-ex, --explain [<topic>]` | Show long-form documentation for a statistic; with no topic, lists available topics |
 | `-mem, --memory-usage [debug]` | Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; `debug` additionally emits per-phase memory diagnostics on stderr |
+| `-t, --timing` | Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary |
 
 ## Alternate Names
 

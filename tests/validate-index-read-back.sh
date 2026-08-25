@@ -24,11 +24,17 @@ LTL="$REPO_DIR/ltl"
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 
+# The fixture records absolute paths, so this harness and the regenerate
+# script must resolve the corpus the same way or the recorded rows will not
+# match the files under test — both read $LOGS_DIR from lib/logs-dir.sh.
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
+
 # 5k-line samples of real production logs, sliced from the middle of the
 # corresponding logs/<source>/ files. See docs/test-logs.md and
 # tests/fixtures/regenerate-index-readback-fixtures.sh for derivation.
-ACCESS_LOG="$REPO_DIR/logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
-SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
+ACCESS_LOG="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+SCRIPT_LOG="$LOGS_DIR/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
 
 # Prebuilt ltl-index.csv covering both ACCESS_LOG and SCRIPT_LOG with file
 # rows + unfiltered selection rows + filtered (-dmin=50) selection rows.
@@ -37,24 +43,99 @@ SCRIPT_LOG="$REPO_DIR/logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtend
 # without paying for a full ltl seed run per scenario.
 INDEX_FIXTURE="$SCRIPT_DIR/fixtures/ltl-index-readback.csv"
 
-# Common options: suppress progress and limit top messages.
-COMMON="--disable-progress -osum -n 1"
+# Common options (tests/HARNESS-DESIGN.md section Invocation coherence):
+# every scenario reads the -V index-read-back section or the index CSV;
+# bucket size is not part of the selection signature (serialize_filters()),
+# so the timeline collapses to one non-empty bucket - the two-file scenarios
+# pair fixtures 25 days apart - and the summary table is suppressed.
+COMMON="--disable-progress -bs 1440 -oe -osum -n 1"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
 fi
 
+# Report why the prebuilt index no longer describes the sample logs, or
+# nothing when it still does.
+#
+# The fixture records each log's file_size and file_mtime as they were at
+# generation time, and ltl rejects an index row whose recorded pair no
+# longer matches the file on disk (read_index_file(): the row is fresh only
+# when $size_match && $mtime_match). A fixture that exists but has gone
+# stale therefore sends every pre-seeded scenario down the "no usable
+# entry" path and fails assertions that describe correct behaviour, so
+# staleness has to be treated exactly as absence is.
+#
+# Three ways the fixture stops describing the logs, all caught here:
+#   - no row for the path   fixture generated against a different corpus,
+#                           or in a checkout that resolved LTL_LOGS_DIR
+#                           elsewhere (rows carry absolute paths)
+#   - file_size differs     the sample log was re-sliced
+#   - file_mtime differs    the sample log was rewritten, copied or touched
+#                           without changing its length
+#
+# Usage: reason=$(fixture_staleness_reason)   # empty when fresh
+fixture_staleness_reason() {
+    [[ -f "$INDEX_FIXTURE" ]] || { echo "fixture does not exist"; return 0; }
+    perl -MText::CSV -e '
+        use POSIX qw(strftime);
+        my ($fixture, @logs) = @ARGV;
+        my $csv = Text::CSV->new({binary => 1, eol => $/});
+        open my $fh, "<", $fixture or do { print "fixture is unreadable"; exit 0 };
+        my (%ci, $header, %file_row);
+        while (my $r = $csv->getline($fh)) {
+            if (!$header) { $header = $r; $ci{$r->[$_]} = $_ for 0..$#$r; next; }
+            next unless ($r->[$ci{entry_type}] // "") eq "file";
+            $file_row{ $r->[$ci{file_path}] // "" } = $r;
+        }
+        close $fh;
+        for my $log (@logs) {
+            my $r = $file_row{$log};
+            if (!$r) { print "fixture has no file row for $log"; exit 0 }
+            my @st = stat($log);
+            if (!@st) { print "cannot stat $log"; exit 0 }
+            my $size      = $st[7];
+            my $mtime     = strftime("%Y-%m-%dT%H:%M:%S", gmtime($st[9]));
+            my $rec_size  = $r->[$ci{file_size}]  // "";
+            my $rec_mtime = $r->[$ci{file_mtime}] // "";
+            if ($rec_size ne "$size") {
+                print "file_size drift for $log (fixture $rec_size, on disk $size)"; exit 0;
+            }
+            if ($rec_mtime ne $mtime) {
+                print "file_mtime drift for $log (fixture $rec_mtime, on disk $mtime)"; exit 0;
+            }
+        }
+    ' "$INDEX_FIXTURE" "$ACCESS_LOG" "$SCRIPT_LOG"
+}
+
 # The sample logs and prebuilt index are gitignored derived artifacts. If
-# any are missing, run the regenerate script to produce them, then check
-# again. If they are still missing the script itself failed (typically
-# because the source logs in logs/ are not present locally) — hard-fail
-# with a clear diagnostic.
+# any are missing — or the index no longer describes the logs it was built
+# from — run the regenerate script to produce them, then check again. If
+# they are still missing the script itself failed (typically because the
+# source logs in logs/ are not present locally) — hard-fail with a clear
+# diagnostic.
+#
+# Regenerating on staleness is what makes one run repair the previous run's
+# damage instead of reporting 29 failures against correct code (#436): any
+# touch of the sample logs, including the regenerate script's own re-slice
+# from another checkout, invalidates the recorded size/mtime pair.
 REGENERATE_SCRIPT="$SCRIPT_DIR/fixtures/regenerate-index-readback-fixtures.sh"
+regenerate_reason=""
 if [[ ! -f "$ACCESS_LOG" || ! -f "$SCRIPT_LOG" || ! -f "$INDEX_FIXTURE" ]]; then
-    echo "Fixtures missing; running $REGENERATE_SCRIPT to generate them..."
+    regenerate_reason="fixtures missing"
+else
+    stale_reason=$(fixture_staleness_reason)
+    [[ -n "$stale_reason" ]] && regenerate_reason="fixture is stale: $stale_reason"
+fi
+if [[ -n "$regenerate_reason" ]]; then
+    echo "Regenerating fixtures ($regenerate_reason); running $REGENERATE_SCRIPT..."
     if ! "$REGENERATE_SCRIPT"; then
         echo "ERROR: $REGENERATE_SCRIPT failed; cannot run this harness" >&2
+        exit 1
+    fi
+    stale_reason=$(fixture_staleness_reason)
+    if [[ -n "$stale_reason" ]]; then
+        echo "ERROR: fixture still stale after regenerate: $stale_reason" >&2
         exit 1
     fi
 fi
@@ -413,6 +494,13 @@ helper_self_test() {
         label       'fixture seeds at least one file row and one selection row' \
         asserts     'The prebuilt fixture must carry both row kinds (file rows and selection rows) so scenarios exercising either tier have something to match against' \
         produced_by 'tests/fixtures/regenerate-index-readback-fixtures.sh (produces tests/fixtures/ltl-index-readback.csv)' \
+        contract    'features/179-index-read-back.md section Validation - Test scenarios; fixture invariant'
+
+    assert_command \
+        command     '[[ -z "$(fixture_staleness_reason)" ]]' \
+        label       'fixture describes the sample logs on disk (fresh size + mtime)' \
+        asserts     'Every pre-seeded scenario depends on ltl accepting the fixture rows as fresh, which it does only when each recorded file_size and file_mtime still matches the live log; asserting freshness here names the fixture as the fault when the logs have moved under it, instead of letting it surface as a broad functional break across every pre-seeded scenario' \
+        produced_by 'fixture_staleness_reason() in tests/validate-index-read-back.sh, compared against the freshness gate in read_index_file() in ltl' \
         contract    'features/179-index-read-back.md section Validation - Test scenarios; fixture invariant'
 
     # Test delete_index_rows: remove all selection rows.

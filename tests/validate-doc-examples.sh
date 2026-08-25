@@ -24,6 +24,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
+
 LTL="$REPO_DIR/ltl"
 EXTRACTOR="$SCRIPT_DIR/extract-doc-examples.pl"
 
@@ -44,30 +48,38 @@ if [[ ! -x "$EXTRACTOR" ]]; then
     exit 1
 fi
 
-# Substitution table: placeholder name → real fixture path under logs/.
+# Substitution table: placeholder name -> derived fixture under $TMP_DIR.
 # Per repo memory (feedback_test_logs.md), do NOT use
-# logs/AccessLogs/localhost_access_log.2025-03-21.txt — corrupt lines.
+# logs/AccessLogs/localhost_access_log.2025-03-21.txt - corrupt lines.
 #
-# We truncate each fixture to a small number of lines at harness start
-# and point substitutions at the truncated copies. The harness asserts
-# "the example parses and runs," not "the example produces interesting
-# output" — a 1000-line slice is plenty for that.
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# the harness asserts "the example parses and runs", never what the data
+# shows, so each fixture is the slice of a corpus file inside ONE bounded
+# time window (a filter on the timestamp prefix, below) - bounding by line
+# count alone left a 3-day span that a documented `-s -bs 30` rendered as
+# 8,640 rows. The app.log window is the one the documented -st/-et example
+# names, so that example reads data instead of silently matching nothing.
 #
 # Parallel arrays rather than `declare -A` because the system bash on
 # macOS is 3.2, which does not support associative arrays (added in 4.0).
 # Matches the bash-3.2-compatible style of tests/validate-histogram-bin-counters.sh.
-FIXTURE_LINES=1000
-
-# Source fixtures committed in the repo.
+# Source fixtures committed in the repo, and the timestamp-prefix filter
+# that selects each one's window.
 FIXTURE_KEYS=(
     "access.log"
     "app.log"
     "error.log"
 )
+# Paths within the log corpus ($LOGS_DIR), not the repo.
 FIXTURE_SOURCES=(
-    "logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
-    "logs/ThingworxLogs/ApplicationLog.log"
-    "logs/ThingworxLogs/ErrorLog.log"
+    "AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
+    "ThingworxLogs/ApplicationLog.2025-05-05.0.log"
+    "ThingworxLogs/ErrorLog.log"
+)
+FIXTURE_WINDOWS=(
+    '\[25/Jan/2026:07:'          # one hour, 667 lines (the file's dense day)
+    '^2025-05-05 08:1[5-9]:'      # 08:15-08:19, ~1,600 lines: the documented -st/-et window
+    '^2025-05-07 03:'             # one hour, ~430 lines
 )
 # Truncated copies live under $TMP_DIR. Built before any example runs.
 SUBSTITUTION_KEYS=( "${FIXTURE_KEYS[@]}" )
@@ -84,8 +96,12 @@ DOCS=(
     "docs/usage.md"
 )
 
-# Per-fixture stable terminal width for deterministic invocations.
-LTL_INJECT="--disable-progress --terminal-width 120"
+# Injected ahead of the example's own options: a pinned width for
+# deterministic runs, and `-bs 1440 -oe` so an example that does not set a
+# bucket size renders one bucket. Scalar options are last-wins, so an
+# example's own `-bs 5` / `-n 50` still parses exactly as documented - the
+# example's options are the subject; the injection only removes empty rows.
+LTL_INJECT="--disable-progress -ni --terminal-width 120 -bs 1440 -oe"
 
 pass=0
 fail=0
@@ -189,7 +205,7 @@ run_doc_example() {
     fi
 
     # Strip the leading `ltl ` or `./ltl ` and prepend our pinned LTL
-    # binary + injected flags. This keeps `--disable-progress
+    # binary + injected flags. This keeps `--disable-progress -ni
     # --terminal-width 120` consistent across every example.
     local ltl_args="${subbed#./ltl }"
     ltl_args="${ltl_args#ltl }"
@@ -199,9 +215,13 @@ run_doc_example() {
 
     # HARNESS-DESIGN.md Trap 1: preserve stderr, check the exit code
     # without set -e aborting the harness.
+    # The example is run through eval so its own quoting is honoured: a
+    # plain word-split turns `-st "2025-05-05 08:15:00.000"` into three
+    # tokens, drops the window, and runs the example as something it is not.
+    # The text is the repository's own documentation, not external input.
     set +e
     # shellcheck disable=SC2086
-    (cd "$REPO_DIR" && "$LTL" $LTL_INJECT $ltl_args > "$stdout_file" 2> "$stderr_file")
+    (cd "$REPO_DIR" && eval "\"\$LTL\" \$LTL_INJECT $ltl_args" > "$stdout_file" 2> "$stderr_file")
     local ec=$?
     set -e
 
@@ -243,13 +263,17 @@ run_doc_example() {
 # Build truncated fixtures (HARNESS-DESIGN.md Trap 9: transient artifacts
 # live under $TMP_DIR, never alongside deliverables).
 for i in "${!FIXTURE_KEYS[@]}"; do
-    src="${REPO_DIR}/${FIXTURE_SOURCES[$i]}"
+    src="${LOGS_DIR}/${FIXTURE_SOURCES[$i]}"
     if [[ ! -f "$src" ]]; then
         echo "ERROR: fixture source not found: $src"
         exit 1
     fi
     dst="$TMP_DIR/${FIXTURE_KEYS[$i]}"
-    head -n "$FIXTURE_LINES" "$src" > "$dst"
+    grep -E "${FIXTURE_WINDOWS[$i]}" "$src" > "$dst" || true
+    if [[ ! -s "$dst" ]]; then
+        echo "ERROR: fixture window '${FIXTURE_WINDOWS[$i]}' selected no lines from $src"
+        exit 1
+    fi
     SUBSTITUTION_VALS+=( "$dst" )
 done
 
@@ -257,7 +281,7 @@ echo "Validating documentation examples (issue #234)"
 echo "  ltl:       $LTL"
 echo "  inject:    $LTL_INJECT"
 echo "  docs:      ${DOCS[*]}"
-echo "  fixtures:  truncated to $FIXTURE_LINES lines under \$TMP_DIR"
+echo "  fixtures:  one bounded time window per corpus file, under \$TMP_DIR"
 echo ""
 
 EXAMPLES_TSV="$TMP_DIR/examples.tsv"

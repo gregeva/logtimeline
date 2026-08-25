@@ -27,6 +27,12 @@ The contract is two-way:
 
 This avoids the anti-pattern where harnesses scrape display output and break every time the display layout shifts. It also keeps `-V` itself comprehensible: each section is owned by one or more harnesses (or by the user for interactive debugging) with a clear purpose.
 
+### Counters serving benchmark attribution: one source, two surfaces
+
+A counter that serves benchmark attribution (a denominator for per-element cost, a population size a release comparison normalizes by) has ONE computation site — the block boundary in its owning functional category. It is exposed in that category's own `-V` section (the development-time assertion surface, with semantics recorded in the owning feature-doc section contract) and re-emitted by `benchmark-data` as a `COUNTS` row reading the same variable (the attribution surface, captured into the benchmark TSVs).
+
+Single source, two surfaces: `benchmark-data` never computes an independent duplicate of a functional counter, and a functional counter that a benchmark comparison needs is never benchmark-only. This keeps the value assertable during development of the functional category and directly attributable in benchmarking data, without the two surfaces drifting apart. (Pre-existing `COUNTS` rows that measure final structure state at emission time — e.g. `log_messages_entries` — are a different quantity from a block-boundary population and are not silently converged; where both exist, the owning feature doc records the distinction.)
+
 ## Render-invariant harnesses
 
 A render-invariant harness asserts that the *rendered terminal output* obeys the rules required for visual consistency and determinism — properties that exist only in the rendered surface and have no internal-state equivalent to read from `-V`. For these harnesses, grepping the (ANSI-stripped) display output is the correct and required approach: the rendered surface is the system under test, not a proxy for it.
@@ -104,11 +110,12 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `heatmap-palette` — heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250)
 - `profile` — timeline folding (--profile): resolved mode, fold period, included weekdays, included vs dropped sample counts (Issue #256)
 - `udm-counting` — per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313)
-- `statistics-demand` — per-store resolved statistics-group demand with raising consumers, per-store moment source, per-store statistics-calculation counters (`stats_calls` invocations plus per-group `group_calc` computed/skipped_demand/ineligible outcomes), and calculated-statistic sort selection (`sort_selection` defined/fill/demoted split, `sort_calc` per-pass attribution) (Issues #305, #303)
-- `benchmark-data` — machine-parseable TSV: version, files, line counts, timings, memory, structure counts
+- `statistics-demand` — per-store resolved statistics-group demand with raising consumers, per-store moment source, per-store statistics-calculation counters (`stats_calls` invocations plus per-group `group_calc` computed/skipped_demand/ineligible outcomes), calculated-statistic sort selection (`sort_selection` defined/fill/demoted split, `sort_calc` per-pass attribution), and block-boundary populations (per-store `population`, phase-level `threadpool_population` — the sub-stage timing denominators, Issue #417) (Issues #305, #303, #417)
+- `benchmark-data` — machine-parseable TSV: version, files, line counts, timings (per-stage `TIMING` rows, the `finalize/calculate_statistics/*` sub-stage rows, Issue #417 — contract in features/417-substage-statistics-timing.md — and the `detect/scan_sub_compile` accumulator, Issue #413), memory, structure counts (including the re-emitted block-boundary populations per the one-source-two-surfaces rule above)
+- `format-detection` — per-file detected format slug/match_type and matched/unmatched/scan-attempt counts, plus the `format-detection / scan` sub-section: registry scan-order telemetry (final MTF order, promotions, per-entry match counts, sampled no-match cost) (Issues #228, #58, #388, #384; contract in features/log-format-registry.md § `-V format-detection` section-contract)
+- `format-registry` — the compiled registry itself: entry inventory (name, slug, group, variant-default, scanned/stateful role), structure (variant groups with occupants, static scan order, derived pinned-ancestor constraints), and scan-sub compile state (subs compiled, cache hits, accumulated compile-boundary RSS delta, compiled order signatures). Per-file detection telemetry stays in `format-detection` (Issue #413; contract in features/log-format-registry.md § `-V format-registry` section-contract)
 
 **Reserved by sub-issues, not yet implemented:**
-- `format-detection` (Issue #228)
 - `filter-summary` (Issues #229, #230 — shared section, ownership decided during research)
 - `option-resolution` (Issue #231)
 
@@ -392,6 +399,57 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 ```
 
 Add the trap on the *same logical line* as the `mktemp` so it can't be forgotten between declaration and use. If the harness uses multiple temp dirs, set the trap to clean all of them: `trap 'rm -rf "$DIR1" "$DIR2"' EXIT`.
+
+#### Trap 11: backticks inside double-quoted prose are command substitutions
+
+```bash
+# WRONG — bash RUNS `more`: the harness blocks on a pager waiting for a terminal
+assert_line "$out" \
+    asserts     "fallback for environments where the pager cannot interpret ANSI (notably legacy Windows `more`)" \
+    ...
+```
+
+`asserts`, `produced_by` and `contract` strings are documentation, and documentation habitually quotes identifiers with markdown backticks. Inside a double-quoted bash string a backtick pair is a command substitution: the quoted word is executed, its output is spliced into the string, and if the word happens to be a real command (`more`, `less`, `script`, `time`, …) the harness runs it — silently when it exits at once, as a hang when it waits on a terminal. `validate-explain.sh` stalled an entire suite run for 36 minutes this way (2026-08-23): in an interactive terminal `more` exited immediately, so the defect only surfaced when the suite ran in the background.
+
+```bash
+# RIGHT — escape the backticks, or single-quote the string
+    asserts     "fallback ... (notably legacy Windows \`more\`)" \
+    asserts     'fallback ... (notably legacy Windows `more`)' \
+```
+
+Review gate: `grep -n '`' tests/validate-*.sh` — every backtick on a non-comment line is either escaped or inside single quotes. A harness that needs a variable *and* a backtick in one string escapes the backtick.
+
+## Invocation coherence: every `ltl` run is shaped to the test that invokes it
+
+A harness does not run `ltl` "the default way" and read off the part it cares about. Every invocation — in a scenario, a capture helper, a probe, a sabotage proof — is tuned so that the tool does exactly the work the assertion needs and nothing else: the fastest runtime, the minimum memory, and an output whose shape is the one being asserted. Anything the run computes that the assertion never reads is waste at best and, on the wrong input, a resource problem at worst.
+
+The mechanical gate before writing any `ltl` command line in a test:
+
+1. **What does this run prove?** Name the surface under assertion (a `-V` section, a rendered block, an exit code, a stderr diagnostic).
+2. **What does that surface NOT depend on?** Everything else is switched off or made trivially cheap through the tool's own options. A format-detection or evidence assertion is identical at any bucket size, so it runs with the coarsest bucket (`-bs 1440`) and no empty buckets (`-oe`); a column-layout assertion runs with `-n 1`; a stderr-diagnostic assertion needs no rendered table at all where an option suppresses it.
+3. **Does the input's shape match the run?** Fixtures spanning months, or a file set whose files sit years apart, make the default time axis allocate thousands of empty buckets — `-oe` and a day-sized bucket are mandatory there unless the time axis *is* the subject. Use the smallest fixture that carries the signal.
+4. **Consult the tool's documentation (`docs/usage.md`, `--help`) for the options that do this** before inventing a workaround in the harness. Where the right shape is not obvious — a scenario that needs the time axis *and* a wide span, say — the choice is an architect decision, recorded in the scenario's comment.
+
+The scenario's comment states the shape and why (one line: *"`-bs 1440 -oe`: detection assertions; fixtures span months"*). A harness run whose options were never chosen against its own assertion is a defect in review, whether or not it passes.
+
+Every harness invocation also passes `-ni` (`--no-index`) unless the index is the subject (`validate-index-read-back.sh`): without it each run reads and rewrites the working directory's `ltl-index.csv`, which on a developer's checkout is the dominant cost of a small run (measured ~0.4 s per invocation against a 2,000-row index) and appends a test row the developer never asked for.
+
+Precedent: #384 (2026-08-23) — ten new format-detection scenarios and the ad-hoc parity checks behind them ran multi-year fixtures at default (and hourly) buckets, building tens of thousands of empty buckets to assert a per-file selection that never reads a bucket. #399 (audit every test harness for invocation coherence) tracks the audit of every existing harness against this rule.
+
+## The log corpus is resolved, never composed
+
+Harnesses read their inputs from the log corpus: `logs/` under the repo root by default, or wherever `LTL_LOGS_DIR` points. A harness never builds that location itself — no `"$REPO_DIR/logs/..."`, no bare `logs/...` assumed relative to the repo root. It sources `tests/lib/logs-dir.sh` and reads `$LOGS_DIR`, or calls `resolve_log_path` for a path that arrives as data (a scenario-table column, a fixture-source list).
+
+Two reasons this is a rule and not a preference:
+
+1. **`logs/` is gitignored, so it exists only in the checkout that populated it.** A second clone or a git worktree has no corpus, and every harness that composes the repo-root path is unrunnable there — the failure is an unrelated-looking "file not found" or, worse, a pass. `LTL_LOGS_DIR` points such a checkout at the real corpus.
+2. **A partially-applied override is worse than none.** When only some call sites honour it, the harness finds its inputs through one path and silently skips the work gated on another. During #436 exactly this happened: `validate-statistics.sh` reported 18/18 passing while the L3 oracle was skipped on all 36 cells (`L3=N/A`), because one of two copies of the same path-resolution logic had been updated. The suite was green and proving materially less than it claimed.
+
+Consequences for harness authors:
+
+- **One resolution surface.** `resolve_log_path` is it. A new `if [[ "$logfile" = /* ]]` ladder is a review defect — that duplication is what produced the silent skip above.
+- **Verify an override end-to-end, not by exit code.** A harness that resolves its corpus correctly and one that quietly skips its most expensive layer both exit 0. Check the counters the run reports (`L3=OK`, assertion counts, scenario counts) against a known-good run on the default path.
+- **Where the recorded path is part of the assertion, keep it relative.** `validate-regression.sh`, `capture-regression.sh` and `tests/baseline/run-benchmark.sh` pass repo-relative paths so no absolute path reaches captured references or the benchmark TSV (#209). These run from the directory *containing* the corpus rather than resolving an absolute path, which keeps `logs/...` intact under an override; because the captured prefix is the literal string `logs/`, an overriding corpus directory must itself be named `logs`, and they fail fast when it is not.
 
 ## Runtime-warning cleanliness
 

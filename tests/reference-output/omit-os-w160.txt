@@ -18,5 +18,5 @@
  2025-05-07 14:00 3xx: 4 2xx: 905                     0:7.6/m │ ██████████                                                50.8 seconds        549.8 KiB         
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-command-line options: --disable-progress -osum -n 1 --terminal-width 160 -os 
+command-line options: --disable-progress -ni -osum -n 1 --terminal-width 160 -os 
 
