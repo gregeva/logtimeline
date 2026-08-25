@@ -10,7 +10,7 @@ Arms (`prototype/426-revalidate-lib.pm`, package `Revalidate426`):
 
 The precision lever is the same number in every arm: one bin is `10^(1/bpd) − 1` wide (4.44% at bpd 53, 2.02% at 115, 0.90% at 256, 0.37% at 616).
 
-Companion prototypes: `prototype/426-revalidate-v{1,2,3,4,5}.pl` (+ drivers `.sh`, `-run.sh`, `-tables.pl`, `-probe.pl`, `-memvar.sh`). Per-aspect results: `prototype/426-results/revalidate-vN.md`; every captured run under `prototype/426-results/revalidate-vN-*`. Each completed aspect was independently verified against its captured files; the verifier's verdict and open issues are recorded at the end of each aspect section.
+Companion prototypes: `prototype/426-revalidate-v{1,2,3,4,5}.pl` (+ drivers `.sh`, `-run.sh`, `-tables.pl`, `-probe.pl`, `-memvar.sh`). Per-aspect results: `prototype/426-results/revalidate-vN.md`; every captured run under `prototype/426-results/revalidate-vN-*`. Each of V1–V5 was independently verified against its captured files; the verifier's verdict and open issues are recorded at the end of each aspect section. The 2026-08-25 aspects add `prototype/426-revalidate-v{6,7}.pl` (+ `.sh`), `prototype/426-revalidate-v8-rebless.pl`, `prototype/426-n5-merge-shapes.pl` (+ `.sh`, `426-n5-verify.pl`), `prototype/426-native-span-merge{,-pairs,-invariant}.pl` (+ `.sh`), `prototype/426-n7-{audit-census,audit-cap,field-census}.pl`, `prototype/426-n{3n6n8,6-fanout}-run.sh`, `prototype/426-n6-{fanout-percentile,locality-probe}.pl`, `prototype/426-accuracy-by-key-shape.pl`, `prototype/426-message-stats-scale.pl` and the probes `prototype/426-v6-boundary-straddle-probe.pl` / `prototype/426-v7-clamp-magnitude.pl`; their captures live under `prototype/426-results/{v6-*,v7,v8-rebless,n5-merge-shapes,n7-audit-census,native-span-merge,n3n6n8,accuracy-by-key-shape,message-stats-scale}`. Arm **S2** (`Revalidate426::Store::S2`) joins T/S/G in the library as the native span merge for P9; a fourth arm in name only, since it inherits everything from S but `merge`.
 
 Contract references: `features/187-histogram-bin-counter-percentiles.md` § *Locked decisions from research* (F1, D1/D1A, D2, D3, D4, D5, D7, D8); `features/189-histogram-bin-counter-primitives.md` § R1–R12.
 
@@ -1119,25 +1119,45 @@ Each row is grounded in a captured aspect; none takes effect until the architect
 | A6 | #189 R4 note "positive-only substrate" / R2 guidance — regardless of P10 | The primitives are undefined for v ≤ 0 (T/S: infinite loop on negative, die on 0; G: die on both); the caller-side `> 0` guard is part of the contract and must precede every `add` in the P8–P10 store. | V1 A11; V3 Part C |
 | A7 | #189 R2 guidance — G index convention — *P10 only* | Record whether the grid index is the closed form `floor(bpd × log10 v)` (one low at exact powers of ten; zero attribution error) or the boundary-checked form; the bin-mode digest baseline is defined by that choice. | V1 Part B, A8/A9; V5 probe 1 |
 | A8 | #189 R8 / #426 P9 implementation note — S and G | Downward span growth extends with `undef`, not `0`, so a span's memory is insertion-order-independent. | V3 Surprise 2 / F6 |
-| A9 | #187 D1 implementation guidance — regardless of P10 | Mark the `lower = upper` case as unreachable on both geometries (no code path needs it). | V1 A2 |
+| A9 | #187 D1 implementation guidance — regardless of P10 | Mark the `lower = upper` case as unreachable on both geometries (no code path needs it). | V1 A2. **Grounding note (2026-08-25):** the *positive* citation is in `prototype/189-bin-counter-primitives-validation-report.md` § V1 — scenario 2, "`lower=upper` (degenerate single-value partition) … formula returns the partition value identically", one of the "18 of 18 edge cases pass". What could **not** be located anywhere in the #189 report is any statement that the case is *unreachable*: #189 records only that the formula handles it, and its own finding 1 says "Decision 1's formula handles every edge case the contract anticipates … Action: none". The unreachability claim is this report's (V1 finding 2 — `partition_new` cannot produce `min ≥ max`, and the grid cannot by construction, verified for i ∈ [−2000, 2000]); the amendment therefore adds a fact #189 never asserted rather than correcting one it did |
 | A10 | #187 D7/D8 text vs shipped emitter — regardless of #426 | Record the pre-existing drift: no `--exact-percentiles` / `-ep` flag, no `opt_out_active` / `opt_out_notice` lines in today's `emit_bin_counter_mode_verbose`; the opt-out is `-mdm raw` and surfaces as `path: user_opt_out`. | V4 F5, `revalidate-v4-ltl-real-raw.txt` |
-| A11 | #187 D2 memory-footprint guidance (~2.1 KB per partition, ~212 MB at 10⁵ keys) and #189 V2 finding 4's +11–12% Perl-overhead note — if P9 or P10 is adopted | Both describe T's dense per-key array only. Replace the "(B+2) counters × 8 bytes" model with a span-based one — per-key fixed overhead + 8 B × occupied span — and state that the footprint's bpd sensitivity is a property of the dense layout (T 5.77× from bpd 53 to 616) rather than of the precision lever (S 1.23×, G 1.36×). | V2 F1/F4 (reproduced T at 227.1 MB / +12.3%; S 91 MB Devel / 57 MB RSS; G 57 / 19 MB at 10⁵ keys, bpd 53), `revalidate-v2-{T,S,G}-bpd{53,616}.txt` |
+| A11 | #187 D2 memory-footprint guidance (~2.1 KB per partition, ~212 MB at 10⁵ keys) and #189 V2 finding 4's +11–12% Perl-overhead note — if P9 or P10 is adopted | Both describe T's dense per-key array only. Replace the "(B+2) counters × 8 bytes" model with a span-based one — per-key fixed overhead + 8 B × occupied span — and state that the footprint's bpd sensitivity is a property of the dense layout (T 5.77× from bpd 53 to 616) rather than of the precision lever (S 1.23×, G 1.36×). **The replacement model must name the surface and the measure**: the span-only advantage is a property of unbounded per-key cardinality, and it inverts on a bounded-cardinality store; and a per-key figure is only valid measured at the scale claimed, one arm per process. | **Strengthened at scale, and bounded in scope.** V2 F1/F4 (reproduced T at 227.1 MB / +12.3%; S 91 MB Devel / 57 MB RSS; G 57 / 19 MB at 10⁵ keys, bpd 53), `revalidate-v2-{T,S,G}-bpd{53,616}.txt` — now built at 286,659 keys rather than projected: T 2,423 / S 1,067 / G 712 B/key at bpd 53 and T 13,616 / S 1,075 / G 720 at 616, ladder growth T 5.6× against S 1.008× (V9 (c)). Two caveats added: on the bucket-stats surface at 29–62 rows S is **larger** than T at bpd ≥ 115 (V7 F4), and the measure itself has two failure modes — small-scale RSS reads allocator slack (sign inverts by 286,659 keys) and a multi-arm process is wrong by up to 47% (Finding U) |
+
+**Candidates surfaced by the 2026-08-25 evidence — NOT proposed, recorded for the architect.** Each is a place where this session's measurements bear on a contract no existing A-row covers. None is drafted as an amendment; the architect decides whether any becomes one.
+
+- **The merge adopt-by-reference path.** The shipped `merge_bin_counter_entries` adopts the source's `partition` and `bins` refs when the target is empty; no columnar row can, and S/S2 copy. Today the difference is unobservable because `merge_log_message_entry_into_cluster` deletes the source counter slot immediately after, leaving one live owner — so a replacement must preserve the *delete*, not the aliasing. Whether ltl's own adopt should become a copy (removing a latent hazard rather than a designed feature) is not addressed by any locked decision. Evidence: V2 addendum finding 10; feature-doc F40.
+- **`out_of_range_bounded` as dead code in shipped ltl.** A2 covers dropping it under P10; nothing covers the finding that it is already unreachable on T and S. Evidence: V4 addendum findings 8 and 11.
+- **The `-V` audit's two aggregation scopes as a documented contract.** ltl aggregates the D8 partition-shape fields over the whole store and `out_of_range_bounded` over only the display-slot keys; a replacement validated at the wrong scope would report twelve non-`none` codes against ltl's twelve `none` on an identical store. This is not written down anywhere today. Evidence: V4 addendum finding 7.
+- **`counter_memory_bytes` as a stability-contract field.** V4 finding 6 already says it should not be a regression assertion; the addendum shows it is non-reproducible *within ltl itself* (2.7% spread on byte-identical input), which is a stronger statement about a field D8 locks. Evidence: V4 Surprise 1; V4 addendum finding on `ltl-repeat-3.out`.
+- **The `[min,max]` clamp on the bucket-stats surface.** No locked decision records that it fires on 9–44% of cells or that its excursions are bounded by one bin width; both are load-bearing for any representation change and for #224's Layer-2 invariant. Evidence: V7 F3.
 
 ### What the evidence does not cover yet — in scope, next to prototype
 
-Every item below is part of the step-2 mandate, not outside it (architect, 2026-08-24). The ordered plan for closing them (N1–N8: display-geometry-bound consumers under S/G first, then the native span merge for S, a second log surface, real ltl end-to-end under G, further merge shapes, ≥ 10⁵-key fan-out, `-V` audit scope, memory measure) and the resumption notes are in `features/426-per-message-statistics-store.md` § *Not yet covered — IN SCOPE*. This section shrinks as each lands.
+Every item below is part of the step-2 mandate, not outside it (architect, 2026-08-24). The ordered plan for closing them (N1–N8: display-geometry-bound consumers under S/G first, then the native span merge for S, a second log surface, real ltl end-to-end under G, further merge shapes, ≥ 10⁵-key fan-out, `-V` audit scope, memory measure) and the resumption notes are in `features/426-per-message-statistics-store.md` § *Not yet covered — IN SCOPE*; the findings they produced are recorded there as F33–F54. This section shrinks as each lands.
 
 **Re-framed 2026-08-25.** The architect locked the objective as *replace the container, and measure what the container change does to the cardinality constraint that holds the per-message surface at a coarser resolution than heatmap and histogram* — evidence handed to him, never a proposal to change the locked `%TIER_BPD` table, and with the display surfaces' settings, geometry and rendering out of question. The work is **not scheduled**. N1 as written above was drafted while the heatmap/histogram counter stores were wrongly believed out of scope; its build is re-derived from the surface-and-decision audit mandated in the feature doc § *Do this first, next session* before any code is written.
 
-- **A native span-array merge for P9.** S's merge and fold numbers (V2) are the cost of running the verbatim `merge_bin_counter_entries` through dense views of both rows; the mechanism is accounted for slot-by-slot, but no native O(occupied span) merge over S's span array was written or measured. Until it is, P9's merge and fold cost is unknown — the fill, memory and percentile numbers are the ones that stand, and the 3–60 s folds measured on T/S are what the D5 remap costs, not what P9 must cost.
-- **Fan-out beyond 51,469 keys.** V2's projections to 10⁵ keys are per-key figures × 10⁵ on a store of 51,469; no store of that size was built, and the projection assumes the per-key cost is flat in cardinality.
-- **Merge shapes other than consecutive-key pairs and the `-g` fold.** V2 measures 725 disjoint pairs of adjacent keys and one 51,468-merge accumulation; the time-bucket and global rollups, and merges between keys with disjoint value ranges, were not timed.
-- **Display-geometry-bound consumers (F2 heatmap, F3 histogram; D5's F2/F3 contract; R12 as a finalize re-bin).** Every aspect keys by `(category, log_key)`; the time-bucket and global partitions, and `partition_rebin` as a render-time projection, were not exercised under G.
-- **A second log surface for V1/V3/V5.** All three run on the 2025-05-05 Tomcat file (integer milliseconds); the DPM ScriptLog (the #426 V8 fixture) was not re-run through these aspects, so the power-of-ten spike behaviour (V5 § F) is characterised on one data shape.
-- **Real ltl end-to-end under G.** V4 renders the section from the prototype's arms; no `ltl` build carries the grid, so byte-level baselines (`tests/validate-*.sh`) for bin mode under P10 were not produced. The percentile shift the architect would re-bless is bounded by the tables in V5 but not enumerated per baseline.
-- **Timing on the parse-dominated build path.** V3's build medians differ by < 10% between arms and include parsing; the per-line cost of the store alone is V2's measurement.
-- **The `-V` audit aggregation scope.** The prototype aggregates `out_of_range_bounded` over every key; ltl aggregates only the keys its statistics pass walks. Identical on the fixtures used (all `none`); not shown to be identical where the audit fires.
-- **Devel::Size as a memory measure.** `counter_memory_bytes` is seed-dependent for hash-backed stores (V4 Surprise 1), S column bytes moved 128 B on re-run (V3 verifier), and S/G Devel::Size grows ~58 KB after one percentile walk (V4 verifier). RSS deltas per arm-process are the memory numbers of record.
+Eight of the ten items listed here on 2026-08-24 are now closed by the 2026-08-25 aspects: the native span-array merge for P9 (V2 addendum, arm S2), fan-out beyond 51,469 keys (V9 and the N3/N6 re-runs, built at 286,659), merge shapes beyond pairs and the fold (V8), the display-geometry-bound consumers (V6), a second and third log surface (V9's N3 re-runs of V1/V3/V5 over the DPM ScriptLog and the 148 MB Tomcat file), the `-V` audit aggregation scope (V4 addendum), `Devel::Size` as a memory measure (Finding U), and — added by V7 — the fourth `%TIER_BPD` surface, which was not on the original list at all. What remains:
+
+- **Real ltl end-to-end under G.** V4 renders the section from the prototype's arms; no `ltl` build carries the grid, so byte-level baselines (`tests/validate-*.sh`) for bin mode under P10 were not produced. V9 now **enumerates** the re-bless — 15.9–31.7% blocking cells at bpd 53 on the three scenarios the prototype's parsers can read — but it reproduces the per-key percentile computation rather than running ltl's CSV pipeline, so the classified diff itself does not exist. **`codebeamer-bin-data-model` is NOT COVERED, not skipped**: the library's verbatim parsers do not read that log's bracketed `[293ms]` duration, which ltl reads through the format registry, so the fifth bin-model scenario has no measurement in either direction.
+- **Arm T's percentile cost at bpd 616 on the fan-out fixture — RESOLVED, and no longer
+  an exclusion.** The N6 process ran **6 h 30 m at a constant 100% CPU, 4.5 GB RSS, zero
+  swapouts** without completing its timed sweeps, and was terminated; the isolated locality
+  probe predicted ~210 µs/eval, so the run exceeded prediction by ~32×
+  (`prototype/426-results/n3n6n8/n6-pct-armT-bpd616.txt`). Re-running the **identical
+  command** with the machine otherwise idle completes in **175.97 s per sweep at
+  204.63 µs/eval** — within 3% of the probe's prediction, and consistent with V9's
+  independent measurement of the same arm, bpd and fixture (181.348 s)
+  (`n6-pct-armT-bpd616-reproduction.txt`). **Three independent measurements agree.** The
+  terminated run was an environmental artefact: it ran concurrently with several other
+  fan-out processes while that cell alone needs 4.43 GB RSS. No property of arm T is
+  implicated, and the bpd-616 comparison no longer rests on S and G alone. The
+  reproduction's RSS/`Devel::Size` gap (15.6%) also falls inside Finding V's measured
+  12.6–40.6% band.
+- **Intermediate tiers 115 and 256 in the fan-out measurements.** Only bpd 53 and 616 — the message-stats ladder's default rung and its top — were run through the N6 store, accuracy and memory measurements. 115 and 256 were exercised only by V1's `--check-bpd` index cross-check, never by a store. (V5 covers all four tiers on the 277 MB surface, and V7 covers 16/32/53/115/616 on the bucket-stats surface.)
+- **No `ltl` invocation exercised a production store path in the N3/N6/N8 work.** Every number there comes from the three arms behind the library interface. Whether ltl's real per-message store shows the same ratios depends on its live key count and N distribution, which that work did not sample. (The V4 addendum *did* run real ltl, but only for the `-V` section comparison.)
+- **Timing on the parse-dominated build path.** V3's build medians differ by < 10% between arms and include parsing; the per-line cost of the store alone is V2's measurement, and V9's is build-plus-percentile over a pre-parsed value list.
+- **The per-aspect residuals**, each recorded in its own section's *Not covered*: real `-b`-derived time buckets and N skew (V6 Part D, V7); `%bucket_stats_counters_hl` and the non-percentile half of `calculate_statistics_bin` (V7); p99999 at any reachable N (V7); merge-depth asymptote beyond 15 and the true state count under order permutation (V8); the sidecar and consolidation-call-site share of a real merge (V8); S2's memory and the full-fixture fold digest at 286,659 keys (V2 addendum); the calculated-statistic sort branch's wider audit scope and the 38-key `partition_count` residual on the fan-out fixture (V4 addendum).
 
 ### Reproduction recipe (full revalidation suite)
 
@@ -1177,6 +1197,61 @@ sh prototype/426-revalidate-v5-run.sh
 perl prototype/426-revalidate-v5-tables.pl prototype/426-results/revalidate-v5 > prototype/426-results/revalidate-v5-tables.txt
 perl prototype/426-revalidate-v5-probe.pl --file logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt \
     --bpd 256 --ordinal 75 --q 0.75 > prototype/426-results/revalidate-v5-probe.txt
+
+# ---- 2026-08-25 aspects ----
+FAN=/tmp/ltl-426-fixtures/bin-twxdur-full.log      # 288,025 lines, 286,659 keys
+DPMF=/tmp/ltl-426-fixtures/bin-dpm-full.log        # 122,808 lines, 3,419 keys
+DPM=logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log
+TOM=logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt
+
+# V6 (display-geometry-bound consumers; 2 files x 5 streaming rungs, builds v6-all.tsv)
+prototype/426-revalidate-v6.sh
+for b in 80 616; do perl prototype/426-v6-boundary-straddle-probe.pl $b; done \
+    > prototype/426-results/v6-probe/boundary-straddle.txt 2>&1
+
+# V7 (bucket-stats surface; --arm all for parity, then one process per arm for the RSS delta)
+prototype/426-revalidate-v7.sh
+perl prototype/426-v7-clamp-magnitude.pl > prototype/426-results/v7/v7-clamp-magnitude.txt
+
+# V8 (merge shapes: rollup, disjoint spans, depth 1/3/7/15, order permutations) — parity gate first
+prototype/426-n5-merge-shapes.sh
+perl prototype/426-n5-verify.pl > prototype/426-results/n5-merge-shapes/verify.txt
+
+# V9 (re-bless enumeration, accuracy by key shape, the store at the motivating scale)
+perl prototype/426-revalidate-v8-rebless.pl --bpd 53 --out prototype/426-results/v8-rebless \
+    > prototype/426-results/v8-rebless/run-bpd53.txt 2>&1
+for b in 16 32 53 80 115 256 616; do echo "=== bpd $b ==="; perl prototype/426-accuracy-by-key-shape.pl $b; done \
+    > prototype/426-results/accuracy-by-key-shape/dpm-ladder.txt 2>&1
+LTL_FILE=$TOM perl prototype/426-accuracy-by-key-shape.pl 53 \
+    > prototype/426-results/accuracy-by-key-shape/tomcat-bpd53.txt
+LTL_FILE=$FAN perl prototype/426-accuracy-by-key-shape.pl 53 \
+    > prototype/426-results/accuracy-by-key-shape/fanout-bpd53.txt
+for b in 53 616; do echo "=== bpd $b ==="; caffeinate -s perl prototype/426-message-stats-scale.pl $b $FAN; done \
+    > prototype/426-results/message-stats-scale/fanout.txt 2>&1
+
+# V2 addendum (native span merge, arm S2) — parity before timing
+prototype/426-native-span-merge.sh parity
+prototype/426-native-span-merge.sh timing 53  0 725 full     # likewise bpd 616
+caffeinate -s perl prototype/426-native-span-merge-pairs.pl --bpd 53 --file $FAN --runs 3 --pairs 5000 \
+    > prototype/426-results/native-span-merge/pairs-fanout-bpd53.txt 2>&1   # likewise --bpd 616
+perl prototype/426-native-span-merge-invariant.pl --file $DPMF \
+    > prototype/426-results/native-span-merge/span-invariant.txt 2>&1
+
+# V4 addendum (-V audit aggregation scope + the D8 field census). The ltl oracle is shaped to
+# the assertion: coarse buckets, no heatmap/histogram/CSV, smallest fixture carrying the signal.
+./ltl --disable-progress -ni -mdm bin -bs 1440 -V histogram-bin-counters $DPMF \
+    > prototype/426-results/n7-audit-census/oracle-dpmfull.out 2>&1
+perl prototype/426-n7-audit-census.pl --arm T --file $DPMF \
+    > prototype/426-results/n7-audit-census/arm-T-dpmfull.out 2>&1     # likewise S, G
+perl prototype/426-n7-audit-cap.pl > prototype/426-results/n7-audit-census/cap-sweep.out 2>&1
+perl prototype/426-n7-field-census.pl > prototype/426-results/n7-audit-census/field-census-dpm10k.out 2>&1
+
+# N3/N6/N8 re-runs of V1/V3/V5 over the second and third surfaces and the fan-out fixture
+sh prototype/426-n3n6n8-run.sh n3-dpm
+sh prototype/426-n3n6n8-run.sh n3-tomcat
+sh prototype/426-n3n6n8-run.sh n6
+sh prototype/426-n6-fanout-run.sh                # one process per arm per bpd for the RSS delta
+perl prototype/426-n6-locality-probe.pl --bpd 53 --runs 3
 ```
 
-Every script prints usage with `--help`; every driver exits non-zero on a T↔S digest divergence.
+Every script prints usage with `--help` (the 2026-08-25 instruments document their options in their file headers); every driver exits non-zero on a T↔S digest divergence.

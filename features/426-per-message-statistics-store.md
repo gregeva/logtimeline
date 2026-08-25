@@ -1199,6 +1199,24 @@ Recorded here as they were produced; the per-aspect reports carry the tables.
   S2 is 5.0× faster than T where S was 1.9× slower. The 21st case is the aliasing probe
   (F40), which exercises a state ltl does not reach.
 
+- **F55 — the compact store's memory advantage INVERTS on a bounded-cardinality surface.**
+  On bucket-stats at bpd 616 (62 partitions, DPM), `Devel::Size` reads **T 2,531,282 B
+  against S 3,590,876 B — S is 42% larger**, and G 2,714,054 B is also above T. This is
+  the opposite of the fan-out result (T 13,616 B/key against S 1,075 at the same bpd) and
+  it is not a contradiction: the span-only layout trades a dense array for per-row
+  bookkeeping plus an occupied span, which wins when partitions are numerous and sparsely
+  occupied and loses when they are few and densely occupied. A bucket-stats partition
+  holding ~2,000 observations over a wide value range occupies most of its span, so S pays
+  the bookkeeping without recovering it.
+
+  **Consequence for any claim about this store: the advantage is a property of unbounded
+  per-key cardinality, not of the container in general.** The per-message surface (millions
+  of partitions, most holding one observation) is where it applies; the three
+  bounded-cardinality surfaces are where it does not, and on those the honest reading is
+  that S costs slightly more memory and buys back time (V7's ladder timings still favour S
+  1.9×). Any replacement that switches all four surfaces to one representation must state
+  this trade per surface rather than quoting the fan-out figure.
+
 - **F52 — the prior stage's small-scale RSS figures measured allocator slack, and the
   sign inverts with scale.** RSS minus `Devel::Size`, bytes per key: at 51,469 keys the
   span-only arms read **negative** (S −357, G −402) — their stores fit inside memory the
