@@ -1,0 +1,24 @@
+=== N6 fan-out: arm T bpd 616 ===
+file: /tmp/ltl-426-fixtures/bin-twxdur-full.log
+counts: lines=288025 positive=288025 keys_positive=286659 live_keys=286659 observations=288025 build_s=2.873
+memory: RSS_delta_bytes=4641308672 (4426.30 MB, 16191.0 B/key)  DevelSize_bytes=3916981706 (3735.52 MB, 13664.3 B/key)  RSS-DevelSize=724326966 bytes (15.6% of RSS)
+percentile: quantiles=0.5,0.95,0.99 conv=ceil evals_per_sweep=859977 runs=3 sweep_s median=175.9729 (min 175.8323 max 175.9941)
+percentile: us_per_eval median=204.6251 (min 204.4616 max 204.6497)
+build: s_per_key median_n/a single_build=2.872982 ms/key=0.010022
+OK
+EXIT=0
+
+--- reproduction note ---
+Re-run of the identical command the terminated 6h30m attempt used (same arm,
+bpd, fixture, quantile set, run count). It completed in 176.0 s per sweep.
+
+That resolves the open question recorded in n6-pct-armT-bpd616.txt: the
+terminated run was an environmental artefact, not a property of arm T. The
+original attempt ran concurrently with several other fan-out processes, each
+holding multi-GB stores; this cell alone needs 4.43 GB RSS. The reproduction
+ran with the machine otherwise idle.
+
+The measured 204.63 us/eval matches the controlled probes' ~210.5 us/eval
+prediction to within 3%, and the sweep time matches the independent
+426-message-stats-scale.pl measurement of the same arm/bpd/fixture (181.3 s,
+warmup + 3 runs). Three independent measurements now agree.
