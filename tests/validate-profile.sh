@@ -43,6 +43,13 @@ GENERATOR="$SCRIPT_DIR/profile/generate-profile-log.py"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
+# shellcheck source=lib/colour-env.sh
+source "$SCRIPT_DIR/lib/colour-env.sh"
+
+# Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
+# against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
+# never inherited; issue #438).
+neutralize_colour_env
 
 PRODUCED_BY='emit_profile_verbose() in ltl (sample counts accumulated in read_and_process_logs() via fold_epoch(); included on the all-filters-passed path, dropped on the excluded-weekday path).'
 CONTRACT='Issue #256 + tests/HARNESS-DESIGN.md reserved-names list. The profile section name and field names (profile_active, mode, period_seconds, included_weekdays, samples_included, samples_dropped) are stability-contracted; renames are breaking. Expected values come from the generator manifest, the single source of truth for the fixture.'

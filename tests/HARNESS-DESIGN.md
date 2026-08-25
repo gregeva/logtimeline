@@ -476,6 +476,24 @@ fi
 
 The rule exists because the `udm-counting` csv-output scenario exercised the exact code path of a per-message uninitialized-division bug and emitted 125 warnings on every run — invisibly, because no harness read stderr (Issue #326). The sweep that brought every harness under the check was Issue #341.
 
+## Colour rendering is controlled, never inherited
+
+`ltl` decides whether to emit ANSI from two environment variables, checked in this order by `help_ansi_enabled()`: `FORCE_COLOR` (npm/chalk convention) turns ANSI on, then `NO_COLOR` (no-color.org) turns it off, then `-t STDOUT` decides. That precedence is deliberate and is not a harness concern. What *is* a harness concern is that both variables arrive from whatever shell launched the suite.
+
+A harness never inherits them. It sources `tests/lib/colour-env.sh` and calls `neutralize_colour_env` once at start-up, before any `ltl` invocation; a scenario that asserts on colour then pins **both** variables through `with_ascii_colour` / `with_ansi_colour` rather than setting the one it happens to be naming.
+
+Two reasons this is a rule and not a preference:
+
+1. **Setting one variable does not control the mode.** The ASCII scenario in `validate-explain.sh` ran `NO_COLOR=1 "$LTL" --explain mean` — correct in a bare shell, and wrong in a terminal exporting `FORCE_COLOR`, where `FORCE_COLOR` wins the precedence and ANSI is emitted anyway. The scenario asserted on plain text and silently became a test of precedence it never intended to run. A colour-mode assertion controls both sides of the switch or it controls neither.
+2. **The result must not depend on who launched the suite.** Release step 11 requires every `tests/validate-*.sh` to exit 0. With the variables inherited, the same commit was green from one terminal and red from another — `validate-explain.sh` 148/0 or 145/3, `validate-format-detection.sh` 192/0 or 191/1, `validate-format-registry.sh` 22/0 or 21/1 — with the failures reading as broken `--explain` rendering and broken `-lf` validation rather than as an environment artifact. The `produced_by` lines pointed into `help_ansi_enabled()`, `bs_bold()` and `bs_underline()`, and the misdirection cost an investigation during #436 before the three were established as pre-existing.
+
+Consequences for harness authors:
+
+- **The guard is applied to every harness, not to the ones observed failing.** Any harness matching an anchored pattern against `ltl` output is exposed: `print_usage()` renders its banner with ANSI wrapping under `FORCE_COLOR`, so an anchored `^Error: Unknown log format ...` stops matching — which is exactly how `validate-format-detection.sh` and `validate-format-registry.sh` failed without either one testing colour. A guard applied to the three known failures leaves the same latent inconsistency in the other twenty, and the next one surfaces as another misattributed investigation. Same reasoning as § *The log corpus is resolved, never composed*: a partially-applied environment override is worse than none.
+- **One neutralisation surface.** `tests/lib/colour-env.sh` is it. A bare `unset FORCE_COLOR` or an inline `NO_COLOR=1` prefix on an `ltl` invocation is a review defect — that per-call-site handling is what produced the original failure.
+- **Verify against a hostile environment, not a clean one.** A harness that inherits the ambient and one that neutralises it both pass from a shell where neither variable is set. The check is `FORCE_COLOR=3 CI=1 ./tests/validate-xxx.sh` against `env -u FORCE_COLOR -u NO_COLOR CI=1 ./tests/validate-xxx.sh`: the two runs must report identical counts.
+- **Colour-adjacent surfaces are not all gated by `help_ansi_enabled()`.** ASCII-mode output still carries SGR 0/90/109 sequences from other colour paths; the bold/underline assertions match SGR 1/22/4/24 specifically. An assertion that greps for "any escape sequence" will misfire — match the codes the scenario is actually about.
+
 ## Self-documenting assertions
 
 **Every assertion must answer three questions at the moment of failure, without the reader leaving the harness output:**
