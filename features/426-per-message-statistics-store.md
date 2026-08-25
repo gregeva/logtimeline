@@ -678,6 +678,422 @@ iterated on with the architect before any step-3 decision is asked for.
 **Step 3 is the architect's**, after N1–N8. Nothing above is a `Dxx`; P1–P10 remain
 proposals.
 
+## Pre-prototype audit (2026-08-25)
+
+Produced in four parts per § *Do this first, next session*, then reconciled. Every claim is
+anchored to a file + sub name + grep-able snippet; line numbers are omitted deliberately
+(they drift). Contradictions between the four independently-produced parts were verified
+against the tree at branch `426-per-message-statistics-store` and are resolved in-line,
+not papered over.
+
+### Reconciliation of contradictions between the four parts
+
+| # | Disagreement | Resolved fact (verified) | Which part was wrong |
+|---|---|---|---|
+| R1 | Part 1 lists **8** histogram `counter_update` sites; Part 3 says **7** | **8** — `duration`, `bytes`, `count`, UDM, each ×(main, `_hl`). Anchor: `counter_update(\%histogram_counters, 'duration', $duration, $histogram_stream_bpd);` and its seven siblings in `read_and_process_logs()`. Total across all surfaces: **14** (1 message + 1 consolidation `%tmp` + 2 bucket + 2 heatmap + 8 histogram) | Part 3 (miscount) |
+| R2 | Part 3 "breaks LOUDLY #4": histogram golden renders are **not** pinned to raw, so a bin-geometry change fails `validate-regression.sh` byte-compare | **False.** Every `hg-*`, `hl-histogram-*` and `heatmap-*` scenario in `tests/validate-regression.sh` carries `-dm raw` (e.g. `run_test "hg-duration-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hg duration "$APACHE_LOG"`). The whole render-regression suite is fenced off the bin path. This **moves the item from "breaks loudly" to "breaks silently"** — and makes the *bin* histogram render as uncovered as the bin heatmap render | Part 3 |
+| R3 | Part 4 flags `=== BIN-COUNTER MODE ===` vs shipped `=== histogram-bin-counters ===` as un-amended D8 drift; Part 2 treats D8's section-name lock as satisfied by the 2026-05-20 amendment | **Part 4 is right.** `grep -n '=== BIN-COUNTER MODE ===' features/187-*.md` returns 8 hits including the amendment text itself ("section name changed from `=== PERCENTILE MODE ===` to `=== BIN-COUNTER MODE ===` … All field names … remain in effect verbatim"). `ltl` emits `push @verbose_output, "=== histogram-bin-counters ===";`. A **second, later rename shipped and was never recorded in D8** | Part 2 (understated) |
+| R4 | Part 2 A9: cites V1 finding 2 as grounding for "`lower = upper` unreachable" | Neither `lower = upper` nor `fraction = 0` nor `rank_in_bin = 0` appears in `prototype/189-bin-counter-primitives-validation-report.md` (`grep` returns nothing). **The A9 grounding pointer cannot be located in the cited report at all** — weaker than Part 2's "points at a different finding". A9 must be re-grounded before consideration | Part 2 (charitable); the citation is not merely mismatched, it is absent |
+| R5 | Part 2 lists `features/349-*`, `354-*`, `323-*` as expected docs | Confirmed absent: `ls features/ \| grep -E '^(349\|354\|323)'` returns nothing. #349's contract survives only inside `features/305-*.md` § *Store-level demand*. **Step 2 of the audit brief cites a `features/349-*` that does not exist** | Neither part wrong; the brief is |
+| R6 | Part 3 says the clamp is documented in #289 and absent from #287 R3.2; Part 4 says the same | **Confirmed and it is worse than either states.** `grep -in clamp` over the three docs: #289 has `clamped to [min,max]`; #187 has **zero** hits; #287's only `clamp` hit is about std_dev cancellation, unrelated. So the `[min,max]` percentile clamp in `calculate_statistics_bin` (`# Clamp interpolated percentile values to the observed [min, max].`) is documented **only** on the bucket-stats surface, and is undocumented on the message-stats surface #426 replaces | Both correct, jointly under-stated |
+| R7 | Part 1: message-stats capture is the only site omitting `$bpd_override` | **Verified.** `counter_update(\%log_messages_counters, "$category\x1f$log_key", $duration);` — three args. Every other site passes a bpd. Also verified the consolidation site is likewise three-arg: `counter_update(\%tmp, '_single', $duration);` — so **two** sites rely on the default, not one | Part 1 (minor: "only" → "one of two") |
+| R8 | Part 2 records `%bucket_stats_counters_hl` as store-parity-only; Part 1 says write-only | **Both correct, same fact.** Exactly three references in `ltl`: the declaration, `counter_update(\%bucket_stats_counters_hl, …)`, and `bucket_stats_counters_hl => Devel::Size::total_size(\%bucket_stats_counters_hl)` in `named_structure_sizes()`. No consuming read | — |
+
+---
+
+### Verification table — load-bearing claims spot-checked against source
+
+| # | Claim | Verified? | Evidence |
+|---|---|---|---|
+| V1 | `%TIER_BPD` has exactly four surfaces with the stated rows | ✅ | `ltl`, GLOBALS: `'message-stats' => [ 4,  8,  16,  32,  53,  80, 115, 256, 616],` — four keys, values exactly as Part 1 reports |
+| V2 | `bpd_for_surface()` has exactly four callers, all in `adapt_to_command_line_options()` | ✅ | `grep -n bpd_for_surface ltl` → declaration + `$percentile_buckets_per_decade = bpd_for_surface('message-stats');` and three siblings, contiguous |
+| V3 | message-stats and bucket-stats default to `raw`; heatmap/histogram to `bin` | ✅ | `$message_stats_capture_mode = choose_data_model('message-stats') // 'raw';` vs `$heatmap_capture_mode = choose_data_model('heatmap') // 'bin';`. Mirrored at the surface-registry site (`data_model => choose_data_model('histogram') // 'bin',`) |
+| V4 | `partition_rebin` has six call sites: 2 merge, 2 heatmap finalize, 2 histogram finalize | ✅ | `grep -n 'partition_rebin(' ltl` → 6 hits: two in `merge_bin_counter_entries`, two in `finalize_heatmap_unified`, two in `finalize_histogram_unified` |
+| V5 | `merge_bin_counter_entries` rebins **both** sides into a union geometry (not #287 R2.3's "extend the narrower") | ✅ | `my $union_bin_count = int($bpd * $union_decades);` then two guarded `partition_rebin(...)` calls, then `for my $i (0 .. $union_bin_count - 1)`. Sole caller: `merge_bin_counter_entries($target->{bin_entry}, $source->{bin_entry});` inside `merge_bin_state` |
+| V6 | `sub percentile` clamps `$target_rank` to `[1, total_N]` — undocumented | ✅ | `my $target_rank = POSIX::ceil($q * $total_N);` immediately followed by `$target_rank = 1 if $target_rank < 1;` / `$target_rank = $total_N if $target_rank > $total_N;`. No doc hit |
+| V7 | The `-V` section shipped name is `histogram-bin-counters`, not D8's `BIN-COUNTER MODE` | ✅ | `ltl`: `push @verbose_output, "=== histogram-bin-counters ===";`; `features/187-*.md` § D8: "Section header: `=== BIN-COUNTER MODE ===`" |
+| V8 | `--exact-percentiles` / `opt_out_active` / `opt_out_notice` / `consumers_active` have **no emission site** | ✅ | `grep -n 'consumers_active\|opt_out_active\|opt_out_notice\|exact-percentiles' ltl` → **zero hits**. All four are locked D7/D8 clauses with no implementation |
+| V9 | `validate-regression.sh` pins **all** heatmap AND histogram scenarios to `-dm raw` | ✅ | 22 `run_test` lines carry `-dm raw`, covering `heatmap-*`, `hg-*`, `hm-hg-*`, `hl-heatmap-*`, `hl-histogram-*`. Comment: "`-dm raw` pins these to the sort-and-index path so the reference…" |
+| V10 | No bin/partition/counter state is serialized anywhere | ✅ | `tests/validate-index-read-back.sh` contains zero `bins` references; `write_index_file()` columns are scalar aggregates only |
+| V11 | `named_structure_sizes()` names all seven counter stores individually | ✅ | `heatmap_counters`, `heatmap_counters_hl`, `bucket_stats_counters`, `bucket_stats_counters_hl`, `histogram_counters`, `histogram_counters_hl` — plus `log_messages_counters` |
+| V12 | `validate-distribution-shape.sh` is raw-only by declared scope | ✅ | Header: "Scope (per #254): raw-array data model only (the default per-message-key…" |
+| V13 | `features/349-*`, `354-*`, `323-*` do not exist | ✅ | `ls features/ \| grep -E '^(349\|354\|323)'` → empty |
+| V14 | A9's grounding (`lower = upper` / `fraction = 0` / `rank_in_bin = 0`) is not in the #189 validation report | ✅ | `grep -n` for all three strings over `prototype/189-bin-counter-primitives-validation-report.md` → zero hits |
+
+---
+
+### Part 1 — Impacted surfaces
+
+Four surfaces, one per `%TIER_BPD` row. All capture in `read_and_process_logs()`.
+
+| Surface | Counter globals | Capture gating | Consume sub | Partition key | Cardinality bound | rebin at finalize? | Display-geometry-bound? | Default model |
+|---|---|---|---|---|---|---|---|---|
+| **histogram** | `%histogram_counters`, `%histogram_counters_hl`, `%histogram_data_min/_max` → `%histogram_stats`, `%histogram_boundaries`, `%histogram_buckets` (+`_hl`) | `$histogram_enabled` × mode `bin` × per-metric `defined && > 0 && !$omit_*` | `finalize_histogram_unified` (via `calculate_histogram_buckets`) | metric name literal | **3 + #UDMs** (`for my $metric (qw(duration bytes count), map { $_->{name} } @histogram_udm_configs)`) | **Yes**, ×2/metric | **Yes** — `calculate_histogram_bucket_count($min,$max)` | `bin` |
+| **heatmap** | `%heatmap_counters`, `%heatmap_counters_hl` → `%heatmap_data{,_hl}`, `%heatmap_percentiles`, `@heatmap_boundaries` | mode `bin`; `_hl` on `$category_bucket =~ /-HL$/`; **not value-gated at this site** | `finalize_heatmap_unified` (via `calculate_heatmap_buckets`); frees with `delete $heatmap_counters{$bucket};` | `$bucket` (time bucket) | **#time buckets** (span ÷ `-bs`) | **Yes**, ×2/bucket | **Yes** — `my $W = $heatmap_width;`, markers → columns via `find_heatmap_bucket($v, $W)` | `bin` |
+| **bucket-stats** | `%bucket_stats_counters`, `%bucket_stats_counters_hl` (**write-only**), `%bucket_stats_audit`; sidecars on `%log_analysis{$bucket}` | `$bucket_duration_stats_demand` × mode `bin` × `$duration > 0` | `calculate_statistics_bin` from `calculate_all_statistics`; telemetry `finalize_bucket_stats_unified` | `$bucket` | **#time buckets** (`scalar keys %log_analysis`) | **No** | **No** — scalars only | `raw` |
+| **message-stats** | `%log_messages_counters` (**flat**), `%message_stats_audit`; sidecars on `%log_messages{$cat}{$key}`; **no `_hl` store** | mode `bin` × `$duration > 0`; **three-arg `counter_update`** (bpd defaults to `$percentile_buckets_per_decade`) | `calculate_statistics_bin` (2 sites); telemetry `finalize_message_stats_unified` | `"$category\x1f$log_key"` | **UNBOUNDED.** `$top_n_messages` bounds display only; reduced solely by `-g N` consolidation | **Indirect** — `merge_bin_counter_entries` → `partition_rebin` ×2 per non-congruent merge | **No** | `raw` |
+
+**Primitive set** — nine subs inside `# HISTOGRAM BIN-COUNTER PRIMITIVES (R1-R6 per Issue #189)` …
+`# END HISTOGRAM BIN-COUNTER PRIMITIVES`: `bin_boundary`, `partition_new`, `partition_extend`,
+`partition_rebin`, `snapshot_counter_telemetry`, `bin_assign`, `bpd_for_surface`,
+`counter_update`, `percentile`. **`merge_bin_counter_entries` is a tenth member located
+outside the marker** (it sits beside `merge_bin_state` in the consolidation region).
+
+**The container contract is two nested shapes, not one:**
+entry `{ partition, bins, overflow, underflow }` and partition
+`{ min, max, bpd, decades, bin_count, log_ratio, rebins }`. Both are addressed by field
+name in all ten subs.
+
+Findings carried forward:
+
+1. **message-stats is the only surface whose partition count is unbounded by anything structural.** This is the whole memory profile #426 exists for.
+2. The two display-geometry surfaces are exactly the two that rebin at finalize and the two that default to `bin`. The two scalar-statistics surfaces default to `raw` and never rebin at finalize.
+3. `%bucket_stats_counters_hl` is pure cost — three references, none consuming.
+4. **Capture is unconditional; consume is top-N.** Most message partitions built are never read for a percentile — only walked by `snapshot_counter_telemetry`.
+
+---
+
+### Part 2 — Governing research and locked decisions
+
+#### The register (surfaces bound / later amendment)
+
+| ID | Decides | Surfaces bound | Amendment |
+|---|---|---|---|
+| **#187 F1** | ltl is a query-time analyzer; precision is the analyst's run-time lever; `rank_in_bin` legitimate | Anchors D1's formula and D2's existence | none |
+| **#187 D1 / D1A** | The Prometheus `HistogramQuantile` walk verbatim (`ceil(q·N)`, low→high, `rank_in_bin/count`, log-interpolation), using `rank_in_bin` as the fraction | `percentile`; every quantile consumer | none. #426 F24: grid-agnostic (92/92 edge cases) |
+| **#187 D2** | bpd default 53, range 4..616, tier ladder | All bin surfaces' resolution + memory budget | **Twice, in place.** #289: 53 is a floor, per-surface upward tuning sanctioned. #293: single `-dmp` lever, `-pbpd`/`-bsbpd`/`-hgbpd` deleted |
+| **#187 D3** | No per-bin sample guard; no `rank_support` field | `percentile`; the `-V` field set | none |
+| **#187 D4** | Structurally distinct overflow/underflow, both in `total_N`, boundary-return with no interpolation; `out_of_range_bounded: high\|low\|none` **per quantile** | Partition layout (B+2); `percentile`'s return tuple; three `-V` fields | none locked. **Vacuous under a shared grid** (proposed A2) |
+| **#187 D5** | HdrHistogram auto-resize: lazy construct, 5-decade seed on `v_0`, doubling, counts preserved, rebin telemetry mandatory. Seed heuristic revisitable; **the auto-resize lifecycle itself is not** | `partition_new`/`partition_extend`; per-key memory; `-V` telemetry | **#201, 2026-05-20**: scope narrowed to F1; F2/F3 get the separate stream-616 → finalize-rebin contract |
+| **#187 D6, D9** | Dissolved (no runtime gate; activation policy out of scope) | — | — |
+| **#187 D7** | Visible-but-deprecated `--exact-percentiles`/`-ep`, stderr notice, `-V` banner + per-consumer `user_opt_out` | CLI; `-V` header | **Never amended; contradicted by shipped code** (V8: zero hits). #287 re-reads it as `-mdm raw` via `choose_data_model` without amending D7 |
+| **#187 D8** | Section name, run-level fields, ordered per-consumer field set, seven locked consumer names, deterministic block order. **Stability contract: names may not change without a new locked entry** | `emit_bin_counter_mode_verbose`; every harness greping the section | **Twice in place** (#34 rename to `BIN-COUNTER MODE`; #293 `data_model_precision:` + removal of run-level `buckets_per_decade:`). **A third rename shipped un-recorded** — see R3 |
+| **#187 D10** | Prototype validation mandatory before production bin code | Gate on all bin work | Discharged for message-stats by #287; re-opened in practice by `prototype/426-*` |
+| **#187 R4** | **The accuracy contract**: bin-resolution error bounded uniformly by geometry, "**structural … not empirical**" | The one-bin bound every harness and the L3 oracle assert | Not amended. **Contradicted by #426 F25** — proposed correction A4 |
+| **#187 R5** | Degenerate inputs: zero → `-`, no partition; all-same → single bin, `lower = upper` **by geometry** (a reachable, specified case) | `percentile` | none — and it is why A9 overreaches |
+| **#187 R6** | Determinism for a given input (fixed-sequence) | All primitives | none. #426 F27 shows order-independence is **not** claimed and T does not have it |
+| **#189 R1–R12** | The primitive contracts. **R3 explicitly leaves store shape implementation-defined** ("the contract is the operation, not the data structure") — this is what permits a container change. **R7 partition independence is a hard requirement.** **R12** adds `partition_rebin` (geometric-midpoint, F2/F3 only) | The primitives; store representation | R12 *is* the #201 amendment; R1 narrowed to F1 alongside |
+| **#201 three-dimension framing** | The mismatch is A bin-count, **B range-anchor**, C unknown display width. Raising bpd made fidelity *worse* — the failure is B, not A | Why F2/F3 need a different lifecycle | — |
+| **#201 F1/F2/F3 taxonomy** | F1 precision-bound per-key fan-out; F2 display-direct; F3 linear-index-projected | The vocabulary all later docs use | — |
+| **#201 Recommendation (e_coarse)**, locked 2026-05-20 | Two-stage stream → finalize-rebin → legacy display projection. Naive "rebin straight to display width" **empirically rejected** by V8 | `calculate_heatmap_buckets`, `calculate_histogram_buckets` | Adopted verbatim into D5 and #34 R5/R8 |
+| **#201 per-family bpd contract** | Streaming bpd 616 **for F2/F3 only**; F1 stays at 53 (unbounded partition count) | `$histogram_stream_bpd`, `$heatmap_stream_bpd` | **#293** lets tiers 1–4 coarsen the display surfaces below 616 — flagged in #293 as new behavior |
+| **#201 fidelity invariant** | No cross-bin mass splitting at any stage; geometric-midpoint only; visual validation mandatory; "memory savings are not worth fidelity loss" | Any rebin/merge/projection touching counts | Mirrored verbatim into #34 R5 |
+| **#293** | One lever `-dmp` 1..9 default 5; the four-row tier table is source of truth; `percentile_precision:` → `data_model_precision:` is a breaking `-V` key rename | Every surface's `effective_bpd`; five harnesses | Amends #187 D2 and D8, and #201's fixed-616 pinning |
+| **#289** | 53 is a global floor with per-surface upward tuning sanctioned; STATS CSV is a render surface independent of `-hm`; documents the `[min,max]` clamp and the `high>low>none` cross-key audit aggregation | Bucket-stats | Amends #187 D2 |
+| **#287 R2.1–R2.3, R5, R6, R10, R12** | The per-message store's shape: bin entry + five sidecars; bpd **53 not 616** because cardinality is unbounded; **no finalize rebin**; ~2 KB/key, crossover ≈256 samples/key; `-mdm raw` byte-identical | **The exact structure #426 replaces** | R2.3's merge mechanism is stale vs code — see Part 4 |
+| **#305 / #349** | Statistics-group demand gating; store-level demand booleans | Whether the message store is built at all | #349 has **no feature doc** — recorded only in `features/305-*.md` |
+
+#### Decisions that go vacuous or need amendment under a shared-grid representation
+
+Source: `prototype/426-bin-primitives-revalidation-report.md` § *Proposed amendments*. **None is
+locked.** `features/189-*.md` § *Revalidation under #426* states it directly: P10 "makes D4,
+D5 and R6 vacuous (no out-of-range state, no seed, no rebin) … D8's rebin/overflow fields
+become inert", while P8+P9 (span-only, verbatim geometry) leave R1–R12 holding verbatim.
+
+Citation cross-check, corrected:
+
+| # | Cited decision | Accurate? | Note |
+|---|---|---|---|
+| A1 | #187 D5 (P10 only) | ✅ | But **understated**: D5 declares the auto-resize lifecycle *not revisitable* (only the seed is). A1 overrides a non-revisitable clause — architect-level, not pre-authorized tuning |
+| A2 | #187 D4 (P10 only) | ✅ | Under a grid the `low`/`high` branches are unreachable; enum collapses to constant `none` |
+| A3 | #187 D8 five fields (P10 only) | ✅ | But **silent on D8's locked field *order***, part of the same stability contract |
+| A4 | #187 R4 wording, regardless of P10 | ✅ | **The one correction that applies to shipped code today.** R4 says "structural … not empirical" with no remap exception; `partition_extend`, `partition_rebin` and `merge_bin_counter_entries` all remap |
+| A5 | #189 V5 finding 1 | ✅ | V5's own table shows `binning_max` 0.83–0.93% against a 0.90% bound, marked ✅ — the report contradicts itself |
+| A6 | `v ≤ 0` undefined | ✅ | Genuine gap: neither #187 D1 nor #189 R2/R4 states behavior; caller-side `> 0` guard is de-facto contract |
+| A7 | #189 R2 grid index convention (P10 only) | ✅ | Correctly asks for a *new* convention rather than claiming R2 settles it |
+| A8 | #189 R8 `undef` vs `0` fill | ✅ | New implementation note under R8's umbrella, correctly labelled |
+| A9 | #187 D1 `lower = upper` unreachable | ❌ **REJECT AS WRITTEN** | Two defects. (a) **The cited grounding does not exist**: none of `lower = upper`, `fraction = 0`, `rank_in_bin = 0` appears anywhere in `prototype/189-bin-counter-primitives-validation-report.md` (V14). (b) It would contradict **#187 R5**, which specifies `lower = upper` as a *reachable, contractually-specified* degenerate outcome. A9 must be re-grounded against a real capture and re-scoped against R5 before it is considered |
+| A10 | #187 D7/D8 vs shipped emitter | ✅ | Verified: zero hits for all four strings (V8). Pre-dates #426 entirely |
+| A11 | #187 D2 memory guidance is dense-layout-specific | ✅ | D2's ~2.1 KB/partition and ~212 MB/10⁵ keys derive from a dense `(B+2)×8` array; #426 F31 measured T at 2,381 B reproducing #189 V2 exactly, vs S 955 and G 600 |
+
+---
+
+### Part 3 — Blast radius of a container change
+
+#### Call graph, by phase
+
+**Hot path** (`read_and_process_logs`) — **14** `counter_update` sites across three cardinality
+regimes on one substrate: ~5 keys (histogram), O(buckets) (heatmap, bucket-stats),
+O(10⁵⁺) (message-stats). Two sites are three-arg and rely on the default bpd:
+`counter_update(\%log_messages_counters, "$category\x1f$log_key", $duration);` and
+`counter_update(\%tmp, '_single', $duration);`.
+
+**Consolidation path** (`group_similar_messages`) —
+`merge_log_message_entry_into_cluster` → `merge_consolidation_stats` → `merge_bin_state` →
+`merge_bin_counter_entries` → `partition_rebin` ×2. **The most exposed site**: it assumes both
+operands expose `{partition}{min,max,bpd,bin_count}` and a directly-indexable `{bins}` arrayref.
+
+**Finalize**, in MAIN order: `finalize_message_stats_unified` (snapshot only) →
+`finalize_bucket_stats_unified` (snapshot only) → `finalize_heatmap_unified` (rebin +
+4 percentiles + `delete`) → `finalize_histogram_unified` (rebin + 12 percentiles +
+`bin_boundary` over `0 .. $bucket_count`) → `emit_bin_counter_mode_verbose`.
+
+`calculate_statistics_bin` is the **read-side hot spot** — three call sites in
+`calculate_all_statistics`, two of them per message key. Key coupling for #426: the message
+sites pass **two containers** joined by the string key `"$category\x1f$log_key"` — the
+`%log_messages` sidecar entry and the `%log_messages_counters` entry. A compact store must
+decide whether those stay two keyed structures or fuse.
+
+#### `-V` emitters carrying counter state
+
+| Section | Emitter | Bin-relevant content |
+|---|---|---|
+| `histogram-bin-counters` | `emit_bin_counter_mode_verbose` | `data_model_precision:`; per-consumer `path`, `partition_keying`, `partition_count`, `total_rebin_events`, `max_partition_bins`, `partitions_with_{over,under}flow_count`, `counter_memory_bytes`, `rebins_per_partition`, `percentiles_emitted`, `out_of_range_bounded`, `shares_partitions_with`. **Every numeric field is produced by `snapshot_counter_telemetry` reading container field names directly**; `counter_memory_bytes` is `Devel::Size::total_size($store)` and therefore moves by construction on any container change |
+| `histogram-bin-counters / dimensions` | `finalize_histogram_unified` (buffered) | `format_histogram_dimensions_line` |
+| `percentile-algorithm` | `emit_percentile_algorithm_verbose` | Per surface: `data_model`, `effective_algorithm`, `effective_bpd`, `formula`. **Machine-read by the `validate-statistics.sh` L3 oracle** |
+| `statistics-demand` | `emit_statistics_demand_verbose` | `stats_calls`, `group_calc … computed/skipped_demand/ineligible`, `moment_source: sidecar` |
+| `benchmark-data` | `print_verbose_output` | `MEMORY\t<struct>` rows from `named_structure_sizes()` — all seven counter stores named individually (V11), plus `MEMORY\tunattributed` |
+| `runtime-config` | `emit_runtime_config_verbose` | The selector rows |
+
+#### Serialization — **none**
+
+No bin, partition or counter state reaches disk. `write_index_file()`'s columns are scalar
+aggregates; CSV writes derived percentile values, not counters; index-read-back fixtures
+contain zero `bins` references (V10). **A container change has zero on-disk migration
+surface.** This is the single biggest de-risking fact in the audit.
+
+#### Harnesses
+
+| Harness | Nature | What moves it |
+|---|---|---|
+| `validate-histogram-bin-counters.sh` | **Structural, value-insensitive.** ~40 anchored patterns; `partition_count: [1-9][0-9]*` requires ≥1; `percentiles_emitted` exact ladder + order; `assert_surface_bpd` 16 exact cells across tiers 1/5/7/9 | Any field/consumer/section rename; `partition_count` reaching 0; any `%TIER_BPD` edit |
+| `validate-statistics.sh` | **VALUE-EXACT.** 5 committed bin-model baseline dirs (`{apache,codebeamer,thingworx,tomcat}-bin-data-model`, `tomcat-heatmap-bin`) holding full-precision floats. T1/T2 advisory ≤1%; **T3 blocking >1%**; L2 invariants T4; L3 oracle reads `effective_bpd`, blocking >2.5% on bin columns | Any percentile shift >1%; any break of `min ≤ p1 … p99999 ≤ max` |
+| `validate-statistics-demand.sh` | Structural, **call-count-sensitive** | Any change to how many keys reach `calculate_statistics_bin` |
+| `validate-duration-display.sh` | Render invariants across **both** models (`-dm bin` and `-dm raw`) | A shift that inverts P50/P95/P99 ordering |
+| `validate-regression.sh` | Value-exact golden renders — **but fenced entirely off the bin path** (V9, R2) | Nothing on the bin path |
+| `validate-csv-output.sh` | Structural typing only | Nothing numeric |
+| `validate-distribution-shape.sh` | Value-exact, **raw-only by declared scope** | Nothing on the bin path |
+| `validate-histogram-ticks.sh` | Self-consistency (ltl vs itself) | Desync of boundaries from percentile values, not a uniform geometry change |
+| `validate-runtime-config.sh` | Selector rows only | `-dmp` / selector surface |
+| All harnesses | `assert_no_runtime_warnings` | Any autovivification or `//`-guard slip — **fires before anything else** |
+
+#### Ranked
+
+**Breaks LOUDLY**
+
+1. Renaming any `-V histogram-bin-counters` field, consumer, or `path:` value — also a D8 locked-decision breach requiring an architect-approved entry and a `tests/HARNESS-DESIGN.md` consultation.
+2. Any percentile value moving >1% — `validate-statistics.sh` L1 T3, blocking, against 5 committed bin baselines; L3 oracle a second blocking layer.
+3. Breaking `min ≤ p1 … p99999 ≤ max` — L2 T4. The clamp in `calculate_statistics_bin` exists solely to hold this.
+4. `partition_count` reaching zero for a migrated consumer.
+5. Editing `%TIER_BPD` or `bpd_for_surface`.
+6. Changing how many keys reach `calculate_statistics_bin`.
+7. Any Perl runtime warning.
+
+**Breaks SILENTLY** — *promoted item: the bin histogram render joins the bin heatmap render as
+wholly uncovered (R2)*
+
+1. Percentile shifts ≤1% — T2 advisory, visible only under `--show-all`. Exactly the magnitude a reshaped container produces.
+2. `counter_memory_bytes` — asserted only as `[0-9]+`, and it is the designed memory instrument.
+3. `MEMORY\t*_counters` rows vanishing from `-V benchmark-data` if a store is renamed or removed in `named_structure_sizes()` — a metric present on one side only is *news* per CLAUDE.md, but nothing detects it automatically.
+4. **`MEMORY\tunattributed` absorbing the delta** if the substrate moves somewhere `Devel::Size` cannot walk (packed string, closure, buffer). In-tree precedent: `format_scan_subs` needed a dedicated RSS-delta path for exactly this. **A compact container is highly likely to hit it.**
+5. `total_rebin_events` / `max_partition_bins` / `rebins_per_partition` drifting — shape-only assertions.
+6. `out_of_range_bounded` flipping `none` → `low`/`high`.
+7. Bin-path shape moments drifting — no absolute-correctness anchor exists (`validate-distribution-shape.sh` is raw-only).
+8. **Bin heatmap AND bin histogram renders** — zero golden coverage (R2).
+9. **Consolidation merge fidelity under `-mdm bin`** — every `*-consolidated` statistics-drift scenario is raw-model; there is **no `*-bin-consolidated` scenario**. The `-g 90 × -mdm bin` path through `merge_bin_counter_entries` is entirely unasserted. **Highest-risk uncovered path.**
+10. Doc prose going stale (below).
+
+#### User-facing documentation to update
+
+| File | Section | Commitment |
+|---|---|---|
+| `docs/usage.md` | "Percentile data model and algorithm" + selector table | "Scales with partition count rather than observation count"; per-selector bin description |
+| `docs/usage.md` | "Tuning precision" | `-dmp` tiers; pointers to the two `-V` sections |
+| `docs/explain/statistics.md` | "percentiles" | **"one partition per logical series, with a fixed bin footprint per partition regardless of how many observations stream through it"** — a direct statement about container shape |
+| `docs/explain/statistics.md` | "iqr" / "min" / "max" | "~1.3% relative bin width"; "running min sidecar alongside the bin partition" |
+| `docs/explain/histogram.md` | "Precision and tuning" | Bin resolution tied to `-dmp` |
+| `ltl` `--explain` strings | `$explain_percentiles_compute`, `$explain_{min,max,iqr,skewness,kurtosis}_compute` | Same claims, second surface; nothing enforces agreement between the two |
+
+Per CLAUDE.md's 2026-05-23 rule none of this may name internal identifiers, so a *rename*
+does not propagate here — but a change to bin width, per-partition footprint, sidecar
+mechanism, or "scales with partition count" does.
+
+---
+
+### Part 4 — Invariants a replacement must preserve
+
+Legend: **C** = locked contract; **O** = observed behavior with no contract statement.
+
+| # | Invariant | Status | Verbatim source | Code anchor |
+|---|---|---|---|---|
+| 1 | **Mass conservation** | **C** for `partition_rebin`; **O** for capture and merge | #189 R12 *Invariants preserved*: "Sum of counts in `$finalized_bins` equals sum of counts in `$src_bins` plus optional source-side overflow/underflow folded in" | `$new_bins[$new_i] = ($new_bins[$new_i] // 0) + $count;` with clamps `$new_i = 0` / `= $new_bin_count - 1` making it total. `counter_update`: every observation lands in exactly one of bin/overflow/underflow |
+| 2 | **Peak preservation** = 1.0 always | **C** (mechanism); numbers **O** | #201: "For a spike entirely within one source bin, the spike count goes entirely to one target column. `peak_retention = 1.0` [always — no count splitting]. **Y-axis is exact.**" | geometric-midpoint loop, both `partition_extend` and `partition_rebin` |
+| 3 | **Peak X-offset** ≤ `ceil(B_d × (R_s/B_s) / R_d)` | **C** (algebraic) | #201 § *Algebraic fidelity bounds*; V6/V7 measured 0 columns, 100.0000% mass and peak retention | — |
+| 4 | **#201 fidelity invariant** — no cross-bin mass splitting at any stage; geometric-midpoint only; visual validation mandatory before merge; "memory savings are not worth fidelity loss" | **C** | #201 § *Fidelity invariant — DO NOT smooth the data*, mirrored verbatim in #34 R5. Review vocabulary: *distributive, smear, split, interpolate* applied to **bin counts** is suspect | `my $midpoint = sqrt($lower * $upper);` in exactly two subs — plus a **third context #201 never contemplated**: `merge_bin_counter_entries` calls `partition_rebin` twice |
+| 5 | **Determinism** (fixed-sequence) | **C** | #187 R6, #189 R5, #189 R12, #287 R11 | `percentile` walks `0 .. bin_count-1` by index; `merge_bin_counter_entries` iterates `0 .. $union_bin_count-1`; `snapshot_counter_telemetry` sorts before reporting |
+| 5b | **Insertion-order independence** | **explicitly NOT claimed** | #426 F27: "G is insertion-order-independent and merge-commutative; T is neither (T differs on 105/200 keys, up to 0.99 bins; G 0/200)" | — |
+| 6 | **Out-of-range semantics** — distinct counters, both in `total_N`, `boundary[0]`/`boundary[B]` with no interpolation, `out_of_range_bounded` **per quantile** | **C** (#187 D4, #189 R6) | D4 verbatim; #189 R6: "a partition with `partitions_with_overflow_count > 0` may still report `audit = none` for some quantiles … Consumer tests must not assert `high` for every quantile" | `sub percentile` matches exactly. **Note**: `counter_update`'s own header says the counters are structurally unreachable under today's uncapped auto-resize — they are reachable only via `merge_bin_counter_entries` propagation |
+| 7 | **#187 D8 `-V` name stability** | **C** | "the section name, all top-level field names, all consumer-name strings, and all per-consumer field names are part of the locked feature contract" | See divergences below |
+| 8 | **In-bin interpolation rule** | **C** — doc and code **AGREE, no drift** | D1 steps 1–5 | `POSIX::ceil($q * $total_N)`; `$rank_in_bin = $target_rank - ($cum - $c)`; `$fraction = $rank_in_bin / $c`; `$lower * (($upper / $lower) ** $fraction)` — the doc's explicitly-permitted equivalent form. Natural-log `bin_boundary` is the permitted alternative to log2/exp2 |
+| 9 | **Rank-convention divergence is deliberate** — raw uses `int` (nearest-rank), bin uses `ceil` (Prometheus) | **C** (#272 pair, restated #287 R4) | The two paths are **not** expected to agree; cross-model equality is never a valid assertion | `$sorted[int($duration_count * 0.5)]` vs `POSIX::ceil($q * $total_N)`. `emit_percentile_algorithm_verbose` declares both; the L3 oracle dispatches on it |
+| 10 | **R4 accuracy bound** — "structural … not empirical", uniform across quantiles | **C as written; measured false** | #187 R4 verbatim | **#189 § Revalidation under #426**: "R4's 'structural' bound is not met once a partition has been remapped by widening or by `merge_bin_counter_entries` (up to ~2 bins after merges)". #426 F25: T needed a remap on 73% of 1,258 pairs / 88% of 2,198 fold steps, worst 1.35–2.06 bins, within-one-bin down to **78%**; G holds **100.00%** at 53/115/256/616. **Correction PROPOSED, NOT APPLIED — R4 as written still stands** |
+| 11 | **No per-bin sample-count guard**, ever | **C** (#187 D3) | "R4 returns Decision 1's formula output regardless of `bin_count` or the position of the target rank"; no `rank_support` field | A replacement must not add one |
+| 12 | **Render-stage duplication is preserved, not fixed** | **C** by #201's `e_coarse` | #201 V7: shipped display sum 1,647,292 vs true raw 575,800 (~2.86× inflation) via `display[i] = partition[int(i / cols_per_bucket)]` — duplication, not splitting; deliberately kept | A replacement must preserve the duplication convention or bar widths change |
+
+#### Merge semantics
+
+| Aspect | Status |
+|---|---|
+| **Merge-fidelity guarantee** | **C** (#287 R2.3): merged ≡ from-scratch, "up to the bin-resolution bound on percentiles, and numerically identical on the sidecar-derived statistics" |
+| **Mechanism** | **#287 R2.3 is STALE.** It says extend the narrower via `partition_extend`; code computes a **union geometry and rebins both sides** (V5). The code comment justifies it: "`partition_extend`'s doubling history can leave the two partitions with non-congruent (min, max) … so we cannot just per-bin add directly". The code is the better mechanism; R2.3 was never updated. R2.3 also names `merge_consolidation_stats` as the site; the bin merge actually lives in `merge_bin_state` |
+| **Commutativity** | **NOT claimed; measured false** (F27). Asymmetry in code: `$union_bin_count = int($bpd * $union_decades)` uses the **target's** `$bpd`, and the target-empty branch adopts the source wholesale without rebinning |
+| **Associativity** | **NOT claimed, not measured** anywhere in the corpus |
+| **Target-empty aliasing** | `$target->{partition} = $source->{partition};` — **by reference**. Two entries then alias one partition hashref. **Undocumented anywhere.** A replacement must preserve or deliberately fix |
+| **Merge rebins invisible to telemetry** | `partition_rebin` returns `rebins => 0`; `total_rebin_events` and `rebins_per_partition` **undercount on every consolidated run**. Recorded as a proposed correction, **not applied** |
+
+#### Doc/code divergences found
+
+| # | Divergence | Doc | Code | Severity |
+|---|---|---|---|---|
+| D-a | `-V` section name | D8: `=== BIN-COUNTER MODE ===` (both amendments say the rest holds "verbatim") | `=== histogram-bin-counters ===` | **Rename real, shipped, harness-asserted; D8 never amended.** A replacement preserves the *shipped* name |
+| D-b | `consumers_active: none` | D8 contract clause | no emission site (V8) | clause unimplemented |
+| D-c | `opt_out_active` / `opt_out_notice` / `--exact-percentiles` | D7 + D8 contract | zero hits (V8); superseded in practice by `-mdm`/`-bdm`/`-dm` (#266) | clause unimplemented, un-amended |
+| D-d | merge geometry alignment | #287 R2.3 | union rebin of both sides | code correct, R2.3 stale |
+| D-e | merge-driven rebin telemetry | D8 counts them | `rebins => 0` | proposed correction, not applied |
+| D-f | **`[min,max]` percentile clamp** | #289 documents it; **#187 D1 zero mentions; #287 has none** (R6) | `calculate_statistics_bin` clamps unconditionally | **Drift on the exact surface #426 replaces.** The harness (L2 T4, #224 D4) enforces the bound; no #187-level statement authorises the clamp |
+| D-g | `$target_rank` clamped to `[1, total_N]` | not stated anywhere | `sub percentile` clamps (V6) | code-only, benign |
+| D-h | target-empty merge aliases the partition | not stated anywhere | by-reference assignment | code-only, undocumented |
+| D-i | R4 "structural, uniform" | #187 R4 | false after any remap/merge | correction proposed, not applied |
+
+#### Not found / uncertain
+
+- No document states mass conservation as an invariant for the **streaming capture path** or for **`merge_bin_counter_entries`**. It holds in code; it is contract only for `partition_rebin` via #189 R12.
+- No **associativity** claim for merge anywhere.
+- No accuracy bound scoped "after N merges" other than #426 F25, which is a finding, not a locked contract.
+- The `high > low > none` cross-key audit aggregation rule is documented **only** in #289 § *Observability* — not in #187 D4 or D8.
+- `features/349-*`, `features/354-*`, `features/323-*` **do not exist** (V13). #349's contract lives inside `features/305-*.md`; #323's findings are in `features/189-*.md` but not under a `#323` heading. **Step 2 of the audit brief cites a doc that was never created.**
+
+---
+
+### What this audit changes about the N1–N8 plan
+
+**N1 as written already names the display surfaces** — it was drafted *after* the scope
+correction, not before it, and covers F2 heatmap and F3 histogram, the `partition_rebin`
+finalize step, T↔S parity of finalized cells/markers/bins, and the #201 measures. The
+audit does **not** find N1's surface coverage deficient. What it finds is that N1's *build*
+is under-specified in five concrete ways that the audit now settles:
+
+1. **N1 must cover `bucket-stats`, which it does not name at all.** N1 names F2 and F3;
+   the audit's Part 1 shows **four** `%TIER_BPD` rows, and `bucket-stats` is a per-time-bucket
+   store on the same substrate with a **different bpd ladder** (`[16,32,53,53,53,115,616,616,616]`
+   — 616 arrives at tier 7, not tier 5) and **no finalize rebin**. It is neither an F1
+   fan-out surface nor an F2/F3 display surface. Under S and G it is a third shape: bounded
+   cardinality, scalar-only consumption, `percentile()` invoked directly against the
+   streaming partition. **N1 (or a new N1b) must add a bucket-keyed, no-rebin arm.**
+
+2. **N1 must exercise the `merge` path on the display arms, and it currently cannot.**
+   N1's parity target is "finalized cells/markers/bins". But `partition_rebin` has **six**
+   call sites, and **two are in `merge_bin_counter_entries`** — a context #201 never
+   contemplated when it locked the geometric-midpoint contract. The heatmap/histogram
+   arms never merge, so N1 as scoped tests four of the six. N2 covers merge for S on the
+   message surface only. **The union-rebin path needs an arm in N1 or an explicit statement
+   that it is N2's alone.**
+
+3. **N1's "`-hm` / `-hg` `-V` sections from each arm vs real ltl" must include the five
+   fields the audit shows go inert.** Under P10 (grid), `total_rebin_events`,
+   `max_partition_bins`, `partitions_with_overflow_count`,
+   `partitions_with_underflow_count` and `rebins_per_partition` are all structurally
+   meaningless, and A2/A3 propose amending D8. N1 must therefore report **which D8 fields
+   each arm can still populate**, per surface, not just whether the section matches — a
+   pure diff-vs-ltl will show five failures on G that are the *expected* consequence of
+   the representation, not defects.
+
+4. **N1 must measure with RSS, not `Devel::Size`, on the display arms too.** Blast-radius
+   item 4: if a compact container moves the substrate somewhere `Devel::Size` cannot walk,
+   the bytes silently reappear in `MEMORY\tunattributed`. N8 already sets RSS as the number
+   of record — **that rule must apply from N1 forward, not be deferred to N8**, or N1's
+   memory numbers on the display arms will be unusable and have to be re-run.
+
+5. **N1's fidelity comparison must state which R4 bound it is testing against.** Post-#426
+   F25 the "structural" bound is known false after remap, and every N1 finalize step *is*
+   a remap. N1 reports **within-one-bin percentage**, not "within the structural bound".
+
+**Re-derivation needed in N2–N8:**
+
+- **N2 (native span merge for S)** — unchanged in intent, but must now target the **union**
+  geometry the shipped `merge_bin_counter_entries` computes, not #287 R2.3's stale "extend
+  the narrower". Building against R2.3's prose would validate a mechanism ltl does not use.
+  Also: it must decide whether the **target-empty by-reference aliasing** (D-h) is preserved
+  or fixed, and say which.
+- **N4 (real ltl end-to-end under G)** — **expand.** N4 says "the summary-table path". The
+  audit shows the harness exposure is not confined there: `validate-statistics.sh` carries
+  five committed **bin-model** baseline directories including `tomcat-heatmap-bin`, and
+  `validate-histogram-bin-counters.sh` asserts 16 exact bpd cells across four tiers.
+  N4's re-bless enumeration must cover **all five bin baselines and the tier assertions**,
+  not the summary table alone.
+- **N7 (`-V` audit aggregation scope)** — **partly moot under G.** If `out_of_range_bounded`
+  collapses to constant `none` (A2), N7's question has no content on the G arm. N7 must
+  either be scoped to T and S, or restated as "show that the audit is constant under G
+  and say what should replace it".
+- **N3, N5, N6, N8** — no re-derivation. N3's second surface, N5's merge shapes, N6's
+  ≥10⁵-key fan-out and N8's RSS measure are all unaffected by anything the audit found,
+  beyond N8's rule being promoted forward into N1 (point 4).
+
+**Two coverage gaps the audit found that no N-item currently addresses**, both of which
+make it impossible to *prove* a container change is safe from the harness suite alone:
+
+- **No `*-bin-consolidated` statistics-drift scenario exists.** Every `*-consolidated`
+  scenario is raw-model. The `-g 90 × -mdm bin` path — the one that goes through
+  `merge_bin_counter_entries` → `partition_rebin` ×2 — is asserted by nothing.
+- **No golden render exists for either bin display surface.** `validate-regression.sh`
+  pins all 22 heatmap and histogram scenarios to `-dm raw` (V9). The `bin` histogram render,
+  which is the **default**, has no byte-level coverage at all.
+
+Both are pre-existing gaps, not #426's creation — but a container change lands on
+precisely them.
+
+---
+
+### Open questions raised by the audit
+
+1. **D8's section name.** `ltl` emits `=== histogram-bin-counters ===`; #187 D8 still locks
+   `=== BIN-COUNTER MODE ===`, and both recorded amendments say the rest holds "verbatim".
+   The rename shipped and is asserted by the harness. Should D8 be amended retroactively to
+   record the name that shipped, or is a different resolution intended?
+
+2. **D7 and the three unimplemented D8 clauses.** `--exact-percentiles`, `opt_out_active`,
+   `opt_out_notice` and `consumers_active` are locked contract with **zero emission sites**.
+   #287 re-read the opt-out as `-mdm raw` without amending D7. Should D7 be dissolved (as
+   D6 and D9 were) and D8's run-level header trimmed, before #426 touches the emitter?
+
+3. **The `[min,max]` percentile clamp on the message-stats surface.** It ships
+   unconditionally in `calculate_statistics_bin`, is documented only for bucket-stats
+   (#289), and appears in neither #187 D1 nor #287. The #224 L2 T4 invariant depends on it.
+   Is the clamp a locked part of the message-stats contract that #426 must preserve, or an
+   undocumented implementation detail open to redesign?
+
+4. **A4 — the R4 accuracy contract.** The correction (the bound is not met after remap or
+   merge) applies to **today's shipped code regardless of #426**. Should it be locked as a
+   #187 amendment now, independently of any representation decision, so the corpus stops
+   asserting something measured false?
+
+5. **A9.** Its grounding citation cannot be located in the #189 validation report at all
+   (V14), and its proposed text would contradict #187 R5, which specifies `lower = upper`
+   as a reachable degenerate case. Withdraw A9, or re-ground and re-scope it?
+
+6. **`%bucket_stats_counters_hl`.** Written on the hot path, read only by `Devel::Size`,
+   its own comment concedes "store parity only". Is it in scope for #426 to remove, or does
+   store parity have a purpose the code does not record?
+
+7. **Bucket-stats' place in the F1/F2/F3 taxonomy.** #201's taxonomy puts
+   `time_bucket_stats` in F1 (precision-bound per-key fan-out), but its cardinality is
+   bounded by time buckets like F2/F3, and it never finalizes. Is it F1 by lineage only,
+   and should N1 treat it as a fourth shape?
+
+8. **The two uncovered paths.** Should a `*-bin-consolidated` statistics-drift scenario and
+   a bin-model golden render be added **before** the prototype work, so #426 has a harness
+   that can detect what it changes — or is that a separate issue?
+
+9. **Merge associativity.** No document claims it and nothing measures it. Under `-g N`
+   folds, entries are merged in sequence. Is associativity a property a replacement must
+   demonstrate, or is fixed-sequence determinism (#187 R6) sufficient?
+
+10. **`features/349-*`.** Step 2 of the audit brief names it; it does not exist, and #349's
+    store-level demand contract lives inside `features/305-*.md`. Should #349 get its own
+    feature doc, or is the pointer in #305 the intended record?
+
+---
+
 ## Verification instrument
 
 The before/after instrument is the #417 sub-stage timing, which attributes 97% of the
