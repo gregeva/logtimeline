@@ -1164,6 +1164,32 @@ Recorded here as they were produced; the per-aspect reports carry the tables.
   geometry; it is not repairing arbitrary seed artefacts. It fires on 9.2% of
   bucket-stats cells, so it is doing real work, and any representation must keep it.
 
+- **F43 — the container change's effect on the constraint, measured at the motivating
+  scale, and it grows with resolution.** `prototype/426-message-stats-scale.pl` builds all
+  three arms over the real message-stats keying at the full fan-out fixture (286,659
+  distinct keys, 288,025 observations) and times what the statistics pass does — build
+  once, then evaluate percentiles across every key. Built at size, not projected. Medians
+  of 3:
+
+  | bpd | arm | build | percentiles (286,659 keys × 3 q) | memory | B/key |
+  |---|---|---|---|---|---|
+  | 53 | T | 1.518 s | 17.634 s | 662.3 MB | 2,423 |
+  | 53 | **S** | 1.233 s | **2.112 s** | **291.7 MB** | 1,067 |
+  | 53 | G | 0.697 s | 1.616 s | 194.7 MB | 712 |
+  | 616 | T | 2.966 s | **181.348 s** | **3,722.4 MB** | 13,616 |
+  | 616 | **S** | 1.294 s | **2.281 s** | **293.9 MB** | 1,075 |
+  | 616 | G | 0.738 s | 1.731 s | 196.9 MB | 720 |
+
+  At the default tier's message-stats resolution S is **8.4× on percentile evaluation and
+  2.2× on memory**; at bpd 616 it is **79.5× and 12.7×**. The reason is the growth shape,
+  and it is the load-bearing half of the locked objective: **across the ladder T grows
+  10.3× in time and 5.6× in memory, S grows 1.08× and 1.008×.** Today's dense seeded array
+  is what makes per-message resolution expensive — the array is sized by the partition,
+  not by the data — so the per-message row's coarse rung exists to pay for the container,
+  not for the statistics. A span-only container removes that coupling almost entirely.
+  This is evidence handed to the architect about what the row *could* afford; it is **not**
+  a proposal to change `%TIER_BPD`, which is locked and his alone.
+
 - **F41 — the native span merge removes S's only regression against T.** S's merge ran
   the verbatim arithmetic through dense views, which cost O(partition width) per merge and
   made it *slower* than T on the `-g` fold. A native O(occupied span) merge (arm S2,

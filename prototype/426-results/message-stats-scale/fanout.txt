@@ -5,3 +5,9 @@ T  build   1.518 s [1.401,1.628]   percentiles(286659 keys x 3 q)  17.634 s [17.
 S  build   1.233 s [1.220,1.243]   percentiles(286659 keys x 3 q)   2.112 s [2.111,2.118]  mem 291.7 MB (1067 B/key)
 G  build   0.697 s [0.693,0.702]   percentiles(286659 keys x 3 q)   1.616 s [1.609,1.617]  mem 194.7 MB (712 B/key)
 === bpd 616 ===
+file=/tmp/ltl-426-fixtures/bin-twxdur-full.log bpd=616 observations=288025
+distinct keys=286659
+T  build   2.966 s [2.899,3.024]   percentiles(286659 keys x 3 q) 181.348 s [181.257,181.921]  mem 3722.4 MB (13616 B/key)
+S  build   1.294 s [1.286,1.307]   percentiles(286659 keys x 3 q)   2.281 s [2.260,2.287]  mem 293.9 MB (1075 B/key)
+G  build   0.738 s [0.731,0.752]   percentiles(286659 keys x 3 q)   1.731 s [1.697,1.733]  mem 196.9 MB (720 B/key)
+DONE exit=0
