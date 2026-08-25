@@ -1,1 +1,7 @@
 === bpd 53 ===
+file=/tmp/ltl-426-fixtures/bin-twxdur-full.log bpd=53 observations=288025
+distinct keys=286659
+T  build   1.518 s [1.401,1.628]   percentiles(286659 keys x 3 q)  17.634 s [17.616,17.640]  mem 662.3 MB (2423 B/key)
+S  build   1.233 s [1.220,1.243]   percentiles(286659 keys x 3 q)   2.112 s [2.111,2.118]  mem 291.7 MB (1067 B/key)
+G  build   0.697 s [0.693,0.702]   percentiles(286659 keys x 3 q)   1.616 s [1.609,1.617]  mem 194.7 MB (712 B/key)
+=== bpd 616 ===

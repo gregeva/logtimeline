@@ -1164,6 +1164,26 @@ Recorded here as they were produced; the per-aspect reports carry the tables.
   geometry; it is not repairing arbitrary seed artefacts. It fires on 9.2% of
   bucket-stats cells, so it is doing real work, and any representation must keep it.
 
+- **F41 — the native span merge removes S's only regression against T.** S's merge ran
+  the verbatim arithmetic through dense views, which cost O(partition width) per merge and
+  made it *slower* than T on the `-g` fold. A native O(occupied span) merge (arm S2,
+  `prototype/426-native-span-merge.pl`) is digest-identical to T and S on 20 of 21 merge
+  edge cases, on consecutive-pair merges and on the full fold, and turns the fold from a
+  loss into a win: at 286,658 merges, bpd 53, **T 18.20 s / S 34.36 s / S2 3.65 s** —
+  S2 is 5.0× faster than T where S was 1.9× slower. The 21st case is the aliasing probe
+  (F40), which exercises a state ltl does not reach.
+
+- **F42 — S populates every locked Decision 8 `-V` field identically to T; six go inert
+  under G.** Probed rather than asserted (`prototype/426-n7-field-census.pl` asks each
+  arm's own store for a populable source per field, on a live store). S: all ten fields
+  YES, same values as T. G: `total_rebin_events`, `max_partition_bins`,
+  `partitions_with_overflow_count`, `partitions_with_underflow_count`,
+  `rebins_per_partition` and `out_of_range_bounded` have no source, because the
+  representation has no rebin, no bounded partition and no out-of-range state — the
+  consequence #187 D4/D5 make structural, not a defect. So **a plain diff of the `-V`
+  section against ltl is a valid gate for S and is not one for G**, which needs the
+  amendment A2/A3 propose before it can be diffed at all.
+
 - **F40 — the merge aliasing path is reachable in ltl but safe as ltl uses it.** The
   verbatim `merge_bin_counter_entries` adopts `$source->{partition}` and
   `$source->{bins}` **by reference** when the target is empty, and
