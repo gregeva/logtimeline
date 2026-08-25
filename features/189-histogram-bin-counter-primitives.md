@@ -95,6 +95,8 @@ Issue #426 (compact per-message statistics store) proposes to re-container these
 
 No decision in this file changes until the architect locks one in the #426 record and, where a #187 decision changes, amends #187.
 
+**#426 objective locked 2026-08-25**: replace the counter container and measure what that change does to the cardinality constraint that holds the per-message surface at bpd 53 while the display surfaces run at 616 (#187 Decision 2 as amended by #289/#293). The resolution tiers themselves, the display surfaces' geometry, and the rendering are **not in question** — 616 is the HdrHistogram 3-significant-digit reference and revisiting it is out of scope for #426 (architect, 2026-08-25). The work is not yet scheduled; the record is `features/426-per-message-statistics-store.md` § *Framing correction and the locked objective*.
+
 ## Requirements
 
 The requirements below define the **contract surface** that #189's primitive implementations must satisfy. Each requirement either restates a #187-locked decision (referenced explicitly) or specifies #189-internal contract surface for the primitives.

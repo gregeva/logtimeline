@@ -22,9 +22,25 @@ before that.
 in § Prototype findings below. The decisions there are *proposed*, awaiting the
 architect's lock.
 
-Scope note: this is the store for *per-message-key* statistics. The bucket-scoped store
-(`%log_analysis` / `%log_stats`) is a different structure with a different cardinality
-profile and is out of scope.
+Scope note: the *motivating* store is the one for per-message-key statistics — that is
+where the memory is. But this is a data-model redesign, and a data-model redesign is
+analysed across **all** of the data structures that hold observations (architect,
+2026-08-25): the bucket-scoped stores (`%log_analysis` / `%log_stats`), the heatmap and
+histogram counter stores, and the per-message store alike. They differ in cardinality
+profile, lifecycle and consumer, and those differences are findings of the analysis —
+not grounds for excluding a structure from it.
+
+The four bin-counter surfaces are **already one shared substrate**, not four independent
+stores: `%TIER_BPD` in `ltl` resolves `histogram`, `heatmap`, `bucket-stats` and
+`message-stats` from a single precision tier (`--data-model-precision` / `-dmp`,
+default 5) through `bpd_for_surface()`, and #187 states that algorithm, lifecycle,
+in-bin rule and out-of-range handling are uniform across them — resolution is the one
+thing legitimately per-surface (#187 Decision 2 as amended by #289 and #293). The
+per-message row sits at 53 at the default tier while heatmap and histogram sit at 616,
+and the reason is cardinality, not preference: per-message partition count is unbounded,
+and #187's memory table puts today's dense layout at ~212 MB per 10^5 keys at 53 against
+~2.5 GB at 616. Any store proposal is therefore a proposal about that shared substrate's
+container, and its consequences are read across all four rows of the table.
 
 ## GitHub Issue
 
@@ -553,6 +569,80 @@ correction (327 of 328 at bpd 256); A6 the `> 0` guard is contract; A7 G index
 convention; A8 `undef` downward fill; A9 `lower = upper` unreachable; A10 D7/D8 vs
 shipped emitter drift; A11 D2 memory guidance is T-layout-specific.
 
+### Framing correction and the locked objective (2026-08-25)
+
+Three false premises were carried into the 2026-08-25 session and corrected against the
+corpus. They are recorded because each one, left standing, points the work at the wrong
+question:
+
+1. **The heatmap and histogram counter stores are NOT out of scope.** An earlier revision
+   of this document said they were, in two places. That was drafting text written while
+   specifying (commit `eb53b3c`), never an architect's decision, and it was withdrawn
+   2026-08-25: a data-model redesign is analysed across all of the data structures.
+2. **A shared substrate does not need to be invented — it already ships.** All four
+   bin-counter surfaces run one algorithm, one lifecycle, one in-bin rule and one
+   out-of-range handling; `%TIER_BPD` and `bpd_for_surface()` resolve every surface's
+   resolution from the single `--data-model-precision` / `-dmp` lever. Resolution is the
+   only thing #187 permits to differ per surface (Decision 2 as amended by #289 and #293).
+3. **`buckets_per_decade` 616 is not a tunable knob.** It is HdrHistogram's
+   3-significant-digit latency-tracking reference (2048 sub-buckets per doubling ÷
+   log2(10)), the top rung of a tier ladder whose rungs are external standards — 53 is the
+   OpenTelemetry Scale-4 analog, 115 is DDSketch at 1% relative accuracy. It was arrived at
+   through hard-won work on preserving visible modality and edge distinction in the
+   rendered display (architect, 2026-08-25). Changing it would require an enormous set of
+   retesting and rework and is **out of scope for this issue**, which retains the same
+   operation, functionality and settings. The corpus for all of this is
+   `features/187-histogram-industry-grounding.md` (the literature pass) and
+   `features/187-histogram-bin-counter-percentiles.md` (the decisions it grounds); both are
+   read before any statement about resolution is made.
+
+**Locked objective (architect, 2026-08-25): replace the container, and measure what the
+container change does to the constraint.** The per-message row sits at a coarser
+resolution than heatmap and histogram for one stated reason — cardinality. #187's memory
+model puts today's dense layout at ~2.1 KB per partition and ~212 MB per 10^5 keys at
+bpd 53, against ~25 KB and ~2.5 GB at bpd 616, and the per-message surface has unbounded
+partition count while the display surfaces have ~70 between them. The candidate
+containers attack exactly that: F31 measured per-key cost falling from 2,381 B (T) to
+955 B (S) and 600 B (G) at bpd 53, and — the load-bearing part — growth across the tier
+ladder of 5.8× for today's dense array against 1.2× (S) and 1.4× (G).
+
+So the work is: prove the replacement gives the same answers at the same settings across
+all four surfaces, **and** report what the per-message row could afford once the container
+is cheap. The second half is evidence handed to the architect, **not** a proposal to change
+`%TIER_BPD` — that table is locked and the decision is his alone. Nothing about the
+display surfaces' settings, geometry or rendering is in question.
+
+**Not scheduled.** The architect locked the objective on 2026-08-25 and deferred the work
+to a later session. Nothing below is started.
+
+### Do this first, next session
+
+Before any prototype code, run the audit that should have preceded this session's framing
+(the mechanical gate now recorded in CLAUDE.md § observations, 2026-08-25):
+
+1. **Enumerate the impacted surfaces from the code** — for each row of `%TIER_BPD`
+   (`histogram`, `heatmap`, `bucket-stats`, `message-stats`): the globals holding its
+   counters, the capture site, the finalize/consume site, its partition keying, its
+   cardinality profile, and whether it finalizes into display geometry.
+2. **Map each surface to its governing research and locked decisions** — at minimum
+   `features/187-histogram-bin-counter-percentiles.md` (+ the industry-grounding companion),
+   `features/189-histogram-bin-counter-primitives.md`,
+   `features/201-display-geometry-bound-consumers.md`,
+   `features/293-precision-lever-unification.md`, `features/289-*`, `features/34-*`,
+   `features/349-*`. Record decision identifier + what it decides in plain language.
+3. **Enumerate the blast radius of a container change** — the primitives, every caller, the
+   `-V` emitters and telemetry snapshot, any serialization, and every `tests/validate-*.sh`
+   that asserts on bin-counter output (with what each asserts).
+4. **Extract the invariants any replacement must preserve** verbatim — mass conservation,
+   peak preservation, determinism, the #201 fidelity invariant (no cross-bin mass
+   splitting at any stage; geometric-midpoint projection only), out-of-range semantics,
+   the #187 Decision 8 `-V` field-name stability contract, and merge semantics.
+
+Only then design the measurement. The N1–N8 table below predates this framing: it is the
+list of uncovered aspects, still valid as gaps, but N1's build must be re-derived from the
+audit rather than taken as written (it was drafted while the heatmap/histogram surfaces
+were wrongly believed to be out of scope).
+
 **Not yet covered — IN SCOPE, the next prototype work (architect, 2026-08-24).** The
 report's § *What the evidence does not cover* is not a boundary; every item in it is
 part of step 2 and is prototyped and analysed before step 3 begins. Nothing is skipped.
@@ -607,9 +697,15 @@ computed, and that distinction is re-recorded here when it does.
 
 ## Boundaries
 
-- **Out of scope**: the bucket-scoped stores (`%log_analysis`, `%log_stats`); the
-  heatmap/histogram counter stores; the `mean_bytes` / `count_mean` sort-key bug (F8,
-  filed as #428); #273's `total_duration` collapse (adjacent, not folded in).
+- **In scope — every observation-holding structure.** A data-model redesign is analysed
+  across all of them (architect, 2026-08-25): the per-message store (the motivating
+  case), the bucket-scoped stores (`%log_analysis`, `%log_stats`), and the heatmap and
+  histogram counter stores. An earlier revision of this document declared the latter two
+  groups out of scope; that was drafting text, never an architect's decision, and it is
+  withdrawn. Where a structure turns out not to need changing, that is a *conclusion of
+  the analysis*, recorded with its grounds.
+- **Out of scope**: the `mean_bytes` / `count_mean` sort-key bug (F8, filed as #428);
+  #273's `total_duration` collapse (adjacent, not folded in).
 - **This document does not lock decisions.** `Dxx` entries appear only after the
   prototype that grounds them.
 
