@@ -45,7 +45,7 @@ use FindBin;
 require "$FindBin::Bin/426-revalidate-lib.pm";
 
 my %opt = (bpd => 616, width => 52, out => undef, 'max-lines' => undef, file => undef,
-           hgbpd => 8);
+           hgbpd => 8, keyed => 0, 'bucket-lines' => 5000);
 while (@ARGV) {
     my $a = shift @ARGV;
     if ($a =~ /^--(\w[\w-]*)$/ && exists $opt{$1}) { $opt{$1} = shift @ARGV }
@@ -189,9 +189,21 @@ sub measures {
 # added in the driver by partitioning the value stream.
 
 my @values;
+my %by_bucket;      # heatmap-shaped keying: one partition per time bucket
+my $obs_seq = 0;
+my $BUCKET_LINES = $opt{'bucket-lines'} + 0;
 my $counts = Revalidate426::iterate_durations(
     $opt{file},
-    sub { my (undef, undef, $d) = @_; push @values, $d },
+    sub {
+        my (undef, undef, $d) = @_;
+        push @values, $d;
+        # Time buckets are contiguous runs of the input, which is chronological:
+        # this reproduces the heatmap's per-time-bucket partition keying and its
+        # per-key value distribution (each bucket sees its own value range) without
+        # depending on this prototype re-implementing ltl's timestamp parsing.
+        push @{ $by_bucket{ int($obs_seq / $BUCKET_LINES) } }, $d;
+        $obs_seq++;
+    },
     (defined $opt{'max-lines'} ? (max_lines => $opt{'max-lines'} + 0) : ()),
 );
 
@@ -312,6 +324,94 @@ for my $geo (@geometries) {
         printf "        the fold places that mass in cells 0 and %d regardless of value;\n",
             $geo->{bins} - 1;
         printf "        G has no out-of-range state and places it by value.\n";
+    }
+}
+
+# =============================================================================
+# Part D — the heatmap's real keying: one partition per time bucket, all
+# finalized into ONE shared display geometry (finalize_heatmap_unified walks
+# keys %heatmap_counters and re-bins each against the global [min,max] x W).
+#
+# This is where the two representations differ structurally: T/S seed each
+# bucket's partition around that bucket's OWN first value, so every bucket
+# carries a different range anchor (#201's Dimension B); G's grid is global by
+# construction, so every bucket's bins already share one anchor.
+# =============================================================================
+{
+    print "\n";
+    my $nb = scalar keys %by_bucket;
+    printf "=== PART D  per-time-bucket keying: %d buckets, %d lines each, one shared %d-cell display ===\n",
+        $nb, $BUCKET_LINES, $W;
+
+    my ($dmin, $dmax) = ($vmin > 0 ? $vmin : 1, $vmax);
+
+    my %fin_total;      # arm -> summed display cells over all buckets
+    my %per_bucket_dev; # arm -> list of per-bucket abs_dev_pct
+    my %seed_ranges;    # T: distinct partition anchors observed
+    for my $arm (qw(T S G)) { $fin_total{$arm} = [ (0) x $W ] }
+
+    my $exact_total = exact_display(\@values, $dmin, $dmax, $W);
+
+    my $parity_bad = 0;
+    for my $b (sort { $a <=> $b } keys %by_bucket) {
+        my $vals = $by_bucket{$b};
+        my %bfin;
+        for my $arm (qw(T S G)) {
+            my $st = Revalidate426::store_new($arm, bpd => $BPD);
+            $st->add('k', $_) for @$vals;
+            if ($arm eq 'G') {
+                my $i = $st->{row}{'k'};
+                $bfin{G} = grid_rebin($st->{bins}[$i], $BPD, $dmin, $dmax, $W);
+            } else {
+                my $e = $st->entry('k');
+                my $f = partition_rebin_verbatim($e->{partition}, $e->{bins}, $dmin, $dmax, $W);
+                $f->[0]      += $e->{underflow} // 0;
+                $f->[$W - 1] += $e->{overflow}  // 0;
+                $bfin{$arm} = $f;
+                if ($arm eq 'T') {
+                    my $g = $st->geometry('k');
+                    $seed_ranges{ sprintf('%.6g/%.6g/%d', $g->{min}, $g->{max}, $g->{bin_count}) }++;
+                }
+            }
+        }
+        for my $i (0 .. $W - 1) {
+            $parity_bad++ if $bfin{T}[$i] != $bfin{S}[$i];
+            $fin_total{$_}[$i] += $bfin{$_}[$i] for qw(T S G);
+        }
+        # per-bucket fidelity against that bucket's own exact display
+        my $bexact = exact_display($vals, $dmin, $dmax, $W);
+        for my $arm (qw(T S G)) {
+            my $m = measures($bfin{$arm}, $bexact);
+            push @{ $per_bucket_dev{$arm} }, $m->{abs_dev_pct};
+        }
+    }
+
+    printf "PART D  T vs S per-bucket finalized cells: %s\n",
+        ($parity_bad ? "$parity_bad cells DIFFER" : "IDENTICAL across every bucket");
+    printf "PART D  distinct T/S partition anchors across the %d buckets: %d\n",
+        $nb, scalar keys %seed_ranges;
+    printf "        (G uses one global grid anchor by construction — #201 Dimension B)\n";
+
+    printf "PART D  aggregate display (all buckets summed) vs exact:\n";
+    printf "  %-4s %10s %10s %8s %8s %8s %10s %8s\n",
+        'arm', 'mass', 'mass_ret', 'peak_ret', 'peak_dx', 'empty', 'abs_dev%', 'maxcell';
+    for my $arm (qw(T S G)) {
+        my $m = measures($fin_total{$arm}, $exact_total);
+        printf "  %-4s %10d %10.6f %8.4f %8d %8d %10.4f %8d\n",
+            $arm, $m->{mass}, $m->{mass_retention}, $m->{peak_retention},
+            $m->{peak_x_offset}, $m->{empty_cells}, $m->{abs_dev_pct}, $m->{max_cell_dev};
+        push @rows, { geometry => 'heatmap-keyed', arm => $arm, bins => $W,
+                      %$m, overflow => '', underflow => '' };
+    }
+
+    printf "PART D  per-bucket deviation from that bucket's exact display (%% of its mass):\n";
+    printf "  %-4s %9s %9s %9s %9s\n", 'arm', 'median', 'p95', 'max', 'mean';
+    for my $arm (qw(T S G)) {
+        my @d = sort { $a <=> $b } @{ $per_bucket_dev{$arm} };
+        my $med = $d[int(@d * 0.5)];
+        my $p95 = $d[int(@d * 0.95)];
+        my $mean = 0; $mean += $_ for @d; $mean /= @d;
+        printf "  %-4s %9.4f %9.4f %9.4f %9.4f\n", $arm, $med, $p95, $d[-1], $mean;
     }
 }
 
