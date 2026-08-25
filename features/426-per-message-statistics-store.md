@@ -1095,6 +1095,87 @@ data-model change does not absorb independent test-coverage work.
 
 ---
 
+### Session findings (2026-08-25) — N1, N4 and the aliasing question
+
+Recorded here as they were produced; the per-aspect reports carry the tables.
+
+- **F33 — S is display-cell-identical to T on both display geometries, at every
+  resolution and every time bucket.** V6 (`prototype/426-revalidate-v6.pl`) finalizes all
+  three arms through the F2/F3 contract and compares against an exact display that places
+  every observation in the cell holding its value. Across 90 rows — two canonical files,
+  three geometries, the five streaming resolutions the display surfaces can resolve to —
+  mass retention is `1.000000` and peak X-offset is `0` for every arm, and T and S never
+  differ in a single cell. **P8+P9 inherit #201's validation on the display surfaces the
+  same way F23 showed they inherit #189's on the percentile surface.**
+
+- **F34 — on the heatmap's real per-time-bucket keying, the global anchor is measurably
+  better.** T and S seed each bucket's partition around that bucket's own first value,
+  producing **13 distinct range anchors across 24 buckets** — #201 Dimension B, the
+  mismatch it identified as the actual failure mode behind its four rejected Phase 3
+  strategies. G's grid is globally anchored by construction. Per-bucket deviation from
+  that bucket's exact display, 148 MB Tomcat, bpd 616: **G median 0.0667% / max 0.2333%
+  against T 0.2667% / 0.4583%.** On the DPM file the three arms are statistically
+  identical (median 0.2800% each).
+
+- **F35 — large coarse-resolution deviations are a boundary straddle, not a
+  representation defect.** The V6 sweep produces deviations up to 33% at bpd 80,
+  non-monotonic in resolution. `prototype/426-v6-boundary-straddle-probe.pl`: the DPM
+  durations are small integers, and the source bin holding the value `2` — 19,926
+  observations, 16% of the file — has its geometric midpoint at 2.013, just across a
+  display-cell boundary, so that bin's whole mass lands one cell over. **T and G do this
+  identically** (both cell 3 at bpd 80, both cell 2 at 616). A property of the two-stage
+  projection at coarse streaming resolution — and an independent rediscovery of why #201
+  locked the display surfaces' streaming bpd at 616.
+
+- **F36 — a shared grid on the message-stats surface is a large re-bless.** N4
+  (`prototype/426-revalidate-v8-rebless.pl`, scenario list read from
+  `tests/statistics-drift/scenarios.tsv` so it cannot drift from the harness) classifies
+  every per-key percentile with `compare-statistics-drift.pl`'s own tiers, where T3
+  (> 1%) blocks. At bpd 53: **apache 21.8% T3, tomcat 15.9%, thingworx 31.7%**, worst
+  deviations 3.9–4.5%. `codebeamer-bin-data-model` is reported NOT COVERED, not skipped —
+  the library's two verbatim parsers do not read that log's bracketed `[293ms]` duration;
+  ltl reads it through the format registry.
+
+- **F37 — the T-vs-G accuracy difference is resolution-dependent and reverses across the
+  tier ladder.** The aggregate "G lands further from the oracle more often than closer"
+  is a composition effect. Decomposed by key shape
+  (`prototype/426-accuracy-by-key-shape.pl`, observation count × spread in decades): at
+  **bpd 16 G is better on both files** and the margin is large on wide-spread keys (DPM
+  `N<1000 / spread>=1dec`: G 3.60% against T 6.78%); at **bpd 53** the two are mixed on
+  DPM and T is ahead on Tomcat; **from bpd 115 up T is ahead on Tomcat** and stays ahead
+  at 616 (0.021% against 0.239% on its most populous band). Mechanism: T seeds each key's
+  partition around that key's own first value (#187 D5), so its bins are adaptive to that
+  key's data — an advantage that **grows** with resolution because the seeded range
+  concentrates bins where the key has values; G never wastes resolution on a seeded range
+  the key does not occupy, which dominates when bins are **scarce**. Both arms are sub-1%
+  on every band at bpd 616 on both files.
+
+- **F38 — the surface #426 exists for is accuracy-neutral.** At the 287k-key fan-out,
+  **573,026 of 573,318 compared cells are exact for both arms** — the high-cardinality
+  population is dominated by single-observation keys, where every representation returns
+  that observation. Of the 292 non-degenerate cells, G is closer on every band. The
+  T-vs-G accuracy trade of F37 lives entirely in the moderate-cardinality,
+  multi-observation population.
+
+- **F39 — the `[min,max]` clamp only ever repairs sub-one-bin overshoots.** When
+  `calculate_statistics_bin`'s clamp fires, the raw interpolated value was outside the
+  observed range by at most **1.046×** against a bin width of **1.044×** at bpd 53, for
+  all three arms (`prototype/426-v7-clamp-magnitude.pl`). The clamp is bounded by the bin
+  geometry; it is not repairing arbitrary seed artefacts. It fires on 9.2% of
+  bucket-stats cells, so it is doing real work, and any representation must keep it.
+
+- **F40 — the merge aliasing path is reachable in ltl but safe as ltl uses it.** The
+  verbatim `merge_bin_counter_entries` adopts `$source->{partition}` and
+  `$source->{bins}` **by reference** when the target is empty, and
+  `merge_log_message_entry_into_cluster` creates exactly that empty target
+  (`$target->{bin_entry} //= { partition => undef, ... }` in `merge_bin_state`). So the
+  adopt path runs in production. But the same wrapper **deletes the source counter slot
+  immediately afterwards** (`delete $log_messages_counters{$key};`), leaving the aliased
+  structures with a single live owner. The N2 probe's A21 divergence (T diverging from
+  S/S2 after adding to *both* keys post-adopt) exercises a state ltl never reaches.
+  **A replacement must preserve the delete, not the aliasing** — and a columnar store that
+  copies instead of aliasing is therefore free to do so.
+
 ## Verification instrument
 
 The before/after instrument is the #417 sub-stage timing, which attributes 97% of the
