@@ -1,0 +1,34 @@
+=== Part A: seeding / span growth on real data ===
+file: /tmp/ltl-426-fixtures/bin-twxdur-full.log
+arms: T,S,G   bpd: 53   runs: 0
+
+--- bpd=53 (one bin = 4.4403%)
+arm T build: single untimed build 2.492s (no timed runs requested)
+arm T memory: Devel::Size=696816466 (664.54 MB)  RSS delta=829584 kB (810.14 MB) [rss 11088 -> 840672 kB]
+arm S build: single untimed build 2.357s (no timed runs requested)
+arm S memory: Devel::Size=305834353 (291.67 MB)  RSS delta=262224 kB (256.08 MB) [rss 847008 -> 1109232 kB]
+arm G build: single untimed build 2.139s (no timed runs requested)
+arm G memory: Devel::Size=204086139 (194.63 MB)  RSS delta=142960 kB (139.61 MB) [rss 1111520 -> 1254480 kB]
+file counts: format=twx lines=288025 matched=288025 unparsed=0 no_duration=0 positive=288025 zero=0 negative=0 keys_any=286659 keys_positive=286659
+T telemetry: partitions_total=286659 total_rebin_events=2 max_partition_bins=397 partitions_with_overflow=0 partitions_with_underflow=0 overflow_total=0 underflow_total=0 rebins_per_partition: p50=0 p95=0 p99=0 max=1 counter_memory_bytes=696816578
+T partitions_with_rebins=2 (0.0007%)  Decision 5 healthy-seed signal (p99 <= 2): PASS
+S telemetry: partitions_total=286659 total_rebin_events=2 max_partition_bins=397 partitions_with_overflow=0 partitions_with_underflow=0 overflow_total=0 underflow_total=0 rebins_per_partition: p50=0 p95=0 p99=0 max=1 counter_memory_bytes=305834465
+S partitions_with_rebins=2 (0.0007%)  Decision 5 healthy-seed signal (p99 <= 2): PASS
+G telemetry: partitions_total=286659 span_slots: p50=1 p95=1 p99=1 max=153 index_range=[0,237] (4.49 decades) counter_memory_bytes=213259339
+PASS bpd=53 T and S digests identical (be559bfb1745210c71d1b97b8141612c)
+PASS bpd=53 T and S telemetry identical (rebins/overflow/underflow/bins fields)
+per-key T vs G (bpd=53): keys=286659; T bin_count==seed(265)=286657, grown=2; G span > T bin_count: 0 keys; G span == T bin_count: 0; G span > T bins array length: 0
+per-key T vs G (bpd=53): G span > seed bin_count (265): 0 keys
+totals (bpd=53): sum T bin_count=75964899; sum T bins array length=38128391; sum G span slots=293395; sum G occupied bins=287428; G/T slot ratio=0.0039 (span/bin_count), 0.0077 (span/array length)
+span/bin_count ratio per key: p50=0.0038 p95=0.0038 p99=0.0038 max=0.5208
+5 widest G spans (n, T bin_count, T rebins, T bins len, G span, G lo..hi, occupied): 
+  WARN | [WARN] [metrics-SystemMetric] [t.s.s.p.PlatformSubsystem] STG_PersistenceProvider.Val | n=6 T bc=397 rb=1 len=272 | G span=153 lo=82 hi=234 occ=6
+  WARN | [WARN] [https-jsse-nio-8443-] [IntrusionDetector] [SECURITY FAILURE Anonymous:@unknow | n=86 T bc=265 rb=0 len=164 | G span=138 lo=99 hi=236 occ=44
+  WARN | [WARN] [metrics-SystemMetric] [t.s.s.p.PlatformSubsystem] PoltatchDeltic_Influx2Compa | n=5 T bc=397 rb=1 len=265 | G span=136 lo=99 hi=234 occ=5
+  ERROR | [ERROR] [TWEventProcessor] [c.t.s.s.e.EventInstance] Error Executing Event Handler ' | n=22 T bc=265 rb=0 len=169 | G span=124 lo=111 hi=234 occ=20
+  WARN | [WARN] [metrics-SystemMetric] [t.s.s.p.PlatformSubsystem] ThingworxPersistenceProvide | n=3 T bc=265 rb=0 len=133 | G span=123 lo=114 hi=236 occ=3
+keys T rebinned (n, T bin_count, T rebins, T bins len, G span, G lo..hi, occupied):
+  WARN | [WARN] [metrics-SystemMetric] [t.s.s.p.PlatformSubsystem] PoltatchDeltic_Influx2Compa | n=5 T bc=397 rb=1 len=265 | G span=136 lo=99 hi=234 occ=5
+  WARN | [WARN] [metrics-SystemMetric] [t.s.s.p.PlatformSubsystem] STG_PersistenceProvider.Val | n=6 T bc=397 rb=1 len=272 | G span=153 lo=82 hi=234 occ=6
+
+ALL PASS

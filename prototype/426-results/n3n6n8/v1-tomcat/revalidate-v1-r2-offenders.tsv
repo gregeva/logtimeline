@@ -1,0 +1,5 @@
+bpd	value	occurrences	closed_i	checked_i	lower_closed	upper_closed	reason
+53	1000	17	158	159	957.485212649577	1000	exact power of ten
+115	1000	17	344	345	980.176639600291	1000	exact power of ten
+256	1000	17	767	768	991.045856248861	1000	exact power of ten
+616	1000	17	1847	1848	996.269014673126	1000	exact power of ten

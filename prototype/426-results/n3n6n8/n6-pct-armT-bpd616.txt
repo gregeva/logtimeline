@@ -1,0 +1,2 @@
+=== N6 fan-out: arm T bpd 616 ===
+file: /tmp/ltl-426-fixtures/bin-twxdur-full.log

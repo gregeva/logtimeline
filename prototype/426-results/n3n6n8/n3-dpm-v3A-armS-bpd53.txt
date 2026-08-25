@@ -1,0 +1,12 @@
+=== Part A: seeding / span growth on real data ===
+file: logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log
+arms: S   bpd: 53   runs: 3
+
+--- bpd=53 (one bin = 4.4403%)
+arm S build: warmup 0.821s; timed runs=3 median 0.783s (min 0.780 max 0.826) — parse+add, one arm per store
+arm S memory: Devel::Size=5688317 (5.42 MB)  RSS delta=7888 kB (7.70 MB) [rss 11008 -> 18896 kB]
+file counts: format=twx lines=122808 matched=122808 unparsed=0 no_duration=0 positive=122798 zero=10 negative=0 keys_any=3421 keys_positive=3419
+S telemetry: partitions_total=3419 total_rebin_events=116 max_partition_bins=397 partitions_with_overflow=0 partitions_with_underflow=0 overflow_total=0 underflow_total=0 rebins_per_partition: p50=0 p95=0 p99=1 max=1 counter_memory_bytes=5688429
+S partitions_with_rebins=116 (3.3928%)  Decision 5 healthy-seed signal (p99 <= 2): PASS
+
+ALL PASS

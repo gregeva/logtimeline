@@ -1,0 +1,8 @@
+=== N6 fan-out: arm S bpd 53 ===
+file: /tmp/ltl-426-fixtures/bin-twxdur-full.log
+counts: lines=288025 positive=288025 keys_positive=286659 live_keys=286659 observations=288025 build_s=2.347
+memory: RSS_delta_bytes=399884288 (381.36 MB, 1395.0 B/key)  DevelSize_bytes=305885393 (291.72 MB, 1067.1 B/key)  RSS-DevelSize=93998895 bytes (23.5% of RSS)
+percentile: quantiles=0.5,0.95,0.99 conv=ceil evals_per_sweep=859977 runs=3 sweep_s median=1.9821 (min 1.9316 max 1.9859)
+percentile: us_per_eval median=2.3048 (min 2.2461 max 2.3092)
+build: s_per_key median_n/a single_build=2.347004 ms/key=0.008187
+OK

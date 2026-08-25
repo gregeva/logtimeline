@@ -1,0 +1,56 @@
+>>> T bpd=53 fanout
+>>> S bpd=53 fanout
+>>> G bpd=53 fanout
+>>> T bpd=616 fanout
+>>> S bpd=616 fanout
+>>> G bpd=616 fanout
+>>> T bpd=53 dpm
+>>> S bpd=53 dpm
+>>> G bpd=53 dpm
+>>> T bpd=616 dpm
+>>> S bpd=616 dpm
+>>> G bpd=616 dpm
+
+=== PARITY: T vs S digests (must be identical on every merge shape) ===
+PASS fanout/53/rollup_digest 9758603723cb79a1547797a8d43450cc
+PASS fanout/53/disjoint_digest 37af0ac33d6d94a0c1ba1b3f3e7d2aa9
+PASS fanout/53/disjoint_bins_err_max 0.7859
+PASS fanout/53/depth15_bins_err_max 1.3715
+PASS fanout/53/rollup_bins_err_max 1.4116
+PASS fanout/53/order_groups_differing 24
+PASS fanout/616/rollup_digest 88cd7f2ba1dd4601c2250a6517526d88
+PASS fanout/616/disjoint_digest e33433a848ed85b0c8c51ed375276f48
+PASS fanout/616/disjoint_bins_err_max 0.2729
+PASS fanout/616/depth15_bins_err_max 1.3069
+PASS fanout/616/rollup_bins_err_max 0.5476
+PASS fanout/616/order_groups_differing 23
+PASS dpm/53/rollup_digest 05deec3061b8f8198c6be114aaea7a61
+PASS dpm/53/disjoint_digest d3e25b62f9c7e563de76ceca13681ace
+PASS dpm/53/disjoint_bins_err_max 1.0008
+PASS dpm/53/depth15_bins_err_max 2.1026
+PASS dpm/53/rollup_bins_err_max 0.5223
+PASS dpm/53/order_groups_differing 17
+PASS dpm/616/rollup_digest e955d091cf640e6fe4a081f88c4e7db6
+PASS dpm/616/disjoint_digest 1b79bd76fb02baa3c854583fcfec97a8
+PASS dpm/616/disjoint_bins_err_max 0.9859
+PASS dpm/616/depth15_bins_err_max 2.0637
+PASS dpm/616/rollup_bins_err_max 1.0219
+PASS dpm/616/order_groups_differing 21
+PARITY_OK=1  RUNS_FAILED=0
+
+=== N conservation (rollup_n_after must equal rollup_values) ===
+PASS G-bpd53-dpm.txt 78612
+PASS G-bpd53-fanout.txt 2754
+PASS G-bpd616-dpm.txt 78612
+PASS G-bpd616-fanout.txt 2754
+PASS S-bpd53-dpm.txt 78612
+PASS S-bpd53-fanout.txt 2754
+PASS S-bpd616-dpm.txt 78612
+PASS S-bpd616-fanout.txt 2754
+PASS T-bpd53-dpm.txt 78612
+PASS T-bpd53-fanout.txt 2754
+PASS T-bpd616-dpm.txt 78612
+PASS T-bpd616-fanout.txt 2754
+PASS driver.txt 
+
+timings -> prototype/426-results/n5-merge-shapes/timings.tsv

@@ -1,0 +1,10 @@
+# perl 5.42.2  bpd=616  file=/tmp/ltl-426-fixtures/bin-twxdur-full.log
+# lines=288025 positive=288025 samples=288025
+# runs=3, fill EXCLUDED from the timed region (fresh store per run, untimed)
+
+arm	bpd	merges	median_s	min_s	max_s	us_per_merge	digest
+T	616	5000	3.5195	3.4746	3.5352	703.90	a300ba8384f1
+S	616	5000	4.5105	4.4060	4.5600	902.10	a300ba8384f1
+S2	616	5000	0.2682	0.2647	0.2752	53.64	a300ba8384f1
+
+# post-merge digest parity T=S=S2: IDENTICAL (a300ba8384f1f63b1222cc332f481058)

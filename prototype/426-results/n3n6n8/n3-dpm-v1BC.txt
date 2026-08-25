@@ -1,0 +1,52 @@
+
+=== Part B/C on ScriptLog-DPMExtended-clean.log ===
+file: ScriptLog-DPMExtended-clean.log format=twx lines=122808 matched=122808 unparsed=0 no_duration=0 positive=122798 zero=10 negative=0 keys_any=3421 keys_positive=3419 distinct_values=5997 read_s=1
+
+--- Part B1: G closed-form index vs boundary-checked index
+B1 bpd=53 distinct values=5997 observations=122798 disagreements: 1 distinct values / 38 observations (exact power of ten=1); bound holds after check on all: yes
+B1 bpd=53 offenders: 1000(x38, closed 158 -> checked 159, exact power of ten)
+PASS B1 bpd=53 boundary-checked index satisfies 10**(i/bpd) <= v < 10**((i+1)/bpd) on every distinct value
+B1 bpd=115 distinct values=5997 observations=122798 disagreements: 1 distinct values / 38 observations (exact power of ten=1); bound holds after check on all: yes
+B1 bpd=115 offenders: 1000(x38, closed 344 -> checked 345, exact power of ten)
+PASS B1 bpd=115 boundary-checked index satisfies 10**(i/bpd) <= v < 10**((i+1)/bpd) on every distinct value
+B1 bpd=256 distinct values=5997 observations=122798 disagreements: 1 distinct values / 38 observations (exact power of ten=1); bound holds after check on all: yes
+B1 bpd=256 offenders: 1000(x38, closed 767 -> checked 768, exact power of ten)
+PASS B1 bpd=256 boundary-checked index satisfies 10**(i/bpd) <= v < 10**((i+1)/bpd) on every distinct value
+B1 bpd=616 distinct values=5997 observations=122798 disagreements: 1 distinct values / 38 observations (exact power of ten=1); bound holds after check on all: yes
+B1 bpd=616 offenders: 1000(x38, closed 1847 -> checked 1848, exact power of ten)
+PASS B1 bpd=616 boundary-checked index satisfies 10**(i/bpd) <= v < 10**((i+1)/bpd) on every distinct value
+
+--- Part B2: full-file digests
+B2 bpd=53 digests G=e2e39760180ce5f1a819f8de7ef64a4f S=4d7b33c038f11aef6ea7ff433c3789f0 T=4d7b33c038f11aef6ea7ff433c3789f0 keys G=3419 S=3419 T=3419 rss_delta_kb=16432 memory_bytes G=3673766 S=5107588 T=10581834
+PASS B2 bpd=53 T and S full-file digests identical
+B2 bpd=53 T telemetry: partitions=3419 rebin_events=116 max_bins=397 over=0 under=0 rebins p50=0 p95=0 p99=1 max=1
+B2 bpd=53 G telemetry: partitions=3419 span p50=17 p95=134 p99=158 max=214 index_range=[0,279]
+B2 bpd=616 digests G=00323c38bd7b807a678c4ec3c2719052 S=4f62a70e642d1580e48e90ce30b4ca68 T=4f62a70e642d1580e48e90ce30b4ca68 keys G=3419 S=3419 T=3419 rss_delta_kb=101968 memory_bytes G=23593486 S=26953860 T=62288506
+PASS B2 bpd=616 T and S full-file digests identical
+B2 bpd=616 T telemetry: partitions=3419 rebin_events=116 max_bins=4619 over=0 under=0 rebins p50=0 p95=0 p99=1 max=1
+B2 bpd=616 G telemetry: partitions=3419 span p50=186 p95=1549 p99=1826 max=2477 index_range=[0,3244]
+
+--- Part C: determinism (#189 R5)
+C keys: 1830 eligible with N>=20; using first 200 (sorted key order) for orderings, 200 consecutive pairs; N range 24..623; seed 426
+C1 bpd=53 T orderings: 200 keys; canonical order-dependent: 187; percentiles order-dependent (>1e-12): 187; max rel diff 4.107% = 0.925 bins; geometry (min/max/bin_count) order-dependent: 187; keys that rebinned in some ordering: 1
+PASS C1 bpd=53 T order dependence recorded: 187/200 keys canonical-different, max percentile diff 0.925 bins (R5 holds for a fixed sequence; the geometry is seeded by the first sample)
+PASS C1 bpd=53 T ordering percentile differences bounded by one bin width (max 0.925 bins)
+C2 bpd=53 T merge(a,b) vs merge(b,a): 200 pairs; canonical differs: 0; bins+geometry differ: 0; percentiles differ (>1e-12): 0; max rel diff 0% = 0.000 bins
+PASS C2 bpd=53 T merge is commutative on bins and percentiles (0 canonical-string differences)
+C1 bpd=53 G orderings: 200 keys; canonical order-dependent: 0; percentiles order-dependent (>1e-12): 0; max rel diff 0% = 0.000 bins
+PASS C1 bpd=53 G is order-independent (0 canonical, 0 percentile differences)
+PASS C1 bpd=53 G ordering percentile differences bounded by one bin width (max 0.000 bins)
+C2 bpd=53 G merge(a,b) vs merge(b,a): 200 pairs; canonical differs: 0; bins+geometry differ: 0; percentiles differ (>1e-12): 0; max rel diff 0% = 0.000 bins
+PASS C2 bpd=53 G merge is commutative on bins and percentiles (0 canonical-string differences)
+C1 bpd=616 T orderings: 200 keys; canonical order-dependent: 187; percentiles order-dependent (>1e-12): 187; max rel diff 0.3725% = 0.995 bins; geometry (min/max/bin_count) order-dependent: 187; keys that rebinned in some ordering: 1
+PASS C1 bpd=616 T order dependence recorded: 187/200 keys canonical-different, max percentile diff 0.995 bins (R5 holds for a fixed sequence; the geometry is seeded by the first sample)
+PASS C1 bpd=616 T ordering percentile differences bounded by one bin width (max 0.995 bins)
+C2 bpd=616 T merge(a,b) vs merge(b,a): 200 pairs; canonical differs: 0; bins+geometry differ: 0; percentiles differ (>1e-12): 0; max rel diff 0% = 0.000 bins
+PASS C2 bpd=616 T merge is commutative on bins and percentiles (0 canonical-string differences)
+C1 bpd=616 G orderings: 200 keys; canonical order-dependent: 0; percentiles order-dependent (>1e-12): 0; max rel diff 0% = 0.000 bins
+PASS C1 bpd=616 G is order-independent (0 canonical, 0 percentile differences)
+PASS C1 bpd=616 G ordering percentile differences bounded by one bin width (max 0.000 bins)
+C2 bpd=616 G merge(a,b) vs merge(b,a): 200 pairs; canonical differs: 0; bins+geometry differ: 0; percentiles differ (>1e-12): 0; max rel diff 0% = 0.000 bins
+PASS C2 bpd=616 G merge is commutative on bins and percentiles (0 canonical-string differences)
+
+ALL PASS

@@ -1,0 +1,2 @@
+bpd=53   bin_count=544   span_len=281   base=131   RAW-SPAN IDENTICAL to S, well-formed
+bpd=616  bin_count=6324  span_len=3245  base=1539  RAW-SPAN IDENTICAL to S, well-formed

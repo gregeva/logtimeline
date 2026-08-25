@@ -1199,6 +1199,35 @@ Recorded here as they were produced; the per-aspect reports carry the tables.
   S2 is 5.0× faster than T where S was 1.9× slower. The 21st case is the aliasing probe
   (F40), which exercises a state ltl does not reach.
 
+- **F45 — today's shipped merge is order-dependent, and the dependence is the common
+  case, not the corner case.** Merging the same key set in different orders
+  (`prototype/426-results/n5-merge-shapes/`, 25 groups × 8 keys × 4 permutations):
+  **T and S land on different state on 68% of groups at bpd 53 on the DPM file, and on
+  92% at bpd 616 on the fan-out fixture**, with a per-quantile spread up to **2.00 bins**.
+  **G is exactly order-independent — 0% of groups, 0.0000 bins, at every setting
+  measured.** S reproducing T's order-dependence exactly is itself the parity proof: S is
+  not introducing or removing the behaviour, it is the same arithmetic in a different
+  container. The consequence for today's tool is that a `-g` consolidation's percentiles
+  depend on the order in which keys happened to be merged — which the harness cannot see,
+  because the order is deterministic for a given input.
+
+- **F46 — T's accuracy degrades monotonically with merge depth and breaches the R4
+  one-bin bound; G holds the bound exactly.** Per-quantile error against the exact oracle
+  after 1, 3, 7 and 15 successive merges (200 groups × 16 keys, bpd 53, DPM):
+
+  | depth | T max error | T cells > 1 bin (of 1000) | G max error | G cells > 1 bin |
+  |---|---|---|---|---|
+  | 1 | 1.2502 bins | 48 | **1.0000** | **0** |
+  | 3 | 1.4046 bins | 66 | **1.0000** | **0** |
+  | 7 | 1.5125 bins | 78 | **1.0000** | **0** |
+  | 15 | 2.1026 bins | 98 | **1.0000** | **0** |
+
+  This confirms and sharpens F25, and is the direct grounding for **proposed amendment
+  A4**: #189's R4 bound holds only while no remap has occurred, and every merge is a
+  remap. The correction applies to **today's shipped code regardless of which
+  representation is adopted** — G's exact adherence is a property of having no remap at
+  all, not a benefit that must be bought.
+
 - **F44 — `counter_memory_bytes` is not deterministic across runs of real ltl, while
   every other locked D8 field is.** Three identical invocations of ltl on the same file
   emit identical `partition_count` (2,514), `total_rebin_events` (15),
