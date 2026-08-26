@@ -1457,6 +1457,19 @@ computed, and that distinction is re-recorded here when it does.
   (`features/287-message-stats-bin-counter-data-model.md`) owns the per-message bin
   data model this store replaces.
 - **#323 — dynamic bins-per-decade** (on hold). Same distribution evidence.
+- **Defects found by this investigation and filed separately (2026-08-26).** All four describe
+  shipped behaviour, are independent of which representation is adopted, and are kept out of this
+  issue's scope so a data-model change does not absorb independent bug work:
+  - **#459** — `-g` consolidation under `-mdm bin` gives different percentiles depending on merge
+    order; the merge arithmetic is not commutative (68–92% of groups, up to 2.0 bin widths).
+    Distinct from #284, which fixed *which key seeds a cluster*; this is the arithmetic below it.
+  - **#460** — the one-bin percentile accuracy guarantee is documented as structural but is breached
+    after any re-binning (2.10 bin widths at merge depth 15; also two unmerged cases). Resolvable by
+    amending the contract (drafted as A4) or by changing the mechanism.
+  - **#461** — `counter_memory_bytes` varies 2.7% between runs on identical input, while every other
+    locked field in the same block is stable.
+  - **#462** — re-binning caused by merges is invisible in the telemetry, so the counters read as
+    "geometry is stable" during exactly the runs where it is least stable.
 - **#458 — `-n 0` retains and computes nothing per message.** Removes the per-message store by
   construction rather than making it cheaper, and the per-message surface is the only one on which
   this issue's container change earns its headline figures. The two address the same pressure by
