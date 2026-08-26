@@ -159,6 +159,22 @@ Committed and pushed progressively, each stage merged back to `release/0.18.0`.
 The re-bless of the stage-3 baseline after stage 4 is the before/after measurement
 of what D1 bought, per quantile, on real logs.
 
+**The rest of the release follows the same sequence**, because two of the remaining
+issues move numbers the stage-3 baseline depends on and must land after stage 4 —
+never between the capture and the changes it measures:
+
+5. **#447** — control-character normalisation on ingest. Changes the message key, so
+   it changes consolidation grouping and what the baselines contain.
+6. **#432** — metric/aggregate naming, bytes min/mean/max, CSV headers, index
+   alignment. Renames baseline columns and adds new per-line capture.
+7. **#418** — unsatisfiable sort notice and early objection. After #432 so its
+   messages are written against the final statistic names, not rewritten.
+8. **#443** (with #449 folded in) — user-defined metric diagnostics and `-V` surface.
+9. **#445** — quoting documentation and the `-r` failure message.
+
+8 and 9 touch nothing the others touch. Their positions are a choice, not a
+constraint, and no native dependency is recorded for them.
+
 ### D7 — One amendment pass over the contracts, eight corrections
 
 Three corrections were filed on #460; five more were drafted against the same
