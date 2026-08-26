@@ -1,5 +1,65 @@
 # Feature: Compact per-message statistics store
 
+## Status and next step (architect, 2026-08-26)
+
+**`not planned`, and the issue stays OPEN.** The label marks a decision record retained for the
+record: the investigation is complete, the evidence stands, and no implementation is scheduled.
+This is not a closure — closing would remove the analysis from the working set, and the findings
+below bear on work that is still live.
+
+**Why the work stops here.** The investigation set out to make the per-message statistics store
+cheaper, and it measured that a compact container does so decisively on that one surface
+(percentile evaluation 8.4x faster at the default resolution and 79.5x at the finest, memory 2.2x
+and 12.7x lower, with byte-identical answers). But three things emerged that together remove the
+case for scheduling it now:
+
+1. **#458 (`-n 0`, retain and compute nothing per message) addresses the motivating pressure more
+   cheaply.** The per-message surface is the only surface on which the container change earns those
+   figures — it carries roughly 286,000 partitions against tens on the per-time-bucket and heatmap
+   surfaces and about four on the histogram. On the other three the arms are within noise on time
+   and the compact arms are *worse* on memory. For the enormous-scale runs where gigabytes are the
+   problem, declining to build the store beats building a cheaper one.
+2. **No candidate dominates.** Each arm wins some dimensions and loses others, and no arm passes
+   the contract gate clean. Today's representation and the span-only container both breach the
+   documented accuracy bound after any merge; the shared grid holds it but needs two contract
+   amendments and moves 16-32% of the committed baselines past the harness's blocking threshold.
+   There is no ordering to read off the evidence, only a set of named trade-offs.
+3. **The defects this investigation found are separable and were separated.** #459, #460, #461 and
+   #462 describe shipped behaviour, are independent of which representation is adopted, and are
+   filed on their own so they can be fixed without a data-model change.
+
+**What is NOT parked with this issue.** The four defects above are live work in their own right.
+**#460 in particular is owed to the shipped code regardless of what happens here** — a documented
+guarantee the code does not provide. #450 (the `-g` x `-mdm bin` path has no test baseline) is why
+none of them were caught, and it gates being able to fix them safely.
+
+**What would reopen this as scheduled work.** Any of:
+
+- **#458 lands and proves insufficient** — i.e. runs that genuinely need per-message output at high
+  cardinality remain a real cost problem. That is the residual case this issue answers.
+- **A decision on either locked item under review** (see below) goes the way that makes the shared
+  grid admissible, since several of its advantages are structural rather than incremental.
+- **#2 (memory ceiling / adaptive controller)** is picked up, since its levers operate on this store
+  and its per-entry arithmetic depends on the representation.
+
+**Two locked decisions were left under review and are not resolved by this disposition.** Both are
+recorded in `features/426-three-arm-comparison.md` sections 7.1 and 7.2 with the evidence pressuring
+them, and both are the architect's alone:
+
+- **#187 Decision 5's "the auto-resize lifecycle itself is not revisitable"** — the same per-key
+  seeding is the locked virtue for percentile accuracy and the locked failure mode for display, and
+  it is the sole cause of both the accuracy breach and the order-dependence.
+- **#189 R7's "a hard requirement, not an option ... no global registry of partitions"** — whether a
+  shared index function counts as a global registry is settled nowhere in the corpus and appears in
+  no amendment list.
+
+**Where to resume.** `features/426-three-arm-comparison.md` is the deliverable: the headline
+summary, the contract gate, the dimension-by-dimension tables, the inversions, the frictions, and
+fourteen open decisions. `features/426-evaluation-framework.md` holds the dimension register and
+weighting it was built on. `prototype/426-bin-primitives-revalidation-report.md` is the evidence
+record (aspects V1-V9), and every instrument is under `prototype/426-*` with its captures in
+`prototype/426-results/`. Nothing needs re-measuring to take a decision.
+
 ## Overview
 
 Every distinct message's statistics live in their own small Perl hash:
