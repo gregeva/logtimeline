@@ -1,0 +1,51 @@
+# Known Layer-3 failures: comparisons that breach the blocking threshold because
+# of a filed, open defect in ltl — not because the harness is miscalibrated.
+#
+# An entry suppresses the block for exactly one (scenario, file_kind, column,
+# key_class) combination and is reported as XFAIL, with its issue, on every run.
+# It is NOT a tolerance: the comparison still happens and the deviation is still
+# printed.
+#
+# Entries are self-clearing. If a registered comparison PASSES, the engine fails
+# the run with "known failure no longer reproduces" — so the fix cannot land
+# without the entry being removed in the same change.
+#
+# Columns:
+#   scenario    — scenario id from scenarios.tsv
+#   file_kind   — messages | stats
+#   column      — the CSV column whose comparison is expected to breach
+#   key_class   — merged (row key contains the consolidation wildcard '*')
+#                 | any
+#   issue       — the open defect this is waiting on
+#   note        — why, in one line
+#
+# ---------------------------------------------------------------------------
+# #459: combining two bin-counter histograms re-projects both sides onto a
+# union geometry by geometric midpoint. The displacement compounds with merge
+# depth, so a cluster's percentiles drift from the true sample set. Measured
+# against the oracle on 2026-08-26: percentiles 2.7-4.2%, IQR to 32.6% (IQR is
+# a difference of two percentiles, so it carries both errors). Only the two
+# deep-merge scenarios breach; apache-bin-consolidated, at 52 projections,
+# stays inside the threshold. The raw *-consolidated scenarios agree exactly,
+# which is what identifies the bin merge as the cause rather than the grouping.
+#
+# D1 in features/bin-counter-accuracy-and-observability.md is the fix: project
+# each member once, from pristine counts, at finalize. When it lands these
+# entries must be deleted, and the engine will insist on it.
+# ---------------------------------------------------------------------------
+scenario	file_kind	column	key_class	issue	note
+thingworx-bin-consolidated	messages	p1	merged	459	bin merge re-projection compounds with depth (3551 projections)
+thingworx-bin-consolidated	messages	p5	merged	459	bin merge re-projection compounds with depth
+thingworx-bin-consolidated	messages	p10	merged	459	bin merge re-projection compounds with depth
+thingworx-bin-consolidated	messages	p25	merged	459	bin merge re-projection compounds with depth
+thingworx-bin-consolidated	messages	p50	merged	459	bin merge re-projection compounds with depth
+thingworx-bin-consolidated	messages	p75	merged	459	bin merge re-projection compounds with depth
+thingworx-bin-consolidated	messages	p95	merged	459	bin merge re-projection compounds with depth
+thingworx-bin-consolidated	messages	p999	merged	459	bin merge re-projection compounds with depth
+thingworx-bin-consolidated	messages	iqr	merged	459	difference of two displaced percentiles
+codebeamer-bin-consolidated	messages	p1	merged	459	bin merge re-projection compounds with depth (147 projections)
+codebeamer-bin-consolidated	messages	p5	merged	459	bin merge re-projection compounds with depth
+codebeamer-bin-consolidated	messages	p10	merged	459	bin merge re-projection compounds with depth
+codebeamer-bin-consolidated	messages	p25	merged	459	bin merge re-projection compounds with depth
+codebeamer-bin-consolidated	messages	p50	merged	459	bin merge re-projection compounds with depth
+codebeamer-bin-consolidated	messages	iqr	merged	459	difference of two displaced percentiles

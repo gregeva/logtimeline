@@ -355,37 +355,32 @@ partitions. It is captured anyway, as the harness does for every scenario, and
 recorded here so nobody reads it as independent coverage. The merge signal is
 entirely in `messages.csv` (32–50 differing lines per log).
 
-### D15 — Tick position is asserted by shape, with a tolerance sized to the render
+### D15 — Tick position is asserted exactly, from published inputs
 
-The architect's decision, 2026-08-26: assert tick position from the values available
-today with a tolerance, rather than add a `-V` observable to support an exact
-assertion. What that buys, measured rather than assumed:
+**Superseded the tolerance-based form on 2026-08-26, at the architect's direction.**
+The first attempt predicted tick columns from the rendered legend, whose values are
+rounded by `format_heatmap_value()` to one decimal and a unit. That mispredicted 3 of
+9 columns and forced a tolerance which, sized to the rounding, was wide enough to be
+inert on the widest histograms — 10 of 10 percentiles display-limited at `-hgw 75`
+and `-hgw 95`.
 
-**What it catches.** The assertion anchors on the lowest and highest rendered ticks
-and predicts every interior percentile's column from its own value, so it tests that
-columns stay log-proportional to values — the mapping in
-`calculate_histogram_percentile_ticks()`. Replacing that log mapping with a linear
-one is caught: 5 failures.
+The architect's correction: being unable to determine where a tick should be is an
+**observability** defect, and it belonged in the observability issue rather than
+being absorbed as test slack. `-V histogram-percentile-ticks` now publishes the four
+inputs of `calculate_histogram_percentile_ticks()` at full precision — `bar_width`,
+the axis `min` and `max`, and each selected percentile value. The harness recomputes
+the mapping and compares against the columns recovered from the rendered axis:
+`-V` supplies the expected, the render supplies the actual.
 
-**What it does not catch, proven by sabotage.** Adding a constant 3 to every column
-produces **0 failures** — a uniform offset, or a rescale of the whole axis, is
-absorbed by the anchors. The shape of the mapping is under test; its absolute
-placement is not.
+**The computed columns are deliberately not published.** A harness reading them back
+would compare `ltl` with itself and assert nothing; the mapping expression, not its
+output, is what is under test.
 
-**And it weakens where the render is coarse.** The legend values it predicts from are
-display-rounded to one decimal, so the tolerance is widened per percentile by how far
-that rounding alone could move the prediction. Where values are crushed together
-relative to the printed precision the tolerance grows until the assertion is inert.
-Each run reports how many of its percentiles are display-limited: **0 of 3 at
-`-hgw 30`, but 10 of 10 at both `-hgw 75` and `-hgw 95`** — the widest histograms,
-which have the finest column resolution, are where it gates least.
-
-**Consequence, stated plainly:** D2's requirement that the tick marks line up
-accurately with the printed percentile values is documented and partially gated, not
-fully gated. A one-column drift passes; a uniform shift passes; on wide histograms
-most percentiles are unconstrained. Closing it needs the unrounded `min`, `max`,
-per-percentile values and `bar_width` on a `-V` surface, which was considered and not
-taken.
+**Equality, no tolerance.** Verified exact on all six panels across four widths and a
+two-metric run. Proven by sabotage: replacing the log mapping with a linear one
+fails; **a uniform 3-column shift now fails too** — it passed silently under the
+tolerance; and a one-column drift on a single percentile class fails, which is
+precisely what D2 requires be provable and what the tolerance could not do.
 
 ### D16 — The oracle's blind spot on consolidated rows is made visible
 
@@ -405,6 +400,54 @@ Layers 1 and 2. Recorded in `tests/statistics-drift/README.md` § L3 oracle scop
 
 **This is pre-existing and wider than this drop**: it applies to the four
 `*-consolidated` scenarios that predate #450, not only the new rows.
+
+---
+
+### D17 — Consolidation publishes its grouping, so the oracle can check merged rows
+
+The blind spot D16 made visible was closed rather than documented. A consolidated
+row's key is a wildcard pattern that appears nowhere in the log, so the statistics
+oracle could not form its sample set. `-V message-grouping` now carries a
+`cluster-membership` sub-section — canonical key to member keys — recorded only when
+the section is requested, so a normal run pays nothing. `validate-statistics.sh`
+captures it per consolidating scenario and passes it to the oracle as
+`--cluster-membership`.
+
+**The division that makes this sound:** `ltl` supplies the *grouping*, which is the
+fuzzy matcher's decision and not a statistic; the oracle computes the *arithmetic*
+over each group independently, which is what it exists to check. Recovering the
+grouping by pattern-matching the wildcard key against raw messages was rejected — a
+key can match a pattern it was not assigned to, which would manufacture false
+failures.
+
+**Result, and it validated itself.** All four raw `*-consolidated` scenarios went
+from 6–16 unpaired rows to **zero, with zero T3** — raw consolidation concatenates
+sample arrays losslessly, so exact agreement there is what proves the grouping is
+right. L3 coverage on those scenarios rose from 129–208 cells to 227–400.
+
+### D18 — The oracle immediately found #459, and the finding is registered, not suppressed
+
+With merged rows checked for the first time, the two deep-merge scenarios breached:
+**`thingworx-bin-consolidated` 25 comparisons, `codebeamer-bin-consolidated` 8**, all
+on wildcarded keys, all on percentiles and IQR — counts, min, max and mean agree.
+Percentile deviations **2.7–4.2 %**, IQR to **32.6 %** (a difference of two displaced
+percentiles, so it carries both errors). `apache-bin-consolidated`, at 52
+projections, stays inside the threshold.
+
+This is the compounding merge loss of #459, measured against an independent oracle
+for the first time rather than inferred from a prototype — and it is the clearest
+evidence yet for the D1 fix.
+
+**It is registered, not tolerated.** `tests/statistics-drift/known-failures.tsv`
+suppresses the block for exactly these (scenario, file_kind, column, key_class)
+combinations, attributes each to #459, and still prints the deviation on every run;
+the scenarios report `L3=OK-WITH-XFAIL`, never `L3=OK`. Widening the threshold was
+rejected: it would hide the defect the drop exists to fix.
+
+**The registry is self-clearing.** If a registered comparison passes, the engine
+fails the run with `KNOWN-FAILURE-STALE`, naming the entry and its issue — so #459
+cannot land without deleting its entries in the same change. Proven by sabotage:
+registering a comparison that passes fails the run.
 
 ---
 
