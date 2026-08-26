@@ -225,15 +225,24 @@ consumer: summary_table
   path: unified
   partition_keying: (category, log_key)
   partition_count: <N>
-  total_rebin_events: <N>
+  rebin_growth_events: <N>
+  rebin_merge_events: <N>
+  rebin_finalize_events: 0
   max_partition_bins: <N>
   partitions_with_overflow_count: <N>
   partitions_with_underflow_count: <N>
+  overflow_total: <N>
+  underflow_total: <N>
   counter_memory_bytes: <N>
+  members_live: <N>
+  members_max: <N>
+  members_memory_bytes: <N>
   rebins_per_partition: p50=<N> p95=<N> p99=<N> max=<N>
   percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
   out_of_range_bounded: p1=<none|low|high> ... p99999=<none|low|high>
 ```
+
+Amended 2026-08-26 by #462: `total_rebin_events` is retired in favour of the three per-mechanism counters, the out-of-range totals and the retention fields are emitted, and `counter_memory_bytes` becomes a derived figure. `rebin_finalize_events` is **zero for this consumer by contract** — `summary_table` reads percentiles directly from the streaming partition and never projects into display shape. `rebin_merge_events` is the consolidation signal: this is the only surface with a combination path.
 
 The `csv_output` block emits the shared-partition short form per #189 R7:
 

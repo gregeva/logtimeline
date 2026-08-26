@@ -146,7 +146,9 @@ The migrated consumers do not require any feature-specific overflow handling bey
 
 Each migrated consumer produces a per-consumer block in the locked `=== BIN-COUNTER MODE ===` `-V` section per #187 Decision 8, with the locked consumer-name strings: `heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`.
 
-Each per-consumer block reports the contract-surface fields locked in #187 Decision 8: `path`, `partition_keying`, `partition_count`, `total_rebin_events`, `max_partition_bins`, `partitions_with_overflow_count`, `partitions_with_underflow_count`, `counter_memory_bytes`, `rebins_per_partition`, `percentiles_emitted`, `out_of_range_bounded`, `shares_partitions_with` (where applicable).
+Each per-consumer block reports the contract-surface fields locked in #187 Decision 8: `path`, `partition_keying`, `partition_count`, `rebin_growth_events`, `rebin_merge_events`, `rebin_finalize_events`, `max_partition_bins`, `partitions_with_overflow_count`, `partitions_with_underflow_count`, `overflow_total`, `underflow_total`, `counter_memory_bytes`, `members_live`, `members_max`, `members_memory_bytes`, `rebins_per_partition`, `percentiles_emitted`, `out_of_range_bounded`, `shares_partitions_with` (where applicable). (Field set amended 2026-08-26 by #462; `total_rebin_events` retired.)
+
+`rebin_finalize_events` is the field these two surfaces exist to demonstrate: every heatmap and histogram partition is projected into display shape once per run, on every such run with no flags required, and until #462 that projection was counted by nothing because it happens after the telemetry snapshot. The count equals `partition_count` on both surfaces. The highlight sub-stores (`%heatmap_counters_hl`, `%histogram_counters_hl`) take their own projections and are **not** observed by any consumer block — see the open item in `features/bin-counter-accuracy-and-observability.md`.
 
 The exact field formats are locked in #187 Decision 8. This feature implements the consumer-specific population of those fields; it does not define new fields.
 

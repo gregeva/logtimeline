@@ -235,9 +235,12 @@ The primitives expose telemetry signals that consumers populate into the locked 
 
 The primitives must expose:
 
-- Per-partition `min`, `max`, `bin_count`, and counter-store memory footprint — for the `bin_count` and `state_budget_bytes` fields in `-V` per consumer block.
-- Aggregate rebin event count per consumer (sum of rebin events across all partitions for that consumer) — for `total_rebin_events` field.
-- Per-partition rebin-event-count distribution across the partition population — for `rebins_per_partition: p50=N p95=N p99=N max=N` field. Per #187 Decision 5, this distribution is the empirical-tuning surface for the seed heuristic.
+- Per-partition `min`, `max`, `bin_count`, and counter-store memory footprint — for the `bin_count` and `state_budget_bytes` fields in `-V` per consumer block. The footprint is **derived from what the store holds**, not measured from the live structure: a live measurement reports what the process allocated, which moves with Perl's per-process hash seed while no observation changes, and a figure that moves on its own cannot be compared before and after a change (amended 2026-08-26 by #462).
+- Rebin event counts per consumer, **separated by mechanism** — for the `rebin_growth_events`, `rebin_merge_events` and `rebin_finalize_events` fields (amended 2026-08-26 by #462; a single aggregate was retired because one number cannot say which mechanism moved).
+  - The growth and combination counts are carried on the **store entry**, not on the partition. A combination replaces the target's partition with one built by `partition_rebin()`, so a count held on the partition is discarded exactly when consolidation happens — which is why consolidation was invisible. `partition_new()` and `partition_rebin()` therefore carry no `rebins` slot and `partition_extend()` increments none; the caller increments the entry's counter.
+  - The finalize count cannot come from a snapshot of the streaming store at all: the projection into display shape runs after the snapshot and discards the partitions it projects. It is counted at its own call sites by the finalizer that projects.
+- Per-partition growth-event-count distribution across the partition population — for `rebins_per_partition: p50=N p95=N p99=N max=N` field. Per #187 Decision 5, this distribution is the empirical-tuning surface for the seed heuristic.
+- Member-histogram retention across combined keys — for `members_live`, `members_max` and `members_memory_bytes`. Carried on the store entry and summed at snapshot; a combination folds the source's membership into the target's rather than dropping it.
 - Per-partition high-water-mark bin count — for `max_partition_bins` field.
 - Per-partition overflow and underflow counter values — for `partitions_with_overflow_count` and `partitions_with_underflow_count` aggregates.
 - Per-quantile R4 return state (whether the value came from interpolation or from an overflow/underflow boundary) — for `out_of_range_bounded: high|low|none` per quantile.

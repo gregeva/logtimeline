@@ -154,7 +154,7 @@ The contract surface includes (full detail in Decision 8):
 - **Section presence**: always emitted under `-V`; reports `consumers_active: none` when no consumer is computing.
 
 The section name (`=== BIN-COUNTER MODE ===`), all field names, and all consumer-name strings are part of the locked feature contract per Decision 8. Field-name changes require a new locked-decision entry.
-- **Rebin telemetry (per-consumer using the unified path)**: `total_rebin_events`, `rebins_per_key { p50, p95, p99, max }`, `max_partition_bins` (Decision 5 lock; intended to support empirical seed-heuristic tuning).
+- **Rebin telemetry (per-consumer using the unified path)**: `rebin_growth_events`, `rebin_merge_events`, `rebin_finalize_events`, `rebins_per_partition { p50, p95, p99, max }`, `max_partition_bins` (Decision 5 lock, as amended 2026-08-26 by #462; intended to support empirical seed-heuristic tuning).
 - **Tier-correctness for filtered runs**: if a run includes a filter, `-V` reports the filter context so an analyst can audit whether the result is appropriate (R2.2 reframed as audit concern, not gate).
 - **Pre-migration consumers (any still running the sort-based path during phased migration)**: `n` (the value count consumed) and `sorted: yes` line, matching R11's byte-identical contract.
 
@@ -405,7 +405,7 @@ The algorithm substrate is fixed (HdrHistogram-style log-spaced bin counters, pe
 | All matched values are identical | Partition has a single populated bin; every percentile equals that value (Decision 1's formula returns that value uniformly when all observations land in one bin). |
 | Single matched value | Same as above — single observation, single bin, every percentile equals that value. |
 | Very small N | Decision 1's formula computes for any positive `bin_count`; no per-bin guard (Decision 3); no rank-support warning (Decision 3). Output is well-defined for any N ≥ 1. |
-| Per-key partition rebins mid-parse | Expected behavior per Decision 5's auto-resize lifecycle. Each rebin is recorded in the Decision 5 `-V` telemetry counters (`total_rebin_events`, `rebins_per_key {p50, p95, p99, max}`). |
+| Per-key partition rebins mid-parse | Expected behavior per Decision 5's auto-resize lifecycle. Each is recorded in the Decision 5 `-V` telemetry counter for its own mechanism (`rebin_growth_events` here; see also `rebins_per_partition {p50, p95, p99, max}`). |
 | Per-key value falls outside partition's current [min, max] | Triggers a rebin (Decision 5 doubling). If the value falls outside the rebinned partition for any reason (e.g., extreme outlier past the doubled extent), it is counted in the overflow or underflow counter per Decision 4. The per-quantile `out_of_range_bounded: high\|low` audit field reflects this on subsequent percentile queries. |
 | Filtered run | The unified contract runs unconditionally. The filter context is reported in `-V` for analyst audit per R7. Filter-context audit is not a gate. |
 | User opts out via `--exact-percentiles` (if practical decision 7 ships this) | The consumer's pre-migration code path runs; output is byte-identical to the pre-feature implementation per R11a. `-V` reports `user_opt_out` per R10. |
@@ -1056,6 +1056,19 @@ This section records the binding values produced by the decision conversation th
 
 ### F1 — Design-philosophy framing — **LOCKED (2026-05-19)**
 
+> **Amendment 2026-08-26 (#462) — re-binning is reported per mechanism; retention and footprint become observable; the memory figure becomes reproducible.** Recorded in `features/bin-counter-accuracy-and-observability.md` § D4. Unlike the two amendments above, this one is applied **in the body below as well as here**, so the field list is true as written rather than superseded from the top.
+>
+> - **`total_rebin_events` is retired.** It reported a single summed figure that could not be acted on — a number that rises says nothing about whether a partition outgrew its range, a combination churned, or a histogram was rendered — and it was not even a reliable sum: a combination replaced the target's partition, discarding the history it should have been adding to, so consolidation of 17 partitions into 13 left every re-bin field byte-identical to the un-consolidated run.
+> - **Three per-mechanism counters replace it**, in this order: `rebin_growth_events`, `rebin_merge_events`, `rebin_finalize_events`.
+> - **Re-bin history moves from the partition to the store entry.** `partition_new()` and `partition_rebin()` no longer carry a `rebins` slot and `partition_extend()` no longer increments one; the counters live on the `{partition, bins, overflow, underflow}` entry, which survives a combination. `rebins_per_partition:` keeps its name and now reports the distribution of per-entry **growth** events.
+> - **`overflow_total` and `underflow_total` are emitted.** Both were already produced and printed by nothing. They are guards expected to read zero, kept visible so that if one ever fires it can be investigated (§ D7 of the drop record).
+> - **Three retention fields are added**: `members_live`, `members_max`, `members_memory_bytes`. They are defined for the shape the system is moving to (§ D1) and implemented against today's, where combination collapses members into one histogram: `members_live` equals `partition_count` plus the keys folded into clusters, `members_max` is the largest membership reached, and `members_memory_bytes` equals `counter_memory_bytes`. That equality is itself the signal that no member histogram is being retained yet.
+> - **`counter_memory_bytes` becomes a derived, reproducible figure.** It was `Devel::Size::total_size()` over the live store, which reports what the process *allocated*: measured 46277 / 45189 across six runs of one command with every content-derived field constant, because Perl's per-process hash seed changes when a bucket array doubles. It is now computed from what the store holds. Model and calibration are recorded in the drop file; the figure is byte-identical across runs and systematically slightly under the live measurement, which carries allocator slack.
+> - **The section name in the body below (`=== BIN-COUNTER MODE ===`) remains stale**; `ltl` has emitted `=== histogram-bin-counters ===` since #226. That correction belongs to the amendment pass in #460 and is not made here.
+>
+> All other Decision 8 field names, consumer-name strings, and per-consumer lockings remain in effect verbatim.
+
+
 #### Contract
 
 ltl occupies the **query-time analyzer** role, not the recording-side library role. The raw values live in the log file and are read by ltl at analysis time, which means the precision parameter is a query-time choice exposed to the analyst, not a fixed recording-time choice the way Prometheus Scale, DDSketch α, and HdrHistogram significant-digits typically are in their production deployments. `buckets_per_decade` is the analyst's lever; the in-bin rule uses `rank_in_bin` because that information is available to ltl in a way it is not to consumers of pre-aggregated metrics.
@@ -1352,8 +1365,8 @@ Non-binding — the contract above is what must hold; specifics below are starti
 - **Initial seed arithmetic**: when the first value `v_0` for a new partition is observed, construct the partition with `min = v_0 / sqrt(10^decades_default)` and `max = v_0 · sqrt(10^decades_default)`, where `decades_default = 5` (matches ltl's existing heatmap/histogram convention at `ltl:4908`-area code). For 5 decades and locked Decision 2 default `buckets_per_decade = 53`, the partition opens with ~265 bins, centered geometrically on `v_0`.
 - **Rebin doubling arithmetic**: when a value exceeds `max`, extend the high end so that the new `max` is at least `current_max · 10^(decades_default / 2)` (effectively doubling the span at the affected end on a log-scale). Symmetric for values below `min`. Adding bins on the high end is conceptually `append`; on the low end is `prepend`. Both are O(bin count) per rebin.
 - **Suggested `-V` field names** (settled finally by practical decision 8):
-  - `total_rebin_events: N` — aggregate count, Layer 2.
-  - `rebins_per_partition: { p50, p95, p99, max }` — per-partition distribution, available under verbose flag.
+  - `rebin_growth_events: N` / `rebin_merge_events: N` / `rebin_finalize_events: N` — one count per re-binning mechanism, Layer 2 (amended 2026-08-26 by #462; a single aggregate was retired because it could not be acted on).
+  - `rebins_per_partition: { p50, p95, p99, max }` — per-partition distribution of growth events, available under verbose flag.
   - `max_partition_bins: N` — high-water-mark bin count, Layer 2.
   - `counter_memory_bytes: N` — aggregate counter-store memory, Layer 2 (matches R7's `state_budget_bytes`).
 - **Healthy-seed signal**: with the suggested seed (5 decades centered on first value), `rebins_per_partition.p99` should be in the 0–2 range on typical latency data. Higher values suggest tuning the seed wider or the doubling factor more aggressive.
@@ -1528,12 +1541,19 @@ Block field set, in order:
 When `path: unified`, the following fields appear (in order):
 - `partition_keying: <description>` — human-readable description of the keying dimension (e.g., `(category, log_key)`, `time_bucket`, `metric_global`).
 - `partition_count: <N>` — number of distinct partitions managed by this consumer this run.
-- `total_rebin_events: <N>` — sum of rebin events across all partitions for this consumer (Decision 5 telemetry).
+- `rebin_growth_events: <N>` — re-binning caused by a partition outgrowing its range and doubling (Decision 5 telemetry). Counted on the store entry, so a combination adds to it rather than resetting it.
+- `rebin_merge_events: <N>` — re-binning caused by combining two histograms: one increment per side projected onto the union geometry, so zero, one or two per combination, since a side already congruent with the union is not projected. Non-zero only where a combination path exists.
+- `rebin_finalize_events: <N>` — re-binning caused by projecting a partition into display shape at finalize. One per partition per run on the heatmap and histogram surfaces, on every such run with no flags required; exactly zero for `summary_table`, `csv_output` and `time_bucket_stats`, which read percentiles from the streaming partition and never project.
 - `max_partition_bins: <N>` — high-water-mark bin count across all partitions for this consumer (Decision 5 telemetry).
 - `partitions_with_overflow_count: <N>` — number of partitions for this consumer with at least one overflow tally (Decision 4 audit aggregate).
 - `partitions_with_underflow_count: <N>` — number of partitions for this consumer with at least one underflow tally (Decision 4 audit aggregate).
-- `counter_memory_bytes: <N>` — aggregate counter-store memory for this consumer's partitions (Decision 5 telemetry; matches R7's `state_budget_bytes` requirement applied per consumer).
-- `rebins_per_partition: p50=<N> p95=<N> p99=<N> max=<N>` — distribution of per-partition rebin counts across this consumer's partitions (Decision 5 telemetry). Format is space-separated `key=value` pairs.
+- `overflow_total: <N>` — summed overflow tally across this consumer's partitions. A guard expected to read zero, not an audit signal expected to go non-zero.
+- `underflow_total: <N>` — the symmetric summed underflow tally, likewise expected to read zero.
+- `counter_memory_bytes: <N>` — counter-store footprint for this consumer's partitions, derived from what the store holds rather than measured from the live structure, so that it is reproducible across runs on identical input.
+- `members_live: <N>` — member histograms alive across combined keys. Conserved under combination: folding keys into clusters lowers `partition_count` but not this figure.
+- `members_max: <N>` — the largest membership reached by any single entry. At least 1, since an entry always stands for itself.
+- `members_memory_bytes: <N>` — footprint of the retained member histograms, on the same derived model as `counter_memory_bytes`. Equal to it while combination still collapses members into one histogram.
+- `rebins_per_partition: p50=<N> p95=<N> p99=<N> max=<N>` — distribution of per-entry **growth** events across this consumer's partitions (Decision 5 telemetry). Format is space-separated `key=value` pairs.
 - `percentiles_emitted: <space-separated list>` — the quantile set this consumer requested per R3 (e.g., `p1 p50 p75 p90 p95 p99 p999`).
 - `out_of_range_bounded: <inline per-quantile>` — per-quantile audit per Decision 4. **Format: Option A inline**, e.g., `out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=high p999=high`. Space-separated `quantile_name=audit_value` pairs. The three-value enum `none | high | low` is locked verbatim from Decision 4.
 
@@ -1585,11 +1605,18 @@ consumer: summary_table
   path: unified
   partition_keying: (category, log_key)
   partition_count: 1247
-  total_rebin_events: 14
+  rebin_growth_events: 14
+  rebin_merge_events: 0
+  rebin_finalize_events: 0
   max_partition_bins: 318
   partitions_with_overflow_count: 0
   partitions_with_underflow_count: 0
+  overflow_total: 0
+  underflow_total: 0
   counter_memory_bytes: 2643456
+  members_live: 1247
+  members_max: 1
+  members_memory_bytes: 2643456
   rebins_per_partition: p50=0 p95=0 p99=1 max=2
   percentiles_emitted: p1 p50 p75 p90 p95 p99 p999
   out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=none p999=none
@@ -1652,11 +1679,18 @@ consumer: summary_table
   path: unified
   partition_keying: (category, log_key)
   partition_count: 1247
-  total_rebin_events: 14
+  rebin_growth_events: 14
+  rebin_merge_events: 0
+  rebin_finalize_events: 0
   max_partition_bins: 318
   partitions_with_overflow_count: 3
   partitions_with_underflow_count: 0
+  overflow_total: 47
+  underflow_total: 0
   counter_memory_bytes: 2643456
+  members_live: 1247
+  members_max: 1
+  members_memory_bytes: 2643456
   rebins_per_partition: p50=0 p95=0 p99=1 max=2
   percentiles_emitted: p1 p50 p75 p90 p95 p99 p999
   out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=high p999=high
