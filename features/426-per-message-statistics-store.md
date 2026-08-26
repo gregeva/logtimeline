@@ -1095,6 +1095,60 @@ data-model change does not absorb independent test-coverage work.
 
 ---
 
+### Process error — framing drift in the 2026-08-25/26 analysis (recorded 2026-08-26)
+
+**The measurements below are sound and unaffected. The analysis written on top of them was
+not, and the error is recorded here because it would otherwise be invisible: it corrupted
+only the interpretive layer, and every capture, table and finding would pass an audit.**
+
+**What happened.** Across roughly ten progress summaries, the three-arm comparison stopped
+being symmetric. A different evaluation question came to be applied to each arm, and the
+incumbent stopped being evaluated at all:
+
+| arm | the question it was actually being judged by |
+|---|---|
+| S | "does anything observable change?" — nothing does, so: clean, safe |
+| G | "what would adoption cost?" — a re-bless plus contract amendments, so: expensive, risky |
+| T | *none* — treated as the reference against which the others were measured |
+
+Those are three different questions. Asking one of each guarantees the conclusion before any
+data is consulted, because "changes nothing observable" is a test only a
+conservative-by-construction arm can pass — and it was never the objective. The locked
+objective (2026-08-25) was **"replace the container, and measure what the container change
+does to the constraint"**, and this issue exists because the as-built layout costs 5x on
+traversal. **P10/arm G is the candidate that attacks that at the root.** By the final
+summaries it had been reframed as a risk annex to a P8+P9 recommendation.
+
+**The most damaging part is the omission, not the asymmetry.** Because T was never asked its
+own adoption cost, T's *measured* properties — order-dependent results on 68-92% of merge
+groups (F45), accuracy degrading with merge depth past its own R4 bound (F46) — read as
+background conditions of reality rather than as costs carried by one candidate. Those numbers
+were in the tables the whole time. The prose did not carry them into the comparison.
+
+**Second-order effect on prominence.** F55 — the compact container is **42% larger** than T on
+a bounded-cardinality surface — is a dimension where the emerging front-runner *loses*. It was
+recorded accurately and then placed in a subordinate position, while every dimension where S
+won was placed in a summary table. Demotion of contrary evidence is the detectable signature of
+this failure.
+
+**Corrective actions.**
+
+1. The comparison is rebuilt symmetrically: the same question asked of all three arms, T
+   included as the candidate "keep today's representation" and carrying its own adoption cost.
+2. The evaluation dimensions are **derived from the specification corpus** (#187, #189, #201,
+   #287, #289, #34, #293, #305, #266, #224) rather than from recollection — the list used
+   during the drift was assembled from memory and was incomplete.
+3. Weightings are grounded in what those specifications treat as load-bearing per feature area,
+   and are used **only to direct where analytical effort is spent** — explicitly not to select a
+   direction (architect, 2026-08-26: the quantitative view "is not sufficient to decide on the
+   direction, but can be used to influence where you spend the most time looking").
+4. A problem report with reproduction guidance was written for the tool vendor. It is kept
+   outside this repository (it concerns the development tool, not this project).
+
+**The rule this establishes for this issue's remaining work:** an arm's property is never
+promoted to a criterion the other arms must meet. "S is digest-identical to T" is a finding
+about S. It is not the standard by which G is judged, and it is not evidence that T is correct.
+
 ### Session findings (2026-08-25) — N1, N4 and the aliasing question
 
 Recorded here as they were produced; the per-aspect reports carry the tables.
