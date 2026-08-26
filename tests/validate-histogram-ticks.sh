@@ -7,14 +7,16 @@
 #      (`┴`/`┻` upward tick, OR `┼`/`╋` cross when also a bucket boundary).
 #   2. Duplicate-column collapse is allowed: when two percentile values map to
 #      the same column (e.g. P1 and P10 both at the data floor), one axis tick
-#      represents both — assertion is `tick_count == distinct_legend_columns`.
+#      represents both — so the assertion is the inequality
+#      `1 <= tick_count <= legend_entries`, not an equality.
 #   3. No `┴`/`┻`/`┼`/`╋` characters appear outside the histogram x-axis row.
 #   4. Tick characters match the colour of the rest of the axis frame.
 #      The existing frame chars (┗ ━ ┳ ┛) are emitted without any ANSI
 #      wrapping, so the ticks must be too — same emission = same colour.
-#   5. When `┼`/`╋` appears, the column it sits on is one of the percentile columns
-#      computed from the legend values (i.e. it's there because a percentile and a
-#      bucket boundary genuinely share that column).
+#   5. Each percentile tick sits within one column of where the log mapping puts
+#      its legend value, anchored on the lowest and highest rendered ticks
+#      (#450). See assert_tick_positions() for what the tolerance does and does
+#      not catch.
 #   6. Multi-histogram runs (`-hg duration,bytes`): each histogram independently
 #      carries its own tick set matching its own legend.
 
@@ -157,6 +159,21 @@ inspect_output() {
                 my $t = () = $seg =~ /$tup_re/g;
                 my $c = () = $seg =~ /$cross_re/g;
                 print "AXIS:$axis_seq:$hidx:tup=$t:cross=$c:total=", $t+$c, "\n";
+
+                # Tick COLUMNS, for the position assertion (#450). Anchored on
+                # the bottom-left corner glyph, never on a fixed left margin:
+                # print_histograms() prefixes every line with a data-dependent
+                # centering offset.
+                my @chars = split //, $seg;
+                my ($corner_at) = grep { $chars[$_] =~ /$corner_l/ } 0 .. $#chars;
+                if (defined $corner_at) {
+                    my @cols;
+                    for my $j ($corner_at + 1 .. $#chars) {
+                        push @cols, $j - $corner_at - 1
+                            if $chars[$j] =~ /$tup_re|$cross_re/;
+                    }
+                    print "TICKCOL:$axis_seq:$hidx:", join(",", @cols), "\n" if @cols;
+                }
             }
             # Issue #185: tick chars must match the colour of the rest of the
             # axis frame. The frame chars are emitted without any ANSI wrapping,
@@ -200,6 +217,36 @@ inspect_output() {
                 my $distinct = scalar keys %distinct_vals;
                 print "LEGEND:$legend_seq:$hidx:entries=", scalar(@entries),
                       ":distinct_values=$distinct\n";
+
+                # Legend values converted to one base unit, for the position
+                # assertion (#450). This is a harness-side reader of the
+                # rendered vocabulary -- the render is the only place these
+                # values appear, so the harness must parse what is displayed.
+                # Values are display-rounded, which is exactly why the position
+                # assertion carries a tolerance.
+                my %unit_scale = (
+                    ""    => 1,          "us" => 1,        "\x{00B5}s" => 1,
+                    "ms"  => 1e3,        "s"  => 1e6,      "m" => 6e7,
+                    "h"   => 3.6e9,      "d"  => 8.64e10,
+                    "B"   => 1,          "KiB" => 1024,    "MiB" => 1048576,
+                    "GiB" => 1073741824, "KB" => 1000,     "MB" => 1e6, "GB" => 1e9,
+                );
+                my @vals;
+                my $unparsed = 0;
+                while ($seg =~ /(P\d+(?:\.\d+)?):\s*([0-9.]+)\s*([A-Za-z\x{00B5}]*)/g) {
+                    my ($label, $num, $unit) = ($1, $2, $3);
+                    if (!exists $unit_scale{$unit}) { $unparsed++; next; }
+                    # Half of the last displayed decimal place is how much this
+                    # value could really differ from what is printed. Carried
+                    # alongside so the position assertion can size its tolerance
+                    # to the precision the render actually offers.
+                    my $decimals = ($num =~ /\.(\d+)/) ? length($1) : 0;
+                    my $half_ulp = 0.5 * (10 ** -$decimals);
+                    push @vals, "$label=" . ($num * $unit_scale{$unit})
+                              . "=" . ($half_ulp * $unit_scale{$unit});
+                }
+                print "LEGENDVAL:$legend_seq:$hidx:unparsed=$unparsed:",
+                      join(",", @vals), "\n";
             }
         }
     ' "$file"
@@ -217,6 +264,126 @@ inspect_output() {
 #   - tick_count > legend_count would mean orphan ticks (no matching legend
 #     entry), which IS a bug — the displayed legend is the contract.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Tick POSITION assertion (#450).
+#
+# calculate_histogram_percentile_ticks() maps a percentile value to a column by
+#   col = int( log(v/min) / log(max/min) * (bar_width - 1) )
+# so columns are log-proportional to the values: the spacing between ticks is
+# fixed by the spacing between the percentile values, whatever min, max and
+# bar_width happen to be.
+#
+# That is what this asserts. Anchoring on the lowest and highest rendered ticks
+# and their matching legend values, every interior percentile's column is
+# predicted from its own value and compared with the rendered ticks.
+#
+# WHAT IT DOES NOT CATCH, stated so nobody reads more into a pass than is there,
+# and demonstrated rather than assumed (#450):
+#   - Replacing the log mapping with a linear one is caught: 5 failures.
+#   - Adding a constant 3 to every column is NOT caught: 0 failures. A uniform
+#     offset, or a rescale of the whole axis, is absorbed by the anchors.
+# The interior spacing -- the shape of the log mapping -- is what is under test,
+# not the axis's absolute placement.
+#
+# TOLERANCE: +/-1 column, widened per percentile by how far display rounding
+# alone could move its prediction (half of the last printed decimal, propagated
+# through d(log v) = u/v, for the value and both anchors). Each run reports how
+# many of its percentiles are display-limited -- where the printed precision is
+# coarse relative to the spacing, the tolerance grows and the assertion weakens
+# to the point of being inert. On this corpus that is all 10 percentiles at
+# -hgw 75 and -hgw 95, and 0 at -hgw 30.
+#
+# The base +/-1 is not slack that could be tightened. The
+# legend values this predicts FROM are display-rounded by format_heatmap_value()
+# (one decimal plus a unit: "1.5m"), and int() flooring at each anchor adds its
+# own column of uncertainty. Predicting from unrounded values is not possible
+# from any surface ltl emits today; measured, the rounded inputs mispredict
+# roughly a third of columns by exactly one. Architect's decision, 2026-08-26:
+# accept the tolerance rather than add an observable. The consequence is
+# recorded in features/bin-counter-accuracy-and-observability.md D15 -- a
+# one-column drift passes, so this documents the mapping without gating it.
+# ---------------------------------------------------------------------------
+assert_tick_positions() {
+    local report="$1" hidx="$2" label="$3"
+
+    local cols vals unparsed
+    cols=$(echo "$report" | awk -F: -v h="$hidx" '/^TICKCOL:1:/ && $3==h {print $4}')
+    vals=$(echo "$report" | awk -F: -v h="$hidx" '/^LEGENDVAL:1:/ && $3==h {print $5}')
+    unparsed=$(echo "$report" | awk -F: -v h="$hidx" '/^LEGENDVAL:1:/ && $3==h {sub(/unparsed=/,"",$4); print $4+0}')
+
+    if [[ -z "$cols" || -z "$vals" ]]; then
+        emit_fail \
+            label       "tick position extraction ($label)" \
+            asserts     'The inspector must extract both a tick-column list and a parsed legend-value list; a missing anchor here means the axis row or the legend was not rendered, or the inspector regexes drifted from the render' \
+            produced_by 'render_histogram_x_axis() and the legend rendering in ltl; TICKCOL/LEGENDVAL emission in inspect_output() of this harness' \
+            contract    'tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors - a grep that matches nothing is a failure, not a pass' \
+            detail      "cols='$cols' vals='$vals' ($label)"
+        return 1
+    fi
+    if [[ "${unparsed:-0}" -ne 0 ]]; then
+        emit_fail \
+            label       "legend unit vocabulary ($label)" \
+            asserts     'Every legend entry carries a unit this harness can convert to a common base; an unrecognised unit means the rendered vocabulary gained a suffix the position assertion cannot read, which would silently reduce coverage' \
+            produced_by 'format_heatmap_value() in ltl - legend value formatting; unit_scale table in inspect_output() of this harness' \
+            contract    'Issue #450 - the position assertion reads the rendered legend, so the harness tracks its unit vocabulary' \
+            detail      "$unparsed legend entries had an unrecognised unit ($label)"
+        return 1
+    fi
+
+    local verdict
+    verdict=$(TICK_COLS="$cols" LEGEND_VALS="$vals" perl -e '
+        my @cols = sort { $a <=> $b } split /,/, $ENV{TICK_COLS};
+        my @pairs;
+        for my $e (split /,/, $ENV{LEGEND_VALS}) {
+            my ($l, $v, $u) = split /=/, $e;
+            push @pairs, [$l, $v, $u // 0] if defined $v && $v > 0;
+        }
+        @pairs = sort { $a->[1] <=> $b->[1] } @pairs;
+        if (@pairs < 3 || @cols < 2) { print "SKIP:too-few-anchors"; exit }
+        my ($lo, $hi) = ($pairs[0][1], $pairs[-1][1]);
+        if ($hi <= $lo) { print "SKIP:degenerate-range"; exit }
+        my ($c_lo, $c_hi) = ($cols[0], $cols[-1]);
+        my $span = log($hi / $lo);
+        # Columns per natural log unit, from the anchors.
+        my $scale = ($c_hi - $c_lo) / $span;
+        my ($u_lo, $u_hi) = ($pairs[0][2], $pairs[-1][2]);
+        my @bad; my $weak = 0;
+        for my $p (@pairs) {
+            my ($label, $v, $u) = @$p;
+            my $pred = $c_lo + $scale * log($v / $lo);
+            # How far the prediction could move purely because the value, and
+            # both anchors, are display-rounded. d(log v) = u/v.
+            my $slop = $scale * ($u / $v + $u_lo / $lo + $u_hi / $hi);
+            my $tol  = 1.0 + $slop;
+            $weak++ if $slop > 1.0;
+            my $best = 1e9;
+            for my $c (@cols) { my $d = abs($c - $pred); $best = $d if $d < $best }
+            push @bad, sprintf("%s(v=%g pred=%.1f nearest-off-by=%.1f tol=%.1f)",
+                               $label, $v, $pred, $best, $tol)
+                if $best > $tol;
+        }
+        print @bad ? "FAIL:" . join(" ", @bad)
+                   : sprintf("OK:%d percentiles, %d of them display-limited", scalar(@pairs), $weak);
+    ')
+
+    case "$verdict" in
+        OK:*)
+            note_pass "tick columns log-proportional to legend values, +/-1 col (${verdict#OK:}) ($label)" ;;
+        SKIP:*)
+            note_pass "tick position check not applicable (${verdict#SKIP:}) ($label)" ;;
+        *)
+            emit_fail \
+                label       "tick position ($label)" \
+                asserts     'Each percentile tick sits within one column of where the log mapping puts its legend value, anchored on the lowest and highest rendered ticks. A larger deviation means the value-to-column mapping is no longer log-proportional - the percentile markers no longer line up with the values printed beside them' \
+                produced_by 'calculate_histogram_percentile_ticks() in ltl - col = int(log(v/min)/log(max/min) * (bar_width-1)); rendered by render_histogram_x_axis()' \
+                contract    'features/bin-counter-accuracy-and-observability.md section D2 - the percentile tick marks must line up accurately with the percentile values that are printed and with their placement on the histogram, validated by test rather than by inspection' \
+                detail      "${verdict#FAIL:} ($label)"
+            return 1 ;;
+    esac
+    return 0
+}
+
 test_single_width() {
     local hgw="$1"
     echo "Single histogram, -hgw $hgw"
@@ -241,7 +408,7 @@ test_single_width() {
         emit_fail \
             label       "out-of-axis ticks (-hgw $hgw)" \
             asserts     'Percentile tick characters (upward-tick and cross marks) appear only on the histogram x-axis frame row; appearance elsewhere means the tick emission code is firing on a non-axis row, which is a layout regression' \
-            produced_by 'print_histogram() in ltl - the tick characters are inserted into the same row that emits the histogram frame characters' \
+            produced_by 'render_histogram_x_axis() in ltl - the tick characters are inserted into the same row that emits the histogram frame characters' \
             contract    'Issue #185 section percentile tick marks on histogram x-axis - tick emission is confined to the axis row by construction; tick characters in other rows are not part of the contract' \
             detail      "found $oo lines containing ticks outside axis (-hgw $hgw)"
     fi
@@ -255,7 +422,7 @@ test_single_width() {
         emit_fail \
             label       "tick colour parity (-hgw $hgw)" \
             asserts     'Percentile tick characters are emitted with no ANSI wrapping, matching the rest of the frame which is also unwrapped; an ANSI escape sequence immediately preceding a tick means the tick will render in a different colour than the histogram frame characters' \
-            produced_by 'print_histogram() in ltl - tick characters are appended to the frame string with no additional colour wrapping' \
+            produced_by 'render_histogram_x_axis() in ltl - tick characters are appended to the frame string with no additional colour wrapping' \
             contract    'Issue #185 - visual unity of the axis frame requires tick chars to inherit the frame colour by being emitted in the same uncoloured stream' \
             detail      "$bad_colour tick chars carry ANSI colour wrapping (-hgw $hgw)"
     fi
@@ -268,7 +435,7 @@ test_single_width() {
         emit_fail \
             label       "tick/legend extraction (-hgw $hgw)" \
             asserts     'The inspector must successfully extract both an AXIS tick total and a LEGEND entry count from the single-histogram output; a missing anchor here means the histogram or its legend was not emitted, OR the inspector regexes drifted from the rendered output' \
-            produced_by 'print_histogram() + legend rendering in ltl; inspector regexes in inspect_output() of this harness' \
+            produced_by 'render_histogram_x_axis() + legend rendering in ltl; inspector regexes in inspect_output() of this harness' \
             contract    'tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors - a grep that matches nothing is a failure, not a pass' \
             detail      "could not extract axis/legend counts (-hgw $hgw): tick='$tick_total' legend='$legend_entries'"
     elif [[ "$tick_total" -ge 1 && "$tick_total" -le "$legend_entries" ]]; then
@@ -277,10 +444,14 @@ test_single_width() {
         emit_fail \
             label       "tick/legend cardinality (-hgw $hgw)" \
             asserts     'The number of axis ticks is at least 1 and at most the number of legend entries; tick_count > legend_count means orphan ticks with no matching legend entry (the legend is the contract); tick_count < 1 means the percentile marker layer was not rendered at all' \
-            produced_by 'print_histogram() in ltl - tick column derivation maps each legend percentile to a column; duplicate columns collapse to one tick' \
+            produced_by 'calculate_histogram_percentile_ticks() in ltl - tick column derivation maps each legend percentile to a column; duplicate columns collapse to one tick' \
             contract    'Issue #185 - set-semantics: percentiles with identical (or column-quantised-identical) values collapse to one tick; orphan ticks have no place in the rendering' \
             detail      "axis ticks ($tick_total) outside [1, $legend_entries] legend entries (-hgw $hgw)"
     fi
+
+    # Position assertion (#450).
+    assert_tick_positions "$report" 1 "-hgw $hgw" || true
+
 
     rm -f "$out"
 }
@@ -311,7 +482,7 @@ test_multi_histogram() {
         emit_fail \
             label       "out-of-axis ticks (multi)" \
             asserts     'In a multi-histogram run, percentile tick characters still appear only on histogram x-axis frame rows; tick leakage into other rows is a layout regression that the single-width tests can miss because multi-histogram layout takes a different code path' \
-            produced_by 'print_histogram() in ltl - invoked once per metric for -hg duration,bytes; each invocation must restrict tick emission to its own axis row' \
+            produced_by 'print_histograms() in ltl - render_histogram_x_axis() runs once per metric for -hg duration,bytes; each must restrict tick emission to its own axis row' \
             contract    'Issue #185 - multi-histogram is the panel-stacking variant; the same axis-row containment invariant applies independently to each panel' \
             detail      "found $oo lines with ticks outside axis (multi)"
     fi
@@ -325,7 +496,7 @@ test_multi_histogram() {
             emit_fail \
                 label       "tick/legend extraction (multi hist#$hidx)" \
                 asserts     "The inspector must successfully extract both an AXIS tick total and a LEGEND entry count for histogram panel #$hidx; missing data here means the panel was not rendered, or its legend was emitted on a row the inspector cannot identify" \
-                produced_by 'print_histogram() (per-panel invocation) + inspect_output() per-segment splitting in this harness' \
+                produced_by 'print_histograms() (per-panel rendering) + inspect_output() per-segment splitting in this harness' \
                 contract    'tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors - multi-histogram extraction failures must not silently degrade to a passing test' \
                 detail      "could not extract counts for hist#$hidx (multi): tick='$tick' legend='$legend'"
         elif [[ "$tick" -ge 1 && "$tick" -le "$legend" ]]; then
@@ -334,10 +505,13 @@ test_multi_histogram() {
             emit_fail \
                 label       "tick/legend cardinality (multi hist#$hidx)" \
                 asserts     "Histogram panel #$hidx has at least 1 axis tick and no more axis ticks than legend entries; each panel carries its own independent tick set matching its own legend" \
-                produced_by 'print_histogram() in ltl - tick column derivation runs independently per panel' \
+                produced_by 'calculate_histogram_percentile_ticks() in ltl - tick column derivation runs independently per panel' \
                 contract    'Issue #185 - multi-histogram panels carry independent tick sets; cross-panel sharing would create the orphan-tick failure mode this assertion exists to prevent' \
                 detail      "hist#$hidx ticks ($tick) outside [1, $legend] legend entries"
         fi
+
+        assert_tick_positions "$report" "$hidx" "panel #$hidx" || true
+
     done
 
     rm -f "$out"
