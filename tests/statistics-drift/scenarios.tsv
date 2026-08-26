@@ -7,13 +7,23 @@
 #   options   — ltl options (excluding --disable-progress and -o; the cache
 #               helper appends -o <logfile> itself when invoking ltl)
 #
-# Decision 6 matrix: 4 golden log files x 4 option families = 16 scenarios.
+# Decision 6 matrix: 4 golden log files x 4 option families, plus the #289
+# heatmap pair and the #450 bin-consolidated rows = 21 scenarios.
 #
 # Option families (Decision 6):
 #   default          baseline raw-array data model on both observed surfaces
 #   consolidated     -g 90 changes which samples land in which message bucket
 #   bin-data-model   bin-counter data model on both surfaces (honored end-to-end)
 #   sorted-by-p999   ranks output by p999 (exercises percentile-based ranking)
+#   bin-consolidated (Issue #450)   -g 90 AND the bin-counter data model. This
+#                    cross is the only path that reaches merge_bin_counter_entries(),
+#                    which projects both sides onto a union geometry — the merge
+#                    arithmetic had no baseline behind it before. The merge shows up
+#                    in the MESSAGES CSV only: consolidation never touches
+#                    bucket-keyed partitions, so this family's STATS CSV is
+#                    byte-identical to its bin-data-model sibling and asserts nothing
+#                    new. Layer 3 cannot pair the wildcarded consolidated keys, so
+#                    Layers 1 and 2 carry these rows — see the l3_unpaired figure.
 #   heatmap-raw / heatmap-bin (Issue #289)   -hm duration replaces the terminal
 #                    per-time-bucket statistics row with the heatmap row, but the
 #                    STATS CSV is a separate render surface — the per-time-bucket
@@ -50,3 +60,6 @@ codebeamer-default	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-cp ful
 codebeamer-consolidated	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-cp full -bs 240 -g 90 -n 25 -mdm raw -bdm raw
 codebeamer-bin-data-model	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-cp full -bs 240 -n 25 -mdm bin -bdm bin
 codebeamer-sorted-by-p999	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-cp full -bs 240 -n 25 -so p999 -mdm raw -bdm raw
+apache-bin-consolidated	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-du us -cp full -bs 240 -g 90 -n 25 -mdm bin -bdm bin
+thingworx-bin-consolidated	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-cp full -bs 240 -g 90 -n 25 -mdm bin -bdm bin
+codebeamer-bin-consolidated	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-cp full -bs 240 -g 90 -n 25 -mdm bin -bdm bin

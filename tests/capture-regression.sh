@@ -244,6 +244,65 @@ run_test "hl-heatmap-hdmin-w160"   "$LTL" $HL_COMMON -dm raw --terminal-width 16
 run_test "hl-histogram-hdmin-w160" "$LTL" $HL_COMMON -dm raw --terminal-width 160 -du us -hg duration -hdmin 100 "$APACHE_LOG"
 run_test "hl-filelegend-two-files-w160" "$LTL" $HL_COMMON --terminal-width 160 -hdmin 100000 "$DPM5K_LOG" "$PLOT_LOG"
 
+echo "Bin data model renders (Issue #450):"
+# ---------------------------------------------------------------------------
+# Bin data model — the shipped default for both display surfaces (#450)
+# ---------------------------------------------------------------------------
+# The -dm raw scenarios above pin the sort-and-index path, which users reach
+# only by asking for it: choose_data_model('heatmap') and
+# choose_data_model('histogram') both default to 'bin'. Without the block
+# below, the rendering users actually get by default was compared against no
+# reference at all.
+#
+# The raw scenarios stay — they assert a different, still-shipped path — so
+# each surface now carries both arms and the pair is the raw-vs-bin diff.
+#
+# -hmdm bin / -hgdm bin rather than -dm bin: each scenario pins only the
+# surface it asserts, per HARNESS-DESIGN.md § Invocation coherence. -dm bin
+# would additionally flip per-time-bucket statistics, moving the timeline
+# P50/P95 cells in every histogram scenario — an unrelated surface inside the
+# asserted bytes.
+#
+# These references are expected to move under #459 (combination arithmetic)
+# and #460 (percentile source). That is the point: they are blessed now, before
+# those changes, so the diff measures what the changes did.
+
+for mode in duration bytes count; do
+    run_test "heatmap-${mode}-w160-bin" "$LTL" $COMMON -hmdm bin --terminal-width 160 -hm "$mode" -bs 1 "$SCRIPT_LOG"
+done
+
+run_test "autohide-hm-w120-bin" "$LTL" $COMMON -hmdm bin --terminal-width 120 -hm duration -bs 1 "$SCRIPT_LOG"
+
+run_test "heatmap-duration-w80-bin"  "$LTL" $COMMON -hmdm bin --terminal-width 80  -hm duration -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-duration-w100-bin" "$LTL" $COMMON -hmdm bin --terminal-width 100 -hm duration -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-bytes-w120-bin"    "$LTL" $COMMON -hmdm bin --terminal-width 120 -hm bytes    -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-count-w100-bin"    "$LTL" $COMMON -hmdm bin --terminal-width 100 -hm count    -bs 1 "$SCRIPT_LOG"
+
+run_test "heatmap-lbg-duration-w160-bin" "$LTL" $COMMON -hmdm bin --light-background --terminal-width 160 -hm duration -bs 1 "$SCRIPT_LOG"
+
+run_test "heatmap-hmw30-duration-w160-bin" "$LTL" $COMMON -hmdm bin --terminal-width 160 -hm duration -hmw 30 -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-hmw80-duration-w160-bin" "$LTL" $COMMON -hmdm bin --terminal-width 160 -hm duration -hmw 80 -bs 1 "$SCRIPT_LOG"
+
+run_test "hg-duration-w80-bin"  "$LTL" $COMMON -hgdm bin --terminal-width 80  -hg duration "$APACHE_LOG"
+run_test "hg-duration-w120-bin" "$LTL" $COMMON -hgdm bin --terminal-width 120 -hg duration "$APACHE_LOG"
+run_test "hg-duration-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration "$APACHE_LOG"
+
+run_test "hg-bytes-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg bytes "$APACHE_LOG"
+run_test "hg-count-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg count -bs 1 "$SCRIPT_LOG"
+
+run_test "hg-multi-duration-bytes-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration,bytes        "$APACHE_LOG"
+run_test "hg-multi-all-w160-bin"            "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration,bytes,count -bs 1 "$SCRIPT_LOG"
+
+run_test "hg-hgw30-duration-w160-bin"     "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration       -hgw 30 "$APACHE_LOG"
+run_test "hg-hgw50-multi-w160-bin"        "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration,bytes -hgw 50 "$APACHE_LOG"
+run_test "hg-hgh4-duration-w160-bin"      "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration       -hgh 4  "$APACHE_LOG"
+run_test "hg-hgh16-duration-w160-bin"     "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration       -hgh 16 "$APACHE_LOG"
+
+run_test "hm-hg-duration-w160-bin" "$LTL" $COMMON -hmdm bin -hgdm bin --terminal-width 160 -hm duration -hg duration -bs 1 "$SCRIPT_LOG"
+
+run_test "hl-heatmap-hdmin-w160-bin"   "$LTL" $HL_COMMON -hmdm bin --terminal-width 160 -hm duration -hdmin 963 "$DPM5K_LOG"
+run_test "hl-histogram-hdmin-w160-bin" "$LTL" $HL_COMMON -hgdm bin --terminal-width 160 -du us -hg duration -hdmin 100 "$APACHE_LOG"
+
 echo ""
 echo "Captured $count reference files to: $REF_DIR"
 echo "Done."

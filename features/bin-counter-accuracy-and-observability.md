@@ -149,9 +149,12 @@ Committed and pushed progressively, each stage merged back to `release/0.18.0`.
 1. **Observability** — #462, carrying the whole `-V` surface, with #461 folded in.
 2. **Test harness** — #450: the `-g` × `-mdm bin` scenarios and their assertions,
    **plus tick-mark position assertions**. `tests/validate-histogram-ticks.sh`
-   asserts tick *presence* today (`tick_count == distinct_legend_columns`, no stray
-   tick characters, colour parity) but not tick *position*: a tick in the wrong
-   column with the right total count passes. Without a position assertion the D2
+   asserted tick *presence* only — the cardinality inequality
+   `1 <= tick_count <= legend_entries` (the doc previously described this as an
+   equality against distinct legend columns; the code has always asserted the
+   inequality), no stray tick characters, colour parity — but not tick *position*:
+   a tick in the wrong column with the right total count passed. See D15 for what
+   the position assertion added here does and does not gate. Without a position assertion the D2
    requirement cannot be shown to hold and drift is undetectable.
 3. **Capture the new baseline**, before anything changes.
 4. **The merge mechanism** — #459, and the D2 percentile-source change.
@@ -318,6 +321,90 @@ Both were already produced by `snapshot_counter_telemetry()` and printed by noth
 D7 keeps the out-of-range counters as designed-in safety instrumentation for
 conditions that should never occur; a guard that is computed and then discarded is not
 instrumentation. They are emitted and documented as expected to read zero.
+
+---
+
+### D13 — The bin renders are added alongside the raw ones, not in place of them
+
+Locked 2026-08-26. Both display surfaces default to the bin data model, so the
+byte-compare suite was asserting a path users reach only by asking for it. 25 bin
+counterparts are added; the 25 `-dm raw` scenarios stay, because they assert a
+different, still-shipped path. Each surface now carries both arms and the pair is
+itself the raw-vs-bin diff. All 25 new goldens differ from their raw twin — the
+coverage is real, not a set of copies.
+
+Each new scenario pins **only the surface it asserts** — `-hmdm bin` / `-hgdm bin`,
+not `-dm bin` — per HARNESS-DESIGN's invocation-coherence rule. `-dm bin` would also
+flip per-time-bucket statistics, moving the timeline P50/P95 cells inside every
+histogram scenario's asserted bytes: an unrelated surface in the diff.
+
+### D14 — Only the new scenarios are blessed; the existing ones are the gate
+
+The stage-3 capture writes to a scratch directory, from which only the new files are
+copied in. The existing 46 goldens are then diffed against that same capture: all 46
+reproduced byte-identically, which proves both that nothing was silently re-blessed
+and that the capture is deterministic. Same for the drift baselines — three new
+directories, the 18 existing ones untouched.
+
+Blessing today's values is deliberate: they carry the compounding loss, so stage 4's
+diff measures what D1 bought.
+
+**The bin-consolidated `stats.csv` is a byte duplicate of its `bin-data-model`
+sibling** on all three logs, because consolidation never touches bucket-keyed
+partitions. It is captured anyway, as the harness does for every scenario, and
+recorded here so nobody reads it as independent coverage. The merge signal is
+entirely in `messages.csv` (32–50 differing lines per log).
+
+### D15 — Tick position is asserted by shape, with a tolerance sized to the render
+
+The architect's decision, 2026-08-26: assert tick position from the values available
+today with a tolerance, rather than add a `-V` observable to support an exact
+assertion. What that buys, measured rather than assumed:
+
+**What it catches.** The assertion anchors on the lowest and highest rendered ticks
+and predicts every interior percentile's column from its own value, so it tests that
+columns stay log-proportional to values — the mapping in
+`calculate_histogram_percentile_ticks()`. Replacing that log mapping with a linear
+one is caught: 5 failures.
+
+**What it does not catch, proven by sabotage.** Adding a constant 3 to every column
+produces **0 failures** — a uniform offset, or a rescale of the whole axis, is
+absorbed by the anchors. The shape of the mapping is under test; its absolute
+placement is not.
+
+**And it weakens where the render is coarse.** The legend values it predicts from are
+display-rounded to one decimal, so the tolerance is widened per percentile by how far
+that rounding alone could move the prediction. Where values are crushed together
+relative to the printed precision the tolerance grows until the assertion is inert.
+Each run reports how many of its percentiles are display-limited: **0 of 3 at
+`-hgw 30`, but 10 of 10 at both `-hgw 75` and `-hgw 95`** — the widest histograms,
+which have the finest column resolution, are where it gates least.
+
+**Consequence, stated plainly:** D2's requirement that the tick marks line up
+accurately with the printed percentile values is documented and partially gated, not
+fully gated. A one-column drift passes; a uniform shift passes; on wide histograms
+most percentiles are unconstrained. Closing it needs the unrounded `min`, `max`,
+per-percentile values and `bar_width` on a `-V` surface, which was considered and not
+taken.
+
+### D16 — The oracle's blind spot on consolidated rows is made visible
+
+Layer 3 pairs `ltl` rows to oracle rows by exact message key, and the oracle
+implements no fuzzy merge, so a consolidated row's wildcarded key can never pair. The
+skip was silent — not counted, not reported — so a scenario whose merge arithmetic
+the oracle never examined still reported `L3=OK`, which reads as agreement.
+
+Every summary line now reports `unpaired=N (wildcard=M)`, and a scenario where every
+row went unpaired is named `NO CELLS COMPARED` rather than `L3=OK`.
+
+The counter immediately corrected the assumption behind it: L3 is **not** wholly blind
+on a consolidated scenario. It still pairs the unmerged remainder — 129–208 cells per
+scenario — and only the merged rows go unpaired, 6–16 per scenario, 100 % of them
+wildcarded. So the blind spot is precisely the merge arithmetic, which is carried by
+Layers 1 and 2. Recorded in `tests/statistics-drift/README.md` § L3 oracle scope.
+
+**This is pre-existing and wider than this drop**: it applies to the four
+`*-consolidated` scenarios that predate #450, not only the new rows.
 
 ---
 

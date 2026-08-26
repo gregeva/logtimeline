@@ -1088,7 +1088,22 @@ sub run_layer3 {
     for my $n_row (@{ $new_data->{rows} }) {
         my $k = row_key($n_row, $file_kind);
         my $o_row = $by_key->{$k};
-        next unless defined $o_row;  # ltl ranks top-N; oracle has all keys
+        if (!defined $o_row) {
+            # No oracle counterpart for this row. Two different causes, and
+            # they are not equally benign (#450):
+            #   - ltl ranks top-N while the oracle holds every key, so most
+            #     unpaired rows are simply outside the ranked set;
+            #   - but a CONSOLIDATED row carries a wildcarded key
+            #     (".../Things/*/Services/..."), and calculate-reference.py
+            #     groups by exact message key with no fuzzy merge, so NO
+            #     consolidated row can ever pair. Layer 3 therefore does not
+            #     cover the -g merge arithmetic at all.
+            # Counted so that "the gate never fired" is distinguishable from
+            # "the gate passed" — it was silently skipped before.
+            $stats->{l3_unpaired}++;
+            $stats->{l3_unpaired_wildcard}++ if index($k, '*') >= 0;
+            next;
+        }
         my $o_stats = $o_row->{stats} // {};
 
         for my $col (@L3_COLUMNS) {
@@ -1208,6 +1223,8 @@ my %stats = (
     l3_T2                => 0,
     l3_T3                => 0,
     l3_nonnumeric        => 0,
+    l3_unpaired          => 0,
+    l3_unpaired_wildcard => 0,
 );
 
 my $baseline_data;
@@ -1259,9 +1276,18 @@ if (defined $opt{oracle_json}) {
 my $struct_state = $structural_ok ? 'OK' : 'DRIFT';
 my $l3_detail = '';
 if ($l3_state ne 'N/A') {
-    $l3_detail = sprintf(' | L3: %d cells, %d T3, %d T2, %d T1, nonnumeric=%d',
+    $l3_detail = sprintf(' | L3: %d cells, %d T3, %d T2, %d T1, nonnumeric=%d, unpaired=%d (wildcard=%d)',
         $stats{l3_cells_checked},
-        $stats{l3_T3}, $stats{l3_T2}, $stats{l3_T1}, $stats{l3_nonnumeric});
+        $stats{l3_T3}, $stats{l3_T2}, $stats{l3_T1}, $stats{l3_nonnumeric},
+        $stats{l3_unpaired}, $stats{l3_unpaired_wildcard});
+    # A scenario whose rows are ALL unpaired reported L3=OK before #450, which
+    # reads as "the oracle agreed" when the oracle never ran. Name it.
+    if ($stats{l3_cells_checked} == 0 && $stats{l3_unpaired} > 0) {
+        $l3_detail .= ' — NO CELLS COMPARED: every row was unpaired'
+                    . ($stats{l3_unpaired_wildcard} == $stats{l3_unpaired}
+                       ? ', all wildcarded (consolidated keys have no oracle counterpart)'
+                       : '');
+    }
 }
 print "SUMMARY scenario=$opt{scenario}/$opt{file_kind}: ",
       "$stats{cells_checked} cells checked, ",

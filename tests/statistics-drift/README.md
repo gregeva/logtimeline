@@ -27,7 +27,8 @@ L1 and L3 share the same ladder:
 
 ## Scenario matrix
 
-4 logs × 4 option families = 16 scenarios. See `scenarios.tsv` for the full
+4 logs × 4 option families, plus the #289 heatmap pair and the #450
+bin-consolidated rows = **21 scenarios**. See `scenarios.tsv` for the full
 manifest. Apache HTTP2 scenarios prepend `-du us` because its log records
 duration in microseconds and auto-detection cannot infer this. All scenarios
 pin `-mdm` and `-bdm` explicitly via #266's selectors.
@@ -36,7 +37,8 @@ pin `-mdm` and `-bdm` explicitly via #266's selectors.
 |---|---|---|
 | `default` | `-bs 240 -n 25 -mdm raw -bdm raw -o` | Raw-array baseline |
 | `consolidated` | `-bs 240 -g 90 -n 25 -mdm raw -bdm raw -o` | Fuzzy consolidation at 90% |
-| `bin-data-model` | `-bs 240 -n 25 -mdm bin -bdm bin -o` | Bin-counter data model (falls back to raw today) |
+| `bin-data-model` | `-bs 240 -n 25 -mdm bin -bdm bin -o` | Bin-counter data model, honoured end to end |
+| `bin-consolidated` | `-bs 240 -g 90 -n 25 -mdm bin -bdm bin -o` | The `-g` × bin cross — the only path reaching `merge_bin_counter_entries()` (#450). Apache, ThingWorx and Codebeamer only |
 | `sorted-by-p999` | `-bs 240 -n 25 -so p999 -mdm raw -bdm raw -o` | Percentile-based ranking |
 
 ## Usage
@@ -121,6 +123,19 @@ the feature file.
 
 ## L3 oracle scope
 
+**Layer 3 does not cover consolidated rows.** `oracle/calculate-reference.py`
+groups by exact message key and implements no fuzzy merge, so a consolidated
+row — whose key is wildcarded, e.g.
+`[200] POST /Thingworx/Things/*/Services/…` — has no oracle counterpart and is
+skipped. Every summary line reports `unpaired=N (wildcard=M)` so a skipped row
+is visible rather than silent (#450), and a scenario where every row went
+unpaired is named as `NO CELLS COMPARED` rather than reporting `L3=OK`.
+
+On the `*-consolidated` and `*-bin-consolidated` families the merged rows — the
+merge arithmetic itself — are therefore carried by **Layers 1 and 2 only**. The
+unmerged remainder of those scenarios still pairs and is checked normally.
+
+
 External-oracle validation is reserved for statistics where the algorithm has
 non-trivial degrees of freedom and quiet methodology bugs are plausible:
 `p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999`, `std_dev`,
@@ -135,7 +150,7 @@ counts, rate counts) are validated by L1 + L2 only.
 ```
 tests/statistics-drift/
 ├── README.md                        ← this file
-├── scenarios.tsv                    ← 16 scenarios (4 logs × 4 families)
+├── scenarios.tsv                    ← 21 scenarios (see the matrix above)
 ├── compare-statistics-drift.pl      ← L1+L2+L3 engine
 ├── oracle/
 │   └── calculate-reference.py       ← algorithm-aware NumPy/SciPy oracle
