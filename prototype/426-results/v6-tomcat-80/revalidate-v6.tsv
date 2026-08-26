@@ -1,0 +1,10 @@
+file	bpd	geometry	arm	bins	mass	mass_exact	mass_retention	peak	peak_exact	peak_retention	peak_col	peak_col_exact	peak_x_offset	empty_cells	empty_exact	cells_differ	abs_dev	abs_dev_pct	max_cell_dev	overflow	underflow
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap	T	52	575800	575800	1	289806	289806	1	0	0	0	9	7	33	20408	3.54428621048975	4553	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap	S	52	575800	575800	1	289806	289806	1	0	0	0	9	7	33	20408	3.54428621048975	4553	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap	G	52	575800	575800	1	289806	289806	1	0	0	0	6	7	26	11394	1.97881208753039	1838	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	histogram	T	36	575800	575800	1	289806	289806	1	0	0	0	3	3	18	43836	7.61306009030914	20837	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	histogram	S	36	575800	575800	1	289806	289806	1	0	0	0	3	3	18	43836	7.61306009030914	20837	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	histogram	G	36	575800	575800	1	289806	289806	1	0	0	0	3	3	16	6380	1.10802361931226	2045	0	0
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap-keyed	T	52	575800	575800	1	289806	289806	1	0	0	0	6	7	31	16912	2.93713094824592	6388		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap-keyed	S	52	575800	575800	1	289806	289806	1	0	0	0	6	7	31	16912	2.93713094824592	6388		
+logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	80	heatmap-keyed	G	52	575800	575800	1	289806	289806	1	0	0	0	6	7	26	11394	1.97881208753039	1838		

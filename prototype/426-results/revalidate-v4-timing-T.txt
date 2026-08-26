@@ -1,0 +1,90 @@
+file: localhost_access_log.2025-03-21.txt format=access lines=22264 matched=22256 positive=14062 zero=8187 negative=0 keys_positive=635
+arms: T scenarios: 1,3
+
+##############################################################################
+# Scenario 1: Default precision (tier 5)
+# ltl equivalent: ./ltl -ni -mdm bin -V histogram-bin-counters ...
+# arm: T   bpd=53   tier=5   max_rebins=none
+##############################################################################
+rss_delta_kb(store build): 1456
+overflow_total=0 underflow_total=0 (telemetry extras, not Decision 8 fields)
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 1
+  max_partition_bins: 397
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 1521689
+  rebins_per_partition: p50=0 p95=0 p99=0 max=1
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+timing arm=T scenario=1 bpd=53 telemetry+audit+render runs=3 median=0.1805s min=0.1803s max=0.1846s devel_size_bytes=1521689 rss_delta_kb=1456
+
+##############################################################################
+# Scenario 3: -pbpd 100 (#189 scenario 3) — UNREACHABLE: -pbpd dissolved by #293; substitute: tier 9 (bpd 616, the lever maximum)
+# ltl equivalent: ./ltl -ni -mdm bin -dmp 9 -V histogram-bin-counters ...
+# arm: T   bpd=616   tier=9   max_rebins=none
+##############################################################################
+rss_delta_kb(store build): 9264
+overflow_total=0 underflow_total=0 (telemetry extras, not Decision 8 fields)
+=== histogram-bin-counters ===
+data_model_precision: 9 (--data-model-precision 9)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 1
+  max_partition_bins: 4619
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 9235513
+  rebins_per_partition: p50=0 p95=0 p99=0 max=1
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+timing arm=T scenario=3 bpd=616 telemetry+audit+render runs=3 median=1.9239s min=1.9119s max=1.9288s devel_size_bytes=9235513 rss_delta_kb=9264
+
+ALL PARITY PASS

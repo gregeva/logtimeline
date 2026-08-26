@@ -1,0 +1,11 @@
+=== Part A: seeding / span growth on real data ===
+file: /tmp/ltl-426-fixtures/bin-twxdur-full.log
+arms: G   bpd: 53   runs: 3
+
+--- bpd=53 (one bin = 4.4403%)
+arm G build: warmup 1.981s; timed runs=3 median 1.853s (min 1.853 max 1.855) — parse+add, one arm per store
+arm G memory: Devel::Size=204086139 (194.63 MB)  RSS delta=268592 kB (262.30 MB) [rss 11072 -> 279664 kB]
+file counts: format=twx lines=288025 matched=288025 unparsed=0 no_duration=0 positive=288025 zero=0 negative=0 keys_any=286659 keys_positive=286659
+G telemetry: partitions_total=286659 span_slots: p50=1 p95=1 p99=1 max=153 index_range=[0,237] (4.49 decades) counter_memory_bytes=213259339
+
+ALL PASS

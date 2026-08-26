@@ -1,0 +1,37 @@
+PASS bpd=53 fill_digest T==S (c87c98222bf02b2b7c7933efb0fe6f91)
+PASS bpd=53 pct_digest T==S (0f0971ac04dc2d3b72660b44ff34a825)
+PASS bpd=53 merge_digest T==S (521fd6bba3396cbae18cebeaceff1e2d)
+PASS bpd=53 fold_digest T==S (162a349ab7e3af0db8d754f0e43888a0)
+PASS bpd=53 keys T==S (51469)
+PASS bpd=53 merge_keys_after T==S (50744)
+PASS bpd=53 merge_n_total_after T==S (339832)
+PASS bpd=53 fold_n_total T==S (339832)
+PASS bpd=53 fold_percentiles T==S (1.01124,19.505,47.8848,228.262,779.785,4688.36,100161)
+PASS bpd=53 T merge_n_total_after == n_samples (339832)
+PASS bpd=53 T fold_n_total == n_samples (339832)
+T bpd=53 fold_percentiles=1.01124,19.505,47.8848,228.262,779.785,4688.36,100161
+PASS bpd=53 S merge_n_total_after == n_samples (339832)
+PASS bpd=53 S fold_n_total == n_samples (339832)
+S bpd=53 fold_percentiles=1.01124,19.505,47.8848,228.262,779.785,4688.36,100161
+PASS bpd=53 G merge_n_total_after == n_samples (339832)
+PASS bpd=53 G fold_n_total == n_samples (339832)
+G bpd=53 fold_percentiles=1.03101,19.039,48.1164,228.518,787.456,4719.34,99704.9
+PASS bpd=616 fill_digest T==S (a0ac7c4c98d2cbf7f3dd7cd9f5585c20)
+PASS bpd=616 pct_digest T==S (f1016f0f107825ab70c44359c8c7fd13)
+PASS bpd=616 merge_digest T==S (79cb4aa8c07068b1b3cb0aace310736b)
+PASS bpd=616 fold_digest T==S (cba03dcd6d855194be51ac16b77bd44f)
+PASS bpd=616 keys T==S (51469)
+PASS bpd=616 merge_keys_after T==S (50744)
+PASS bpd=616 merge_n_total_after T==S (339832)
+PASS bpd=616 fold_n_total T==S (339832)
+PASS bpd=616 fold_percentiles T==S (1.00033,19.0258,47.8617,228.779,786.061,4705.2,99823.1)
+PASS bpd=616 T merge_n_total_after == n_samples (339832)
+PASS bpd=616 T fold_n_total == n_samples (339832)
+T bpd=616 fold_percentiles=1.00033,19.0258,47.8617,228.779,786.061,4705.2,99823.1
+PASS bpd=616 S merge_n_total_after == n_samples (339832)
+PASS bpd=616 S fold_n_total == n_samples (339832)
+S bpd=616 fold_percentiles=1.00033,19.0258,47.8617,228.779,786.061,4705.2,99823.1
+PASS bpd=616 G merge_n_total_after == n_samples (339832)
+PASS bpd=616 G fold_n_total == n_samples (339832)
+G bpd=616 fold_percentiles=1.00263,19.0077,47.9423,228.647,785.705,4709.83,99780.4
+ALL PASS

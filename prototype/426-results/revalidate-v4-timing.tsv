@@ -1,0 +1,15 @@
+file: localhost_access_log.2025-03-21.txt format=access lines=22264 matched=22256 positive=14062 zero=8187 negative=0 keys_positive=635
+rss_delta_kb(store build): 208
+timing arm=G scenario=1 bpd=53 telemetry+audit+render runs=3 median=0.0190s min=0.0186s max=0.0190s devel_size_bytes=503490 rss_delta_kb=208
+rss_delta_kb(store build): 1168
+timing arm=G scenario=3 bpd=616 telemetry+audit+render runs=3 median=0.0694s min=0.0690s max=0.0697s devel_size_bytes=2554858 rss_delta_kb=1168
+file: localhost_access_log.2025-03-21.txt format=access lines=22264 matched=22256 positive=14062 zero=8187 negative=0 keys_positive=635
+rss_delta_kb(store build): 512
+timing arm=S scenario=1 bpd=53 telemetry+audit+render runs=3 median=0.0225s min=0.0220s max=0.0226s devel_size_bytes=708808 rss_delta_kb=512
+rss_delta_kb(store build): 1168
+timing arm=S scenario=3 bpd=616 telemetry+audit+render runs=3 median=0.0826s min=0.0817s max=0.0835s devel_size_bytes=2756960 rss_delta_kb=1168
+file: localhost_access_log.2025-03-21.txt format=access lines=22264 matched=22256 positive=14062 zero=8187 negative=0 keys_positive=635
+rss_delta_kb(store build): 1456
+timing arm=T scenario=1 bpd=53 telemetry+audit+render runs=3 median=0.1805s min=0.1803s max=0.1846s devel_size_bytes=1521689 rss_delta_kb=1456
+rss_delta_kb(store build): 9264
+timing arm=T scenario=3 bpd=616 telemetry+audit+render runs=3 median=1.9239s min=1.9119s max=1.9288s devel_size_bytes=9235513 rss_delta_kb=9264

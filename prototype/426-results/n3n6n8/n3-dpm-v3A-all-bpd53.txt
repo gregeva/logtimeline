@@ -1,0 +1,148 @@
+=== Part A: seeding / span growth on real data ===
+file: logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log
+arms: T,S,G   bpd: 53   runs: 0
+
+--- bpd=53 (one bin = 4.4403%)
+arm T build: single untimed build 0.863s (no timed runs requested)
+arm T memory: Devel::Size=9809186 (9.35 MB)  RSS delta=12224 kB (11.94 MB) [rss 11024 -> 23248 kB]
+arm S build: single untimed build 0.878s (no timed runs requested)
+arm S memory: Devel::Size=5692029 (5.43 MB)  RSS delta=6224 kB (6.08 MB) [rss 23520 -> 29744 kB]
+arm G build: single untimed build 0.805s (no timed runs requested)
+arm G memory: Devel::Size=4258207 (4.06 MB)  RSS delta=3744 kB (3.66 MB) [rss 29792 -> 33536 kB]
+file counts: format=twx lines=122808 matched=122808 unparsed=0 no_duration=0 positive=122798 zero=10 negative=0 keys_any=3421 keys_positive=3419
+T telemetry: partitions_total=3419 total_rebin_events=116 max_partition_bins=397 partitions_with_overflow=0 partitions_with_underflow=0 overflow_total=0 underflow_total=0 rebins_per_partition: p50=0 p95=0 p99=1 max=1 counter_memory_bytes=9809298
+T partitions_with_rebins=116 (3.3928%)  Decision 5 healthy-seed signal (p99 <= 2): PASS
+S telemetry: partitions_total=3419 total_rebin_events=116 max_partition_bins=397 partitions_with_overflow=0 partitions_with_underflow=0 overflow_total=0 underflow_total=0 rebins_per_partition: p50=0 p95=0 p99=1 max=1 counter_memory_bytes=5692141
+S partitions_with_rebins=116 (3.3928%)  Decision 5 healthy-seed signal (p99 <= 2): PASS
+G telemetry: partitions_total=3419 span_slots: p50=17 p95=134 p99=158 max=214 index_range=[0,279] (5.28 decades) counter_memory_bytes=4367727
+PASS bpd=53 T and S digests identical (4d7b33c038f11aef6ea7ff433c3789f0)
+PASS bpd=53 T and S telemetry identical (rebins/overflow/underflow/bins fields)
+per-key T vs G (bpd=53): keys=3419; T bin_count==seed(265)=3303, grown=116; G span > T bin_count: 0 keys; G span == T bin_count: 0; G span > T bins array length: 0
+per-key T vs G (bpd=53): G span > seed bin_count (265): 0 keys
+totals (bpd=53): sum T bin_count=921347; sum T bins array length=550535; sum G span slots=128564; sum G occupied bins=19939; G/T slot ratio=0.1395 (span/bin_count), 0.2335 (span/array length)
+span/bin_count ratio per key: p50=0.0642 p95=0.4604 p99=0.5170 max=0.6491
+5 widest G spans (n, T bin_count, T rebins, T bins len, G span, G lo..hi, occupied): 
+  INFO | [INFO] [https-jsse-nio-8443-] [S.c.t.d.e.DSLScript] SUCCEEDED - PTCDTS.ProductionDash | n=43 T bc=397 rb=1 len=332 | G span=214 lo=0 hi=213 occ=27
+  WARN | [WARN] [WC_MX_0K964012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K964012.WU_000 | n=31 T bc=397 rb=1 len=313 | G span=185 lo=41 hi=225 occ=4
+  WARN | [WARN] [WC_MX_0K005012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K005012.WU_000 | n=31 T bc=397 rb=1 len=305 | G span=177 lo=41 hi=217 occ=13
+  WARN | [WARN] [WC_MX_0K023012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K023012.WU_000 | n=31 T bc=397 rb=1 len=309 | G span=177 lo=41 hi=217 occ=19
+  WARN | [WARN] [WC_MX_0K027012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K027012.WU_000 | n=31 T bc=265 rb=0 len=177 | G span=172 lo=44 hi=215 occ=21
+keys T rebinned (n, T bin_count, T rebins, T bins len, G span, G lo..hi, occupied):
+  INFO | [INFO] [https-jsse-nio-8443-] [S.c.t.d.e.DSLScript] SUCCEEDED - PTCDTS.ProductionDash | n=43 T bc=397 rb=1 len=332 | G span=214 lo=0 hi=213 occ=27
+  WARN | [WARN] [WC_0K001012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K001012.WU_010030 | n=31 T bc=397 rb=1 len=272 | G span=144 lo=41 hi=184 occ=10
+  WARN | [WARN] [WC_0K009012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K009012.WU_000005 | n=31 T bc=397 rb=1 len=288 | G span=159 lo=41 hi=199 occ=9
+  WARN | [WARN] [WC_0K009012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K009012.WU_000025 | n=31 T bc=397 rb=1 len=284 | G span=152 lo=41 hi=192 occ=11
+  WARN | [WARN] [WC_0K009012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K009012.WU_000045 | n=31 T bc=397 rb=1 len=276 | G span=148 lo=41 hi=188 occ=12
+  WARN | [WARN] [WC_0K011012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K011012.WU_000020 | n=31 T bc=397 rb=1 len=286 | G span=170 lo=44 hi=213 occ=19
+  WARN | [WARN] [WC_0K012012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K012012.WU_000001 | n=31 T bc=397 rb=1 len=299 | G span=167 lo=41 hi=207 occ=8
+  WARN | [WARN] [WC_0K012012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K012012.WU_000007 | n=31 T bc=397 rb=1 len=267 | G span=135 lo=41 hi=175 occ=5
+  WARN | [WARN] [WC_0K012012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K012012.WU_000010 | n=31 T bc=397 rb=1 len=274 | G span=150 lo=41 hi=190 occ=22
+  WARN | [WARN] [WC_0K012012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K012012.WU_000010 | n=31 T bc=397 rb=1 len=269 | G span=138 lo=41 hi=178 occ=21
+  WARN | [WARN] [WC_0K015012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K015012.WU_000001 | n=31 T bc=397 rb=1 len=282 | G span=156 lo=41 hi=196 occ=7
+  WARN | [WARN] [WC_0K019012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K019012.WU_000070 | n=31 T bc=397 rb=1 len=272 | G span=144 lo=41 hi=184 occ=12
+  WARN | [WARN] [WC_0K025012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K025012.WU_000001 | n=31 T bc=397 rb=1 len=271 | G span=143 lo=41 hi=183 occ=9
+  WARN | [WARN] [WC_0K027012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K027012.WU_000005 | n=31 T bc=397 rb=1 len=266 | G span=134 lo=41 hi=174 occ=6
+  WARN | [WARN] [WC_0K027012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K027012.WU_000040 | n=31 T bc=397 rb=1 len=283 | G span=171 lo=41 hi=211 occ=21
+  WARN | [WARN] [WC_0K028012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K028012.WU_000005 | n=31 T bc=397 rb=1 len=272 | G span=144 lo=41 hi=184 occ=4
+  WARN | [WARN] [WC_0K028012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K028012.WU_000010 | n=31 T bc=397 rb=1 len=271 | G span=147 lo=37 hi=183 occ=10
+  WARN | [WARN] [WC_0K028012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K028012.WU_000040 | n=31 T bc=397 rb=1 len=267 | G span=139 lo=41 hi=179 occ=5
+  WARN | [WARN] [WC_0K029012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K029012.WU_000001 | n=31 T bc=397 rb=1 len=267 | G span=139 lo=41 hi=179 occ=8
+  WARN | [WARN] [WC_0K030012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K030012.WU_000005 | n=31 T bc=397 rb=1 len=270 | G span=138 lo=41 hi=178 occ=6
+  WARN | [WARN] [WC_0K033012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K033012.WU_000020 | n=31 T bc=397 rb=1 len=281 | G span=152 lo=41 hi=192 occ=5
+  WARN | [WARN] [WC_0K038012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K038012.WU_000020 | n=31 T bc=397 rb=1 len=269 | G span=141 lo=41 hi=181 occ=8
+  WARN | [WARN] [WC_0K038012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K038012.WU_000020 | n=31 T bc=397 rb=1 len=271 | G span=143 lo=41 hi=183 occ=7
+  WARN | [WARN] [WC_0K038012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K038012.WU_000060 | n=31 T bc=397 rb=1 len=288 | G span=159 lo=41 hi=199 occ=6
+  WARN | [WARN] [WC_0K040012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K040012.WU_000005 | n=31 T bc=397 rb=1 len=273 | G span=145 lo=41 hi=185 occ=5
+  WARN | [WARN] [WC_0K044012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K044012.WU_000065 | n=31 T bc=397 rb=1 len=279 | G span=151 lo=41 hi=191 occ=8
+  WARN | [WARN] [WC_0K958012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K958012.WU_000001 | n=31 T bc=397 rb=1 len=276 | G span=148 lo=41 hi=188 occ=7
+  WARN | [WARN] [WC_0K958022_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K958022.WU_000010 | n=31 T bc=397 rb=1 len=274 | G span=142 lo=41 hi=182 occ=8
+  WARN | [WARN] [WC_0K958022_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K958022.WU_000045 | n=31 T bc=397 rb=1 len=269 | G span=146 lo=41 hi=186 occ=9
+  WARN | [WARN] [WC_0K959032_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K959032.WU_000035 | n=31 T bc=397 rb=1 len=290 | G span=164 lo=41 hi=204 occ=12
+  WARN | [WARN] [WC_0K959032_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K959032.WU_000070 | n=31 T bc=397 rb=1 len=292 | G span=164 lo=41 hi=204 occ=12
+  WARN | [WARN] [WC_0K961032_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K961032.WU_000001 | n=31 T bc=397 rb=1 len=286 | G span=158 lo=41 hi=198 occ=5
+  WARN | [WARN] [WC_0K961032_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K961032.WU_000005 | n=31 T bc=397 rb=1 len=276 | G span=148 lo=41 hi=188 occ=5
+  WARN | [WARN] [WC_0K961032_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K961032.WU_000035 | n=31 T bc=397 rb=1 len=269 | G span=137 lo=41 hi=177 occ=4
+  WARN | [WARN] [WC_0K961042_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_0K961042.WU_000045 | n=31 T bc=397 rb=1 len=271 | G span=139 lo=41 hi=179 occ=5
+  WARN | [WARN] [WC_MX_0K004012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K004012.WU_000 | n=31 T bc=397 rb=1 len=265 | G span=136 lo=41 hi=176 occ=15
+  WARN | [WARN] [WC_MX_0K004012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K004012.WU_000 | n=31 T bc=397 rb=1 len=275 | G span=143 lo=41 hi=183 occ=12
+  WARN | [WARN] [WC_MX_0K004012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K004012.WU_000 | n=31 T bc=397 rb=1 len=272 | G span=140 lo=41 hi=180 occ=14
+  WARN | [WARN] [WC_MX_0K004012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K004012.WU_000 | n=31 T bc=397 rb=1 len=281 | G span=150 lo=41 hi=190 occ=26
+  WARN | [WARN] [WC_MX_0K005012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K005012.WU_000 | n=31 T bc=397 rb=1 len=271 | G span=139 lo=41 hi=179 occ=12
+  WARN | [WARN] [WC_MX_0K005012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K005012.WU_000 | n=31 T bc=397 rb=1 len=270 | G span=141 lo=41 hi=181 occ=12
+  WARN | [WARN] [WC_MX_0K005012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K005012.WU_000 | n=31 T bc=397 rb=1 len=268 | G span=136 lo=41 hi=176 occ=15
+  WARN | [WARN] [WC_MX_0K005012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K005012.WU_000 | n=31 T bc=397 rb=1 len=269 | G span=141 lo=41 hi=181 occ=13
+  WARN | [WARN] [WC_MX_0K005012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K005012.WU_000 | n=31 T bc=397 rb=1 len=305 | G span=177 lo=41 hi=217 occ=13
+  WARN | [WARN] [WC_MX_0K006012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K006012.WU_000 | n=31 T bc=397 rb=1 len=281 | G span=152 lo=41 hi=192 occ=7
+  WARN | [WARN] [WC_MX_0K006012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K006012.WU_000 | n=31 T bc=397 rb=1 len=277 | G span=152 lo=41 hi=192 occ=5
+  WARN | [WARN] [WC_MX_0K007012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K007012.WU_000 | n=31 T bc=397 rb=1 len=267 | G span=138 lo=41 hi=178 occ=19
+  WARN | [WARN] [WC_MX_0K007012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K007012.WU_000 | n=31 T bc=397 rb=1 len=295 | G span=167 lo=41 hi=207 occ=16
+  WARN | [WARN] [WC_MX_0K007012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K007012.WU_000 | n=31 T bc=397 rb=1 len=271 | G span=142 lo=41 hi=182 occ=17
+  WARN | [WARN] [WC_MX_0K007012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K007012.WU_000 | n=31 T bc=397 rb=1 len=293 | G span=161 lo=41 hi=201 occ=17
+  WARN | [WARN] [WC_MX_0K007012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K007012.WU_000 | n=31 T bc=397 rb=1 len=281 | G span=149 lo=41 hi=189 occ=16
+  WARN | [WARN] [WC_MX_0K008012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K008012.WU_000 | n=31 T bc=397 rb=1 len=265 | G span=137 lo=41 hi=177 occ=6
+  WARN | [WARN] [WC_MX_0K008012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K008012.WU_000 | n=31 T bc=397 rb=1 len=275 | G span=145 lo=41 hi=185 occ=15
+  WARN | [WARN] [WC_MX_0K008012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K008012.WU_000 | n=31 T bc=397 rb=1 len=278 | G span=146 lo=41 hi=186 occ=18
+  WARN | [WARN] [WC_MX_0K009012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K009012.WU_000 | n=31 T bc=397 rb=1 len=270 | G span=142 lo=41 hi=182 occ=10
+  WARN | [WARN] [WC_MX_0K009012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K009012.WU_000 | n=31 T bc=397 rb=1 len=273 | G span=145 lo=41 hi=185 occ=11
+  WARN | [WARN] [WC_MX_0K010012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K010012.WU_000 | n=31 T bc=397 rb=1 len=293 | G span=162 lo=41 hi=202 occ=7
+  WARN | [WARN] [WC_MX_0K010012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K010012.WU_000 | n=31 T bc=397 rb=1 len=280 | G span=151 lo=41 hi=191 occ=8
+  WARN | [WARN] [WC_MX_0K012012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K012012.WU_000 | n=31 T bc=397 rb=1 len=283 | G span=155 lo=41 hi=195 occ=4
+  WARN | [WARN] [WC_MX_0K012012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K012012.WU_000 | n=31 T bc=397 rb=1 len=270 | G span=142 lo=41 hi=182 occ=14
+  WARN | [WARN] [WC_MX_0K012012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K012012.WU_000 | n=31 T bc=397 rb=1 len=275 | G span=143 lo=41 hi=183 occ=15
+  WARN | [WARN] [WC_MX_0K012012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K012012.WU_000 | n=31 T bc=397 rb=1 len=277 | G span=145 lo=41 hi=185 occ=13
+  WARN | [WARN] [WC_MX_0K012012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K012012.WU_000 | n=31 T bc=397 rb=1 len=267 | G span=139 lo=41 hi=179 occ=12
+  WARN | [WARN] [WC_MX_0K012012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K012012.WU_000 | n=31 T bc=397 rb=1 len=286 | G span=158 lo=41 hi=198 occ=17
+  WARN | [WARN] [WC_MX_0K015012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K015012.WU_000 | n=31 T bc=397 rb=1 len=276 | G span=147 lo=41 hi=187 occ=12
+  WARN | [WARN] [WC_MX_0K015012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K015012.WU_000 | n=31 T bc=397 rb=1 len=273 | G span=145 lo=41 hi=185 occ=14
+  WARN | [WARN] [WC_MX_0K015012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K015012.WU_000 | n=31 T bc=397 rb=1 len=279 | G span=154 lo=37 hi=190 occ=13
+  WARN | [WARN] [WC_MX_0K015012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K015012.WU_000 | n=31 T bc=397 rb=1 len=279 | G span=147 lo=41 hi=187 occ=11
+  WARN | [WARN] [WC_MX_0K015012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K015012.WU_000 | n=31 T bc=397 rb=1 len=281 | G span=149 lo=41 hi=189 occ=10
+  WARN | [WARN] [WC_MX_0K015012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K015012.WU_000 | n=31 T bc=397 rb=1 len=270 | G span=142 lo=41 hi=182 occ=9
+  WARN | [WARN] [WC_MX_0K015012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K015012.WU_000 | n=31 T bc=397 rb=1 len=266 | G span=134 lo=41 hi=174 occ=8
+  WARN | [WARN] [WC_MX_0K015012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K015012.WU_000 | n=31 T bc=397 rb=1 len=280 | G span=152 lo=41 hi=192 occ=16
+  WARN | [WARN] [WC_MX_0K016012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K016012.WU_000 | n=31 T bc=397 rb=1 len=295 | G span=163 lo=41 hi=203 occ=11
+  WARN | [WARN] [WC_MX_0K016012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K016012.WU_000 | n=31 T bc=397 rb=1 len=277 | G span=149 lo=41 hi=189 occ=16
+  WARN | [WARN] [WC_MX_0K017012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K017012.WU_000 | n=31 T bc=397 rb=1 len=270 | G span=142 lo=41 hi=182 occ=4
+  WARN | [WARN] [WC_MX_0K017012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K017012.WU_000 | n=31 T bc=397 rb=1 len=280 | G span=152 lo=41 hi=192 occ=17
+  WARN | [WARN] [WC_MX_0K017012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K017012.WU_000 | n=31 T bc=397 rb=1 len=284 | G span=155 lo=41 hi=195 occ=16
+  WARN | [WARN] [WC_MX_0K017012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K017012.WU_000 | n=31 T bc=397 rb=1 len=271 | G span=142 lo=41 hi=182 occ=14
+  WARN | [WARN] [WC_MX_0K017012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K017012.WU_000 | n=31 T bc=397 rb=1 len=270 | G span=141 lo=41 hi=181 occ=15
+  WARN | [WARN] [WC_MX_0K017012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K017012.WU_000 | n=31 T bc=397 rb=1 len=272 | G span=140 lo=41 hi=180 occ=13
+  WARN | [WARN] [WC_MX_0K018012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K018012.WU_000 | n=31 T bc=397 rb=1 len=268 | G span=140 lo=41 hi=180 occ=5
+  WARN | [WARN] [WC_MX_0K018012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K018012.WU_000 | n=31 T bc=397 rb=1 len=277 | G span=145 lo=41 hi=185 occ=11
+  WARN | [WARN] [WC_MX_0K018012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K018012.WU_000 | n=31 T bc=397 rb=1 len=273 | G span=144 lo=41 hi=184 occ=14
+  WARN | [WARN] [WC_MX_0K018012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K018012.WU_000 | n=31 T bc=397 rb=1 len=277 | G span=160 lo=41 hi=200 occ=17
+  WARN | [WARN] [WC_MX_0K020012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K020012.WU_000 | n=31 T bc=397 rb=1 len=270 | G span=150 lo=41 hi=190 occ=12
+  WARN | [WARN] [WC_MX_0K020012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K020012.WU_000 | n=31 T bc=397 rb=1 len=266 | G span=137 lo=41 hi=177 occ=8
+  WARN | [WARN] [WC_MX_0K022012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K022012.WU_000 | n=31 T bc=397 rb=1 len=270 | G span=145 lo=41 hi=185 occ=16
+  WARN | [WARN] [WC_MX_0K022012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K022012.WU_000 | n=31 T bc=397 rb=1 len=274 | G span=143 lo=44 hi=186 occ=19
+  WARN | [WARN] [WC_MX_0K023012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K023012.WU_000 | n=31 T bc=397 rb=1 len=277 | G span=146 lo=41 hi=186 occ=6
+  WARN | [WARN] [WC_MX_0K023012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K023012.WU_000 | n=31 T bc=397 rb=1 len=309 | G span=177 lo=41 hi=217 occ=19
+  WARN | [WARN] [WC_MX_0K023012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K023012.WU_000 | n=31 T bc=397 rb=1 len=288 | G span=157 lo=44 hi=200 occ=19
+  WARN | [WARN] [WC_MX_0K024012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K024012.WU_000 | n=31 T bc=397 rb=1 len=267 | G span=136 lo=41 hi=176 occ=14
+  WARN | [WARN] [WC_MX_0K024012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K024012.WU_000 | n=31 T bc=397 rb=1 len=272 | G span=144 lo=41 hi=184 occ=13
+  WARN | [WARN] [WC_MX_0K024012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K024012.WU_000 | n=31 T bc=397 rb=1 len=273 | G span=145 lo=41 hi=185 occ=13
+  WARN | [WARN] [WC_MX_0K024012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K024012.WU_000 | n=31 T bc=397 rb=1 len=279 | G span=147 lo=44 hi=190 occ=24
+  WARN | [WARN] [WC_MX_0K027012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K027012.WU_000 | n=31 T bc=397 rb=1 len=265 | G span=142 lo=41 hi=182 occ=14
+  WARN | [WARN] [WC_MX_0K027012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K027012.WU_000 | n=31 T bc=397 rb=1 len=270 | G span=138 lo=41 hi=178 occ=7
+  WARN | [WARN] [WC_MX_0K027012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K027012.WU_000 | n=31 T bc=397 rb=1 len=281 | G span=150 lo=41 hi=190 occ=8
+  WARN | [WARN] [WC_MX_0K027012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K027012.WU_000 | n=31 T bc=397 rb=1 len=293 | G span=164 lo=41 hi=204 occ=20
+  WARN | [WARN] [WC_MX_0K958012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K958012.WU_000 | n=31 T bc=397 rb=1 len=265 | G span=138 lo=41 hi=178 occ=6
+  WARN | [WARN] [WC_MX_0K961012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K961012.WU_000 | n=31 T bc=397 rb=1 len=265 | G span=152 lo=41 hi=192 occ=9
+  WARN | [WARN] [WC_MX_0K962012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K962012.WU_000 | n=31 T bc=397 rb=1 len=280 | G span=154 lo=41 hi=194 occ=14
+  WARN | [WARN] [WC_MX_0K962012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K962012.WU_000 | n=31 T bc=397 rb=1 len=265 | G span=148 lo=41 hi=188 occ=4
+  WARN | [WARN] [WC_MX_0K962012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K962012.WU_000 | n=31 T bc=397 rb=1 len=265 | G span=133 lo=41 hi=173 occ=5
+  WARN | [WARN] [WC_MX_0K962012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K962012.WU_000 | n=31 T bc=397 rb=1 len=265 | G span=136 lo=41 hi=176 occ=10
+  WARN | [WARN] [WC_MX_0K962012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K962012.WU_000 | n=31 T bc=397 rb=1 len=265 | G span=143 lo=41 hi=183 occ=8
+  WARN | [WARN] [WC_MX_0K964012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K964012.WU_000 | n=31 T bc=397 rb=1 len=313 | G span=185 lo=41 hi=225 occ=4
+  WARN | [WARN] [WC_MX_0K964012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K964012.WU_000 | n=31 T bc=397 rb=1 len=271 | G span=160 lo=44 hi=203 occ=18
+  WARN | [WARN] [WC_MX_0K964012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K964012.WU_000 | n=31 T bc=397 rb=1 len=291 | G span=163 lo=41 hi=203 occ=13
+  WARN | [WARN] [WC_MX_0K964012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K964012.WU_000 | n=31 T bc=397 rb=1 len=290 | G span=162 lo=41 hi=202 occ=6
+  WARN | [WARN] [WC_MX_0K964012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K964012.WU_000 | n=31 T bc=397 rb=1 len=294 | G span=163 lo=41 hi=203 occ=6
+  WARN | [WARN] [WC_MX_0K964012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K964012.WU_000 | n=31 T bc=397 rb=1 len=288 | G span=163 lo=41 hi=203 occ=5
+  WARN | [WARN] [WC_MX_0K964012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K964012.WU_000 | n=31 T bc=397 rb=1 len=290 | G span=162 lo=41 hi=202 occ=6
+  WARN | [WARN] [WC_MX_0K964012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K964012.WU_000 | n=31 T bc=397 rb=1 len=292 | G span=163 lo=41 hi=203 occ=4
+  WARN | [WARN] [WC_MX_0K964012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K964012.WU_000 | n=31 T bc=397 rb=1 len=291 | G span=163 lo=41 hi=203 occ=4
+  WARN | [WARN] [WC_MX_0K964012_Proce] [S.c.t.d.e.DSLScript] SUCCEEDED - WC_MX_0K964012.WU_000 | n=31 T bc=397 rb=1 len=287 | G span=162 lo=41 hi=202 occ=4
+
+ALL PASS

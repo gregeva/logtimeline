@@ -1,0 +1,782 @@
+file: localhost_access_log.2025-03-21.txt format=access lines=22264 matched=22256 positive=14062 zero=8187 negative=0 keys_positive=635
+arms: T,S,G scenarios: 1,2,3,4,5,6
+
+PASS scenario 1 bpd=53 T/S digest identical: T=fefe624fd6730efe1c907c420958c2de S=fefe624fd6730efe1c907c420958c2de
+info scenario 1 bpd=53 G digest=08d50beda3990fcffd2fff6e4dfe2cb5 keys=635
+
+##############################################################################
+# Scenario 1: Default precision (tier 5)
+# ltl equivalent: ./ltl -ni -mdm bin -V histogram-bin-counters ...
+# arm: T   bpd=53   tier=5   max_rebins=none
+##############################################################################
+rss_delta_kb(store build): 1488
+overflow_total=0 underflow_total=0 (telemetry extras, not Decision 8 fields)
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 1
+  max_partition_bins: 397
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 1598689
+  rebins_per_partition: p50=0 p95=0 p99=0 max=1
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 1: Default precision (tier 5)
+# ltl equivalent: ./ltl -ni -mdm bin -V histogram-bin-counters ...
+# arm: S   bpd=53   tier=5   max_rebins=none
+##############################################################################
+rss_delta_kb(store build): 656
+overflow_total=0 underflow_total=0 (telemetry extras, not Decision 8 fields)
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 1
+  max_partition_bins: 397
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 650952
+  rebins_per_partition: p50=0 p95=0 p99=0 max=1
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 1: Default precision (tier 5)
+# ltl equivalent: ./ltl -ni -mdm bin -V histogram-bin-counters ...
+# arm: G   bpd=53   tier=5   max_rebins=none
+##############################################################################
+rss_delta_kb(store build): 288
+--- G under the LOCKED Decision 8 field set (as today's emitter would print it):
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 0
+  max_partition_bins: 0
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 445386
+  rebins_per_partition: p50=0 p95=0 p99=0 max=0
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+--- G vacuous fields (structurally constant under a shared grid):
+    total_rebin_events: 0 (no rebin exists)
+    max_partition_bins: telemetry has no such field -> emitter prints 0 via `// 0`
+    partitions_with_overflow_count: 0 / partitions_with_underflow_count: 0 (an index exists for every positive value)
+    rebins_per_partition: p50=0 p95=0 p99=0 max=0
+    out_of_range_bounded: every quantile 'none' (percentile() audit is constant 'none' under G)
+--- PROPOSED Decision 8 amendment rendering for G (NOT a lock; architect's decision):
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  grid_bpd: 53
+  grid_index_range: 0..231
+  span_slots: p50=1 p95=51 p99=80 max=191
+  counter_slots_total: 6536
+  counter_memory_bytes: 445386
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+PASS scenario 2 bpd=115 T/S digest identical: T=6e55c317c482c1bef4245970e2631590 S=6e55c317c482c1bef4245970e2631590
+info scenario 2 bpd=115 G digest=36ce32c78dc5b26b5b2f2eed8f2d191f keys=635
+
+##############################################################################
+# Scenario 2: --data-model-precision 7 (#189 scenario 2: --percentile-precision 7, bpd 115)
+# ltl equivalent: ./ltl -ni -mdm bin -dmp 7 -V histogram-bin-counters ...
+# arm: T   bpd=115   tier=7   max_rebins=none
+##############################################################################
+rss_delta_kb(store build): 1712
+overflow_total=0 underflow_total=0 (telemetry extras, not Decision 8 fields)
+=== histogram-bin-counters ===
+data_model_precision: 7 (--data-model-precision 7)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 1
+  max_partition_bins: 862
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 2451241
+  rebins_per_partition: p50=0 p95=0 p99=0 max=1
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 2: --data-model-precision 7 (#189 scenario 2: --percentile-precision 7, bpd 115)
+# ltl equivalent: ./ltl -ni -mdm bin -dmp 7 -V histogram-bin-counters ...
+# arm: S   bpd=115   tier=7   max_rebins=none
+##############################################################################
+rss_delta_kb(store build): 80
+overflow_total=0 underflow_total=0 (telemetry extras, not Decision 8 fields)
+=== histogram-bin-counters ===
+data_model_precision: 7 (--data-model-precision 7)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 1
+  max_partition_bins: 862
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 793600
+  rebins_per_partition: p50=0 p95=0 p99=0 max=1
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 2: --data-model-precision 7 (#189 scenario 2: --percentile-precision 7, bpd 115)
+# ltl equivalent: ./ltl -ni -mdm bin -dmp 7 -V histogram-bin-counters ...
+# arm: G   bpd=115   tier=7   max_rebins=none
+##############################################################################
+rss_delta_kb(store build): 128
+--- G under the LOCKED Decision 8 field set (as today's emitter would print it):
+=== histogram-bin-counters ===
+data_model_precision: 7 (--data-model-precision 7)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 0
+  max_partition_bins: 0
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 587274
+  rebins_per_partition: p50=0 p95=0 p99=0 max=0
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+--- G vacuous fields (structurally constant under a shared grid):
+    total_rebin_events: 0 (no rebin exists)
+    max_partition_bins: telemetry has no such field -> emitter prints 0 via `// 0`
+    partitions_with_overflow_count: 0 / partitions_with_underflow_count: 0 (an index exists for every positive value)
+    rebins_per_partition: p50=0 p95=0 p99=0 max=0
+    out_of_range_bounded: every quantile 'none' (percentile() audit is constant 'none' under G)
+--- PROPOSED Decision 8 amendment rendering for G (NOT a lock; architect's decision):
+=== histogram-bin-counters ===
+data_model_precision: 7 (--data-model-precision 7)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  grid_bpd: 115
+  grid_index_range: 0..503
+  span_slots: p50=1 p95=110 p99=173 max=412
+  counter_slots_total: 13439
+  counter_memory_bytes: 587274
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+PASS scenario 3 bpd=616 T/S digest identical: T=bb067777ac62edd46bc020af33921d9c S=bb067777ac62edd46bc020af33921d9c
+info scenario 3 bpd=616 G digest=12d69796548f97a0cadf54fe3602d1a1 keys=635
+
+##############################################################################
+# Scenario 3: -pbpd 100 (#189 scenario 3) — UNREACHABLE: -pbpd dissolved by #293; substitute: tier 9 (bpd 616, the lever maximum)
+# ltl equivalent: ./ltl -ni -mdm bin -dmp 9 -V histogram-bin-counters ...
+# arm: T   bpd=616   tier=9   max_rebins=none
+##############################################################################
+rss_delta_kb(store build): 9248
+overflow_total=0 underflow_total=0 (telemetry extras, not Decision 8 fields)
+=== histogram-bin-counters ===
+data_model_precision: 9 (--data-model-precision 9)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 1
+  max_partition_bins: 4619
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 9336673
+  rebins_per_partition: p50=0 p95=0 p99=0 max=1
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 3: -pbpd 100 (#189 scenario 3) — UNREACHABLE: -pbpd dissolved by #293; substitute: tier 9 (bpd 616, the lever maximum)
+# ltl equivalent: ./ltl -ni -mdm bin -dmp 9 -V histogram-bin-counters ...
+# arm: S   bpd=616   tier=9   max_rebins=none
+##############################################################################
+rss_delta_kb(store build): 416
+overflow_total=0 underflow_total=0 (telemetry extras, not Decision 8 fields)
+=== histogram-bin-counters ===
+data_model_precision: 9 (--data-model-precision 9)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 1
+  max_partition_bins: 4619
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 1938664
+  rebins_per_partition: p50=0 p95=0 p99=0 max=1
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 3: -pbpd 100 (#189 scenario 3) — UNREACHABLE: -pbpd dissolved by #293; substitute: tier 9 (bpd 616, the lever maximum)
+# ltl equivalent: ./ltl -ni -mdm bin -dmp 9 -V histogram-bin-counters ...
+# arm: G   bpd=616   tier=9   max_rebins=none
+##############################################################################
+rss_delta_kb(store build): 1488
+--- G under the LOCKED Decision 8 field set (as today's emitter would print it):
+=== histogram-bin-counters ===
+data_model_precision: 9 (--data-model-precision 9)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 0
+  max_partition_bins: 0
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 1728466
+  rebins_per_partition: p50=0 p95=0 p99=0 max=0
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+--- G vacuous fields (structurally constant under a shared grid):
+    total_rebin_events: 0 (no rebin exists)
+    max_partition_bins: telemetry has no such field -> emitter prints 0 via `// 0`
+    partitions_with_overflow_count: 0 / partitions_with_underflow_count: 0 (an index exists for every positive value)
+    rebins_per_partition: p50=0 p95=0 p99=0 max=0
+    out_of_range_bounded: every quantile 'none' (percentile() audit is constant 'none' under G)
+--- PROPOSED Decision 8 amendment rendering for G (NOT a lock; architect's decision):
+=== histogram-bin-counters ===
+data_model_precision: 9 (--data-model-precision 9)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  grid_bpd: 616
+  grid_index_range: 0..2695
+  span_slots: p50=1 p95=588 p99=923 max=2202
+  counter_slots_total: 69272
+  counter_memory_bytes: 1728466
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 4: -pbpd 100 + --percentile-precision 4 (#189 scenario 4) — UNREACHABLE: no competing flag exists after #293
+# ltl equivalent: (none)
+##############################################################################
+NOT RENDERED: ltl has no -pbpd and no --percentile-precision flag (grep count 0 in ltl); the
+only precision knob is --data-model-precision 1..9, so a two-flag conflict cannot be constructed.
+Decision 2's '-pbpd always wins' clause and Decision 8's '; overridden' annotation were dissolved
+by the #293 amendment (features/187-histogram-bin-counter-percentiles.md § Decision 8, 2026-05-27).
+
+PASS scenario 5 bpd=53 T/S digest identical: T=ee54df460b18a1dcef080ec4393a866a S=ee54df460b18a1dcef080ec4393a866a
+info scenario 5 bpd=53 G digest=08d50beda3990fcffd2fff6e4dfe2cb5 keys=635
+
+##############################################################################
+# Scenario 5: Overflow audit firing (max_rebins 0 on T/S; G has no rebin cap)
+# ltl equivalent: (no ltl flag: --max-rebins is a #189-prototype hook; ltl has no growth cap today)
+# arm: T   bpd=53   tier=5   max_rebins=0
+##############################################################################
+rss_delta_kb(store build): 0
+overflow_total=6 underflow_total=0 (telemetry extras, not Decision 8 fields)
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 0
+  max_partition_bins: 265
+  partitions_with_overflow_count: 1
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 1612617
+  rebins_per_partition: p50=0 p95=0 p99=0 max=0
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=high p95=high p99=high p999=high p9999=high p99999=high
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 5: Overflow audit firing (max_rebins 0 on T/S; G has no rebin cap)
+# ltl equivalent: (no ltl flag: --max-rebins is a #189-prototype hook; ltl has no growth cap today)
+# arm: S   bpd=53   tier=5   max_rebins=0
+##############################################################################
+rss_delta_kb(store build): 48
+overflow_total=6 underflow_total=0 (telemetry extras, not Decision 8 fields)
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 0
+  max_partition_bins: 265
+  partitions_with_overflow_count: 1
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 649040
+  rebins_per_partition: p50=0 p95=0 p99=0 max=0
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=high p95=high p99=high p999=high p9999=high p99999=high
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 5: Overflow audit firing (max_rebins 0 on T/S; G has no rebin cap)
+# ltl equivalent: (no ltl flag: --max-rebins is a #189-prototype hook; ltl has no growth cap today)
+# arm: G   bpd=53   tier=5   max_rebins=0
+##############################################################################
+rss_delta_kb(store build): 0
+--- G under the LOCKED Decision 8 field set (as today's emitter would print it):
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  total_rebin_events: 0
+  max_partition_bins: 0
+  partitions_with_overflow_count: 0
+  partitions_with_underflow_count: 0
+  counter_memory_bytes: 445386
+  rebins_per_partition: p50=0 p95=0 p99=0 max=0
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+--- G vacuous fields (structurally constant under a shared grid):
+    total_rebin_events: 0 (no rebin exists)
+    max_partition_bins: telemetry has no such field -> emitter prints 0 via `// 0`
+    partitions_with_overflow_count: 0 / partitions_with_underflow_count: 0 (an index exists for every positive value)
+    rebins_per_partition: p50=0 p95=0 p99=0 max=0
+    out_of_range_bounded: every quantile 'none' (percentile() audit is constant 'none' under G)
+--- PROPOSED Decision 8 amendment rendering for G (NOT a lock; architect's decision):
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: unified
+  partition_keying: (category, log_key)
+  partition_count: 635
+  grid_bpd: 53
+  grid_index_range: 0..231
+  span_slots: p50=1 p95=51 p99=80 max=191
+  counter_slots_total: 6536
+  counter_memory_bytes: 445386
+  percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
+  out_of_range_bounded: p1=none p5=none p10=none p25=none p50=none p75=none p90=none p95=none p99=none p999=none p9999=none p99999=none
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 6: Opt-out: -mdm raw (#189 scenario 6: --exact-percentiles) -> path: user_opt_out
+# ltl equivalent: ./ltl -ni -mdm raw -V histogram-bin-counters ...
+# arm: T   bpd=53   tier=5   max_rebins=none
+##############################################################################
+(no counter store is built under -mdm raw — the block below is representation-independent)
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: user_opt_out
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 6: Opt-out: -mdm raw (#189 scenario 6: --exact-percentiles) -> path: user_opt_out
+# ltl equivalent: ./ltl -ni -mdm raw -V histogram-bin-counters ...
+# arm: S   bpd=53   tier=5   max_rebins=none
+##############################################################################
+(no counter store is built under -mdm raw — the block below is representation-independent)
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: user_opt_out
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+##############################################################################
+# Scenario 6: Opt-out: -mdm raw (#189 scenario 6: --exact-percentiles) -> path: user_opt_out
+# ltl equivalent: ./ltl -ni -mdm raw -V histogram-bin-counters ...
+# arm: G   bpd=53   tier=5   max_rebins=none
+##############################################################################
+(no counter store is built under -mdm raw — the block below is representation-independent)
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
+
+consumer: summary_table
+  path: user_opt_out
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: user_opt_out
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+=== END histogram-bin-counters ===
+
+ALL PARITY PASS

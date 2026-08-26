@@ -1,0 +1,54 @@
+# V7 bucket-stats surface — file=/tmp/ltl-426-fixtures/bin-dpm-full.log bpd=16 bucket_size=2000
+input: format=twx lines=122808 matched=122808 positive=122798 zero=10 no_duration=0 unparsed=0
+buckets: count=62 total_N=122798  N per bucket: min=798 p50=2000 p95=2000 max=2000
+
+## Part 2 — ACCURACY vs oracle (clamp applied, 'int' rank convention)
+bin width at bpd=16: 1.154782 x (15.4782% multiplicative)
+arm    compared  max_rel_err    within_1bin   mean_rel_err
+T           682     0.177740         99.71%       0.037967
+  T worst: bucket00006/p5 got=2.35547900663611 want=2
+
+### per-quantile mean relative error
+degen% = share of buckets where the oracle index int(n*q) is n-1, so the
+oracle answer IS the observed max and the clamp forces exact agreement.
+Those rows measure the clamp, not the binning; read them as such.
+quantile            T   degen%
+p1           0.061870     0.0%
+p5           0.040828     0.0%
+p10          0.053611     0.0%
+p25          0.055336     0.0%
+p50          0.035437     0.0%
+p75          0.040755     0.0%
+p90          0.017683     0.0%
+p95          0.015593     0.0%
+p99          0.030142     0.0%
+p999         0.066381     1.6%
+p9999        0.000000   100.0%
+
+## Part 3 — CLAMP RATE (raw interpolated value outside observed [min,max])
+clamped_high = raw > observed max ; clamped_low = raw < observed min
+quantile                T hi/lo
+p1            0.00%/   22.58%
+p5            0.00%/   11.29%
+p10           0.00%/    8.06%
+p25           0.00%/    0.00%
+p50           0.00%/    0.00%
+p75           0.00%/    0.00%
+p90           0.00%/    0.00%
+p95           0.00%/    0.00%
+p99           0.00%/    0.00%
+p999          6.45%/    0.00%
+p9999       100.00%/    0.00%
+ALL           9.68%/    3.81%
+
+## Part 4 — MEMORY
+arm    RSS_delta_kB    Devel::Size_B
+T               208           194786
+NOTE: RSS delta in --arm all is contaminated (three stores built in one
+process). The memory number of record comes from the single-arm runs.
+
+## Part 5 — TIMING (medians of 3 with min/max)
+arm     build_s (med [min,max])   ladder_s (med [min,max])
+T        0.1157 [0.1153,0.1158]        0.00793 [0.00775,0.00812]
+
+ladder = the full 11-quantile ltl ladder + clamp over all 62 buckets, 'ceil' (native) convention

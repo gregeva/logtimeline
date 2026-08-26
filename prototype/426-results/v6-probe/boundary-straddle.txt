@@ -1,0 +1,26 @@
+### bpd 80
+bpd=80  top deviating cells (cell: exact -> T):
+  cell  2: exact=  19926  T=      0  diff= -19926   cell range [1.594, 2.013)
+  cell  3: exact=      0  T=  19926  diff= +19926   cell range [2.013, 2.542)
+  cell 10: exact=    556  T=    424  diff=   -132   cell range [10.3, 13)
+  cell 11: exact=    205  T=    337  diff=   +132   cell range [13, 16.42)
+  cell 37: exact=    562  T=    660  diff=    +98   cell range [5588, 7056)
+  cell 15: exact=     61  T=    128  diff=    +67   cell range [33.05, 41.73)
+  cell 30: exact=   1711  T=   1644  diff=    -67   cell range [1092, 1379)
+  cell 26: exact=    421  T=    468  diff=    +47   cell range [429.8, 542.6)
+total abs dev 40696 of 122798 (33.1406%)
+most common values: 3(x24220) 7(x23388) 2(x19926) 4(x10572) 6(x9415) 
+G: total abs dev 40822 (33.2432%);  cell2 exact=19926 G=0  cell3 exact=0 G=19926
+### bpd 616
+bpd=616  top deviating cells (cell: exact -> T):
+  cell 20: exact=   1659  T=   1802  diff=   +143   cell range [106.1, 133.9)
+  cell 19: exact=   1044  T=    950  diff=    -94   cell range [84, 106.1)
+  cell 21: exact=   1160  T=   1110  diff=    -50   cell range [133.9, 169.1)
+  cell 28: exact=    689  T=    699  diff=    +10   cell range [685.1, 865.1)
+  cell 34: exact=    980  T=    989  diff=     +9   cell range [2776, 3505)
+  cell 29: exact=   6098  T=   6090  diff=     -8   cell range [865.1, 1092)
+  cell 36: exact=   2491  T=   2499  diff=     +8   cell range [4426, 5588)
+  cell 31: exact=    893  T=    900  diff=     +7   cell range [1379, 1741)
+total abs dev 362 of 122798 (0.2948%)
+most common values: 3(x24220) 7(x23388) 2(x19926) 4(x10572) 6(x9415) 
+G: total abs dev 358 (0.2915%);  cell2 exact=19926 G=19926  cell3 exact=0 G=0

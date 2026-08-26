@@ -1,0 +1,40 @@
+=== Part A: seeding / span growth on real data ===
+file: logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt
+arms: T,S,G   bpd: 53   runs: 0
+
+--- bpd=53 (one bin = 4.4403%)
+arm T build: single untimed build 5.922s (no timed runs requested)
+arm T memory: Devel::Size=9726086 (9.28 MB)  RSS delta=11744 kB (11.47 MB) [rss 10880 -> 22624 kB]
+arm S build: single untimed build 5.693s (no timed runs requested)
+arm S memory: Devel::Size=4020037 (3.83 MB)  RSS delta=5024 kB (4.91 MB) [rss 22880 -> 27904 kB]
+arm G build: single untimed build 5.431s (no timed runs requested)
+arm G memory: Devel::Size=2490007 (2.37 MB)  RSS delta=2096 kB (2.05 MB) [rss 27936 -> 30032 kB]
+file counts: format=access lines=1430678 matched=1430678 unparsed=0 no_duration=0 positive=857480 zero=573198 negative=0 keys_any=4467 keys_positive=4153
+T telemetry: partitions_total=4153 total_rebin_events=7 max_partition_bins=397 partitions_with_overflow=0 partitions_with_underflow=0 overflow_total=0 underflow_total=0 rebins_per_partition: p50=0 p95=0 p99=0 max=1 counter_memory_bytes=9726198
+T partitions_with_rebins=7 (0.1686%)  Decision 5 healthy-seed signal (p99 <= 2): PASS
+S telemetry: partitions_total=4153 total_rebin_events=7 max_partition_bins=397 partitions_with_overflow=0 partitions_with_underflow=0 overflow_total=0 underflow_total=0 rebins_per_partition: p50=0 p95=0 p99=0 max=1 counter_memory_bytes=4020149
+S partitions_with_rebins=7 (0.1686%)  Decision 5 healthy-seed signal (p99 <= 2): PASS
+G telemetry: partitions_total=4153 span_slots: p50=1 p95=26 p99=78 max=175 index_range=[0,302] (5.72 decades) counter_memory_bytes=2623015
+PASS bpd=53 T and S digests identical (3962d9c26ac17c07388d8a02149c3fb0)
+PASS bpd=53 T and S telemetry identical (rebins/overflow/underflow/bins fields)
+per-key T vs G (bpd=53): keys=4153; T bin_count==seed(265)=4146, grown=7; G span > T bin_count: 0 keys; G span == T bin_count: 0; G span > T bins array length: 0
+per-key T vs G (bpd=53): G span > seed bin_count (265): 0 keys
+totals (bpd=53): sum T bin_count=1101469; sum T bins array length=569388; sum G span slots=29442; sum G occupied bins=8738; G/T slot ratio=0.0267 (span/bin_count), 0.0517 (span/array length)
+span/bin_count ratio per key: p50=0.0038 p95=0.0981 p99=0.2943 max=0.5811
+5 widest G spans (n, T bin_count, T rebins, T bins len, G span, G lo..hi, occupied): 
+  2xx | [200] POST /Thingworx/Things/PTCDTS.ScorecardImpl.Manager/Services/GetMetricsList | n=23 T bc=397 rb=1 len=291 | G span=175 lo=0 hi=174 occ=6
+  2xx | [200] POST /Thingworx/Things/Brembo.ProductionDashboard.Manager/Services/GetProduction | n=4225 T bc=397 rb=1 len=283 | G span=163 lo=0 hi=162 occ=30
+  2xx | [200] POST /Thingworx/Things/Brembo.ProductionDashboard.Manager/Services/UpdateHeartbe | n=31703 T bc=397 rb=1 len=266 | G span=161 lo=0 hi=160 occ=4
+  2xx | [200] POST /Thingworx/Things/Brembo.ProductionDashboard.Manager/Services/GetStatusEven | n=4466 T bc=397 rb=1 len=285 | G span=156 lo=0 hi=155 occ=35
+  2xx | [200] POST /Thingworx/Things/Brembo.ProductionDashboard.Manager/Services/GetJobSummary | n=3906 T bc=265 rb=0 len=155 | G span=154 lo=0 hi=153 occ=44
+keys T rebinned (n, T bin_count, T rebins, T bins len, G span, G lo..hi, occupied):
+  2xx | [200] GET /Thingworx/Runtime/index.html | n=413 T bc=397 rb=1 len=279 | G span=147 lo=0 hi=146 occ=17
+  2xx | [200] POST /Thingworx/Things/Brembo.ProductionDashboard.Manager/Services/GetProduction | n=4225 T bc=397 rb=1 len=283 | G span=163 lo=0 hi=162 occ=30
+  2xx | [200] POST /Thingworx/Things/Brembo.ProductionDashboard.Manager/Services/GetStatusEven | n=4466 T bc=397 rb=1 len=285 | G span=156 lo=0 hi=155 occ=35
+  2xx | [200] POST /Thingworx/Things/Brembo.ProductionDashboard.Manager/Services/UpdateHeartbe | n=31703 T bc=397 rb=1 len=266 | G span=161 lo=0 hi=160 occ=4
+  2xx | [200] POST /Thingworx/Things/PTCDTS.ProductionDashboard.Manager/Services/GetProduction | n=48 T bc=397 rb=1 len=282 | G span=150 lo=0 hi=149 occ=11
+  2xx | [200] POST /Thingworx/Things/PTCDTS.Reports.Manager/Services/GetShiftSummaryReportData | n=30 T bc=397 rb=1 len=265 | G span=153 lo=89 hi=241 occ=24
+  2xx | [200] POST /Thingworx/Things/PTCDTS.ScorecardImpl.Manager/Services/GetMetricsList | n=23 T bc=397 rb=1 len=291 | G span=175 lo=0 hi=174 occ=6
+per-key TSV: prototype/426-results/revalidate-v3-partA-perkey-bpd53.tsv
+
+ALL PASS

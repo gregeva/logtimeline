@@ -1,0 +1,11 @@
+=== Part A: seeding / span growth on real data ===
+file: logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt
+arms: G   bpd: 53   runs: 3
+
+--- bpd=53 (one bin = 4.4403%)
+arm G build: warmup 5.363s; timed runs=3 median 5.180s (min 5.161 max 5.184) — parse+add, one arm per store
+arm G memory: Devel::Size=2490007 (2.37 MB)  RSS delta=3888 kB (3.80 MB) [rss 10928 -> 14816 kB]
+file counts: format=access lines=1430678 matched=1430678 unparsed=0 no_duration=0 positive=857480 zero=573198 negative=0 keys_any=4467 keys_positive=4153
+G telemetry: partitions_total=4153 span_slots: p50=1 p95=26 p99=78 max=175 index_range=[0,302] (5.72 decades) counter_memory_bytes=2623015
+
+ALL PASS

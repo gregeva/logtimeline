@@ -1,0 +1,71 @@
+# V7 bucket-stats surface — file=logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt bpd=16 bucket_size=20000
+input: format=access lines=761698 matched=761698 positive=575800 zero=185898 no_duration=0 unparsed=0
+buckets: count=29 total_N=575800  N per bucket: min=15800 p50=20000 p95=20000 max=20000
+
+## Part 1 — PARITY (T vs S canonical digests)
+keys compared: 29   mismatches: 0
+store digest T = bcc1b932f040a31638bd963113d7ca9b
+store digest S = bcc1b932f040a31638bd963113d7ca9b
+PARITY: PASS
+store digest G = 046e05439d8aa995a5eafdc0798414e2   (different geometry by construction; not a parity target)
+
+N-conservation across T/S/G vs raw counts: PASS (0 key(s) disagree)
+
+## Part 2 — ACCURACY vs oracle (clamp applied, 'int' rank convention)
+bin width at bpd=16: 1.154782 x (15.4782% multiplicative)
+arm    compared  max_rel_err    within_1bin   mean_rel_err
+T           319     0.147182        100.00%       0.025321
+S           319     0.147182        100.00%       0.025321
+G           319     0.154401        100.00%       0.042424
+  T worst: bucket00011/p50 got=6.88309417455793 want=6
+  S worst: bucket00011/p50 got=6.88309417455793 want=6
+  G worst: bucket00003/p50 got=1.15440073387236 want=1
+
+### per-quantile mean relative error
+degen% = share of buckets where the oracle index int(n*q) is n-1, so the
+oracle answer IS the observed max and the clamp forces exact agreement.
+Those rows measure the clamp, not the binning; read them as such.
+quantile            T            S            G   degen%
+p1           0.000000     0.000000     0.002891     0.0%
+p5           0.000692     0.000692     0.014479     0.0%
+p10          0.002308     0.002308     0.029153     0.0%
+p25          0.012390     0.012390     0.074468     0.0%
+p50          0.047646     0.047646     0.086859     0.0%
+p75          0.017851     0.017851     0.011420     0.0%
+p90          0.035527     0.035527     0.019978     0.0%
+p95          0.023466     0.023466     0.017420     0.0%
+p99          0.040612     0.040612     0.071388     0.0%
+p999         0.060415     0.060415     0.092605     0.0%
+p9999        0.037626     0.037626     0.046003     0.0%
+
+## Part 3 — CLAMP RATE (raw interpolated value outside observed [min,max])
+clamped_high = raw > observed max ; clamped_low = raw < observed min
+quantile                T hi/lo                S hi/lo                G hi/lo
+p1            0.00%/  100.00%      0.00%/  100.00%      0.00%/    0.00%
+p5            0.00%/   93.10%      0.00%/   93.10%      0.00%/    0.00%
+p10           0.00%/   82.76%      0.00%/   82.76%      0.00%/    0.00%
+p25           0.00%/   72.41%      0.00%/   72.41%      0.00%/    0.00%
+p50           0.00%/    3.45%      0.00%/    3.45%      0.00%/    0.00%
+p75           0.00%/    0.00%      0.00%/    0.00%      0.00%/    0.00%
+p90           0.00%/    0.00%      0.00%/    0.00%      0.00%/    0.00%
+p95           6.90%/    0.00%      6.90%/    0.00%     17.24%/    0.00%
+p99          34.48%/    0.00%     34.48%/    0.00%     41.38%/    0.00%
+p999         41.38%/    0.00%     41.38%/    0.00%     44.83%/    0.00%
+p9999        55.17%/    0.00%     55.17%/    0.00%     58.62%/    0.00%
+ALL          12.54%/   31.97%     12.54%/   31.97%     14.73%/    0.00%
+
+## Part 4 — MEMORY
+arm    RSS_delta_kB    Devel::Size_B
+T                 0            82909
+S                 0            68751
+G                 0            54209
+NOTE: RSS delta in --arm all is contaminated (three stores built in one
+process). The memory number of record comes from the single-arm runs.
+
+## Part 5 — TIMING (medians of 3 with min/max)
+arm     build_s (med [min,max])   ladder_s (med [min,max])
+T        0.5324 [0.5299,0.5399]        0.00314 [0.00310,0.00317]
+S        0.3634 [0.3633,0.3635]        0.00199 [0.00199,0.00199]
+G        0.2650 [0.2640,0.2652]        0.00179 [0.00176,0.00184]
+
+ladder = the full 11-quantile ltl ladder + clamp over all 29 buckets, 'ceil' (native) convention

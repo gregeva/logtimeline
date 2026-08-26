@@ -1,0 +1,12 @@
+=== Part A: seeding / span growth on real data ===
+file: /tmp/ltl-426-fixtures/bin-twxdur-full.log
+arms: S   bpd: 53   runs: 3
+
+--- bpd=53 (one bin = 4.4403%)
+arm S build: warmup 2.258s; timed runs=3 median 2.199s (min 2.106 max 2.339) — parse+add, one arm per store
+arm S memory: Devel::Size=305834161 (291.67 MB)  RSS delta=390528 kB (381.38 MB) [rss 11088 -> 401616 kB]
+file counts: format=twx lines=288025 matched=288025 unparsed=0 no_duration=0 positive=288025 zero=0 negative=0 keys_any=286659 keys_positive=286659
+S telemetry: partitions_total=286659 total_rebin_events=2 max_partition_bins=397 partitions_with_overflow=0 partitions_with_underflow=0 overflow_total=0 underflow_total=0 rebins_per_partition: p50=0 p95=0 p99=0 max=1 counter_memory_bytes=305834273
+S partitions_with_rebins=2 (0.0007%)  Decision 5 healthy-seed signal (p99 <= 2): PASS
+
+ALL PASS

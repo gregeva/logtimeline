@@ -1,0 +1,70 @@
+=== bpd 16 ===
+band                           cells T mean err G mean err G closer G further
+N<10 / spread<0.1dec            2054    1.3219%    1.0239%      585      318
+N<10 / spread<1dec              1014    2.4465%    2.0464%      292      215
+N<10 / spread>=1dec               94    2.1438%    2.1447%       25       22
+N<100 / spread<0.1dec             28    0.2481%    1.2759%        1       12
+N<100 / spread<1dec             2120    4.3649%    3.7655%     1225      661
+N<100 / spread>=1dec            1338    6.0624%    4.7997%      855      474
+N<1000 / spread<1dec               4    1.0016%    1.5627%        1        3
+N<1000 / spread>=1dec            186    6.7845%    3.5972%      129       57
+=== bpd 32 ===
+band                           cells T mean err G mean err G closer G further
+N<10 / spread<0.1dec            2054    0.8530%    0.7251%      551      365
+N<10 / spread<1dec              1014    1.3092%    1.1679%      295      212
+N<10 / spread>=1dec               94    1.1671%    0.7537%       31       16
+N<100 / spread<0.1dec             28    0.1162%    0.0634%        2        1
+N<100 / spread<1dec             2120    2.5680%    2.4693%     1175      910
+N<100 / spread>=1dec            1338    3.2480%    3.4102%      738      589
+N<1000 / spread<1dec               4    1.1882%    1.5315%        1        3
+N<1000 / spread>=1dec            186    3.3512%    2.6165%      122       64
+=== bpd 53 ===
+band                           cells T mean err G mean err G closer G further
+N<10 / spread<0.1dec            2054    0.4799%    0.5207%      427      491
+N<10 / spread<1dec              1014    0.7295%    0.7011%      261      246
+N<10 / spread>=1dec               94    0.7462%    0.8344%       22       25
+N<100 / spread<0.1dec             28    0.2836%    0.8099%        1       13
+N<100 / spread<1dec             2120    1.1983%    1.3806%      828     1262
+N<100 / spread>=1dec            1338    1.6294%    1.6243%      677      657
+N<1000 / spread<1dec               4    0.5822%    0.4188%        2        2
+N<1000 / spread>=1dec            186    1.6682%    1.0591%      126       60
+=== bpd 80 ===
+band                           cells T mean err G mean err G closer G further
+N<10 / spread<0.1dec            2054    0.4303%    0.3855%      506      412
+N<10 / spread<1dec              1014    0.6127%    0.5189%      293      216
+N<10 / spread>=1dec               94    0.6085%    0.5153%       26       21
+N<100 / spread<0.1dec             28    0.0345%    0.3444%        1       13
+N<100 / spread<1dec             2120    0.9875%    0.9164%     1096      840
+N<100 / spread>=1dec            1338    1.3037%    1.0985%      785      547
+N<1000 / spread<1dec               4    0.8215%    0.8249%        2        2
+N<1000 / spread>=1dec            186    1.4879%    1.3698%      136       50
+=== bpd 115 ===
+band                           cells T mean err G mean err G closer G further
+N<10 / spread<0.1dec            2054    0.2986%    0.2832%      454      463
+N<10 / spread<1dec              1014    0.3800%    0.3922%      250      257
+N<10 / spread>=1dec               94    0.4059%    0.3331%       29       18
+N<100 / spread<0.1dec             28    0.1441%    0.0600%       10        2
+N<100 / spread<1dec             2120    0.6170%    0.6151%      758     1318
+N<100 / spread>=1dec            1338    0.8041%    0.8651%      446      891
+N<1000 / spread<1dec               4    0.6374%    0.6808%        2        2
+N<1000 / spread>=1dec            186    0.7313%    0.8793%       78      108
+=== bpd 256 ===
+band                           cells T mean err G mean err G closer G further
+N<10 / spread<0.1dec            2054    0.1825%    0.1654%      517      404
+N<10 / spread<1dec              1014    0.2178%    0.1951%      301      208
+N<10 / spread>=1dec               94    0.2133%    0.1931%       28       19
+N<100 / spread<0.1dec             28    0.0251%    0.0350%        2        7
+N<100 / spread<1dec             2120    0.3401%    0.2986%     1443      603
+N<100 / spread>=1dec            1338    0.4296%    0.3886%      866      471
+N<1000 / spread<1dec               4    0.3686%    0.5383%        1        3
+N<1000 / spread>=1dec            186    0.4647%    0.4489%      137       49
+=== bpd 616 ===
+band                           cells T mean err G mean err G closer G further
+N<10 / spread<0.1dec            2054    0.0710%    0.0814%      857      473
+N<10 / spread<1dec              1014    0.0813%    0.0913%      326      271
+N<10 / spread>=1dec               94    0.0814%    0.0898%       20       27
+N<100 / spread<0.1dec             28    0.1053%    0.0595%       19        4
+N<100 / spread<1dec             2120    0.1335%    0.1176%     1197      821
+N<100 / spread>=1dec            1338    0.1609%    0.1344%      812      523
+N<1000 / spread<1dec               4    0.1868%    0.2011%        1        3
+N<1000 / spread>=1dec            186    0.1373%    0.1254%      130       56

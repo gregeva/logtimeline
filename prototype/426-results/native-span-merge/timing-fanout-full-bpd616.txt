@@ -1,0 +1,15 @@
+# perl 5.42.2  bpd=616  mode=timing
+# parsed /tmp/ltl-426-fixtures/bin-twxdur-full.log: lines=288025 matched=288025 positive=288025 samples=288025
+# runs=3 (median of 3, plus one untimed warmup)
+
+## Merge pairs
+arm	bpd	merges	median_s	min_s	max_s	us_per_merge	digest
+T	616	5000	5.0333	4.9893	5.0725	1006.65	(see parity)
+S	616	5000	5.3135	5.2195	5.3158	1062.70	(see parity)
+S2	616	5000	0.7809	0.7588	0.7835	156.19	(see parity)
+
+## -g fold
+arm	bpd	merges	median_s	min_s	max_s	us_per_merge	digest
+T	616	286658	199.5215	197.9879	201.0986	696.03	(see parity)
+S	616	286658	414.1805	410.9016	414.7124	1444.86	(see parity)
+S2	616	286658	16.1192	16.0283	16.3002	56.23	(see parity)

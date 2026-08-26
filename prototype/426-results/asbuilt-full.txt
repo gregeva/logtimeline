@@ -1,0 +1,27 @@
+### 426 category=plain keys=286659 top_n=10 sort_ascending=0
+### 426 L0   lookup_s               0.169593 0.165945 0.17786
+### 426 L0   walk_s                 0.260395 0.247949 0.270753
+### 426 L0   sort_s                 0.235745 0.234998 0.249326
+### 426 L0   devel_size_bytes       1.33188e+08 1.33188e+08 1.33188e+08
+### 426 L2   lookup_s               0.0351419 0.0347271 0.0357709
+### 426 L2   walk_s                 0.134796 0.1336 0.135663
+### 426 L2   sort_s                 0.100921 0.0986199 0.101067
+### 426 D    convert_s              0.277693 0.261091 0.293839
+### 426 D    lookup_s               0.0451832 0.0448589 0.0457389
+### 426 D    walk_s                 0.045578 0.0440099 0.048111
+### 426 D    sort_s                 0.0230112 0.0223291 0.0253
+### 426 D    devel_size_bytes       1.73033e+08 1.73033e+08 1.73033e+08
+### 426 D    devel_size_key_col     7.87258e+07 7.87258e+07 7.87258e+07
+### 426 parity top-10 L0/L2/D: OK (fill L0=286659 L2=286659 D=286659)
+TIMING	finalize/calculate_statistics	9.849
+TIMING	finalize/calculate_statistics/bucket_stats	0.000
+TIMING	finalize/calculate_statistics/population_walk	0.254
+TIMING	finalize/calculate_statistics/sort_selection	0.245
+TIMING	finalize/calculate_statistics/group_calc	0.000
+TIMING	finalize/calculate_statistics/threadpool_stats	0.000
+TIMING	finalize/calculate_statistics/untimed	9.349
+MEMORY	log_messages	165294045
+MEMORY	log_messages_counters	120
+MEMORY_FINAL	log_messages	165294045
+COUNTS	log_messages_entries	286659
+COUNTS	log_messages_population	286659

@@ -1,0 +1,11 @@
+=== Part A: seeding / span growth on real data ===
+file: logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log
+arms: G   bpd: 53   runs: 3
+
+--- bpd=53 (one bin = 4.4403%)
+arm G build: warmup 0.784s; timed runs=3 median 0.758s (min 0.740 max 0.760) — parse+add, one arm per store
+arm G memory: Devel::Size=4258207 (4.06 MB)  RSS delta=5680 kB (5.55 MB) [rss 11152 -> 16832 kB]
+file counts: format=twx lines=122808 matched=122808 unparsed=0 no_duration=0 positive=122798 zero=10 negative=0 keys_any=3421 keys_positive=3419
+G telemetry: partitions_total=3419 span_slots: p50=17 p95=134 p99=158 max=214 index_range=[0,279] (5.28 decades) counter_memory_bytes=4367727
+
+ALL PASS

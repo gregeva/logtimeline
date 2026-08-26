@@ -1,0 +1,186 @@
+=== Part B: pathological scenarios (#189 V3 Part B under T cap 0 / T no cap / S parity / G) ===
+warmup: 1000 deterministic values v0*(0.5 + j/1000), j=0..999 (#189 used rand); outliers appended after warmup.
+
+--- bpd=53 (one bin = 4.4403%)
+
+Scenario: extreme high outlier (v0=100; 1e6,1e7,1e8) (bpd=53, N=1003)
+  oracle exact (nearest-rank): q0.001=50.1  q0.5=100.1  q0.999=1e+07
+PASS   [extreme high outlier (v0=100; 1e6,1e7,1e8) bpd=53 cap] S canonical == T canonical
+PASS   [extreme high outlier (v0=100; 1e6,1e7,1e8) bpd=53 nocap] S canonical == T canonical
+  T_cap    partition min=0.158114 max=15811.4 bin_count=265 rebins=0 bins_array_len=158 overflow=3 underflow=0 bytes=4428
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=49.3136[none,-1.57%]  q0.5=100.147[none,+0.05%]  q0.999=15811.4[high,-99.84%]
+  T_nocap  partition min=0.158114 max=1.58114e+09 bin_count=530 rebins=2 bins_array_len=467 overflow=0 underflow=0 bytes=7820
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=49.3136[none,-1.57%]  q0.5=100.147[none,+0.05%]  q0.999=1.02398e+07[none,+2.40%]
+  G        span_slots=335 grid_index=[90,424] occupied=29 bytes=4731 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=50.0989[none,-0.00%]  q0.5=100.193[none,+0.09%]  q0.999=1e+07[none,+0.00%]
+PASS   [extreme high outlier (v0=100; 1e6,1e7,1e8) bpd=53] T cap 0 audit across q=0.001/0.5/0.999: {high=1,none=2} expected high=1 low=0 (#189 V3)
+PASS   [extreme high outlier (v0=100; 1e6,1e7,1e8) bpd=53] T no cap: every audit 'none' (auto-resize contained every value)
+PASS   [extreme high outlier (v0=100; 1e6,1e7,1e8) bpd=53] G: every audit 'none' (structural)
+
+Scenario: extreme low outlier (v0=10000; 0.5,0.1,0.01) (bpd=53, N=1003)
+  oracle exact (nearest-rank): q0.001=0.1  q0.5=9980  q0.999=14980
+PASS   [extreme low outlier (v0=10000; 0.5,0.1,0.01) bpd=53 cap] S canonical == T canonical
+PASS   [extreme low outlier (v0=10000; 0.5,0.1,0.01) bpd=53 nocap] S canonical == T canonical
+  T_cap    partition min=15.8114 max=1.58114e+06 bin_count=265 rebins=0 bins_array_len=158 overflow=0 underflow=3 bytes=4428
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=15.8114[low,+15711.39%]  q0.5=9984.38[none,+0.04%]  q0.999=15126[none,+0.97%]
+  T_nocap  partition min=0.000158114 max=1.58114e+06 bin_count=530 rebins=2 bins_array_len=423 overflow=0 underflow=0 bytes=6892
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=0.102398[none,+2.40%]  q0.5=9984.38[none,+0.04%]  q0.999=15126[none,+0.97%]
+  G        span_slots=328 grid_index=[-106,221] occupied=29 bytes=11907 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=0.10444[none,+4.44%]  q0.5=9989.66[none,+0.10%]  q0.999=15409.2[none,+2.87%]
+PASS   [extreme low outlier (v0=10000; 0.5,0.1,0.01) bpd=53] T cap 0 audit across q=0.001/0.5/0.999: {low=1,none=2} expected high=0 low=1 (#189 V3)
+PASS   [extreme low outlier (v0=10000; 0.5,0.1,0.01) bpd=53] T no cap: every audit 'none' (auto-resize contained every value)
+PASS   [extreme low outlier (v0=10000; 0.5,0.1,0.01) bpd=53] G: every audit 'none' (structural)
+
+Scenario: mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) (bpd=53, N=1100)
+  oracle exact (nearest-rank): q0.001=0.001  q0.5=1000  q0.999=1e+08
+PASS   [mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) bpd=53 cap] S canonical == T canonical
+PASS   [mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) bpd=53 nocap] S canonical == T canonical
+  T_cap    partition min=1.58114 max=158114 bin_count=265 rebins=0 bins_array_len=158 overflow=50 underflow=50 bytes=4428
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=1.58114[low,+158013.88%]  q0.5=999.447[none,-0.06%]  q0.999=158114[high,-99.84%]
+  T_nocap  partition min=1.58114e-05 max=1.58114e+10 bin_count=794 rebins=2 bins_array_len=678 overflow=0 underflow=0 bytes=9380
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=0.00098727[none,-1.27%]  q0.5=978.797[none,-2.12%]  q0.999=1.01661e+08[none,+1.66%]
+  G        span_slots=584 grid_index=[-159,424] occupied=28 bytes=14067 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=0.00100174[none,+0.17%]  q0.5=998.99[none,-0.10%]  q0.999=1.0435e+08[none,+4.35%]
+PASS   [mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) bpd=53] T cap 0 audit across q=0.001/0.5/0.999: {high=1,low=1,none=1} expected high=1 low=1 (#189 V3)
+PASS   [mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) bpd=53] T no cap: every audit 'none' (auto-resize contained every value)
+PASS   [mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) bpd=53] G: every audit 'none' (structural)
+
+Scenario: 12-decade key (1000 near 100 first, then 1e-3..1e9 ascending) (bpd=53, N=1013)
+  oracle exact (nearest-rank): q0.001=0.01  q0.5=100  q0.999=1e+08
+PASS   [12-decade key (1000 near 100 first, then 1e-3..1e9 ascending) bpd=53 cap] S canonical == T canonical
+PASS   [12-decade key (1000 near 100 first, then 1e-3..1e9 ascending) bpd=53 nocap] S canonical == T canonical
+  T_cap    partition min=0.158114 max=15811.4 bin_count=265 rebins=0 bins_array_len=255 overflow=5 underflow=3 bytes=5452
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=0.158114[low,+1481.14%]  q0.5=100.099[none,+0.10%]  q0.999=15811.4[high,-99.98%]
+  T_nocap  partition min=0.0005 max=1.58114e+09 bin_count=662 rebins=3 bins_array_len=652 overflow=0 underflow=0 bytes=10212
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=0.0100425[none,+0.42%]  q0.5=98.8533[none,-1.15%]  q0.999=1.02186e+08[none,+2.19%]
+  G        span_slots=636 grid_index=[-159,476] occupied=38 bytes=12851 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=0.010444[none,+4.44%]  q0.5=100.189[none,+0.19%]  q0.999=1.0444e+08[none,+4.44%]
+PASS   [12-decade key (1000 near 100 first, then 1e-3..1e9 ascending) bpd=53] G: every audit 'none' (structural)
+
+Scenario: 12-decade key (1e-3..1e9 ascending first, then 1000 near 100) (bpd=53, N=1013)
+  oracle exact (nearest-rank): q0.001=0.01  q0.5=100  q0.999=1e+08
+PASS   [12-decade key (1e-3..1e9 ascending first, then 1000 near 100) bpd=53 cap] S canonical == T canonical
+PASS   [12-decade key (1e-3..1e9 ascending first, then 1000 near 100) bpd=53 nocap] S canonical == T canonical
+  T_cap    partition min=3.16228e-06 max=0.316228 bin_count=265 rebins=0 bins_array_len=239 overflow=1010 underflow=0 bytes=3924
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=0.0102196[none,+2.20%]  q0.5=0.316228[high,-99.68%]  q0.999=0.316228[high,-100.00%]
+  T_nocap  partition min=3.16228e-06 max=3.16228e+09 bin_count=794 rebins=4 bins_array_len=768 overflow=0 underflow=0 bytes=10292
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=0.0103241[none,+3.24%]  q0.5=100.097[none,+0.10%]  q0.999=1.01755e+08[none,+1.76%]
+  G        span_slots=636 grid_index=[-159,476] occupied=38 bytes=6995 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=0.010444[none,+4.44%]  q0.5=100.189[none,+0.19%]  q0.999=1.0444e+08[none,+4.44%]
+PASS   [12-decade key (1e-3..1e9 ascending first, then 1000 near 100) bpd=53] G: every audit 'none' (structural)
+
+Scenario: 12-decade key (1e9 first, then 1e8..1e-3 descending, then 1000 near 100) (bpd=53, N=1013)
+  oracle exact (nearest-rank): q0.001=0.01  q0.5=100  q0.999=1e+08
+PASS   [12-decade key (1e9 first, then 1e8..1e-3 descending, then 1000 near 100) bpd=53 cap] S canonical == T canonical
+PASS   [12-decade key (1e9 first, then 1e8..1e-3 descending, then 1000 near 100) bpd=53 nocap] S canonical == T canonical
+  T_cap    partition min=3.16228e+06 max=3.16228e+11 bin_count=265 rebins=0 bins_array_len=133 overflow=0 underflow=1010 bytes=2740
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=3.16228e+06[low,+31622776501.68%]  q0.5=3.16228e+06[low,+3162177.66%]  q0.999=1.02196e+08[none,+2.20%]
+  T_nocap  partition min=0.000316228 max=3.16228e+11 bin_count=794 rebins=4 bins_array_len=662 overflow=0 underflow=0 bytes=10292
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=0.0102644[none,+2.64%]  q0.5=100.013[none,+0.01%]  q0.999=1.01167e+08[none,+1.17%]
+  G        span_slots=636 grid_index=[-159,476] occupied=38 bytes=21347 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=0.010444[none,+4.44%]  q0.5=100.189[none,+0.19%]  q0.999=1.0444e+08[none,+4.44%]
+PASS   [12-decade key (1e9 first, then 1e8..1e-3 descending, then 1000 near 100) bpd=53] G: every audit 'none' (structural)
+
+
+--- bpd=616 (one bin = 0.3745%)
+
+Scenario: extreme high outlier (v0=100; 1e6,1e7,1e8) (bpd=616, N=1003)
+  oracle exact (nearest-rank): q0.001=50.1  q0.5=100.1  q0.999=1e+07
+PASS   [extreme high outlier (v0=100; 1e6,1e7,1e8) bpd=616 cap] S canonical == T canonical
+PASS   [extreme high outlier (v0=100; 1e6,1e7,1e8) bpd=616 nocap] S canonical == T canonical
+  T_cap    partition min=0.158114 max=15811.4 bin_count=3080 rebins=0 bins_array_len=1834 overflow=3 underflow=0 bytes=37572
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=50.1872[none,+0.17%]  q0.5=100.118[none,+0.02%]  q0.999=15811.4[high,-99.84%]
+  T_nocap  partition min=0.158114 max=1.58114e+09 bin_count=6160 rebins=2 bins_array_len=5422 overflow=0 underflow=0 bytes=69772
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=50.1872[none,+0.17%]  q0.5=100.118[none,+0.02%]  q0.999=1.00212e+07[none,+0.21%]
+  G        span_slots=3883 grid_index=[1046,4928] occupied=298 bytes=40883 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=50.175[none,+0.15%]  q0.5=100.187[none,+0.09%]  q0.999=1e+07[none,+0.00%]
+PASS   [extreme high outlier (v0=100; 1e6,1e7,1e8) bpd=616] T cap 0 audit across q=0.001/0.5/0.999: {high=1,none=2} expected high=1 low=0 (#189 V3)
+PASS   [extreme high outlier (v0=100; 1e6,1e7,1e8) bpd=616] T no cap: every audit 'none' (auto-resize contained every value)
+PASS   [extreme high outlier (v0=100; 1e6,1e7,1e8) bpd=616] G: every audit 'none' (structural)
+
+Scenario: extreme low outlier (v0=10000; 0.5,0.1,0.01) (bpd=616, N=1003)
+  oracle exact (nearest-rank): q0.001=0.1  q0.5=9980  q0.999=14980
+PASS   [extreme low outlier (v0=10000; 0.5,0.1,0.01) bpd=616 cap] S canonical == T canonical
+PASS   [extreme low outlier (v0=10000; 0.5,0.1,0.01) bpd=616 nocap] S canonical == T canonical
+  T_cap    partition min=15.8114 max=1.58114e+06 bin_count=3080 rebins=0 bins_array_len=1834 overflow=0 underflow=3 bytes=37572
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=15.8114[low,+15711.39%]  q0.5=9983.77[none,+0.04%]  q0.999=14994[none,+0.09%]
+  T_nocap  partition min=0.000158114 max=1.58114e+06 bin_count=6160 rebins=2 bins_array_len=4914 overflow=0 underflow=0 bytes=61580
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=0.100212[none,+0.21%]  q0.5=9983.77[none,+0.04%]  q0.999=14994[none,+0.09%]
+  G        span_slots=3805 grid_index=[-1232,2572] occupied=298 bytes=125051 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=0.100374[none,+0.37%]  q0.5=9987.55[none,+0.08%]  q0.999=15001.6[none,+0.14%]
+PASS   [extreme low outlier (v0=10000; 0.5,0.1,0.01) bpd=616] T cap 0 audit across q=0.001/0.5/0.999: {low=1,none=2} expected high=0 low=1 (#189 V3)
+PASS   [extreme low outlier (v0=10000; 0.5,0.1,0.01) bpd=616] T no cap: every audit 'none' (auto-resize contained every value)
+PASS   [extreme low outlier (v0=10000; 0.5,0.1,0.01) bpd=616] G: every audit 'none' (structural)
+
+Scenario: mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) (bpd=616, N=1100)
+  oracle exact (nearest-rank): q0.001=0.001  q0.5=1000  q0.999=1e+08
+PASS   [mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) bpd=616 cap] S canonical == T canonical
+PASS   [mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) bpd=616 nocap] S canonical == T canonical
+  T_cap    partition min=1.58114 max=158114 bin_count=3080 rebins=0 bins_array_len=1834 overflow=50 underflow=50 bytes=37572
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=1.58114[low,+158013.88%]  q0.5=999.311[none,-0.07%]  q0.999=158114[high,-99.84%]
+  T_nocap  partition min=1.58114e-05 max=1.58114e+10 bin_count=9239 rebins=2 bins_array_len=7885 overflow=0 underflow=0 bytes=93396
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=0.000998975[none,-0.10%]  q0.5=997.519[none,-0.25%]  q0.999=1.00149e+08[none,+0.15%]
+  G        span_slots=6777 grid_index=[-1848,4928] occupied=297 bytes=152715 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=0.00100015[none,+0.01%]  q0.5=999.066[none,-0.09%]  q0.999=1.00367e+08[none,+0.37%]
+PASS   [mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) bpd=616] T cap 0 audit across q=0.001/0.5/0.999: {high=1,low=1,none=1} expected high=1 low=1 (#189 V3)
+PASS   [mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) bpd=616] T no cap: every audit 'none' (auto-resize contained every value)
+PASS   [mixed scale (v0=1000; 50 x 1e-3, 50 x 1e8) bpd=616] G: every audit 'none' (structural)
+
+Scenario: 12-decade key (1000 near 100 first, then 1e-3..1e9 ascending) (bpd=616, N=1013)
+  oracle exact (nearest-rank): q0.001=0.01  q0.5=100  q0.999=1e+08
+PASS   [12-decade key (1000 near 100 first, then 1e-3..1e9 ascending) bpd=616 cap] S canonical == T canonical
+PASS   [12-decade key (1000 near 100 first, then 1e-3..1e9 ascending) bpd=616 nocap] S canonical == T canonical
+  T_cap    partition min=0.158114 max=15811.4 bin_count=3080 rebins=0 bins_array_len=2958 overflow=5 underflow=3 bytes=48372
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=0.158114[low,+1481.14%]  q0.5=100.062[none,+0.06%]  q0.999=15811.4[high,-99.98%]
+  T_nocap  partition min=0.0005 max=1.58114e+09 bin_count=7700 rebins=3 bins_array_len=7578 overflow=0 underflow=0 bytes=86732
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=0.0100212[none,+0.21%]  q0.5=100.062[none,+0.06%]  q0.999=1.00212e+08[none,+0.21%]
+  G        span_slots=7392 grid_index=[-1848,5543] occupied=307 bytes=143203 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=0.0100374[none,+0.37%]  q0.5=100.15[none,+0.15%]  q0.999=1.00374e+08[none,+0.37%]
+PASS   [12-decade key (1000 near 100 first, then 1e-3..1e9 ascending) bpd=616] G: every audit 'none' (structural)
+
+Scenario: 12-decade key (1e-3..1e9 ascending first, then 1000 near 100) (bpd=616, N=1013)
+  oracle exact (nearest-rank): q0.001=0.01  q0.5=100  q0.999=1e+08
+PASS   [12-decade key (1e-3..1e9 ascending first, then 1000 near 100) bpd=616 cap] S canonical == T canonical
+PASS   [12-decade key (1e-3..1e9 ascending first, then 1000 near 100) bpd=616 nocap] S canonical == T canonical
+  T_cap    partition min=3.16228e-06 max=0.316228 bin_count=3080 rebins=0 bins_array_len=2773 overflow=1010 underflow=0 bytes=27796
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=0.0100374[none,+0.37%]  q0.5=0.316228[high,-99.68%]  q0.999=0.316228[high,-100.00%]
+  T_nocap  partition min=3.16228e-06 max=3.16228e+09 bin_count=9239 rebins=4 bins_array_len=8932 overflow=0 underflow=0 bytes=100764
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=0.0100462[none,+0.46%]  q0.5=100.094[none,+0.09%]  q0.999=1.00337e+08[none,+0.34%]
+  G        span_slots=7392 grid_index=[-1848,5543] occupied=307 bytes=73867 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=0.0100374[none,+0.37%]  q0.5=100.15[none,+0.15%]  q0.999=1.00374e+08[none,+0.37%]
+PASS   [12-decade key (1e-3..1e9 ascending first, then 1000 near 100) bpd=616] G: every audit 'none' (structural)
+
+Scenario: 12-decade key (1e9 first, then 1e8..1e-3 descending, then 1000 near 100) (bpd=616, N=1013)
+  oracle exact (nearest-rank): q0.001=0.01  q0.5=100  q0.999=1e+08
+PASS   [12-decade key (1e9 first, then 1e8..1e-3 descending, then 1000 near 100) bpd=616 cap] S canonical == T canonical
+PASS   [12-decade key (1e9 first, then 1e8..1e-3 descending, then 1000 near 100) bpd=616 nocap] S canonical == T canonical
+  T_cap    partition min=3.16228e+06 max=3.16228e+11 bin_count=3080 rebins=0 bins_array_len=1540 overflow=0 underflow=1010 bytes=13996
+  T_cap    R4 ceil-rank (value[audit,err vs exact]): q0.001=3.16228e+06[low,+31622776501.68%]  q0.5=3.16228e+06[low,+3162177.66%]  q0.999=1.00374e+08[none,+0.37%]
+  T_nocap  partition min=0.000316228 max=3.16228e+11 bin_count=9239 rebins=4 bins_array_len=7699 overflow=0 underflow=0 bytes=86668
+  T_nocap  R4 ceil-rank (value[audit,err vs exact]): q0.001=0.0100037[none,+0.04%]  q0.5=100.137[none,+0.14%]  q0.999=1.00287e+08[none,+0.29%]
+  G        span_slots=7392 grid_index=[-1848,5543] occupied=307 bytes=243907 (no partition state; no overflow/underflow counters)
+  G        R4 ceil-rank (value[audit,err vs exact]): q0.001=0.0100374[none,+0.37%]  q0.5=100.15[none,+0.15%]  q0.999=1.00374e+08[none,+0.37%]
+PASS   [12-decade key (1e9 first, then 1e8..1e-3 descending, then 1000 near 100) bpd=616] G: every audit 'none' (structural)
+
+
+--- worst case: integer ms durations spanning 1..1e9 ---
+bpd=53 closed form: grid_index(1)=0 grid_index(1e9)=476 -> max G span slots = 477 (= 9 decades x 53 + 1)
+PASS   [worst bpd=53 first=1] S canonical == T canonical
+  first=1     N=479 | T: min=0.00316228 max=1e+10 decades=12.50 bin_count=662 rebins=1 bins_array_len=610 occupied=478 bytes(entry)=37228 bytes(S columns)=18233 | G: span_slots=477 occupied=477 bytes=16235 | G/T slots=0.721 bytes=0.436
+PASS   [worst bpd=53 first=1000] S canonical == T canonical
+  first=1000  N=480 | T: min=0.01 max=3.16228e+10 decades=12.50 bin_count=662 rebins=2 bins_array_len=583 occupied=478 bytes(entry)=37260 bytes(S columns)=18489 | G: span_slots=477 occupied=477 bytes=16483 | G/T slots=0.721 bytes=0.442
+PASS   [worst bpd=53 first=1000000000] S canonical == T canonical
+  first=1e+09 N=479 | T: min=0.1 max=3.16228e+11 decades=12.50 bin_count=662 rebins=1 bins_array_len=530 occupied=478 bytes(entry)=36380 bytes(S columns)=18233 | G: span_slots=477 occupied=477 bytes=16235 | G/T slots=0.721 bytes=0.446
+  endpoints only (1 then 1e9): T bin_count=662 rebins=1 bins_array_len=610 bytes=6684 | G span_slots=477 occupied=2 bytes=4835
+  endpoints only (1e9 then 1): T bin_count=662 rebins=1 bins_array_len=530 bytes=5836 | G span_slots=477 occupied=2 bytes=16235 (downward growth splices real zeros)
+bpd=616 closed form: grid_index(1)=0 grid_index(1e9)=5543 -> max G span slots = 5544 (= 9 decades x 616 + 1)
+PASS   [worst bpd=616 first=1] S canonical == T canonical
+  first=1     N=5546 | T: min=0.00316228 max=1e+10 decades=12.50 bin_count=7700 rebins=1 bins_array_len=7085 occupied=5546 bytes(entry)=415628 bytes(S columns)=180409 | G: span_slots=5544 occupied=5544 bytes=178379 | G/T slots=0.720 bytes=0.429
+PASS   [worst bpd=616 first=1000] S canonical == T canonical
+  first=1000  N=5547 | T: min=0.01 max=3.16228e+10 decades=12.50 bin_count=7700 rebins=2 bins_array_len=6777 occupied=5546 bytes(entry)=416028 bytes(S columns)=183361 | G: span_slots=5544 occupied=5544 bytes=181331 | G/T slots=0.720 bytes=0.436
+PASS   [worst bpd=616 first=1000000000] S canonical == T canonical
+  first=1e+09 N=5546 | T: min=0.1 max=3.16228e+11 decades=12.50 bin_count=7700 rebins=1 bins_array_len=6160 occupied=5544 bytes(entry)=405644 bytes(S columns)=180345 | G: span_slots=5544 occupied=5544 bytes=178379 | G/T slots=0.720 bytes=0.440
+  endpoints only (1 then 1e9): T bin_count=7700 rebins=1 bins_array_len=7085 bytes=60732 | G span_slots=5544 occupied=2 bytes=45371
+  endpoints only (1e9 then 1): T bin_count=7700 rebins=1 bins_array_len=6160 bytes=50876 | G span_slots=5544 occupied=2 bytes=178379 (downward growth splices real zeros)
+
+ALL PASS
