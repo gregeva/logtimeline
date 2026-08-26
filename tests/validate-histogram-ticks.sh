@@ -266,117 +266,100 @@ inspect_output() {
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Tick POSITION assertion (#450).
+# Tick POSITION assertion (#450, made exact by the observability added in #462).
 #
-# calculate_histogram_percentile_ticks() maps a percentile value to a column by
+# calculate_histogram_percentile_ticks() maps a percentile value to a column:
 #   col = int( log(v/min) / log(max/min) * (bar_width - 1) )
-# so columns are log-proportional to the values: the spacing between ticks is
-# fixed by the spacing between the percentile values, whatever min, max and
-# bar_width happen to be.
 #
-# That is what this asserts. Anchoring on the lowest and highest rendered ticks
-# and their matching legend values, every interior percentile's column is
-# predicted from its own value and compared with the rendered ticks.
+# `-V histogram-percentile-ticks` publishes that expression's four inputs at
+# full precision -- bar_width, min, max, and each selected percentile value.
+# The harness recomputes the mapping from them and compares the resulting
+# column set against the columns recovered from the rendered axis row. So the
+# -V surface supplies the EXPECTED and the render supplies the ACTUAL, which is
+# the split HARNESS-DESIGN.md sanctions; the section deliberately does not
+# report the computed columns, since reading those back would compare ltl with
+# itself and assert nothing.
 #
-# WHAT IT DOES NOT CATCH, stated so nobody reads more into a pass than is there,
-# and demonstrated rather than assumed (#450):
-#   - Replacing the log mapping with a linear one is caught: 5 failures.
-#   - Adding a constant 3 to every column is NOT caught: 0 failures. A uniform
-#     offset, or a rescale of the whole axis, is absorbed by the anchors.
-# The interior spacing -- the shape of the log mapping -- is what is under test,
-# not the axis's absolute placement.
+# Equality, no tolerance. An earlier form of this assertion predicted from the
+# rendered legend, whose values are rounded by format_heatmap_value() to one
+# decimal and a unit -- that mispredicted 3 of 9 columns on this fixture and
+# forced a tolerance wide enough to be inert on the widest histograms. With the
+# unrounded inputs the prediction is exact, so a single-column drift now fails,
+# which is what D2 requires be provable.
 #
-# TOLERANCE: +/-1 column, widened per percentile by how far display rounding
-# alone could move its prediction (half of the last printed decimal, propagated
-# through d(log v) = u/v, for the value and both anchors). Each run reports how
-# many of its percentiles are display-limited -- where the printed precision is
-# coarse relative to the spacing, the tolerance grows and the assertion weakens
-# to the point of being inert. On this corpus that is all 10 percentiles at
-# -hgw 75 and -hgw 95, and 0 at -hgw 30.
-#
-# The base +/-1 is not slack that could be tightened. The
-# legend values this predicts FROM are display-rounded by format_heatmap_value()
-# (one decimal plus a unit: "1.5m"), and int() flooring at each anchor adds its
-# own column of uncertainty. Predicting from unrounded values is not possible
-# from any surface ltl emits today; measured, the rounded inputs mispredict
-# roughly a third of columns by exactly one. Architect's decision, 2026-08-26:
-# accept the tolerance rather than add an observable. The consequence is
-# recorded in features/bin-counter-accuracy-and-observability.md D15 -- a
-# one-column drift passes, so this documents the mapping without gating it.
+# Columns are recovered by anchoring on the bottom-left corner glyph, never on
+# a fixed left margin: print_histograms() prefixes every line with a
+# data-dependent centering offset.
 # ---------------------------------------------------------------------------
 assert_tick_positions() {
-    local report="$1" hidx="$2" label="$3"
+    local out="$1" report="$2" hidx="$3" label="$4"
 
-    local cols vals unparsed
+    local cols
     cols=$(echo "$report" | awk -F: -v h="$hidx" '/^TICKCOL:1:/ && $3==h {print $4}')
-    vals=$(echo "$report" | awk -F: -v h="$hidx" '/^LEGENDVAL:1:/ && $3==h {print $5}')
-    unparsed=$(echo "$report" | awk -F: -v h="$hidx" '/^LEGENDVAL:1:/ && $3==h {sub(/unparsed=/,"",$4); print $4+0}')
-
-    if [[ -z "$cols" || -z "$vals" ]]; then
-        emit_fail \
-            label       "tick position extraction ($label)" \
-            asserts     'The inspector must extract both a tick-column list and a parsed legend-value list; a missing anchor here means the axis row or the legend was not rendered, or the inspector regexes drifted from the render' \
-            produced_by 'render_histogram_x_axis() and the legend rendering in ltl; TICKCOL/LEGENDVAL emission in inspect_output() of this harness' \
-            contract    'tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors - a grep that matches nothing is a failure, not a pass' \
-            detail      "cols='$cols' vals='$vals' ($label)"
-        return 1
-    fi
-    if [[ "${unparsed:-0}" -ne 0 ]]; then
-        emit_fail \
-            label       "legend unit vocabulary ($label)" \
-            asserts     'Every legend entry carries a unit this harness can convert to a common base; an unrecognised unit means the rendered vocabulary gained a suffix the position assertion cannot read, which would silently reduce coverage' \
-            produced_by 'format_heatmap_value() in ltl - legend value formatting; unit_scale table in inspect_output() of this harness' \
-            contract    'Issue #450 - the position assertion reads the rendered legend, so the harness tracks its unit vocabulary' \
-            detail      "$unparsed legend entries had an unrecognised unit ($label)"
-        return 1
-    fi
 
     local verdict
-    verdict=$(TICK_COLS="$cols" LEGEND_VALS="$vals" perl -e '
-        my @cols = sort { $a <=> $b } split /,/, $ENV{TICK_COLS};
-        my @pairs;
-        for my $e (split /,/, $ENV{LEGEND_VALS}) {
-            my ($l, $v, $u) = split /=/, $e;
-            push @pairs, [$l, $v, $u // 0] if defined $v && $v > 0;
+    verdict=$(TICK_COLS="${cols:-}" PANEL="$hidx" perl -CS -e '
+        use strict; use warnings;
+        my $file = $ARGV[0];
+        open my $fh, "<:encoding(UTF-8)", $file or die "open: $!";
+        my @l = <$fh>; close $fh;
+        my ($in, $panel, @blocks) = (0, 0);
+        for my $line (@l) {
+            $line =~ s/\e\[[0-9;]*m//g;
+            if ($line =~ /^=== histogram-percentile-ticks ===/)     { $in = 1; next }
+            if ($line =~ /^=== END histogram-percentile-ticks ===/) { $in = 0; next }
+            next unless $in;
+            if ($line =~ /^\s+metric:\s+(\S+)\s+bar_width=(\d+)\s+min=(\S+)\s+max=(\S+)/) {
+                push @blocks, { metric => $1, w => $2, min => $3, max => $4, vals => [] };
+            } elsif (@blocks && $line =~ /^\s+(P[\d.]+)=(\S+)/) {
+                push @{ $blocks[-1]{vals} }, [$1, $2];
+            }
         }
-        @pairs = sort { $a->[1] <=> $b->[1] } @pairs;
-        if (@pairs < 3 || @cols < 2) { print "SKIP:too-few-anchors"; exit }
-        my ($lo, $hi) = ($pairs[0][1], $pairs[-1][1]);
-        if ($hi <= $lo) { print "SKIP:degenerate-range"; exit }
-        my ($c_lo, $c_hi) = ($cols[0], $cols[-1]);
-        my $span = log($hi / $lo);
-        # Columns per natural log unit, from the anchors.
-        my $scale = ($c_hi - $c_lo) / $span;
-        my ($u_lo, $u_hi) = ($pairs[0][2], $pairs[-1][2]);
-        my @bad; my $weak = 0;
-        for my $p (@pairs) {
-            my ($label, $v, $u) = @$p;
-            my $pred = $c_lo + $scale * log($v / $lo);
-            # How far the prediction could move purely because the value, and
-            # both anchors, are display-rounded. d(log v) = u/v.
-            my $slop = $scale * ($u / $v + $u_lo / $lo + $u_hi / $hi);
-            my $tol  = 1.0 + $slop;
-            $weak++ if $slop > 1.0;
-            my $best = 1e9;
-            for my $c (@cols) { my $d = abs($c - $pred); $best = $d if $d < $best }
-            push @bad, sprintf("%s(v=%g pred=%.1f nearest-off-by=%.1f tol=%.1f)",
-                               $label, $v, $pred, $best, $tol)
-                if $best > $tol;
+        if (!@blocks) { print "MISSING:no-tick-inputs-section"; exit }
+        # NB: not $a/$b -- a lexical of either name in this scope binds the
+        # comparison variables used by sort, silently disabling the sort.
+        my $blk = $blocks[ $ENV{PANEL} - 1 ];
+        if (!$blk) { print "MISSING:no-block-for-panel-$ENV{PANEL}"; exit }
+        my ($w, $min, $max) = ($blk->{w}, $blk->{min}, $blk->{max});
+        if (!($min > 0) || !($max > $min)) { print "SKIP:degenerate-range"; exit }
+        my $lr = log($max / $min);
+        my %exp;
+        for my $v (@{ $blk->{vals} }) {
+            my ($label, $value) = @$v;
+            next unless $value > 0;
+            my $pos = log($value / $min) / $lr;
+            $pos = 0 if $pos < 0; $pos = 1 if $pos > 1;
+            $exp{ int($pos * ($w - 1)) } = 1;
         }
-        print @bad ? "FAIL:" . join(" ", @bad)
-                   : sprintf("OK:%d percentiles, %d of them display-limited", scalar(@pairs), $weak);
-    ')
+        my @expected = sort { $a <=> $b } keys %exp;
+        my @actual   = sort { $a <=> $b } grep { length } split /,/, ($ENV{TICK_COLS} // "");
+        if (!@actual)   { print "MISSING:no-tick-columns-on-axis"; exit }
+        if (!@expected) { print "SKIP:no-positive-percentile-values"; exit }
+        my $want = join(",", @expected);
+        my $got  = join(",", @actual);
+        print $want eq $got
+            ? "OK:$blk->{metric} " . scalar(@expected) . " columns [$want]"
+            : "FAIL:$blk->{metric} expected [$want] actual [$got]";
+    ' "$out")
 
     case "$verdict" in
         OK:*)
-            note_pass "tick columns log-proportional to legend values, +/-1 col (${verdict#OK:}) ($label)" ;;
+            note_pass "tick columns exactly match the mapping recomputed from -V inputs (${verdict#OK:}) ($label)" ;;
         SKIP:*)
             note_pass "tick position check not applicable (${verdict#SKIP:}) ($label)" ;;
+        MISSING:*)
+            emit_fail \
+                label       "tick position inputs ($label)" \
+                asserts     'The -V histogram-percentile-ticks section must publish a block for every rendered histogram panel, and the axis row must yield at least one tick column; a missing anchor on either side means the section or the render regressed, or this harness stopped reading what ltl emits' \
+                produced_by 'emit_histogram_tick_inputs() / emit_histogram_tick_inputs_verbose() in ltl; TICKCOL emission in inspect_output() of this harness' \
+                contract    'tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors - a grep that matches nothing is a failure, not a pass' \
+                detail      "${verdict#MISSING:} ($label)"
+            return 1 ;;
         *)
             emit_fail \
                 label       "tick position ($label)" \
-                asserts     'Each percentile tick sits within one column of where the log mapping puts its legend value, anchored on the lowest and highest rendered ticks. A larger deviation means the value-to-column mapping is no longer log-proportional - the percentile markers no longer line up with the values printed beside them' \
-                produced_by 'calculate_histogram_percentile_ticks() in ltl - col = int(log(v/min)/log(max/min) * (bar_width-1)); rendered by render_histogram_x_axis()' \
+                asserts     'Every percentile tick sits in exactly the column the mapping puts it in, recomputed independently by this harness from the full-precision inputs ltl publishes. Any difference means the rendered tick marks no longer line up with the percentile values printed beside them' \
+                produced_by 'calculate_histogram_percentile_ticks() in ltl - col = int(log(v/min)/log(max/min) * (bar_width-1)); rendered by render_histogram_x_axis(); inputs published by emit_histogram_tick_inputs()' \
                 contract    'features/bin-counter-accuracy-and-observability.md section D2 - the percentile tick marks must line up accurately with the percentile values that are printed and with their placement on the histogram, validated by test rather than by inspection' \
                 detail      "${verdict#FAIL:} ($label)"
             return 1 ;;
@@ -391,7 +374,7 @@ test_single_width() {
     local out
     out=$(mktemp)
     # shellcheck disable=SC2086
-    "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -hg duration -hgw "$hgw" "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
+    "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -V histogram-percentile-ticks -hg duration -hgw "$hgw" "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
     if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
         fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
     fi
@@ -450,7 +433,7 @@ test_single_width() {
     fi
 
     # Position assertion (#450).
-    assert_tick_positions "$report" 1 "-hgw $hgw" || true
+    assert_tick_positions "$out" "$report" 1 "-hgw $hgw" || true
 
 
     rm -f "$out"
@@ -466,7 +449,7 @@ test_multi_histogram() {
     local out
     out=$(mktemp)
     # shellcheck disable=SC2086
-    "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -hg duration,bytes -hgw 95 "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
+    "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -V histogram-percentile-ticks -hg duration,bytes -hgw 95 "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
     if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
         fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
     fi
@@ -510,7 +493,7 @@ test_multi_histogram() {
                 detail      "hist#$hidx ticks ($tick) outside [1, $legend] legend entries"
         fi
 
-        assert_tick_positions "$report" "$hidx" "panel #$hidx" || true
+        assert_tick_positions "$out" "$report" "$hidx" "panel #$hidx" || true
 
     done
 

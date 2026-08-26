@@ -123,17 +123,41 @@ the feature file.
 
 ## L3 oracle scope
 
-**Layer 3 does not cover consolidated rows.** `oracle/calculate-reference.py`
-groups by exact message key and implements no fuzzy merge, so a consolidated
-row — whose key is wildcarded, e.g.
-`[200] POST /Thingworx/Things/*/Services/…` — has no oracle counterpart and is
-skipped. Every summary line reports `unpaired=N (wildcard=M)` so a skipped row
-is visible rather than silent (#450), and a scenario where every row went
-unpaired is named as `NO CELLS COMPARED` rather than reporting `L3=OK`.
+**Layer 3 covers consolidated rows** (#462). A consolidated row's key is a
+wildcard pattern that appears nowhere in the log, so the oracle — which groups
+by exact message key and implements no fuzzy merge — could not form its sample
+set and skipped it. The harness now captures `ltl -V message-grouping`'s
+cluster-membership sub-section per consolidating scenario and passes it to the
+oracle as `--cluster-membership`, which folds each member into its cluster
+before computing. The division: **`ltl` supplies the grouping**, which is the
+fuzzy matcher's decision and not a statistic, and **the oracle computes the
+arithmetic over each group itself**, which is what it exists to check.
 
-On the `*-consolidated` and `*-bin-consolidated` families the merged rows — the
-merge arithmetic itself — are therefore carried by **Layers 1 and 2 only**. The
-unmerged remainder of those scenarios still pairs and is checked normally.
+Unpaired rows are still counted and reported as `unpaired=N (wildcard=M)`, and
+a scenario where every row went unpaired is named `NO CELLS COMPARED` rather
+than reporting `L3=OK` (#450) — so a future regression in the pairing shows up
+instead of quietly reducing coverage.
+
+### Known Layer-3 failures
+
+`known-failures.tsv` registers comparisons that breach the blocking threshold
+because of a filed, open defect in `ltl` rather than a miscalibrated harness.
+An entry suppresses the block for one (scenario, file_kind, column, key_class)
+and is reported as `XFAIL` with its issue on every run; the comparison still
+happens and the deviation is still printed, and the scenario reports
+`L3=OK-WITH-XFAIL` rather than `L3=OK`.
+
+**Entries are self-clearing.** If a registered comparison passes, the engine
+fails the run with `KNOWN-FAILURE-STALE` — a fix cannot land without its
+entries being removed in the same change.
+
+The current entries are all #459: combining two bin-counter histograms
+re-projects both sides onto a union geometry, and the displacement compounds
+with merge depth. Measured against the oracle, percentiles drift 2.7–4.2% and
+IQR up to 32.6% on the two deep-merge scenarios. `apache-bin-consolidated`, at
+52 projections, stays inside the threshold, and the raw `*-consolidated`
+scenarios agree exactly — which is what identifies the bin merge as the cause
+rather than the grouping.
 
 
 External-oracle validation is reserved for statistics where the algorithm has

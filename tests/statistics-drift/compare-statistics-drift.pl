@@ -75,6 +75,7 @@ GetOptions(
     'new=s'                     => \$opt{new},
     'show-all'                  => \$opt{show_all},
     'oracle-json=s'             => \$opt{oracle_json},
+    'known-failures=s'          => \$opt{known_failures},
 ) or die "usage error\n";
 
 for my $required (qw(scenario file_kind new)) {
@@ -1076,6 +1077,44 @@ sub classify_cell_l3 {
     return ('T3', $dev);  # >5% still T3 (matches L1 convention)
 }
 
+# Issue #462: known Layer-3 failures — comparisons that breach the blocking
+# threshold because of a filed, open defect in ltl rather than a miscalibrated
+# harness. An entry suppresses the block for one (scenario, file_kind, column,
+# key_class) and is reported as XFAIL with its issue on every run; the
+# comparison still runs and the deviation is still printed. If a registered
+# comparison passes, the run fails — a fix cannot land without its entries
+# being removed in the same change.
+my %known_failures;      # "scenario\tkind\tcolumn\tkey_class" => { issue, note }
+my %known_failure_hit;   # same key => 1 once it actually breached
+my %known_failure_pass;  # same key => first passing cell, for the report
+
+sub load_known_failures {
+    my ($path) = @_;
+    return unless defined $path && -f $path;
+    open my $fh, '<', $path or die "open $path: $!";
+    while (my $line = <$fh>) {
+        chomp $line;
+        next if $line =~ /^\s*#/ || $line !~ /\S/;
+        my @f = split /\t/, $line;
+        next if @f < 5 || $f[0] eq 'scenario';
+        my ($sc, $kind, $col, $class, $issue, $note) = @f;
+        $known_failures{"$sc\t$kind\t$col\t$class"} =
+            { issue => $issue, note => $note // '' };
+    }
+    close $fh;
+}
+
+sub known_failure_for {
+    # A merged row is one whose key carries the consolidation wildcard.
+    my ($scenario, $kind, $col, $key) = @_;
+    my $class = (index($key, '*') >= 0) ? 'merged' : 'unmerged';
+    for my $c ($class, 'any') {
+        my $k = "$scenario\t$kind\t$col\t$c";
+        return ($k, $known_failures{$k}) if $known_failures{$k};
+    }
+    return (undef, undef);
+}
+
 # Run Layer 3 against an oracle JSON. Per Decision 3, Layer-3 tolerates
 # float quantization (ltl writes at most 5 decimals per #223). The
 # oracle's value is compared against ltl's at the same precision ltl
@@ -1133,6 +1172,29 @@ sub run_layer3 {
                 $stats->{l3_nonnumeric}++;
                 next;
             }
+            my ($kf_key, $kf) = known_failure_for($scenario, $file_kind, $col, $k);
+
+            if ($tier eq 'T3' && $kf) {
+                # Registered against an open defect: report, do not block.
+                $known_failure_hit{$kf_key} = 1;
+                $stats->{l3_xfail}++;
+                printf "XFAIL [T3-L3] scenario=%s file=%s key=\"%s\" column=%s\n",
+                       $scenario, $file_kind, $k, $col;
+                printf "       ltl=%s oracle=%s deviation=%.2f%%\n",
+                       $ltl_val, $o_quantized, $dev;
+                printf "       known failure: issue #%s - %s\n",
+                       $kf->{issue}, $kf->{note};
+                printf "       registered in tests/statistics-drift/known-failures.tsv; "
+                     . "remove the entry when #%s lands\n", $kf->{issue};
+                next;
+            }
+            if (($tier eq 'T1' || $tier eq 'T2') && $kf) {
+                # It passed where a defect was expected. Recorded, and failed at
+                # the end, so the entry cannot outlive the defect.
+                $known_failure_pass{$kf_key} //=
+                    { key => $k, column => $col, issue => $kf->{issue} };
+            }
+
             $stats->{"l3_$tier"}++;
 
             if ($tier eq 'T1' || $tier eq 'T2') {
@@ -1225,6 +1287,7 @@ my %stats = (
     l3_nonnumeric        => 0,
     l3_unpaired          => 0,
     l3_unpaired_wildcard => 0,
+    l3_xfail             => 0,
 );
 
 my $baseline_data;
@@ -1254,6 +1317,8 @@ if (defined $baseline_data && $structural_ok) {
     run_layer2($baseline_data->{rows}, $opt{scenario}, $opt{file_kind}, \%stats, 'baseline');
 }
 
+load_known_failures($opt{known_failures});
+
 # Layer 3: external-oracle validation. Triggered when --oracle-json
 # supplied. Validates the algebraically sensitive statistics per
 # Decision 3 against NumPy/SciPy reference values.
@@ -1267,6 +1332,10 @@ if (defined $opt{oracle_json}) {
     run_layer3($new_data, $oracle, $opt{scenario}, $opt{file_kind}, \%stats);
     if ($stats{l3_T3} > 0 || $stats{l3_nonnumeric} > 0) {
         $l3_state = 'FAIL';
+    } elsif ($stats{l3_xfail} > 0) {
+        # Not a clean pass: comparisons breached and were suppressed against an
+        # open defect. Named so a reader cannot mistake it for agreement.
+        $l3_state = 'OK-WITH-XFAIL';
     } else {
         $l3_state = 'OK';
     }
@@ -1280,6 +1349,7 @@ if ($l3_state ne 'N/A') {
         $stats{l3_cells_checked},
         $stats{l3_T3}, $stats{l3_T2}, $stats{l3_T1}, $stats{l3_nonnumeric},
         $stats{l3_unpaired}, $stats{l3_unpaired_wildcard});
+    $l3_detail .= sprintf(', xfail=%d', $stats{l3_xfail}) if $stats{l3_xfail};
     # A scenario whose rows are ALL unpaired reported L3=OK before #450, which
     # reads as "the oracle agreed" when the oracle never ran. Name it.
     if ($stats{l3_cells_checked} == 0 && $stats{l3_unpaired} > 0) {
@@ -1298,7 +1368,29 @@ print "SUMMARY scenario=$opt{scenario}/$opt{file_kind}: ",
 # Exit code: T3/T4 in L1/L2 block; nonnumeric and key_mismatch also
 # block since both indicate the engine couldn't actually assert
 # against the baseline.
-my $exit_fail = ($stats{T3} > 0 || $stats{T4} > 0 || $stats{nonnumeric} > 0);
+# A known failure that no longer reproduces has to be removed, or the registry
+# rots into a permanent tolerance. Only entries that passed AND never breached
+# anywhere in this run count: a defect can be intermittent across keys.
+my @stale_known;
+for my $k (sort keys %known_failure_pass) {
+    next if $known_failure_hit{$k};
+    my ($sc, $kind, $col, $class) = split /\t/, $k;
+    my $info = $known_failure_pass{$k};
+    push @stale_known, sprintf(
+        "  scenario=%s file=%s column=%s key_class=%s (registered against #%s)\n" .
+        "        now passes, e.g. key=\"%s\"",
+        $sc, $kind, $col, $class, $info->{issue}, $info->{key});
+}
+if (@stale_known) {
+    print "FAIL [KNOWN-FAILURE-STALE] scenario=$opt{scenario} file=$opt{file_kind}\n";
+    print "$_\n" for @stale_known;
+    print "       asserts: every entry in tests/statistics-drift/known-failures.tsv still reproduces; an entry that passes is a fix that landed without its registration being removed\n";
+    print "       produced_by: known_failure_for() in compare-statistics-drift.pl against tests/statistics-drift/known-failures.tsv\n";
+    print "       contract: Issue #462 - the registry is self-clearing, so a suppression cannot outlive the defect it was granted for\n";
+    print "       rule: delete the entry in the same change that fixes the defect\n";
+}
+
+my $exit_fail = ($stats{T3} > 0 || $stats{T4} > 0 || $stats{nonnumeric} > 0 || @stale_known);
 $exit_fail = 1 if $stats{l3_T3} > 0 || $stats{l3_nonnumeric} > 0;
 $exit_fail = 1 if $stats{key_mismatch} > 0;
 exit ($exit_fail ? 1 : 0);

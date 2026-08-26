@@ -182,9 +182,16 @@ oracle_json_for_logfile() {
     # different bpd must not collide, and the oracle must build its reference
     # partition at the resolution ltl actually used (read from -V effective_bpd).
     local logfile="$1" bs_sec="$2" du_unit="$3" fmt="$4" algorithm="$5" bpd="$6"
+    local membership="${7:-}"
     local log_shorthand
     log_shorthand="$(csv_cache_logfile_shorthand "$logfile")"
-    local cache_name="${fmt}_${log_shorthand}_bs${bs_sec}_du${du_unit}_${algorithm}_bpd${bpd}.json"
+    # Issue #462: a membership-grouped reference is specific to the scenario
+    # whose grouping produced it, so it cannot share the per-logfile entry.
+    local group_tag=""
+    if [[ -n "$membership" ]]; then
+        group_tag="_grp$(basename "$membership" .txt)"
+    fi
+    local cache_name="${fmt}_${log_shorthand}_bs${bs_sec}_du${du_unit}_${algorithm}_bpd${bpd}${group_tag}.json"
     local cache_path="$ORACLE_CACHE_DIR/$cache_name"
     if [[ -s "$cache_path" ]]; then   # -s, not -f: an interrupted producer leaves a 0-byte file
         echo "$cache_path"
@@ -193,8 +200,11 @@ oracle_json_for_logfile() {
     mkdir -p "$ORACLE_CACHE_DIR"
     local abs_log
     abs_log="$(resolve_log_path "$logfile")"
+    local membership_args=()
+    [[ -n "$membership" ]] && membership_args=(--cluster-membership "$membership")
     if ! python3 "$ORACLE_SCRIPT" \
             --log "$abs_log" \
+            "${membership_args[@]}" \
             --bucket-size-seconds "$bs_sec" \
             --duration-unit "$du_unit" \
             --format "$fmt" \
@@ -218,6 +228,59 @@ oracle_json_for_logfile() {
 #
 # Cached at $SCRIPT_DIR/.artifacts/oracle/pa-<scenario>.txt to avoid
 # re-running ltl per file-kind.
+# Issue #462: capture the cluster membership consolidation produced, for the
+# oracle. A `-g` scenario reports merged rows under a wildcard key that appears
+# nowhere in the log, so the oracle could not build those rows' sample sets and
+# skipped them — silently, until #450 made the skip visible. With this mapping
+# it groups the way ltl did and computes the statistics itself.
+#
+# Only scenarios that actually consolidate produce one; for the rest this
+# echoes nothing and the oracle runs unchanged.
+MEMBERSHIP_CAPTURE_DIR="$SCRIPT_DIR/.artifacts/oracle"
+membership_capture_for_scenario() {
+    # Args: scenario_id, logfile, options
+    # Echoes the capture path on stdout, or nothing when the scenario does not
+    # consolidate. Returns non-zero on ltl failure.
+    local scenario="$1" logfile="$2" options="$3"
+    case " $options " in
+        *" -g "*) ;;
+        *) return 0 ;;
+    esac
+    mkdir -p "$MEMBERSHIP_CAPTURE_DIR"
+    local cache_path="$MEMBERSHIP_CAPTURE_DIR/membership-${scenario}.txt"
+    if [[ -s "$cache_path" ]]; then
+        echo "$cache_path"
+        return 0
+    fi
+    local abs_log tmp
+    abs_log="$(resolve_log_path "$logfile")"
+    tmp="$(mktemp)"
+    # shellcheck disable=SC2086  # word-splitting on $options is intentional
+    if ! "$LTL" --disable-progress -ni -V message-grouping $options "$abs_log" \
+            >"$tmp" 2>"$tmp.stderr"; then
+        echo "ERROR: ltl -V message-grouping failed for scenario=$scenario" >&2
+        sed 's/^/        /' "$tmp.stderr" >&2
+        rm -f "$tmp" "$tmp.stderr"
+        return 1
+    fi
+    if ! assert_no_runtime_warnings "$tmp.stderr" "message-grouping capture scenario=$scenario"; then
+        rm -f "$tmp" "$tmp.stderr"
+        return 1
+    fi
+    # Keep only the sub-section; a missing anchor is a hard failure, since a
+    # consolidating scenario that produced no membership would silently hand
+    # the oracle nothing and restore the blind spot this exists to remove.
+    if ! sed -n '/^=== message-grouping \/ cluster-membership ===$/,/^=== END message-grouping \/ cluster-membership ===$/p' "$tmp" \
+            | grep -E '^  cluster: |^    member: ' > "$cache_path"; then
+        echo "ERROR: scenario=$scenario runs -g but emitted no cluster membership" >&2
+        rm -f "$tmp" "$tmp.stderr" "$cache_path"
+        return 1
+    fi
+    rm -f "$tmp" "$tmp.stderr"
+    echo "$cache_path"
+    return 0
+}
+
 PA_CAPTURE_DIR="$SCRIPT_DIR/.artifacts/oracle"
 pa_capture_for_scenario() {
     # Args: scenario_id, logfile, options
@@ -457,12 +520,16 @@ while IFS=$'\t' read -r scenario logfile options; do
                             set -e
                             if [[ $pabc -eq 0 && -n "$pa_bpd" ]]; then
                                 set +e
+                                membership_capture="$(membership_capture_for_scenario \
+                                    "$scenario" "$logfile" "$options")"
                                 oracle_json="$(oracle_json_for_logfile \
-                                    "$logfile" "$bs_sec" "$du_unit" "$fmt" "$pa_algorithm" "$pa_bpd")"
+                                    "$logfile" "$bs_sec" "$du_unit" "$fmt" "$pa_algorithm" "$pa_bpd" \
+                                    "$membership_capture")"
                                 orc=$?
                                 set -e
                                 if [[ $orc -eq 0 && -n "$oracle_json" ]]; then
                                     engine_args+=(--oracle-json "$oracle_json")
+                                    engine_args+=(--known-failures "$HARNESS_DIR/known-failures.tsv")
                                 fi
                             fi
                         fi

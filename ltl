@@ -86,6 +86,10 @@ my @verbose_output;           # Accumulated verbose output lines (Issue #56)
 # Order in this hash is the natural emission order when no specific
 # selection is requested. Iteration uses a parallel ordered list because
 # Perl hash iteration is unordered.
+# Issue #462: recording per-cluster membership costs one key string per
+# absorbed key, so it is gated on the diagnostic that reports it.
+my $consolidation_membership_wanted = 0;
+
 my %verbose_section_registry = (
     'runtime-config' => {
         description => 'Effective runtime configuration: LTL_CONFIG, merged include/exclude/highlight/threadpool-activity regexes, resolved duration-statistics demand.',
@@ -99,8 +103,11 @@ my %verbose_section_registry = (
     'histogram-bin-counters' => {
         description => 'HDR-style bin-counter histogram state: precision tier, per-consumer partition keying, re-binning counted per mechanism, member-histogram retention and footprint, finalized histogram dimensions.',
     },
+    'histogram-percentile-ticks' => {
+        description => 'Inputs to the histogram percentile tick mapping, at full precision: per metric the bar width, the axis min and max, and each selected percentile value. The computed columns are deliberately NOT reported -- a test that read them back would be comparing this code to itself (Issue #462).',
+    },
     'message-grouping' => {
-        description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction (Issue #96).',
+        description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction, and the cluster membership consolidation produced (Issue #96, #462).',
     },
     'format-detection' => {
         description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts, plus registry scan telemetry: order, promotions, per-entry match counts, sampled no-match cost (Issues #228, #58).',
@@ -135,6 +142,7 @@ my @verbose_section_order = qw(
     index-read-back
     histogram-array
     histogram-bin-counters
+    histogram-percentile-ticks
     message-grouping
     format-detection
     format-registry
@@ -7329,6 +7337,15 @@ sub group_similar_messages {
 
             my $entry = $log_messages{$category}{$canonical_log_key};
 
+            # Issue #462: publish the grouping this cluster represents, keyed by
+            # the canonical form the rest of the run reports it under.
+            if ($consolidation_membership_wanted && $cluster->{member_keys}) {
+                push @{ $verbose_section_buffer{'message-grouping-membership'} },
+                    "  cluster: $category\x1f$canonical_log_key";
+                push @{ $verbose_section_buffer{'message-grouping-membership'} },
+                    "    member: $_" for sort @{ $cluster->{member_keys} };
+            }
+
             # Copy duration stats
             if (defined $cluster->{total_duration}) {
                 $entry->{total_duration}     = $cluster->{total_duration};
@@ -7989,6 +8006,13 @@ sub merge_consolidation_stats {
 sub merge_log_message_entry_into_cluster {
     my ($cluster, $category, $log_key) = @_;
     my $source = $log_messages{$category}{$log_key};
+    # Issue #462: remember which keys this cluster absorbed. The consolidated
+    # row's own key is a wildcard pattern that appears nowhere in the log, so
+    # without this the sample set behind it cannot be reconstructed from
+    # outside -- which is why the statistics oracle could not check a
+    # consolidated row and silently skipped it. Recorded only when the
+    # diagnostic that reports it was requested, so a normal run pays nothing.
+    push @{ $cluster->{member_keys} }, $log_key if $consolidation_membership_wanted;
     if ($message_stats_capture_mode && $message_stats_capture_mode eq 'bin') {
         my $key = "$category\x1f$log_key";
         $source->{bin_entry} = $log_messages_counters{$key};
@@ -8070,6 +8094,8 @@ sub try_consolidation_merge_into_existing {
 
             merge_consolidation_stats($existing, $new_cluster);
             $existing->{match_count} += $new_cluster->{match_count};
+            push @{ $existing->{member_keys} }, @{ $new_cluster->{member_keys} // [] }
+                if $consolidation_membership_wanted;
 
             my $old_canonical = $entry->{canonical};
             $existing->{canonical} = $merged_canonical;
@@ -8521,6 +8547,8 @@ sub merge_consolidation_overlapping_patterns {
 
             merge_consolidation_stats($general_cluster, $specific_cluster);
             $general_cluster->{match_count} += $specific_cluster->{match_count};
+            push @{ $general_cluster->{member_keys} }, @{ $specific_cluster->{member_keys} // [] }
+                if $consolidation_membership_wanted;
             delete $consolidation_clusters{$cat_gk}{$specific->{canonical}};
             $removed{$specific_idx} = 1;
             $merges++;
@@ -9588,9 +9616,15 @@ sub adapt_to_command_line_options {
             next if $name eq '';
             if ($name eq 'list') {
                 print "Known -V sections (Issue #226):\n";
+                # Width follows the longest registered name so a new section
+                # cannot silently break the column alignment.
+                my $name_width = 0;
                 for my $section (@verbose_section_order) {
-                    printf "  %-25s  %s\n",
-                        $section, $verbose_section_registry{$section}{description};
+                    $name_width = length($section) if length($section) > $name_width;
+                }
+                for my $section (@verbose_section_order) {
+                    printf "  %-*s  %s\n",
+                        $name_width, $section, $verbose_section_registry{$section}{description};
                 }
                 print "\nUsage: -V             emit all sections (default)\n";
                 print "       -V all         emit all sections (explicit)\n";
@@ -9625,6 +9659,11 @@ sub adapt_to_command_line_options {
         # match through section_requested(). This mirrors the issue body:
         # exit code unchanged, warning emitted, run continues.
     }
+
+    # Issue #462: consolidation records which keys each cluster absorbed only
+    # when the section that reports it was asked for -- the record costs one
+    # key string per absorbed key and nothing else reads it.
+    $consolidation_membership_wanted = section_requested('message-grouping') ? 1 : 0;
 
     $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
     $filter_range{'end'} = $filter_range_end if defined(  $filter_range_end );
@@ -14727,6 +14766,16 @@ sub print_histograms {
         my ($selected_pcts, $pct_separator) = select_histogram_percentiles($stats, $bar_width, $metric);
         my $percentile_cols = calculate_histogram_percentile_ticks($selected_pcts, $boundaries, $bar_width);
 
+        # Issue #462: publish the mapping's INPUTS at full precision. The
+        # legend and the dimensions line both round through
+        # format_heatmap_value(), which is coarse enough that a column cannot
+        # be predicted from them -- so the D2 requirement that the ticks line
+        # up with the printed values could not be asserted, only approximated.
+        # The computed columns are deliberately absent: a harness reading them
+        # back would compare this code with itself. It recomputes the mapping
+        # from these inputs and checks the result against the rendered axis.
+        emit_histogram_tick_inputs($metric, $bar_width, $boundaries, $selected_pcts);
+
         $metric_data{$metric} = {
             display_buckets    => \@display_buckets,
             display_buckets_hl => \@display_buckets_hl,
@@ -14846,6 +14895,12 @@ sub print_histograms {
     for my $line (@all_lines) {
         print "$line\n";
     }
+
+    # Issue #462: the tick mapping's inputs, gathered per metric above. Printed
+    # here rather than pushed to @verbose_output because print_verbose_output()
+    # has already flushed by the time histograms render -- the inputs do not
+    # exist until the render computes the layout.
+    emit_histogram_tick_inputs_verbose();
 
     return;
 }
@@ -15205,6 +15260,35 @@ sub select_histogram_percentiles {
     my @selected = @all_entries[0 .. $max_entries - 1];
     @selected = sort { $a->{sort_order} <=> $b->{sort_order} } @selected;
     return (\@selected, $separator);
+}
+
+# Issue #462: the inputs calculate_histogram_percentile_ticks() maps from.
+# Full precision via %.17g so a consumer recovers the exact double.
+sub emit_histogram_tick_inputs {
+    my ($metric, $bar_width, $boundaries_ref, $selected) = @_;
+    return unless section_requested('histogram-percentile-ticks');
+    return unless $selected && @$selected;
+
+    my $min_val = $boundaries_ref->[0];
+    my $max_val = $boundaries_ref->[-1];
+    return unless defined $min_val && defined $max_val;
+
+    my @lines;
+    push @lines, sprintf("  metric: %s bar_width=%d min=%.17g max=%.17g",
+                         $metric, $bar_width, $min_val, $max_val);
+    for my $entry (@$selected) {
+        next unless defined $entry->{value};
+        push @lines, sprintf("    %s=%.17g", $entry->{label}, $entry->{value});
+    }
+    push @{ $verbose_section_buffer{'histogram-percentile-ticks'} }, @lines;
+}
+
+sub emit_histogram_tick_inputs_verbose {
+    return unless $verbose && section_requested('histogram-percentile-ticks');
+    my $buf = delete $verbose_section_buffer{'histogram-percentile-ticks'};
+    print "=== histogram-percentile-ticks ===\n";
+    print "$_\n" for @{ $buf // [] };
+    print "=== END histogram-percentile-ticks ===\n";
 }
 
 # Issue #185: Map each selected percentile to a column index on the log-scaled x-axis.
@@ -16193,6 +16277,16 @@ sub pipeline_finalize {
                 push @verbose_output, sprintf("    Total fc calls:        %d", $grand_fc);
                 push @verbose_output, "=== END message-grouping / grand-totals ===";
             }
+            # Issue #462: the grouping consolidation actually produced, so a
+            # consumer outside ltl can form the same sample sets. Emitted last
+            # in the section because it is the longest part of it.
+            if (my $buf = delete $verbose_section_buffer{'message-grouping-membership'}) {
+                push @verbose_output, "";
+                push @verbose_output, "=== message-grouping / cluster-membership ===";
+                push @verbose_output, @$buf;
+                push @verbose_output, "=== END message-grouping / cluster-membership ===";
+            }
+
             push @verbose_output, "=== END message-grouping ===";
             push @verbose_output, "";
         }
