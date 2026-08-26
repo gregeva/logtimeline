@@ -77,7 +77,77 @@ Both disagreements were between *captures*, not errors of transcription. Neither
 
 ---
 
-## 1. The summary view
+## 1. Headline summary
+
+| | **T** — today | **S** — same maths, cheaper container | **G** — shared grid |
+|---|---|---|---|
+| **What changes** | nothing | container only; answers bit-identical | the bin geometry itself |
+| **Percentile pass**, 286,659 keys @53 / @616 | 17.6 s / 181.3 s | **2.1 s / 2.3 s** | **1.6 s / 1.7 s** |
+| **Memory**, same, @53 / @616 | 662 MB / 3.72 GB | **292 MB / 294 MB** | **195 MB / 197 MB** |
+| **Cost across the resolution ladder** | ×10.3 time, ×5.6 memory | **×1.08 / ×1.008** | **×1.07 / ×1.01** |
+| **Memory on a *bounded* surface** (bucket-stats @616) | **2.53 MB — best** | 3.59 MB (+42%) | 2.71 MB (+7%) |
+| **Accuracy, unmerged** | **best from bpd 115 up** (0.021% vs 0.239% @616 Tomcat) | = T exactly | **best at coarse resolution** (3.60% vs 6.78% @16) |
+| **Accuracy after merges** (depth 15) | 2.10 bins — **breaches R4** | = T — breaches | **1.0000 bins — holds, 0 of 20,000** |
+| **Same input, different order** | differs on 68–92% of groups | = T | **identical, always** |
+| **Merge / `-g` fold cost** | 18.2 s | 34.4 s → **3.65 s** (native) | **0.12 s** |
+| **Display fidelity** (mass, peak, X-offset) | exact | exact — identical cells | exact; **better on the heatmap's real keying** (0.067% vs 0.267% median) |
+| **Committed baselines moved >1%** | 0 | **0** | **16–32%** — needs an architect re-bless |
+| **`-V` fields still discriminating** | 4 of 10 | **4 of 10** | 3 of 10 (6 inert) |
+| **Contract gate** | **breaches R4** | **breaches R4** (inherits) | holds R4; needs A2/A3; **R7 unresolved** |
+
+**Reading it:** no row order ranks the arms — each column wins some rows and loses others. The three
+carrying the most weight:
+
+- **T's cost is not flat in resolution.** ×10.3 in time and ×5.6 in memory across the ladder, because
+  its array is sized by the partition rather than by the data. S and G are both ≈×1.
+- **T and S breach an accuracy bound the spec calls "structural, not empirical"** once anything merges
+  — and that correction (**A4**) is owed to shipped code whichever arm is adopted.
+- **G is the only arm that holds that bound and is order-independent**, and pays for it with a 16–32%
+  baseline re-bless plus two amendments — one of which (**#189 R7**, "no global registry of
+  partitions") is unresolved anywhere in the corpus.
+
+The row that most resists a simple story is memory: **S is the best arm at high cardinality and the
+worst at bounded cardinality.** Any memory claim without a surface attached is wrong.
+
+### 1.0 What #458 does to this question
+
+**#458 (`-n 0`: accept zero as the top-messages operand, retaining and computing nothing per message)
+removes the per-message store by construction, rather than making it cheaper.** It is filed, open, and
+`status: backlog`.
+
+That matters here because **the per-message surface is the only surface on which the container change
+is worth anything.** It carries ≈286,000 partitions against tens on bucket-stats and heatmap and ≈4 on
+histogram; every headline figure above — the 8.4×/79.5× percentile pass, the 2.2×/12.7× memory, the
+×10.3 ladder growth — is measured on it. On the other three surfaces the arms are within noise of each
+other on time, and the compact arms are *worse* on memory (the +42% bucket-stats row).
+
+So the two address the same pressure by opposite means, and they are complements rather than
+alternatives:
+
+| | **#426** (this analysis) | **#458** (`-n 0`) |
+|---|---|---|
+| mechanism | make the per-message store cheap | do not build it |
+| applies when | the user wants per-message output | the user wants the timeline and population statistics only |
+| effect on the 3.72 GB @616 figure | 3.72 GB → ≈294 MB (S) | → **nothing retained** |
+| cost | a container change across four surfaces, with the gate above | one option; `-g` and `-mdm` become inert |
+| scope | every run that keeps messages | only runs that decline them |
+
+**The consequence for weighting this analysis.** The emphasis score in § 1.2 puts per-message at 0.40,
+which is where nearly all of the compact arms' advantage sits. If `-n 0` lands, the enormous-scale runs
+where gigabytes of memory are the problem can simply decline the store — and the residual question this
+analysis answers narrows to *runs that do want per-message output*, at whatever cardinality those
+carry. That does not make the container question moot: those runs still pay T's ×10.3 ladder growth,
+still breach R4 after merges, and still carry the order-dependence. But it does mean **the extreme-scale
+memory argument for changing the container is weaker than the figures above suggest in isolation**,
+because a cheaper escape from it exists.
+
+It also cuts the other way on one point worth stating: `-n 0` does nothing for the *bounded* surfaces,
+where the compact arms are neutral-to-worse. Nothing in #458 changes any row of the bucket-stats,
+heatmap or histogram evidence.
+
+---
+
+## 2. The summary view
 
 ### 1.1 Contract gate
 
@@ -131,7 +201,7 @@ CONTRACT dimensions only. **A breach is not a low score — it is a decision for
 
 ---
 
-## 2. Dominance check
+## 3. Dominance check
 
 **No arm dominates any other.** Checked pairwise:
 
@@ -144,7 +214,7 @@ The evidence supports **no ordering of the arms**. What it supports is a set of 
 
 ---
 
-## 3. Dimension-major tables
+## 4. Dimension-major tables
 
 ### T-1 — Dimension × arm (master overview)
 
@@ -632,7 +702,7 @@ Corroborating memory growth at 51,469 keys (`Devel::Size`): T ×5.77 · S ×1.23
 
 ---
 
-## 4. Arm-major profiles
+## 5. Arm-major profiles
 
 All three tables carry identical rows and columns; that identity is the symmetry contract. `msg-stats` = unbounded per-key fan-out surface (286,659 keys) unless a cell names the 51,469-key fixture. `display @616` = the finalize contract at the rung the display surfaces run at.
 
@@ -764,7 +834,7 @@ All three tables carry identical rows and columns; that identity is the symmetry
 
 ---
 
-## 5. The inversions
+## 6. The inversions
 
 Ten. Eight named by the framework; **two the evidence shows and the framework's list missed**, marked as such. Treatment follows cause: *by surface* → paired figures never averaged; *by resolution* → resolution as the axis with an explicit crossover; *by data shape* → a range across named fixtures, never a scalar.
 
@@ -880,7 +950,7 @@ The one inversion in the comparison that is **escapable and already escaped** �
 
 ---
 
-## 6. The frictions
+## 7. The frictions
 
 One row per friction — *gaining X costs Y* — never one per dimension. The `escapable?` column is what makes this a decision instrument rather than a list of caveats.
 
@@ -968,9 +1038,38 @@ One row per friction — *gaining X costs Y* — never one per dimension. The `e
 
 ---
 
-## 7. Decisions the architect must take
+## 8. Decisions the architect must take
 
-Thirteen open items. Every one is re-decidable. None is foreclosed by anything in this document.
+Fourteen open items. Every one is re-decidable. None is foreclosed by anything in this document.
+
+### 7.0 Whether #458 (`-n 0`) changes what this issue needs to solve
+
+**Decision.** Does `-n 0` — retain and compute nothing per message — take the extreme-scale memory case
+off #426's plate, and if so does the container change still earn its cost on the runs that remain?
+
+**Evidence pressuring it.** Every headline advantage the compact arms hold is measured on the
+per-message surface: 8.4×/79.5× on the percentile pass, 2.2×/12.7× on memory, ×10.3 against ×1.08 on
+ladder growth. That surface is also the only one #458 removes. On the other three the arms are within
+noise on time and the compact arms are *worse* on memory (bucket-stats @616: S 3.59 MB against T
+2.53 MB, +42%).
+
+**Magnitude.** #458 takes the 3.72 GB @616 case to nothing retained; S takes it to ≈294 MB. For a user
+who does not want per-message output, #458 is both cheaper to build and strictly better on the metric.
+
+**What each option costs.**
+- *Treat them as complements (they address the same pressure by opposite means).* #458 serves runs that
+  decline messages; #426 serves runs that want them. Neither is redundant. The residual case for #426
+  is then: runs that DO want per-message output still pay T's ×10.3 ladder growth, still breach R4
+  after any merge, and still carry order-dependence — none of which #458 touches.
+- *Let #458 absorb the memory argument.* The extreme-scale memory case for changing the container
+  weakens, and #426 narrows to a correctness-and-cost question on ordinary-cardinality runs. The R4
+  breach and the order-dependence remain owed to shipped code regardless.
+- *Sequence #458 first.* It is one option against a container change spanning four surfaces with the
+  § 2.1 gate. It would also give a clean measurement baseline: a run with no per-message store isolates
+  what the store actually costs in production.
+
+**Not a substitute in one direction:** `-n 0` does nothing for the bounded surfaces, where the compact
+arms are neutral-to-worse. No row of the bucket-stats, heatmap or histogram evidence changes.
 
 ### 7.1 #187 Decision 5 — "the auto-resize lifecycle itself is not revisitable"
 

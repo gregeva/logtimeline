@@ -1457,6 +1457,14 @@ computed, and that distinction is re-recorded here when it does.
   (`features/287-message-stats-bin-counter-data-model.md`) owns the per-message bin
   data model this store replaces.
 - **#323 — dynamic bins-per-decade** (on hold). Same distribution evidence.
+- **#458 — `-n 0` retains and computes nothing per message.** Removes the per-message store by
+  construction rather than making it cheaper, and the per-message surface is the only one on which
+  this issue's container change earns its headline figures. The two address the same pressure by
+  opposite means and are complements, not alternatives: #458 serves runs that decline per-message
+  output; #426 serves runs that want it, which still pay T's ×10.3 ladder growth, still breach
+  #187 R4 after any merge, and still carry order-dependence. `-n 0` does nothing for the bounded
+  surfaces, where the compact arms are neutral-to-worse. Analysed in
+  `features/426-three-arm-comparison.md` § 1.0 and § 7.0.
 - **#450 — the shipped bin-model display renders and the `-g` × `-mdm bin` merge path
   are asserted by nothing.** Found by this issue's pre-prototype audit; pre-existing and
   out of scope here, but they are the two harness gaps a container change lands on.
