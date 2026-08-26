@@ -16,6 +16,46 @@ and amendment before the symmetric three-arm analysis is built on them.
 
 Reconciliation of three independently-produced pieces (dimension register, weighting hierarchy, presentation specification) into one record. Arms: **T** (today: dense per-key array, seeded per #187 D5), **S** (span-only columns, verbatim T geometry — P8+P9), **G** (one shared log-spaced grid — P10). The comparison is symmetric: T is a candidate, not a reference.
 
+## How locked decisions are treated in this evaluation (architect, 2026-08-26)
+
+**A locked decision is a record of a choice made in a context. It is not terrain, and it is
+not a boundary on the analysis.** Where this document marks something "locked",
+"non-revisitable", "out of scope by ruling", or "a hard requirement, not an option", that
+records *what was decided and when* — it does **not** mean the analysis may treat the
+question as closed, and it does **not** mean the assistant may route around it.
+
+The architect's ruling, verbatim in substance (2026-08-26):
+
+> A locked, explicitly non-reversible virtue is a decision for me to take, not you to read
+> and ignore as an option. The type of analysis and discovery we are doing requires
+> reassessing previous decisions, as it is inevitable that previous decisions will prove to
+> be in contradiction to one another or posing friction with new direction. When you were
+> proposing a 10x performance improvement, that is a magnitude difference. This makes it
+> worthwhile to reassess previously made decisions which were made in a different context
+> long ago.
+
+Consequences for this framework and everything built on it:
+
+1. **Every locked decision that this evidence pressures is surfaced as a decision under
+   review**, with the contradiction and the magnitude stated, and goes into the scales with
+   the others. It is never reported as foreclosing an option.
+2. **Two are already identified and both are architect-level:**
+   - **#187 Decision 5's "the auto-resize lifecycle itself is not revisitable"** — pressured by
+     the measured inversion (per-key adaptivity is the locked virtue for percentile
+     calculation and the locked failure mode for display) and by the magnitude of the
+     container result.
+   - **#189 R7's "This is a hard requirement, not an option … The primitives impose no global
+     registry of partitions"** — a single shared grid is arguably exactly a global registry.
+     This appears in **no amendment list anywhere in the corpus**. It is either a non-issue or
+     a blocking amendment and nothing written settles which; it is raised for the architect
+     rather than resolved here.
+3. **"Out of scope by ruling" rows record scope as the architect set it**, and are re-raised
+   if evidence pressures them — not treated as questions that may not be asked.
+
+An earlier revision of this analysis reported locked decisions as constraints that settled the
+matter. That was wrong: it removed the architect's agency over his own prior decisions, which
+is the opposite of what surfacing them is for.
+
 ---
 
 ## Reconciliation of the two dimension vocabularies
