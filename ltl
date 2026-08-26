@@ -1216,38 +1216,46 @@ sub partition_rebin {
     return ($new_partition, \@new_bins);
 }
 
-# Deterministic memory model for a bin-counter store (#462).
+# Counter-store footprint for a bin-counter store (#462).
 #
-# Devel::Size::total_size() reports what the process ALLOCATED, which moves
-# with Perl's per-process hash seed: measured 46277 / 45189 across six runs of
-# one command on identical input, with every content-derived field constant.
-# A figure that moves without an observation changing cannot be compared
-# before and after a change, which is the comparison the retention ceiling
-# (features/bin-counter-accuracy-and-observability.md D3) has to be decided
-# from. These constants describe what the counters HOLD, so the same store
-# always yields the same number.
+# This reports the counters' PAYLOAD — the geometry each partition carries and
+# the bin slots it spans — not the process's allocation. That distinction is
+# the point of the field, not a shortcut:
 #
-# Calibrated against total_size() over a grid of (entries, bin_count, filled)
-# spanning 16..3080 bins and 100..2500 entries: the model tracks measured
-# allocation to within 4.6% and is uniformly slightly under, because it counts
-# no allocator slack. The under-report is systematic, so differences between
-# two stores stay meaningful.
+# Devel::Size::total_size(), which this replaces, reports what the process
+# allocated, and allocation depends on the history of how a structure grew
+# rather than on what it holds. On identical input the same store measured
+# 46277 / 45189 across six runs, every content-derived field constant, because
+# Perl's per-process hash seed changes when a bucket array doubles. A figure
+# that moves on its own cannot answer "did this change cost memory", which is
+# the question the retention ceiling has to be decided from
+# (features/bin-counter-accuracy-and-observability.md D3, D11).
+#
+# Nor can that allocation be modelled deterministically: measured against real
+# stores, per-slot allocation ranges from 8 to ~170 bytes depending on array
+# density and growth history, so any fitted model is wrong by tens of percent
+# on some shape — it would reintroduce the same history-dependence in
+# disguise. The payload is instead exact and content-defined, and it tracks
+# measured allocation closely enough to compare with: across eleven real
+# stores spanning three surfaces and 1..3074 partitions, allocation was
+# 10.6-16.4x the payload, a 1.54x spread end to end.
+#
+# So: use this to compare two runs, two configurations, or before and after a
+# change. For absolute footprint use RSS, which is the measure of record per
+# features/426-per-message-statistics-store.md F44(b) — `-mem` and the
+# per-structure figures from named_structure_sizes().
 use constant {
-    COUNTER_BYTES_PER_ENTRY => 1100,  # entry hash + partition hash + array head
-    COUNTER_BYTES_PER_SLOT  => 8,     # one allocated bins slot (a pointer)
-    COUNTER_BYTES_PER_COUNT => 24,    # the integer scalar in an occupied slot
+    COUNTER_BYTES_PER_PARTITION => 48,  # min, max, bpd, decades, bin_count, log_ratio
+    COUNTER_BYTES_PER_BIN_SLOT  => 8,   # one 64-bit count slot spanned by the partition
 };
 
 sub counter_store_bytes {
-    # Reproducible footprint of $store under the model above.
+    # Exact, reproducible payload of $store under the model above.
     my ($store) = @_;
     my $bytes = 0;
     for my $entry (values %$store) {
-        my $bins = $entry->{bins} || [];
-        my $filled = grep { defined $_ && $_ != 0 } @$bins;
-        $bytes += COUNTER_BYTES_PER_ENTRY
-                + COUNTER_BYTES_PER_SLOT  * scalar(@$bins)
-                + COUNTER_BYTES_PER_COUNT * $filled;
+        $bytes += COUNTER_BYTES_PER_PARTITION
+                + COUNTER_BYTES_PER_BIN_SLOT * scalar(@{ $entry->{bins} || [] });
     }
     return $bytes;
 }

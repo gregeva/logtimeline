@@ -281,13 +281,31 @@ order would yield a different union geometry and genuinely different stored cont
 is ruled out as a necessary cause. The step is discrete (1088 bytes, one bucket-array
 doubling), not continuous drift.
 
-**The model.** `counter_store_bytes()` computes the footprint from what the store
-holds: per entry, a fixed cost plus one cost per allocated bins slot and another per
-occupied slot. Constants were calibrated against `Devel::Size::total_size()` over a
-grid of (entries, bin_count, filled) spanning 16–3080 bins and 100–2500 entries; the
-model tracks measured allocation to within **4.6 %** and is uniformly slightly under,
-because it counts no allocator slack. The under-report is systematic, so differences
-between two stores stay meaningful — which is what D3 needs it for.
+**The model, and a finding that changed it.** The first implementation modelled
+Perl's allocation with constants calibrated against `Devel::Size` on synthetic
+stores, and claimed agreement within 4.6 %. Measured against **real** stores it was
+wrong by 88–92 % — the synthetic baseline did not reproduce the production data
+shape, the same failure mode as #58's F9. Re-fitting against real stores then showed
+why no such model can work: per-slot allocation ranges from 8 to ~170 bytes depending
+on array density and growth history, so a two-term fit is off by up to 53 % on some
+shape, and a three-term fit only converges by taking a physically meaningless
+negative coefficient. **Allocation depends on how a structure grew, not on what it
+holds** — which is the same property that made the field unstable in the first place.
+Any model of it reintroduces that dependence in disguise.
+
+`counter_memory_bytes` therefore reports the counters' **payload**: per partition,
+its geometry (six numbers) plus the bin slots it spans. Exact, content-defined, no
+calibration constants. It is **not** an absolute footprint, and says so in the code:
+across eleven real stores spanning three surfaces and 1–3,074 partitions, allocation
+was **10.6–16.4× the payload — a 1.54× spread end to end**, which is far tighter than
+any additive model achieved. That makes it a sound instrument for the comparison D3
+needs (two runs, two configurations, before and after a change) and an unsound one
+for an absolute ceiling.
+
+**For absolute footprint, use RSS**, already the measure of record per
+`features/426-per-message-statistics-store.md` § F44(b) — `-mem` and the
+per-structure figures from `named_structure_sizes()`. D3's ceiling is set from those,
+with this field as the relative signal.
 
 **Verified:** byte-identical across six runs in every arm, with and without a fixed
 hash seed. The `Devel::Size` dependency is retained for `named_structure_sizes()`,

@@ -392,7 +392,7 @@ scenario_message_stats_bin() {
 
     assert_line "$out" \
         pattern     '^  counter_memory_bytes: [0-9]+$' \
-        asserts     'counter_memory_bytes is reproducible across runs on identical input. It is derived from what the store holds - entries, allocated bins slots and occupied slots - not measured from the live structure, whose allocation moves with the per-process hash seed while no observation changes.' \
+        asserts     'counter_memory_bytes is reproducible across runs on identical input. It reports the counters payload - partition geometry plus the bin slots spanned - not a measurement of the live structure, whose allocation depends on growth history and moves between runs while no observation changes.' \
         produced_by 'counter_store_bytes() in ltl via snapshot_counter_telemetry()' \
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - counter_memory_bytes is locked; format is bare bytes.'
 
@@ -608,7 +608,7 @@ scenario_bucket_stats_bin() {
 
     assert_line "$out" \
         pattern     '^  counter_memory_bytes: [0-9]+$' \
-        asserts     'counter_memory_bytes is reproducible across runs on identical input. It is derived from what the store holds - entries, allocated bins slots and occupied slots - not measured from the live structure, whose allocation moves with the per-process hash seed while no observation changes.' \
+        asserts     'counter_memory_bytes is reproducible across runs on identical input. It reports the counters payload - partition geometry plus the bin slots spanned - not a measurement of the live structure, whose allocation depends on growth history and moves between runs while no observation changes.' \
         produced_by 'counter_store_bytes() in ltl via snapshot_counter_telemetry()' \
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - counter_memory_bytes is locked; format is bare bytes.'
 
