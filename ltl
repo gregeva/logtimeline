@@ -97,7 +97,7 @@ my %verbose_section_registry = (
         description => 'Raw-array histogram dimensions: per-metric sample counts, min/max, decades, bucket layout. Active when a surface resolves to the raw values data model.',
     },
     'histogram-bin-counters' => {
-        description => 'HDR-style bin-counter histogram state: percentile precision, per-consumer partition keying, rebin events, finalized histogram dimensions.',
+        description => 'HDR-style bin-counter histogram state: precision tier, per-consumer partition keying, re-binning counted per mechanism, member-histogram retention and footprint, finalized histogram dimensions.',
     },
     'message-grouping' => {
         description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction (Issue #96).',
@@ -1126,7 +1126,6 @@ sub partition_new {
         decades   => $seed_decades,
         bin_count => $bin_count,
         log_ratio => log($max / $min),  # cached for closed-form bin_assign
-        rebins    => 0,
     };
 }
 
@@ -1173,7 +1172,6 @@ sub partition_extend {
     $p->{max}       = $new_max;
     $p->{bin_count} = $new_bin_count;
     $p->{log_ratio} = $new_log_ratio;
-    $p->{rebins}++;
 
     return \@new_bins;
 }
@@ -1214,23 +1212,83 @@ sub partition_rebin {
         decades   => log($new_max / $new_min) / log(10),
         bin_count => $new_bin_count,
         log_ratio => $new_log_ratio,
-        rebins    => 0,
     };
     return ($new_partition, \@new_bins);
 }
 
+# Counter-store footprint for a bin-counter store (#462).
+#
+# This reports the counters' PAYLOAD — the geometry each partition carries and
+# the bin slots it spans — not the process's allocation. That distinction is
+# the point of the field, not a shortcut:
+#
+# Devel::Size::total_size(), which this replaces, reports what the process
+# allocated, and allocation depends on the history of how a structure grew
+# rather than on what it holds. On identical input the same store measured
+# 46277 / 45189 across six runs, every content-derived field constant, because
+# Perl's per-process hash seed changes when a bucket array doubles. A figure
+# that moves on its own cannot answer "did this change cost memory", which is
+# the question the retention ceiling has to be decided from
+# (features/bin-counter-accuracy-and-observability.md D3, D11).
+#
+# Nor can that allocation be modelled deterministically: measured against real
+# stores, per-slot allocation ranges from 8 to ~170 bytes depending on array
+# density and growth history, so any fitted model is wrong by tens of percent
+# on some shape — it would reintroduce the same history-dependence in
+# disguise. The payload is instead exact and content-defined, and it tracks
+# measured allocation closely enough to compare with: across eleven real
+# stores spanning three surfaces and 1..3074 partitions, allocation was
+# 10.6-16.4x the payload, a 1.54x spread end to end.
+#
+# So: use this to compare two runs, two configurations, or before and after a
+# change. For absolute footprint use RSS, which is the measure of record per
+# features/426-per-message-statistics-store.md F44(b) — `-mem` and the
+# per-structure figures from named_structure_sizes().
+use constant {
+    COUNTER_BYTES_PER_PARTITION => 48,  # min, max, bpd, decades, bin_count, log_ratio
+    COUNTER_BYTES_PER_BIN_SLOT  => 8,   # one 64-bit count slot spanned by the partition
+};
+
+sub counter_store_bytes {
+    # Exact, reproducible payload of $store under the model above.
+    my ($store) = @_;
+    my $bytes = 0;
+    for my $entry (values %$store) {
+        $bytes += COUNTER_BYTES_PER_PARTITION
+                + COUNTER_BYTES_PER_BIN_SLOT * scalar(@{ $entry->{bins} || [] });
+    }
+    return $bytes;
+}
+
 sub snapshot_counter_telemetry {
     # Capture per-consumer telemetry from a streaming counter store before
-    # the store is discarded at finalize. Populates the locked #187 Decision 8
-    # -V fields read later by emit_bin_counter_mode_verbose().
+    # the store is discarded at finalize. Populates the #187 Decision 8 -V
+    # fields read later by emit_bin_counter_mode_verbose().
+    #
+    # Re-binning is counted per mechanism (#462): one summed figure cannot be
+    # acted on, because a number that rises says nothing about whether the
+    # seed geometry was wrong, consolidation churned, or a histogram was
+    # rendered. Growth and combination are counted on the STORE ENTRY rather
+    # than on the partition, because a combination replaces the target's
+    # partition outright and would otherwise reset the history it should be
+    # adding to. The finalize projection happens after this snapshot and is
+    # counted at its own call sites (see finalize_heatmap_unified /
+    # finalize_histogram_unified).
     my ($store) = @_;
     my $n = scalar keys %$store;
-    my ($total_rebins, $max_bins, $with_over, $with_under, $over_sum, $under_sum) = (0, 0, 0, 0, 0, 0);
-    my @rebins;
+    my ($growth, $merge, $max_bins, $with_over, $with_under, $over_sum, $under_sum)
+        = (0, 0, 0, 0, 0, 0, 0);
+    my ($members_live, $members_max) = (0, 0);
+    my @growth_per_partition;
     for my $entry (values %$store) {
         my $p = $entry->{partition};
-        $total_rebins += $p->{rebins};
-        push @rebins, $p->{rebins};
+        my $g = $entry->{rebin_growth} // 0;
+        $growth += $g;
+        push @growth_per_partition, $g;
+        $merge  += $entry->{rebin_merge} // 0;
+        my $m = $entry->{members} // 1;
+        $members_live += $m;
+        $members_max = $m if $m > $members_max;
         $max_bins = $p->{bin_count} if $p->{bin_count} > $max_bins;
         my $o = $entry->{overflow}  // 0;
         my $u = $entry->{underflow} // 0;
@@ -1239,22 +1297,31 @@ sub snapshot_counter_telemetry {
         $over_sum    += $o;
         $under_sum   += $u;
     }
-    my @sorted = sort { $a <=> $b } @rebins;
+    my @sorted = sort { $a <=> $b } @growth_per_partition;
     my $p50 = @sorted ? $sorted[int(@sorted * 0.50)] : 0;
     my $p95 = @sorted ? $sorted[int(@sorted * 0.95)] : 0;
     my $p99 = @sorted ? $sorted[int(@sorted * 0.99)] : 0;
     my $rmax = @sorted ? $sorted[-1] : 0;
-    require Devel::Size;
-    my $bytes = Devel::Size::total_size($store);
+    my $bytes = counter_store_bytes($store);
     return {
         partition_count                 => $n,
-        total_rebin_events              => $total_rebins,
+        rebin_growth_events             => $growth,
+        rebin_merge_events              => $merge,
+        rebin_finalize_events           => 0,   # set by the finalizer that projects
         max_partition_bins              => $max_bins,
         partitions_with_overflow_count  => $with_over,
         partitions_with_underflow_count => $with_under,
         overflow_total                  => $over_sum,
         underflow_total                 => $under_sum,
         counter_memory_bytes            => $bytes,
+        members_live                    => $members_live,
+        members_max                     => $members_max,
+        # Every retained member histogram is in $store today, so the member
+        # footprint is the store footprint. Under D1 (features/bin-counter-
+        # accuracy-and-observability.md) a cluster holds its members' original
+        # histograms alongside the merged one and the two figures diverge;
+        # their equality is the signal that no member is being retained yet.
+        members_memory_bytes            => $bytes,
         rebins_p50                      => $p50,
         rebins_p95                      => $p95,
         rebins_p99                      => $p99,
@@ -1307,6 +1374,13 @@ sub counter_update {
             bins      => [],
             overflow  => 0,
             underflow => 0,
+            # Re-bin history lives on the entry, not the partition: a
+            # combination replaces the partition and would reset it (#462).
+            rebin_growth => 0,
+            rebin_merge  => 0,
+            # Member histograms this entry stands for. One until a
+            # combination folds another key's counters in.
+            members      => 1,
         };
     }
 
@@ -1318,6 +1392,7 @@ sub counter_update {
 
     # Out of range: extend the partition, remap existing counts, re-assign.
     my $new_bins = partition_extend($entry->{partition}, $value, $entry->{bins});
+    $entry->{rebin_growth}++;
     $entry->{bins} = $new_bins;
     my ($w2, $i2) = bin_assign($entry->{partition}, $value);
     if ($w2 eq 'IN') {
@@ -4765,11 +4840,27 @@ sub emit_bin_counter_mode_verbose {
 
         push @verbose_output, "  partition_keying: $partition_keying{$consumer}";
         push @verbose_output, "  partition_count: "                 . ($t->{partition_count}                 // 0);
-        push @verbose_output, "  total_rebin_events: "              . ($t->{total_rebin_events}              // 0);
+        # Re-binning per mechanism (#462). Growth is a partition outgrowing
+        # its range; merge is a combination projecting a side onto the union
+        # geometry; finalize is the projection into display shape, which runs
+        # on every heatmap or histogram render. A single summed figure could
+        # not distinguish them, so it is not reported.
+        push @verbose_output, "  rebin_growth_events: "             . ($t->{rebin_growth_events}             // 0);
+        push @verbose_output, "  rebin_merge_events: "              . ($t->{rebin_merge_events}              // 0);
+        push @verbose_output, "  rebin_finalize_events: "           . ($t->{rebin_finalize_events}           // 0);
         push @verbose_output, "  max_partition_bins: "              . ($t->{max_partition_bins}              // 0);
         push @verbose_output, "  partitions_with_overflow_count: "  . ($t->{partitions_with_overflow_count}  // 0);
         push @verbose_output, "  partitions_with_underflow_count: " . ($t->{partitions_with_underflow_count} // 0);
+        push @verbose_output, "  overflow_total: "                  . ($t->{overflow_total}                  // 0);
+        push @verbose_output, "  underflow_total: "                 . ($t->{underflow_total}                 // 0);
         push @verbose_output, "  counter_memory_bytes: "            . ($t->{counter_memory_bytes}            // 0);
+        # Retention of member histograms across combined keys. members_live
+        # equals partition_count and members_memory_bytes equals
+        # counter_memory_bytes while combination still collapses members into
+        # one histogram; the two pairs diverge once members are retained.
+        push @verbose_output, "  members_live: "                    . ($t->{members_live}                    // 0);
+        push @verbose_output, "  members_max: "                     . ($t->{members_max}                     // 0);
+        push @verbose_output, "  members_memory_bytes: "            . ($t->{members_memory_bytes}            // 0);
         push @verbose_output, sprintf("  rebins_per_partition: p50=%d p95=%d p99=%d max=%d",
             $t->{rebins_p50} // 0, $t->{rebins_p95} // 0,
             $t->{rebins_p99} // 0, $t->{rebins_max} // 0);
@@ -7702,6 +7793,9 @@ sub merge_bin_counter_entries {
         $target->{bins}      = $source->{bins} // [];
         $target->{overflow}  = $source->{overflow}  // 0;
         $target->{underflow} = $source->{underflow} // 0;
+        $target->{rebin_growth} = $source->{rebin_growth} // 0;
+        $target->{rebin_merge}  = $source->{rebin_merge}  // 0;
+        $target->{members}      = $source->{members}      // 1;
         return;
     }
     return unless $source->{partition};
@@ -7720,16 +7814,23 @@ sub merge_bin_counter_entries {
     my $union_bin_count = int($bpd * $union_decades);
     $union_bin_count = 1 if $union_bin_count < 1;
 
+    # Each side is projected only when its geometry differs from the union, so
+    # a combination re-bins zero, one or two partitions. Counted per projection
+    # rather than per combination (#462): the accuracy cost is the projection.
+    my $projections = 0;
+
     if ($tp->{min} != $union_min || $tp->{max} != $union_max || $tp->{bin_count} != $union_bin_count) {
         my ($new_p, $new_bins) = partition_rebin($tp, $target->{bins}, $union_min, $union_max, $union_bin_count);
         $target->{partition} = $new_p;
         $target->{bins}      = $new_bins;
+        $projections++;
     }
 
     my $source_bins_aligned;
     if ($sp->{min} != $union_min || $sp->{max} != $union_max || $sp->{bin_count} != $union_bin_count) {
         my (undef, $new_bins) = partition_rebin($sp, $source->{bins}, $union_min, $union_max, $union_bin_count);
         $source_bins_aligned = $new_bins;
+        $projections++;
     } else {
         $source_bins_aligned = $source->{bins};
     }
@@ -7741,6 +7842,13 @@ sub merge_bin_counter_entries {
     }
     $target->{overflow}  += ($source->{overflow}  // 0);
     $target->{underflow} += ($source->{underflow} // 0);
+
+    # The source entry is dropped by the caller, so its re-bin history is
+    # added here or it is lost — which is what made consolidation invisible.
+    $target->{rebin_growth} = ($target->{rebin_growth} // 0) + ($source->{rebin_growth} // 0);
+    $target->{rebin_merge}  = ($target->{rebin_merge}  // 0) + ($source->{rebin_merge}  // 0)
+                            + $projections;
+    $target->{members}      = ($target->{members}      // 1) + ($source->{members}      // 1);
 }
 
 # Issue #287: merge the bin-path state (Welford-Pébay sidecars + bin-counter
@@ -11552,6 +11660,11 @@ sub finalize_heatmap_unified {
         }
         $heatmap_percentiles{$bucket} = \%markers if %markers;
 
+        # Every partition on this surface is projected into display shape
+        # exactly once per run, after the telemetry snapshot above — which is
+        # why it was invisible before #462. Counted here, at the site.
+        $bin_counter_telemetry{heatmap_cells}{rebin_finalize_events}++;
+
         # Discard streaming partition now that finalize is done.
         delete $heatmap_counters{$bucket};
     }
@@ -11872,6 +11985,9 @@ sub finalize_histogram_unified {
         @{$histogram_boundaries{$metric}} =
             map { bin_boundary($final_p, $_) } 0 .. $bucket_count;
         @{$histogram_buckets{$metric}} = @$final_bins;
+
+        # One display projection per metric per run, after the snapshot (#462).
+        $bin_counter_telemetry{histogram_view}{rebin_finalize_events}++;
 
         # Discard streaming partition now that finalize is done.
         delete $histogram_counters{$metric};

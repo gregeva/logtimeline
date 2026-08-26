@@ -1,6 +1,6 @@
 # Bin-counter accuracy and observability
 
-**Status:** planning complete, implementation not started
+**Status:** stage 1 (#462) delivered; stages 2-4 not started
 **Release:** 0.18.0
 **Issues:** #462 (observability carrier, absorbs #461), #450 (test coverage), #459 (merge arithmetic), #460 (contract amendment pass)
 **Out of this release:** #354 (per-message store memory), #412 (notices surface)
@@ -219,6 +219,128 @@ can currently see only the memory half.
 The notice (D5) catches them at the moment it affects them; the documentation lets
 them choose before it does.
 
+### D9 — Re-binning is counted on the store entry; the finalize projection at its own sites
+
+Locked 2026-08-26 during #462, from the code as it stands.
+
+The three mechanisms cannot share one carrier. Growth and combination are counted
+on the **store entry** — the `{partition, bins, overflow, underflow}` hashref — and
+not on the partition, because a combination replaces the target's partition with a
+fresh one from `partition_rebin()`. A count held on the partition is therefore
+discarded at exactly the moment consolidation happens, which is the mechanism by
+which consolidation was invisible: `-g 70` folding 17 partitions into 13 left every
+re-bin field byte-identical to the un-consolidated run. `partition_new()` and
+`partition_rebin()` no longer carry a `rebins` slot and `partition_extend()`
+increments none — one carrier, not two.
+
+The finalize projection cannot be observed from a snapshot at all. It runs after the
+only snapshot and deletes the partitions it projects. It is counted at its four call
+sites, into the consumer's telemetry hash, independently of the snapshot.
+
+**Rejected:** moving the snapshot to after the projection loops. It is the smaller
+change, but `partition_count`, `max_partition_bins` and `counter_memory_bytes` would
+then describe the display geometry rather than the 616-bpd streaming geometry — the
+same field names silently meaning something else.
+
+**Invariant this establishes:** `rebin_finalize_events == partition_count` on the
+heatmap and histogram surfaces, and exactly `0` on `summary_table`, `csv_output` and
+`time_bucket_stats`, which read percentiles from the streaming partition and never
+project. Both are asserted by `tests/validate-histogram-bin-counters.sh`.
+
+### D10 — Retention is emitted from stage 1, with today's values
+
+`members_live`, `members_max` and `members_memory_bytes` ship now rather than waiting
+for D1's retention change, so that the harness in #450 can assert their shape before
+#459 moves their values — which is the reason observability leads the drop.
+
+`members` is carried on the store entry, seeded at 1 and folded in on combination, so
+the definitions do not change when D1 lands:
+
+- `members_live` — member histograms alive across combined keys. **Conserved under
+  combination**: measured 17 both with and without `-g 70`, while `partition_count`
+  fell from 17 to 13.
+- `members_max` — the largest membership any one entry reached. 1 un-consolidated, 2
+  under `-g 70` on the same fixture.
+- `members_memory_bytes` — footprint of the retained member histograms. Equal to
+  `counter_memory_bytes` today, because combination still collapses members into one
+  histogram. **That equality is the signal that no member is being retained yet**, and
+  the two diverge the moment D1 lands.
+
+### D11 — `counter_memory_bytes` becomes a derived figure, not a live measurement
+
+Closes #461, folded into #462.
+
+**Attribution, measured before deciding.** Six runs per arm on
+`tests/fixtures/tomcat-access-duration-spread.txt`: without `-g`, the figure moved
+46277 / 45189 (2.4 % spread) while `partition_count`, `max_partition_bins` and the
+re-bin fields stayed constant; with `-g 70`, 50802 / 49970 (1.6 %), likewise with the
+content fields constant; under `PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0`, one value per
+arm. The variance is **the allocator alone**. It reproduces with no consolidation at
+all, so no merge happens and the hash-iteration-order route — where a different merge
+order would yield a different union geometry and genuinely different stored contents —
+is ruled out as a necessary cause. The step is discrete (1088 bytes, one bucket-array
+doubling), not continuous drift.
+
+**The model, and a finding that changed it.** The first implementation modelled
+Perl's allocation with constants calibrated against `Devel::Size` on synthetic
+stores, and claimed agreement within 4.6 %. Measured against **real** stores it was
+wrong by 88–92 % — the synthetic baseline did not reproduce the production data
+shape, the same failure mode as #58's F9. Re-fitting against real stores then showed
+why no such model can work: per-slot allocation ranges from 8 to ~170 bytes depending
+on array density and growth history, so a two-term fit is off by up to 53 % on some
+shape, and a three-term fit only converges by taking a physically meaningless
+negative coefficient. **Allocation depends on how a structure grew, not on what it
+holds** — which is the same property that made the field unstable in the first place.
+Any model of it reintroduces that dependence in disguise.
+
+`counter_memory_bytes` therefore reports the counters' **payload**: per partition,
+its geometry (six numbers) plus the bin slots it spans. Exact, content-defined, no
+calibration constants. It is **not** an absolute footprint, and says so in the code:
+across eleven real stores spanning three surfaces and 1–3,074 partitions, allocation
+was **10.6–16.4× the payload — a 1.54× spread end to end**, which is far tighter than
+any additive model achieved. That makes it a sound instrument for the comparison D3
+needs (two runs, two configurations, before and after a change) and an unsound one
+for an absolute ceiling.
+
+**For absolute footprint, use RSS**, already the measure of record per
+`features/426-per-message-statistics-store.md` § F44(b) — `-mem` and the
+per-structure figures from `named_structure_sizes()`. D3's ceiling is set from those,
+with this field as the relative signal.
+
+**Verified:** byte-identical across six runs in every arm, with and without a fixed
+hash seed. The `Devel::Size` dependency is retained for `named_structure_sizes()`,
+which is a different question (real footprint, reported alongside RSS per
+`features/426-per-message-statistics-store.md` § F44(b)).
+
+### D12 — `overflow_total` and `underflow_total` are emitted
+
+Both were already produced by `snapshot_counter_telemetry()` and printed by nothing.
+D7 keeps the out-of-range counters as designed-in safety instrumentation for
+conditions that should never occur; a guard that is computed and then discarded is not
+instrumentation. They are emitted and documented as expected to read zero.
+
+---
+
+## Open items carried out of stage 1
+
+- **The highlight sub-stores are not observed.** `%heatmap_counters_hl`,
+  `%histogram_counters_hl` and `%bucket_stats_counters_hl` take streaming growth, and
+  the first two take a finalize projection each, and no consumer block reports any of
+  it. Deliberately out of scope for #462: whether the highlight subset is its own
+  consumer, or folds into the parent's figures, is a Decision 8 consumer-name question,
+  not a counter question. `%bucket_stats_counters_hl` additionally has no consumer at
+  all beyond `named_structure_sizes()`.
+- **`path: pre_migration` is unreachable.** All seven consumer names are in
+  `%migrated`, so the value can no longer be produced. It is a locked D8 path value
+  asserted by nothing; its retirement belongs to the amendment pass in #460.
+- **The `/ dimensions` sub-section reports a different epoch from its parent.** It is
+  built after the display projection and drained inside the same `-V` brackets as
+  fields describing the streaming geometry, with nothing marking the boundary.
+  Not changed here; recorded for #460.
+- **`features/426-*` and `prototype/` retain `total_rebin_events`.** Both are the
+  frozen record of the investigation that produced this drop, describing what the tool
+  did at the time they were written. They are not swept.
+
 ---
 
 ## Deferred to the development flow
@@ -226,13 +348,8 @@ them choose before it does.
 These are decided from measurement during implementation, not up front:
 
 - **Whether retention is capped, and at what value** (D3).
-- **Disposition of `counter_memory_bytes`.** Its 2.4–2.7 % run-to-run spread is the
-  Perl per-process hash seed perturbing bucket allocation — the store's contents are
-  identical, the measurement of them is not (verified: six runs under a fixed hash
-  seed produce one value). Whether it stays a true live measurement with a
-  documented noise floor, or becomes a reproducible derived figure, is decided from
-  prototype measurements. The benchmark gate's 5 % threshold stands for now;
-  findings during development may move it.
+- **Disposition of `counter_memory_bytes`** — **settled 2026-08-26, see D11**: a
+  derived, reproducible figure. The benchmark gate's 5 % threshold stands.
 
 ---
 
