@@ -193,22 +193,18 @@ cmd_sweep() {
             fi
         fi
 
-        # A recorded dependency means the issue was planned for delivery and picked
-        # up out of the backlog; it is waiting for the blocker, not queued unstarted.
-        if [ -z "$proposal" ]; then
-            local blockers
-            blockers="$(gh api "repos/{owner}/{repo}/issues/$number/dependencies/blocked_by" \
-                --jq '[.[] | select(.state=="open") | "#\(.number)"] | join(", ")' 2>/dev/null || true)"
-            if [ -n "$blockers" ]; then
-                proposal="on hold"
-                reason="blocked by $blockers (open) — a recorded dependency means delivery was planned and the issue picked up"
-            fi
-        fi
+        # Blocking is NOT a status signal. CLAUDE.md § Issue Status: "Status is
+        # orthogonal to blocking. An issue can be `blocked_by` an open issue AND
+        # be `in progress` at the same time." An open dependency therefore says
+        # nothing about which status an issue should carry, and `on hold` in
+        # particular records "deliberately paused by an explicit decision" — a
+        # judgement no mechanical signal can make. No proposal is derived from a
+        # dependency edge.
 
         # Nothing else to go on.
         if [ -z "$proposal" ] && [ -z "$current" ]; then
             proposal="backlog"
-            reason="no open blocker, no branch, no open PR — nothing indicates work started or planned"
+            reason="no branch and no open PR — nothing indicates work has started"
         fi
 
         if [ -n "$proposal" ]; then
