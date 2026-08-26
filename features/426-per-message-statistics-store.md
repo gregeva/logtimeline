@@ -1465,7 +1465,12 @@ computed, and that distinction is re-recorded here when it does.
     Distinct from #284, which fixed *which key seeds a cluster*; this is the arithmetic below it.
   - **#460** — the one-bin percentile accuracy guarantee is documented as structural but is breached
     after any re-binning (2.10 bin widths at merge depth 15; also two unmerged cases). Resolvable by
-    amending the contract (drafted as A4) or by changing the mechanism.
+    amending the contract (drafted as A4) or by changing the mechanism. **Broadened after filing** to
+    carry two further corrections owed to the same contract document, so one amendment pass fixes all
+    three: the out-of-range counters are documented as live but never fire under the current growth
+    policy (leaving three verbose fields constant, and therefore useless as parity assertions), and the
+    documented merge description says "extend the narrower side" where the shipped code re-projects
+    both sides into a spanning range — the code being correct and the description wrong.
   - **#461** — `counter_memory_bytes` varies 2.7% between runs on identical input, while every other
     locked field in the same block is stable.
   - **#462** — re-binning caused by merges is invisible in the telemetry, so the counters read as
