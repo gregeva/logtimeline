@@ -1487,7 +1487,7 @@ Non-binding.
   - `docs/usage.md` — the parallel options reference, kept in agreement with `--help` in the same change (per CLAUDE.md's documentation-alignment rule).
   - Analyst-facing guidance on when to pin a surface to `raw`: byte-identical comparison against a pre-migration release, or a nearest-rank reference to check a bin-model value against.
 
-### Decision 8 — `-V` reporting verbosity and format — **LOCKED (2026-05-19); section name amended 2026-05-20, re-locked to the shipped name 2026-08-27 via #460**
+### Decision 8 — `-V` reporting verbosity and format — **LOCKED (2026-05-19); section name amended 2026-05-20, re-locked to the shipped name 2026-08-27 via #460; display-dimensions sub-section locked 2026-08-27 via #473**
 
 > **Amendment 2026-05-20 (#34 Phase 2)**: the section is named for the substrate rather than for one consumer family's output. The substrate is HdrHistogram-style histogram bin counters; percentiles are one of three derivations from it, alongside bin counts (`histogram_bins`) and cell colors (`heatmap_cells`), which are not percentiles. The emitting function is `emit_bin_counter_mode_verbose`, for the same reason. All field names, consumer-name strings, and per-consumer field-name lockings within Decision 8 remain in effect verbatim.
 >
@@ -1589,6 +1589,12 @@ When `path: user_opt_out` or `path: feature_not_active`, no further fields appea
 | `histogram_bins` | Path C1-bins | Histogram-mode bin counts (bar heights) |
 
 The consumer-name strings are part of the locked feature contract. Future consumers (highlight subsets per Phase 4; future hover-to-redraw renders per Phase 5) get their canonical names when their migration phase locks them.
+
+**Sub-section: `=== histogram-bin-counters / display-dimensions ===`** — **locked 2026-08-27 by #473.** When a histogram renders under the bin data model, the section additionally carries a per-metric line describing the geometry the chart is drawn on: sample count, observed min and max, decades spanned, bins per decade, and total buckets. It is produced in `finalize_histogram_unified()` and drained into the parent's brackets through the deferred sub-section buffer.
+
+The name is contractual, and the reason is the epoch it distinguishes: every field in the per-consumer blocks above describes the **streaming** partitions as they stood when the telemetry snapshot was taken, before the display projection; the lines in this sub-section describe the geometry that projection produced. The two are different by design on this surface, and without the name the section would present them as one measurement. `total_buckets` here is not comparable with the parent's `max_partition_bins` — different epochs, different geometry.
+
+The raw path emits the same per-metric line shape as `=== histogram-array / dimensions ===`. That name is unqualified because its parent section reports nothing measured at another moment.
 
 **Section presence**: always emitted when `-V` is active. When no consumer is computing percentiles or bin counts (e.g., `ltl -ll <file> -V` with no percentile-relevant features enabled), the section consists of the run-level header followed by:
 

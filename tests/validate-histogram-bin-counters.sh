@@ -716,6 +716,48 @@ scenario_always_present() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario 9: the display-dimensions sub-section, and the epoch its name
+# carries. Needs -hg: the sub-section exists only when a histogram renders.
+# ---------------------------------------------------------------------------
+scenario_display_dimensions() {
+    current_scenario="display-dimensions"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_section -hg duration -hgdm bin)
+    check_capture_warnings "$out"
+
+    assert_header_present "$out"
+
+    assert_line "$out" \
+        pattern     '^=== histogram-bin-counters / display-dimensions ===$' \
+        asserts     'The sub-section reporting the geometry the chart is drawn on is named for the epoch it describes, so a reader cannot mistake it for the streaming figures its parent section reports' \
+        produced_by 'finalize_histogram_unified() in ltl (deferred sub-section buffer, drained by emit_bin_counter_mode_verbose)' \
+        contract    'tests/HARNESS-DESIGN.md section Reserved section names + features/187-histogram-bin-counter-percentiles.md section Decision 8 - sub-section names are stability-contracted; renames are breaking'
+
+    assert_line "$out" \
+        pattern     '^=== END histogram-bin-counters / display-dimensions ===$' \
+        asserts     'The sub-section carries its explicit end marker, so a harness can range-extract it without dragging adjacent content' \
+        produced_by 'finalize_histogram_unified() in ltl (deferred sub-section buffer)' \
+        contract    'tests/HARNESS-DESIGN.md section Delimiter contract - end markers are required'
+
+    assert_line "$out" \
+        pattern     '^  Duration:  +samples=[0-9]+ +min=[^ ]+ +max=[^ ]+ +decades=[0-9]+\.[0-9]{2} buckets_per_decade=[0-9]+ total_buckets=[0-9]+$' \
+        asserts     'Each metric line reports the display geometry the bars were drawn on: sample count, observed range, decades spanned, and the bucket layout derived from them' \
+        produced_by 'format_histogram_dimensions_line() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - the sub-section content shape is part of the locked section contract'
+
+    # The sub-section is drained inside the parent's brackets, which is what
+    # makes its name the only thing distinguishing the two epochs.
+    assert_line "$out" \
+        pattern     '^=== END histogram-bin-counters ===$' \
+        asserts     'The display-dimensions sub-section closes before the parent section does, so it is reported inside the parent brackets rather than as a section of its own' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl (sub-section drain before the closing bracket)' \
+        contract    'Issue #226 deferred sub-section framework + tests/HARNESS-DESIGN.md section Delimiter contract'
+
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
 # Run all scenarios
 # ---------------------------------------------------------------------------
 
@@ -741,6 +783,8 @@ echo ""
 scenario_bucket_stats_raw
 echo ""
 scenario_always_present
+echo ""
+scenario_display_dimensions
 
 echo ""
 echo "Results: $pass passed, $fail failed"

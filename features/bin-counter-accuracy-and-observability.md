@@ -603,14 +603,14 @@ anything else against it.
   the unified path, so the value could no longer be produced — a locked D8 path value
   asserted by nothing. Removed from the emitter and from the contracts that locked it
   under #460.
-- **The `/ dimensions` sub-section reports a different epoch from its parent.** It is
-  built after the display projection and drained inside the same `-V` brackets as
-  fields describing the streaming geometry, with nothing marking the boundary. Still
-  open after #460: the three available shapes are a sub-section rename, a field inside
-  it that names the epoch, or leaving the emission alone and recording the epoch in the
-  section contract — the first two move a locked line shape, and the raw path emits the
-  same sub-section name under `histogram-array`, so it is a question about both
-  surfaces. `460-bin-model-percentile-source.md` § 5.
+- **The `/ dimensions` sub-section reported a different epoch from its parent, and is
+  renamed.** It is built after the display projection and drained inside the same `-V`
+  brackets as fields describing the streaming geometry. The sub-section now says which
+  epoch it describes — `histogram-bin-counters / display-dimensions` — so the name
+  carries the distinction and no field had to be added to a locked field set to state
+  it (architect, 2026-08-27; delivered under #473). The raw path's
+  `histogram-array / dimensions` keeps its unqualified name: its parent reports nothing
+  measured at another moment.
 - **`features/426-*` and `prototype/` retain `total_rebin_events`.** Both are the
   frozen record of the investigation that produced this drop, describing what the tool
   did at the time they were written. They are not swept.

@@ -166,14 +166,13 @@ on instead.
 Two items recorded for this pass are decisions about the locked `-V` contract rather than
 defects with one correct fix, and are not taken here:
 
-- **The `/ dimensions` sub-section reports a different epoch from its parent.** It is
-  built after the display projection and drained inside the same brackets as fields
-  describing the streaming geometry, with nothing marking the boundary. Three shapes are
-  available — rename the sub-section to say which epoch it describes, add a field inside
-  it that does, or leave the emission alone and record the epoch in the section contract —
-  and the first two change a locked line shape. The raw path emits the same sub-section
-  name under `histogram-array`, so any rename is a question about both surfaces, not one.
+- **The `/ dimensions` sub-section reported a different epoch from its parent.**
+  Settled by the architect on 2026-08-27 and delivered under #473: the sub-section is
+  renamed `histogram-bin-counters / display-dimensions`, so its name states that it
+  describes the geometry produced by the display projection while its parent's fields
+  describe the streaming partitions before it.
 - **The highlight sub-stores are observed by nothing.** Whether the highlight subset
   becomes its own consumer name or folds into the parent's figures is a Decision 8
   consumer-name question. Disposition A is a new locked-decision entry plus new harness
   scenarios; disposition B changes what six already-locked field descriptions mean.
+  Filed as #473's sibling, #472.
