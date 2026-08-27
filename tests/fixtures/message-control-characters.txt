@@ -1,0 +1,7 @@
+2025-07-18 04:46:41,354 INFO  [main] wt.method.server.startup  - Baseline message carrying no control characters at all
+2025-07-18 04:46:42,354 INFO  [main] wt.method.server.startup  - Horizontal tab here:	and text following the tab stop
+2025-07-18 04:46:43,354 INFO  [main] wt.method.server.startup  - Carriage return here:and text following the return
+2025-07-18 04:46:44,354 INFO  [main] wt.method.server.startup  - Escape introducer here:[31mand text following it
+2025-07-18 04:46:45,354 INFO  [main] wt.method.server.startup  - Unit separator here:and text following it
+2025-07-18 04:46:46,354 INFO  [main] wt.method.server.startup  - Vertical tab here:and form feed:and backspace:done
+2025-07-18 04:46:47,354 WARN  [main] wt.method.server.shutdown  - Second baseline message with no control characters

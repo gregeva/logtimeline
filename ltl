@@ -10626,6 +10626,19 @@ sub read_and_process_logs {
                 }
             }
 
+            # Issue #447: strip control characters from the message once, here,
+            # where every ingest path has written it and nothing has read it —
+            # so the table, the CSV, the consolidation key and the verbose
+            # surfaces all see the same text. TAB becomes four spaces; every
+            # other C0 character and DEL goes. The raw line is left alone:
+            # -include/-exclude/-highlight match against it.
+            # Shape, measurements and why the gate is correct:
+            # features/447-message-control-character-normalisation.md D1-D5.
+            if ( $is_line_match && defined $message && $message =~ tr/\x00-\x1f\x7f// ) {
+                $message =~ s/\t/    /g if index( $message, "\t" ) >= 0;
+                $message =~ tr/\x00-\x08\x0a-\x1f\x7f//d;
+            }
+
             ## COUNT METRICS # capture count metrics unless explicitly omitted
             if( !$omit_count && defined $message ) {
                 ( $count ) = $message =~ / count\s*=\s*(\d+)/;

@@ -1,0 +1,3 @@
+2025-07-18 04:46:41,354 INFO  [main] wt.method.server.startup  - Matched line carrying	a tab character
+ space-led continuation line that no format recognises
+2025-07-18 04:46:43,354 INFO  [main] wt.method.server.startup  - Second matched line with no control characters
