@@ -26,3 +26,11 @@ Run `./extract-subs.sh` first; then any probe.
 `counter_update()` seeds *and* observes. Every member was short one sample and
 single-sample members contributed nothing. All probes were corrected and re-run. Any
 future probe here must seed and observe, the way `counter_update` does.
+
+**Second defect, fixed the same day.** Four probes declared a partition seed span of 4
+decades; the shipped value is 5. The seed span decides how much of a partition a key
+occupies before it has seen anything beyond its first value, which is the mechanism the
+per-key-versus-grid comparison turns on — it is not a free parameter. Every probe now
+declares the shipped value. **Any constant a probe restates from `ltl` is a realism
+risk**: prefer slicing it out of the source, and where that is impractical, state where
+the value came from in a comment.

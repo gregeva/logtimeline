@@ -58,6 +58,14 @@ ceiling — a total says nothing about whether the load is spread or concentrate
 > probe was fixed and re-run; the numbers below are from the corrected runs. No
 > conclusion reversed, but two moved materially and are flagged where they appear
 > (F4, and the grid-anchored arm in § 5).
+>
+> **Second correction, same day.** Four probes ran with a partition seed span of 4
+> decades; the shipped value is 5 (`$percentile_seed_decades`). A seed span decides how
+> many buckets a key allocates before it has observed anything beyond its first value,
+> so it is not a free parameter — it changes what fraction of a partition is occupied,
+> which is the mechanism the whole per-key-versus-grid comparison turns on. All four
+> were set to the shipped value and re-run. Again no conclusion reversed, and again
+> the grid-anchored arm moved: it no longer reads exactly zero at every depth.
 
 
 
@@ -108,19 +116,23 @@ snapping each partition's seed floor to a global grid "does not reach zero". Tha
 reading was wrong twice over: the probe carried the seeding defect noted at the top of
 this section, and the union bucket count was derived with `int()`, which on
 grid-aligned extents lands a hair under an exact integer and truncates, shifting every
-edge. With both corrected, the grid-anchored arm reads **exactly zero** median
-deviation at every depth measured, and zero maximum at depths 2 and 5:
+edge. With both corrected — and at the shipped seed span, which the first
+corrected run also got wrong — the grid-anchored arm is **exact at the shallow depths**
+and comparable to today's at the deeper ones:
 
 | members | seeded on first value (today) | seeded on a global grid, bucket count rounded |
 |---|---|---|
-| 2 | 0.255 / 0.427 | **0.000 / 0.000** |
-| 5 | 0.174 / 0.377 | **0.000 / 0.000** |
-| 15 | 0.152 / 0.439 | **0.000 / 0.342** |
-| 40 | 0.066 / 0.196 | **0.000 / 0.125** |
+| 2 | 0.249 / 0.399 | **0.000 / 0.000** |
+| 5 | 0.160 / 0.603 | **0.000 / 0.000** |
+| 15 | 0.298 / 0.407 | 0.283 / 0.453 |
+| 40 | 0.101 / 0.197 | 0.133 / 0.282 |
 
 (median / maximum, in member bucket widths, against a single partition over the
-pooled samples.) The residual at depths 15 and 40 traces to the same truncation
-inside `partition_extend`'s growth, not to the idea. What this does **not** measure is
+pooled samples.) Combining two or five keys on a shared grid is exactly the same answer
+as pooling their samples — zero, not nearly zero — which is the property the idea
+promises. It stops being exact by depth 15, and the residual traces to the bucket count
+being truncated inside `partition_extend`'s growth rather than to the idea; that is
+unproven, and is the next thing to measure if the topic is picked up. What this does **not** measure is
 F37's finding — the accuracy of the per-key streaming representation itself across the
 resolution ladder — which is the ground the earlier rejection stood on. The two
 questions are separable and only one of them has been re-opened here.
@@ -263,10 +275,10 @@ widths, median / worst):
 
 | | one collapse | batched at a ceiling of 8 (32 collapses) |
 |---|---|---|
-| combined at the members' resolution | 0.039 / 0.204 | **0.294 / 0.523** |
-| combined at 616 buckets per decade | 0.072 / 0.304 | **0.105 / 0.304** |
+| combined at the members' resolution | 0.222 / 0.445 | **0.492 / 0.641** |
+| combined at 616 buckets per decade | 0.121 / 0.298 | **0.121 / 0.292** |
 
-Batching at the same resolution costs ~7× in typical error. Batching into a finer
+Batching at the same resolution costs ~2.2× in typical error. Batching into a finer
 combined scale is as accurate as not batching at all.
 
 **Memory, modelled from the measured per-row grouping and per-row payloads.** Peak

@@ -20,7 +20,7 @@ use constant {
     COUNTER_BYTES_PER_PARTITION => 48,
     COUNTER_BYTES_PER_BIN_SLOT  => 8,
 };
-our $percentile_seed_decades = 4;
+our $percentile_seed_decades = 5;   # the shipped seed span (ltl $percentile_seed_decades)
 our $message_stats_member_bytes = 0;
 
 do '/tmp/459-subs.pl';      die "load: $@" if $@;
