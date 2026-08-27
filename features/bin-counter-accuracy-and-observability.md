@@ -660,14 +660,59 @@ The resolution lever is the supported way to shrink this residual: the per-messa
 surface runs at 53 bins per decade by default, and `--data-model-precision` takes it
 to 80, 115, 256 and 616, where one bucket is 0.374 %.
 
-**F5 — Retention, measured (D3).** The per-message store on the ThingWorx scriptlog
-holds 26 partitions live at 60 368 bytes of payload, and the members retained until
-their clusters collapsed were 4 595 848 bytes across 3 419 members — **76×** the live
-store, with the largest single cluster standing for 1 283 members. On the Apache
-access log it is 73 136 against 26 920, 2.7×. This is the figure a retention ceiling
-would be set from.
+**F5 — Retention impact analysis: how many histograms a grouped row holds, and what
+that costs.** Five real logs from the corpus, each run at all five resolutions the
+precision lever reaches (4, 16, 53, 115 and 616 bins per decade on the per-message
+surface; 53 is the default). Fuzzy grouping at 90 %, top 25 rows, bin data model.
+`members_per_partition` was added to the verbose telemetry for this — a total and a
+maximum cannot size a ceiling, because a total says nothing about whether the load is
+spread across rows or sits in one of them.
 
-**F6 — L1 drift is confined to the intended surface.** 49 cells moved, all in the
+| log | rows | histograms held | per row p50 / p95 / max | live KB | held KB | ratio | peak RSS MB |
+|---|---|---|---|---|---|---|---|
+| GC (79 MB) | 11 | 11 | 1 / 1 / 1 | 15.3 | 15.3 | 1.0 | 74 |
+| Apache access (98 KB) | 15 | 55 | 1 / 33 / 33 | 26.3 | 71.4 | 2.7 | 27 |
+| Codebeamer access (83 KB) | 123 | 223 | 1 / 2 / 76 | 158.5 | 267.1 | 1.7 | 30 |
+| Tomcat access (148 MB) | 643 | 3 074 | 1 / 12 / 314 | 912.3 | 3 647.7 | 4.0 | 128 |
+| ThingWorx ScriptLog (30 MB) | 26 | 3 419 | 4 / 791 / 1 283 | 59.0 | 4 488.1 | **76.1** | 81 |
+
+(at the default 53 bins per decade; `live` is the histograms that survive to the
+statistics, `held` is those plus every member retained until its row was finalized.)
+
+- **The count of retained histograms does not depend on resolution** — it is a
+  property of how the log groups. Every log above holds the same number at 4 bins per
+  decade as at 616.
+- **The memory does, linearly.** ThingWorx at 616: 50 324 KB held against 672 KB
+  live, and process peak RSS 146 MB against 81 MB at the default. Tomcat at 616:
+  40 736 KB held, peak RSS 182 MB. Resolution and retention multiply.
+- **The distribution is extremely skewed, and that is what makes a ceiling cheap.**
+  The median grouped row holds 1–4 histograms everywhere. The cost is in a handful of
+  rows: ThingWorx's 17 grouped rows hold 3 411 histograms between them, and the top
+  two hold 2 074 of those.
+
+What a per-row ceiling would recover, computed from the exact grouping each run
+published:
+
+| ceiling | ThingWorx held | rows affected (of 17) | Tomcat held | rows affected (of 166) | Codebeamer held | rows affected (of 20) |
+|---|---|---|---|---|---|---|
+| 8 | 3.1 % | 10 | 28.3 % | 45 | 43.3 % | 1 |
+| 16 | 5.5 % | 10 | 38.9 % | 25 | 50.0 % | 1 |
+| 32 | 9.4 % | 6 | 51.4 % | 18 | 63.3 % | 1 |
+| 64 | 15.0 % | 6 | 68.4 % | 10 | 90.0 % | 1 |
+| 128 | 24.5 % | 5 | 84.7 % | 4 | 100 % | 0 |
+| 256 | 41.2 % | 4 | 95.7 % | 2 | 100 % | 0 |
+
+**The trade a ceiling buys and pays.** Members beyond the ceiling have to be combined
+as they arrive, which is the arithmetic this issue removed — so a capped row gets its
+order-dependence back for the part above the ceiling, while every row under the
+ceiling keeps the guarantee. The ceiling therefore decides how many rows on a real
+log lose the property, not whether the property exists. At 32 that is 6 of 17 rows on
+ThingWorx and 18 of 166 on Tomcat; at 128, 5 and 4.
+
+**The ceiling value is not decided here.** The numbers above are what it should be
+decided from.
+
+**F6 — Drift against the committed reference numbers is confined to the intended surface.** 49 cells moved, all in the
 three `*-bin-consolidated` scenarios' `messages` rows, all percentile or IQR columns.
 No count, no min, no max, and no scenario outside the bin data model moved.
 

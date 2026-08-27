@@ -1304,7 +1304,7 @@ sub snapshot_counter_telemetry {
     my ($growth, $merge, $max_bins, $with_over, $with_under, $over_sum, $under_sum)
         = (0, 0, 0, 0, 0, 0, 0);
     my ($members_live, $members_max) = (0, 0);
-    my @growth_per_partition;
+    my (@growth_per_partition, @members_per_partition);
     for my $entry (values %$store) {
         my $p = $entry->{partition};
         my $g = $entry->{rebin_growth} // 0;
@@ -1314,6 +1314,7 @@ sub snapshot_counter_telemetry {
         my $m = $entry->{members} // 1;
         $members_live += $m;
         $members_max = $m if $m > $members_max;
+        push @members_per_partition, $m;
         $max_bins = $p->{bin_count} if $p->{bin_count} > $max_bins;
         my $o = $entry->{overflow}  // 0;
         my $u = $entry->{underflow} // 0;
@@ -1327,6 +1328,15 @@ sub snapshot_counter_telemetry {
     my $p95 = @sorted ? $sorted[int(@sorted * 0.95)] : 0;
     my $p99 = @sorted ? $sorted[int(@sorted * 0.99)] : 0;
     my $rmax = @sorted ? $sorted[-1] : 0;
+    # How many histograms each surviving partition stands for. The total and
+    # the maximum cannot size a retention ceiling on their own — a total of
+    # 3,419 across 26 partitions is a different problem depending on whether
+    # the load is spread or sits in one cluster — so the distribution is
+    # reported the same way the growth history is (#459 / D3).
+    my @msorted = sort { $a <=> $b } @members_per_partition;
+    my $mp50 = @msorted ? $msorted[int(@msorted * 0.50)] : 0;
+    my $mp95 = @msorted ? $msorted[int(@msorted * 0.95)] : 0;
+    my $mp99 = @msorted ? $msorted[int(@msorted * 0.99)] : 0;
     my $bytes = counter_store_bytes($store);
     return {
         partition_count                 => $n,
@@ -1348,6 +1358,9 @@ sub snapshot_counter_telemetry {
         # figure plus the payload of the members released at collapse
         # (#459 / D1). Equality therefore means nothing was retained.
         members_memory_bytes            => $bytes,
+        members_p50                     => $mp50,
+        members_p95                     => $mp95,
+        members_p99                     => $mp99,
         rebins_p50                      => $p50,
         rebins_p95                      => $p95,
         rebins_p99                      => $p99,
@@ -4898,11 +4911,18 @@ sub emit_bin_counter_mode_verbose {
         push @verbose_output, "  counter_memory_bytes: "            . ($t->{counter_memory_bytes}            // 0);
         # Retention of member histograms across combined keys. members_live
         # equals partition_count and members_memory_bytes equals
-        # counter_memory_bytes while combination still collapses members into
-        # one histogram; the two pairs diverge once members are retained.
+        # counter_memory_bytes on a surface that retains nothing; the two
+        # pairs diverge on the per-message surface, where every combined key's
+        # histogram is held in its own geometry until its cluster is finalized.
+        # members_per_partition is what a retention ceiling would be sized
+        # from — a total says nothing about whether the load is spread across
+        # partitions or concentrated in one.
         push @verbose_output, "  members_live: "                    . ($t->{members_live}                    // 0);
         push @verbose_output, "  members_max: "                     . ($t->{members_max}                     // 0);
         push @verbose_output, "  members_memory_bytes: "            . ($t->{members_memory_bytes}            // 0);
+        push @verbose_output, sprintf("  members_per_partition: p50=%d p95=%d p99=%d max=%d",
+            $t->{members_p50} // 0, $t->{members_p95} // 0,
+            $t->{members_p99} // 0, $t->{members_max} // 0);
         push @verbose_output, sprintf("  rebins_per_partition: p50=%d p95=%d p99=%d max=%d",
             $t->{rebins_p50} // 0, $t->{rebins_p95} // 0,
             $t->{rebins_p99} // 0, $t->{rebins_max} // 0);
