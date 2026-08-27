@@ -20,6 +20,10 @@ merged. Both are `full` tier, 45 cases, captured 2026-08-27 back to back:
 | `dev-virtualized-v0.17.0-code.tsv` | tag `v0.17.0` | `0f15e6c6ecf3dff3` |
 | `dev-virtualized-v0.18.0-pre-stage4.tsv` | `084c2ed` (merged as `48d446b`), stages 1–3 | `f799f6ad414c84bf` |
 
+Both were captured before `release/0.18.0` was version-stamped to `0.18.0`, so both
+report `version 0.17.0` and the pre-stage4 file's `ltl` differs from the current
+branch tip by that one line. Captures taken from here on identify themselves.
+
 **Gate stage 4 against `dev-virtualized-v0.18.0-pre-stage4.tsv`** — it is the
 immediate predecessor, so a difference is the change. The v0.17.0-code file is what
 separates a machine effect from a code effect, and is why the numbers below can be
