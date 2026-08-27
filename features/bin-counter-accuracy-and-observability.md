@@ -615,7 +615,7 @@ the full harness suite, and the benchmark gated against
 The L1 re-bless on the merged rows is the per-quantile measurement of what this
 bought, and is read before it is accepted (see § Re-blessing the stage-3 baseline).
 
-### Stage 4a findings — D1 is implemented, and its acceptance criteria are not reachable
+### Stage 4a findings — D1 is implemented; the acceptance criteria were attributed to the wrong issue
 
 **F1 — The guarantee holds, exactly.** `prototype/459-order-independence/order-independence.pl`
 combines the same members in ten orders (arrival, reversed, eight shuffles) at
@@ -624,40 +624,41 @@ Stored counts are byte-identical and all nine percentiles are bit-identical in
 every order, at every depth. Projections equal member count exactly — one per
 member, which is the floor.
 
-**F2 — On the real corpus it bought less than the prototype predicted.** Across the
-three `*-bin-consolidated` scenarios, the oracle's T3 breaches fall 33 → 28, median
-deviation 3.82 % → 3.76 %, worst percentile 4.20 % → 4.18 %, worst IQR 32.55 % →
-27.18 %. The compounding the issue measured at 2.10 bin widths on synthetic depth-15
-data never reached one bin width on these logs: the widest member tends to arrive
-early, after which the union stops moving and the target stops being re-projected.
+**F2 — The defect this fixes is invisible to the oracle by construction, and the
+acceptance criteria were written as if it were not.** #426 F45 already established
+what order-dependence costs: merging the same key set in different orders lands on
+different state on **68 % of groups** at bins-per-decade 53 and **92 %** at 616, with
+a per-quantile spread up to **2.00 bins** — and that "the harness cannot see it,
+because the order is deterministic for a given input". That is exactly what F1 above
+now measures at zero. The statistics oracle compares one deterministic run against a
+recomputation of the same input; it has no way to observe that a different order
+would have given a different answer. Expecting its complaints to clear was a category
+error in D18's attribution, not a shortfall in the change.
 
-**F3 — The residual is not compounding, and #459 cannot remove it.** Every percentile
-breach, before and after, is under one bin width — 4.20 % and 4.18 % against a bin
-width of 4.44 % at bins-per-decade 53. The statistics oracle's reference model pools
-a cluster's raw samples into **one** partition. The tool projects N members into a
-union geometry. One projection is not zero projections, so the two models cannot
-agree to better than a bin width whatever the combination does. **`L3=OK` on merged
-bin rows is unreachable under D1**, and the acceptance criteria in § *Stage 4 has an
-acceptance test it did not have before* — no #459 entries left in
-`known-failures.tsv`, `L3=OK` not `OK-WITH-XFAIL` — were written on the assumption
-that the compounding was the whole of the error. It was a minority of it.
+**F3 — The oracle's complaints are the accuracy-bound correction, which #460 owns.**
+#426 F46 measured the same thing directly: the one-bin bound written into #189 R4
+holds only while no remap has occurred, every merge is a remap, and **the correction
+applies to today's shipped code regardless of which representation is adopted**. The
+residual here is that bound: worst percentile deviation 4.18 % against a bucket
+4.44 % wide, i.e. inside one bucket, which is what #426 F48 measured for a *single*
+projection (within one bin on 3,999 of 4,000 evaluations, worst 1.0008). The
+registered known-failures are therefore re-attributed from #459 to #460's amended
+bound rather than deleted. Measured movement across the three consolidated bin
+scenarios: 33 breaches → 28, median 3.82 % → 3.76 %, worst percentile 4.20 % → 4.18 %,
+worst spread 32.55 % → 27.18 %. Cluster depth on these logs never drove the old code
+past one bucket either, because once the target's geometry covers the membership the
+union stops widening and the target stops being re-projected — the depth that matters
+is the number of times the union grew, not the number of merges.
 
-The registry behaved correctly and is what surfaced this: one registered comparison
-now passes (`KNOWN-FAILURE-STALE`), and the set of breaching keys shifted — twelve
-of the registered thirty-three stopped breaching and seven other cells started.
-
-**F4 — Grid-anchored seeding is the structural answer, and it is not a quick win.**
-`prototype/459-order-independence/grid-anchored-seed.pl` probes the obvious
-alternative: snap each partition's seed floor down to the nearest global
-`10^(k/bpd)` boundary, so every partition in a run shares one set of edges and
-projection becomes an exact index shift — which is how HdrHistogram and
-OpenTelemetry exponential histograms define their buckets. It does not reach zero.
-Both `partition_extend` and the union derivation compute the bin count as
-`int(bpd * decades)`, and on grid-aligned extents that product lands a hair under an
-exact integer in floating point, so truncation shifts every edge. Rounding instead
-of truncating improves it (worst 0.96 bin widths at depth 5, 0.12 at depth 40) but
-does not eliminate it, because growth re-derives geometry independently on each
-partition. This is an investigation, not an edit.
+**F4 — A shared grid is not the alternative; that was settled before this drop.**
+#426 F37 measured it and the advantage reverses with resolution: seeding each key's
+partition around its own first value is adaptive to that key's data, and that
+advantage **grows** with bins-per-decade — the current representation is ahead from
+115 up (0.021 % against 0.239 % on Tomcat's most populous band) and the two are mixed
+at 53. F36 priced the switch at 16–32 % of per-key percentiles moving more than 1 %.
+The resolution lever is the supported way to shrink this residual: the per-message
+surface runs at 53 bins per decade by default, and `--data-model-precision` takes it
+to 80, 115, 256 and 616, where one bucket is 0.374 %.
 
 **F5 — Retention, measured (D3).** The per-message store on the ThingWorx scriptlog
 holds 26 partitions live at 60 368 bytes of payload, and the members retained until
