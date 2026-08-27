@@ -40,8 +40,8 @@ sub build_members {
         my $entry;
         for (1 .. $samples_each) {
             my $v = $centre * (10 ** (nextval() * 1.5 - 0.75));
-            $entry ? counter_entry_observe($entry, $v)
-                   : ($entry = counter_entry_new($v, $bpd));
+            $entry //= counter_entry_new($v, $bpd);
+                    counter_entry_observe($entry, $v);
         }
         push @members, $entry;
     }

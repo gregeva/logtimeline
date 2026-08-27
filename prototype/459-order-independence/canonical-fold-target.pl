@@ -95,7 +95,7 @@ for my $count (16, 64, 256) {
         for (1 .. 60) {
             my $v = $centre * (10 ** (nextval() * 1.5 - 0.75));
             push @raw, $v;
-            $entry ? counter_entry_observe($entry, $v) : ($entry = counter_entry_new($v, $member_bpd));
+            $entry //= counter_entry_new($v, $member_bpd); counter_entry_observe($entry, $v);
         }
         push @members, $entry;
     }

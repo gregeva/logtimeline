@@ -55,7 +55,7 @@ for my $count (2, 5, 15, 40) {
         for (1 .. 200) {
             my $v = $centre * (10 ** (nextval() * 1.5 - 0.75));
             push @pooled, $v;
-            $entry ? counter_entry_observe($entry, $v) : ($entry = counter_entry_new($v, $bpd));
+            $entry //= counter_entry_new($v, $bpd); counter_entry_observe($entry, $v);
         }
         push @members, $entry;
     }
@@ -63,7 +63,7 @@ for my $count (2, 5, 15, 40) {
     # REF: the pooled-sample partition.
     my $ref;
     for my $v (@pooled) {
-        $ref ? counter_entry_observe($ref, $v) : ($ref = counter_entry_new($v, $bpd));
+        $ref //= counter_entry_new($v, $bpd); counter_entry_observe($ref, $v);
     }
 
     my $old = { partition => undef, bins => [], overflow => 0, underflow => 0 };

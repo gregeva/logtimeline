@@ -66,13 +66,13 @@ for my $count (2, 5, 15, 40) {
             for (1 .. 200) {
                 my $v = $centre * (10 ** (nextval() * 1.5 - 0.75));
                 push @pooled, $v;
-                $entry ? counter_entry_observe($entry, $v) : ($entry = counter_entry_new($v, $bpd));
+                $entry //= counter_entry_new($v, $bpd); counter_entry_observe($entry, $v);
             }
             push @members, $entry;
         }
         my $ref;
         for my $v (@pooled) {
-            $ref ? counter_entry_observe($ref, $v) : ($ref = counter_entry_new($v, $bpd));
+            $ref //= counter_entry_new($v, $bpd); counter_entry_observe($ref, $v);
         }
         my $new = { partition => undef, bins => [], overflow => 0, underflow => 0 };
         merge_bin_counter_entries($new, clone_entry($_)) for @members;
@@ -133,12 +133,12 @@ for my $count (2, 5, 15, 40) {
         for (1 .. 200) {
             my $v = $centre * (10 ** (nextval() * 1.5 - 0.75));
             push @pooled, $v;
-            $entry ? counter_entry_observe($entry, $v) : ($entry = counter_entry_new($v, $bpd));
+            $entry //= counter_entry_new($v, $bpd); counter_entry_observe($entry, $v);
         }
         push @members, $entry;
     }
     my $ref;
-    for my $v (@pooled) { $ref ? counter_entry_observe($ref, $v) : ($ref = counter_entry_new($v, $bpd)); }
+    for my $v (@pooled) { $ref //= counter_entry_new($v, $bpd); counter_entry_observe($ref, $v); }
     my $got = collapse_rounded(\@members, $bpd);
     my $bw = (10 ** (1 / $bpd) - 1) * 100;
     my @dev;

@@ -18,3 +18,11 @@ Run `./extract-subs.sh` first; then any probe.
 | `fold-compounding.pl` | Does repeated folding compound error, or stay bounded by the current bucket width? |
 | `growth-alignment.pl` | Does today's range growth move counts, or shift them in place? |
 | `canonical-fold-target.pl` | On a canonical grid with a fixed bucket budget, is the combined row independent of arrival order and of batch boundaries? |
+| `extract-real-groups.py` | Produces the real per-message duration streams behind each consolidated row, grouped as `ltl -g` grouped them, using the statistics oracle's verbatim parsers. |
+| `real-corpus-comparison.pl` | Both candidate designs on those real groups: agreement across orders and batch boundaries, accuracy against the raw durations, peak memory, absorb cost. |
+
+**Known defect, fixed 2026-08-27.** The probes originally seeded a member with
+`counter_entry_new()` without then observing that first value; production's
+`counter_update()` seeds *and* observes. Every member was short one sample and
+single-sample members contributed nothing. All probes were corrected and re-run. Any
+future probe here must seed and observe, the way `counter_update` does.

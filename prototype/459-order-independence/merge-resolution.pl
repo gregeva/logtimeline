@@ -93,12 +93,12 @@ for my $count (16, 64, 256) {
             for (1 .. 60) {
                 my $v = $centre * (10 ** (nextval() * 1.5 - 0.75));
                 push @pooled, $v;
-                $entry ? counter_entry_observe($entry, $v) : ($entry = counter_entry_new($v, $member_bpd));
+                $entry //= counter_entry_new($v, $member_bpd); counter_entry_observe($entry, $v);
             }
             push @members, $entry;
         }
         my $ref;
-        for my $v (@pooled) { $ref ? counter_entry_observe($ref, $v) : ($ref = counter_entry_new($v, $member_bpd)); }
+        for my $v (@pooled) { $ref //= counter_entry_new($v, $member_bpd); counter_entry_observe($ref, $v); }
 
         my %arm = (
             A => collapse_at([@members], $member_bpd),

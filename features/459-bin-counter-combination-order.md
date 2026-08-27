@@ -51,6 +51,15 @@ ceiling — a total says nothing about whether the load is spread or concentrate
 
 ## 2. Findings
 
+> **Probe correction, 2026-08-27.** The first run of every probe seeded a member's
+> histogram with `counter_entry_new()` and did not then observe that first value —
+> production's `counter_update()` seeds *and* observes. Each member was therefore
+> missing one sample, and single-sample members contributed nothing at all. Every
+> probe was fixed and re-run; the numbers below are from the corrected runs. No
+> conclusion reversed, but two moved materially and are flagged where they appear
+> (F4, and the grid-anchored arm in § 5).
+
+
 
 **F1 — The guarantee holds, exactly.** `prototype/459-order-independence/order-independence.pl`
 combines the same members in ten orders (arrival, reversed, eight shuffles) at
@@ -85,15 +94,46 @@ past one bucket either, because once the target's geometry covers the membership
 union stops widening and the target stops being re-projected — the depth that matters
 is the number of times the union grew, not the number of merges.
 
-**F4 — A shared grid is not the alternative; that was settled before this drop.**
-#426 F37 measured it and the advantage reverses with resolution: seeding each key's
-partition around its own first value is adaptive to that key's data, and that
-advantage **grows** with bins-per-decade — the current representation is ahead from
-115 up (0.021 % against 0.239 % on Tomcat's most populous band) and the two are mixed
-at 53. F36 priced the switch at 16–32 % of per-key percentiles moving more than 1 %.
-The resolution lever is the supported way to shrink this residual: the per-message
-surface runs at 53 bins per decade by default, and `--data-model-precision` takes it
-to 80, 115, 256 and 616, where one bucket is 0.374 %.
+**F4 — The shared grid is NOT settled, and this drop's first reading of it was
+wrong.** The earlier research (#426 F37) measured per-message shared-grid seeding as
+losing to per-key adaptive seeding at higher resolutions — ahead from 115 buckets per
+decade up (0.021 % against 0.239 % on Tomcat's most populous band), mixed at 53 — and
+priced a switch at 16–32 % of per-key percentiles moving more than 1 % (F36). That is
+a real cost and it stands. It is **not** a decision to close the topic, and the
+architect has said explicitly that it remains open (2026-08-27).
+
+This drop's own probe of the idea
+(`prototype/459-order-independence/grid-anchored-seed.pl`) first reported that
+snapping each partition's seed floor to a global grid "does not reach zero". That
+reading was wrong twice over: the probe carried the seeding defect noted at the top of
+this section, and the union bucket count was derived with `int()`, which on
+grid-aligned extents lands a hair under an exact integer and truncates, shifting every
+edge. With both corrected, the grid-anchored arm reads **exactly zero** median
+deviation at every depth measured, and zero maximum at depths 2 and 5:
+
+| members | seeded on first value (today) | seeded on a global grid, bucket count rounded |
+|---|---|---|
+| 2 | 0.255 / 0.427 | **0.000 / 0.000** |
+| 5 | 0.174 / 0.377 | **0.000 / 0.000** |
+| 15 | 0.152 / 0.439 | **0.000 / 0.342** |
+| 40 | 0.066 / 0.196 | **0.000 / 0.125** |
+
+(median / maximum, in member bucket widths, against a single partition over the
+pooled samples.) The residual at depths 15 and 40 traces to the same truncation
+inside `partition_extend`'s growth, not to the idea. What this does **not** measure is
+F37's finding — the accuracy of the per-key streaming representation itself across the
+resolution ladder — which is the ground the earlier rejection stood on. The two
+questions are separable and only one of them has been re-opened here.
+
+**A constraint the architect stated, 2026-08-27:** histogram *bounds* cannot be
+anchored, because any line still to be read can move them. That is one of the
+attributes that made grid counters inappropriate. It is worth recording precisely what
+a canonical grid does and does not fix, because the two are easy to conflate: it fixes
+the **bucket edges** (bucket j is [10^(j/B), 10^((j+1)/B)), a function of the
+resolution alone), and it fixes **nothing about the range**. The occupied span grows
+freely as lines arrive — a new value simply addresses an index that was not occupied
+before, with no geometry re-derived and no count moved. Whether that distinction
+satisfies the constraint is the architect's call, not settled here.
 
 **F5 — Retention impact analysis: how many histograms a grouped row holds, and what
 that costs.** Five real logs from the corpus, each run at all five resolutions the
@@ -223,10 +263,10 @@ widths, median / worst):
 
 | | one collapse | batched at a ceiling of 8 (32 collapses) |
 |---|---|---|
-| combined at the members' resolution | 0.076 / 0.204 | **0.363 / 0.523** |
-| combined at 616 buckets per decade | 0.061 / 0.304 | **0.069 / 0.304** |
+| combined at the members' resolution | 0.039 / 0.204 | **0.294 / 0.523** |
+| combined at 616 buckets per decade | 0.072 / 0.304 | **0.105 / 0.304** |
 
-Batching at the same resolution costs ~5× in typical error. Batching into a finer
+Batching at the same resolution costs ~7× in typical error. Batching into a finer
 combined scale is as accurate as not batching at all.
 
 **Memory, modelled from the measured per-row grouping and per-row payloads.** Peak
@@ -348,11 +388,11 @@ once), against the raw sorted samples:
 
 | members | budget | final buckets/decade | order and batch mismatches | worst error vs the raw data |
 |---|---|---|---|---|
-| 16 | 512 | 77 | **0 of 12** | 0.82 member buckets |
-| 16 | 2 048 | 308 | **0 of 12** | 0.73 |
-| 64 | 512 | 77 | **0 of 12** | 0.22 |
-| 64 | 2 048 | 308 | **0 of 12** | 0.30 |
-| 256 | 512 | 77 | **0 of 12** | 0.14 |
+| 16 | 512 | 77 | **0 of 12** | 0.68 member buckets |
+| 16 | 2 048 | 308 | **0 of 12** | 0.51 |
+| 64 | 512 | 77 | **0 of 12** | 0.46 |
+| 64 | 2 048 | 308 | **0 of 12** | 0.46 |
+| 256 | 512 | 77 | **0 of 12** | 0.12 |
 | 256 | 2 048 | 308 | **0 of 12** | 0.14 |
 
 Byte-identical stored counts across every order AND every batch boundary — the
@@ -377,7 +417,47 @@ corpus rather than on generated members.
 
 ---
 
-## 7. Where this stands
+## 7. Measured — both designs on the real corpus
+
+Sections 4–6 ran on generated members. This runs on the real thing: the actual
+per-message duration streams behind every consolidated row, grouped exactly as
+`ltl -g` grouped them, extracted with
+`prototype/459-order-independence/extract-real-groups.py` (which reuses the statistics
+oracle's verbatim parsers, so the durations are the ones the oracle checks `ltl`
+against). Reference is the exact percentile of the pooled raw durations — not a
+modelled partition. Six arrival orders crossed with batch boundaries at 8, 64 and
+all-at-once. Bucket budget 512.
+
+| | Codebeamer (20 rows, 120 keys) | ThingWorx (16 rows, 3 409 keys) | Tomcat (159 rows, 2 595 keys) |
+|---|---|---|---|
+| agreement, deferred | identical | identical | identical |
+| agreement, canonical | identical | identical | identical |
+| error vs raw, deferred (p50 / p95 / max) | 0.495 / 0.894 / 0.895 | 0.201 / 0.772 / **1.289** | 0.306 / 0.821 / **1.333** |
+| error vs raw, canonical (p50 / p95 / max) | **0.044 / 0.097 / 0.159** | **0.136 / 0.547 / 0.813** | **0.048 / 0.398 / 0.673** |
+| peak memory, deferred | 130 KB | 4 450 KB | 2 911 KB |
+| peak memory, canonical | 39 KB | **42 KB** | 233 KB |
+| memory ratio | 3.4× | **106×** | 12.5× |
+| cost per absorbed member | 48.7 vs 17.1 µs | 64.0 vs 22.5 µs | 49.6 vs 19.4 µs |
+| coarsest resolution reached | 308 | 77 | 77 |
+
+(errors in member bucket widths, one bucket = 4.44 % at 53 buckets per decade.)
+
+Four things this establishes on real data rather than generated data:
+
+- **Both designs are order-independent, and the canonical one is also independent of
+  where the batch boundaries fall.** Byte-identical stored counts in every
+  combination.
+- **The deferred design breaches the one-bucket accuracy bound on two of the three
+  logs** (1.29 and 1.33 member bucket widths). The canonical one stays under one
+  bucket everywhere, worst 0.81.
+- **The canonical design is more accurate at every quantile band**, by 1.5× to 11× at
+  the median.
+- **It is 3.4–106× smaller and ~2.6× cheaper per absorbed member**, because it
+  absorbs on arrival and holds nothing.
+
+---
+
+## 8. Where this stands
 
 **Delivered on the branch** (`459-bin-counter-combination-not-commutative`, not
 merged): the deferred collapse of section 1, proved order-independent in section 2,
@@ -406,6 +486,10 @@ answered.
   correction owned by #460 (bin-model percentiles computed below the captured
   resolution, plus the eight-correction amendment pass), not a #459 residual — see F3.
 
-**Not open:** a shared grid for the per-message histograms (settled by the earlier
-research, F4), and the ceiling-versus-no-ceiling trade as an accuracy question
-(section 6 removes it).
+**Explicitly still open, at the architect's instruction (2026-08-27):** the shared
+grid for the **per-message** histograms. The earlier research priced it and found it
+loses at higher resolutions, but that was never a decision to close the topic, and
+this drop's own probe of it was wrong on first reading (F4). It is to be returned to.
+
+**Closed by measurement:** the ceiling-versus-no-ceiling trade as an accuracy
+question — § 6 and § 7 remove the ceiling rather than tuning it.
