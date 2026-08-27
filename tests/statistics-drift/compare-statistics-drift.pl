@@ -655,14 +655,19 @@ my %L2_INVARIANTS = (
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 4 — duration derivation',
     },
     bytes_order => {
-        asserts     => 'bytes row ordering invariant: mean_bytes <= bytes',
-        produced_by => 'accumulate_log_record() in ltl',
-        contract    => 'features/224-validate-statistics-test-harness.md § Decision 4 — bytes ordering',
+        asserts     => 'bytes row ordering invariant: bytes_min <= bytes_mean <= bytes_max <= bytes',
+        produced_by => 'read_and_process_logs() in ltl — the per-message bytes family capture',
+        contract    => 'features/432-metric-aggregate-naming-parity.md § D5 — bytes gains the full basic family',
     },
     bytes_deriv => {
-        asserts     => 'mean_bytes equals bytes divided by occurrences',
-        produced_by => 'accumulate_log_record() in ltl',
-        contract    => 'features/224-validate-statistics-test-harness.md § Decision 4 — bytes derivation',
+        asserts     => 'bytes_mean equals bytes divided by bytes_occurrences — the lines that carried a bytes value, not every matched line',
+        produced_by => 'print_message_summary() in ltl — the bytes_mean display derivation',
+        contract    => 'features/432-metric-aggregate-naming-parity.md § F1 — the shipped mean divided by the wrong denominator',
+    },
+    bytes_occurrences_bound => {
+        asserts     => 'bytes_occurrences never exceeds occurrences: a line carrying a bytes value is a matched line',
+        produced_by => 'read_and_process_logs() in ltl — the per-message bytes family capture',
+        contract    => 'features/432-metric-aggregate-naming-parity.md § F1',
     },
     count_order => {
         asserts     => 'count row ordering invariant: count_min <= count_mean <= count_max',
@@ -776,28 +781,57 @@ sub check_layer2_row {
         }
     }
 
-    # Bytes ordering: mean_bytes <= bytes
-    my $mb = as_num($row->{mean_bytes});
+    # Bytes ordering: bytes_min <= bytes_mean <= bytes_max <= bytes (#432)
+    my $mb = as_num($row->{bytes_mean});
     my $bt = as_num($row->{bytes});
-    if (defined $mb && defined $bt) {
-        unless ($mb <= $bt) {
+    my $bmin = as_num($row->{bytes_min});
+    my $bmax = as_num($row->{bytes_max});
+    my $bocc = as_num($row->{bytes_occurrences});
+    {
+        my @ladder = grep { defined $_->[1] }
+                     ( [ 'bytes_min', $bmin ], [ 'bytes_mean', $mb ],
+                       [ 'bytes_max', $bmax ], [ 'bytes', $bt ] );
+        for my $i (1 .. $#ladder) {
+            my ($pn, $pv) = @{ $ladder[$i - 1] };
+            my ($cn, $cv) = @{ $ladder[$i] };
+            next if $pv <= $cv;
             $stats->{T4}++;
             my $inv = $L2_INVARIANTS{bytes_order};
             emit_l2_failure(
                 scenario => $scenario, file => $file_kind, key => $k,
                 invariant => "bytes_order ($side)",
-                observed => "mean_bytes=$mb bytes=$bt",
+                observed => "$pn=$pv $cn=$cv",
                 asserts => $inv->{asserts},
                 produced_by => $inv->{produced_by},
                 contract => $inv->{contract},
-                rule => 'mean_bytes <= bytes',
+                rule => 'bytes_min <= bytes_mean <= bytes_max <= bytes',
             );
+            last;
         }
     }
 
-    # Bytes derivation: mean_bytes == bytes / occurrences
-    if (defined $mb && defined $bt && defined $occ && $occ > 0) {
-        my $expected = $bt / $occ;
+    # A line carrying a bytes value is by definition a matched line, so the
+    # observation count can never exceed the occurrence count (#432).
+    if (defined $bocc && defined $occ && $bocc > $occ) {
+        $stats->{T4}++;
+        my $inv = $L2_INVARIANTS{bytes_occurrences_bound};
+        emit_l2_failure(
+            scenario => $scenario, file => $file_kind, key => $k,
+            invariant => "bytes_occurrences_bound ($side)",
+            observed => "bytes_occurrences=$bocc occurrences=$occ",
+            asserts => $inv->{asserts},
+            produced_by => $inv->{produced_by},
+            contract => $inv->{contract},
+            rule => 'bytes_occurrences <= occurrences',
+        );
+    }
+
+    # Bytes derivation: bytes_mean == bytes / bytes_occurrences (#432).
+    # The divisor is the bytes observation count, NOT occurrences: total_bytes
+    # sums only the lines that carried a bytes value, so dividing by every
+    # matched line understates the mean wherever a key mixes the two.
+    if (defined $mb && defined $bt && defined $bocc && $bocc > 0) {
+        my $expected = $bt / $bocc;
         # Bytes are integer; tolerate <= 1.0 absolute diff (truncation/rounding).
         if (abs($expected - $mb) > BYTES_INTEGER_EPS) {
             $stats->{T4}++;
@@ -805,11 +839,11 @@ sub check_layer2_row {
             emit_l2_failure(
                 scenario => $scenario, file => $file_kind, key => $k,
                 invariant => "bytes_deriv ($side)",
-                observed => sprintf("mean_bytes=%s bytes=%s occurrences=%s expected_mb=%.2f", $mb, $bt, $occ, $expected),
+                observed => sprintf("bytes_mean=%s bytes=%s bytes_occurrences=%s occurrences=%s expected=%.2f", $mb, $bt, $bocc, $occ, $expected),
                 asserts => $inv->{asserts},
                 produced_by => $inv->{produced_by},
                 contract => $inv->{contract},
-                rule => 'mean_bytes == bytes / occurrences (tolerance 1 byte; mean_bytes is integer-typed per #223 rules TSV)',
+                rule => 'bytes_mean == bytes / bytes_occurrences (tolerance 1 byte; bytes_mean is integer-typed per the rules TSV)',
             );
         }
     }
@@ -1000,6 +1034,17 @@ my @L3_COLUMNS = qw(
 );
 my %L3_COLUMN_SET = map { $_ => 1 } @L3_COLUMNS;
 
+# The oracle keys its output by the bare statistic name, because it computes a
+# statistic and knows nothing about CSV column naming. ltl's CSV columns carry the
+# duration_ prefix (#432). The mapping lives here rather than in the oracle so the
+# reference implementation stays a statement about statistics, not about ltl's
+# output format.
+#
+# This must stay in step with the emitted header: the comparison loop skips any
+# column absent from the row, so a stale mapping does not fail — it silently
+# compares nothing. assert_l3_columns_present() below is the guard against that.
+sub l3_csv_column { return "duration_$_[0]" }
+
 # Load an oracle JSON dump produced by calculate-reference.py.
 sub load_oracle {
     my ($path) = @_;
@@ -1144,11 +1189,15 @@ sub run_layer3 {
             next;
         }
         my $o_stats = $o_row->{stats} // {};
+        $stats->{l3_rows_paired}++;
 
         for my $col (@L3_COLUMNS) {
+            # The oracle key is the bare statistic name; the CSV column carries the
+            # duration_ prefix (#432).
+            my $csv_col = l3_csv_column($col);
             # Only check columns that ltl actually emitted in this row's CSV.
-            next unless exists $n_row->{$col};
-            my $ltl_val = $n_row->{$col};
+            next unless exists $n_row->{$csv_col};
+            my $ltl_val = $n_row->{$csv_col};
             next if is_blank($ltl_val);  # ltl undefined → cannot compare
 
             my $o_entry = $o_stats->{$col};
@@ -1281,6 +1330,7 @@ my %stats = (
     nonnumeric           => 0,
     key_mismatch         => 0,
     l3_cells_checked     => 0,
+    l3_rows_paired       => 0,
     l3_T1                => 0,
     l3_T2                => 0,
     l3_T3                => 0,
@@ -1343,6 +1393,7 @@ if (defined $opt{oracle_json}) {
 
 # Per-scenario summary (Decision 7).
 my $struct_state = $structural_ok ? 'OK' : 'DRIFT';
+my $l3_mapping_broken = 0;
 my $l3_detail = '';
 if ($l3_state ne 'N/A') {
     $l3_detail = sprintf(' | L3: %d cells, %d T3, %d T2, %d T1, nonnumeric=%d, unpaired=%d (wildcard=%d)',
@@ -1357,6 +1408,15 @@ if ($l3_state ne 'N/A') {
                     . ($stats{l3_unpaired_wildcard} == $stats{l3_unpaired}
                        ? ', all wildcarded (consolidated keys have no oracle counterpart)'
                        : '');
+    }
+    # The other way to compare nothing while looking healthy (#432): rows pair, but
+    # l3_csv_column() names a column the CSV does not carry, so every cell is
+    # skipped by the `exists` test. Unlike the unpaired case above this is never
+    # legitimate — paired rows with zero compared cells means the mapping is stale.
+    elsif ($stats{l3_cells_checked} == 0 && $stats{l3_rows_paired} > 0) {
+        $l3_detail .= ' — NO CELLS COMPARED despite paired rows: the L3 column'
+                    . ' mapping (l3_csv_column) does not match the emitted CSV header';
+        $l3_mapping_broken = 1;
     }
 }
 print "SUMMARY scenario=$opt{scenario}/$opt{file_kind}: ",
@@ -1390,7 +1450,17 @@ if (@stale_known) {
     print "       rule: delete the entry in the same change that fixes the defect\n";
 }
 
+if ($l3_mapping_broken) {
+    print "FAIL [L3-COLUMN-MAPPING] scenario=$opt{scenario} file=$opt{file_kind}\n";
+    print "       rows paired with the oracle: $stats{l3_rows_paired}, cells compared: 0\n";
+    print "       asserts: the L3 oracle comparison actually runs; paired rows that compare no cells mean the oracle layer is asserting nothing\n";
+    print "       produced_by: l3_csv_column() in compare-statistics-drift.pl, against the CSV header emitted by ltl\n";
+    print "       contract: Issue #432 - the oracle keys statistics by bare name, the CSV columns carry the duration_ prefix, and the mapping between them lives in this file\n";
+    print "       rule: update l3_csv_column() in the same change that renames a statistics CSV column\n";
+}
+
 my $exit_fail = ($stats{T3} > 0 || $stats{T4} > 0 || $stats{nonnumeric} > 0 || @stale_known);
 $exit_fail = 1 if $stats{l3_T3} > 0 || $stats{l3_nonnumeric} > 0;
 $exit_fail = 1 if $stats{key_mismatch} > 0;
+$exit_fail = 1 if $l3_mapping_broken;
 exit ($exit_fail ? 1 : 0);

@@ -1612,9 +1612,9 @@ sub read_index_file {
     my @index_columns = qw(
         entry_type entry_date file_path file_size file_mtime
         line_count match_count first_timestamp last_timestamp ts_precision
-        duration_count duration_min duration_max duration_avg
-        bytes_count bytes_min bytes_max bytes_avg
-        count_count count_min count_max count_avg
+        duration_occurrences duration_min duration_max duration_mean
+        file_bytes_occurrences file_bytes_min file_bytes_max file_bytes_mean
+        count_occurrences count_min count_max count_mean
         read_rate memory_used processing_time filters
     );
     my %col_idx;
@@ -1732,7 +1732,7 @@ sub read_index_file {
     my $active_tier = $tiers[0];
 
     # Build aggregated bounds with provenance.
-    for my $metric (qw(duration_min duration_max bytes_min bytes_max count_min count_max
+    for my $metric (qw(duration_min duration_max file_bytes_min file_bytes_max count_min count_max
                        first_timestamp last_timestamp)) {
         my $best;
         my $best_from;
@@ -1798,7 +1798,7 @@ sub _preseed_from_row {
         matched_entry_date => $bound_row->{entry_date} // '-',
         freshness          => 'fresh',
     );
-    for my $col (qw(duration_min duration_max bytes_min bytes_max count_min count_max
+    for my $col (qw(duration_min duration_max file_bytes_min file_bytes_max count_min count_max
                     first_timestamp last_timestamp)) {
         my $v = $bound_row->{$col};
         $p{$col} = (defined $v && $v ne '' && $v ne '-') ? $v : undef;
@@ -1839,8 +1839,8 @@ sub detect_index_drift {
     my @metrics = (
         [ duration_min   => $unfiltered ? 'duration_min'   : 'sel_duration_min',   'min' ],
         [ duration_max   => $unfiltered ? 'duration_max'   : 'sel_duration_max',   'max' ],
-        [ bytes_min      => $unfiltered ? 'bytes_min'      : 'sel_bytes_min',      'min' ],
-        [ bytes_max      => $unfiltered ? 'bytes_max'      : 'sel_bytes_max',      'max' ],
+        [ file_bytes_min      => $unfiltered ? 'file_bytes_min'      : 'sel_file_bytes_min',      'min' ],
+        [ file_bytes_max      => $unfiltered ? 'file_bytes_max'      : 'sel_file_bytes_max',      'max' ],
         [ count_min      => $unfiltered ? 'count_min'      : 'sel_count_min',      'min' ],
         [ count_max      => $unfiltered ? 'count_max'      : 'sel_count_max',      'max' ],
         [ first_timestamp => $unfiltered ? 'first_timestamp' : 'sel_first_timestamp', 'min' ],
@@ -2306,7 +2306,7 @@ sub emit_index_readback_verbose {
         push @verbose_output, "  lookup: $pre->{lookup}";
         push @verbose_output, "  matched_entry_date: " . ($pre->{matched_entry_date} // '-');
         push @verbose_output, "  freshness: $pre->{freshness}";
-        for my $col (qw(duration_min duration_max bytes_min bytes_max
+        for my $col (qw(duration_min duration_max file_bytes_min file_bytes_max
                         count_min count_max first_timestamp last_timestamp)) {
             my $v = $pre->{$col};
             push @verbose_output, sprintf("  preseed_%s: %s", $col,
@@ -2317,7 +2317,7 @@ sub emit_index_readback_verbose {
     # Aggregated bounds + drift, only when pre-seed is active.
     if ($index_used) {
         push @verbose_output, "aggregated_preseed:";
-        for my $col (qw(duration_min duration_max bytes_min bytes_max
+        for my $col (qw(duration_min duration_max file_bytes_min file_bytes_max
                         count_min count_max first_timestamp last_timestamp)) {
             my $a = $index_aggregated{$col};
             if ($a) {
@@ -2333,7 +2333,7 @@ sub emit_index_readback_verbose {
                 my $fd = $index_drift{$file};
                 next unless grep { $_ && $_->{drifted} } values %$fd;
                 push @verbose_output, "drift_file: $file";
-                for my $metric (qw(duration_min duration_max bytes_min bytes_max
+                for my $metric (qw(duration_min duration_max file_bytes_min file_bytes_max
                                    count_min count_max first_timestamp last_timestamp)) {
                     my $d = $fd->{$metric} or next;
                     push @verbose_output, sprintf(
@@ -4964,9 +4964,9 @@ sub write_index_file {
     my @index_columns = qw(
         entry_type entry_date file_path file_size file_mtime
         line_count match_count first_timestamp last_timestamp ts_precision
-        duration_count duration_min duration_max duration_avg
-        bytes_count bytes_min bytes_max bytes_avg
-        count_count count_min count_max count_avg
+        duration_occurrences duration_min duration_max duration_mean
+        file_bytes_occurrences file_bytes_min file_bytes_max file_bytes_mean
+        count_occurrences count_min count_max count_mean
         read_rate memory_used processing_time filters
     );
     my $col_count = scalar @index_columns;
@@ -5050,17 +5050,17 @@ sub write_index_file {
                 my $first_ts  = format_epoch_iso($fd->{first_timestamp});
                 my $last_ts   = format_epoch_iso($fd->{last_timestamp});
 
-                my $dur_avg   = $fd->{duration_count} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_count}) : '-';
-                my $bytes_avg = $fd->{bytes_count}    > 0 ? sprintf("%.2f", $fd->{bytes_sum}    / $fd->{bytes_count})    : '-';
-                my $count_avg = $fd->{count_count}    > 0 ? sprintf("%.2f", $fd->{count_sum}    / $fd->{count_count})    : '-';
+                my $dur_avg   = $fd->{duration_occurrences} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_occurrences}) : '-';
+                my $file_bytes_mean = $fd->{file_bytes_occurrences}    > 0 ? sprintf("%.2f", $fd->{bytes_sum}    / $fd->{file_bytes_occurrences})    : '-';
+                my $count_mean = $fd->{count_occurrences}    > 0 ? sprintf("%.2f", $fd->{count_sum}    / $fd->{count_occurrences})    : '-';
                 my $read_rate = $fd->{read_elapsed}   > 0 ? sprintf("%.0f", $fd->{line_count}   / $fd->{read_elapsed})   : '-';
 
                 my @file_row = (
                     'file', $now_iso, $path, $fd->{file_size}, $mtime_iso,
                     $fd->{line_count}, $fd->{match_count}, $first_ts, $last_ts, $fd->{ts_precision},
-                    $fd->{duration_count}, $fd->{duration_min} // '-', $fd->{duration_max} // '-', $dur_avg,
-                    $fd->{bytes_count}, $fd->{bytes_min} // '-', $fd->{bytes_max} // '-', $bytes_avg,
-                    $fd->{count_count}, $fd->{count_min} // '-', $fd->{count_max} // '-', $count_avg,
+                    $fd->{duration_occurrences}, $fd->{duration_min} // '-', $fd->{duration_max} // '-', $dur_avg,
+                    $fd->{file_bytes_occurrences}, $fd->{file_bytes_min} // '-', $fd->{file_bytes_max} // '-', $file_bytes_mean,
+                    $fd->{count_occurrences}, $fd->{count_min} // '-', $fd->{count_max} // '-', $count_mean,
                     $read_rate, '-', '-', '-'
                 );
                 $index_csv->print($ofh, \@file_row);
@@ -5069,16 +5069,16 @@ sub write_index_file {
             {
                 my $sel_first = format_epoch_iso($fd->{sel_first_timestamp});
                 my $sel_last  = format_epoch_iso($fd->{sel_last_timestamp});
-                my $sel_dur_avg   = $fd->{sel_duration_count} > 0 ? sprintf("%.2f", $fd->{sel_duration_sum} / $fd->{sel_duration_count}) : '-';
-                my $sel_bytes_avg = $fd->{sel_bytes_count}    > 0 ? sprintf("%.2f", $fd->{sel_bytes_sum}    / $fd->{sel_bytes_count})    : '-';
-                my $sel_count_avg = $fd->{sel_count_count}    > 0 ? sprintf("%.2f", $fd->{sel_count_sum}    / $fd->{sel_count_count})    : '-';
+                my $sel_dur_avg   = $fd->{sel_duration_occurrences} > 0 ? sprintf("%.2f", $fd->{sel_duration_sum} / $fd->{sel_duration_occurrences}) : '-';
+                my $sel_file_bytes_mean = $fd->{sel_file_bytes_occurrences}    > 0 ? sprintf("%.2f", $fd->{sel_bytes_sum}    / $fd->{sel_file_bytes_occurrences})    : '-';
+                my $sel_count_mean = $fd->{sel_count_occurrences}    > 0 ? sprintf("%.2f", $fd->{sel_count_sum}    / $fd->{sel_count_occurrences})    : '-';
 
                 my @sel_row = (
                     'selection', $now_iso, $path, '-', '-',
                     '-', $fd->{sel_match_count}, $sel_first, $sel_last, '-',
-                    $fd->{sel_duration_count}, $fd->{sel_duration_min} // '-', $fd->{sel_duration_max} // '-', $sel_dur_avg,
-                    $fd->{sel_bytes_count}, $fd->{sel_bytes_min} // '-', $fd->{sel_bytes_max} // '-', $sel_bytes_avg,
-                    $fd->{sel_count_count}, $fd->{sel_count_min} // '-', $fd->{sel_count_max} // '-', $sel_count_avg,
+                    $fd->{sel_duration_occurrences}, $fd->{sel_duration_min} // '-', $fd->{sel_duration_max} // '-', $sel_dur_avg,
+                    $fd->{sel_file_bytes_occurrences}, $fd->{sel_file_bytes_min} // '-', $fd->{sel_file_bytes_max} // '-', $sel_file_bytes_mean,
+                    $fd->{sel_count_occurrences}, $fd->{sel_count_min} // '-', $fd->{sel_count_max} // '-', $sel_count_mean,
                     '-', $max_memory_usage, sprintf("%.3f", $elapsed_total), $current_filters
                 );
                 $index_csv->print($ofh, \@sel_row);
@@ -10375,16 +10375,16 @@ sub read_and_process_logs {
             first_timestamp => undef,
             last_timestamp  => undef,
             ts_precision    => 's',
-            duration_count  => 0, duration_min => undef, duration_max => undef, duration_sum => 0,
-            bytes_count     => 0, bytes_min    => undef, bytes_max    => undef, bytes_sum    => 0,
-            count_count     => 0, count_min    => undef, count_max    => undef, count_sum    => 0,
+            duration_occurrences  => 0, duration_min => undef, duration_max => undef, duration_sum => 0,
+            file_bytes_occurrences     => 0, file_bytes_min    => undef, file_bytes_max    => undef, bytes_sum    => 0,
+            count_occurrences     => 0, count_min    => undef, count_max    => undef, count_sum    => 0,
             read_start      => [gettimeofday],
             sel_match_count      => 0,
             sel_first_timestamp  => undef,
             sel_last_timestamp   => undef,
-            sel_duration_count   => 0, sel_duration_min => undef, sel_duration_max => undef, sel_duration_sum => 0,
-            sel_bytes_count      => 0, sel_bytes_min    => undef, sel_bytes_max    => undef, sel_bytes_sum    => 0,
-            sel_count_count      => 0, sel_count_min    => undef, sel_count_max    => undef, sel_count_sum    => 0,
+            sel_duration_occurrences   => 0, sel_duration_min => undef, sel_duration_max => undef, sel_duration_sum => 0,
+            sel_file_bytes_occurrences      => 0, sel_file_bytes_min    => undef, sel_file_bytes_max    => undef, sel_bytes_sum    => 0,
+            sel_count_occurrences      => 0, sel_count_min    => undef, sel_count_max    => undef, sel_count_sum    => 0,
         };
         my $filter_range_filter_initialized = 0;
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
@@ -10859,19 +10859,19 @@ sub read_and_process_logs {
                     $fd->{last_timestamp}  = $timestamp_epoch if !defined $fd->{last_timestamp}  || $timestamp_epoch > $fd->{last_timestamp};
                     $fd->{ts_precision} = 'ms' if $fractional_ms > 0 && $fd->{ts_precision} eq 's';
                     if (defined $duration) {
-                        $fd->{duration_count}++;
+                        $fd->{duration_occurrences}++;
                         $fd->{duration_sum} += $duration;
                         $fd->{duration_min} = $duration if !defined $fd->{duration_min} || $duration < $fd->{duration_min};
                         $fd->{duration_max} = $duration if !defined $fd->{duration_max} || $duration > $fd->{duration_max};
                     }
                     if (defined $bytes && $bytes > 0) {
-                        $fd->{bytes_count}++;
+                        $fd->{file_bytes_occurrences}++;
                         $fd->{bytes_sum} += $bytes;
-                        $fd->{bytes_min} = $bytes if !defined $fd->{bytes_min} || $bytes < $fd->{bytes_min};
-                        $fd->{bytes_max} = $bytes if !defined $fd->{bytes_max} || $bytes > $fd->{bytes_max};
+                        $fd->{file_bytes_min} = $bytes if !defined $fd->{file_bytes_min} || $bytes < $fd->{file_bytes_min};
+                        $fd->{file_bytes_max} = $bytes if !defined $fd->{file_bytes_max} || $bytes > $fd->{file_bytes_max};
                     }
                     if (defined $count) {
-                        $fd->{count_count}++;
+                        $fd->{count_occurrences}++;
                         $fd->{count_sum} += $count;
                         $fd->{count_min} = $count if !defined $fd->{count_min} || $count < $fd->{count_min};
                         $fd->{count_max} = $count if !defined $fd->{count_max} || $count > $fd->{count_max};
@@ -10953,19 +10953,19 @@ sub read_and_process_logs {
                     $fd->{sel_first_timestamp} = $timestamp_epoch if !defined $fd->{sel_first_timestamp} || $timestamp_epoch < $fd->{sel_first_timestamp};
                     $fd->{sel_last_timestamp}  = $timestamp_epoch if !defined $fd->{sel_last_timestamp}  || $timestamp_epoch > $fd->{sel_last_timestamp};
                     if (defined $duration) {
-                        $fd->{sel_duration_count}++;
+                        $fd->{sel_duration_occurrences}++;
                         $fd->{sel_duration_sum} += $duration;
                         $fd->{sel_duration_min} = $duration if !defined $fd->{sel_duration_min} || $duration < $fd->{sel_duration_min};
                         $fd->{sel_duration_max} = $duration if !defined $fd->{sel_duration_max} || $duration > $fd->{sel_duration_max};
                     }
                     if (defined $bytes && $bytes > 0) {
-                        $fd->{sel_bytes_count}++;
+                        $fd->{sel_file_bytes_occurrences}++;
                         $fd->{sel_bytes_sum} += $bytes;
-                        $fd->{sel_bytes_min} = $bytes if !defined $fd->{sel_bytes_min} || $bytes < $fd->{sel_bytes_min};
-                        $fd->{sel_bytes_max} = $bytes if !defined $fd->{sel_bytes_max} || $bytes > $fd->{sel_bytes_max};
+                        $fd->{sel_file_bytes_min} = $bytes if !defined $fd->{sel_file_bytes_min} || $bytes < $fd->{sel_file_bytes_min};
+                        $fd->{sel_file_bytes_max} = $bytes if !defined $fd->{sel_file_bytes_max} || $bytes > $fd->{sel_file_bytes_max};
                     }
                     if (defined $count) {
-                        $fd->{sel_count_count}++;
+                        $fd->{sel_count_occurrences}++;
                         $fd->{sel_count_sum} += $count;
                         $fd->{sel_count_min} = $count if !defined $fd->{sel_count_min} || $count < $fd->{sel_count_min};
                         $fd->{sel_count_max} = $count if !defined $fd->{sel_count_max} || $count > $fd->{sel_count_max};
