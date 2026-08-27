@@ -7451,8 +7451,13 @@ sub group_similar_messages {
                 }
             }
 
-            # Copy bytes stats
+            # Copy bytes stats — the whole family, as count does below (#432)
             $entry->{total_bytes} = $cluster->{total_bytes} if defined $cluster->{total_bytes};
+            if (defined $cluster->{bytes_occurrences}) {
+                $entry->{bytes_occurrences} = $cluster->{bytes_occurrences};
+                $entry->{bytes_min}         = $cluster->{bytes_min};
+                $entry->{bytes_max}         = $cluster->{bytes_max};
+            }
 
             # Copy count stats
             if (defined $cluster->{count_sum}) {
@@ -8076,8 +8081,15 @@ sub merge_consolidation_stats {
         push @{$target->{durations}}, @{$source->{durations}} if $source->{durations} && @{$source->{durations}};
     }
 
-    # Bytes stats
+    # Bytes stats. The whole family merges, not just the sum (#432): a
+    # consolidated row that carried the total without its observation count
+    # would report a total no aggregate could be derived from.
     $target->{total_bytes} = ($target->{total_bytes} // 0) + $source->{total_bytes} if defined $source->{total_bytes};
+    if (defined $source->{bytes_occurrences}) {
+        $target->{bytes_occurrences} = ($target->{bytes_occurrences} // 0) + $source->{bytes_occurrences};
+        $target->{bytes_min} = $source->{bytes_min} if defined $source->{bytes_min} && (!defined $target->{bytes_min} || $source->{bytes_min} < $target->{bytes_min});
+        $target->{bytes_max} = $source->{bytes_max} if defined $source->{bytes_max} && (!defined $target->{bytes_max} || $source->{bytes_max} > $target->{bytes_max});
+    }
 
     # Count stats
     if (defined $source->{count_sum}) {
