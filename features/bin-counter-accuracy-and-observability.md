@@ -690,24 +690,44 @@ statistics, `held` is those plus every member retained until its row was finaliz
   rows: ThingWorx's 17 grouped rows hold 3 411 histograms between them, and the top
   two hold 2 074 of those.
 
-What a per-row ceiling would recover, computed from the exact grouping each run
-published:
+**How a ceiling would work, and what it trades.** A row that reaches the ceiling
+collapses what it is holding — one union geometry over those histograms, each
+projected into it once — and carries on holding that single result plus new
+arrivals. So a row never holds more than the ceiling, and a row of N histograms
+takes ceil(N / ceiling) collapses instead of one. It is not a return to combining
+pair by pair: the number of collapse *events* is what the ceiling controls, and the
+number of projections stays one per histogram either way.
 
-| ceiling | ThingWorx held | rows affected (of 17) | Tomcat held | rows affected (of 166) | Codebeamer held | rows affected (of 20) |
-|---|---|---|---|---|---|---|
-| 8 | 3.1 % | 10 | 28.3 % | 45 | 43.3 % | 1 |
-| 16 | 5.5 % | 10 | 38.9 % | 25 | 50.0 % | 1 |
-| 32 | 9.4 % | 6 | 51.4 % | 18 | 63.3 % | 1 |
-| 64 | 15.0 % | 6 | 68.4 % | 10 | 90.0 % | 1 |
-| 128 | 24.5 % | 5 | 84.7 % | 4 | 100 % | 0 |
-| 256 | 41.2 % | 4 | 95.7 % | 2 | 100 % | 0 |
+What it costs is **re-projection depth** — how many collapses a given count passes
+through before it is read. Uncapped that is 1, and a single projection is the case
+the earlier research measured as staying within one bucket on 3,999 of 4,000
+evaluations. The same research measured error against depth: 1.25 buckets at depth 1
+of the old pair-by-pair merge, 1.40 at depth 3, 1.51 at depth 7, 2.10 at depth 15. A
+ceiling puts the worst rows back onto that curve, at a depth the ceiling chooses.
 
-**The trade a ceiling buys and pays.** Members beyond the ceiling have to be combined
-as they arrive, which is the arithmetic this issue removed — so a capped row gets its
-order-dependence back for the part above the ceiling, while every row under the
-ceiling keeps the guarantee. The ceiling therefore decides how many rows on a real
-log lose the property, not whether the property exists. At 32 that is 6 of 17 rows on
-ThingWorx and 18 of 166 on Tomcat; at 128, 5 and 4.
+Peak memory is the sum over rows of min(row's histograms, ceiling). Depth is for the
+worst row on that log:
+
+| ceiling | ThingWorx peak held / worst-row collapses | Tomcat peak held / worst-row collapses | Codebeamer peak held / worst-row collapses |
+|---|---|---|---|
+| none | 4 478 KB / 1 | 3 172 KB / 1 | 144 KB / 1 |
+| 512 | 3 099 KB / 3 | 3 172 KB / 1 | 144 KB / 1 |
+| 256 | 1 844 KB / 6 | 3 034 KB / 2 | 144 KB / 1 |
+| 128 | 1 095 KB / 11 | 2 688 KB / 3 | 144 KB / 1 |
+| 64 | 673 KB / 21 | 2 170 KB / 5 | 129 KB / 2 |
+| 32 | 421 KB / 41 | 1 632 KB / 10 | 91 KB / 3 |
+| 16 | 245 KB / 81 | 1 233 KB / 20 | 72 KB / 5 |
+| 8 | 140 KB / 161 | 898 KB / 40 | 62 KB / 10 |
+
+(at the default 53 buckets per decade; multiply by 11.6 for the top resolution — the
+ThingWorx `none` row is 52 042 KB there, and the 128 row is 12 724 KB.)
+
+The shape of the trade differs by log because the shape of the grouping does. On the
+ThingWorx scriptlog nearly all the memory is in two rows, so a ceiling is extremely
+effective and extremely concentrated: 128 recovers three quarters of the memory and
+puts 5 rows of 17 onto a depth-11 curve. On the Tomcat access log the load is spread
+over 166 rows, so the same ceiling recovers only 15 % and touches 4 rows. On
+Codebeamer nothing above 128 has any effect at all.
 
 **The ceiling value is not decided here.** The numbers above are what it should be
 decided from.
