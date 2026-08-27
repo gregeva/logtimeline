@@ -101,7 +101,7 @@ my %verbose_section_registry = (
         description => 'Raw-array histogram dimensions: per-metric sample counts, min/max, decades, bucket layout. Active when a surface resolves to the raw values data model.',
     },
     'histogram-bin-counters' => {
-        description => 'HDR-style bin-counter histogram state: precision tier, per-consumer partition keying, re-binning counted per mechanism, member-histogram retention and footprint, finalized histogram dimensions.',
+        description => 'HDR-style bin-counter histogram state: precision tier, per-consumer partition keying, re-binning counted per mechanism, member-histogram retention and footprint, and — in the display-dimensions sub-section — the geometry the chart is drawn on after the display projection.',
     },
     'histogram-percentile-ticks' => {
         description => 'Inputs to the histogram percentile tick mapping, at full precision: per metric the bar width, the axis min and max, and each selected percentile value. The computed columns are deliberately NOT reported -- a test that read them back would be comparing this code to itself (Issue #462).',
@@ -158,7 +158,7 @@ my %verbose_sections_requested;   # Populated by adapt_to_command_line_options()
 
 # Issue #226: deferred sub-section content keyed by parent section name.
 # Producers that emit a sub-section from a different code path than the
-# parent section's emitter (e.g., `histogram-bin-counters / dimensions`
+# parent section's emitter (e.g., `histogram-bin-counters / display-dimensions`
 # is produced in finalize_histogram_unified while the parent section is
 # emitted in emit_bin_counter_mode_verbose) push their lines here. The
 # parent section's emitter pulls the buffered content and splices it
@@ -4946,7 +4946,7 @@ sub emit_bin_counter_mode_verbose {
         }
     }
 
-    # Drain buffered sub-section content (e.g., histogram-bin-counters / dimensions
+    # Drain buffered sub-section content (e.g., histogram-bin-counters / display-dimensions
     # from finalize_histogram_unified) before closing the section bracket.
     if (my $buf = delete $verbose_section_buffer{'histogram-bin-counters'}) {
         push @verbose_output, "" if @$buf;
@@ -12214,19 +12214,24 @@ sub finalize_histogram_unified {
     }
 
     # Streaming bin-counter finalize path. Emit as the
-    # `histogram-bin-counters / dimensions` sub-section via the deferred
-    # buffer — parent section markers are emitted by
+    # `histogram-bin-counters / display-dimensions` sub-section via the
+    # deferred buffer — parent section markers are emitted by
     # emit_bin_counter_mode_verbose() (Issue #226). Per-metric line
     # formatting shared with the array path via
     # format_histogram_dimensions_line() (Issue #237).
+    #
+    # The name carries the epoch: these lines describe the geometry the chart
+    # is drawn on, built after the display projection, while the parent
+    # section's fields describe the streaming partitions as they stood before
+    # it. The two are different by design and the section reports both.
     if (section_requested('histogram-bin-counters') && @metrics_with_data) {
         my @lines;
-        push @lines, "=== histogram-bin-counters / dimensions ===";
+        push @lines, "=== histogram-bin-counters / display-dimensions ===";
         for my $metric (@metrics_with_data) {
             push @lines,
                 format_histogram_dimensions_line($metric, $histogram_stats{$metric});
         }
-        push @lines, "=== END histogram-bin-counters / dimensions ===";
+        push @lines, "=== END histogram-bin-counters / display-dimensions ===";
         push @{ $verbose_section_buffer{'histogram-bin-counters'} }, @lines;
     }
 
