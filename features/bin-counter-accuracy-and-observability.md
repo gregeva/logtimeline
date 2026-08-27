@@ -791,6 +791,61 @@ its members — and more accurate than collapsing it at the default resolution.
   its own requirement, since the ceiling was deferred to the development flow rather
   than scoped into that issue.
 
+### Measured — a canonical grid answers the growth objection, and removes retention entirely
+
+Architect's objection, 2026-08-27: a canonical grid still has a problem as the range
+grows at the next consolidation. Measured, and it does not — because with a canonical
+grid, growth is not a re-derivation of geometry at all.
+
+Bucket j covers [10^(j/B), 10^((j+1)/B)). The grid is defined by the resolution B
+alone, not by any observed value. So:
+
+- **Widening the range addresses more grid indices.** Nothing is recomputed and
+  nothing is moved. There is no geometry to re-derive, which is the step that costs
+  today.
+- **Halving B maps index j to floor(j/2).** Every pair of buckets becomes one, and no
+  count leaves the interval it was already in. Exact, and the result is identical to
+  having binned at the lower resolution from the start, because the coarser grid is a
+  strict subset of the finer one.
+
+Both operations are exact, so the only lossy step remaining is the single projection
+of each member's own (non-canonical, adaptively-seeded) buckets onto the grid.
+
+`prototype/459-order-independence/canonical-fold-target.pl`: a combined-row target
+starting at 616 buckets per decade with a fixed bucket budget, absorbing members as
+they arrive and folding whenever the occupied span exceeds the budget. Twelve arrival
+orders (arrival, reversed, ten shuffles) crossed with three batch sizes (8, 32, all at
+once), against the raw sorted samples:
+
+| members | budget | final buckets/decade | order and batch mismatches | worst error vs the raw data |
+|---|---|---|---|---|
+| 16 | 512 | 77 | **0 of 12** | 0.82 member buckets |
+| 16 | 2 048 | 308 | **0 of 12** | 0.73 |
+| 64 | 512 | 77 | **0 of 12** | 0.22 |
+| 64 | 2 048 | 308 | **0 of 12** | 0.30 |
+| 256 | 512 | 77 | **0 of 12** | 0.14 |
+| 256 | 2 048 | 308 | **0 of 12** | 0.14 |
+
+Byte-identical stored counts across every order AND every batch boundary — the
+property a retention ceiling would otherwise have destroyed — with the error under
+one member bucket width throughout and improving with depth.
+
+**What this displaces.** Members are absorbed as they arrive and never held, so the
+retention this drop set out to measure and cap does not arise. Memory becomes one
+bounded histogram per grouped row: at a 512-bucket budget, 4 KB per grouped row —
+70 KB across the ThingWorx scriptlog's 17 grouped rows against 4 488 KB retained, and
+680 KB across the Tomcat access log's 166 against 3 648 KB. The ceiling question, the
+ceiling's cost in re-projection depth, and the resolution-follows-depth proposal above
+all dissolve: resolution follows *range*, automatically, inside a fixed budget.
+
+**What is not yet established.** Whether anchoring the COMBINED row's histogram to a
+canonical grid is in bounds given that the earlier research rejected anchoring the
+PER-MESSAGE histograms — the adaptivity argument that decided that (a message's
+partition adapts to that message's own data) does not obviously transfer to a row that
+already spans many messages, but that is reasoning, not measurement. Also unmeasured:
+cost per absorbed member against the shipped path, and the behaviour on the real
+corpus rather than on generated members.
+
 ## Open items carried out of stage 1
 
 - **The highlight sub-stores are not observed.** `%heatmap_counters_hl`,
