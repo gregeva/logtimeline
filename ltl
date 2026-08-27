@@ -11177,7 +11177,12 @@ sub read_and_process_logs {
                         # per-bucket capture sits after it and gates on the saved
                         # observation instead. Both admit a zero-byte response, so the
                         # two surfaces count the same lines.
-                        if( defined $bytes ) {
+                        # -ob discards the bytes metric, so nothing about it is
+                        # captured: not the total, not the family. A run that
+                        # discards a metric has nothing to rank on either, and -so
+                        # bytes falls back the same way any operand with no values
+                        # does.
+                        if( defined $bytes && !$omit_bytes ) {
                             my $e = $log_messages{$category}{$log_key};
                             $e->{total_bytes} += $bytes;
                             if( $e->{bytes_occurrences}++ ) {
@@ -11329,7 +11334,6 @@ sub read_and_process_logs {
                     # line carrying no bytes field is indistinguishable from one
                     # reporting a zero-byte response.
                     my $bytes_observed_line = defined $bytes;
-                    $bytes_observed = 1 if $bytes_observed != 1 && $bytes_observed_line;
 
                     ## STATISTICAL DATA CAPTURE ##
                     $duration = 0 if !defined( $duration );
@@ -11437,20 +11441,26 @@ sub read_and_process_logs {
                         }
                     }
 
-                    if( defined $bytes && $bytes ) {
-                        $log_analysis{$bucket}{total_bytes} += $bytes;
-                        $log_analysis{$bucket}{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;
-                    }
-
-                    # The bytes aggregate family, same shape as the per-message
-                    # capture above (#432). Gated on the pre-coercion observation
-                    # rather than on the summing guard above: that guard excludes a
-                    # zero-byte response, which is a real observation and belongs in
-                    # the count and the extrema. Gating both scopes on the same
-                    # condition is what makes the two CSV surfaces agree on the same
-                    # input.
-                    if( $bytes_observed_line ) {
+                    # Nothing about the bytes metric is captured under -ob (#432).
+                    #
+                    # The family is gated on the pre-coercion observation rather than
+                    # on the sum's truth test: a zero-byte response is a real
+                    # observation and belongs in the count and the extrema, though not
+                    # in the running total's `&& $bytes` guard, which is pre-existing.
+                    # Both scopes gate on the same condition, which is what makes the
+                    # two CSV surfaces count the same lines.
+                    #
+                    # $bytes_observed gates the STATS CSV columns and is set here
+                    # rather than once per line: a package-global read-compare-write
+                    # on every line measured ~1.5% of total runtime, for a flag that
+                    # only needs to know whether ANY line carried bytes.
+                    if( $bytes_observed_line && !$omit_bytes ) {
+                        $bytes_observed = 1;
                         my $e = $log_analysis{$bucket};
+                        if( $bytes ) {
+                            $e->{total_bytes} += $bytes;
+                            $e->{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;
+                        }
                         if( $e->{bytes_occurrences}++ ) {
                             $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
                             $e->{bytes_max} = $bytes if $bytes > $e->{bytes_max};
