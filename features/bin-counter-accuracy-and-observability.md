@@ -476,7 +476,7 @@ registering a comparison that passes fails the run.
 
 ## Current state — where to resume
 
-**Last updated 2026-08-27, after #459 merged.** Read this first if work on the drop
+**Last updated 2026-08-27, after #460 merged.** Read this first if work on the drop
 is being picked up after a break. The governing contracts are listed above; the stage-4
 investigation and its decisions are in `459-bin-counter-combination-order.md`.
 
@@ -485,8 +485,8 @@ investigation and its decisions are in `459-bin-counter-combination-order.md`.
 | 1 — observability | #462 (absorbs #461) | **delivered**, merged to `release/0.18.0`, closed |
 | 2 — test coverage | #450 | **delivered**, merged, closed |
 | 3 — baseline capture | part of #450 | **captured**; the three consolidated bin scenarios re-blessed once, for #459 |
-| 4 — merge arithmetic + percentile source | #459, #460 | #459 **delivered** 2026-08-27; #460 next. The grid design that supersedes #459's mechanism is filed as #469 |
-| 5–9 — the rest of the release | #447, #432, #418, #443 (+#449), #445 | not started; order fixed by D6. #447 stays `blocked_by #460` — the gate is merge order |
+| 4 — merge arithmetic + percentile source | #459, #460 | both **delivered** 2026-08-27 and closed. The grid design that supersedes #459's mechanism is filed as #469 |
+| 5–9 — the rest of the release | #447, #432, #418, #443 (+#449), #445 | **#447 is next** — unblocked, its `blocked_by` edge resolved when #460 closed. Order fixed by D6 |
 | beyond this release | #469 | the grid-addressed consolidated row, validated 2026-08-27 (D-459-1), superseding #459's mechanism |
 
 #462 was reopened after its first delivery and completed a second time: the surface
@@ -537,6 +537,30 @@ Consequence for #460's acceptance: it does not have a self-clearing registry ent
 its own. What it is judged on instead is the tick-position assertions (D15), the
 re-blessed stage-3 baseline diff read per the section below, and `rebin_finalize_events`
 moving off the percentile path.
+
+### Stage 4 is complete — what it delivered, and what it did not move
+
+#460 delivered on 2026-08-27 (`34a6d91`, PR #471, merged `6634868`), closing stage 4.
+Percentiles on the heatmap and histogram surfaces now come from the streaming partition
+with the value clamped to the display axis; the eleven contract corrections landed at
+source; the accuracy trade is documented for users; D5's consolidation notice ships; and
+`path: pre_migration` is retired. The record is
+[`460-bin-model-percentile-source.md`](460-bin-model-percentile-source.md).
+
+Two things this stage established that the plan had assumed otherwise:
+
+- **The stage-3 drift baselines did not move, and did not need re-blessing.** The
+  per-message surface already computed from its streaming partition, so a change confined
+  to the display surfaces cannot move a `messages.csv` or `stats.csv` cell. What moved
+  instead was the render side: 18 of the 25 bin reference renders, in 39 lines, every one
+  a percentile legend value, an x-axis tick column or a heatmap marker column.
+- **The 15 XFAIL entries are #469's, not stage 4's.** They are merged `messages` rows,
+  whose one projection is the consolidation collapse — the bound a shared bucket grid
+  removes structurally. Re-attributed with the reasoning in the registry header.
+
+Two open items from stage 1 were dispositioned here: the `/ dimensions` epoch (renamed
+under #473, delivered) and the highlight sub-stores (filed as #472, awaiting the
+Decision 8 consumer-name call).
 
 ### Re-blessing the stage-3 baseline is a deliberate act, not a step
 
