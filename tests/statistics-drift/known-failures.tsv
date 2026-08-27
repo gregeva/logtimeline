@@ -20,9 +20,8 @@
 #   note        — why, in one line
 #
 # ---------------------------------------------------------------------------
-# #460: bin-model percentiles are computed from a re-projected representation,
-# and the accuracy bound written for them describes a histogram that has never
-# been re-projected.
+# #469: consolidated rows are addressed on each cluster's own bin edges, so the
+# members must be projected onto a shared geometry before they can be combined.
 #
 # A consolidated row's percentiles are derived from the member histograms of the
 # keys the row absorbed, projected onto one shared geometry. The oracle derives
@@ -32,31 +31,38 @@
 # Every entry below is inside that bound; IQR entries are larger because an IQR
 # is a difference of two percentiles and carries both.
 #
-# These were registered against #459 (combination order) on 2026-08-26 on the
-# assumption that its compounding was the cause. It was not: #459 landed on
-# 2026-08-27, removing the compounding and proving order-independence, and these
-# comparisons still breach - because they are the accuracy bound, which #460
-# owns and is correcting. Measured on real grouped rows, a single projection
-# leaves the one-bucket bound on 1.54% (tomcat) and 2.08% (thingworx) of
-# evaluations; see features/459-bin-counter-combination-order.md sections 7 and 9.
+# Attribution history, because it has moved twice and the reasoning is the point.
+# Registered against #459 (combination order) on 2026-08-26, on the assumption
+# that its compounding was the cause. It was not: #459 landed on 2026-08-27,
+# removing the compounding and proving order-independence, and these comparisons
+# still breach. They moved to #460 (percentile source) with the bound as the
+# stated cause. They are not #460's either: #460 removes the display projection
+# that precedes histogram and heatmap percentiles, and the merged rows below do
+# not take that path - their percentiles already come from the un-projected
+# streaming entry, and their one projection is the collapse onto the shared
+# geometry. Measured on real grouped rows, that single projection leaves the
+# one-bucket bound on 1.54% (tomcat) and 2.08% (thingworx) of evaluations; see
+# features/459-bin-counter-combination-order.md sections 7 and 9.
 #
-# They clear when #460 either corrects the bound (in which case the harness
-# threshold for merged bin rows follows it) or removes the projection. The
-# entries are self-clearing and the engine will insist.
+# They clear under #469, which addresses consolidated rows on a shared bucket
+# grid and so performs no projection at all. Until then they are the accepted
+# residual bound, documented as such in features/187-histogram-bin-counter-
+# percentiles.md section R4. The entries are self-clearing and the engine will
+# insist.
 # ---------------------------------------------------------------------------
 scenario	file_kind	column	key_class	issue	note
-apache-bin-consolidated	messages	p10	merged	460	one projection onto the shared geometry, 4.0% against a 4.44% bucket
-codebeamer-bin-consolidated	messages	p1	merged	460	one projection onto the shared geometry, 3.0% against a 4.44% bucket
-codebeamer-bin-consolidated	messages	p5	merged	460	one projection onto the shared geometry
-codebeamer-bin-consolidated	messages	p10	merged	460	one projection onto the shared geometry
-codebeamer-bin-consolidated	messages	p25	merged	460	one projection onto the shared geometry
-codebeamer-bin-consolidated	messages	p50	merged	460	one projection onto the shared geometry
-codebeamer-bin-consolidated	messages	iqr	merged	460	difference of two projected percentiles, carries both
-thingworx-bin-consolidated	messages	p1	merged	460	one projection onto the shared geometry, 4.2% against a 4.44% bucket
-thingworx-bin-consolidated	messages	p5	merged	460	one projection onto the shared geometry
-thingworx-bin-consolidated	messages	p10	merged	460	one projection onto the shared geometry
-thingworx-bin-consolidated	messages	p50	merged	460	one projection onto the shared geometry
-thingworx-bin-consolidated	messages	p75	merged	460	one projection onto the shared geometry
-thingworx-bin-consolidated	messages	p95	merged	460	one projection onto the shared geometry
-thingworx-bin-consolidated	messages	p999	merged	460	one projection onto the shared geometry
-thingworx-bin-consolidated	messages	iqr	merged	460	difference of two projected percentiles, carries both
+apache-bin-consolidated	messages	p10	merged	469	one projection onto the shared geometry, 4.0% against a 4.44% bucket
+codebeamer-bin-consolidated	messages	p1	merged	469	one projection onto the shared geometry, 3.0% against a 4.44% bucket
+codebeamer-bin-consolidated	messages	p5	merged	469	one projection onto the shared geometry
+codebeamer-bin-consolidated	messages	p10	merged	469	one projection onto the shared geometry
+codebeamer-bin-consolidated	messages	p25	merged	469	one projection onto the shared geometry
+codebeamer-bin-consolidated	messages	p50	merged	469	one projection onto the shared geometry
+codebeamer-bin-consolidated	messages	iqr	merged	469	difference of two projected percentiles, carries both
+thingworx-bin-consolidated	messages	p1	merged	469	one projection onto the shared geometry, 4.2% against a 4.44% bucket
+thingworx-bin-consolidated	messages	p5	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p10	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p50	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p75	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p95	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p999	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	iqr	merged	469	difference of two projected percentiles, carries both
