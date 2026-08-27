@@ -1,0 +1,268 @@
+# #432 — Metric/aggregate naming alignment and bytes parity
+
+Issue #432 (align built-in metric/aggregate naming with the UDM convention;
+`mean_bytes` is the outlier). Stage 6 of the 0.18.0 delivery order recorded in
+`features/bin-counter-accuracy-and-observability.md` § D6.
+
+## What this is for
+
+A user who has learned the user-defined-metric vocabulary — `udm_<name>_mean`,
+`_min`, `_max`, `_sum`, `_occurrences` — reasonably expects the built-in metrics to
+read the same way. `count` does. `bytes` does not: it carries a sum and a mean whose
+name is inverted (`mean_bytes`), and nothing else.
+
+The requirement is **metric parity for bytes across the tool's two CSV surfaces** —
+per message and per time bucket — so that bytes carries the same aggregate family as
+duration and count already do on those same surfaces, under names that follow one
+convention.
+
+## The two surfaces, and the third scope that is not one of them
+
+`ltl` emits two CSV surfaces, and they are not built the same way:
+
+| | Surface A — MESSAGES | Surface B — STATS |
+|---|---|---|
+| row scope | one per consolidated message key | one per time bucket |
+| filename | `build_csv_filename('MESSAGES')` | `build_csv_filename('STATS')` |
+| header source | a fixed `qw()` literal in `pipeline_render` | derived from `@output_columns` in `normalize_data_for_output` |
+| row emitter | `print_message_summary` | the per-bucket row loop |
+| header/row coupling | **two independent lists ~800 lines apart** — both must be edited in step | positional, from one list |
+| adding a column | edits two literals | implies a **new rendered column** (terminal width, auto-hide) |
+
+There is a **third scope** that is not a CSV surface in this sense: the per-file
+`ltl-index.csv` written by `write_index_file()`, which carries whole-file
+`bytes_min`/`bytes_max`/`bytes_avg` per input file. It is a different aggregation
+level and does not satisfy, or contribute to, parity on Surface A or B. Its
+identifiers are renamed under D4 below precisely so this can never be confused again.
+
+## The parity matrix as shipped (release/0.18.0)
+
+Established by audit, 2026-08-27, and adversarially verified per cell (21 agents,
+zero refutations, zero scope confusions). Identical gap on both surfaces.
+
+| aggregate | duration | count | **bytes** |
+|---|---|---|---|
+| occurrences (n) | absent (computed, unemitted) | `count_occurrences` | **absent — not computed** |
+| min | `min` | `count_min` | **absent — not computed** |
+| mean | `mean` | `count_mean` | **`mean_bytes`** (inverted name) |
+| max | `max` | `count_max` | **absent — not computed** |
+| sum | `duration` / `duration_nice` | `count_sum` | `bytes` / `bytes_nice` |
+| std_dev, cv, p1–p99999, iqr, skewness, kurtosis, bimodality_coef | all present | absent | **absent** |
+
+Bytes carries two of the five basic aggregates. Count carries all five.
+
+The asymmetry is visible in three adjacent lines of the per-message accumulation in
+`read_and_process_logs()` — bytes gets a sum and no companion counter, while count
+immediately below it maintains its whole family:
+
+```perl
+$log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
+
+if( defined $count ) {
+    $log_messages{$category}{$log_key}{count_sum} += $count if defined $count;
+    $log_messages{$category}{$log_key}{count_occurrences}++;
+    $log_messages{$category}{$log_key}{count_min} = $count if !defined ... || $count < ...;
+    $log_messages{$category}{$log_key}{count_max} = $count if !defined ... || $count > ...;
+}
+```
+
+At the per-bucket scope the same holds: `$log_analysis{$bucket}{total_bytes}` is a
+bare sum with no min, max or observation count.
+
+## F1 — The shipped `mean_bytes` is wrong, and parity is its fix
+
+Found during the audit. `mean_bytes` divides the bytes sum by `occurrences` — the
+count of **all matched lines** — while `total_bytes` sums only those lines that
+**carried a bytes value**. On any log where some matched lines have no bytes field,
+the mean is understated. The source already names the defect at the derivation site
+in `print_message_summary`:
+
+```perl
+# BUG/ WRONG!!! below assumes all lines have bytes, but not really
+my $mean_bytes = int( $total_bytes_num / $occurrences + 0.5 ) if defined $total_bytes_num;
+```
+
+The same wrong divisor appears a second time in the sort pre-pass in
+`calculate_all_statistics()`, where `$entry->{mean_bytes}` is materialised for
+ranking (`$sort_key eq 'mean_bytes'`) — greppable as `$entry->{total_bytes} &&
+$entry->{occurrences}`. Both sites must move together, or `-so` ranks on a different
+value than the CSV reports.
+
+The correct divisor is a bytes observation count — which is exactly the
+`bytes_occurrences` cell the parity matrix shows as missing. **The parity work and
+this defect have one fix**, and the defect is what makes `bytes_occurrences` a
+requirement rather than a nicety.
+
+Per the architect (2026-08-27): defects surfaced by this audit belong to #432 and do
+not get their own issues.
+
+## Locked decisions
+
+D1–D3 were taken in the 0.18.0 specification interview and are transcribed from the
+issue body. D4–D7 were taken on 2026-08-27 during the audit walkthrough.
+
+### D1 — Bare metric words alias to the sum
+
+`bytes` = sum of bytes, `duration` / `time` = total duration, `count` = sum of the
+count metric. The rule already holds uniformly in the code; it is now stated.
+`occurrences` is not an exception to it — it is not a metric, it is how many messages
+matched, so there is nothing to sum.
+
+### D2 — `mean_bytes` becomes `bytes_mean`, clean break
+
+No alias, no deprecation path. Called out in the release notes and that is the end of
+the story.
+
+### D3 — Duration keeps its bare CLI spellings; CSV headers take the prefix
+
+Duration is the tool's subject, not an extension of it: every statistic in the summary
+table is a duration statistic unless it says otherwise, and prefixing twelve columns
+with the same word costs width in a table that already auto-hides columns. `duration_*`
+spellings are accepted as **aliases** on the CLI, so a user who has learned the
+convention guesses `duration_p95` and it works. The **CSV output column headers do**
+take the `duration_` prefix, for coherence with the other metric families.
+
+### D4 — The per-file index identifiers are renamed to say "whole file"
+
+**Architect, 2026-08-27:** *"If you need to rename the per file metrics for bytes,
+mean bytes, max, please go ahead and do so. It should be clear by their variable names
+that they're referring to the whole file."*
+
+The index's `bytes_min` / `bytes_max` collide by name with the per-message and
+per-bucket bytes family this issue introduces, at a different aggregation level. During
+this audit that collision already produced one false finding — the index columns were
+reported as evidence that per-message bytes min/max already existed. Names that state
+their scope prevent the next one.
+
+Applies to the index column vocabulary and its in-memory `$fd->{...}` accumulator
+fields, including the selection-scoped `sel_` twins.
+
+### D5 — Bytes gains the full basic family on **both** CSV surfaces
+
+**Architect, 2026-08-27: "Yes. To both."**
+
+`bytes_occurrences`, `bytes_min`, `bytes_mean`, `bytes_max` — per message *and* per
+time bucket. Renaming the mean alone would create a family with one member and move
+the wall one step along, since `bytes_max` would fail exactly as `bytes_mean` does
+today.
+
+On Surface B this implies new **rendered** columns, since that surface's header is
+derived from the rendered column layout. Their default visibility and auto-hide
+priority are open — see O1.
+
+### D6 — Basic aggregates only; no bytes distribution statistics
+
+The family is `occurrences`/`min`/`mean`/`max`/`sum`. Bytes percentiles, std_dev, cv
+and the shape moments are **out of scope**.
+
+Rationale, from the audit: the two classes are structurally different work. Four
+scalars on an entry are identical under `-mdm bin` and `-mdm raw` and need only the
+initialiser and the accumulation site. A bytes *percentile* would need its own
+counter store, a branch in both `calculate_statistics` and `calculate_statistics_bin`,
+a telemetry surface, and merge handling in `merge_bin_state` / `merge_consolidation_stats`.
+Nothing in the requirement asks for it.
+
+### D7 — `ltl-index.csv` is aligned to the same convention
+
+`avg` becomes `mean`, `_count` becomes `_occurrences`, metric-first throughout.
+
+**Trap, from the audit:** `line_count` and `match_count` are structural row fields,
+not metric aggregates. A naive `_count` → `_occurrences` sweep corrupts them. The six
+columns in scope are `duration_count`, `duration_avg`, `bytes_count`, `bytes_avg`,
+`count_count`, `count_avg` — and the bytes pair is subject to D4's scope renaming as
+well.
+
+## Prototyping obligation
+
+`bytes_occurrences` / `bytes_min` / `bytes_max` are **new per-line capture** at the
+per-message and per-bucket scopes (CLAUDE.md § Development Phases 2 — new per-line
+hot-path cost). D-c's original premise, that this capability exists nowhere in the
+tool, is correct *at these scopes*: the `bytes_min`/`bytes_max` that ship today are
+the whole-file index accumulator (D4), a different aggregation level.
+
+The governing precedent is #447 (control-character normalisation), where an unguarded
+implementation of a far smaller per-line addition cost **+4.36% of total runtime**
+before measurement forced a rework to +0.80%. See
+`features/447-message-control-character-normalisation.md` § D4 and
+`tests/profile/results/447-control-char-normalisation/`.
+
+Requirements carried forward from that precedent:
+
+- **Order-balanced ABBA design, ≥8 pairs.** Single-order interleaving was proven
+  insufficient there: the same code measured +0.44% and +1.99% in different sessions
+  because within-arm spread exceeded the effect.
+- **The baseline arm reproduces the production call structure verbatim** (#58 F9,
+  CLAUDE.md 2026-08-21) — extracted from `ltl`, not wrapped in a convenience sub.
+- **Constants come from the source, not from memory** (CLAUDE.md 2026-08-27) — slice
+  them out and name the source symbol beside any value that must be restated.
+
+The measurement question is the per-line cost of the added comparisons under their
+guard, at both scopes, against the current code as baseline.
+
+## Verification obligations
+
+From the audit of the harness surface. All are consequences of existing rules in
+`tests/HARNESS-DESIGN.md`, not new policy.
+
+- **One shared specification, two consumers.** `tests/csv-output/rules/messages-columns.tsv`
+  and `stats-columns.tsv` are read by both `validate-csv-output.pl` and
+  `compare-statistics-drift.pl`. An unknown CSV column is a hard failure in
+  `check_column_structure()`. A partial rename fails both harnesses.
+- **Position renumbering.** `messages-columns.tsv` pins an explicit `position` integer
+  per column (currently 1..35); `stats-columns.tsv` uses `*` and is order-free. New
+  columns on Surface A renumber every subsequent position in the same edit.
+- **48 committed baseline CSVs re-blessed.** Each of the 24
+  `tests/statistics-drift/baselines/*/` directories holds `messages.csv` and
+  `stats.csv` whose headers carry the affected vocabulary. These are deliverables
+  (`tests/statistics-drift/README.md` § Capturing baselines). A header-only rename
+  should produce a diff confined to line 1 of each file — **any value change in that
+  diff is a stop-and-investigate**, except where F1's divisor fix is the known cause,
+  which must then be confirmed as the cause rather than assumed.
+- **No benchmark baseline needs re-blessing.** Every `metric_name` in
+  `tests/baseline/results/*.tsv` is an internal timing/memory/config label; none is in
+  this vocabulary. The `tmap` canonicalization block in `compare-results.sh` covers
+  TIMING stage labels only and needs no entry.
+- **Benchmark scenario labels must not be retitled.** `run-benchmark.sh` defines
+  `sort-p99|-so p99` and `sort-skewness|-so skewness`; the label before the pipe is the
+  `test_name` column and pairs rows with no canonicalization. Renaming one unpairs
+  every historical baseline silently.
+- **New assertions proved to fail first.** HARNESS-DESIGN.md § Proving a new assertion
+  can fail — each new bytes invariant is demonstrated failing against a sabotaged
+  input, directly against `check_layer2_row` where possible, before the healthy path
+  is run.
+- **A negative assertion can pass vacuously.** `validate-index-read-back.sh` contains
+  `assert_no_line ... '^  preseed_duration_min: -$'`; if a renamed key made that
+  pattern match nothing the assertion would pass while hiding the regression.
+- **The L3 oracle keys by bare statistic names.** `calculate-reference.py` emits
+  `out["std_dev"]`, `out["cv"]`, `out["iqr"]` … and `@L3_COLUMNS` in
+  `compare-statistics-drift.pl` is a bare-name list pairing oracle values to CSV
+  columns. D3 prefixes the CSV headers but says nothing about the oracle — whether the
+  oracle keys move or a mapping layer is added is an explicit decision to record, not
+  to make silently.
+
+## Open items
+
+- **O1 — Surface B rendered-column visibility.** D5 puts four bytes columns on the
+  per-bucket surface, whose header derives from the rendered layout. Are they visible
+  by default, and where do they sit in the auto-hide priority? Terminal width is
+  already contended.
+- **O2 — `-so` whitelist case sensitivity.** The 39-word `qw()` operand whitelist in
+  `adapt_to_command_line_options()` is a case-**sensitive** exact-string membership
+  test (`grep { $_ eq $sort_type }`), while every branch of the resolution ladder
+  below it matches with `/i`. So `-so MEAN_BYTES` is rejected by the whitelist even
+  though the ladder would resolve it. Pre-existing; in scope by the architect's ruling
+  that audit-surfaced defects belong to this issue, but the disposition is not yet
+  decided.
+- **O3 — Alias normalisation point for D3.** `duration_p95` must reach the identity
+  arm of the resolution ladder, where `$sort_key = lc $sort_type` makes the operand
+  spelling *be* the storage key, and must be normalised to the bare name before
+  `%STAT_FIELD_GROUP` membership is tested — that lookup gates statistics demand via
+  the `sort-on` consumer, so an un-normalised key silently switches the statistic off
+  and the sort ranks undef against undef, which is the #428 failure mode.
+- **O4 — Oracle key space.** See the L3 note above.
+
+## Status
+
+Branch `432-align-builtin-metric-aggregate-naming`, cut from `release/0.18.0`.
+Audit complete. Feature doc written. **Not yet implemented** — the prototype is the
+next gate, and O1–O4 are open.
