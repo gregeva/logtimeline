@@ -144,7 +144,11 @@ run_test() {
         benchmark_defaults="$benchmark_defaults -bs 60"
     fi
     local output
-    if ! output=$($LTL --disable-progress -V benchmark-data -mem $benchmark_defaults $options $EXTRA_OPTIONS $file_args 2>&1); then
+    # "$LTL" is quoted: a repo path containing spaces (a shared-mount checkout)
+    # otherwise word-splits into a command that does not exist, and every test
+    # reads as "ltl returned non-zero". The option and file lists stay unquoted
+    # on purpose — they are word lists, not single arguments.
+    if ! output=$("$LTL" --disable-progress -V benchmark-data -mem $benchmark_defaults $options $EXTRA_OPTIONS $file_args 2>&1); then
         echo "FAIL: $test_name — ltl returned non-zero" >&2
         return 1
     fi

@@ -3211,6 +3211,27 @@ sub format_probe_signal {
 # carries and how to override it. Phrased run-level with no filename: the
 # assumption covers every file the format binds (#390). Intentional
 # diagnostic: never an ` at ... line` suffix.
+# Consolidation on the bin message-stats surface is lossy by nature: each
+# absorbed key's histogram is re-projected onto the geometry the cluster
+# settles on, so a consolidated row's percentiles are answered from counts
+# that have been remapped once. Where the run can show that it happened, say
+# how much of it happened; where it cannot, the condition still applies, so
+# the note is printed either way. Not gated on --disable-progress: that flag
+# suppresses progress indicators, not decisions the tool made on the user's
+# behalf. Intentional diagnostic: never an ` at ... line` suffix.
+sub bin_consolidation_notice {
+    return if $group_similar_sensitivity eq 'none';
+    return unless ($message_stats_capture_mode // 'raw') eq 'bin';
+
+    my $detail = $message_stats_collapse_projections > 0
+        ? 'consolidation combined ' . format_number($message_stats_collapse_projections)
+          . ' message histograms onto shared bucket geometries'
+        : 'consolidated rows combine each absorbed message histogram onto a shared bucket geometry';
+    print STDERR "Note: $detail, so their percentiles are approximate"
+        . " - use -mdm raw for exact percentiles\n";
+    return;
+}
+
 sub format_variant_ambiguity_note {
     my ($entry) = @_;
     return if $format_unit_ambiguity_warned || defined $log_format_pin;
@@ -4801,13 +4822,9 @@ sub emit_bin_counter_mode_verbose {
         histogram_bins
     );
 
-    # Consumers migrated to the unified path. heatmap_cells / heatmap_markers
-    # / histogram_view / histogram_bins shipped via #34; summary_table /
-    # csv_output shipped via #287; time_bucket_stats shipped via #289.
-    my %migrated = map { $_ => 1 } qw(
-        heatmap_cells heatmap_markers histogram_view histogram_bins
-        summary_table csv_output time_bucket_stats
-    );
+    # Every consumer above runs the unified path, so the only distinctions a
+    # block reports are whether the consumer's feature is active at all and
+    # whether its surface resolved to raw.
 
     # Shared-partition topology per #189 R7 / Decision 8 shares_partitions_with.
     # csv_output reads the same per-(category, log_key) partitions that
@@ -4859,11 +4876,6 @@ sub emit_bin_counter_mode_verbose {
 
         if (!$feature_active{$consumer}) {
             push @verbose_output, "  path: feature_not_active";
-            next;
-        }
-
-        if (!$migrated{$consumer}) {
-            push @verbose_output, "  path: pre_migration";
             next;
         }
 
@@ -5755,14 +5767,14 @@ my $explain_cv_compute = q{Derived from already-computed `std_dev` and `mean`: `
 # --- iqr ---
 my $explain_iqr_intuition = q{Interquartile range = `p75 - p25`. IQR captures the spread of the *middle 50%* of observations -- the range between the lower quartile and the upper quartile. Half of all values fall inside this band; one quarter are slower, one quarter are faster.};
 my $explain_iqr_operational = q{IQR is the *robust* spread statistic: by construction it ignores the bottom 25% and top 25%, which contain all the outliers, fast-path edge cases, and pathological-tail events. This makes IQR resistant to the failure modes that compromise `std_dev` (single 10-second outlier dominates) and `cv` (right-skew inflates std_dev). For SRE work where you want "what's the typical operational range this API behaves in", IQR is usually the right answer -- mean +/- std_dev assumes a normal distribution which production latency violates. IQR pairs well with `p50` (median) as a robust center: the trio `p25 / p50 / p75` describes the body of the distribution without being skewed by tails.};
-my $explain_iqr_compute = q{Derived from already-computed percentiles: `iqr = p75 - p25`. Inherits the data model and precision of the underlying percentile computation -- exact relative to observed samples on surfaces using the raw values data model, or subject to bin-width interpolation on surfaces using the bin counter data model (tunable via `--data-model-precision`).};
+my $explain_iqr_compute = q{Derived from already-computed percentiles: `iqr = p75 - p25`. Inherits the data model, algorithm and accuracy of the underlying percentile computation -- exact relative to observed samples on surfaces using the raw values data model, or subject to within-bucket interpolation on surfaces using the bin counter data model (tunable via `--data-model-precision`), including the extra displacement a fuzzily consolidated row (`-g`) carries. See `--explain percentiles` for how large that is and when it matters.};
 
 # --- percentiles (the major topic, covers p1..p99999) ---
 my $explain_percentiles_intuition = q{Percentiles answer the question "what value is faster than (or equal to) N% of all observations?" The N-th percentile pN is the value at which N percent of observed durations fall at or below. p50 is the median; p99 is the value that 99% of requests beat; p999 is the value that 99.9% of requests beat. Where `mean` collapses a distribution to a single average, percentiles describe its *shape* -- by reading off the values at many different points along the cumulative distribution.};
 my $explain_percentiles_operational = q{Percentiles are the primary SRE latency-investigation tool. Each percentile answers a different operational question: `p50` (median) is the "typical" experience; `p90` and `p95` are commonly-used SLO target points; `p99`, `p999`, and higher tail percentiles describe the user-visible worst-case latencies that drive outage and complaint patterns; `p1`, `p5`, `p10` are the lower-body percentiles useful for fast-path analysis (cache effectiveness, what does the system look like when not loaded). The progression of nines -- p99, p999, p9999, p99999 -- describes *how heavy* the tail is: in a benign distribution these values converge quickly; in a pathological one (GC pauses, lock contention, retry storms) they diverge sharply.};
 my $explain_percentiles_table_intro = q{Available percentile slugs and their operational meaning:};
 my $explain_percentiles_sample_size = q{Higher percentiles require larger samples to be statistically meaningful. The general rule: pN needs at least 10/(1-N/100) observations to be informative -- p99 needs ~1000, p999 needs ~10000, p9999 needs ~100000, p99999 needs ~1 million. Below these thresholds the percentile collapses toward `max` and carries no signal independent of `max`. ltl emits every percentile column regardless of sample size, so check the `occurrences` column when interpreting high-nines values.};
-my $explain_percentiles_compute = q{ltl computes percentiles via one of two data models, each using its own algorithm. The raw values data model holds every observation in memory and selects the percentile by nearest-rank from the sorted array (an actually-observed value at the computed rank). The bin counter data model accumulates observations into log-spaced bin counters and computes the percentile by exponential interpolation within the bucket containing the target rank (a synthesised value placed inside the matching bin on a log scale spanning the bin's lower and upper edges); the default 53 buckets per decade gives ~1.3% relative bin width. The two algorithms return different values on the same input, particularly in the tail. Surface defaults: histogram and heatmap use the bin counter data model; per-message-key statistics (summary table / MESSAGES CSV) and per-time-bucket statistics (STATS CSV) use the raw values data model. Override per surface via `--message-stats-data-model`, `--bucket-stats-data-model`, `--histogram-data-model`, `--heatmap-data-model`; pin globally via `--data-model`. On surfaces using the bin counter data model, the resolution is set by `--data-model-precision` (tier 1..9, default 5); higher tiers give finer resolution at higher memory cost.};
+my $explain_percentiles_compute = q{ltl computes percentiles via one of two data models, each using its own algorithm. The raw values data model holds every observation in memory and selects the percentile by nearest-rank from the sorted array (an actually-observed value at the computed rank), so the reported value is exact. The bin counter data model accumulates observations into log-spaced bin counters and computes the percentile by exponential interpolation within the bucket containing the target rank (a synthesised value placed inside the matching bin on a log scale spanning the bin's lower and upper edges); it is exact about how many observations fell where and approximate about where inside a bucket the target rank sits, so the reported value lands within the bucket that holds the true answer. The two algorithms return different values on the same input, particularly in the tail. Fuzzy consolidation (`-g`) adds to that on the per-message-key surface: the merged messages' histograms are re-projected onto one shared geometry, so a consolidated row's percentiles can sit up to about one bucket from the value the pooled observations would give -- measured on real duration streams, a reading falls outside that band on roughly 1.5-2% of the percentiles of consolidated rows. Pin `--message-stats-data-model raw` when consolidated rows need exact percentiles; `min`, `max`, `mean`, `std_dev` and the shape statistics stay exact under either model. Surface defaults: histogram and heatmap use the bin counter data model; per-message-key statistics (summary table / MESSAGES CSV) and per-time-bucket statistics (STATS CSV) use the raw values data model. Override per surface via `--message-stats-data-model`, `--bucket-stats-data-model`, `--histogram-data-model`, `--heatmap-data-model`; pin globally via `--data-model`. On surfaces using the bin counter data model, the resolution is set by `--data-model-precision` (tier 1..9, default 5); higher tiers give finer resolution at higher memory cost.};
 
 # --- skewness (user-supplied content) ---
 my $explain_skewness_intuition = q{Skewness measures the *asymmetry* of a distribution -- how lopsided it is around its mean. Whether the values tend to bunch up on one side with a tail extending toward the other. For latency, skewness answers "is the tail leaning one way?" -- positive skew means the right tail is heavier (most fast, occasionally slow); negative skew means the left tail is heavier (unusual for latency; common when something caps execution at a ceiling).};
@@ -6554,8 +6566,8 @@ sub print_help {
     $out .= help_opt("-dm,   --data-model <raw|bin>",                  "Pin the data model for every surface (overridden by any per-surface flag below)");
     $out .= help_opt("-hgdm, --histogram-data-model <raw|bin>",        "Pin the histogram surface's data model");
     $out .= help_opt("-hmdm, --heatmap-data-model <raw|bin>",          "Pin the heatmap surface's data model");
-    $out .= help_opt("-mdm,  --message-stats-data-model <raw|bin>",    "Pin the per-message-key statistics data model (default raw; bin uses HDR-style bin counters with Prometheus-style exponential interpolation)");
-    $out .= help_opt("-bdm,  --bucket-stats-data-model <raw|bin>",     "Pin the per-time-bucket statistics data model (default raw; bin uses HDR-style bin counters with Prometheus-style exponential interpolation)");
+    $out .= help_opt("-mdm,  --message-stats-data-model <raw|bin>",    "Pin the per-message-key statistics data model (default raw). 'raw' retains every duration and returns exact, actually-observed percentiles; 'bin' uses HDR-style bin counters with Prometheus-style exponential interpolation, so percentiles are approximate - and with -g, a consolidated row's percentiles sit within about one bucket of the pooled answer. min, max, mean, std_dev and the shape statistics stay exact under both.");
+    $out .= help_opt("-bdm,  --bucket-stats-data-model <raw|bin>",     "Pin the per-time-bucket statistics data model (default raw). 'raw' retains every duration and returns exact, actually-observed percentiles; 'bin' uses HDR-style bin counters with Prometheus-style exponential interpolation, so percentiles are approximate. min, max, mean, std_dev and the shape statistics stay exact under both.");
     $out .= help_opt("-dmp,  --data-model-precision <N>",              "Precision tier 1..9 (default: 5). Higher tiers give finer resolution on bin-counter surfaces at higher memory cost.");
 
     # User-Defined Metrics
@@ -11791,13 +11803,6 @@ sub finalize_heatmap_unified {
         $final_bins->[0]      += $src->{underflow} // 0;
         $final_bins->[$W - 1] += $src->{overflow}  // 0;
 
-        my $final_entry = {
-            partition => $final_p,
-            bins      => $final_bins,
-            underflow => 0,
-            overflow  => 0,
-        };
-
         # heatmap_cells: bin counts directly drive cell colors.
         for my $i (0 .. $W - 1) {
             my $c = $final_bins->[$i];
@@ -11806,15 +11811,29 @@ sub finalize_heatmap_unified {
             $heatmap_max_density = $c if $c > $heatmap_max_density;
         }
 
-        # heatmap_markers: R4 (percentile) invoked against the FINALIZED
-        # partition per #34 R5 / features/34-*.md line 120. Numeric value
-        # mapped to display column via find_heatmap_bucket (which reads
-        # @heatmap_boundaries, just populated above).
+        # heatmap_markers: R4 (percentile) invoked against the STREAMING
+        # partition, which is the highest-fidelity representation this surface
+        # holds (#460 / D2). $src is still alive here — the display projection
+        # above serves the cells, and the marker no longer inherits its
+        # resolution loss. The numeric value is mapped to a display column via
+        # find_heatmap_bucket (which reads @heatmap_boundaries, populated above).
+        #
+        # The value is clamped to the display axis before mapping. The streaming
+        # partition's outermost bins extend beyond the observed extremes (the
+        # 5-decade seed and doubling growth are geometry, not observations), and
+        # the axis floor can additionally sit above the smallest observed value
+        # when it is pre-seeded from the index. Unclamped, a marker a hair
+        # outside the axis falls through find_heatmap_bucket's final return and
+        # renders in the last column. Same remedy and rationale as the clamp in
+        # calculate_statistics_bin.
         my %markers;
         for my $pair (['p50', 0.50], ['p95', 0.95], ['p99', 0.99], ['p999', 0.999]) {
             my ($name, $q) = @$pair;
-            my ($v) = percentile($final_entry, $q);
-            $markers{$name} = find_heatmap_bucket($v, $W) if defined $v;
+            my ($v) = percentile($src, $q);
+            next unless defined $v;
+            $v = $effective_min if $v < $effective_min;
+            $v = $effective_max if $v > $effective_max;
+            $markers{$name} = find_heatmap_bucket($v, $W);
         }
         $heatmap_percentiles{$bucket} = \%markers if %markers;
 
@@ -12119,22 +12138,23 @@ sub finalize_histogram_unified {
         $final_bins->[0]                 += $src->{underflow} // 0;
         $final_bins->[$bucket_count - 1] += $src->{overflow}  // 0;
 
-        my $final_entry = {
-            partition => $final_p,
-            bins      => $final_bins,
-            underflow => 0,
-            overflow  => 0,
-        };
-
-        # histogram_view: R4 (percentile) invoked against the FINALIZED
-        # partition per #34 R5 / features/34-*.md line 120.
+        # histogram_view: R4 (percentile) invoked against the STREAMING
+        # partition (#460 / D2). The projection above exists to give the bars a
+        # display geometry; the percentile has no reason to inherit its
+        # resolution, and $src still holds the counts at streaming precision.
+        # Values are clamped to the axis the bars are drawn on, for the reason
+        # documented at the heatmap marker site.
         my %stats = (count => $n, min => $min, max => $max,
                      bucket_count => $bucket_count, decades => $decades);
         for my $pair (['p1',0.01], ['p5',0.05], ['p10',0.10], ['p25',0.25], ['p50',0.50],
                       ['p75',0.75], ['p90',0.90], ['p95',0.95], ['p99',0.99],
                       ['p999',0.999], ['p9999',0.9999], ['p99999',0.99999]) {
             my ($name, $q) = @$pair;
-            my ($v) = percentile($final_entry, $q);
+            my ($v) = percentile($src, $q);
+            if (defined $v) {
+                $v = $min if $v < $min;
+                $v = $max if $v > $max;
+            }
             $stats{$name} = $v;
         }
         $histogram_stats{$metric} = \%stats;
@@ -12166,19 +12186,19 @@ sub finalize_histogram_unified {
                 $final_bins_hl->[0]                 += $src_hl->{underflow} // 0;
                 $final_bins_hl->[$bucket_count - 1] += $src_hl->{overflow}  // 0;
 
-                my $final_entry_hl = {
-                    partition => $final_p_hl,
-                    bins      => $final_bins_hl,
-                    underflow => 0,
-                    overflow  => 0,
-                };
-
+                # Same source and the same clamp as the parent (#460 / D2).
+                # The clamp target is the PARENT's axis: the highlight legend
+                # and the parent legend are drawn against one geometry.
                 my %stats_hl = (count => $n_hl, min => $min, max => $max);
                 for my $pair (['p1',0.01], ['p5',0.05], ['p10',0.10], ['p25',0.25], ['p50',0.50],
                               ['p75',0.75], ['p90',0.90], ['p95',0.95], ['p99',0.99],
                               ['p999',0.999], ['p9999',0.9999], ['p99999',0.99999]) {
                     my ($name, $q) = @$pair;
-                    my ($v) = percentile($final_entry_hl, $q);
+                    my ($v) = percentile($src_hl, $q);
+                    if (defined $v) {
+                        $v = $min if $v < $min;
+                        $v = $max if $v > $max;
+                    }
                     $stats_hl{$name} = $v;
                 }
                 $histogram_stats_hl{$metric} = \%stats_hl;
@@ -16419,6 +16439,8 @@ sub pipeline_finalize {
     }
 
     memory_debug_decomposition("after_grouping") unless $group_similar_sensitivity eq "none";
+
+    bin_consolidation_notice();
 
     # CALCULATE STATISTICS #
     $start_time = [gettimeofday];

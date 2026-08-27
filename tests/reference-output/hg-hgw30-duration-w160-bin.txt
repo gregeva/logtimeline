@@ -59,7 +59,7 @@
                                                              0 ┗┳━━━━━━━━━━━━━━┻┳━━━━━━━┳━━━━━━┻━╋┛   0%
                                                                 627ms         1.1m    11.8m     2h      
 
-                                                                P50: 48.4s   P99: 1.4h   P99.9: 2h      
+                                                                P50: 47.1s   P99: 1.5h   P99.9: 2h      
 
 command-line options: --disable-progress -ni -osum -n 1 -hgdm bin --terminal-width 160 -hg duration -hgw 30 
 

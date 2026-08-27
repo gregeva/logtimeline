@@ -508,7 +508,7 @@ scenario_message_stats_raw() {
 
     assert_line "$out" \
         pattern     '^  path: user_opt_out$' \
-        asserts     'Under -mdm raw, summary_table reports path: user_opt_out - the consumer is migrated but the user pinned raw on this surface, so the pre-migration code runs. No telemetry block follows.' \
+        asserts     'Under -mdm raw, summary_table reports path: user_opt_out - the user pinned the raw data model on this surface, so the sort-based statistics path runs and no bin counters are kept. No telemetry block follows.' \
         produced_by 'emit_bin_counter_mode_verbose() in ltl - %consumer_opted_out_to_raw map (Issue #287 Commit 4)' \
         contract    'features/187-histogram-bin-counter-percentiles.md section R10 path vocabulary - user_opt_out is the migrated-but-pinned-raw label.'
 
@@ -691,7 +691,7 @@ scenario_bucket_stats_raw() {
 
     assert_line "$out" \
         pattern     '^  path: user_opt_out$' \
-        asserts     'Under -bdm raw, time_bucket_stats reports path: user_opt_out - the consumer is migrated but the user pinned raw on this surface, so the pre-migration code runs. No telemetry block follows.' \
+        asserts     'Under -bdm raw, time_bucket_stats reports path: user_opt_out - the user pinned the raw data model on this surface, so the sort-based statistics path runs and no bin counters are kept. No telemetry block follows.' \
         produced_by 'emit_bin_counter_mode_verbose() in ltl - %consumer_opted_out_to_raw map (Issue #289)' \
         contract    'features/187-histogram-bin-counter-percentiles.md section R10 path vocabulary - user_opt_out is the migrated-but-pinned-raw label.'
 

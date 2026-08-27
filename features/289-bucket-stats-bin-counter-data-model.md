@@ -22,7 +22,7 @@ issue makes the `bin` branch real.
 - The `-V percentile-algorithm / bucket-stats` block's `effective_algorithm` tracks the
   resolved model; the "bin reduction is a follow-up to #266" note disappears.
 - The `time_bucket_stats` consumer in `-V histogram-bin-counters` moves from
-  `path: pre_migration` to `path: unified` (under `-bdm bin`) or `path: user_opt_out`
+  `path: unified` (under `-bdm bin`) or `path: user_opt_out`
   (under `-bdm raw`), with the locked Decision 8 telemetry fields.
 
 ### Two divergences from the issue body (confirmed with the architect 2026-05-27)

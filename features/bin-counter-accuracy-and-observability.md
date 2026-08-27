@@ -157,6 +157,14 @@ The notice ships ad-hoc in this drop. It is registered on #412 (notices surface 
 structured pre-chart render area) as a producer to be collected when that work
 happens; #412 is not in 0.18.0.
 
+**Owned by #460 (bin-model percentile source and the accuracy-contract amendment
+pass), settled 2026-08-27.** This decision was locked in-drop but named by no stage
+in D6 (stage order) and by no issue body, so nothing shipped it. It folds into #460,
+which already carries D8 (the accuracy trade documented on the `--help` /
+`docs/usage.md` / `docs/explain/statistics.md` surfaces) — the two are the runtime and
+documentation halves of the same message to the same user, and a single warning
+message does not warrant an issue of its own (architect's reasoning).
+
 ### D6 — Stage order
 
 Committed and pushed progressively, each stage merged back to `release/0.18.0`.
@@ -508,6 +516,28 @@ direct measurement of what D1's retention costs; and `features/187` § Decision 
 `tests/validate-histogram-bin-counters.sh` were amended in the same change. The full
 record is `459-bin-counter-combination-order.md`.
 
+### Stage 4b's XFAIL entries moved again, to #469
+
+**Settled 2026-08-27.** The 15 entries in `tests/statistics-drift/known-failures.tsv`
+were re-attributed from #459 (combination order) to #460 (percentile source) when #459
+merged. They are not #460's either, and the registry cannot clear under it: every entry
+is a merged `messages` row, whose percentiles are already computed from the un-projected
+streaming entry by `calculate_statistics_bin()`. The one projection those rows carry is
+`collapse_bin_counter_entry()` — the union geometry over the members — while what #460
+removes is the display projection inside `finalize_histogram_unified()` and
+`finalize_heatmap_unified()`, on surfaces the drift oracle does not compare at all.
+
+They are attributed to #469 (consolidated rows held on a shared bucket grid), which
+performs no projection and is where they can clear. Until then they are the accepted
+residual bound, documented as such in the amended `features/187-…md` § R4. The
+attribution history and its reasoning are written into the registry's header block, so
+the file explains itself without this document open.
+
+Consequence for #460's acceptance: it does not have a self-clearing registry entry of
+its own. What it is judged on instead is the tick-position assertions (D15), the
+re-blessed stage-3 baseline diff read per the section below, and `rebin_finalize_events`
+moving off the percentile path.
+
 ### Re-blessing the stage-3 baseline is a deliberate act, not a step
 
 Drift against the blessed baseline is, for the merged rows, one of only two numeric
@@ -567,14 +597,20 @@ anything else against it.
   it. Deliberately out of scope for #462: whether the highlight subset is its own
   consumer, or folds into the parent's figures, is a Decision 8 consumer-name question,
   not a counter question. `%bucket_stats_counters_hl` additionally has no consumer at
-  all beyond `named_structure_sizes()`.
-- **`path: pre_migration` is unreachable.** All seven consumer names are in
-  `%migrated`, so the value can no longer be produced. It is a locked D8 path value
-  asserted by nothing; its retirement belongs to the amendment pass in #460.
+  all beyond `named_structure_sizes()`. Still open after #460, for the same reason —
+  `460-bin-model-percentile-source.md` § 5 records what each disposition costs.
+- **`path: pre_migration` was unreachable, and is retired.** Every consumer name ran
+  the unified path, so the value could no longer be produced — a locked D8 path value
+  asserted by nothing. Removed from the emitter and from the contracts that locked it
+  under #460.
 - **The `/ dimensions` sub-section reports a different epoch from its parent.** It is
   built after the display projection and drained inside the same `-V` brackets as
-  fields describing the streaming geometry, with nothing marking the boundary.
-  Not changed here; recorded for #460.
+  fields describing the streaming geometry, with nothing marking the boundary. Still
+  open after #460: the three available shapes are a sub-section rename, a field inside
+  it that names the epoch, or leaving the emission alone and recording the epoch in the
+  section contract — the first two move a locked line shape, and the raw path emits the
+  same sub-section name under `histogram-array`, so it is a question about both
+  surfaces. `460-bin-model-percentile-source.md` § 5.
 - **`features/426-*` and `prototype/` retain `total_rebin_events`.** Both are the
   frozen record of the investigation that produced this drop, describing what the tool
   did at the time they were written. They are not swept.
