@@ -518,7 +518,7 @@ against the pre-stage4 file**; the v0.17.0-code file is what separates a machine
 effect from a code effect. Both are development references, not release baselines.
 Release benchmarking is not done on this host.
 
-Details, naming convention and the underlying provenance gap: `tests/baseline/results/README.md`.
+The baselining process, the naming convention and the worked example: `tests/baseline/README.md`.
 
 ---
 
