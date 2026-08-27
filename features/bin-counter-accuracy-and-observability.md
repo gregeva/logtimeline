@@ -476,7 +476,7 @@ registering a comparison that passes fails the run.
 
 ## Current state — where to resume
 
-**Last updated 2026-08-27, after #460 merged.** Read this first if work on the drop
+**Last updated 2026-08-27, after #447 merged.** Read this first if work on the drop
 is being picked up after a break. The governing contracts are listed above; the stage-4
 investigation and its decisions are in `459-bin-counter-combination-order.md`.
 
@@ -486,7 +486,9 @@ investigation and its decisions are in `459-bin-counter-combination-order.md`.
 | 2 — test coverage | #450 | **delivered**, merged, closed |
 | 3 — baseline capture | part of #450 | **captured**; the three consolidated bin scenarios re-blessed once, for #459 |
 | 4 — merge arithmetic + percentile source | #459, #460 | both **delivered** 2026-08-27 and closed. The grid design that supersedes #459's mechanism is filed as #469 |
-| 5–9 — the rest of the release | #447, #432, #418, #443 (+#449), #445 | **#447 is next** — unblocked, its `blocked_by` edge resolved when #460 closed. Order fixed by D6 |
+| 5 — control-character normalisation | #447 | **delivered** 2026-08-27, merged as `4998888` (PR #477), closed |
+| 6 — metric/aggregate naming and bytes parity | #432 | **in progress** — audit complete, decisions locked, prototype is the next gate. `features/432-metric-aggregate-naming-parity.md` |
+| 7–9 — the rest of the release | #418, #443 (+#449), #445 | #418 is `blocked_by` #432 so its messages are written against the final statistic names. Order fixed by D6 |
 | beyond this release | #469 | the grid-addressed consolidated row, validated 2026-08-27 (D-459-1), superseding #459's mechanism |
 
 #462 was reopened after its first delivery and completed a second time: the surface
