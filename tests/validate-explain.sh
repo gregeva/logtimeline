@@ -1104,8 +1104,8 @@ scenario_data_model_aware_prose() {
     out="${out#*:}"
     check_capture_warnings "$out"
     assert_line "$out" \
-        pattern     'bin-width interpolation' \
-        asserts     "--explain iqr describes the data-model dependency of its precision; bin-width interpolation language identifies the bin-counter path" \
+        pattern     'within-bucket interpolation' \
+        asserts     "--explain iqr describes the data-model dependency of its precision; within-bucket interpolation language identifies the bin-counter path" \
         produced_by '$explain_iqr_compute in ltl' \
         contract    'features/272-percentile-algorithm-industry-grounding.md - both algorithms must be discoverable from --explain.'
 

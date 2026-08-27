@@ -222,6 +222,8 @@ ltl computes percentiles from one of two data models, each with its own algorith
 
 **Bin counter data model.** Observations are accumulated into log-spaced bins and the percentile is computed by **exponential interpolation within the bucket** — a synthesised value placed inside the bin that contains the target rank, on the log scale spanning the bin's lower and upper edges. The returned value is generally not an observed sample. Bin resolution sets the interpolation tightness; it is governed by the precision lever (see *Tuning precision* below). Scales with partition count rather than observation count.
 
+**The trade.** The raw values model holds every observation and answers exactly: the reported percentile is a value that was actually measured. The bin counter model holds only a count per bucket — memory fixed by the precision lever rather than by how many observations arrive — and answers by interpolating inside the bucket that contains the target rank, so its value sits close to the exact one rather than on it. The one place that gap is routinely visible is fuzzy consolidation (`-g`) on the per-message-key surface: the merged messages' histograms are re-projected onto a single shared geometry, and a consolidated row's percentiles land within about one bucket of what the pooled observations would give. Pin that surface with `-mdm raw` when consolidated rows need exact percentiles.
+
 **Per-surface defaults.** Four consumer surfaces use percentile output; each has a default data model today:
 
 | # | Surface | Default Data Model |
@@ -238,8 +240,8 @@ ltl computes percentiles from one of two data models, each with its own algorith
 | `-dm, --data-model <raw\|bin>` | Pin the data model for every surface (overridden by any per-surface flag below). |
 | `-hgdm, --histogram-data-model <raw\|bin>` | Pin the histogram surface's data model. |
 | `-hmdm, --heatmap-data-model <raw\|bin>` | Pin the heatmap surface's data model. |
-| `-mdm, --message-stats-data-model <raw\|bin>` | Pin the per-message-key statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters plus Welford-Pébay sidecar accumulators for exact-value statistics. Default is `raw`. |
-| `-bdm, --bucket-stats-data-model <raw\|bin>` | Pin the per-time-bucket statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters plus Welford-Pébay sidecar accumulators for exact-value statistics. Default is `raw`. |
+| `-mdm, --message-stats-data-model <raw\|bin>` | Pin the per-message-key statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays and returns exact percentiles; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters, so percentiles are interpolated rather than observed, alongside Welford-Pébay sidecar accumulators that keep `min`, `max`, `mean`, `std_dev` and the shape statistics exact. With `-g`, consolidated rows on the `bin` model carry the extra approximation described above. Default is `raw`. |
+| `-bdm, --bucket-stats-data-model <raw\|bin>` | Pin the per-time-bucket statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays and returns exact percentiles; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters, so percentiles are interpolated rather than observed, alongside Welford-Pébay sidecar accumulators that keep `min`, `max`, `mean`, `std_dev` and the shape statistics exact. Default is `raw`. |
 
 Per-surface flag overrides `-dm`; `-dm` overrides the per-surface default. Invalid values (anything other than `raw` or `bin`) cause ltl to exit at option-parse time with a clear error. Conflicting flags on the same axis follow standard last-one-wins ordering.
 
@@ -442,6 +444,7 @@ Section content is governed by per-section stability contracts — additions are
 | `-g <non-numeric>` (e.g. `-g logfile.log`) | The non-numeric value is treated as a positional argument and the default similarity threshold (85) is applied. |
 | `-hm <unknown-metric>` without any `-udm` configured (e.g. `-hm bogus`) | The value is treated as a positional argument and the default heatmap metric (`duration`) is applied. |
 | `--data-model`, `--histogram-data-model`, `--heatmap-data-model`, `--message-stats-data-model`, or `--bucket-stats-data-model` supplied with a value other than `raw` or `bin` | ltl exits with `<flag>: '<value>' is not a valid data model; valid values are 'raw' and 'bin'`. |
+| `-g` combined with the bin counter data model on the per-message-key surface (`-mdm bin`, or `-dm bin`) | A note reports that percentiles on consolidated rows are approximate — the merged messages' histograms are re-projected onto one shared geometry — and points at `-mdm raw` for exact percentiles on those rows. Every other statistic, and every row that was not consolidated, is unaffected. |
 
 To inspect the resolved configuration after warnings have fired, use `-V runtime-config` and read the `command-line` and `environment-variable` sub-sections.
 
