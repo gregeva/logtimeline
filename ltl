@@ -857,6 +857,19 @@ my %log_messages_counters;
 # %bin_counter_telemetry{summary_table}{out_of_range_bounded}.
 my %message_stats_audit;
 
+# Issue #459: the two figures the deferred combination produces, accumulated as
+# clusters collapse and drained by finalize_message_stats_unified() into
+# %bin_counter_telemetry{summary_table}. Same drain pattern as
+# %message_stats_audit, and for the same reason: the collapse runs before the
+# telemetry snapshot exists.
+#   $message_stats_collapse_projections — one per member actually re-projected
+#     into the union geometry, reported as rebin_finalize_events.
+#   $message_stats_member_bytes         — the payload of every member histogram
+#     retained until its cluster collapsed, reported as the difference between
+#     members_memory_bytes and the live counter_memory_bytes.
+my $message_stats_collapse_projections = 0;
+my $message_stats_member_bytes = 0;
+
 # Issue #289: per-time-bucket counter store, keyed by $bucket — same shape #34
 # uses for %heatmap_counters. Populated under $bucket_stats_capture_mode eq 'bin'
 # by counter_update() during the parsing loop, observing $duration. Consumed by
@@ -1276,18 +1289,22 @@ sub snapshot_counter_telemetry {
     # Re-binning is counted per mechanism (#462): one summed figure cannot be
     # acted on, because a number that rises says nothing about whether the
     # seed geometry was wrong, consolidation churned, or a histogram was
-    # rendered. Growth and combination are counted on the STORE ENTRY rather
-    # than on the partition, because a combination replaces the target's
-    # partition outright and would otherwise reset the history it should be
-    # adding to. The finalize projection happens after this snapshot and is
-    # counted at its own call sites (see finalize_heatmap_unified /
-    # finalize_histogram_unified).
+    # rendered. Growth is counted on the STORE ENTRY rather than on the
+    # partition, because a combination replaces the target's partition
+    # outright and would otherwise reset the history it should be adding to.
+    #
+    # rebin_merge_events reads zero everywhere since #459: combining two
+    # histograms no longer projects anything. The field stays because a
+    # non-zero value would mean a combination path had reintroduced the
+    # order-dependent loss D1 removed. Projections at finalize are counted at
+    # their own call sites, after this snapshot (see finalize_heatmap_unified /
+    # finalize_histogram_unified / finalize_message_stats_unified).
     my ($store) = @_;
     my $n = scalar keys %$store;
     my ($growth, $merge, $max_bins, $with_over, $with_under, $over_sum, $under_sum)
         = (0, 0, 0, 0, 0, 0, 0);
     my ($members_live, $members_max) = (0, 0);
-    my @growth_per_partition;
+    my (@growth_per_partition, @members_per_partition);
     for my $entry (values %$store) {
         my $p = $entry->{partition};
         my $g = $entry->{rebin_growth} // 0;
@@ -1297,6 +1314,7 @@ sub snapshot_counter_telemetry {
         my $m = $entry->{members} // 1;
         $members_live += $m;
         $members_max = $m if $m > $members_max;
+        push @members_per_partition, $m;
         $max_bins = $p->{bin_count} if $p->{bin_count} > $max_bins;
         my $o = $entry->{overflow}  // 0;
         my $u = $entry->{underflow} // 0;
@@ -1310,6 +1328,15 @@ sub snapshot_counter_telemetry {
     my $p95 = @sorted ? $sorted[int(@sorted * 0.95)] : 0;
     my $p99 = @sorted ? $sorted[int(@sorted * 0.99)] : 0;
     my $rmax = @sorted ? $sorted[-1] : 0;
+    # How many histograms each surviving partition stands for. The total and
+    # the maximum cannot size a retention ceiling on their own — a total of
+    # 3,419 across 26 partitions is a different problem depending on whether
+    # the load is spread or sits in one cluster — so the distribution is
+    # reported the same way the growth history is (#459 / D3).
+    my @msorted = sort { $a <=> $b } @members_per_partition;
+    my $mp50 = @msorted ? $msorted[int(@msorted * 0.50)] : 0;
+    my $mp95 = @msorted ? $msorted[int(@msorted * 0.95)] : 0;
+    my $mp99 = @msorted ? $msorted[int(@msorted * 0.99)] : 0;
     my $bytes = counter_store_bytes($store);
     return {
         partition_count                 => $n,
@@ -1324,12 +1351,16 @@ sub snapshot_counter_telemetry {
         counter_memory_bytes            => $bytes,
         members_live                    => $members_live,
         members_max                     => $members_max,
-        # Every retained member histogram is in $store today, so the member
-        # footprint is the store footprint. Under D1 (features/bin-counter-
-        # accuracy-and-observability.md) a cluster holds its members' original
-        # histograms alongside the merged one and the two figures diverge;
-        # their equality is the signal that no member is being retained yet.
+        # Default: the store holds every histogram it stands for, so the
+        # member footprint is the store footprint. Only the per-message
+        # surface retains members — consolidation is the only combiner — and
+        # finalize_message_stats_unified() overwrites this with the store
+        # figure plus the payload of the members released at collapse
+        # (#459 / D1). Equality therefore means nothing was retained.
         members_memory_bytes            => $bytes,
+        members_p50                     => $mp50,
+        members_p95                     => $mp95,
+        members_p99                     => $mp99,
         rebins_p50                      => $p50,
         rebins_p95                      => $p95,
         rebins_p99                      => $p99,
@@ -1374,23 +1405,39 @@ sub counter_update {
     # none today), the over/underflow counter increments per:
     #   features/187-histogram-bin-counter-percentiles.md § Decision 4
     my ($store, $key, $value, $bpd_override) = @_;
-    my $bpd = $bpd_override // $percentile_buckets_per_decade;
-    my $entry = $store->{$key};
-    if (!$entry) {
-        $entry = $store->{$key} = {
-            partition => partition_new($value, $bpd, $percentile_seed_decades),
-            bins      => [],
-            overflow  => 0,
-            underflow => 0,
-            # Re-bin history lives on the entry, not the partition: a
-            # combination replaces the partition and would reset it (#462).
-            rebin_growth => 0,
-            rebin_merge  => 0,
-            # Member histograms this entry stands for. One until a
-            # combination folds another key's counters in.
-            members      => 1,
-        };
-    }
+    my $entry = $store->{$key}
+             //= counter_entry_new($value, $bpd_override // $percentile_buckets_per_decade);
+    counter_entry_observe($entry, $value);
+}
+
+sub counter_entry_new {
+    # A fresh store entry seeded around its first observed value. Split out of
+    # counter_update so a caller holding a bare entry — one that lives on a
+    # consolidation cluster rather than in a store — can seed and observe
+    # without a store and a synthetic key standing in for one.
+    my ($value, $bpd) = @_;
+    return {
+        partition => partition_new($value, $bpd, $percentile_seed_decades),
+        bins      => [],
+        overflow  => 0,
+        underflow => 0,
+        # Re-bin history lives on the entry, not the partition: a
+        # combination replaces the partition and would reset it (#462).
+        rebin_growth => 0,
+        rebin_merge  => 0,
+        # Member histograms this entry stands for. One until a
+        # combination folds another key's counters in.
+        members      => 1,
+    };
+}
+
+sub counter_entry_observe {
+    # Record one observation against an already-seeded entry. This is the
+    # exact path: the value lands in the bin that contains it, and nothing
+    # already counted is moved — the only displacement possible is the growth
+    # re-projection below, which is a property of the entry's own observation
+    # stream and not of combining it with another entry (#459 / D1).
+    my ($entry, $value) = @_;
 
     my ($where, $idx) = bin_assign($entry->{partition}, $value);
     if ($where eq 'IN') {
@@ -4864,11 +4911,18 @@ sub emit_bin_counter_mode_verbose {
         push @verbose_output, "  counter_memory_bytes: "            . ($t->{counter_memory_bytes}            // 0);
         # Retention of member histograms across combined keys. members_live
         # equals partition_count and members_memory_bytes equals
-        # counter_memory_bytes while combination still collapses members into
-        # one histogram; the two pairs diverge once members are retained.
+        # counter_memory_bytes on a surface that retains nothing; the two
+        # pairs diverge on the per-message surface, where every combined key's
+        # histogram is held in its own geometry until its cluster is finalized.
+        # members_per_partition is what a retention ceiling would be sized
+        # from — a total says nothing about whether the load is spread across
+        # partitions or concentrated in one.
         push @verbose_output, "  members_live: "                    . ($t->{members_live}                    // 0);
         push @verbose_output, "  members_max: "                     . ($t->{members_max}                     // 0);
         push @verbose_output, "  members_memory_bytes: "            . ($t->{members_memory_bytes}            // 0);
+        push @verbose_output, sprintf("  members_per_partition: p50=%d p95=%d p99=%d max=%d",
+            $t->{members_p50} // 0, $t->{members_p95} // 0,
+            $t->{members_p99} // 0, $t->{members_max} // 0);
         push @verbose_output, sprintf("  rebins_per_partition: p50=%d p95=%d p99=%d max=%d",
             $t->{rebins_p50} // 0, $t->{rebins_p95} // 0,
             $t->{rebins_p99} // 0, $t->{rebins_max} // 0);
@@ -7369,6 +7423,15 @@ sub group_similar_messages {
                     $entry->{m3_sum}         = $cluster->{m3_sum}         if defined $cluster->{m3_sum};
                     $entry->{m4_sum}         = $cluster->{m4_sum}         if defined $cluster->{m4_sum};
                     if ($cluster->{bin_entry}) {
+                        # Issue #459 / D1: this is the cluster's finalize. Every
+                        # member it absorbed is still in its own untouched
+                        # geometry; here they are projected into one union
+                        # geometry, together, exactly once each. Every cluster
+                        # passes through this loop once, after every merge path
+                        # has run, so no combination reaches a consumer
+                        # uncollapsed.
+                        $message_stats_collapse_projections
+                            += collapse_bin_counter_entry($cluster->{bin_entry});
                         $log_messages_counters{"$category\x1f$canonical_log_key"} = $cluster->{bin_entry};
                     }
                 }
@@ -7795,77 +7858,113 @@ sub match_consolidation_patterns {
 
 # Merge stats from source entry into target (for consolidation cluster merging)
 # Handles all ltl %log_messages fields: occurrences, duration, bytes, count, UDM
-# Issue #287: merge two #189-shape counter-store entries. Used during fuzzy
+# Issue #287: combine two #189-shape counter-store entries. Used during fuzzy
 # consolidation (#96) when two clusters' or a cluster + key's bin partitions
 # need to combine. Target and source are each {partition, bins, overflow,
-# underflow} hashrefs; target is mutated to hold the merged state. When their
-# partitions have different (min, max, bin_count) extents, both are rebinned
-# via geometric-midpoint projection (partition_rebin / #189 R12) into the
-# union geometry first, so the per-bin add is well-defined.
+# underflow} hashrefs; target is mutated to hold the combined state.
+#
+# Issue #459 / D1: the arithmetic is DEFERRED. Combining projects nothing —
+# the source's counts are kept in their own original geometry on the target's
+# member_entries list, and every member is projected exactly once, together,
+# by collapse_bin_counter_entry(). Projecting at each combination instead
+# re-projected already-projected counts, so the stored answer depended on the
+# order the members arrived in and the displacement compounded with depth.
+#
+# The counters that describe the source rather than its counts — overflow,
+# underflow and the growth re-bin history — are folded in here, because the
+# source leaves the store at this point and telemetry walks the store.
 sub merge_bin_counter_entries {
     my ($target, $source) = @_;
-    if (!$target->{partition}) {
-        # Target empty — adopt source wholesale.
-        $target->{partition} = $source->{partition};
-        $target->{bins}      = $source->{bins} // [];
-        $target->{overflow}  = $source->{overflow}  // 0;
-        $target->{underflow} = $source->{underflow} // 0;
-        $target->{rebin_growth} = $source->{rebin_growth} // 0;
-        $target->{rebin_merge}  = $source->{rebin_merge}  // 0;
-        $target->{members}      = $source->{members}      // 1;
-        return;
-    }
     return unless $source->{partition};
 
-    my $tp = $target->{partition};
-    my $sp = $source->{partition};
+    my @incoming = ($source, @{ $source->{member_entries} || [] });
+    delete $source->{member_entries};
 
-    # Compute the union geometry. partition_extend's doubling history can
-    # leave the two partitions with non-congruent (min, max) even when their
-    # observation streams overlapped, so we cannot just per-bin add directly
-    # — we rebin both into a shared union geometry first.
-    my $union_min = $tp->{min} < $sp->{min} ? $tp->{min} : $sp->{min};
-    my $union_max = $tp->{max} > $sp->{max} ? $tp->{max} : $sp->{max};
-    my $bpd       = $tp->{bpd};
-    my $union_decades   = log($union_max / $union_min) / log(10);
-    my $union_bin_count = int($bpd * $union_decades);
+    if (!$target->{partition}) {
+        # Target has never observed anything — the first incoming entry
+        # becomes the target's own counters and the rest become its members.
+        my $first = shift @incoming;
+        $target->{partition} = $first->{partition};
+        $target->{bins}      = $first->{bins} // [];
+        $target->{overflow}  = $first->{overflow}  // 0;
+        $target->{underflow} = $first->{underflow} // 0;
+        $target->{rebin_growth} = $first->{rebin_growth} // 0;
+        $target->{rebin_merge}  = 0;
+        $target->{members}      = 1;
+    }
+
+    push @{ $target->{member_entries} }, @incoming;
+
+    for my $in (@incoming) {
+        $target->{overflow}     += ($in->{overflow}     // 0);
+        $target->{underflow}    += ($in->{underflow}    // 0);
+        $target->{rebin_growth} += ($in->{rebin_growth} // 0);
+    }
+    $target->{members} = 1 + scalar @{ $target->{member_entries} };
+}
+
+# Issue #459 / D1: perform the deferred combination. One union geometry is
+# computed over the entry's own counters AND every member at once, and each
+# side is projected into it exactly once, from counts nothing has displaced.
+# The union is a min/max over the whole membership, so it does not depend on
+# the order the members arrived in — that is the guarantee. A side whose
+# geometry already equals the union is not projected at all.
+#
+# Members are released here. Their payload is accumulated first, so the cost
+# of holding them stays reportable after they are gone
+# (features/bin-counter-accuracy-and-observability.md D1, D3, D10).
+#
+# Returns the number of projections performed.
+sub collapse_bin_counter_entry {
+    my ($entry) = @_;
+    my $members = $entry->{member_entries};
+    return 0 unless $members && @$members;
+
+    my @sides = ({ p => $entry->{partition}, bins => $entry->{bins} },
+                 map { { p => $_->{partition}, bins => $_->{bins} } } @$members);
+
+    my ($union_min, $union_max) = ($sides[0]{p}{min}, $sides[0]{p}{max});
+    for my $side (@sides) {
+        $union_min = $side->{p}{min} if $side->{p}{min} < $union_min;
+        $union_max = $side->{p}{max} if $side->{p}{max} > $union_max;
+    }
+    my $bpd             = $sides[0]{p}{bpd};
+    my $union_bin_count = int($bpd * (log($union_max / $union_min) / log(10)));
     $union_bin_count = 1 if $union_bin_count < 1;
 
-    # Each side is projected only when its geometry differs from the union, so
-    # a combination re-bins zero, one or two partitions. Counted per projection
-    # rather than per combination (#462): the accuracy cost is the projection.
+    for my $m (@$members) {
+        $message_stats_member_bytes += COUNTER_BYTES_PER_PARTITION
+                                     + COUNTER_BYTES_PER_BIN_SLOT * scalar(@{ $m->{bins} || [] });
+    }
+
     my $projections = 0;
-
-    if ($tp->{min} != $union_min || $tp->{max} != $union_max || $tp->{bin_count} != $union_bin_count) {
-        my ($new_p, $new_bins) = partition_rebin($tp, $target->{bins}, $union_min, $union_max, $union_bin_count);
-        $target->{partition} = $new_p;
-        $target->{bins}      = $new_bins;
-        $projections++;
+    my @bins;
+    my $union_partition;
+    for my $side (@sides) {
+        my $sp = $side->{p};
+        my $aligned;
+        if ($sp->{min} != $union_min || $sp->{max} != $union_max || $sp->{bin_count} != $union_bin_count) {
+            my ($new_p, $new_bins) = partition_rebin($sp, $side->{bins}, $union_min, $union_max, $union_bin_count);
+            $union_partition //= $new_p;
+            $aligned = $new_bins;
+            $projections++;
+        } else {
+            $union_partition //= $sp;
+            $aligned = $side->{bins};
+        }
+        for my $i (0 .. $union_bin_count - 1) {
+            my $c = $aligned->[$i] // 0;
+            next if $c == 0;
+            $bins[$i] = ($bins[$i] // 0) + $c;
+        }
     }
+    $bins[$_] //= 0 for 0 .. $union_bin_count - 1;
 
-    my $source_bins_aligned;
-    if ($sp->{min} != $union_min || $sp->{max} != $union_max || $sp->{bin_count} != $union_bin_count) {
-        my (undef, $new_bins) = partition_rebin($sp, $source->{bins}, $union_min, $union_max, $union_bin_count);
-        $source_bins_aligned = $new_bins;
-        $projections++;
-    } else {
-        $source_bins_aligned = $source->{bins};
-    }
+    $entry->{partition} = $union_partition;
+    $entry->{bins}      = \@bins;
+    delete $entry->{member_entries};
 
-    for my $i (0 .. $union_bin_count - 1) {
-        my $sc = $source_bins_aligned->[$i] // 0;
-        next if $sc == 0;
-        $target->{bins}->[$i] = ($target->{bins}->[$i] // 0) + $sc;
-    }
-    $target->{overflow}  += ($source->{overflow}  // 0);
-    $target->{underflow} += ($source->{underflow} // 0);
-
-    # The source entry is dropped by the caller, so its re-bin history is
-    # added here or it is lost — which is what made consolidation invisible.
-    $target->{rebin_growth} = ($target->{rebin_growth} // 0) + ($source->{rebin_growth} // 0);
-    $target->{rebin_merge}  = ($target->{rebin_merge}  // 0) + ($source->{rebin_merge}  // 0)
-                            + $projections;
-    $target->{members}      = ($target->{members}      // 1) + ($source->{members}      // 1);
+    return $projections;
 }
 
 # Issue #287: merge the bin-path state (Welford-Pébay sidecars + bin-counter
@@ -7931,9 +8030,19 @@ sub merge_bin_state {
         $target->{_running_mean}  = $mean_ab;
     }
 
-    # Bin-counter entry merge (only meaningful when source observed at least
-    # one positive duration — counter_update is gated on $duration > 0).
-    if ($source->{bin_entry}) {
+    # Bin-counter merge (only meaningful when source observed at least one
+    # positive duration — the bin producer is gated on $duration > 0).
+    #
+    # Two shapes arrive here. A single log line carries its value on
+    # bin_value and is OBSERVED into the cluster's own counters: a line is not
+    # a member, and treating it as one would retain a partition per line
+    # (#459 / D1). An absorbed key carries its accumulated counters on
+    # bin_entry and becomes a member, projected once at collapse.
+    if (defined $source->{bin_value}) {
+        $target->{bin_entry} //= counter_entry_new($source->{bin_value}, $percentile_buckets_per_decade);
+        counter_entry_observe($target->{bin_entry}, $source->{bin_value});
+    }
+    elsif ($source->{bin_entry}) {
         $target->{bin_entry} //= { partition => undef, bins => [], overflow => 0, underflow => 0 };
         merge_bin_counter_entries($target->{bin_entry}, $source->{bin_entry});
     }
@@ -10927,16 +11036,12 @@ sub read_and_process_logs {
                                         $stats_source->{m4_sum}         = 0;
                                         $stats_source->{min}            = $duration;
                                         $stats_source->{max}            = $duration;
-                                        if ($duration > 0) {
-                                            # Build a single-sample #189-shape counter
-                                            # entry inline. counter_update on a private
-                                            # store with a sentinel key gives us the
-                                            # standard partition_new + bin_assign +
-                                            # initial-bin-increment behavior for free.
-                                            my %tmp;
-                                            counter_update(\%tmp, '_single', $duration);
-                                            $stats_source->{bin_entry} = $tmp{'_single'};
-                                        }
+                                        # Issue #459: hand the raw value across, not a
+                                        # single-sample partition. merge_bin_state
+                                        # observes it directly into the cluster's own
+                                        # counters, which is exact and costs neither a
+                                        # temporary store nor a partition per line.
+                                        $stats_source->{bin_value} = $duration if $duration > 0;
                                     }
                                 }
                             }
@@ -11611,6 +11716,20 @@ sub finalize_message_stats_unified {
     # telemetry hash so emit_bin_counter_mode_verbose's out_of_range_bounded
     # line reflects real audit state instead of hard-coding 'none'.
     $bin_counter_telemetry{summary_table}{out_of_range_bounded} = { %message_stats_audit };
+
+    # Issue #459: the deferred combination's two figures. The collapse runs
+    # before this snapshot exists, so both are accumulated as clusters
+    # collapse and drained here — the same pattern as the audit above.
+    # rebin_finalize_events is no longer contractually zero for this consumer:
+    # the collapse IS a finalize projection, and it is the only one the
+    # per-message counters take.
+    $bin_counter_telemetry{summary_table}{rebin_finalize_events} = $message_stats_collapse_projections;
+    # Retained member histograms are released at collapse, so they are gone by
+    # the time the store is measured. Their payload is added back here, which
+    # is what makes members_memory_bytes report the cost of D1's retention
+    # rather than repeating the live store figure.
+    $bin_counter_telemetry{summary_table}{members_memory_bytes}
+        = $bin_counter_telemetry{summary_table}{counter_memory_bytes} + $message_stats_member_bytes;
 }
 
 sub finalize_bucket_stats_unified {
@@ -13042,6 +13161,13 @@ sub calculate_statistics_bin {
     # mechanism (sidecar here vs the raw path's O(n) second pass).
     my ($sidecar_entry, $counter_entry, $aggregated_data, $demand, $audit_ref) = @_;
     $audit_ref //= \%message_stats_audit;
+    # Issue #459 / D1 safety net. Consolidation collapses every cluster at
+    # reinject, so nothing normally arrives here with members outstanding.
+    # The guarantee is scoped to every combination of two bin-counter
+    # histograms, not only today's caller, so a future combiner that forgets
+    # to collapse must not silently fall back to reading a partial answer.
+    $message_stats_collapse_projections += collapse_bin_counter_entry($counter_entry)
+        if $counter_entry && $counter_entry->{member_entries};
     my $t = $stats_demand_telemetry_active
         ? ($stats_demand_telemetry{ $demand->{store} // 'unattributed' } //= {})
         : undef;

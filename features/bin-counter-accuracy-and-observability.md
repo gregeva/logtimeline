@@ -14,6 +14,21 @@ Nothing in this file restates contract text: a second copy is a copy that drifts
 
 ---
 
+## Governing contracts — read before planning
+
+The bin-counter contract was locked in May 2026 on **#187** (unified primitive
+contract) and **#189** (the primitives), both **closed 2026-05-19**, so nothing in the
+open issue list points at them. Their feature docs, `201-display-geometry-bound-
+consumers.md`, `293-precision-lever-unification.md`, `287-message-stats-bin-counter-
+data-model.md`, `34-histogram-bin-counter-mode.md` and
+`prototype/189-bin-counter-primitives-validation-report.md` are the system of record for
+every decision this drop touches. The clause-by-clause map of what binds this work is
+`459-bin-counter-combination-order.md` § 0.
+
+Three questions were re-derived during this drop that those documents had already
+settled — including the partition seed, measured and closed with "Action: none" in May
+2026. Start from the contract.
+
 ## Why this drop exists
 
 Four defects were filed out of one investigation, all on the bin-counter surfaces,
@@ -461,7 +476,7 @@ after a break.
 | 1 — observability | #462 (absorbs #461) | **delivered**, merged to `release/0.18.0`, closed |
 | 2 — test coverage | #450 | **delivered**, merged, closed |
 | 3 — baseline capture | part of #450 | **captured**, deliberately carrying today's compounding loss |
-| 4 — merge arithmetic + percentile source | #459, #460 | **not started.** Both unblocked, both `status: in progress`, no branch cut |
+| 4 — merge arithmetic + percentile source | #459, #460 | #459 **delivered** 2026-08-27; #460 next. The grid design that supersedes #459's mechanism is filed as #469 |
 | 5–9 — the rest of the release | #447, #432, #418, #443 (+#449), #445 | not started; order fixed by D6 |
 
 #462 was reopened after its first delivery and completed a second time: the surface
@@ -521,6 +536,109 @@ Release benchmarking is not done on this host.
 The baselining process, the naming convention and the worked example: `tests/baseline/README.md`.
 
 ---
+
+---
+
+## Stage 4a — #459 implementation plan
+
+Locked design is D1. This is how D1 lands in the code; it introduces no decision D1
+did not already make, and the two readings it settles are marked as such.
+
+### The data model
+
+A counter-store entry gains one field:
+
+- `member_entries` — an arrayref of **pristine** entry hashrefs, each in its own
+  original geometry, never projected and never added into. `members` stays the
+  integer count it already is (`1 + @member_entries`, recursively), so the retention
+  telemetry #462 shipped is unchanged in meaning.
+
+`merge_bin_counter_entries($target, $source)` **stops projecting**. It appends the
+source — and any members the source itself carried — to `$target->{member_entries}`,
+folds `overflow` / `underflow` / `rebin_growth`, and adds to `members`. The
+adopt-wholesale branch for an empty target is unchanged. `rebin_merge` is no longer
+incremented anywhere, because no combination projects any more.
+
+`collapse_bin_counter_entry($entry)` is new and is where D1's arithmetic happens: one
+union `min` / `max` over the entry's own partition **and every member at once**, one
+`bin_count` from that, then each side projected into it exactly once and summed. A
+side whose geometry already equals the union is not projected at all, so exactness is
+preserved where it is available. Returns the projection count. The union is a
+min/max over the whole membership, so it does not depend on the order the members
+arrived in — which is the guarantee.
+
+### Two readings this settles
+
+**A single log line is not a member.** D1 says "when a *key* is absorbed, the cluster
+keeps that member's histogram". The streaming S1-inline path merges a *per-line*
+single-sample source into a cluster; treating each of those as a member would retain
+one partition per line. It is instead an ordinary **value insertion** into the
+cluster's own partition — `bin_assign` + increment, which is exact and projects
+nothing, so the guarantee is not weakened. The producer site therefore hands
+`merge_bin_state` a `bin_value` rather than a temporary single-sample `bin_entry`,
+and the per-entry observation logic is lifted out of `counter_update` into
+`counter_entry_observe($entry, $value)` so both callers share one surface. This also
+removes a temporary hash and a store insert from the hot path.
+
+**Members are freed at collapse, and measured on the way out.** Retaining them past
+collapse would carry dead weight through statistics and rendering for no purpose but
+observation. The payload is captured as a high-water figure at collapse instead, so
+`members_memory_bytes` reports what retention actually cost at its peak while
+`counter_memory_bytes` stays the live figure. The two diverge, which is the signal
+D10 designed them to give.
+
+### Where collapse happens
+
+At the **cluster reinject loop** in `group_similar_messages` — the point where a
+cluster's `bin_entry` lands in `%log_messages_counters`. Every cluster passes through
+it exactly once, in sorted order, after every merge path has run. That is "at
+finalize" in D1's sense.
+
+D1 also scopes the guarantee to *every* combination of two bin-counter histograms,
+not just today's caller, so a future merger must not be able to reintroduce the loss
+by forgetting to collapse. `calculate_statistics_bin` therefore collapses lazily as a
+safety net if it is ever handed an entry with members outstanding — one array test on
+a path that already walks the entry.
+
+### Telemetry consequences, and the contracts they amend
+
+| field | before | after |
+|---|---|---|
+| `rebin_merge_events` | rises with consolidation | **0** — nothing projects at merge time |
+| `rebin_finalize_events` (`summary_table` / `csv_output`) | contractually 0 | the collapse projections |
+| `members_memory_bytes` | equal to `counter_memory_bytes` | high-water member payload; diverges |
+| `counter_memory_bytes` | live payload | unchanged |
+
+The projection count is accumulated during collapse and drained into
+`$bin_counter_telemetry{summary_table}` by `finalize_message_stats_unified`, which
+runs after the consumer — the same pattern `%message_stats_audit` already uses.
+
+Amended in the same commit: `features/187-histogram-bin-counter-percentiles.md`
+§ Decision 8 (the `rebin_finalize_events`-is-zero and members-equal-store contracts
+both stop being true), and the assertions in
+`tests/validate-histogram-bin-counters.sh` that hold them.
+
+### Done
+
+The acceptance test already exists. `tests/statistics-drift/known-failures.tsv` holds
+the #459 entries, the registry is self-clearing, and a registered comparison that
+starts passing fails the run — so the entries are deleted in this change or it does
+not merge. Beyond that: `L3=OK` (not `OK-WITH-XFAIL`) on the consolidated scenarios,
+the full harness suite, and the benchmark gated against
+`tests/baseline/results/dev-virtualized-v0.18.0-pre-stage4.tsv`.
+
+The L1 re-bless on the merged rows is the per-quantile measurement of what this
+bought, and is read before it is accepted (see § Re-blessing the stage-3 baseline).
+
+### Stage 4a — #459
+
+The implementation, the findings, the retention impact analysis and the design
+investigation that followed it are recorded in
+[`459-bin-counter-combination-order.md`](459-bin-counter-combination-order.md). In
+short: the deferred combination is built and proved order-independent, the retention
+it causes is measured across the corpus and the resolution ladder, and a canonical-grid
+target with a fixed bucket budget was then measured that reaches the same guarantee
+with no retention at all. Open decisions are listed in that document's § 7.
 
 ## Open items carried out of stage 1
 

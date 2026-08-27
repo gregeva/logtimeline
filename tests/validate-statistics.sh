@@ -204,7 +204,7 @@ oracle_json_for_logfile() {
     [[ -n "$membership" ]] && membership_args=(--cluster-membership "$membership")
     if ! python3 "$ORACLE_SCRIPT" \
             --log "$abs_log" \
-            "${membership_args[@]}" \
+            ${membership_args[@]+"${membership_args[@]}"} \
             --bucket-size-seconds "$bs_sec" \
             --duration-unit "$du_unit" \
             --format "$fmt" \
