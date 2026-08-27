@@ -358,10 +358,13 @@ _THREAD_POOL_RE = re.compile(r'^(.*)-\d+$')
 _THREAD_TRUNCATE_LEN = 20
 _OBJECT_TRUNCATE_LEN = 25
 
-# ltl:135 — log_levels list (the levels ltl recognises). Lines whose
-# captured category isn't in this list are skipped at ltl:7256. The
-# oracle must apply the same filter so partition fidelity holds for
-# ScriptLog lines that carry levels like "STDERR" or empty.
+# The levels ltl recognises: the @log_levels list in ltl, gated per line in
+# read_and_process_logs() against %log_level_set. The oracle must apply the
+# same filter so partition fidelity holds for ScriptLog lines that carry
+# levels like "STDERR" or empty. AUDIT is not in ltl's vocabulary and no
+# ThingWorx line carries it in the level position (it appears only inside
+# message text, as "[SECURITY AUDIT ...]"); it is retained here as an inert
+# entry so this set stays a superset and never drops a line ltl would keep.
 LOG_LEVELS = {
     "FORCE", "AUDIT", "FATAL", "ERROR", "WARN", "INFO",
     "DEBUG", "TRACE", "DATA",
@@ -391,7 +394,8 @@ def parse_thingworx_scriptlog_line(line):
     (ts_str, level, obj, _instance, _user,
      _session, _platform, thread, message) = m.groups()
 
-    # ltl:7256 — skip lines whose category isn't a recognised log level.
+    # Skip lines whose category isn't a recognised log level, as the
+    # per-line category gate in read_and_process_logs() does.
     if level not in LOG_LEVELS:
         return None
 
