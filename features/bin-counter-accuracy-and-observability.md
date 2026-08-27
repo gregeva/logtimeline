@@ -496,23 +496,28 @@ statistics — must not move and stays a genuine regression gate throughout.
 
 ### The benchmark comparator moved with the hardware
 
-The machine is now virtualized with abstracted virtual IO drivers. Measured against
-`v0.17.0-release`, captured before the move: `parse/read_files` +11.3 %, while every
-in-memory stage is flat (`calculate_statistics` +1.9 %, `bucket_stats` +2.9 %,
-`group_calc` +2.1 %, `sort_selection` 0.0 %) and `rss_peak` is slightly better. The
-entire delta is the one stage that touches the filesystem. Confirmed by control: the
-**unmodified** `release/0.18.0` binary shows the same +14.1 % on that baseline.
+The machine moved to a virtualized host with abstracted virtual IO drivers. Separated
+into its two causes by re-running the **v0.17.0 code itself** on the new hardware, so
+the machine is the only variable:
 
-**Consequence:** `v0.17.0-release` is not a valid comparator on this hardware, and a
-change that touches the read path would trip the 5 % gate on hardware grounds alone.
-A same-hardware development reference is captured for gating this release's work —
-see `tests/baseline/results/README.md`. It is explicitly **not** a release baseline.
+- **Hardware, same code** — `total` **+8.9 %** (42 of 45 cases worse), `read_files`
+  +8.2 %, `group_similar` +15.7 %, `calculate_statistics` +14.9 %, `sort_selection`
+  +19.4 %. The slowdown is **not confined to I/O**: in-memory stages moved more than
+  the read path did. Memory is unaffected (`rss_peak` −2.2 %, 0 of 45 worse), which
+  is what confirms this is execution speed rather than a behaviour change.
+- **Code, same machine** — the drop's work so far is a net **−2.6 %** on `total`
+  (36 of 45 cases better), so no code regression is baked into the reference. This
+  also retro-validates stages 1–3 suite-wide; they had only been gated on one case.
 
-**Open, not filed:** no baseline TSV records the machine that produced it, so a
-hardware change silently invalidates every cross-baseline comparison and the eleven
-committed baselines and their `comparison-*.md` records cannot say which machine they
-describe. Recording provenance, and having `compare-results.sh` refuse or flag a
-cross-hardware comparison, is tooling work outside this drop.
+**Consequence:** `v0.17.0-release` reports the machine, not the change, and cannot
+gate anything here. Stage 4 gates against
+`tests/baseline/results/dev-reference-virtualized-2026-08-27.tsv` — full tier, 45
+cases, current code, current hardware, explicitly **not** a release baseline. XL was
+not run: it is a release-gate instrument, not a development one. The v0.18.0 release
+cut still needs the `all` tier, and on this hardware it has no same-hardware
+predecessor, so that comparison needs deciding rather than assuming.
+
+Details, naming convention and the underlying provenance gap: `tests/baseline/results/README.md`.
 
 ---
 
