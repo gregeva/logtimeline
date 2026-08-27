@@ -6545,7 +6545,7 @@ sub print_help {
 
     # Sorting
     $out .= help_subheading("Sorting");
-    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. Aggregates: occurrences, duration, bytes, mean_bytes, count, impact. Stats: min, mean, max, stddev, cv. Percentiles: p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999. Shape: iqr, skewness, kurtosis, bimodality_coef. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details.");
+    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. A bare metric name means its total: bytes, duration (alias time), count. Aggregates: occurrences, bytes_occurrences, bytes_min, bytes_mean, bytes_max, count_occurrences, count_min, count_mean, count_max, impact. Stats: min, mean, max, stddev, cv. Percentiles: p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999. Shape: iqr, skewness, kurtosis, bimodality_coef. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details.");
     $out .= help_opt("-sa,  --sort-ascending",        "Reverse the sort order to show lowest values first");
 
     # Heatmap
@@ -16061,8 +16061,14 @@ sub print_message_summary {
                     my $count_mean = $log_messages{$grouping}{$key}{count_mean};
                     my $count_max = $log_messages{$grouping}{$key}{count_max};
                     my $count_sum = $log_messages{$grouping}{$key}{count_sum};
-                    my $total_bytes_num = $log_messages{$grouping}{$key}{total_bytes};
-                    my $total_bytes = format_bytes( $total_bytes_num,'B' );
+                    # total_bytes is 0-initialised at entry creation, so a message
+                    # whose lines never carried a bytes field would otherwise report
+                    # a measured zero. Gate the whole family on the observation count
+                    # (#432): no observation means no value, not a value of nothing.
+                    my $total_bytes_num = $log_messages{$grouping}{$key}{bytes_occurrences}
+                        ? $log_messages{$grouping}{$key}{total_bytes}
+                        : undef;
+                    my $total_bytes = defined $total_bytes_num ? format_bytes( $total_bytes_num,'B' ) : undef;
                     my $bytes_occurrences = $log_messages{$grouping}{$key}{bytes_occurrences};
                     my $bytes_min = $log_messages{$grouping}{$key}{bytes_min};
                     my $bytes_max = $log_messages{$grouping}{$key}{bytes_max};
