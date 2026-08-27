@@ -442,6 +442,14 @@ all-at-once. Bucket budget 512.
 
 (errors in member bucket widths, one bucket = 4.44 % at 53 buckets per decade.)
 
+How often each design leaves the one-bucket accuracy bound, over every quantile of
+every grouped row:
+
+| | Codebeamer | ThingWorx | Tomcat |
+|---|---|---|---|
+| hold-then-collapse | 0 of 180 | **3 of 144 (2.08 %)** | **22 of 1 431 (1.54 %)** |
+| canonical grid | 0 of 180 | **0 of 144** | **0 of 1 431** |
+
 Four things this establishes on real data rather than generated data:
 
 - **Both designs are order-independent, and the canonical one is also independent of
@@ -516,39 +524,116 @@ matched to two different situations.
 
 ---
 
-## 9. Where this stands
+## 9. What this changes about the earlier investigation
 
-**Delivered on the branch** (`459-bin-counter-combination-not-commutative`, not
-merged): the deferred collapse of section 1, proved order-independent in section 2,
-with the retention it causes measured in section 2 and its telemetry shipped.
+The earlier investigation is `426-per-message-statistics-store.md` (per-message
+statistics store; `not planned`, retained as a decision record). Its measurements
+stand. Three things move.
 
-**Superseded by measurement, not yet built:** the canonical-grid target of section 6
-achieves the same order-independence, adds independence from batch boundaries, holds
-memory to a fixed budget per grouped row, and needs no retention at all. On the
-deepest log it is 70 KB against 4 488 KB. If it is adopted, sections 3 and 4 — the
-ceiling, its value, its cost in depth — cease to be questions rather than being
-answered.
+**Sharpened — how often a single projection leaves the one-bucket bound.** That
+investigation measured a *single* merge of two maximally disjoint generated keys as
+staying within one bucket on 3,999 of 4,000 evaluations, i.e. 0.025 % breach. On real
+grouped rows a single collapse breaches on **1.54 % (Tomcat) and 2.08 % (ThingWorx)**
+of evaluations — 60–80× that rate, on the shape the tool actually meets. Nothing is
+contradicted: the synthetic figure describes maximally disjoint pairs, the real figure
+describes real groupings. But **#460's amendment pass quotes the synthetic figure** as
+the direction of travel for the corrected accuracy bound, and it should quote the real
+one instead, or both.
 
-**Open, and for the architect:**
+**Scoped, not overturned — why the shared grid lost.** That investigation rejected the
+shared grid on two grounds: it is behind per-key adaptive seeding at higher resolutions
+(a key's partition adapts to that key's own data), and switching would move 16–32 % of
+per-key percentiles by more than 1 %. Both were measured over the **per-message
+streaming representation**, replacing it everywhere. The design in § 6–8 leaves that
+representation untouched and puts a grid only on **consolidated rows**, where the
+adaptivity argument has nothing to adapt to — a consolidated row spans many messages by
+definition — and where the re-bless is confined to rows that only exist because
+grouping created them. So the rejection is not contradicted; it was measured over a
+scope this design does not enter. Whether the per-message case should also be revisited
+is open at the architect's instruction (F4), and is a different question from this one.
 
-- Whether anchoring the **combined row's** histogram to a canonical grid is in bounds.
-  The earlier research rejected anchoring the **per-message** histograms because a
-  message's partition adapts usefully to that message's own data; a combined row
-  already spans many messages, so the argument does not obviously transfer. This is
-  reasoning, not measurement, and is the one claim in section 6 that is not measured.
-- The bucket budget per grouped row, if section 6 is adopted, and whether it is
-  user-visible or internal.
-- Whether the work lands on #459 or is filed as its own requirement. #459's stated
-  requirement — the same answer whatever order members arrived in — is delivered by
-  what is on the branch; section 6 is a different mechanism reaching further.
-- What happens to the remaining oracle deviations. They are the accuracy-bound
-  correction owned by #460 (bin-model percentiles computed below the captured
-  resolution, plus the eight-correction amendment pass), not a #459 residual — see F3.
+**Corroborated on real data.** That investigation's grid arm measured 600 B per key
+against 2,381 B, and a 51,468-merge fold at 0.093 s against 3.28 s. On the real
+corpus the same comparison reads 42 KB against 4 450 KB peak (106×) and 22.5 µs
+against 64.0 µs per absorbed message (2.8×). Its finding that the grid is
+insertion-order-independent and merge-commutative while today's representation is
+neither is confirmed end to end, across arrival order *and* batch boundaries.
 
-**Explicitly still open, at the architect's instruction (2026-08-27):** the shared
-grid for the **per-message** histograms. The earlier research priced it and found it
-loses at higher resolutions, but that was never a decision to close the topic, and
-this drop's own probe of it was wrong on first reading (F4). It is to be returned to.
+**Amendments it proposed, which this design makes live but narrows.** Three of its
+proposed amendments were written as contingent on adopting the grid everywhere. Under
+this design they apply only to consolidated rows:
 
-**Closed by measurement:** the ceiling-versus-no-ceiling trade as an accuracy
-question — § 6 and § 7 remove the ceiling rather than tuning it.
+- the partition-seed decision (#187 Decision 5) is untouched for per-message
+  histograms and does not describe a consolidated row at all;
+- the overflow/underflow decision (#187 Decision 4) is **structurally vacuous on a
+  grid row** — there is no range to fall outside of — which is a stronger statement
+  than the one #460 is currently set to make (that the counters are guards expected to
+  read zero);
+- the verbose field set (#187 Decision 8) needs a per-row answer: growth events and
+  the growth distribution are meaningless for a grid row, and `max_partition_bins`
+  becomes the bucket budget rather than an observation.
+
+These are for the amendment pass to absorb, not for this issue to settle.
+
+---
+
+## 10. Where this stands, and the proposed direction
+
+### Delivered on the branch, not merged
+
+`459-bin-counter-combination-not-commutative`: the deferred collapse of § 1, proved
+order-independent in § 2 and on the real corpus in § 7, with the retention it causes
+measured across the corpus and the resolution ladder and its telemetry shipped. It
+meets #459's stated requirement — the same answer whatever order members arrived in.
+
+### Proposed direction
+
+**Replace the retention with a grid-addressed consolidated-row histogram (§ 6–8).** On
+the real corpus it is the better answer on every axis measured: order-independent *and*
+batch-boundary-independent, more accurate at every quantile band (1.5–11× at the
+median), the only one of the two that never leaves the one-bucket accuracy bound
+(0 breaches in 1 755 evaluations against 25), 3.4–106× smaller, and ~2.8× cheaper per
+absorbed message. It also dissolves the retention ceiling question rather than
+answering it, because nothing is retained.
+
+Shape, in one paragraph: an ungrouped message is untouched — same histogram, same
+adaptive seeding, and with `-g` off none of this is reachable. A consolidated row
+carries buckets on shared edges addressed by index, with no stored range to fall
+outside of, so it expands by occupying an index and never re-derives geometry. A key's
+own histogram is read once as it is absorbed and then released, which is the only lossy
+step. Memory is held to a bucket budget by folding, which is exact. Both shapes read
+out through the same percentile code.
+
+**Sequencing.** The branch as it stands is a coherent, order-independent improvement
+that is strictly better than what ships today, and it is what #459 asked for. The grid
+design is a different mechanism reaching further, and it should be its own requirement
+rather than absorbed into this one — which also keeps the decision to adopt it separable
+from the decision to merge what is already proved.
+
+### Decisions for the architect
+
+1. **Is a grid on the consolidated row in bounds?** The constraint stated on
+   2026-08-27 is that histogram *bounds* cannot be anchored, because a line still to be
+   read can move them. A grid anchors bucket **edges** and fixes nothing about the
+   range (§ 8). Confirmed as the right distinction on 2026-08-27; the design rests on
+   it.
+2. **The bucket budget per consolidated row**, and whether it is user-visible or
+   internal. Measured at 512: coarsest resolution reached was 77 buckets per decade on
+   the two large logs and 308 on the small one.
+3. **Where the work is filed** — a new requirement, per the sequencing above, or an
+   extension of #459.
+4. **What #460's amended accuracy bound quotes.** It is currently set to quote the
+   synthetic single-merge figure (within one bucket on 3,999 of 4,000). The real-corpus
+   figure is 1.54–2.08 % breaching (§ 9).
+
+### Still open, at the architect's instruction (2026-08-27)
+
+The shared grid for the **per-message** histograms. The earlier investigation priced it
+and found it behind adaptive seeding at higher resolutions, but that was never a
+decision to close the topic, and this drop's own probe of it was wrong on first reading
+(F4). To be returned to, separately from the consolidated-row question.
+
+### Closed by measurement
+
+The retention ceiling as an accuracy trade — § 6 and § 7 remove the ceiling rather than
+tuning it.

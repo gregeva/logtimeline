@@ -206,10 +206,12 @@ for my $file (@ARGV) {
     printf("  agreement across 6 orders x batch 8/64/all: deferred %s, canonical %s\n",
            $mismatch_def ? "$mismatch_def MISMATCHES" : "identical",
            $mismatch_can ? "$mismatch_can MISMATCHES" : "identical");
-    printf("  error vs raw durations (member bucket widths)  deferred p50 %.3f p95 %.3f max %.3f\n",
-           $sd[int(@sd*0.5)], $sd[int(@sd*0.95)], $sd[-1]);
-    printf("                                                 canonical p50 %.3f p95 %.3f max %.3f\n",
-           $sc[int(@sc*0.5)], $sc[int(@sc*0.95)], $sc[-1]);
+    my $over_d = grep { $_ > 1 } @sd;
+    my $over_c = grep { $_ > 1 } @sc;
+    printf("  error vs raw durations (member bucket widths)  deferred p50 %.3f p95 %.3f max %.3f, over one bucket %d/%d (%.2f%%)\n",
+           $sd[int(@sd*0.5)], $sd[int(@sd*0.95)], $sd[-1], $over_d, scalar @sd, $over_d/@sd*100);
+    printf("                                                 canonical p50 %.3f p95 %.3f max %.3f, over one bucket %d/%d (%.2f%%)\n",
+           $sc[int(@sc*0.5)], $sc[int(@sc*0.95)], $sc[-1], $over_c, scalar @sc, $over_c/@sc*100);
     printf("  peak memory across grouped rows: deferred %.0f KB, canonical %.0f KB (%.1fx less)\n",
            $bytes_def/1024, $bytes_can/1024, $bytes_def/($bytes_can||1));
     printf("  cost per absorbed member: deferred %.1f us, canonical %.1f us; coarsest resolution reached %g\n\n",
