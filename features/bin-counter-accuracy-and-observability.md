@@ -14,6 +14,21 @@ Nothing in this file restates contract text: a second copy is a copy that drifts
 
 ---
 
+## Governing contracts — read before planning
+
+The bin-counter contract was locked in May 2026 on **#187** (unified primitive
+contract) and **#189** (the primitives), both **closed 2026-05-19**, so nothing in the
+open issue list points at them. Their feature docs, `201-display-geometry-bound-
+consumers.md`, `293-precision-lever-unification.md`, `287-message-stats-bin-counter-
+data-model.md`, `34-histogram-bin-counter-mode.md` and
+`prototype/189-bin-counter-primitives-validation-report.md` are the system of record for
+every decision this drop touches. The clause-by-clause map of what binds this work is
+`459-bin-counter-combination-order.md` § 0.
+
+Three questions were re-derived during this drop that those documents had already
+settled — including the partition seed, measured and closed with "Action: none" in May
+2026. Start from the contract.
+
 ## Why this drop exists
 
 Four defects were filed out of one investigation, all on the bin-counter surfaces,

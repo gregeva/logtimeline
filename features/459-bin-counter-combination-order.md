@@ -12,6 +12,67 @@ verbatim out of `ltl`, so they measure the shipped path.
 
 ---
 
+## 0. The contracts this work is bound by, and where they live
+
+**Read this before planning anything against this surface.** The contract governing
+bin-counter histograms was locked in May 2026 on two issues that both **closed on
+2026-05-19** — #187 (unified primitive contract for percentile and histogram consumers)
+and #189 (the bin-counter primitives themselves). Nothing in the open issue list points
+at them. Three separate times during this drop a question was re-derived from reasoning
+that these documents had already settled, including one — the partition seed — that had
+been measured and closed with "Action: none" fifteen months earlier. Start here.
+
+| where | what it holds |
+|---|---|
+| `187-histogram-bin-counter-percentiles.md` | Decisions 1–10. The percentile formula, the resolution tiers and memory guidance, overflow/underflow, the partition lifecycle, the `-V` field set, the mandatory-prototype rule. |
+| `189-histogram-bin-counter-primitives.md` | R1–R12 — the primitives themselves, their contracts and the accuracy bound. |
+| `prototype/189-bin-counter-primitives-validation-report.md` | The empirical validation of all of it against real logs, including the seed. |
+| `201-display-geometry-bound-consumers.md` | The separate lifecycle for the heatmap and histogram surfaces (stream at 616, project at finalize). |
+| `293-precision-lever-unification.md` | The per-surface resolution tier table behind `--data-model-precision`. |
+| `287-message-stats-bin-counter-data-model.md` | The per-message surface this issue's combination path lives on. |
+| `34-histogram-bin-counter-mode.md` | The heatmap/histogram bin surfaces. |
+| `426-per-message-statistics-store.md` | The investigation that produced this drop; F-numbered findings, and the three-arm comparison. |
+
+### The clauses that bind THIS work specifically
+
+- **#187 Decision 5 — partition lifecycle.** Lazily constructed on first observation;
+  initial range seeded at **5 decades centred geometrically on the first value**;
+  extended by HdrHistogram-convention doubling when a value falls outside. The seed span
+  is not arbitrary: five decades is the latency range the tool was built for (1 ms to
+  100 s), adopted from the existing heatmap/histogram convention. **The critical clause
+  for any redesign:** *"The seed heuristic is revisitable from telemetry … The
+  auto-resize lifecycle itself is not revisitable."* A grid-addressed representation on
+  the per-message surface does not tune the seed — it removes the lifecycle, which is
+  the half that is locked shut. Scope was narrowed to per-key fan-out consumers by #201.
+- **The seed is validated, not assumed.** Decision 5 states the acceptance signal — p99
+  rebins per partition in [0, 2] on typical latency data — and the #189 validation
+  report measured **p99 = 0 across 4,153 partitions**, and again **6 rebin events across
+  51,469 partitions**, concluding *"Action: none — Decision 5's seed heuristic confirmed
+  empirically."* Reconfirmed 2026-08-27 across five logs and 6,741 histograms: p99
+  between 0 and 1. **Do not re-open this as a question.**
+- **What the seed costs is buckets, not rebins.** Decision 2's footprint: 265 buckets per
+  partition at the default resolution, ~2.1 KB, ~212 MB across 10⁵ keys — measured at
+  2,381 B per partition and 227 MB on real Tomcat data. A message seen once still
+  carries the full seeded span. That, not rebin frequency, is the cost a grid removes.
+- **#187 Decision 4 — overflow/underflow.** Separate counters at the partition
+  boundaries with a per-quantile `out_of_range_bounded: high|low|none` audit. Unreachable
+  under the current growth policy, and *structurally* unreachable on a grid row, which
+  has no range to fall outside of.
+- **#187 Decision 8 — the `-V` field set**, which this drop already amended twice
+  (per-mechanism rebin counters under #462, `members_per_partition` here).
+- **#189 R4 — the percentile primitive** (Prometheus in-bucket interpolation, locked
+  verbatim) **and its accuracy bound**, which is what #460's amendment pass is
+  correcting.
+- **#189 R12 — `partition_rebin`**, the geometric-midpoint projection every combination
+  in this issue is built on.
+- **#187 Decision 10 — prototyping is mandatory** before implementation for work of this
+  kind, and if validation contradicts a locked decision, *"a follow-up issue is filed
+  against #187 to record the contract revision and re-lock the affected decision. #189
+  does not silently diverge from the contract."* That is the route any grid proposal
+  must take.
+
+---
+
 ## 1. What was wrong, and what was built
 
 Each message key seeds its own histogram around its own first observed duration, so
