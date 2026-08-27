@@ -510,12 +510,15 @@ the machine is the only variable:
   also retro-validates stages 1–3 suite-wide; they had only been gated on one case.
 
 **Consequence:** `v0.17.0-release` reports the machine, not the change, and cannot
-gate anything here. Stage 4 gates against
-`tests/baseline/results/dev-reference-virtualized-2026-08-27.tsv` — full tier, 45
-cases, current code, current hardware, explicitly **not** a release baseline. XL was
-not run: it is a release-gate instrument, not a development one. The v0.18.0 release
-cut still needs the `all` tier, and on this hardware it has no same-hardware
-predecessor, so that comparison needs deciding rather than assuming.
+gate anything here. Two same-host references are committed instead, because
+attributing what stage 4 does needs both a pre-drop and an immediate-predecessor
+point — `dev-virtualized-v0.17.0-code.tsv` and
+`dev-virtualized-v0.18.0-pre-stage4.tsv`, `full` tier, 45 cases each. **Stage 4 gates
+against the pre-stage4 file**; the v0.17.0-code file is what separates a machine
+effect from a code effect. Both are development references, not release baselines,
+and both record `version 0.17.0` — the bump is a release-cut step — so the filename
+and the recorded `ltl` sha256 are the only thing telling them apart. Release
+benchmarking is not done on this host.
 
 Details, naming convention and the underlying provenance gap: `tests/baseline/results/README.md`.
 

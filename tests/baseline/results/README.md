@@ -4,22 +4,42 @@
 
 | kind | naming | what it is |
 |---|---|---|
-| Release baseline | `vX.Y.Z.tsv`, `vX.Y.Z-release.tsv` | Captured at a release cut from the `all` tier (every file selection including XL). The performance record for that release. |
-| Development reference | `dev-reference-*.tsv` | **Not a release baseline.** Captured mid-cycle so in-flight work has a valid comparator. Never cited as a release figure. |
-| Hardware control | `hwcontrol-*.tsv` | A named prior version's code re-run on current hardware, to separate a machine change from a code change. |
+| Release baseline | `vX.Y.Z.tsv`, `vX.Y.Z-release.tsv` | Captured at a release cut from the `all` tier. The performance record for that release. |
+| Development reference | `dev-virtualized-*.tsv` | **Not release baselines.** Captured mid-cycle on the virtualized development host so in-flight work has a valid comparator. Never cited as release figures. |
 | Comparison report | `comparison-<from>-vs-<to>.md` | Saved output of `compare-results.sh --save`. |
 
-## The 2026-08-27 hardware discontinuity — read before comparing across it
+## The development reference pair
 
-The development machine moved to a **virtualized host with abstracted virtual IO
-drivers**. Every baseline captured before that date is on different hardware from
-every baseline captured after it, and the two are not comparable.
+Stage 4 of the 0.18.0 bin-counter drop changes the merge arithmetic and the
+percentile source. Attributing what that does needs **two** references on this host —
+one for the code before the drop, one for the code as it stands with stages 1–3
+merged. Both are `full` tier, 45 cases, captured 2026-08-27 back to back:
 
-This was separated into its two causes by re-running the **v0.17.0 code itself** on
-the new hardware (`hwcontrol-v0170-on-virtualized.tsv`), so the machine is the only
-variable:
+| file | code | `ltl` sha256 (first 16) |
+|---|---|---|
+| `dev-virtualized-v0.17.0-code.tsv` | tag `v0.17.0` | `0f15e6c6ecf3dff3` |
+| `dev-virtualized-v0.18.0-pre-stage4.tsv` | `084c2ed` (merged as `48d446b`), stages 1–3 | `f799f6ad414c84bf` |
 
-**A — hardware, same code** (`v0.17.0-release` → `hwcontrol-v0170-on-virtualized`):
+**Gate stage 4 against `dev-virtualized-v0.18.0-pre-stage4.tsv`** — it is the
+immediate predecessor, so a difference is the change. The v0.17.0-code file is what
+separates a machine effect from a code effect, and is why the numbers below can be
+attributed at all.
+
+> **Trap: both files record `version 0.17.0`.** The version in `ltl` is bumped at the
+> release cut, which has not happened, so the in-flight code still reports 0.17.0.
+> The `version` field cannot tell these two apart — the filename and the sha256 above
+> are the only identification. Same reason the provenance gap below matters.
+
+## The 2026-08-27 hardware discontinuity
+
+The development host moved to a **virtualized machine with abstracted virtual IO
+drivers**. Baselines captured before that date are on different hardware from those
+captured after, and are not comparable across it.
+
+Separated into its two causes by re-running the **v0.17.0 code itself** on the new
+host, so the machine is the only variable:
+
+**A — hardware, same code** (`v0.17.0-release` → `dev-virtualized-v0.17.0-code`):
 
 | stage | change | cases worse/better |
 |---|---|---|
@@ -32,12 +52,12 @@ variable:
 The slowdown is **not confined to I/O**. In-memory stages moved 11–19 %, more than
 the read path did. An initial single-case reading suggested otherwise; it was taken
 on a read-dominated selection whose in-memory stages are sub-200 ms, where the
-percentages are quantization rather than signal. Memory is unaffected — `rss_peak`
-is 2.2 % *lower* with 0 of 45 cases worse, which is what confirms this is execution
-speed and not a behaviour change.
+percentages are quantization rather than signal. Memory is unaffected — `rss_peak` is
+2.2 % *lower* with 0 of 45 cases worse, which is what confirms this is execution speed
+and not a behaviour change.
 
-**B — code, same machine** (`hwcontrol-v0170-on-virtualized` →
-`dev-reference-virtualized-2026-08-27`, i.e. what v0.18.0's work so far did):
+**B — code, same machine** (`dev-virtualized-v0.17.0-code` →
+`dev-virtualized-v0.18.0-pre-stage4`, i.e. what the drop's stages 1–3 did):
 
 | stage | change | cases worse/better |
 |---|---|---|
@@ -46,29 +66,26 @@ speed and not a behaviour change.
 | `finalize/group_similar` | −3.4 % | 0 / 10 |
 | `finalize/calculate_statistics` | −2.2 % | 4 / 31 |
 
-The 0.18.0 bin-counter drop is a net improvement, so no code regression is baked
-into the development reference.
+Stages 1–3 are a net improvement, so no code regression is baked into the reference
+stage 4 will be measured against.
 
-## Which file to compare against
+## `v0.17.0-release.tsv`
 
-- **Gating in-flight 0.18.0 work:** `dev-reference-virtualized-2026-08-27.tsv`
-  (`full` tier, 45 cases, current code, current hardware).
-- **Judging what the hardware did:** the A/B pair above.
-- **`v0.17.0-release.tsv`:** the last release record on the previous hardware. Still
-  the correct release-to-release comparator *for that hardware*; comparing current
-  work against it reports the machine, not the change.
+The last release record, on the previous hardware. Comparing current work against it
+reports the machine rather than the change. It stays as that release's record.
 
-The XL selections were deliberately not run for the development reference: they are a
-release-gate instrument, not a development one, and cost hours. A release cut still
-needs the `all` tier — and on this hardware it has no same-hardware predecessor, so
-the v0.18.0 release comparison needs deciding rather than assuming.
+## Scope of the development references
+
+`full` tier only — the XL selections are a release-gate instrument, not a development
+one, and cost hours. Release benchmarking is not done on this host.
 
 ## Known gap
 
 **No baseline records the machine that produced it.** The TSV carries version, files,
-line counts, timings and memory — no host, CPU, or storage. So a hardware change is
-invisible in the artifacts, the eleven baselines here cannot say which machine they
-describe, and `compare-results.sh` will silently report a hardware difference as a
-code regression. That is what happened on 2026-08-27, and it cost an investigation to
-establish. Recording provenance, and having `compare-results.sh` refuse or flag a
-cross-hardware comparison, is unfiled tooling work.
+line counts, timings and memory — no host, CPU, or storage, and as noted above the
+version field cannot even separate two different builds mid-cycle. So a hardware
+change is invisible in the artifacts, the committed baselines cannot say which
+machine they describe, and `compare-results.sh` silently reports a hardware
+difference as a code regression. That is what happened on 2026-08-27 and it cost an
+investigation to establish. Recording provenance, and having `compare-results.sh`
+refuse or flag a cross-hardware comparison, is unfiled tooling work.
