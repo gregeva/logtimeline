@@ -173,6 +173,51 @@ line's text. Message-key construction already sits behind `if( $is_line_match )`
 so no output was ever wrong — but normalising ahead of that condition would have
 rewritten a value no longer in play.
 
+### D6 — FATAL joins the log-level vocabulary
+
+A line whose captured level is not in `@log_levels` is discarded by the per-line
+category gate: read, matched against its format, then silently dropped. It counts
+in LINES READ and not in LINES INCLUDED, and nothing tells the user.
+
+**FATAL was not in the vocabulary.** The Windchill Method Server format emits it
+— 14 lines across the corpus, including `MethodServer stopped`, a server
+shutdown — and every one was being discarded. Found while reproducing this
+issue's control-character case on a Method Server log.
+
+FATAL is added to all four surfaces a category must occupy (the three named in
+`features/395-wgm-client-log-format.md` § Log-category consistency, plus the
+error rate):
+
+| Surface | Change |
+|---|---|
+| `@log_levels` / `%log_level_set` in `ltl` | `FATAL-HL`, `FATAL`, ordered ahead of ERROR as the more severe level |
+| `%colors` in `ltl` | red, as ERROR — both are failures |
+| `tests/csv-output/rules/stats-columns.tsv` | `FATAL` and `FATAL-HL` rows, `int`/`level` family |
+| Error-rate accumulation in `normalize_data_for_output()` | FATAL joins `ERROR|5xx|4xx` — it denotes a failure |
+
+The statistics oracle (`tests/statistics-drift/oracle/calculate-reference.py`)
+already listed FATAL in its own `LOG_LEVELS` filter, so the oracle had been
+counting lines the tool discarded. That divergence was latent — no drift baseline
+carries a FATAL line — and closes with this change. Its stale `ltl:NNN` comment
+references were replaced with function names at the same time.
+
+**This is not the whole gap.** The format patterns admit any `\w+` in the level
+slot while the gate accepts 13 hard-coded names, so `CRITICAL`, `SEVERE`,
+`WARNING` (java.util.logging's spelling of WARN), `NOTICE`, `ALERT` and
+`EMERGENCY` are all matched and then dropped. None appears in the current corpus,
+so none is a live defect. Two issues carry the rest, deliberately separated
+because one is a list edit and the other is a redesign, and the cheap fix should
+not wait on the expensive one:
+
+- [#475](https://github.com/gregeva/logtimeline/issues/475) — the missing
+  severity names are added to the recognised set, the same four-surface change
+  this decision worked through for FATAL.
+- [#476](https://github.com/gregeva/logtimeline/issues/476) — log levels are a
+  property of the format that emits them, so they belong in the format registry
+  beside each format's duration unit and time contract; a level seen but not
+  registered is collected during the run and reported at the end, naming the
+  format and the levels, rather than discarded in silence.
+
 ## Affected surfaces
 
 All of these consume the message key and are therefore corrected by D2 without
@@ -198,6 +243,17 @@ what changes is that no message-derived key can any longer forge their `0x1f`
 category/key boundary.
 
 ## Test coverage
+
+`tests/validate-log-level-vocabulary.sh` — render-invariant harness over
+`tests/fixtures/log-level-vocabulary.txt`, one line per level the Windchill
+Method Server format emits. Asserts each level reaches the category table, that
+LINES READ equals LINES INCLUDED (a shortfall is the count the gate discarded),
+and that FATAL raises the error rate — measured by comparing a FATAL-and-ERROR
+run against the same fixture with the FATAL line downgraded, which keeps the
+assertion independent of the rate unit. The rate assertion runs at `-bs 1`, the
+one place bucket size matters: at `-bs 1440` two failures over a day round to
+0/min on both arms. Sabotage: removing FATAL from `@log_levels` fails exactly the
+three FATAL assertions and leaves the other five green.
 
 `tests/validate-message-control-characters.sh` — render-invariant harness
 (HARNESS-DESIGN.md § Render-invariant harnesses) over
@@ -253,7 +309,11 @@ Of the four that do not:
   repairs for control characters is also violated by East Asian wide characters
   and combining marks. No such case has been reported, and the fix would be a
   display-width measurement rather than an ingest normalisation. Not filed.
-- **`FATAL` is not in the log-level vocabulary.** Found while reproducing this
-  issue: a Windchill Method Server line at `FATAL` is read but not included in
-  the analysis, independent of any control character. Unrelated to this drop and
-  not fixed here.
+- **Log levels beyond FATAL that the gate discards.** The format patterns admit
+  any `\w+` in the level slot; the gate accepts 13 names. `CRITICAL`, `SEVERE`,
+  `WARNING`, `NOTICE`, `ALERT` and `EMERGENCY` are matched and then dropped with
+  no notice. None occurs in the current corpus. Filed as
+  [#475](https://github.com/gregeva/logtimeline/issues/475) (add the missing
+  severity names) and [#476](https://github.com/gregeva/logtimeline/issues/476)
+  (declare levels per format in the registry and report unregistered ones); see
+  D6.

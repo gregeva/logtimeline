@@ -1,5 +1,7 @@
 column	position	type	required	max_decimals	family
 timestamp	1	timestamp	yes	n/a	meta
+FATAL	*	int	no	0	level
+FATAL-HL	*	int	no	0	level
 ERROR	*	int	no	0	level
 ERROR-HL	*	int	no	0	level
 WARN	*	int	no	0	level

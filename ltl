@@ -941,7 +941,7 @@ my $histogram_gridline_color = 8;             # Dark grey (bright black / ANSI 8
 
 # Defines the log level/type buckets and their order for printing and processing
 my @log_levels = (
-    'FORCE-HL', 'FORCE',
+    'FORCE-HL', 'FORCE', 'FATAL-HL', 'FATAL',
     'ERROR-HL', 'ERROR', 'WARN-HL', 'WARN', 'INFO-HL', 'INFO', 
     'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx', 
     '4xx-HL', '4xx', '3xx-HL', '3xx', '2xx-HL', '2xx', '1xx-HL', 
@@ -978,6 +978,7 @@ my $default_chart_block = ($^O eq 'MSWin32') ? 'G' : 'A';
 # Load in ANSI color codes and configure presets for various log levels/types
 my %colors = (
     'FORCE' => "\033[0;35m",
+    'FATAL' => "\033[0;31m",
     'ERROR' => "\033[0;31m",
     'WARN'  => "\033[0;33m",
     'INFO'  => "\033[0;32m",
@@ -13785,7 +13786,7 @@ sub normalize_data_for_output {
             my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
             next unless $occurrences > 0 && $category_bucket !~ /^(?:empty|err-rate|msg-rate)$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
             $total_occurrences += $occurrences;
-            $error_occurrences += $occurrences if $category_bucket =~ /^(?:ERROR|5xx|4xx)$/i;
+            $error_occurrences += $occurrences if $category_bucket =~ /^(?:FATAL|ERROR|5xx|4xx)$/i;
         }
 
         # this part takes the time windows error and message counts and converts them to a rate (unit controlled by -ru, default per minute)
