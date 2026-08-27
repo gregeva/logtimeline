@@ -451,6 +451,71 @@ registering a comparison that passes fails the run.
 
 ---
 
+## Current state — where to resume
+
+**Last updated 2026-08-27.** Read this first if work on the drop is being picked up
+after a break.
+
+| stage | issue | state |
+|---|---|---|
+| 1 — observability | #462 (absorbs #461) | **delivered**, merged to `release/0.18.0`, closed |
+| 2 — test coverage | #450 | **delivered**, merged, closed |
+| 3 — baseline capture | part of #450 | **captured**, deliberately carrying today's compounding loss |
+| 4 — merge arithmetic + percentile source | #459, #460 | **not started.** Both unblocked, both `status: in progress`, no branch cut |
+| 5–9 — the rest of the release | #447, #432, #418, #443 (+#449), #445 | not started; order fixed by D6 |
+
+#462 was reopened after its first delivery and completed a second time: the surface
+shipped without the two observables that make its own requirements testable (D15,
+D17). Both landed before it was closed again.
+
+### Stage 4 has an acceptance test it did not have before
+
+`tests/statistics-drift/known-failures.tsv` registers the 33 oracle comparisons that
+#459's defect currently breaks, each attributed to it. The registry is self-clearing,
+so **#459 cannot land without deleting its entries in the same change** — the engine
+fails the run with `KNOWN-FAILURE-STALE` the moment a registered comparison starts
+passing. Done, for #459, means:
+
+- `known-failures.tsv` holds no #459 entries;
+- `validate-statistics.sh` reports `L3=OK` (not `OK-WITH-XFAIL`) on all seven
+  consolidated scenarios;
+- `rebin_merge_events` reads 0, and `rebin_finalize_events` on `summary_table` rises
+  from its contractually-zero value to `members_live` — which breaks an invariant
+  #462 locked, so `tests/validate-histogram-bin-counters.sh` and `features/187`
+  § Decision 8 are amended in the same commit;
+- `members_memory_bytes` diverges from `counter_memory_bytes`, which is the direct
+  measurement of what D1's retention costs.
+
+### Re-blessing the stage-3 baseline is a deliberate act, not a step
+
+L1 is drift against the blessed baseline, and for the merged rows it is now one of
+only two numeric checks (L3 being the other, newly available). Re-blessing removes
+the L1 check on those rows for that run, so it is done from a diff that has been
+read, not automatically. The rest of each row — counts, min/max, the exact-value
+statistics — must not move and stays a genuine regression gate throughout.
+
+### The benchmark comparator moved with the hardware
+
+The machine is now virtualized with abstracted virtual IO drivers. Measured against
+`v0.17.0-release`, captured before the move: `parse/read_files` +11.3 %, while every
+in-memory stage is flat (`calculate_statistics` +1.9 %, `bucket_stats` +2.9 %,
+`group_calc` +2.1 %, `sort_selection` 0.0 %) and `rss_peak` is slightly better. The
+entire delta is the one stage that touches the filesystem. Confirmed by control: the
+**unmodified** `release/0.18.0` binary shows the same +14.1 % on that baseline.
+
+**Consequence:** `v0.17.0-release` is not a valid comparator on this hardware, and a
+change that touches the read path would trip the 5 % gate on hardware grounds alone.
+A same-hardware development reference is captured for gating this release's work —
+see `tests/baseline/results/README.md`. It is explicitly **not** a release baseline.
+
+**Open, not filed:** no baseline TSV records the machine that produced it, so a
+hardware change silently invalidates every cross-baseline comparison and the eleven
+committed baselines and their `comparison-*.md` records cannot say which machine they
+describe. Recording provenance, and having `compare-results.sh` refuse or flag a
+cross-hardware comparison, is tooling work outside this drop.
+
+---
+
 ## Open items carried out of stage 1
 
 - **The highlight sub-stores are not observed.** `%heatmap_counters_hl`,
