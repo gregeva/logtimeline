@@ -457,7 +457,66 @@ Four things this establishes on real data rather than generated data:
 
 ---
 
-## 8. Where this stands
+## 8. How the two representations coexist
+
+Architect's question, 2026-08-27. Two histogram shapes, each used where it is better,
+with one hand-off point between them.
+
+**A message that is never grouped keeps exactly what it has today.** Its histogram is
+seeded around its own first duration, its bucket edges adapt to its own data, and
+nothing about it changes — which matters, because that adaptivity is what the earlier
+research measured as winning at higher resolutions. With `-g` off, nothing in this
+design is reachable at all.
+
+**A consolidated row gets the second shape:** buckets on shared edges, addressed by
+index rather than by a stored range. Bucket *j* covers 10^(j/B) to 10^((j+1)/B), so
+the resolution B is the only thing that defines where edges fall. The row stores
+occupied indices and their counts — nothing else, no min, no max, no bin_count.
+
+**The hand-off happens once per absorbed message, and it is the only lossy step.**
+When consolidation absorbs a key, that key's own histogram is read once: each occupied
+bucket's geometric midpoint is turned into a grid index and its count added there. The
+key's histogram is then released. It is never read again, never re-projected, and
+never held — which is why nothing accumulates and why order stops mattering.
+
+Values arriving directly on the row — the streaming path where a line matches an
+existing cluster — skip the hand-off entirely and address their grid index straight
+away.
+
+**Range expands by occupying indices, not by recomputing anything.** Take the
+architect's example: a row whose first messages carry durations of 200 ms and above
+occupies the indices covering those. A line arriving later at 60 ms computes its index,
+finds it unoccupied, and occupies it. Nothing is re-derived, nothing already counted
+moves, and no earlier decision constrained what could arrive. The same is true upward,
+and the same is true if the very next line is 3 ms or 90 s.
+
+That is the difference from fixing a range: today's histograms store `[min, max]` and
+must re-derive geometry when a value falls outside, which is a remap. A grid stores no
+range to fall outside of.
+
+**Memory is bounded by folding, which is exact.** The row carries a bucket budget. If
+the span between its lowest and highest occupied index exceeds it, resolution halves:
+index *j* becomes floor(j/2), so adjacent buckets pair up and no count leaves the
+interval it was in (§ 5). Resolution therefore starts fine and coarsens only as far as
+the row's actual range forces — a narrow row keeps fine buckets, a row spanning five
+decades ends up coarser, and both cost the same memory.
+
+**Both shapes read out through the same percentile code.** `percentile()` uses a
+partition's bucket count and range ratio and never reads its resolution, so a grid row
+presents as `min = 10^(lowest/B)`, `max = 10^((highest+1)/B)`, `bin_count = highest -
+lowest + 1` and is consumed identically. No consumer needs to know which shape it was
+handed.
+
+**What each shape is doing for its case.** The per-message shape spends its buckets
+where one message's durations actually sit, which is why it wins on a single key. The
+grid shape gives up that adaptivity — a consolidated row spans many messages, so there
+is no single key's distribution to adapt to — and buys back exactness under combination
+and growth. The two are not competing representations of the same thing; they are
+matched to two different situations.
+
+---
+
+## 9. Where this stands
 
 **Delivered on the branch** (`459-bin-counter-combination-not-commutative`, not
 merged): the deferred collapse of section 1, proved order-independent in section 2,
