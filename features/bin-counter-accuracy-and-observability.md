@@ -522,6 +522,154 @@ The baselining process, the naming convention and the worked example: `tests/bas
 
 ---
 
+---
+
+## Stage 4a — #459 implementation plan
+
+Locked design is D1. This is how D1 lands in the code; it introduces no decision D1
+did not already make, and the two readings it settles are marked as such.
+
+### The data model
+
+A counter-store entry gains one field:
+
+- `member_entries` — an arrayref of **pristine** entry hashrefs, each in its own
+  original geometry, never projected and never added into. `members` stays the
+  integer count it already is (`1 + @member_entries`, recursively), so the retention
+  telemetry #462 shipped is unchanged in meaning.
+
+`merge_bin_counter_entries($target, $source)` **stops projecting**. It appends the
+source — and any members the source itself carried — to `$target->{member_entries}`,
+folds `overflow` / `underflow` / `rebin_growth`, and adds to `members`. The
+adopt-wholesale branch for an empty target is unchanged. `rebin_merge` is no longer
+incremented anywhere, because no combination projects any more.
+
+`collapse_bin_counter_entry($entry)` is new and is where D1's arithmetic happens: one
+union `min` / `max` over the entry's own partition **and every member at once**, one
+`bin_count` from that, then each side projected into it exactly once and summed. A
+side whose geometry already equals the union is not projected at all, so exactness is
+preserved where it is available. Returns the projection count. The union is a
+min/max over the whole membership, so it does not depend on the order the members
+arrived in — which is the guarantee.
+
+### Two readings this settles
+
+**A single log line is not a member.** D1 says "when a *key* is absorbed, the cluster
+keeps that member's histogram". The streaming S1-inline path merges a *per-line*
+single-sample source into a cluster; treating each of those as a member would retain
+one partition per line. It is instead an ordinary **value insertion** into the
+cluster's own partition — `bin_assign` + increment, which is exact and projects
+nothing, so the guarantee is not weakened. The producer site therefore hands
+`merge_bin_state` a `bin_value` rather than a temporary single-sample `bin_entry`,
+and the per-entry observation logic is lifted out of `counter_update` into
+`counter_entry_observe($entry, $value)` so both callers share one surface. This also
+removes a temporary hash and a store insert from the hot path.
+
+**Members are freed at collapse, and measured on the way out.** Retaining them past
+collapse would carry dead weight through statistics and rendering for no purpose but
+observation. The payload is captured as a high-water figure at collapse instead, so
+`members_memory_bytes` reports what retention actually cost at its peak while
+`counter_memory_bytes` stays the live figure. The two diverge, which is the signal
+D10 designed them to give.
+
+### Where collapse happens
+
+At the **cluster reinject loop** in `group_similar_messages` — the point where a
+cluster's `bin_entry` lands in `%log_messages_counters`. Every cluster passes through
+it exactly once, in sorted order, after every merge path has run. That is "at
+finalize" in D1's sense.
+
+D1 also scopes the guarantee to *every* combination of two bin-counter histograms,
+not just today's caller, so a future merger must not be able to reintroduce the loss
+by forgetting to collapse. `calculate_statistics_bin` therefore collapses lazily as a
+safety net if it is ever handed an entry with members outstanding — one array test on
+a path that already walks the entry.
+
+### Telemetry consequences, and the contracts they amend
+
+| field | before | after |
+|---|---|---|
+| `rebin_merge_events` | rises with consolidation | **0** — nothing projects at merge time |
+| `rebin_finalize_events` (`summary_table` / `csv_output`) | contractually 0 | the collapse projections |
+| `members_memory_bytes` | equal to `counter_memory_bytes` | high-water member payload; diverges |
+| `counter_memory_bytes` | live payload | unchanged |
+
+The projection count is accumulated during collapse and drained into
+`$bin_counter_telemetry{summary_table}` by `finalize_message_stats_unified`, which
+runs after the consumer — the same pattern `%message_stats_audit` already uses.
+
+Amended in the same commit: `features/187-histogram-bin-counter-percentiles.md`
+§ Decision 8 (the `rebin_finalize_events`-is-zero and members-equal-store contracts
+both stop being true), and the assertions in
+`tests/validate-histogram-bin-counters.sh` that hold them.
+
+### Done
+
+The acceptance test already exists. `tests/statistics-drift/known-failures.tsv` holds
+the #459 entries, the registry is self-clearing, and a registered comparison that
+starts passing fails the run — so the entries are deleted in this change or it does
+not merge. Beyond that: `L3=OK` (not `OK-WITH-XFAIL`) on the consolidated scenarios,
+the full harness suite, and the benchmark gated against
+`tests/baseline/results/dev-virtualized-v0.18.0-pre-stage4.tsv`.
+
+The L1 re-bless on the merged rows is the per-quantile measurement of what this
+bought, and is read before it is accepted (see § Re-blessing the stage-3 baseline).
+
+### Stage 4a findings — D1 is implemented, and its acceptance criteria are not reachable
+
+**F1 — The guarantee holds, exactly.** `prototype/459-order-independence/order-independence.pl`
+combines the same members in ten orders (arrival, reversed, eight shuffles) at
+depths 2, 5, 15 and 40, using the production subs sliced verbatim out of `ltl`.
+Stored counts are byte-identical and all nine percentiles are bit-identical in
+every order, at every depth. Projections equal member count exactly — one per
+member, which is the floor.
+
+**F2 — On the real corpus it bought less than the prototype predicted.** Across the
+three `*-bin-consolidated` scenarios, the oracle's T3 breaches fall 33 → 28, median
+deviation 3.82 % → 3.76 %, worst percentile 4.20 % → 4.18 %, worst IQR 32.55 % →
+27.18 %. The compounding the issue measured at 2.10 bin widths on synthetic depth-15
+data never reached one bin width on these logs: the widest member tends to arrive
+early, after which the union stops moving and the target stops being re-projected.
+
+**F3 — The residual is not compounding, and #459 cannot remove it.** Every percentile
+breach, before and after, is under one bin width — 4.20 % and 4.18 % against a bin
+width of 4.44 % at bins-per-decade 53. The statistics oracle's reference model pools
+a cluster's raw samples into **one** partition. The tool projects N members into a
+union geometry. One projection is not zero projections, so the two models cannot
+agree to better than a bin width whatever the combination does. **`L3=OK` on merged
+bin rows is unreachable under D1**, and the acceptance criteria in § *Stage 4 has an
+acceptance test it did not have before* — no #459 entries left in
+`known-failures.tsv`, `L3=OK` not `OK-WITH-XFAIL` — were written on the assumption
+that the compounding was the whole of the error. It was a minority of it.
+
+The registry behaved correctly and is what surfaced this: one registered comparison
+now passes (`KNOWN-FAILURE-STALE`), and the set of breaching keys shifted — twelve
+of the registered thirty-three stopped breaching and seven other cells started.
+
+**F4 — Grid-anchored seeding is the structural answer, and it is not a quick win.**
+`prototype/459-order-independence/grid-anchored-seed.pl` probes the obvious
+alternative: snap each partition's seed floor down to the nearest global
+`10^(k/bpd)` boundary, so every partition in a run shares one set of edges and
+projection becomes an exact index shift — which is how HdrHistogram and
+OpenTelemetry exponential histograms define their buckets. It does not reach zero.
+Both `partition_extend` and the union derivation compute the bin count as
+`int(bpd * decades)`, and on grid-aligned extents that product lands a hair under an
+exact integer in floating point, so truncation shifts every edge. Rounding instead
+of truncating improves it (worst 0.96 bin widths at depth 5, 0.12 at depth 40) but
+does not eliminate it, because growth re-derives geometry independently on each
+partition. This is an investigation, not an edit.
+
+**F5 — Retention, measured (D3).** The per-message store on the ThingWorx scriptlog
+holds 26 partitions live at 60 368 bytes of payload, and the members retained until
+their clusters collapsed were 4 595 848 bytes across 3 419 members — **76×** the live
+store, with the largest single cluster standing for 1 283 members. On the Apache
+access log it is 73 136 against 26 920, 2.7×. This is the figure a retention ceiling
+would be set from.
+
+**F6 — L1 drift is confined to the intended surface.** 49 cells moved, all in the
+three `*-bin-consolidated` scenarios' `messages` rows, all percentile or IQR columns.
+No count, no min, no max, and no scenario outside the bin data model moved.
+
 ## Open items carried out of stage 1
 
 - **The highlight sub-stores are not observed.** `%heatmap_counters_hl`,
