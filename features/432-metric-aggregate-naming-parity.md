@@ -268,39 +268,76 @@ From the audit of the harness surface. All are consequences of existing rules in
 - ~~**O1 — Surface B rendered-column visibility.**~~ **Closed 2026-08-27 by D8** —
   the new metrics are consumers of `-so` and the two CSV files only, and are not
   rendered, so no visibility or auto-hide question arises.
-- **O2 — `-so` whitelist case sensitivity.** The 39-word `qw()` operand whitelist in
-  `adapt_to_command_line_options()` is a case-**sensitive** exact-string membership
-  test (`grep { $_ eq $sort_type }`), while every branch of the resolution ladder
-  below it matches with `/i`. So `-so MEAN_BYTES` is rejected by the whitelist even
-  though the ladder would resolve it. Pre-existing; in scope by the architect's ruling
-  that audit-surfaced defects belong to this issue, but the disposition is not yet
-  decided.
-- **O3 — Alias normalisation point for D3.** `duration_p95` must reach the identity
-  arm of the resolution ladder, where `$sort_key = lc $sort_type` makes the operand
-  spelling *be* the storage key, and must be normalised to the bare name before
-  `%STAT_FIELD_GROUP` membership is tested — that lookup gates statistics demand via
-  the `sort-on` consumer, so an un-normalised key silently switches the statistic off
-  and the sort ranks undef against undef, which is the #428 failure mode.
-- **O4 — Oracle key space.** See the L3 note above.
+- ~~**O2 — `-so` whitelist case sensitivity.**~~ **Closed** — the whitelist now
+  matches case-insensitively, as every arm of the ladder below it already did.
+- ~~**O3 — Alias normalisation point for D3.**~~ **Closed** — `duration_` is stripped
+  once, ahead of both the whitelist and the ladder, so a prefixed spelling reaches
+  neither the identity arm nor the `%STAT_FIELD_GROUP` membership test.
+- ~~**O4 — Oracle key space.**~~ **Closed** — the oracle keeps its bare statistic keys
+  and the mapping to the prefixed CSV columns lives in the comparator, guarded by a
+  paired-rows-but-zero-cells check so a stale mapping fails loudly instead of
+  comparing nothing.
 
 ## Status
 
-Branch `432-align-builtin-metric-aggregate-naming`, cut from `release/0.18.0`.
+**Delivered on branch `432-align-builtin-metric-aggregate-naming`, cut from
+`release/0.18.0`.** Audit complete and verified per cell; decisions D1–D8 locked;
+O1–O4 all closed.
 
-- Audit complete, verified per cell.
-- Decisions D1–D8 locked. O1 closed by D8.
-- **Prototype gate cleared.** Shape chosen by measurement: entry reference with
-  extrema seeded at first observation, +205 ns/line across both scopes, projected
-  +1.8% end-to-end. The idiomatic shape measured 2.4x worse. Full record:
-  `tests/profile/results/432-bytes-parity-capture/analysis.md`.
-- **Not yet implemented.** O2–O4 remain open and are expected to settle during
-  implementation rather than blocking its start.
+### What shipped
 
-Two constraints carried from the prototype into implementation:
+- Bytes carries `bytes_occurrences` / `bytes_min` / `bytes_mean` / `bytes_max` on both
+  CSV surfaces, and as `-so` operands. `mean_bytes` is gone (D2, clean break).
+- The duration statistics take the `duration_` prefix on the CSV headers and keep
+  their bare CLI spellings, with `duration_*` accepted as an alias (D3).
+- The index schema is metric-first, and its bytes columns are `file_bytes_*` so the
+  whole-file scope is unmistakable (D4, D7).
+- **F1 is fixed.** `bytes_mean` divides by the bytes observation count at both
+  derivation sites, so the CSV and `-so` ranking cannot disagree.
+- An unobserved bytes metric reports nothing rather than a measured zero — the mean,
+  the extrema and the total alike.
+- `-ob` discards the metric completely: nothing about bytes is captured at either
+  scope, and `-so bytes*` falls back the way any operand with no values does.
 
-1. `bytes_min` / `bytes_max` are **absent**, not 0-initialised, at entry creation —
-   the first-observation branch is selected by `$e->{bytes_occurrences}++` returning
-   false, and 0-initialising would pin every minimum at 0 (the same defect class
-   as F1).
-2. On Surface B the header emitter and the per-bucket row push must consult the same
-   activation predicate, per D8.
+### Found and fixed while implementing
+
+- **Consolidation dropped the family.** Both merge paths carried only the bytes sum,
+  so a `-g` consolidated row arrived with a total and no observation count. Both now
+  move the whole family, as the count blocks beside them already did.
+- **The regression goldens rejected every branch build.** The version-banner
+  normaliser matched `[0-9.]+`, which excludes the `X.Y.Z-{issue}` marker every
+  feature branch stamps, so all 71 scenarios failed for the one difference the
+  goldens exist to ignore. Fixed in the validator and the capture script together.
+- **A silent-pass hazard in the L3 oracle layer.** The comparison loop skips any
+  column absent from the row, so the prefixed CSV headers would have made every cell
+  skip while the layer still reported OK. Guarded by a paired-rows-but-zero-cells
+  check that fails the run.
+
+### Measured cost
+
+**+2.7%** end-to-end against the branch point (medians of 4 pairs, 1.43M-line access
+log, same interpreter both arms), **−0.7%** under `-ob`. Inside the 5% gate.
+
+The benchmark comparison against `v0.17.0-release` reads +5.0%, but that baseline
+predates the rest of the 0.18.0 work (#462, #450, #459, #460, #447) and does not
+attribute to this change.
+
+The prototype predicted +1.8% and production measures roughly double: its arms were
+faithful to each other but its environment was not faithful to production. It got the
+ordering of the candidates right — which is what it was for — and the magnitude wrong.
+Full record: `tests/profile/results/432-bytes-parity-capture/analysis.md`.
+
+### Raised, not fixed here
+
+Line-level profiling put the highlight suffix test in three of the top thirteen lines
+of the script — ~2.0s on the reference corpus, ~12% of runtime — evaluated when no
+highlight is active and on lines whose metric is absent. Pre-existing, on a shared
+mechanism, and filed as **#478 (highlight bookkeeping evaluated on the hot path when
+no highlight is active and when the metric is absent)**.
+
+### Gate
+
+26/26 harnesses pass (1,024 assertions). The 48 statistics-drift baseline CSVs were
+re-blessed, and every value change across the 42 compared files is attributed: 78 F1
+mean corrections, 368 unobserved-becomes-blank, and 15 `duration_nice` cells carrying
+pre-existing formatting drift that no line of this change touches.
