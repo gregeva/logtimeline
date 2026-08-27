@@ -355,8 +355,8 @@ scenario_message_stats_bin() {
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - re-binning is reported per mechanism.'
 
     assert_line "$out" \
-        pattern     '^  rebin_finalize_events: 0$' \
-        asserts     'rebin_finalize_events counts projections into display shape, and is asserted as exactly zero for summary_table, which computes percentiles directly from the streaming partition and never projects into display shape.' \
+        pattern     '^  rebin_finalize_events: [0-9]+$' \
+        asserts     'rebin_finalize_events on summary_table counts the collapse of a consolidated row: every member histogram absorbed into a cluster is projected into one union geometry exactly once when that cluster is finalized (#459). Zero on a run with no consolidation; a positive count otherwise. It is NOT a display-shape projection - summary_table has no display geometry.' \
         produced_by 'finalize_message_stats_unified() in ltl - initialised to 0 by snapshot_counter_telemetry(), incremented only by the finalizers that project' \
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - re-binning is reported per mechanism.'
 
@@ -410,9 +410,15 @@ scenario_message_stats_bin() {
 
     assert_line "$out" \
         pattern     '^  members_memory_bytes: [0-9]+$' \
-        asserts     'members_memory_bytes is the footprint of the retained member histograms. It equals counter_memory_bytes while combination still collapses members into one histogram; the two diverge once members are retained.' \
+        asserts     'members_memory_bytes is the footprint of the member histograms the store stands for. On summary_table it is the live store plus the payload of every member retained until its cluster collapsed, so it is a high-water figure that diverges from counter_memory_bytes whenever consolidation retained anything, and equals it otherwise (#459).' \
         produced_by 'counter_store_bytes() in ltl via snapshot_counter_telemetry()' \
         contract    'features/bin-counter-accuracy-and-observability.md section D4 - the member-histogram footprint is observable.'
+
+    assert_line "$out" \
+        pattern     '^  members_per_partition: p50=[0-9]+ p95=[0-9]+ p99=[0-9]+ max=[0-9]+$' \
+        asserts     'members_per_partition reports how many member histograms each surviving partition stands for, in the same four-field format as rebins_per_partition. It is the figure a retention ceiling would be sized from: members_live and members_max cannot say between them whether the retained load is spread across partitions or concentrated in one, and on real logs it is heavily concentrated (#459).' \
+        produced_by 'snapshot_counter_telemetry() in ltl, over $entry->{members}' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - field added 2026-08-27 by #459; four-field format matches rebins_per_partition.'
 
     assert_line "$out" \
         pattern     '^  rebins_per_partition: p50=[0-9]+ p95=[0-9]+ p99=[0-9]+ max=[0-9]+$' \
@@ -629,6 +635,12 @@ scenario_bucket_stats_bin() {
         asserts     'members_memory_bytes is the footprint of the retained member histograms. It equals counter_memory_bytes while combination still collapses members into one histogram; the two diverge once members are retained.' \
         produced_by 'counter_store_bytes() in ltl via snapshot_counter_telemetry()' \
         contract    'features/bin-counter-accuracy-and-observability.md section D4 - the member-histogram footprint is observable.'
+
+    assert_line "$out" \
+        pattern     '^  members_per_partition: p50=[0-9]+ p95=[0-9]+ p99=[0-9]+ max=[0-9]+$' \
+        asserts     'members_per_partition reports how many member histograms each surviving partition stands for, in the same four-field format as rebins_per_partition. It is the figure a retention ceiling would be sized from: members_live and members_max cannot say between them whether the retained load is spread across partitions or concentrated in one, and on real logs it is heavily concentrated (#459).' \
+        produced_by 'snapshot_counter_telemetry() in ltl, over $entry->{members}' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - field added 2026-08-27 by #459; four-field format matches rebins_per_partition.'
 
     assert_line "$out" \
         pattern     '^  rebins_per_partition: p50=[0-9]+ p95=[0-9]+ p99=[0-9]+ max=[0-9]+$' \

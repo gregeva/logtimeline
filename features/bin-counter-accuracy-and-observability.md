@@ -476,7 +476,7 @@ after a break.
 | 1 — observability | #462 (absorbs #461) | **delivered**, merged to `release/0.18.0`, closed |
 | 2 — test coverage | #450 | **delivered**, merged, closed |
 | 3 — baseline capture | part of #450 | **captured**, deliberately carrying today's compounding loss |
-| 4 — merge arithmetic + percentile source | #459, #460 | **not started.** Both unblocked, both `status: in progress`, no branch cut |
+| 4 — merge arithmetic + percentile source | #459, #460 | #459 **delivered** 2026-08-27; #460 next. The grid design that supersedes #459's mechanism is filed as #469 |
 | 5–9 — the rest of the release | #447, #432, #418, #443 (+#449), #445 | not started; order fixed by D6 |
 
 #462 was reopened after its first delivery and completed a second time: the surface

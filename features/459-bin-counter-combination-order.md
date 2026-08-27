@@ -73,6 +73,40 @@ been measured and closed with "Action: none" fifteen months earlier. Start here.
 
 ---
 
+## D-459-1 — LOCKED (architect, 2026-08-27): consolidated-row histograms move to a shared grid
+
+The architect validated the shared-grid approach for consolidated message histograms.
+
+**What is locked.** A consolidated row's histogram is addressed on a shared grid —
+bucket *j* covers [10^(j/B), 10^((j+1)/B)), so the resolution alone decides where
+edges fall and the row stores occupied indices and their counts. It holds no range, so
+it expands by occupying an index and never re-derives geometry; memory is bounded by a
+bucket budget, reached by folding, which is exact. A key's own histogram is read once
+as it is absorbed and released. Per-message histograms are untouched.
+
+**Scope.** Consolidated rows only. The shared grid for the **per-message** surface
+remains a separate, open question (§ 2 F4) and is not decided by this.
+
+**Route.** #187 Decision 5 locks the auto-resize lifecycle as *not* revisitable, and
+#187 Decision 10 requires that a change contradicting a locked decision be filed against
+#187 to record the revision and re-lock. The implementing issue carries that obligation.
+It is scoped: Decision 5's lifecycle governs per-key fan-out partitions, and a
+consolidated row is a new structure rather than a per-key partition — but the boundary
+is for the re-lock to state, not for the implementation to assume.
+
+**Grounding.** § 6 (order- and batch-independence at every budget measured), § 7 (both
+designs on the real corpus: more accurate at every band, the only one of the two that
+never leaves the one-bucket bound, 3.4–106× smaller, ~2.8× cheaper per absorbed
+message), § 5 (folding is a lossless coarsening and does not compound), § 8 (how the
+two representations coexist).
+
+**Implementing issue:** #469 (hold consolidated message histograms on a shared bucket
+grid), filed 2026-08-27.
+
+**Not decided here:** the bucket budget, and whether it is user-visible.
+
+---
+
 ## 1. What was wrong, and what was built
 
 Each message key seeds its own histogram around its own first observed duration, so
@@ -659,45 +693,36 @@ order-independent in § 2 and on the real corpus in § 7, with the retention it 
 measured across the corpus and the resolution ladder and its telemetry shipped. It
 meets #459's stated requirement — the same answer whatever order members arrived in.
 
-### Proposed direction
+### Direction — validated 2026-08-27
 
-**Replace the retention with a grid-addressed consolidated-row histogram (§ 6–8).** On
-the real corpus it is the better answer on every axis measured: order-independent *and*
-batch-boundary-independent, more accurate at every quantile band (1.5–11× at the
-median), the only one of the two that never leaves the one-bucket accuracy bound
-(0 breaches in 1 755 evaluations against 25), 3.4–106× smaller, and ~2.8× cheaper per
-absorbed message. It also dissolves the retention ceiling question rather than
-answering it, because nothing is retained.
+**Replace the retention with a grid-addressed consolidated-row histogram (§ 6–8).**
+Validated by the architect and locked as D-459-1 above; filed as **#469** (hold
+consolidated message histograms on a shared bucket grid). On the real corpus it is the
+better answer on every axis measured: order-independent *and* batch-boundary-
+independent, more accurate at every quantile band (1.5–11× at the median), the only one
+of the two that never leaves the one-bucket accuracy bound (0 breaches in 1 755
+evaluations against 25), 3.4–106× smaller, and ~2.8× cheaper per absorbed message. It
+also dissolves the retention ceiling question rather than answering it, because nothing
+is retained.
 
-Shape, in one paragraph: an ungrouped message is untouched — same histogram, same
-adaptive seeding, and with `-g` off none of this is reachable. A consolidated row
-carries buckets on shared edges addressed by index, with no stored range to fall
-outside of, so it expands by occupying an index and never re-derives geometry. A key's
-own histogram is read once as it is absorbed and then released, which is the only lossy
-step. Memory is held to a bucket budget by folding, which is exact. Both shapes read
-out through the same percentile code.
+**Sequencing, as taken.** The branch is merged as #459's answer — it is a coherent,
+order-independent improvement over what ships today and it is what the issue asked for.
+The grid is #469, so the decision to adopt it stayed separable from the decision to
+merge what was already proved.
 
-**Sequencing.** The branch as it stands is a coherent, order-independent improvement
-that is strictly better than what ships today, and it is what #459 asked for. The grid
-design is a different mechanism reaching further, and it should be its own requirement
-rather than absorbed into this one — which also keeps the decision to adopt it separable
-from the decision to merge what is already proved.
+### Decisions taken and carried
 
-### Decisions for the architect
-
-1. **Is a grid on the consolidated row in bounds?** The constraint stated on
-   2026-08-27 is that histogram *bounds* cannot be anchored, because a line still to be
-   read can move them. A grid anchors bucket **edges** and fixes nothing about the
-   range (§ 8). Confirmed as the right distinction on 2026-08-27; the design rests on
-   it.
-2. **The bucket budget per consolidated row**, and whether it is user-visible or
-   internal. Measured at 512: coarsest resolution reached was 77 buckets per decade on
-   the two large logs and 308 on the small one.
-3. **Where the work is filed** — a new requirement, per the sequencing above, or an
-   extension of #459.
-4. **What #460's amended accuracy bound quotes.** It is currently set to quote the
-   synthetic single-merge figure (within one bucket on 3,999 of 4,000). The real-corpus
-   figure is 1.54–2.08 % breaching (§ 9).
+1. **A grid on the consolidated row is in bounds.** The constraint is that histogram
+   *bounds* cannot be anchored, because a line still to be read can move them. A grid
+   anchors bucket **edges** and fixes nothing about the range (§ 8). Confirmed by the
+   architect on 2026-08-27; the design rests on it.
+2. **The bucket budget** and whether it is user-visible — carried to #469. Measured at
+   512: coarsest resolution reached was 77 buckets per decade on the two large logs and
+   308 on the small one.
+3. **Where the work is filed** — #469, a new requirement.
+4. **What #460's amended accuracy bound quotes.** Carried to #460 as a comment: it is
+   set to quote the synthetic single-merge figure (within one bucket on 3,999 of 4,000);
+   the real-corpus figure is 1.54–2.08 % breaching (§ 9).
 
 ### Still open, at the architect's instruction (2026-08-27)
 

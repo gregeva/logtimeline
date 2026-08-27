@@ -154,7 +154,7 @@ The contract surface includes (full detail in Decision 8):
 - **Section presence**: always emitted under `-V`; reports `consumers_active: none` when no consumer is computing.
 
 The section name (`=== BIN-COUNTER MODE ===`), all field names, and all consumer-name strings are part of the locked feature contract per Decision 8. Field-name changes require a new locked-decision entry.
-- **Rebin telemetry (per-consumer using the unified path)**: `rebin_growth_events`, `rebin_merge_events`, `rebin_finalize_events`, `rebins_per_partition { p50, p95, p99, max }`, `max_partition_bins` (Decision 5 lock, as amended 2026-08-26 by #462; intended to support empirical seed-heuristic tuning).
+- **Rebin telemetry (per-consumer using the unified path)**: `rebin_growth_events`, `rebin_merge_events`, `rebin_finalize_events`, `rebins_per_partition { p50, p95, p99, max }`, `members_per_partition { p50, p95, p99, max }`, `max_partition_bins` (Decision 5 lock, as amended 2026-08-26 by #462; intended to support empirical seed-heuristic tuning).
 - **Tier-correctness for filtered runs**: if a run includes a filter, `-V` reports the filter context so an analyst can audit whether the result is appropriate (R2.2 reframed as audit concern, not gate).
 - **Pre-migration consumers (any still running the sort-based path during phased migration)**: `n` (the value count consumed) and `sorted: yes` line, matching R11's byte-identical contract.
 
@@ -1062,7 +1062,9 @@ This section records the binding values produced by the decision conversation th
 > - **Three per-mechanism counters replace it**, in this order: `rebin_growth_events`, `rebin_merge_events`, `rebin_finalize_events`.
 > - **Re-bin history moves from the partition to the store entry.** `partition_new()` and `partition_rebin()` no longer carry a `rebins` slot and `partition_extend()` no longer increments one; the counters live on the `{partition, bins, overflow, underflow}` entry, which survives a combination. `rebins_per_partition:` keeps its name and now reports the distribution of per-entry **growth** events.
 > - **`overflow_total` and `underflow_total` are emitted.** Both were already produced and printed by nothing. They are guards expected to read zero, kept visible so that if one ever fires it can be investigated (§ D7 of the drop record).
-> - **Three retention fields are added**: `members_live`, `members_max`, `members_memory_bytes`. They are defined for the shape the system is moving to (§ D1) and implemented against today's, where combination collapses members into one histogram: `members_live` equals `partition_count` plus the keys folded into clusters, `members_max` is the largest membership reached, and `members_memory_bytes` equals `counter_memory_bytes`. That equality is itself the signal that no member histogram is being retained yet.
+> - **Four retention fields are added** (the fourth, `members_per_partition`, added
+>   2026-08-27 by #459): `members_live`, `members_max`, `members_memory_bytes`,
+>   `members_per_partition`. They are defined for the shape the system is moving to (§ D1) and implemented against today's, where combination collapses members into one histogram: `members_live` equals `partition_count` plus the keys folded into clusters, `members_max` is the largest membership reached, and `members_memory_bytes` equalled `counter_memory_bytes` until #459 made retention real. That equality was itself the signal that no member histogram was being retained yet; it now holds only where nothing is retained.
 > - **`counter_memory_bytes` becomes a derived, reproducible figure.** It was `Devel::Size::total_size()` over the live store, which reports what the process *allocated*: measured 46277 / 45189 across six runs of one command with every content-derived field constant, because Perl's per-process hash seed changes when a bucket array doubles. It now reports the counters' payload — partition geometry plus the bin slots spanned — which is exact and content-defined. Allocation cannot be modelled deterministically (it depends on growth history, not content), so the field is an instrument for comparing two runs or configurations, not an absolute footprint; RSS remains the measure of record for that. Recorded in the drop file § D11.
 > - **The section name in the body below (`=== BIN-COUNTER MODE ===`) remains stale**; `ltl` has emitted `=== histogram-bin-counters ===` since #226. That correction belongs to the amendment pass in #460 and is not made here.
 >
@@ -1543,7 +1545,16 @@ When `path: unified`, the following fields appear (in order):
 - `partition_count: <N>` — number of distinct partitions managed by this consumer this run.
 - `rebin_growth_events: <N>` — re-binning caused by a partition outgrowing its range and doubling (Decision 5 telemetry). Counted on the store entry, so a combination adds to it rather than resetting it.
 - `rebin_merge_events: <N>` — re-binning caused by combining two histograms: one increment per side projected onto the union geometry, so zero, one or two per combination, since a side already congruent with the union is not projected. Non-zero only where a combination path exists.
-- `rebin_finalize_events: <N>` — re-binning caused by projecting a partition into display shape at finalize. One per partition per run on the heatmap and histogram surfaces, on every such run with no flags required; exactly zero for `summary_table`, `csv_output` and `time_bucket_stats`, which read percentiles from the streaming partition and never project.
+- `rebin_finalize_events: <N>` — re-binning caused by projecting a partition at
+  finalize. One per partition per run on the heatmap and histogram surfaces, where the
+  projection is into display shape, on every such run with no flags required. Exactly
+  zero for `time_bucket_stats`, which reads percentiles from the streaming partition and
+  never projects. **Amended 2026-08-27 by #459:** no longer zero for `summary_table` and
+  `csv_output`. Combination no longer projects as it goes — each absorbed key's counts
+  are held in their own geometry and every member is projected exactly once, together,
+  when its cluster is finalized — so this field carries that collapse. It reads zero on
+  a run with no consolidation, and otherwise counts one per member actually re-projected
+  into the union geometry.
 - `max_partition_bins: <N>` — high-water-mark bin count across all partitions for this consumer (Decision 5 telemetry).
 - `partitions_with_overflow_count: <N>` — number of partitions for this consumer with at least one overflow tally (Decision 4 audit aggregate).
 - `partitions_with_underflow_count: <N>` — number of partitions for this consumer with at least one underflow tally (Decision 4 audit aggregate).
@@ -1552,7 +1563,19 @@ When `path: unified`, the following fields appear (in order):
 - `counter_memory_bytes: <N>` — the counters' payload for this consumer's partitions: per partition, its geometry plus the bin slots it spans. Content-defined and reproducible across runs, unlike a measurement of the live structure, whose allocation depends on growth history. It is a comparison instrument, not an absolute footprint.
 - `members_live: <N>` — member histograms alive across combined keys. Conserved under combination: folding keys into clusters lowers `partition_count` but not this figure.
 - `members_max: <N>` — the largest membership reached by any single entry. At least 1, since an entry always stands for itself.
-- `members_memory_bytes: <N>` — footprint of the retained member histograms, on the same derived model as `counter_memory_bytes`. Equal to it while combination still collapses members into one histogram.
+- `members_memory_bytes: <N>` — footprint of the member histograms this store stands
+  for, on the same derived model as `counter_memory_bytes`. **Amended 2026-08-27 by
+  #459:** on `summary_table` and `csv_output` it is the live store plus the payload of
+  every member retained until its cluster collapsed, so it is a high-water figure and
+  diverges from `counter_memory_bytes` whenever consolidation retained anything. Equal
+  to `counter_memory_bytes` on every surface that retains nothing, and on any run with
+  no consolidation.
+- `members_per_partition: p50=<N> p95=<N> p99=<N> max=<N>` — **added 2026-08-27 by
+  #459.** The distribution of how many member histograms each surviving partition stands
+  for. `members_live` and `members_max` cannot size a retention ceiling between them: a
+  total says nothing about whether the load is spread across partitions or concentrated
+  in one, and on real logs it is heavily concentrated. Same four-field shape as
+  `rebins_per_partition`. `max` is `members_max`.
 - `rebins_per_partition: p50=<N> p95=<N> p99=<N> max=<N>` — distribution of per-entry **growth** events across this consumer's partitions (Decision 5 telemetry). Format is space-separated `key=value` pairs.
 - `percentiles_emitted: <space-separated list>` — the quantile set this consumer requested per R3 (e.g., `p1 p50 p75 p90 p95 p99 p999`).
 - `out_of_range_bounded: <inline per-quantile>` — per-quantile audit per Decision 4. **Format: Option A inline**, e.g., `out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=high p999=high`. Space-separated `quantile_name=audit_value` pairs. The three-value enum `none | high | low` is locked verbatim from Decision 4.
@@ -1617,6 +1640,7 @@ consumer: summary_table
   members_live: 1247
   members_max: 1
   members_memory_bytes: 2643456
+  members_per_partition: p50=1 p95=1 p99=1 max=1
   rebins_per_partition: p50=0 p95=0 p99=1 max=2
   percentiles_emitted: p1 p50 p75 p90 p95 p99 p999
   out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=none p999=none
@@ -1691,6 +1715,7 @@ consumer: summary_table
   members_live: 1247
   members_max: 1
   members_memory_bytes: 2643456
+  members_per_partition: p50=1 p95=1 p99=1 max=1
   rebins_per_partition: p50=0 p95=0 p99=1 max=2
   percentiles_emitted: p1 p50 p75 p90 p95 p99 p999
   out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=high p999=high
