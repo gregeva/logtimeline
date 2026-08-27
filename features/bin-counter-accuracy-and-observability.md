@@ -468,46 +468,58 @@ registering a comparison that passes fails the run.
 
 ## Current state — where to resume
 
-**Last updated 2026-08-27.** Read this first if work on the drop is being picked up
-after a break.
+**Last updated 2026-08-27, after #459 merged.** Read this first if work on the drop
+is being picked up after a break. The governing contracts are listed above; the stage-4
+investigation and its decisions are in `459-bin-counter-combination-order.md`.
 
 | stage | issue | state |
 |---|---|---|
 | 1 — observability | #462 (absorbs #461) | **delivered**, merged to `release/0.18.0`, closed |
 | 2 — test coverage | #450 | **delivered**, merged, closed |
-| 3 — baseline capture | part of #450 | **captured**, deliberately carrying today's compounding loss |
+| 3 — baseline capture | part of #450 | **captured**; the three consolidated bin scenarios re-blessed once, for #459 |
 | 4 — merge arithmetic + percentile source | #459, #460 | #459 **delivered** 2026-08-27; #460 next. The grid design that supersedes #459's mechanism is filed as #469 |
-| 5–9 — the rest of the release | #447, #432, #418, #443 (+#449), #445 | not started; order fixed by D6 |
+| 5–9 — the rest of the release | #447, #432, #418, #443 (+#449), #445 | not started; order fixed by D6. #447 stays `blocked_by #460` — the gate is merge order |
+| beyond this release | #469 | the grid-addressed consolidated row, validated 2026-08-27 (D-459-1), superseding #459's mechanism |
 
 #462 was reopened after its first delivery and completed a second time: the surface
 shipped without the two observables that make its own requirements testable (D15,
 D17). Both landed before it was closed again.
 
-### Stage 4 has an acceptance test it did not have before
+### Stage 4's acceptance test, and what it actually proved
 
-`tests/statistics-drift/known-failures.tsv` registers the 33 oracle comparisons that
-#459's defect currently breaks, each attributed to it. The registry is self-clearing,
-so **#459 cannot land without deleting its entries in the same change** — the engine
-fails the run with `KNOWN-FAILURE-STALE` the moment a registered comparison starts
-passing. Done, for #459, means:
+`tests/statistics-drift/known-failures.tsv` registered 33 oracle comparisons against
+#459, on the reading that its compounding caused them. The registry is self-clearing —
+a registered comparison that starts passing fails the run with `KNOWN-FAILURE-STALE` —
+so the attribution could not survive the fix silently, and it did not.
 
-- `known-failures.tsv` holds no #459 entries;
-- `validate-statistics.sh` reports `L3=OK` (not `OK-WITH-XFAIL`) on all seven
-  consolidated scenarios;
-- `rebin_merge_events` reads 0, and `rebin_finalize_events` on `summary_table` rises
-  from its contractually-zero value to `members_live` — which breaks an invariant
-  #462 locked, so `tests/validate-histogram-bin-counters.sh` and `features/187`
-  § Decision 8 are amended in the same commit;
-- `members_memory_bytes` diverges from `counter_memory_bytes`, which is the direct
-  measurement of what D1's retention costs.
+**It was the wrong attribution, and the registry is what proved it.** #459 landed on
+2026-08-27, removing the compounding and proving order-independence, and 28 of those
+comparisons still breach. They are the accuracy bound, not the combination: the oracle
+models a consolidated row as one histogram over the pooled samples while the tool
+projects each member's histogram onto a shared geometry, and one projection is not zero
+projections. The entries are **re-attributed to #460**, which owns that bound, with the
+reasoning written into the file. `L3=OK` on merged bin rows was never reachable by
+#459 and should not have been written as its acceptance criterion.
+
+What #459 did have to deliver, and did: `rebin_merge_events` reads 0;
+`rebin_finalize_events` on `summary_table` stops being contractually zero and carries
+the collapse; `members_memory_bytes` diverges from `counter_memory_bytes`, which is the
+direct measurement of what D1's retention costs; and `features/187` § Decision 8 plus
+`tests/validate-histogram-bin-counters.sh` were amended in the same change. The full
+record is `459-bin-counter-combination-order.md`.
 
 ### Re-blessing the stage-3 baseline is a deliberate act, not a step
 
-L1 is drift against the blessed baseline, and for the merged rows it is now one of
-only two numeric checks (L3 being the other, newly available). Re-blessing removes
-the L1 check on those rows for that run, so it is done from a diff that has been
-read, not automatically. The rest of each row — counts, min/max, the exact-value
-statistics — must not move and stays a genuine regression gate throughout.
+Drift against the blessed baseline is, for the merged rows, one of only two numeric
+checks (the oracle being the other, newly available). Re-blessing removes that check on
+those rows for that run, so it is done from a diff that has been read, not
+automatically. The rest of each row — counts, min/max, the exact-value statistics — must
+not move and stays a genuine regression gate throughout.
+
+**Done once, for #459, on 2026-08-27:** 49 cells, all in the three `*-bin-consolidated`
+scenarios' `messages` rows, all percentile or IQR columns, median 2.42 % and worst
+percentile 4.45 % — about one bucket width. No count, minimum, maximum, or non-bin
+scenario moved. #460 will move these rows again, and the same reading applies.
 
 ### The benchmark comparator moved with the hardware
 
@@ -537,108 +549,15 @@ The baselining process, the naming convention and the worked example: `tests/bas
 
 ---
 
+## Stage 4a — #459
+
+Planned, implemented, measured and delivered. The implementation plan, the findings,
+the retention impact analysis and the design investigation that followed are in
+[`459-bin-counter-combination-order.md`](459-bin-counter-combination-order.md); its § 0
+lists the contracts this surface is bound by and should be read before planning
+anything else against it.
+
 ---
-
-## Stage 4a — #459 implementation plan
-
-Locked design is D1. This is how D1 lands in the code; it introduces no decision D1
-did not already make, and the two readings it settles are marked as such.
-
-### The data model
-
-A counter-store entry gains one field:
-
-- `member_entries` — an arrayref of **pristine** entry hashrefs, each in its own
-  original geometry, never projected and never added into. `members` stays the
-  integer count it already is (`1 + @member_entries`, recursively), so the retention
-  telemetry #462 shipped is unchanged in meaning.
-
-`merge_bin_counter_entries($target, $source)` **stops projecting**. It appends the
-source — and any members the source itself carried — to `$target->{member_entries}`,
-folds `overflow` / `underflow` / `rebin_growth`, and adds to `members`. The
-adopt-wholesale branch for an empty target is unchanged. `rebin_merge` is no longer
-incremented anywhere, because no combination projects any more.
-
-`collapse_bin_counter_entry($entry)` is new and is where D1's arithmetic happens: one
-union `min` / `max` over the entry's own partition **and every member at once**, one
-`bin_count` from that, then each side projected into it exactly once and summed. A
-side whose geometry already equals the union is not projected at all, so exactness is
-preserved where it is available. Returns the projection count. The union is a
-min/max over the whole membership, so it does not depend on the order the members
-arrived in — which is the guarantee.
-
-### Two readings this settles
-
-**A single log line is not a member.** D1 says "when a *key* is absorbed, the cluster
-keeps that member's histogram". The streaming S1-inline path merges a *per-line*
-single-sample source into a cluster; treating each of those as a member would retain
-one partition per line. It is instead an ordinary **value insertion** into the
-cluster's own partition — `bin_assign` + increment, which is exact and projects
-nothing, so the guarantee is not weakened. The producer site therefore hands
-`merge_bin_state` a `bin_value` rather than a temporary single-sample `bin_entry`,
-and the per-entry observation logic is lifted out of `counter_update` into
-`counter_entry_observe($entry, $value)` so both callers share one surface. This also
-removes a temporary hash and a store insert from the hot path.
-
-**Members are freed at collapse, and measured on the way out.** Retaining them past
-collapse would carry dead weight through statistics and rendering for no purpose but
-observation. The payload is captured as a high-water figure at collapse instead, so
-`members_memory_bytes` reports what retention actually cost at its peak while
-`counter_memory_bytes` stays the live figure. The two diverge, which is the signal
-D10 designed them to give.
-
-### Where collapse happens
-
-At the **cluster reinject loop** in `group_similar_messages` — the point where a
-cluster's `bin_entry` lands in `%log_messages_counters`. Every cluster passes through
-it exactly once, in sorted order, after every merge path has run. That is "at
-finalize" in D1's sense.
-
-D1 also scopes the guarantee to *every* combination of two bin-counter histograms,
-not just today's caller, so a future merger must not be able to reintroduce the loss
-by forgetting to collapse. `calculate_statistics_bin` therefore collapses lazily as a
-safety net if it is ever handed an entry with members outstanding — one array test on
-a path that already walks the entry.
-
-### Telemetry consequences, and the contracts they amend
-
-| field | before | after |
-|---|---|---|
-| `rebin_merge_events` | rises with consolidation | **0** — nothing projects at merge time |
-| `rebin_finalize_events` (`summary_table` / `csv_output`) | contractually 0 | the collapse projections |
-| `members_memory_bytes` | equal to `counter_memory_bytes` | high-water member payload; diverges |
-| `counter_memory_bytes` | live payload | unchanged |
-
-The projection count is accumulated during collapse and drained into
-`$bin_counter_telemetry{summary_table}` by `finalize_message_stats_unified`, which
-runs after the consumer — the same pattern `%message_stats_audit` already uses.
-
-Amended in the same commit: `features/187-histogram-bin-counter-percentiles.md`
-§ Decision 8 (the `rebin_finalize_events`-is-zero and members-equal-store contracts
-both stop being true), and the assertions in
-`tests/validate-histogram-bin-counters.sh` that hold them.
-
-### Done
-
-The acceptance test already exists. `tests/statistics-drift/known-failures.tsv` holds
-the #459 entries, the registry is self-clearing, and a registered comparison that
-starts passing fails the run — so the entries are deleted in this change or it does
-not merge. Beyond that: `L3=OK` (not `OK-WITH-XFAIL`) on the consolidated scenarios,
-the full harness suite, and the benchmark gated against
-`tests/baseline/results/dev-virtualized-v0.18.0-pre-stage4.tsv`.
-
-The L1 re-bless on the merged rows is the per-quantile measurement of what this
-bought, and is read before it is accepted (see § Re-blessing the stage-3 baseline).
-
-### Stage 4a — #459
-
-The implementation, the findings, the retention impact analysis and the design
-investigation that followed it are recorded in
-[`459-bin-counter-combination-order.md`](459-bin-counter-combination-order.md). In
-short: the deferred combination is built and proved order-independent, the retention
-it causes is measured across the corpus and the resolution ladder, and a canonical-grid
-target with a fixed bucket budget was then measured that reaches the same guarantee
-with no retention at all. Open decisions are listed in that document's § 7.
 
 ## Open items carried out of stage 1
 

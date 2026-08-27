@@ -686,12 +686,18 @@ These are for the amendment pass to absorb, not for this issue to settle.
 
 ## 10. Where this stands, and the proposed direction
 
-### Delivered on the branch, not merged
+### Delivered
 
-`459-bin-counter-combination-not-commutative`: the deferred collapse of § 1, proved
-order-independent in § 2 and on the real corpus in § 7, with the retention it causes
-measured across the corpus and the resolution ladder and its telemetry shipped. It
-meets #459's stated requirement — the same answer whatever order members arrived in.
+Merged to `release/0.18.0` on 2026-08-27 as `1e9c2b1` (PR #470, branch
+`459-bin-counter-combination-not-commutative`); #459 closed. The deferred collapse of
+§ 1, proved order-independent in § 2 and on the real corpus in § 7, with the retention
+it causes measured across the corpus and the resolution ladder and its telemetry
+shipped. It meets #459's stated requirement — the same answer whatever order members
+arrived in.
+
+Gate: all 23 `tests/validate-*.sh` exit 0 with assertions confirmed; benchmark
+`single-day-access-log-standard` against `dev-virtualized-v0.18.0-pre-stage4` at
+total +0.3 %, `rss_peak` −0.1 %, nothing worse than 5 %.
 
 ### Direction — validated 2026-08-27
 
