@@ -82,9 +82,16 @@ APACHE_LOG="logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026
 PLOT_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log"
 DPM5K_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
 
-# Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin
+# Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin.
+#
+# The version banner is normalised to [VERSION] so the goldens survive a version
+# bump. The pattern must accept the branch marker as well as the release number:
+# a feature branch stamps $version_number as X.Y.Z-{issue} (e.g. 0.18.0-432) for
+# the life of the branch, per CLAUDE.md § Version Stamping, so every development
+# build carries a suffix. Matching only [0-9.]+ made every scenario fail on any
+# branch, for the one reason the goldens are explicitly meant to ignore.
 strip_nondeterministic() {
-    perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[0-9.]+\]/log timeline [VERSION]/' \
+    perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[^\]]+\]/log timeline [VERSION]/' \
     | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
 }
 

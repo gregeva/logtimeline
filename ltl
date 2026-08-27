@@ -225,6 +225,7 @@ my @column_colors = (
 );
 my %column_color_lookup = map { $_->{name} => $_ } @column_colors;
 my ( $durations_observed, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, undef );
+my $bytes_observed = 0;
 my ( $show_memory_debug, $memory_usage_operand ) = ( 0, undef );   # -mem debug diagnostic mode (Issue #356)
 my $show_timing = 0;   # -t, --timing: per-stage timing rows in the summary
 my $explain_arg;   # --explain [<topic>]: undef = not given; '' = bare; non-empty = topic name (Issue #261)
@@ -1611,9 +1612,9 @@ sub read_index_file {
     my @index_columns = qw(
         entry_type entry_date file_path file_size file_mtime
         line_count match_count first_timestamp last_timestamp ts_precision
-        duration_count duration_min duration_max duration_avg
-        bytes_count bytes_min bytes_max bytes_avg
-        count_count count_min count_max count_avg
+        duration_occurrences duration_min duration_max duration_mean
+        file_bytes_occurrences file_bytes_min file_bytes_max file_bytes_mean
+        count_occurrences count_min count_max count_mean
         read_rate memory_used processing_time filters
     );
     my %col_idx;
@@ -1731,7 +1732,7 @@ sub read_index_file {
     my $active_tier = $tiers[0];
 
     # Build aggregated bounds with provenance.
-    for my $metric (qw(duration_min duration_max bytes_min bytes_max count_min count_max
+    for my $metric (qw(duration_min duration_max file_bytes_min file_bytes_max count_min count_max
                        first_timestamp last_timestamp)) {
         my $best;
         my $best_from;
@@ -1797,7 +1798,7 @@ sub _preseed_from_row {
         matched_entry_date => $bound_row->{entry_date} // '-',
         freshness          => 'fresh',
     );
-    for my $col (qw(duration_min duration_max bytes_min bytes_max count_min count_max
+    for my $col (qw(duration_min duration_max file_bytes_min file_bytes_max count_min count_max
                     first_timestamp last_timestamp)) {
         my $v = $bound_row->{$col};
         $p{$col} = (defined $v && $v ne '' && $v ne '-') ? $v : undef;
@@ -1838,8 +1839,8 @@ sub detect_index_drift {
     my @metrics = (
         [ duration_min   => $unfiltered ? 'duration_min'   : 'sel_duration_min',   'min' ],
         [ duration_max   => $unfiltered ? 'duration_max'   : 'sel_duration_max',   'max' ],
-        [ bytes_min      => $unfiltered ? 'bytes_min'      : 'sel_bytes_min',      'min' ],
-        [ bytes_max      => $unfiltered ? 'bytes_max'      : 'sel_bytes_max',      'max' ],
+        [ file_bytes_min      => $unfiltered ? 'file_bytes_min'      : 'sel_file_bytes_min',      'min' ],
+        [ file_bytes_max      => $unfiltered ? 'file_bytes_max'      : 'sel_file_bytes_max',      'max' ],
         [ count_min      => $unfiltered ? 'count_min'      : 'sel_count_min',      'min' ],
         [ count_max      => $unfiltered ? 'count_max'      : 'sel_count_max',      'max' ],
         [ first_timestamp => $unfiltered ? 'first_timestamp' : 'sel_first_timestamp', 'min' ],
@@ -2305,7 +2306,7 @@ sub emit_index_readback_verbose {
         push @verbose_output, "  lookup: $pre->{lookup}";
         push @verbose_output, "  matched_entry_date: " . ($pre->{matched_entry_date} // '-');
         push @verbose_output, "  freshness: $pre->{freshness}";
-        for my $col (qw(duration_min duration_max bytes_min bytes_max
+        for my $col (qw(duration_min duration_max file_bytes_min file_bytes_max
                         count_min count_max first_timestamp last_timestamp)) {
             my $v = $pre->{$col};
             push @verbose_output, sprintf("  preseed_%s: %s", $col,
@@ -2316,7 +2317,7 @@ sub emit_index_readback_verbose {
     # Aggregated bounds + drift, only when pre-seed is active.
     if ($index_used) {
         push @verbose_output, "aggregated_preseed:";
-        for my $col (qw(duration_min duration_max bytes_min bytes_max
+        for my $col (qw(duration_min duration_max file_bytes_min file_bytes_max
                         count_min count_max first_timestamp last_timestamp)) {
             my $a = $index_aggregated{$col};
             if ($a) {
@@ -2332,7 +2333,7 @@ sub emit_index_readback_verbose {
                 my $fd = $index_drift{$file};
                 next unless grep { $_ && $_->{drifted} } values %$fd;
                 push @verbose_output, "drift_file: $file";
-                for my $metric (qw(duration_min duration_max bytes_min bytes_max
+                for my $metric (qw(duration_min duration_max file_bytes_min file_bytes_max
                                    count_min count_max first_timestamp last_timestamp)) {
                     my $d = $fd->{$metric} or next;
                     push @verbose_output, sprintf(
@@ -4963,9 +4964,9 @@ sub write_index_file {
     my @index_columns = qw(
         entry_type entry_date file_path file_size file_mtime
         line_count match_count first_timestamp last_timestamp ts_precision
-        duration_count duration_min duration_max duration_avg
-        bytes_count bytes_min bytes_max bytes_avg
-        count_count count_min count_max count_avg
+        duration_occurrences duration_min duration_max duration_mean
+        file_bytes_occurrences file_bytes_min file_bytes_max file_bytes_mean
+        count_occurrences count_min count_max count_mean
         read_rate memory_used processing_time filters
     );
     my $col_count = scalar @index_columns;
@@ -5049,17 +5050,17 @@ sub write_index_file {
                 my $first_ts  = format_epoch_iso($fd->{first_timestamp});
                 my $last_ts   = format_epoch_iso($fd->{last_timestamp});
 
-                my $dur_avg   = $fd->{duration_count} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_count}) : '-';
-                my $bytes_avg = $fd->{bytes_count}    > 0 ? sprintf("%.2f", $fd->{bytes_sum}    / $fd->{bytes_count})    : '-';
-                my $count_avg = $fd->{count_count}    > 0 ? sprintf("%.2f", $fd->{count_sum}    / $fd->{count_count})    : '-';
+                my $dur_avg   = $fd->{duration_occurrences} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_occurrences}) : '-';
+                my $file_bytes_mean = $fd->{file_bytes_occurrences}    > 0 ? sprintf("%.2f", $fd->{bytes_sum}    / $fd->{file_bytes_occurrences})    : '-';
+                my $count_mean = $fd->{count_occurrences}    > 0 ? sprintf("%.2f", $fd->{count_sum}    / $fd->{count_occurrences})    : '-';
                 my $read_rate = $fd->{read_elapsed}   > 0 ? sprintf("%.0f", $fd->{line_count}   / $fd->{read_elapsed})   : '-';
 
                 my @file_row = (
                     'file', $now_iso, $path, $fd->{file_size}, $mtime_iso,
                     $fd->{line_count}, $fd->{match_count}, $first_ts, $last_ts, $fd->{ts_precision},
-                    $fd->{duration_count}, $fd->{duration_min} // '-', $fd->{duration_max} // '-', $dur_avg,
-                    $fd->{bytes_count}, $fd->{bytes_min} // '-', $fd->{bytes_max} // '-', $bytes_avg,
-                    $fd->{count_count}, $fd->{count_min} // '-', $fd->{count_max} // '-', $count_avg,
+                    $fd->{duration_occurrences}, $fd->{duration_min} // '-', $fd->{duration_max} // '-', $dur_avg,
+                    $fd->{file_bytes_occurrences}, $fd->{file_bytes_min} // '-', $fd->{file_bytes_max} // '-', $file_bytes_mean,
+                    $fd->{count_occurrences}, $fd->{count_min} // '-', $fd->{count_max} // '-', $count_mean,
                     $read_rate, '-', '-', '-'
                 );
                 $index_csv->print($ofh, \@file_row);
@@ -5068,16 +5069,16 @@ sub write_index_file {
             {
                 my $sel_first = format_epoch_iso($fd->{sel_first_timestamp});
                 my $sel_last  = format_epoch_iso($fd->{sel_last_timestamp});
-                my $sel_dur_avg   = $fd->{sel_duration_count} > 0 ? sprintf("%.2f", $fd->{sel_duration_sum} / $fd->{sel_duration_count}) : '-';
-                my $sel_bytes_avg = $fd->{sel_bytes_count}    > 0 ? sprintf("%.2f", $fd->{sel_bytes_sum}    / $fd->{sel_bytes_count})    : '-';
-                my $sel_count_avg = $fd->{sel_count_count}    > 0 ? sprintf("%.2f", $fd->{sel_count_sum}    / $fd->{sel_count_count})    : '-';
+                my $sel_dur_avg   = $fd->{sel_duration_occurrences} > 0 ? sprintf("%.2f", $fd->{sel_duration_sum} / $fd->{sel_duration_occurrences}) : '-';
+                my $sel_file_bytes_mean = $fd->{sel_file_bytes_occurrences}    > 0 ? sprintf("%.2f", $fd->{sel_bytes_sum}    / $fd->{sel_file_bytes_occurrences})    : '-';
+                my $sel_count_mean = $fd->{sel_count_occurrences}    > 0 ? sprintf("%.2f", $fd->{sel_count_sum}    / $fd->{sel_count_occurrences})    : '-';
 
                 my @sel_row = (
                     'selection', $now_iso, $path, '-', '-',
                     '-', $fd->{sel_match_count}, $sel_first, $sel_last, '-',
-                    $fd->{sel_duration_count}, $fd->{sel_duration_min} // '-', $fd->{sel_duration_max} // '-', $sel_dur_avg,
-                    $fd->{sel_bytes_count}, $fd->{sel_bytes_min} // '-', $fd->{sel_bytes_max} // '-', $sel_bytes_avg,
-                    $fd->{sel_count_count}, $fd->{sel_count_min} // '-', $fd->{sel_count_max} // '-', $sel_count_avg,
+                    $fd->{sel_duration_occurrences}, $fd->{sel_duration_min} // '-', $fd->{sel_duration_max} // '-', $sel_dur_avg,
+                    $fd->{sel_file_bytes_occurrences}, $fd->{sel_file_bytes_min} // '-', $fd->{sel_file_bytes_max} // '-', $sel_file_bytes_mean,
+                    $fd->{sel_count_occurrences}, $fd->{sel_count_min} // '-', $fd->{sel_count_max} // '-', $sel_count_mean,
                     '-', $max_memory_usage, sprintf("%.3f", $elapsed_total), $current_filters
                 );
                 $index_csv->print($ofh, \@sel_row);
@@ -6544,7 +6545,7 @@ sub print_help {
 
     # Sorting
     $out .= help_subheading("Sorting");
-    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. Aggregates: occurrences, duration, bytes, mean_bytes, count, impact. Stats: min, mean, max, stddev, cv. Percentiles: p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999. Shape: iqr, skewness, kurtosis, bimodality_coef. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details.");
+    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. A bare metric name means its total: bytes, duration (alias time), count. Aggregates: occurrences, bytes_occurrences, bytes_min, bytes_mean, bytes_max, count_occurrences, count_min, count_mean, count_max, impact. Stats: min, mean, max, stddev, cv. Percentiles: p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999. Shape: iqr, skewness, kurtosis, bimodality_coef. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details.");
     $out .= help_opt("-sa,  --sort-ascending",        "Reverse the sort order to show lowest values first");
 
     # Heatmap
@@ -7450,8 +7451,13 @@ sub group_similar_messages {
                 }
             }
 
-            # Copy bytes stats
+            # Copy bytes stats — the whole family, as count does below (#432)
             $entry->{total_bytes} = $cluster->{total_bytes} if defined $cluster->{total_bytes};
+            if (defined $cluster->{bytes_occurrences}) {
+                $entry->{bytes_occurrences} = $cluster->{bytes_occurrences};
+                $entry->{bytes_min}         = $cluster->{bytes_min};
+                $entry->{bytes_max}         = $cluster->{bytes_max};
+            }
 
             # Copy count stats
             if (defined $cluster->{count_sum}) {
@@ -8075,8 +8081,15 @@ sub merge_consolidation_stats {
         push @{$target->{durations}}, @{$source->{durations}} if $source->{durations} && @{$source->{durations}};
     }
 
-    # Bytes stats
+    # Bytes stats. The whole family merges, not just the sum (#432): a
+    # consolidated row that carried the total without its observation count
+    # would report a total no aggregate could be derived from.
     $target->{total_bytes} = ($target->{total_bytes} // 0) + $source->{total_bytes} if defined $source->{total_bytes};
+    if (defined $source->{bytes_occurrences}) {
+        $target->{bytes_occurrences} = ($target->{bytes_occurrences} // 0) + $source->{bytes_occurrences};
+        $target->{bytes_min} = $source->{bytes_min} if defined $source->{bytes_min} && (!defined $target->{bytes_min} || $source->{bytes_min} < $target->{bytes_min});
+        $target->{bytes_max} = $source->{bytes_max} if defined $source->{bytes_max} && (!defined $target->{bytes_max} || $source->{bytes_max} > $target->{bytes_max});
+    }
 
     # Count stats
     if (defined $source->{count_sum}) {
@@ -9214,7 +9227,10 @@ my %csv_column_family = (
     'timestamp'         => 'meta',
     'occurrences'       => 'meta',
     # bytes
-    'mean_bytes'        => 'bytes',
+    'bytes_occurrences' => 'meta',
+    'bytes_min'         => 'bytes',
+    'bytes_mean'        => 'bytes',
+    'bytes_max'         => 'bytes',
     'bytes'             => 'bytes',
     'bytes_nice'        => 'bytes',
     # count
@@ -9224,32 +9240,32 @@ my %csv_column_family = (
     'count_max'         => 'count',
     'count_sum'         => 'count',
     # duration
-    'min'               => 'duration',
-    'mean'              => 'duration',
-    'max'               => 'duration',
+    'duration_min'      => 'duration',
+    'duration_mean'     => 'duration',
+    'duration_max'      => 'duration',
     'duration'          => 'duration',
     'duration_nice'     => 'duration',
     # percentile
-    'p1'                => 'percentile',
-    'p5'                => 'percentile',
-    'p10'               => 'percentile',
-    'p25'               => 'percentile',
-    'p50'               => 'percentile',
-    'p75'               => 'percentile',
-    'iqr'               => 'percentile',
-    'p90'               => 'percentile',
-    'p95'               => 'percentile',
-    'p99'               => 'percentile',
-    'p999'              => 'percentile',
-    'p9999'             => 'percentile',
-    'p99999'            => 'percentile',
+    'duration_p1'       => 'percentile',
+    'duration_p5'       => 'percentile',
+    'duration_p10'      => 'percentile',
+    'duration_p25'      => 'percentile',
+    'duration_p50'      => 'percentile',
+    'duration_p75'      => 'percentile',
+    'duration_iqr'      => 'percentile',
+    'duration_p90'      => 'percentile',
+    'duration_p95'      => 'percentile',
+    'duration_p99'      => 'percentile',
+    'duration_p999'     => 'percentile',
+    'duration_p9999'    => 'percentile',
+    'duration_p99999'   => 'percentile',
     # shape (unitless or scale-derived; emit at fixed shape decimals)
-    'std_dev'           => 'shape',
-    'cv'                => 'shape',
-    'skewness'          => 'shape',
-    'kurtosis'          => 'shape',
+    'duration_std_dev'  => 'shape',
+    'duration_cv'       => 'shape',
+    'duration_skewness' => 'shape',
+    'duration_kurtosis' => 'shape',
     'impact'            => 'shape',
-    'bimodality_coef'   => 'shape',
+    'duration_bimodality_coef' => 'shape',
 );
 
 # Resolve the family for a CSV column name. Returns 'level' for log-level
@@ -10035,8 +10051,29 @@ sub adapt_to_command_line_options {
     }
 
     do { print_usage( "unable to open any files" ); exit 2; } unless @in_files;
-    do { print_usage( "invalid sort type used" ); exit 1; } unless grep { $_ eq $sort_type } qw(
-        occurrences total duration time bytes size mean_bytes impact cv
+    # Duration keeps its bare spellings on the CLI because duration is the tool's
+    # subject: every statistic in the summary table is a duration statistic unless
+    # it says otherwise. A user who has learned the metric_aggregate convention from
+    # the count and bytes families guesses `duration_p95`, so the prefix is accepted
+    # as an alias and stripped to the bare name here (#432).
+    #
+    # Stripping happens once, ahead of both the whitelist and the ladder, rather than
+    # as an alias arm per statistic: the ladder's final arm is an identity mapping
+    # where the operand spelling IS the storage key, and %STAT_FIELD_GROUP — which
+    # gates whether the statistic is computed at all — is keyed by the bare names. A
+    # prefixed spelling reaching either would silently switch the statistic off and
+    # rank undef against undef, which is the #428 failure mode.
+    #
+    # `duration` is the metric's own sum and is not a prefixed statistic, so it is
+    # excluded from the strip.
+    $sort_type =~ s/^duration_//i unless $sort_type =~ /^duration$/i;
+
+    # The whitelist is matched case-insensitively, as every arm of the resolution
+    # ladder below already is. It was an exact-string test, so an operand the ladder
+    # would have resolved was rejected before reaching it (#432).
+    do { print_usage( "invalid sort type used" ); exit 1; } unless grep { lc $_ eq lc $sort_type } qw(
+        occurrences total duration time bytes size impact cv
+        bytes_occurrences bytes_min bytes_mean bytes_max
         count count_occurrences count_total count_sum count_min count_mean count_avg count_max
         std_dev stddev min mean avg max
         p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
@@ -10071,8 +10108,14 @@ sub adapt_to_command_line_options {
         $sort_key = "count_mean";
     } elsif( $sort_type =~ /^count_max$/i ) {
         $sort_key = "count_max";
-    } elsif( $sort_type =~ /^mean_bytes$/i ) {
-        $sort_key = "mean_bytes";
+    } elsif( $sort_type =~ /^bytes_occurrences$/i ) {
+        $sort_key = "bytes_occurrences";
+    } elsif( $sort_type =~ /^bytes_min$/i ) {
+        $sort_key = "bytes_min";
+    } elsif( $sort_type =~ /^bytes_mean$/i ) {
+        $sort_key = "bytes_mean";
+    } elsif( $sort_type =~ /^bytes_max$/i ) {
+        $sort_key = "bytes_max";
     } elsif( $sort_type =~ /^(p1|p5|p10|p25|p50|p75|p90|p95|p99|p999|p9999|p99999|iqr|skewness|kurtosis|bimodality_coef)$/i ) {
         # Identity mapping: percentile and distribution-shape metrics are stored on
         # %log_messages under the same key name they're invoked by on -so (#220, #222).
@@ -10344,16 +10387,16 @@ sub read_and_process_logs {
             first_timestamp => undef,
             last_timestamp  => undef,
             ts_precision    => 's',
-            duration_count  => 0, duration_min => undef, duration_max => undef, duration_sum => 0,
-            bytes_count     => 0, bytes_min    => undef, bytes_max    => undef, bytes_sum    => 0,
-            count_count     => 0, count_min    => undef, count_max    => undef, count_sum    => 0,
+            duration_occurrences  => 0, duration_min => undef, duration_max => undef, duration_sum => 0,
+            file_bytes_occurrences     => 0, file_bytes_min    => undef, file_bytes_max    => undef, bytes_sum    => 0,
+            count_occurrences     => 0, count_min    => undef, count_max    => undef, count_sum    => 0,
             read_start      => [gettimeofday],
             sel_match_count      => 0,
             sel_first_timestamp  => undef,
             sel_last_timestamp   => undef,
-            sel_duration_count   => 0, sel_duration_min => undef, sel_duration_max => undef, sel_duration_sum => 0,
-            sel_bytes_count      => 0, sel_bytes_min    => undef, sel_bytes_max    => undef, sel_bytes_sum    => 0,
-            sel_count_count      => 0, sel_count_min    => undef, sel_count_max    => undef, sel_count_sum    => 0,
+            sel_duration_occurrences   => 0, sel_duration_min => undef, sel_duration_max => undef, sel_duration_sum => 0,
+            sel_file_bytes_occurrences      => 0, sel_file_bytes_min    => undef, sel_file_bytes_max    => undef, sel_bytes_sum    => 0,
+            sel_count_occurrences      => 0, sel_count_min    => undef, sel_count_max    => undef, sel_count_sum    => 0,
         };
         my $filter_range_filter_initialized = 0;
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
@@ -10828,19 +10871,19 @@ sub read_and_process_logs {
                     $fd->{last_timestamp}  = $timestamp_epoch if !defined $fd->{last_timestamp}  || $timestamp_epoch > $fd->{last_timestamp};
                     $fd->{ts_precision} = 'ms' if $fractional_ms > 0 && $fd->{ts_precision} eq 's';
                     if (defined $duration) {
-                        $fd->{duration_count}++;
+                        $fd->{duration_occurrences}++;
                         $fd->{duration_sum} += $duration;
                         $fd->{duration_min} = $duration if !defined $fd->{duration_min} || $duration < $fd->{duration_min};
                         $fd->{duration_max} = $duration if !defined $fd->{duration_max} || $duration > $fd->{duration_max};
                     }
                     if (defined $bytes && $bytes > 0) {
-                        $fd->{bytes_count}++;
+                        $fd->{file_bytes_occurrences}++;
                         $fd->{bytes_sum} += $bytes;
-                        $fd->{bytes_min} = $bytes if !defined $fd->{bytes_min} || $bytes < $fd->{bytes_min};
-                        $fd->{bytes_max} = $bytes if !defined $fd->{bytes_max} || $bytes > $fd->{bytes_max};
+                        $fd->{file_bytes_min} = $bytes if !defined $fd->{file_bytes_min} || $bytes < $fd->{file_bytes_min};
+                        $fd->{file_bytes_max} = $bytes if !defined $fd->{file_bytes_max} || $bytes > $fd->{file_bytes_max};
                     }
                     if (defined $count) {
-                        $fd->{count_count}++;
+                        $fd->{count_occurrences}++;
                         $fd->{count_sum} += $count;
                         $fd->{count_min} = $count if !defined $fd->{count_min} || $count < $fd->{count_min};
                         $fd->{count_max} = $count if !defined $fd->{count_max} || $count > $fd->{count_max};
@@ -10922,19 +10965,19 @@ sub read_and_process_logs {
                     $fd->{sel_first_timestamp} = $timestamp_epoch if !defined $fd->{sel_first_timestamp} || $timestamp_epoch < $fd->{sel_first_timestamp};
                     $fd->{sel_last_timestamp}  = $timestamp_epoch if !defined $fd->{sel_last_timestamp}  || $timestamp_epoch > $fd->{sel_last_timestamp};
                     if (defined $duration) {
-                        $fd->{sel_duration_count}++;
+                        $fd->{sel_duration_occurrences}++;
                         $fd->{sel_duration_sum} += $duration;
                         $fd->{sel_duration_min} = $duration if !defined $fd->{sel_duration_min} || $duration < $fd->{sel_duration_min};
                         $fd->{sel_duration_max} = $duration if !defined $fd->{sel_duration_max} || $duration > $fd->{sel_duration_max};
                     }
                     if (defined $bytes && $bytes > 0) {
-                        $fd->{sel_bytes_count}++;
+                        $fd->{sel_file_bytes_occurrences}++;
                         $fd->{sel_bytes_sum} += $bytes;
-                        $fd->{sel_bytes_min} = $bytes if !defined $fd->{sel_bytes_min} || $bytes < $fd->{sel_bytes_min};
-                        $fd->{sel_bytes_max} = $bytes if !defined $fd->{sel_bytes_max} || $bytes > $fd->{sel_bytes_max};
+                        $fd->{sel_file_bytes_min} = $bytes if !defined $fd->{sel_file_bytes_min} || $bytes < $fd->{sel_file_bytes_min};
+                        $fd->{sel_file_bytes_max} = $bytes if !defined $fd->{sel_file_bytes_max} || $bytes > $fd->{sel_file_bytes_max};
                     }
                     if (defined $count) {
-                        $fd->{sel_count_count}++;
+                        $fd->{sel_count_occurrences}++;
                         $fd->{sel_count_sum} += $count;
                         $fd->{sel_count_min} = $count if !defined $fd->{sel_count_min} || $count < $fd->{sel_count_min};
                         $fd->{sel_count_max} = $count if !defined $fd->{sel_count_max} || $count > $fd->{sel_count_max};
@@ -11115,7 +11158,40 @@ sub read_and_process_logs {
                         });
 
                         $log_messages{$category}{$log_key}{occurrences}++;
-                        $log_messages{$category}{$log_key}{total_bytes} += $bytes if defined $bytes;
+
+                        # Bytes carries the same aggregate family as count (#432).
+                        # bytes_occurrences counts lines that actually carried a
+                        # bytes value: occurrences counts every matched line, so
+                        # dividing by it understates the mean on any log where some
+                        # matched lines have no bytes field.
+                        #
+                        # The entry reference is taken once and written through, and
+                        # the extrema are seeded on the first observation rather than
+                        # tested for definedness on every line. Measured at
+                        # +99 ns/line against +248 for the repeated-lookup,
+                        # test-every-line idiom below — see
+                        # tests/profile/results/432-bytes-parity-capture/analysis.md.
+                        #
+                        # `defined $bytes` is a true observation test HERE because this
+                        # block runs ahead of the `$bytes = 0 if !defined` coercion; the
+                        # per-bucket capture sits after it and gates on the saved
+                        # observation instead. Both admit a zero-byte response, so the
+                        # two surfaces count the same lines.
+                        # -ob discards the bytes metric, so nothing about it is
+                        # captured: not the total, not the family. A run that
+                        # discards a metric has nothing to rank on either, and -so
+                        # bytes falls back the same way any operand with no values
+                        # does.
+                        if( defined $bytes && !$omit_bytes ) {
+                            my $e = $log_messages{$category}{$log_key};
+                            $e->{total_bytes} += $bytes;
+                            if( $e->{bytes_occurrences}++ ) {
+                                $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
+                                $e->{bytes_max} = $bytes if $bytes > $e->{bytes_max};
+                            } else {
+                                $e->{bytes_min} = $e->{bytes_max} = $bytes;
+                            }
+                        }
 
                         if( defined $count ) {
                             $log_messages{$category}{$log_key}{count_sum} += $count if defined $count;
@@ -11252,6 +11328,13 @@ sub read_and_process_logs {
                     my $duration_observed = defined $duration;
                     $durations_observed = 1 if $durations_observed != 1 && $duration_observed;
 
+                    # Same for bytes (#432): the zero-default below makes
+                    # `defined $bytes` vacuously true for every later consumer, so the
+                    # observation has to be taken before the coercion. Without this a
+                    # line carrying no bytes field is indistinguishable from one
+                    # reporting a zero-byte response.
+                    my $bytes_observed_line = defined $bytes;
+
                     ## STATISTICAL DATA CAPTURE ##
                     $duration = 0 if !defined( $duration );
                     $bytes = 0 if !defined( $bytes );
@@ -11358,9 +11441,32 @@ sub read_and_process_logs {
                         }
                     }
 
-                    if( defined $bytes && $bytes ) {
-                        $log_analysis{$bucket}{total_bytes} += $bytes;
-                        $log_analysis{$bucket}{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;
+                    # Nothing about the bytes metric is captured under -ob (#432).
+                    #
+                    # The family is gated on the pre-coercion observation rather than
+                    # on the sum's truth test: a zero-byte response is a real
+                    # observation and belongs in the count and the extrema, though not
+                    # in the running total's `&& $bytes` guard, which is pre-existing.
+                    # Both scopes gate on the same condition, which is what makes the
+                    # two CSV surfaces count the same lines.
+                    #
+                    # $bytes_observed gates the STATS CSV columns and is set here
+                    # rather than once per line: a package-global read-compare-write
+                    # on every line measured ~1.5% of total runtime, for a flag that
+                    # only needs to know whether ANY line carried bytes.
+                    if( $bytes_observed_line && !$omit_bytes ) {
+                        $bytes_observed = 1;
+                        my $e = $log_analysis{$bucket};
+                        if( $bytes ) {
+                            $e->{total_bytes} += $bytes;
+                            $e->{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;
+                        }
+                        if( $e->{bytes_occurrences}++ ) {
+                            $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
+                            $e->{bytes_max} = $bytes if $bytes > $e->{bytes_max};
+                        } else {
+                            $e->{bytes_min} = $e->{bytes_max} = $bytes;
+                        }
                     }
 
                     if( defined $count ) {
@@ -12477,6 +12583,10 @@ sub calculate_all_statistics {
                 count_max     => $log_analysis{$bucket}{count_max},
                 count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? ($log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
                 count_sum     => $log_analysis{$bucket}{count_sum},
+                bytes_occurrences => $log_analysis{$bucket}{bytes_occurrences},
+                bytes_min     => $log_analysis{$bucket}{bytes_min},
+                bytes_max     => $log_analysis{$bucket}{bytes_max},
+                bytes_mean    => $log_analysis{$bucket}{bytes_occurrences} ? ($log_analysis{$bucket}{total_bytes} / $log_analysis{$bucket}{bytes_occurrences}) : undef,
                 %$stats,
             };
 
@@ -12494,7 +12604,11 @@ sub calculate_all_statistics {
                 count_min     => $log_analysis{$bucket}{count_min},
                 count_max     => $log_analysis{$bucket}{count_max},
                 count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? ($log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
-                count_sum     => $log_analysis{$bucket}{count_sum}
+                count_sum     => $log_analysis{$bucket}{count_sum},
+                bytes_occurrences => $log_analysis{$bucket}{bytes_occurrences},
+                bytes_min     => $log_analysis{$bucket}{bytes_min},
+                bytes_max     => $log_analysis{$bucket}{bytes_max},
+                bytes_mean    => $log_analysis{$bucket}{bytes_occurrences} ? ($log_analysis{$bucket}{total_bytes} / $log_analysis{$bucket}{bytes_occurrences}) : undef
             }
         }
 
@@ -12592,7 +12706,7 @@ sub calculate_all_statistics {
             # the entry by the time the comparator runs (#428), so ranking on
             # either compared undef against undef for every key and fell through
             # to the string tiebreaker — a "top N" in lexicographic order.
-            # mean_bytes is only ever computed as a display local in the message
+            # bytes_mean is only ever computed as a display local in the message
             # summary, after selection; count_mean is written by the group-calc
             # loop further down this sub, likewise after selection (and only for
             # the keys that already survived it). Both are ratios of fields the
@@ -12602,10 +12716,10 @@ sub calculate_all_statistics {
             # rounded display value — rounding at rank time would manufacture
             # ties. A key with no observations of the underlying metric is left
             # undef, which the comparator's // 0 handles.
-            if( $sort_key eq 'mean_bytes' ) {
+            if( $sort_key eq 'bytes_mean' ) {
                 foreach my $entry (values %{$log_messages{$category}}) {
-                    $entry->{mean_bytes} = ( defined $entry->{total_bytes} && $entry->{occurrences} )
-                        ? ( $entry->{total_bytes} / $entry->{occurrences} )
+                    $entry->{bytes_mean} = $entry->{bytes_occurrences}
+                        ? ( $entry->{total_bytes} / $entry->{bytes_occurrences} )
                         : undef;
                 }
             } elsif( $sort_key eq 'count_mean' ) {
@@ -13761,6 +13875,14 @@ sub stats_csv_duration_columns_active {
     return ($write_messages_to_csv && !$omit_durations && $durations_observed) ? 1 : 0;
 }
 
+# The same contract for the bytes aggregate family (#432). These columns are
+# CSV-only: the bytes metric renders as a single total in the terminal, and the
+# family exists for the CSV surfaces and -so, so nothing here reaches the
+# rendered layout.
+sub stats_csv_bytes_columns_active {
+    return ($write_messages_to_csv && !$omit_bytes && $bytes_observed) ? 1 : 0;
+}
+
 # Key function used to normalize data for output, graphing, and data scaling.
 sub normalize_data_for_output {
 
@@ -13974,8 +14096,11 @@ sub normalize_data_for_output {
 
     # Add CSV output columns for latency stats. @output_columns drives the CSV
     # header/data only here; the terminal render uses @column_layout.
+    if (stats_csv_bytes_columns_active()) {
+        push @output_columns, qw( bytes_occurrences bytes_min bytes_mean bytes_max );
+    }
     if (stats_csv_duration_columns_active()) {
-        push @output_columns, qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );
+        push @output_columns, qw( duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef );
     }
 
     foreach my $bucket (keys %log_occurrences) {
@@ -14834,9 +14959,21 @@ sub print_bar_graph {
             # so rows always match the header regardless of whether the latency
             # *display column* was auto-hidden by terminal width (Issue #263)
             # or replaced by the heatmap row on the terminal surface (Issue #289).
+            # The bytes aggregate family (#432), CSV-only like the duration stats
+            # below and under its own shared predicate. Pushed ahead of them to match
+            # the header order in normalize_data_for_output.
+            if( stats_csv_bytes_columns_active() ) {
+                foreach my $metric ( qw( occurrences min mean max ) ) {
+                    push @csv_data, format_csv_value( $log_stats{$bucket}{"bytes_${metric}"}, "bytes_${metric}" );
+                }
+            }
+
             if( stats_csv_duration_columns_active() ) {
+                # The storage keys are the bare statistic names; the CSV column names
+                # take the duration_ prefix (#432), so the value is looked up by the
+                # bare name and formatted under the prefixed one.
                 foreach my $stat ( qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef ) ) {
-                    push @csv_data, format_csv_value( $log_stats{$bucket}{$stat}, $stat );
+                    push @csv_data, format_csv_value( $log_stats{$bucket}{$stat}, "duration_${stat}" );
                 }
             }
 
@@ -15946,10 +16083,24 @@ sub print_message_summary {
                     my $count_mean = $log_messages{$grouping}{$key}{count_mean};
                     my $count_max = $log_messages{$grouping}{$key}{count_max};
                     my $count_sum = $log_messages{$grouping}{$key}{count_sum};
-                    my $total_bytes_num = $log_messages{$grouping}{$key}{total_bytes};
-                    my $total_bytes = format_bytes( $total_bytes_num,'B' );
-                    # BUG/ WRONG!!! below assumes all lines have bytes, but not really
-                    my $mean_bytes = int( $total_bytes_num / $occurrences + 0.5 ) if defined $total_bytes_num; 
+                    # total_bytes is 0-initialised at entry creation, so a message
+                    # whose lines never carried a bytes field would otherwise report
+                    # a measured zero. Gate the whole family on the observation count
+                    # (#432): no observation means no value, not a value of nothing.
+                    my $total_bytes_num = $log_messages{$grouping}{$key}{bytes_occurrences}
+                        ? $log_messages{$grouping}{$key}{total_bytes}
+                        : undef;
+                    my $total_bytes = defined $total_bytes_num ? format_bytes( $total_bytes_num,'B' ) : undef;
+                    my $bytes_occurrences = $log_messages{$grouping}{$key}{bytes_occurrences};
+                    my $bytes_min = $log_messages{$grouping}{$key}{bytes_min};
+                    my $bytes_max = $log_messages{$grouping}{$key}{bytes_max};
+                    # Divide by the lines that carried a bytes value, not by every
+                    # matched line: total_bytes is 0-initialised, so occurrences as
+                    # the divisor understates the mean wherever a message key mixes
+                    # lines with and without a bytes field (#432).
+                    my $bytes_mean = $bytes_occurrences
+                        ? int( $total_bytes_num / $bytes_occurrences + 0.5 )
+                        : undef;
                     my $min = $log_messages{$grouping}{$key}{min};
                     my $mean = $log_messages{$grouping}{$key}{mean};
                     my $max = $log_messages{$grouping}{$key}{max};
@@ -16027,7 +16178,10 @@ sub print_message_summary {
                             $grouping,
                             $key,
                             format_csv_value($occurrences,       'occurrences'),
-                            format_csv_value($mean_bytes,        'mean_bytes'),
+                            format_csv_value($bytes_occurrences, 'bytes_occurrences'),
+                            format_csv_value($bytes_min,         'bytes_min'),
+                            format_csv_value($bytes_mean,        'bytes_mean'),
+                            format_csv_value($bytes_max,         'bytes_max'),
                             format_csv_value($total_bytes_num,   'bytes'),
                             $total_bytes,
                             format_csv_value($count_occurrences, 'count_occurrences'),
@@ -16035,27 +16189,27 @@ sub print_message_summary {
                             format_csv_value($count_mean,        'count_mean'),
                             format_csv_value($count_max,         'count_max'),
                             format_csv_value($count_sum,         'count_sum'),
-                            format_csv_value($min,               'min'),
-                            format_csv_value($mean,              'mean'),
-                            format_csv_value($max,               'max'),
-                            format_csv_value($std_dev,           'std_dev'),
-                            format_csv_value($p1,                'p1'),
-                            format_csv_value($p5,                'p5'),
-                            format_csv_value($p10,               'p10'),
-                            format_csv_value($p25,               'p25'),
-                            format_csv_value($p50,               'p50'),
-                            format_csv_value($p75,               'p75'),
-                            format_csv_value($iqr,               'iqr'),
-                            format_csv_value($p90,               'p90'),
-                            format_csv_value($p95,               'p95'),
-                            format_csv_value($p99,               'p99'),
-                            format_csv_value($p999,              'p999'),
-                            format_csv_value($p9999,             'p9999'),
-                            format_csv_value($p99999,            'p99999'),
-                            format_csv_value($cv,                'cv'),
-                            format_csv_value($skewness,          'skewness'),
-                            format_csv_value($kurtosis,          'kurtosis'),
-                            format_csv_value($bimodality_coef,   'bimodality_coef'),
+                            format_csv_value($min,               'duration_min'),
+                            format_csv_value($mean,              'duration_mean'),
+                            format_csv_value($max,               'duration_max'),
+                            format_csv_value($std_dev,           'duration_std_dev'),
+                            format_csv_value($p1,                'duration_p1'),
+                            format_csv_value($p5,                'duration_p5'),
+                            format_csv_value($p10,               'duration_p10'),
+                            format_csv_value($p25,               'duration_p25'),
+                            format_csv_value($p50,               'duration_p50'),
+                            format_csv_value($p75,               'duration_p75'),
+                            format_csv_value($iqr,               'duration_iqr'),
+                            format_csv_value($p90,               'duration_p90'),
+                            format_csv_value($p95,               'duration_p95'),
+                            format_csv_value($p99,               'duration_p99'),
+                            format_csv_value($p999,              'duration_p999'),
+                            format_csv_value($p9999,             'duration_p9999'),
+                            format_csv_value($p99999,            'duration_p99999'),
+                            format_csv_value($cv,                'duration_cv'),
+                            format_csv_value($skewness,          'duration_skewness'),
+                            format_csv_value($kurtosis,          'duration_kurtosis'),
+                            format_csv_value($bimodality_coef,   'duration_bimodality_coef'),
                             format_csv_value($total_duration_num,'duration'),
                             $total_duration,
                             format_csv_value($impact,            'impact'),
@@ -16590,7 +16744,11 @@ sub pipeline_render {
                 push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
             }
         }
-        $csv->print($csv_fh, [qw(category message occurrences mean_bytes bytes bytes_nice count_occurrences count_min count_mean count_max count_sum min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef duration duration_nice impact), @udm_csv_headers]);
+        # Metric-first, aggregate-last throughout, matching the user-defined-metric
+        # convention (#432). The duration statistics take the duration_ prefix here
+        # even though the CLI keeps their bare spellings, so every column on this
+        # surface names its metric.
+        $csv->print($csv_fh, [qw(category message occurrences bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
     }
 
     print_message_summary();														                    # Print and write message summaries

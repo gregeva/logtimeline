@@ -255,15 +255,15 @@ anchor_normal() {
     local csv; csv=$(generate_and_run normal)
     check_capture_warnings normal
 
-    assert_in_band csv "$csv" column skewness lo -0.1 hi 0.1 \
+    assert_in_band csv "$csv" column duration_skewness lo -0.1 hi 0.1 \
         asserts     'A normal (symmetric) distribution has skewness ~0; ltl must report near-zero skewness for N(100,10)' \
         produced_by "$PRODUCED_BY" contract "$CONTRACT"
 
-    assert_in_band csv "$csv" column kurtosis lo -0.2 hi 0.2 \
+    assert_in_band csv "$csv" column duration_kurtosis lo -0.2 hi 0.2 \
         asserts     'A normal distribution has excess kurtosis ~0; ltl uses the Fisher (excess) convention so normal must read near zero' \
         produced_by "$PRODUCED_BY" contract "$CONTRACT"
 
-    assert_in_band csv "$csv" column bimodality_coef lo 0 hi 0.5549999 \
+    assert_in_band csv "$csv" column duration_bimodality_coef lo 0 hi 0.5549999 \
         asserts     'A unimodal distribution has bimodality_coef below the 0.555 (5/9) Sarle cutoff; ltl must not flag normal as multimodal' \
         produced_by "$PRODUCED_BY" contract "$CONTRACT"
 }
@@ -279,11 +279,11 @@ anchor_exponential() {
     local csv; csv=$(generate_and_run exponential)
     check_capture_warnings exponential
 
-    assert_in_band csv "$csv" column skewness lo 1.8 hi 2.2 \
+    assert_in_band csv "$csv" column duration_skewness lo 1.8 hi 2.2 \
         asserts     'An exponential distribution has skewness 2.0 (analytic); ltl must report ~2.0 for Exp(1)' \
         produced_by "$PRODUCED_BY" contract "$CONTRACT"
 
-    assert_in_band csv "$csv" column kurtosis lo 5.0 hi 7.0 \
+    assert_in_band csv "$csv" column duration_kurtosis lo 5.0 hi 7.0 \
         asserts     'An exponential distribution has excess kurtosis 6.0 (analytic); ltl must report ~6.0 for Exp(1)' \
         produced_by "$PRODUCED_BY" contract "$CONTRACT"
 }
@@ -299,15 +299,15 @@ anchor_bimodal() {
     local csv; csv=$(generate_and_run bimodal)
     check_capture_warnings bimodal
 
-    assert_in_band csv "$csv" column bimodality_coef lo 0.5550001 hi 1.0 \
+    assert_in_band csv "$csv" column duration_bimodality_coef lo 0.5550001 hi 1.0 \
         asserts     'A clearly bimodal distribution (two separated modes) has bimodality_coef above the 0.555 Sarle cutoff; ltl must flag it as suspect multimodal' \
         produced_by "$PRODUCED_BY" contract "$CONTRACT"
 
-    assert_in_band csv "$csv" column skewness lo 0.028 hi 0.128 \
+    assert_in_band csv "$csv" column duration_skewness lo 0.028 hi 0.128 \
         asserts     'The two equal-mass, separated modes are near-symmetric about the grand mean, giving small positive skewness; pinned from the seeded sample' \
         produced_by "$PRODUCED_BY" contract "$CONTRACT"
 
-    assert_in_band csv "$csv" column kurtosis lo -1.994 hi -1.794 \
+    assert_in_band csv "$csv" column duration_kurtosis lo -1.994 hi -1.794 \
         asserts     'Two separated equal-mass modes produce strongly platykurtic (negative excess kurtosis) shape; pinned from the seeded sample' \
         produced_by "$PRODUCED_BY" contract "$CONTRACT"
 }

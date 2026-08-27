@@ -190,12 +190,26 @@ The summary table is sorted by occurrence count by default. Use `-so` to rank me
 | `-so, --sort-on <field>` | Choose which metric to rank messages by in the summary. Valid values are grouped below. |
 | `-sa, --sort-ascending` | Reverse the sort order to show lowest values first |
 
+A bare metric name means that metric's total: `bytes` is the sum of bytes,
+`duration` the total duration, `count` the sum of the count metric. The other
+aggregates name the metric first and what is being aggregated second, so
+`bytes_mean` and `count_mean` read the same way.
+
 | Group | Values |
 |-------|--------|
-| Aggregates | `occurrences`, `duration` (alias `time`), `bytes` (alias `size`), `mean_bytes`, `count`, `count_occurrences`, `count_min`, `count_mean`, `count_max`, `impact` |
+| Totals | `bytes` (alias `size`), `duration` (alias `time`), `count`, `occurrences`, `impact` |
+| Bytes | `bytes_occurrences`, `bytes_min`, `bytes_mean`, `bytes_max` |
+| Count | `count_occurrences`, `count_min`, `count_mean`, `count_max` |
 | Latency stats | `min`, `mean` (alias `avg`), `max`, `stddev` (alias `std_dev`), `cv` |
 | Percentile latency | `p1`, `p5`, `p10`, `p25`, `p50`, `p75`, `p90`, `p95`, `p99`, `p999`, `p9999`, `p99999` |
 | Distribution shape | `iqr`, `skewness`, `kurtosis`, `bimodality_coef` |
+
+The latency values rank on duration, which is the tool's subject, so they are
+spelled bare. Each also accepts a `duration_` prefix — `duration_p95` is
+`p95` — for consistency with the other metric families.
+
+`occurrences` counts the messages that matched; `bytes_occurrences` counts only
+those lines that carried a bytes value, which is what `bytes_mean` divides by.
 
 ```bash
 # Rank messages by total duration (heaviest hitters)
