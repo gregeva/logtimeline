@@ -20,9 +20,12 @@ merged. Both are `full` tier, 45 cases, captured 2026-08-27 back to back:
 | `dev-virtualized-v0.17.0-code.tsv` | tag `v0.17.0` | `0f15e6c6ecf3dff3` |
 | `dev-virtualized-v0.18.0-pre-stage4.tsv` | `084c2ed` (merged as `48d446b`), stages 1–3 | `f799f6ad414c84bf` |
 
-Both were captured before `release/0.18.0` was version-stamped to `0.18.0`, so both
-report `version 0.17.0` and the pre-stage4 file's `ltl` differs from the current
-branch tip by that one line. Captures taken from here on identify themselves.
+Each file's `version` field matches the code it holds, so the pair is self-identifying
+from the inside and not only by filename. Both were captured before
+`release/0.18.0` was version-stamped, so the pre-stage4 file's recorded `version` was
+corrected in place afterwards — 45 rows, the version field only. Its `ltl` sha256
+above is the build as captured, which differs from the branch tip by that one
+version line.
 
 **Gate stage 4 against `dev-virtualized-v0.18.0-pre-stage4.tsv`** — it is the
 immediate predecessor, so a difference is the change. The v0.17.0-code file is what

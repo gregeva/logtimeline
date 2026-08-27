@@ -1,5 +1,5 @@
 test_name	options	metric_type	metric_name	value
-humungous-log-uniqueness-standard		version	0.17.0
+humungous-log-uniqueness-standard		version	0.18.0
 humungous-log-uniqueness-standard		FILES	logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
 humungous-log-uniqueness-standard		lines_read	288025
 humungous-log-uniqueness-standard		lines_included	288025
@@ -74,7 +74,7 @@ humungous-log-uniqueness-standard		CONFIG	terminal_height	24
 humungous-log-uniqueness-standard		CONFIG	max_log_message_length	200
 humungous-log-uniqueness-standard		CONFIG	time_bucket_size	60
 humungous-log-uniqueness-standard		CONFIG	bucket_size_seconds	3600.00
-humungous-log-uniqueness-top25	-n 25	version	0.17.0
+humungous-log-uniqueness-top25	-n 25	version	0.18.0
 humungous-log-uniqueness-top25	-n 25	FILES	logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
 humungous-log-uniqueness-top25	-n 25	lines_read	288025
 humungous-log-uniqueness-top25	-n 25	lines_included	288025
@@ -149,7 +149,7 @@ humungous-log-uniqueness-top25	-n 25	CONFIG	terminal_height	24
 humungous-log-uniqueness-top25	-n 25	CONFIG	max_log_message_length	200
 humungous-log-uniqueness-top25	-n 25	CONFIG	time_bucket_size	60
 humungous-log-uniqueness-top25	-n 25	CONFIG	bucket_size_seconds	3600.00
-humungous-log-uniqueness-top25-consolidate	-n 25 -g	version	0.17.0
+humungous-log-uniqueness-top25-consolidate	-n 25 -g	version	0.18.0
 humungous-log-uniqueness-top25-consolidate	-n 25 -g	FILES	logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
 humungous-log-uniqueness-top25-consolidate	-n 25 -g	lines_read	288025
 humungous-log-uniqueness-top25-consolidate	-n 25 -g	lines_included	288025
@@ -224,7 +224,7 @@ humungous-log-uniqueness-top25-consolidate	-n 25 -g	CONFIG	terminal_height	24
 humungous-log-uniqueness-top25-consolidate	-n 25 -g	CONFIG	max_log_message_length	200
 humungous-log-uniqueness-top25-consolidate	-n 25 -g	CONFIG	time_bucket_size	60
 humungous-log-uniqueness-top25-consolidate	-n 25 -g	CONFIG	bucket_size_seconds	3600.00
-humungous-log-uniqueness-heatmap	-hm	version	0.17.0
+humungous-log-uniqueness-heatmap	-hm	version	0.18.0
 humungous-log-uniqueness-heatmap	-hm	FILES	logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
 humungous-log-uniqueness-heatmap	-hm	lines_read	288025
 humungous-log-uniqueness-heatmap	-hm	lines_included	288025
@@ -299,7 +299,7 @@ humungous-log-uniqueness-heatmap	-hm	CONFIG	terminal_height	24
 humungous-log-uniqueness-heatmap	-hm	CONFIG	max_log_message_length	200
 humungous-log-uniqueness-heatmap	-hm	CONFIG	time_bucket_size	60
 humungous-log-uniqueness-heatmap	-hm	CONFIG	bucket_size_seconds	3600.00
-humungous-log-uniqueness-histogram	-hg	version	0.17.0
+humungous-log-uniqueness-histogram	-hg	version	0.18.0
 humungous-log-uniqueness-histogram	-hg	FILES	logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
 humungous-log-uniqueness-histogram	-hg	lines_read	288025
 humungous-log-uniqueness-histogram	-hg	lines_included	288025
@@ -374,7 +374,7 @@ humungous-log-uniqueness-histogram	-hg	CONFIG	terminal_height	24
 humungous-log-uniqueness-histogram	-hg	CONFIG	max_log_message_length	200
 humungous-log-uniqueness-histogram	-hg	CONFIG	time_bucket_size	60
 humungous-log-uniqueness-histogram	-hg	CONFIG	bucket_size_seconds	3600.00
-humungous-log-uniqueness-heatmap-histogram	-hm -hg	version	0.17.0
+humungous-log-uniqueness-heatmap-histogram	-hm -hg	version	0.18.0
 humungous-log-uniqueness-heatmap-histogram	-hm -hg	FILES	logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
 humungous-log-uniqueness-heatmap-histogram	-hm -hg	lines_read	288025
 humungous-log-uniqueness-heatmap-histogram	-hm -hg	lines_included	288025
@@ -449,7 +449,7 @@ humungous-log-uniqueness-heatmap-histogram	-hm -hg	CONFIG	terminal_height	24
 humungous-log-uniqueness-heatmap-histogram	-hm -hg	CONFIG	max_log_message_length	200
 humungous-log-uniqueness-heatmap-histogram	-hm -hg	CONFIG	time_bucket_size	60
 humungous-log-uniqueness-heatmap-histogram	-hm -hg	CONFIG	bucket_size_seconds	3600.00
-humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	version	0.17.0
+humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	version	0.18.0
 humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	FILES	logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
 humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	lines_read	288025
 humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	lines_included	288025
@@ -524,7 +524,7 @@ humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	termina
 humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	max_log_message_length	200
 humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	time_bucket_size	60
 humungous-log-uniqueness-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	bucket_size_seconds	3600.00
-humungous-log-uniqueness-sort-p99	-so p99	version	0.17.0
+humungous-log-uniqueness-sort-p99	-so p99	version	0.18.0
 humungous-log-uniqueness-sort-p99	-so p99	FILES	logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
 humungous-log-uniqueness-sort-p99	-so p99	lines_read	288025
 humungous-log-uniqueness-sort-p99	-so p99	lines_included	288025
@@ -599,7 +599,7 @@ humungous-log-uniqueness-sort-p99	-so p99	CONFIG	terminal_height	24
 humungous-log-uniqueness-sort-p99	-so p99	CONFIG	max_log_message_length	200
 humungous-log-uniqueness-sort-p99	-so p99	CONFIG	time_bucket_size	60
 humungous-log-uniqueness-sort-p99	-so p99	CONFIG	bucket_size_seconds	3600.00
-humungous-log-uniqueness-sort-skewness	-so skewness	version	0.17.0
+humungous-log-uniqueness-sort-skewness	-so skewness	version	0.18.0
 humungous-log-uniqueness-sort-skewness	-so skewness	FILES	logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log	101746807
 humungous-log-uniqueness-sort-skewness	-so skewness	lines_read	288025
 humungous-log-uniqueness-sort-skewness	-so skewness	lines_included	288025
@@ -674,7 +674,7 @@ humungous-log-uniqueness-sort-skewness	-so skewness	CONFIG	terminal_height	24
 humungous-log-uniqueness-sort-skewness	-so skewness	CONFIG	max_log_message_length	200
 humungous-log-uniqueness-sort-skewness	-so skewness	CONFIG	time_bucket_size	60
 humungous-log-uniqueness-sort-skewness	-so skewness	CONFIG	bucket_size_seconds	3600.00
-single-day-application-log-standard		version	0.17.0
+single-day-application-log-standard		version	0.18.0
 single-day-application-log-standard		FILES	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
 single-day-application-log-standard		lines_read	479904
 single-day-application-log-standard		lines_included	479904
@@ -749,7 +749,7 @@ single-day-application-log-standard		CONFIG	terminal_height	24
 single-day-application-log-standard		CONFIG	max_log_message_length	200
 single-day-application-log-standard		CONFIG	time_bucket_size	60
 single-day-application-log-standard		CONFIG	bucket_size_seconds	3600.00
-single-day-application-log-top25	-n 25	version	0.17.0
+single-day-application-log-top25	-n 25	version	0.18.0
 single-day-application-log-top25	-n 25	FILES	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
 single-day-application-log-top25	-n 25	lines_read	479904
 single-day-application-log-top25	-n 25	lines_included	479904
@@ -824,7 +824,7 @@ single-day-application-log-top25	-n 25	CONFIG	terminal_height	24
 single-day-application-log-top25	-n 25	CONFIG	max_log_message_length	200
 single-day-application-log-top25	-n 25	CONFIG	time_bucket_size	60
 single-day-application-log-top25	-n 25	CONFIG	bucket_size_seconds	3600.00
-single-day-application-log-top25-consolidate	-n 25 -g	version	0.17.0
+single-day-application-log-top25-consolidate	-n 25 -g	version	0.18.0
 single-day-application-log-top25-consolidate	-n 25 -g	FILES	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
 single-day-application-log-top25-consolidate	-n 25 -g	lines_read	479904
 single-day-application-log-top25-consolidate	-n 25 -g	lines_included	479904
@@ -899,7 +899,7 @@ single-day-application-log-top25-consolidate	-n 25 -g	CONFIG	terminal_height	24
 single-day-application-log-top25-consolidate	-n 25 -g	CONFIG	max_log_message_length	200
 single-day-application-log-top25-consolidate	-n 25 -g	CONFIG	time_bucket_size	60
 single-day-application-log-top25-consolidate	-n 25 -g	CONFIG	bucket_size_seconds	3600.00
-single-day-application-log-heatmap	-hm	version	0.17.0
+single-day-application-log-heatmap	-hm	version	0.18.0
 single-day-application-log-heatmap	-hm	FILES	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
 single-day-application-log-heatmap	-hm	lines_read	479904
 single-day-application-log-heatmap	-hm	lines_included	479904
@@ -974,7 +974,7 @@ single-day-application-log-heatmap	-hm	CONFIG	terminal_height	24
 single-day-application-log-heatmap	-hm	CONFIG	max_log_message_length	200
 single-day-application-log-heatmap	-hm	CONFIG	time_bucket_size	60
 single-day-application-log-heatmap	-hm	CONFIG	bucket_size_seconds	3600.00
-single-day-application-log-histogram	-hg	version	0.17.0
+single-day-application-log-histogram	-hg	version	0.18.0
 single-day-application-log-histogram	-hg	FILES	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
 single-day-application-log-histogram	-hg	lines_read	479904
 single-day-application-log-histogram	-hg	lines_included	479904
@@ -1049,7 +1049,7 @@ single-day-application-log-histogram	-hg	CONFIG	terminal_height	24
 single-day-application-log-histogram	-hg	CONFIG	max_log_message_length	200
 single-day-application-log-histogram	-hg	CONFIG	time_bucket_size	60
 single-day-application-log-histogram	-hg	CONFIG	bucket_size_seconds	3600.00
-single-day-application-log-heatmap-histogram	-hm -hg	version	0.17.0
+single-day-application-log-heatmap-histogram	-hm -hg	version	0.18.0
 single-day-application-log-heatmap-histogram	-hm -hg	FILES	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
 single-day-application-log-heatmap-histogram	-hm -hg	lines_read	479904
 single-day-application-log-heatmap-histogram	-hm -hg	lines_included	479904
@@ -1124,7 +1124,7 @@ single-day-application-log-heatmap-histogram	-hm -hg	CONFIG	terminal_height	24
 single-day-application-log-heatmap-histogram	-hm -hg	CONFIG	max_log_message_length	200
 single-day-application-log-heatmap-histogram	-hm -hg	CONFIG	time_bucket_size	60
 single-day-application-log-heatmap-histogram	-hm -hg	CONFIG	bucket_size_seconds	3600.00
-single-day-application-log-heatmap-histogram-consolidate	-hm -hg -g	version	0.17.0
+single-day-application-log-heatmap-histogram-consolidate	-hm -hg -g	version	0.18.0
 single-day-application-log-heatmap-histogram-consolidate	-hm -hg -g	FILES	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
 single-day-application-log-heatmap-histogram-consolidate	-hm -hg -g	lines_read	479904
 single-day-application-log-heatmap-histogram-consolidate	-hm -hg -g	lines_included	479904
@@ -1199,7 +1199,7 @@ single-day-application-log-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	termi
 single-day-application-log-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	max_log_message_length	200
 single-day-application-log-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	time_bucket_size	60
 single-day-application-log-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	bucket_size_seconds	3600.00
-single-day-application-log-sort-p99	-so p99	version	0.17.0
+single-day-application-log-sort-p99	-so p99	version	0.18.0
 single-day-application-log-sort-p99	-so p99	FILES	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
 single-day-application-log-sort-p99	-so p99	lines_read	479904
 single-day-application-log-sort-p99	-so p99	lines_included	479904
@@ -1274,7 +1274,7 @@ single-day-application-log-sort-p99	-so p99	CONFIG	terminal_height	24
 single-day-application-log-sort-p99	-so p99	CONFIG	max_log_message_length	200
 single-day-application-log-sort-p99	-so p99	CONFIG	time_bucket_size	60
 single-day-application-log-sort-p99	-so p99	CONFIG	bucket_size_seconds	3600.00
-single-day-application-log-sort-skewness	-so skewness	version	0.17.0
+single-day-application-log-sort-skewness	-so skewness	version	0.18.0
 single-day-application-log-sort-skewness	-so skewness	FILES	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
 single-day-application-log-sort-skewness	-so skewness	lines_read	479904
 single-day-application-log-sort-skewness	-so skewness	lines_included	479904
@@ -1349,7 +1349,7 @@ single-day-application-log-sort-skewness	-so skewness	CONFIG	terminal_height	24
 single-day-application-log-sort-skewness	-so skewness	CONFIG	max_log_message_length	200
 single-day-application-log-sort-skewness	-so skewness	CONFIG	time_bucket_size	60
 single-day-application-log-sort-skewness	-so skewness	CONFIG	bucket_size_seconds	3600.00
-multi-day-application-logs-standard	-bs 480	version	0.17.0
+multi-day-application-logs-standard	-bs 480	version	0.18.0
 multi-day-application-logs-standard	-bs 480	FILES	logs/ThingworxLogs/archives/ApplicationLog.2026-01-16.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-17.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-18.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.10.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.11.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.12.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.13.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.14.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.15.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.16.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.17.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.7.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.8.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.9.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-21.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-22.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-23.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-24.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-25.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-26.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-27.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-28.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-29.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-30.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-31.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-01.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-02.0.log	329814559
 multi-day-application-logs-standard	-bs 480	lines_read	930031
 multi-day-application-logs-standard	-bs 480	lines_included	930028
@@ -1424,7 +1424,7 @@ multi-day-application-logs-standard	-bs 480	CONFIG	terminal_height	24
 multi-day-application-logs-standard	-bs 480	CONFIG	max_log_message_length	200
 multi-day-application-logs-standard	-bs 480	CONFIG	time_bucket_size	480
 multi-day-application-logs-standard	-bs 480	CONFIG	bucket_size_seconds	28800.00
-multi-day-application-logs-top25	-bs 480 -n 25	version	0.17.0
+multi-day-application-logs-top25	-bs 480 -n 25	version	0.18.0
 multi-day-application-logs-top25	-bs 480 -n 25	FILES	logs/ThingworxLogs/archives/ApplicationLog.2026-01-16.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-17.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-18.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.10.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.11.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.12.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.13.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.14.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.15.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.16.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.17.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.7.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.8.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.9.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-21.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-22.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-23.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-24.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-25.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-26.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-27.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-28.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-29.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-30.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-31.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-01.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-02.0.log	329814559
 multi-day-application-logs-top25	-bs 480 -n 25	lines_read	930031
 multi-day-application-logs-top25	-bs 480 -n 25	lines_included	930028
@@ -1499,7 +1499,7 @@ multi-day-application-logs-top25	-bs 480 -n 25	CONFIG	terminal_height	24
 multi-day-application-logs-top25	-bs 480 -n 25	CONFIG	max_log_message_length	200
 multi-day-application-logs-top25	-bs 480 -n 25	CONFIG	time_bucket_size	480
 multi-day-application-logs-top25	-bs 480 -n 25	CONFIG	bucket_size_seconds	28800.00
-multi-day-application-logs-top25-consolidate	-bs 480 -n 25 -g	version	0.17.0
+multi-day-application-logs-top25-consolidate	-bs 480 -n 25 -g	version	0.18.0
 multi-day-application-logs-top25-consolidate	-bs 480 -n 25 -g	FILES	logs/ThingworxLogs/archives/ApplicationLog.2026-01-16.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-17.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-18.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.10.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.11.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.12.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.13.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.14.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.15.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.16.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.17.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.7.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.8.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.9.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-21.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-22.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-23.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-24.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-25.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-26.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-27.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-28.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-29.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-30.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-31.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-01.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-02.0.log	329814559
 multi-day-application-logs-top25-consolidate	-bs 480 -n 25 -g	lines_read	930031
 multi-day-application-logs-top25-consolidate	-bs 480 -n 25 -g	lines_included	930028
@@ -1574,7 +1574,7 @@ multi-day-application-logs-top25-consolidate	-bs 480 -n 25 -g	CONFIG	terminal_he
 multi-day-application-logs-top25-consolidate	-bs 480 -n 25 -g	CONFIG	max_log_message_length	200
 multi-day-application-logs-top25-consolidate	-bs 480 -n 25 -g	CONFIG	time_bucket_size	480
 multi-day-application-logs-top25-consolidate	-bs 480 -n 25 -g	CONFIG	bucket_size_seconds	28800.00
-multi-day-application-logs-heatmap	-bs 480 -hm	version	0.17.0
+multi-day-application-logs-heatmap	-bs 480 -hm	version	0.18.0
 multi-day-application-logs-heatmap	-bs 480 -hm	FILES	logs/ThingworxLogs/archives/ApplicationLog.2026-01-16.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-17.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-18.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.10.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.11.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.12.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.13.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.14.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.15.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.16.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.17.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.7.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.8.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.9.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-21.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-22.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-23.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-24.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-25.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-26.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-27.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-28.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-29.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-30.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-31.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-01.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-02.0.log	329814559
 multi-day-application-logs-heatmap	-bs 480 -hm	lines_read	930031
 multi-day-application-logs-heatmap	-bs 480 -hm	lines_included	930028
@@ -1649,7 +1649,7 @@ multi-day-application-logs-heatmap	-bs 480 -hm	CONFIG	terminal_height	24
 multi-day-application-logs-heatmap	-bs 480 -hm	CONFIG	max_log_message_length	200
 multi-day-application-logs-heatmap	-bs 480 -hm	CONFIG	time_bucket_size	480
 multi-day-application-logs-heatmap	-bs 480 -hm	CONFIG	bucket_size_seconds	28800.00
-multi-day-application-logs-histogram	-bs 480 -hg	version	0.17.0
+multi-day-application-logs-histogram	-bs 480 -hg	version	0.18.0
 multi-day-application-logs-histogram	-bs 480 -hg	FILES	logs/ThingworxLogs/archives/ApplicationLog.2026-01-16.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-17.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-18.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.10.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.11.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.12.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.13.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.14.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.15.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.16.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.17.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.7.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.8.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.9.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-21.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-22.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-23.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-24.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-25.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-26.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-27.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-28.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-29.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-30.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-31.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-01.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-02.0.log	329814559
 multi-day-application-logs-histogram	-bs 480 -hg	lines_read	930031
 multi-day-application-logs-histogram	-bs 480 -hg	lines_included	930028
@@ -1724,7 +1724,7 @@ multi-day-application-logs-histogram	-bs 480 -hg	CONFIG	terminal_height	24
 multi-day-application-logs-histogram	-bs 480 -hg	CONFIG	max_log_message_length	200
 multi-day-application-logs-histogram	-bs 480 -hg	CONFIG	time_bucket_size	480
 multi-day-application-logs-histogram	-bs 480 -hg	CONFIG	bucket_size_seconds	28800.00
-multi-day-application-logs-heatmap-histogram	-bs 480 -hm -hg	version	0.17.0
+multi-day-application-logs-heatmap-histogram	-bs 480 -hm -hg	version	0.18.0
 multi-day-application-logs-heatmap-histogram	-bs 480 -hm -hg	FILES	logs/ThingworxLogs/archives/ApplicationLog.2026-01-16.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-17.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-18.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.10.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.11.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.12.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.13.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.14.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.15.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.16.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.17.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.7.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.8.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.9.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-21.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-22.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-23.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-24.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-25.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-26.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-27.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-28.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-29.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-30.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-31.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-01.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-02.0.log	329814559
 multi-day-application-logs-heatmap-histogram	-bs 480 -hm -hg	lines_read	930031
 multi-day-application-logs-heatmap-histogram	-bs 480 -hm -hg	lines_included	930028
@@ -1799,7 +1799,7 @@ multi-day-application-logs-heatmap-histogram	-bs 480 -hm -hg	CONFIG	terminal_hei
 multi-day-application-logs-heatmap-histogram	-bs 480 -hm -hg	CONFIG	max_log_message_length	200
 multi-day-application-logs-heatmap-histogram	-bs 480 -hm -hg	CONFIG	time_bucket_size	480
 multi-day-application-logs-heatmap-histogram	-bs 480 -hm -hg	CONFIG	bucket_size_seconds	28800.00
-multi-day-application-logs-heatmap-histogram-consolidate	-bs 480 -hm -hg -g	version	0.17.0
+multi-day-application-logs-heatmap-histogram-consolidate	-bs 480 -hm -hg -g	version	0.18.0
 multi-day-application-logs-heatmap-histogram-consolidate	-bs 480 -hm -hg -g	FILES	logs/ThingworxLogs/archives/ApplicationLog.2026-01-16.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-17.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-18.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.10.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.11.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.12.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.13.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.14.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.15.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.16.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.17.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.7.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.8.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.9.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-21.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-22.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-23.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-24.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-25.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-26.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-27.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-28.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-29.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-30.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-31.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-01.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-02.0.log	329814559
 multi-day-application-logs-heatmap-histogram-consolidate	-bs 480 -hm -hg -g	lines_read	930031
 multi-day-application-logs-heatmap-histogram-consolidate	-bs 480 -hm -hg -g	lines_included	930028
@@ -1874,7 +1874,7 @@ multi-day-application-logs-heatmap-histogram-consolidate	-bs 480 -hm -hg -g	CONF
 multi-day-application-logs-heatmap-histogram-consolidate	-bs 480 -hm -hg -g	CONFIG	max_log_message_length	200
 multi-day-application-logs-heatmap-histogram-consolidate	-bs 480 -hm -hg -g	CONFIG	time_bucket_size	480
 multi-day-application-logs-heatmap-histogram-consolidate	-bs 480 -hm -hg -g	CONFIG	bucket_size_seconds	28800.00
-multi-day-application-logs-sort-p99	-bs 480 -so p99	version	0.17.0
+multi-day-application-logs-sort-p99	-bs 480 -so p99	version	0.18.0
 multi-day-application-logs-sort-p99	-bs 480 -so p99	FILES	logs/ThingworxLogs/archives/ApplicationLog.2026-01-16.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-17.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-18.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.10.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.11.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.12.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.13.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.14.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.15.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.16.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.17.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.7.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.8.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.9.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-21.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-22.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-23.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-24.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-25.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-26.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-27.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-28.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-29.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-30.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-31.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-01.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-02.0.log	329814559
 multi-day-application-logs-sort-p99	-bs 480 -so p99	lines_read	930031
 multi-day-application-logs-sort-p99	-bs 480 -so p99	lines_included	930028
@@ -1949,7 +1949,7 @@ multi-day-application-logs-sort-p99	-bs 480 -so p99	CONFIG	terminal_height	24
 multi-day-application-logs-sort-p99	-bs 480 -so p99	CONFIG	max_log_message_length	200
 multi-day-application-logs-sort-p99	-bs 480 -so p99	CONFIG	time_bucket_size	480
 multi-day-application-logs-sort-p99	-bs 480 -so p99	CONFIG	bucket_size_seconds	28800.00
-multi-day-application-logs-sort-skewness	-bs 480 -so skewness	version	0.17.0
+multi-day-application-logs-sort-skewness	-bs 480 -so skewness	version	0.18.0
 multi-day-application-logs-sort-skewness	-bs 480 -so skewness	FILES	logs/ThingworxLogs/archives/ApplicationLog.2026-01-16.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-17.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-18.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-19.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.1.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.10.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.11.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.12.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.13.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.14.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.15.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.16.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.17.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.2.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.3.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.4.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.5.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.6.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.7.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.8.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-20.9.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-21.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-22.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-23.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-24.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-25.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-26.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-27.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-28.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-29.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-30.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-01-31.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-01.0.log;logs/ThingworxLogs/archives/ApplicationLog.2026-02-02.0.log	329814559
 multi-day-application-logs-sort-skewness	-bs 480 -so skewness	lines_read	930031
 multi-day-application-logs-sort-skewness	-bs 480 -so skewness	lines_included	930028
@@ -2024,7 +2024,7 @@ multi-day-application-logs-sort-skewness	-bs 480 -so skewness	CONFIG	terminal_he
 multi-day-application-logs-sort-skewness	-bs 480 -so skewness	CONFIG	max_log_message_length	200
 multi-day-application-logs-sort-skewness	-bs 480 -so skewness	CONFIG	time_bucket_size	480
 multi-day-application-logs-sort-skewness	-bs 480 -so skewness	CONFIG	bucket_size_seconds	28800.00
-multi-day-custom-logs-standard		version	0.17.0
+multi-day-custom-logs-standard		version	0.18.0
 multi-day-custom-logs-standard		FILES	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log	485559953
 multi-day-custom-logs-standard		lines_read	1530399
 multi-day-custom-logs-standard		lines_included	1530399
@@ -2099,7 +2099,7 @@ multi-day-custom-logs-standard		CONFIG	terminal_height	24
 multi-day-custom-logs-standard		CONFIG	max_log_message_length	200
 multi-day-custom-logs-standard		CONFIG	time_bucket_size	60
 multi-day-custom-logs-standard		CONFIG	bucket_size_seconds	3600.00
-multi-day-custom-logs-top25	-n 25	version	0.17.0
+multi-day-custom-logs-top25	-n 25	version	0.18.0
 multi-day-custom-logs-top25	-n 25	FILES	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log	485559953
 multi-day-custom-logs-top25	-n 25	lines_read	1530399
 multi-day-custom-logs-top25	-n 25	lines_included	1530399
@@ -2174,7 +2174,7 @@ multi-day-custom-logs-top25	-n 25	CONFIG	terminal_height	24
 multi-day-custom-logs-top25	-n 25	CONFIG	max_log_message_length	200
 multi-day-custom-logs-top25	-n 25	CONFIG	time_bucket_size	60
 multi-day-custom-logs-top25	-n 25	CONFIG	bucket_size_seconds	3600.00
-multi-day-custom-logs-top25-consolidate	-n 25 -g	version	0.17.0
+multi-day-custom-logs-top25-consolidate	-n 25 -g	version	0.18.0
 multi-day-custom-logs-top25-consolidate	-n 25 -g	FILES	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log	485559953
 multi-day-custom-logs-top25-consolidate	-n 25 -g	lines_read	1530399
 multi-day-custom-logs-top25-consolidate	-n 25 -g	lines_included	1530399
@@ -2249,7 +2249,7 @@ multi-day-custom-logs-top25-consolidate	-n 25 -g	CONFIG	terminal_height	24
 multi-day-custom-logs-top25-consolidate	-n 25 -g	CONFIG	max_log_message_length	200
 multi-day-custom-logs-top25-consolidate	-n 25 -g	CONFIG	time_bucket_size	60
 multi-day-custom-logs-top25-consolidate	-n 25 -g	CONFIG	bucket_size_seconds	3600.00
-multi-day-custom-logs-heatmap	-hm	version	0.17.0
+multi-day-custom-logs-heatmap	-hm	version	0.18.0
 multi-day-custom-logs-heatmap	-hm	FILES	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log	485559953
 multi-day-custom-logs-heatmap	-hm	lines_read	1530399
 multi-day-custom-logs-heatmap	-hm	lines_included	1530399
@@ -2324,7 +2324,7 @@ multi-day-custom-logs-heatmap	-hm	CONFIG	terminal_height	24
 multi-day-custom-logs-heatmap	-hm	CONFIG	max_log_message_length	200
 multi-day-custom-logs-heatmap	-hm	CONFIG	time_bucket_size	60
 multi-day-custom-logs-heatmap	-hm	CONFIG	bucket_size_seconds	3600.00
-multi-day-custom-logs-histogram	-hg	version	0.17.0
+multi-day-custom-logs-histogram	-hg	version	0.18.0
 multi-day-custom-logs-histogram	-hg	FILES	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log	485559953
 multi-day-custom-logs-histogram	-hg	lines_read	1530399
 multi-day-custom-logs-histogram	-hg	lines_included	1530399
@@ -2399,7 +2399,7 @@ multi-day-custom-logs-histogram	-hg	CONFIG	terminal_height	24
 multi-day-custom-logs-histogram	-hg	CONFIG	max_log_message_length	200
 multi-day-custom-logs-histogram	-hg	CONFIG	time_bucket_size	60
 multi-day-custom-logs-histogram	-hg	CONFIG	bucket_size_seconds	3600.00
-multi-day-custom-logs-heatmap-histogram	-hm -hg	version	0.17.0
+multi-day-custom-logs-heatmap-histogram	-hm -hg	version	0.18.0
 multi-day-custom-logs-heatmap-histogram	-hm -hg	FILES	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log	485559953
 multi-day-custom-logs-heatmap-histogram	-hm -hg	lines_read	1530399
 multi-day-custom-logs-heatmap-histogram	-hm -hg	lines_included	1530399
@@ -2474,7 +2474,7 @@ multi-day-custom-logs-heatmap-histogram	-hm -hg	CONFIG	terminal_height	24
 multi-day-custom-logs-heatmap-histogram	-hm -hg	CONFIG	max_log_message_length	200
 multi-day-custom-logs-heatmap-histogram	-hm -hg	CONFIG	time_bucket_size	60
 multi-day-custom-logs-heatmap-histogram	-hm -hg	CONFIG	bucket_size_seconds	3600.00
-multi-day-custom-logs-heatmap-histogram-consolidate	-hm -hg -g	version	0.17.0
+multi-day-custom-logs-heatmap-histogram-consolidate	-hm -hg -g	version	0.18.0
 multi-day-custom-logs-heatmap-histogram-consolidate	-hm -hg -g	FILES	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log	485559953
 multi-day-custom-logs-heatmap-histogram-consolidate	-hm -hg -g	lines_read	1530399
 multi-day-custom-logs-heatmap-histogram-consolidate	-hm -hg -g	lines_included	1530399
@@ -2549,7 +2549,7 @@ multi-day-custom-logs-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	terminal_h
 multi-day-custom-logs-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	max_log_message_length	200
 multi-day-custom-logs-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	time_bucket_size	60
 multi-day-custom-logs-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	bucket_size_seconds	3600.00
-multi-day-custom-logs-sort-p99	-so p99	version	0.17.0
+multi-day-custom-logs-sort-p99	-so p99	version	0.18.0
 multi-day-custom-logs-sort-p99	-so p99	FILES	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log	485559953
 multi-day-custom-logs-sort-p99	-so p99	lines_read	1530399
 multi-day-custom-logs-sort-p99	-so p99	lines_included	1530399
@@ -2624,7 +2624,7 @@ multi-day-custom-logs-sort-p99	-so p99	CONFIG	terminal_height	24
 multi-day-custom-logs-sort-p99	-so p99	CONFIG	max_log_message_length	200
 multi-day-custom-logs-sort-p99	-so p99	CONFIG	time_bucket_size	60
 multi-day-custom-logs-sort-p99	-so p99	CONFIG	bucket_size_seconds	3600.00
-multi-day-custom-logs-sort-skewness	-so skewness	version	0.17.0
+multi-day-custom-logs-sort-skewness	-so skewness	version	0.18.0
 multi-day-custom-logs-sort-skewness	-so skewness	FILES	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log	485559953
 multi-day-custom-logs-sort-skewness	-so skewness	lines_read	1530399
 multi-day-custom-logs-sort-skewness	-so skewness	lines_included	1530399
@@ -2699,7 +2699,7 @@ multi-day-custom-logs-sort-skewness	-so skewness	CONFIG	terminal_height	24
 multi-day-custom-logs-sort-skewness	-so skewness	CONFIG	max_log_message_length	200
 multi-day-custom-logs-sort-skewness	-so skewness	CONFIG	time_bucket_size	60
 multi-day-custom-logs-sort-skewness	-so skewness	CONFIG	bucket_size_seconds	3600.00
-single-day-access-log-standard		version	0.17.0
+single-day-access-log-standard		version	0.18.0
 single-day-access-log-standard		FILES	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	155210047
 single-day-access-log-standard		lines_read	761698
 single-day-access-log-standard		lines_included	761698
@@ -2774,7 +2774,7 @@ single-day-access-log-standard		CONFIG	terminal_height	24
 single-day-access-log-standard		CONFIG	max_log_message_length	200
 single-day-access-log-standard		CONFIG	time_bucket_size	60
 single-day-access-log-standard		CONFIG	bucket_size_seconds	3600.00
-single-day-access-log-top25	-n 25	version	0.17.0
+single-day-access-log-top25	-n 25	version	0.18.0
 single-day-access-log-top25	-n 25	FILES	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	155210047
 single-day-access-log-top25	-n 25	lines_read	761698
 single-day-access-log-top25	-n 25	lines_included	761698
@@ -2849,7 +2849,7 @@ single-day-access-log-top25	-n 25	CONFIG	terminal_height	24
 single-day-access-log-top25	-n 25	CONFIG	max_log_message_length	200
 single-day-access-log-top25	-n 25	CONFIG	time_bucket_size	60
 single-day-access-log-top25	-n 25	CONFIG	bucket_size_seconds	3600.00
-single-day-access-log-top25-consolidate	-n 25 -g	version	0.17.0
+single-day-access-log-top25-consolidate	-n 25 -g	version	0.18.0
 single-day-access-log-top25-consolidate	-n 25 -g	FILES	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	155210047
 single-day-access-log-top25-consolidate	-n 25 -g	lines_read	761698
 single-day-access-log-top25-consolidate	-n 25 -g	lines_included	761698
@@ -2924,7 +2924,7 @@ single-day-access-log-top25-consolidate	-n 25 -g	CONFIG	terminal_height	24
 single-day-access-log-top25-consolidate	-n 25 -g	CONFIG	max_log_message_length	200
 single-day-access-log-top25-consolidate	-n 25 -g	CONFIG	time_bucket_size	60
 single-day-access-log-top25-consolidate	-n 25 -g	CONFIG	bucket_size_seconds	3600.00
-single-day-access-log-heatmap	-hm	version	0.17.0
+single-day-access-log-heatmap	-hm	version	0.18.0
 single-day-access-log-heatmap	-hm	FILES	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	155210047
 single-day-access-log-heatmap	-hm	lines_read	761698
 single-day-access-log-heatmap	-hm	lines_included	761698
@@ -2999,7 +2999,7 @@ single-day-access-log-heatmap	-hm	CONFIG	terminal_height	24
 single-day-access-log-heatmap	-hm	CONFIG	max_log_message_length	200
 single-day-access-log-heatmap	-hm	CONFIG	time_bucket_size	60
 single-day-access-log-heatmap	-hm	CONFIG	bucket_size_seconds	3600.00
-single-day-access-log-histogram	-hg	version	0.17.0
+single-day-access-log-histogram	-hg	version	0.18.0
 single-day-access-log-histogram	-hg	FILES	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	155210047
 single-day-access-log-histogram	-hg	lines_read	761698
 single-day-access-log-histogram	-hg	lines_included	761698
@@ -3074,7 +3074,7 @@ single-day-access-log-histogram	-hg	CONFIG	terminal_height	24
 single-day-access-log-histogram	-hg	CONFIG	max_log_message_length	200
 single-day-access-log-histogram	-hg	CONFIG	time_bucket_size	60
 single-day-access-log-histogram	-hg	CONFIG	bucket_size_seconds	3600.00
-single-day-access-log-heatmap-histogram	-hm -hg	version	0.17.0
+single-day-access-log-heatmap-histogram	-hm -hg	version	0.18.0
 single-day-access-log-heatmap-histogram	-hm -hg	FILES	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	155210047
 single-day-access-log-heatmap-histogram	-hm -hg	lines_read	761698
 single-day-access-log-heatmap-histogram	-hm -hg	lines_included	761698
@@ -3149,7 +3149,7 @@ single-day-access-log-heatmap-histogram	-hm -hg	CONFIG	terminal_height	24
 single-day-access-log-heatmap-histogram	-hm -hg	CONFIG	max_log_message_length	200
 single-day-access-log-heatmap-histogram	-hm -hg	CONFIG	time_bucket_size	60
 single-day-access-log-heatmap-histogram	-hm -hg	CONFIG	bucket_size_seconds	3600.00
-single-day-access-log-heatmap-histogram-consolidate	-hm -hg -g	version	0.17.0
+single-day-access-log-heatmap-histogram-consolidate	-hm -hg -g	version	0.18.0
 single-day-access-log-heatmap-histogram-consolidate	-hm -hg -g	FILES	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	155210047
 single-day-access-log-heatmap-histogram-consolidate	-hm -hg -g	lines_read	761698
 single-day-access-log-heatmap-histogram-consolidate	-hm -hg -g	lines_included	761698
@@ -3224,7 +3224,7 @@ single-day-access-log-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	terminal_h
 single-day-access-log-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	max_log_message_length	200
 single-day-access-log-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	time_bucket_size	60
 single-day-access-log-heatmap-histogram-consolidate	-hm -hg -g	CONFIG	bucket_size_seconds	3600.00
-single-day-access-log-sort-p99	-so p99	version	0.17.0
+single-day-access-log-sort-p99	-so p99	version	0.18.0
 single-day-access-log-sort-p99	-so p99	FILES	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	155210047
 single-day-access-log-sort-p99	-so p99	lines_read	761698
 single-day-access-log-sort-p99	-so p99	lines_included	761698
@@ -3299,7 +3299,7 @@ single-day-access-log-sort-p99	-so p99	CONFIG	terminal_height	24
 single-day-access-log-sort-p99	-so p99	CONFIG	max_log_message_length	200
 single-day-access-log-sort-p99	-so p99	CONFIG	time_bucket_size	60
 single-day-access-log-sort-p99	-so p99	CONFIG	bucket_size_seconds	3600.00
-single-day-access-log-sort-skewness	-so skewness	version	0.17.0
+single-day-access-log-sort-skewness	-so skewness	version	0.18.0
 single-day-access-log-sort-skewness	-so skewness	FILES	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	155210047
 single-day-access-log-sort-skewness	-so skewness	lines_read	761698
 single-day-access-log-sort-skewness	-so skewness	lines_included	761698
