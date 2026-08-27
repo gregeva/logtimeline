@@ -25,11 +25,6 @@ immediate predecessor, so a difference is the change. The v0.17.0-code file is w
 separates a machine effect from a code effect, and is why the numbers below can be
 attributed at all.
 
-> **Trap: both files record `version 0.17.0`.** The version in `ltl` is bumped at the
-> release cut, which has not happened, so the in-flight code still reports 0.17.0.
-> The `version` field cannot tell these two apart — the filename and the sha256 above
-> are the only identification. Same reason the provenance gap below matters.
-
 ## The 2026-08-27 hardware discontinuity
 
 The development host moved to a **virtualized machine with abstracted virtual IO
@@ -82,8 +77,7 @@ one, and cost hours. Release benchmarking is not done on this host.
 ## Known gap
 
 **No baseline records the machine that produced it.** The TSV carries version, files,
-line counts, timings and memory — no host, CPU, or storage, and as noted above the
-version field cannot even separate two different builds mid-cycle. So a hardware
+line counts, timings and memory — no host, CPU, or storage. So a hardware
 change is invisible in the artifacts, the committed baselines cannot say which
 machine they describe, and `compare-results.sh` silently reports a hardware
 difference as a code regression. That is what happened on 2026-08-27 and it cost an

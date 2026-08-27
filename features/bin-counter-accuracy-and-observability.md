@@ -515,10 +515,8 @@ attributing what stage 4 does needs both a pre-drop and an immediate-predecessor
 point — `dev-virtualized-v0.17.0-code.tsv` and
 `dev-virtualized-v0.18.0-pre-stage4.tsv`, `full` tier, 45 cases each. **Stage 4 gates
 against the pre-stage4 file**; the v0.17.0-code file is what separates a machine
-effect from a code effect. Both are development references, not release baselines,
-and both record `version 0.17.0` — the bump is a release-cut step — so the filename
-and the recorded `ltl` sha256 are the only thing telling them apart. Release
-benchmarking is not done on this host.
+effect from a code effect. Both are development references, not release baselines.
+Release benchmarking is not done on this host.
 
 Details, naming convention and the underlying provenance gap: `tests/baseline/results/README.md`.
 

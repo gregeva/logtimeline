@@ -225,6 +225,8 @@ Every feature/bugfix branch completes the following in order. **Do not skip step
    ```
    **Any metric worse by more than 5% is a stop-and-investigate**, not an automatic block — a single run is not a median-of-3, so confirm before concluding. Delete the gate TSV afterwards; it is not a deliverable. The threshold is deliberately tight to catch regressions early rather than at release-cut time.
 
+   **Restore `$version_number` to the release version `X.Y.Z` before running either gate** (see *Version Stamping*), so the gate runs on exactly the code being merged rather than on a build still carrying its branch marker.
+
    Re-run the gate after any amend or added commit: **a gate run that predates the commit being merged does not count** — and re-apply the scope test too, since an added commit can bring `ltl` into a diff that did not touch it before.
 
 2. Commit all changes to feature branch
@@ -249,12 +251,19 @@ Code, tests, and build scripts always go through a feature branch and a PR.
 
 **The architect's instruction overrides this list in both directions.** "Commit directly" means commit directly, whatever the content; "open a PR" means open a PR, whatever the content. If the instruction appears to conflict with the process, say so and let the architect decide — never substitute the process for the instruction and report it afterwards.
 
+### Creating the release branch
+
+Creating `release/X.Y.Z` includes setting `$version_number` to `X.Y.Z` in `ltl`, in
+the first commit on the branch, before any feature branch is cut from it (see
+*Version Stamping*). Every build and every artifact produced during the cycle then
+carries the release it belongs to.
+
 ### Cutting the release
 
 By the time you cut the release, every feature/bugfix issue has already been comment-and-closed under the per-feature workflow above, and `releases/v{version}.md` already contains all the bullets. This phase finalizes versioning, benchmarks, tagging, and the merge back to main.
 
 9. Switch to the release branch: `git checkout release/X.Y.Z && git pull origin release/X.Y.Z`
-10. Update version in `ltl` (`$version_number` near top of GLOBALS section)
+10. **Verify** the version in `ltl` (`$version_number` near top of GLOBALS section) already reads `X.Y.Z`. It was set when the release branch was created (see *Version Stamping*); this step confirms it, and confirms no feature branch left its `X.Y.Z-{issue}` marker behind. If it is wrong, the branch that changed it did not restore it — fix it here and note which branch.
 11. **Run ALL validation harnesses**: every `tests/validate-*.sh` must exit 0 before proceeding — the release gate is the complete suite, not a subset. Run `CI=1 ./tests/validate-csv-output.sh` before `CI=1 ./tests/validate-statistics.sh` (the `CI=1` cache is shared between them), then every other `tests/validate-*.sh`. Capture each harness's output once to a file and inspect the file (capture-once rule).
 12. **Review advisories and clean up**: for `validate-statistics.sh`, T3/T4 failures on any of the three layers (L1 drift against committed baselines, L2 intra-row arithmetic invariants, L3 algorithm-aware NumPy/SciPy oracle) block the release; T1/T2 advisories are non-blocking — review to confirm any drift is intentional. After all harnesses pass, run `./tests/cleanup-test-artifacts.sh` to remove the shared scratch directory.
 13. **Run benchmarks**: `./tests/baseline/run-benchmark.sh all --label vX.Y.Z` — captures the release baseline across ALL file selections including XL (≈2.5 h; run under `caffeinate -s`). The `all` tier is required for release validation; `full` is not sufficient.
@@ -352,10 +361,43 @@ Each issue gets its own branch named `{issue-number}-{semantic-slug-from-issue-t
 
 If multiple branches are genuinely needed for one issue (rare), differentiate with a numeric suffix like `225-test-harness-coverage-gaps-2`, **not** with an activity name.
 
+### Version Stamping (MANDATORY at branch creation)
+
+**`$version_number` in `ltl` identifies the branch that produced a build, and is set
+when the branch is created — never left until the release.**
+
+| branch | `$version_number` |
+|---|---|
+| `release/X.Y.Z` | `X.Y.Z`, set in the first commit on the branch |
+| `{issue}-{slug}` off `release/X.Y.Z` | `X.Y.Z-{issue}` (e.g. `0.18.0-462`) |
+| `main` | whatever the last merged release set |
+
+**Why.** Every artifact the tool generates stamps this string — the `-V
+benchmark-data` TSV, the `--help` and `-v` banners, `-V` captures. Bumping only at
+the release cut means every artifact produced during a whole development cycle
+carries the *previous* release's number, so two builds cannot be told apart from
+their output. Benchmark baselines captured a week and several merges apart both read
+`0.17.0`; nothing in the file said which code produced it, and the only identification
+left was the filename someone chose. A developer also cannot tell which branch a
+binary came from by running it.
+
+**Restore the release version before the completion gate.** The branch marker exists
+for development artifacts; it must not travel into the release branch on merge. Set
+`$version_number` back to `X.Y.Z` **before** running step 1's gate, so the gate runs
+on exactly the code being merged and no version-only commit lands after it. This is
+part of step 1, not a separate step to remember afterwards.
+
+Nothing hardcodes a version: `tests/validate-help-content.sh` extracts
+`$version_number` from the source and asserts `-v` matches whatever it finds, and
+`tests/validate-regression.sh` normalises the banner to `[VERSION]` before comparing.
+Changing the version therefore never re-blesses a golden.
+
 ### Branch Verification (MANDATORY FIRST STEP)
 ```bash
 git branch --show-current                          # Must start with the issue number AND match the issue's semantic title
 ./build/issue-status.sh set {number} "in progress"  # Before the first line of code
+# Stamp the branch into the build (see Version Stamping above), before the first line of code:
+#   $version_number = "X.Y.Z-{issue}" in ltl, where X.Y.Z is the release branch this was cut from
 ```
 
 **CRITICAL:** Verify branch before making code changes. Do not write production code until implementation plan is approved.
