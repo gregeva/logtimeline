@@ -27,7 +27,7 @@ convention.
 | header source | a fixed `qw()` literal in `pipeline_render` | derived from `@output_columns` in `normalize_data_for_output` |
 | row emitter | `print_message_summary` | the per-bucket row loop |
 | header/row coupling | **two independent lists ~800 lines apart** — both must be edited in step | positional, from one list |
-| adding a column | edits two literals | implies a **new rendered column** (terminal width, auto-hide) |
+| adding a column | edits two literals | appended to `@output_columns` after the layout is built — **CSV-only, not rendered** (see D8) |
 
 There is a **third scope** that is not a CSV surface in this sense: the per-file
 `ltl-index.csv` written by `write_index_file()`, which carries whole-file
@@ -146,9 +146,7 @@ time bucket. Renaming the mean alone would create a family with one member and m
 the wall one step along, since `bytes_max` would fail exactly as `bytes_mean` does
 today.
 
-On Surface B this implies new **rendered** columns, since that surface's header is
-derived from the rendered column layout. Their default visibility and auto-hide
-priority are open — see O1.
+On Surface B these are **not** rendered columns — see D8.
 
 ### D6 — Basic aggregates only; no bytes distribution statistics
 
@@ -161,6 +159,31 @@ initialiser and the accumulation site. A bytes *percentile* would need its own
 counter store, a branch in both `calculate_statistics` and `calculate_statistics_bin`,
 a telemetry surface, and merge handling in `merge_bin_state` / `merge_consolidation_stats`.
 Nothing in the requirement asks for it.
+
+### D8 — The consumers are `-so` and the two CSV files; nothing is rendered
+
+**Architect, 2026-08-27:** *"Consumers are on the sort order as well as the two CSV
+files. These new metrics are not printed to the screen anywhere."*
+
+`bytes_occurrences`, `bytes_min`, `bytes_mean` and `bytes_max` are available as `-so`
+operands and appear as columns in the MESSAGES and STATS CSVs. They add nothing to the
+terminal output. There is therefore no default-visibility question, no auto-hide
+priority, and no terminal-width cost.
+
+**This is an established pattern, not a new mechanism.** The STATS surface already
+carries CSV-only columns: the 21 duration statistics are appended to `@output_columns`
+after the layout is built, gated by `stats_csv_duration_columns_active()`, under a
+comment that states the contract — *"`@output_columns` drives the CSV header/data only
+here; the terminal render uses `@column_layout`"*. The bytes family follows the same
+route.
+
+The gate's own contract carries an obligation the bytes family inherits: the header
+emitter and the per-bucket row push in `print_bar_graph` **must both** consult the same
+predicate, so rows always match the header.
+
+Corrects an audit conclusion: "a new CSV column on Surface B implies a new rendered
+column" was read off the default path and missed the escape hatch duration already
+uses.
 
 ### D7 — `ltl-index.csv` is aligned to the same convention
 
@@ -242,10 +265,9 @@ From the audit of the harness surface. All are consequences of existing rules in
 
 ## Open items
 
-- **O1 — Surface B rendered-column visibility.** D5 puts four bytes columns on the
-  per-bucket surface, whose header derives from the rendered layout. Are they visible
-  by default, and where do they sit in the auto-hide priority? Terminal width is
-  already contended.
+- ~~**O1 — Surface B rendered-column visibility.**~~ **Closed 2026-08-27 by D8** —
+  the new metrics are consumers of `-so` and the two CSV files only, and are not
+  rendered, so no visibility or auto-hide question arises.
 - **O2 — `-so` whitelist case sensitivity.** The 39-word `qw()` operand whitelist in
   `adapt_to_command_line_options()` is a case-**sensitive** exact-string membership
   test (`grep { $_ eq $sort_type }`), while every branch of the resolution ladder
@@ -264,5 +286,21 @@ From the audit of the harness surface. All are consequences of existing rules in
 ## Status
 
 Branch `432-align-builtin-metric-aggregate-naming`, cut from `release/0.18.0`.
-Audit complete. Feature doc written. **Not yet implemented** — the prototype is the
-next gate, and O1–O4 are open.
+
+- Audit complete, verified per cell.
+- Decisions D1–D8 locked. O1 closed by D8.
+- **Prototype gate cleared.** Shape chosen by measurement: entry reference with
+  extrema seeded at first observation, +205 ns/line across both scopes, projected
+  +1.8% end-to-end. The idiomatic shape measured 2.4x worse. Full record:
+  `tests/profile/results/432-bytes-parity-capture/analysis.md`.
+- **Not yet implemented.** O2–O4 remain open and are expected to settle during
+  implementation rather than blocking its start.
+
+Two constraints carried from the prototype into implementation:
+
+1. `bytes_min` / `bytes_max` are **absent**, not 0-initialised, at entry creation —
+   the first-observation branch is selected by `$e->{bytes_occurrences}++` returning
+   false, and 0-initialising would pin every minimum at 0 (the same defect class
+   as F1).
+2. On Surface B the header emitter and the per-bucket row push must consult the same
+   activation predicate, per D8.
