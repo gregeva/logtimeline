@@ -5,128 +5,121 @@ Companion to `hypothesis.md`, written after measurement. Feature doc:
 
 ## Method
 
-Candidate accumulation shapes measured against the production code as baseline, at
-both scopes, by `prototype/432-bytes-parity/bytes-capture-cost.pl`. The baseline arms
-reproduce the production blocks sliced verbatim out of `ltl` by
-`prototype/432-bytes-parity/extract-blocks.sh` (#58 F9), which fails hard on a missing
-anchor rather than silently measuring nothing.
+Two arms, `release/0.18.0` as baseline and this branch, both run through the same
+interpreter (`/opt/homebrew/bin/perl <script>`) so the shebang path cannot differ
+between them. End-to-end wall clock on
+`logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt`
+(1,430,678 lines), `--disable-progress -ni -bs 1440 -oe -n 5 --terminal-width 120`,
+3 pairs, medians.
 
-Order-balanced ABBA, 8 pairs, 1,000,000 lines per run, 20,000 distinct message keys,
-1,440 buckets, 85% of lines carrying a bytes value. Medians with ranges.
-
-A correctness gate runs before any timing: every candidate must agree with an
-independently computed reference on all ~19,900 keys, and the fixture must be shown
-capable of demonstrating F1. Both were enforced, and the gate earned its place — see
-*What the gate caught* below.
+Line-level attribution from `tests/profile/run-profile.sh` at the 100k sample, read
+through `nytprofcsv`. The runner's cross-validation confirmed `lines_read=100000`
+against the profile's own call counts.
 
 ## Result
 
-Per-line deltas are over the accumulation loop only. The end-to-end column projects
-onto the reference run measured the same session:
-`localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt`, 1,430,678 lines,
-baseline median **16.38 s** over 3 runs (16.28 / 16.38 / 16.73) — the same corpus and
-the same baseline as #447, so the two are directly comparable.
+| Run | base | this branch | delta |
+|---|---|---|---|
+| normal | 16.44 s | 17.09 s | **+4.0%** |
+| `-ob` (bytes discarded) | 16.50 s | 16.38 s | **−0.7%** |
 
-| Scope | Arm | Median | vs baseline | Per line | Pairs positive | Projected end-to-end |
-|---|---|---|---|---|---|---|
-| per message | baseline | 0.2811 s | — | — | — | — |
-| per message | count-family idiom | 0.5293 s | +88.3% | +248 ns | 8/8 | +2.2% |
-| per message | entry reference | 0.4087 s | +48.2% | +133 ns | 8/8 | +1.2% |
-| **per message** | **entry ref + seeded extrema** | **0.3784 s** | **+35.5%** | **+99 ns** | 8/8 | **+0.9%** |
-| per bucket | baseline | 0.1082 s | — | — | — | — |
-| per bucket | count-family idiom | 0.2977 s | +175.2% | +189 ns | 8/8 | +1.6% |
-| **per bucket** | **entry ref + seeded extrema** | **0.2150 s** | **+98.9%** | **+107 ns** | 8/8 | **+0.9%** |
-| **both scopes** | **entry ref + seeded extrema** | **0.5882 s** | **+53.4%** | **+205 ns** | 8/8 | **+1.8%** |
+Under `-ob` the cost is *gone*, not merely reduced. That is the proof the option gate
+short-circuits: a run that discards the metric does no work for it.
 
-Every arm was positive in 8/8 pairs with non-overlapping ranges, so unlike #447 the
-effect here sits well clear of the noise floor and the ABBA design is confirming a
-result rather than rescuing one.
+### Where the time goes, per 100k lines
 
-**The naive shape costs 2.4x the chosen one.** Copying the shipped `count` idiom
-verbatim to both scopes projects to **+3.8%** end-to-end — within striking distance of
-#447's rejected +4.36% arm. The chosen shape projects to **+1.8%**.
+| Lines | Cost |
+|---|---|
+| per-message family (counter + two extrema) | 0.0111 s |
+| per-bucket family (counter + two extrema + flag) | 0.0116 s |
+| the two guard tests, on every line | 0.0150 s |
+| **total attributable** | **0.0377 s** |
+
+Projected onto 1.43M lines: **0.54 s**, against ~0.65 s measured end-to-end. The
+profile accounts for the delta.
+
+Only 36,409 of 100,000 lines carry a bytes value on this corpus, so the guards skip
+64% of lines — the counter and extrema lines each show ~36.4k calls against the
+guards' 100k.
 
 ## Hypotheses
 
-**H1 — hash element access dominates, not the comparison. CONFIRMED.** Caching the
-entry reference and writing through it removed +115 ns/line at the per-message scope
-(+248 → +133), a 46% reduction, with no change to the arithmetic performed. The
-shipped `count` block re-resolves `$log_messages{$category}{$log_key}{...}` **six
-times in four lines**; each resolution is two hash lookups.
+**H1 — hash element access dominates. HOLDS, and it is why the guards cost what they
+do.** The two guard tests together (0.0150 s) cost more than either family's actual
+work (0.0111 / 0.0116 s), because they run on every line while the work runs on 36%.
 
-**H2 — the `!defined` test is a per-line cost payable once. CONFIRMED.** Seeding both
-extrema at first observation removed a further +34 ns/line (+133 → +99). The standard
-idiom evaluates a definedness test on every line for the life of a key to handle only
-its first line; at 850k observations over 20k keys that is ~830k wasted tests.
+**H2 — seeding beats the `!defined` test. HOLDS.** The seeded branch means
+`bytes_min`/`bytes_max` are two compare-and-maybe-assign lines at 0.0032/0.0021 s and
+0.0025/0.0017 s; no definedness test appears in the profile at all.
 
-**H3 — the two scopes are not equally expensive. CONFIRMED, and the direction was
-predicted correctly but for the wrong reason.** Per bucket is cheaper in absolute
-loop terms (0.108 s baseline vs 0.281 s) because 1,440 keys stay cache-resident against
-20,000. But as a *delta* the two are near-identical (+107 vs +99 ns/line), and per
-bucket is far worse in *relative* terms (+98.9% vs +35.5%) because its baseline does so
-little. The prediction that bucket writes would be near-free because the entry is
-already in hand was wrong: the baseline resolves `$log_analysis{$b}{total_bytes}` once,
-so the three new fields are three genuinely new resolutions.
+**H3 — the two scopes are not equally expensive. REFUTED for this shape.** They are
+within 5% of each other (0.0111 vs 0.0116 s). The prediction that per-bucket would be
+materially cheaper because the entry is already in hand was wrong for the same reason
+recorded in the prototype: the baseline resolves that entry once, so the family's
+fields are genuinely new resolutions at both scopes.
 
-**H4 — under +1.5% for both scopes. REFUTED, narrowly.** The chosen shape projects to
-**+1.8%**, above the stated bound. Recorded as stated so the miss stands: the
-prediction was made before knowing the per-bucket delta would match the per-message
-one rather than being a fraction of it.
+**H4 — under +1.5% for both scopes. REFUTED.** Measured **+4.0%**. The prototype
+predicted +1.8% and was itself already above its own bound; production is roughly
+double the prototype's projection.
 
-## What the gate caught
+## Why the prototype under-predicted, and what that means for the next one
 
-The correctness gate failed on its **first** run, with
-`total_bytes = 0, expected undef` for a key whose lines all lacked a bytes value.
+The prototype measured accumulation loops over pre-built arrays. Production runs the
+same accumulation interleaved with regex extraction, format dispatch, timestamp
+parsing and bucket-key construction — so every hash write competes for cache against
+work the prototype did not model, and each costs more in place than it did in
+isolation.
 
-The reference was wrong, not the candidates. Production 0-initialises `total_bytes` at
-entry creation (`ltl:11092`), so a key that never observed bytes reads **0**, which is
-indistinguishable from a key whose bytes genuinely summed to zero. That is precisely
-the failure mode CLAUDE.md's 2026-07-09 entry names — *gate on observation counts, not
-defined-ness* — and it is the same distinction F1 turns on: `bytes_occurrences` is the
-field that separates "never observed" from "summed to zero", which is why it is a
-requirement of the fix and not an ornament.
+This is the #58 F9 lesson recurring one layer out. There, a prototype's *baseline arm*
+was a convenience sub and hid the machinery the candidate added. Here both arms were
+faithful to each other, but the *environment* was not faithful to production, and a
+prototype that is internally consistent can still mispredict by 2x. The prototype was
+right about the **ordering** of the candidates — which is what it was for, and the
+shape it chose is still the cheapest of the three — and wrong about the magnitude.
 
-Had the gate been written to compare only the arms against each other, all three would
-have agreed with one another and the discrepancy would never have surfaced.
+**For the next prototype of a hot-path change:** the ratio between candidates
+transfers from an isolated loop; the absolute per-line cost does not. State
+predictions as ratios, or measure in place.
 
-## F1 demonstrated, not asserted
+## The largest hot-path cost here is not this change
 
-Per #447 lesson 2 — a probe that reports zero must be shown capable of reporting
-non-zero — the fixture is built with 15% of matched lines carrying no bytes value, and
-the probe **fails hard** if no key can demonstrate the defect.
+Line-level profiling put the `-HL` suffix regex in three of the top thirteen lines of
+the whole script:
 
-On the full run: **11,235 of 19,871 keys (57%)** produce a different mean under the
-correct divisor than under the shipped one, worst case **83.3% understated**.
+| Line | Cost / 100k | Code |
+|---|---|---|
+| 11031 | 0.0651 s | `$log_level =~ s/-HL$//;` |
+| 11383 | 0.0480 s | `$log_analysis{$bucket}{'total_duration-HL'} += $duration if $category_bucket =~ /-HL$/;` |
+| 11462 | 0.0267 s | `$e->{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;` |
 
-The shipped `mean_bytes` divides by `occurrences` (all matched lines); the correct
-divisor is `bytes_occurrences` (lines that carried bytes). The magnitude is set by
-what fraction of a key's lines carry no bytes field, so on a log where every matched
-line has a bytes value the defect is invisible — which is why it has survived.
+**0.14 s per 100k lines, ~2.0 s on the reference corpus — roughly 12% of total
+runtime**, spent re-deriving a highlight flag from a string suffix on every line.
+Three of these run per line; the pattern is a constant.
 
-## Recommendation
-
-Implement both scopes with the **entry reference + seeded extrema** shape: +205 ns/line,
-projected +1.8% end-to-end. Do **not** copy the shipped `count` idiom, which measures
-2.4x worse for identical results.
-
-Two consequences worth carrying into implementation:
-
-1. **The seeded shape changes the initialiser contract.** `bytes_min`/`bytes_max` must
-   be absent (not 0-initialised) at entry creation, since the first-observation branch
-   is selected by `$e->{bytes_occurrences}++` returning false. 0-initialising them
-   would silently pin every minimum at 0 — the same defect class as F1.
-
-2. **The existing `count` blocks are now known-suboptimal by measurement.** Converging
-   them onto the same shape is not in #432's scope, but the measurement exists and
-   should be recorded where the next person to touch that code will find it.
+This is **pre-existing and not caused by this change** — line 11462 appears in the
+list only because the bytes block it lives in was merged under the new option gate,
+and it carries the same cost it always did. It is not fixed here: it is a separate
+change to a shared mechanism, and folding it into a naming issue would be exactly the
+scope creep the repository's rules forbid. Recorded so the measurement is not lost.
 
 ## Lessons
 
-1. **Write the correctness gate against an independent reference, not against the
-   other arms.** Three mutually-agreeing candidates prove nothing; the reference is
-   what caught the initialiser semantics.
-2. **A prediction stated numerically can be refuted.** H4's +1.5% was wrong and is
-   recorded as wrong. The value of stating it was in learning *why* — the per-bucket
-   delta matched the per-message one instead of being a fraction of it.
-3. **The cheapest correct shape and the idiomatic shape are not the same here**, and
-   the gap (2.4x) is large enough to matter on a hot path executed once per line.
+1. **An option that discards a metric must gate its capture, not just its output.**
+   The first implementation paid full per-line cost under `-ob` and would have shipped
+   that way. `-ob` is documented in CLAUDE.md, `--help` and `docs/usage.md`, and
+   appears seven times in `ltl` beside the edited code — reading the option gates for
+   the metric being touched is part of editing that path, not a later optimisation.
+2. **Profile with the project's runner.** `tests/profile/run-profile.sh` handles sample
+   truncation, cross-validation against `ltl -V` counters, and output layout; ad-hoc
+   `-d:NYTProf` invocations produced nothing usable here and cost time.
+3. **A prototype transfers ratios, not absolutes.** See above.
+4. **Bisecting by hand is slower than one line-level profile.** Several arm-patching
+   rounds narrowed nothing; the profile attributed the whole delta in one run.
+
+## Environment note
+
+`features/nytprof-profiling-workflow.md` § Environment records the tool paths under
+Perl **5.42.0**; the installed toolchain is **5.42.2** (`/opt/homebrew/Cellar/perl/5.42.2/bin/nytprofcsv`).
+The doc anticipates exactly this drift and says to update the paths when Homebrew
+upgrades Perl. `run-profile.sh` resolves `nytprofhtml` from the same versioned path
+and was run here with `--no-html`, so the drift did not surface as a failure.
