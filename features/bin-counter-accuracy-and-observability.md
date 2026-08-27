@@ -736,6 +736,61 @@ decided from.
 three `*-bin-consolidated` scenarios' `messages` rows, all percentile or IQR columns.
 No count, no min, no max, and no scenario outside the bin data model moved.
 
+### Proposed (not locked) — retention ceiling with resolution that follows depth
+
+Architect's direction, 2026-08-27: *"allow the histograms needing the precision to
+take more memory, and keep the ones that don't small."*
+
+**Shape.** A grouped row holds at most a fixed number of member histograms. On
+reaching it, the row collapses what it holds into one combined histogram and carries
+on. The combined histogram of a row that hit the ceiling is built at a **higher
+resolution than its members**; a row that never reaches the ceiling collapses once, at
+the default resolution, and is unchanged in every respect.
+
+**Why the higher resolution is the load-bearing part.** A member's own quantisation
+cannot be undone — its counts already sit at its own bucket midpoints. But the
+projection that places those midpoints onto the combined scale need not add error of
+its own, and it barely does when the combined scale is much finer. So the carried
+result stops decaying across successive collapses, which is the entire cost of having
+a ceiling. Measured (`prototype/459-order-independence/merge-resolution.pl`, 256
+members, deviation from a single partition over the pooled samples, in member bucket
+widths, median / worst):
+
+| | one collapse | batched at a ceiling of 8 (32 collapses) |
+|---|---|---|
+| combined at the members' resolution | 0.076 / 0.204 | **0.363 / 0.523** |
+| combined at 616 buckets per decade | 0.061 / 0.304 | **0.069 / 0.304** |
+
+Batching at the same resolution costs ~5× in typical error. Batching into a finer
+combined scale is as accurate as not batching at all.
+
+**Memory, modelled from the measured per-row grouping and per-row payloads.** Peak
+retention as a percentage of holding everything:
+
+| ceiling / combined resolution | ThingWorx | Tomcat | Codebeamer |
+|---|---|---|---|
+| 8 / default 53 | 3.2 % | 18.2 % | 13.2 % |
+| 8 / 256 | 5.1 % | 24.9 % | 15.1 % |
+| 8 / 616 | 8.6 % | 36.8 % | 18.4 % |
+| 16 / 256 | 7.5 % | 23.2 % | 18.7 % |
+| 32 / 256 | 7.6 % | 27.9 % | 25.9 % |
+
+The crossover that makes this work: one combined histogram at 616 buckets per decade
+costs what **17–39 retained member histograms** cost, measured across the five logs.
+Any row grouping more than that is cheaper as one high-resolution histogram than as
+its members — and more accurate than collapsing it at the default resolution.
+
+**Open, for the architect.**
+
+- The ceiling value, and whether it is user-visible or internal.
+- How combined resolution is chosen: one fixed step up, or a ladder that follows how
+  many histograms the row absorbed.
+- Whether percentiles are then read from a per-row histogram whose resolution varies
+  by row — the statistics contract currently describes one resolution per surface.
+- Whether this rides #459 (combination order-independence, delivered) or is filed as
+  its own requirement, since the ceiling was deferred to the development flow rather
+  than scoped into that issue.
+
 ## Open items carried out of stage 1
 
 - **The highlight sub-stores are not observed.** `%heatmap_counters_hl`,
