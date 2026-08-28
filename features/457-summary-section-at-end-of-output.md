@@ -74,6 +74,16 @@ summary's first line (the echoed options).
 *Consequence:* the asserted surface is unchanged from before this issue; the
 `TOP OVERALL` block stays excluded.
 
+**D5 — the bounded skip fails loudly when its closing anchor is absent.**
+Ending the skip on a content line makes the filter silent about a run that
+never prints one: it would drop the whole tail and hand back a smaller surface
+that still compares clean. `tests/HARNESS-DESIGN.md` § "a grep that matches
+nothing is a failure" governs exactly this, so the filter now exits 3 when it
+reaches end of input with the skip still open, and both harnesses check that
+status alongside `ltl`'s own.
+*Consequence:* a truncated surface aborts the capture or fails the scenario
+instead of quietly narrowing what is asserted.
+
 **D4 — `docs/usage.md` § Display & Output no longer calls two different things
 "the summary table".** The paragraph claimed `-osum` suppressed the
 top-messages table, which it never did. The `-n` row now says "top-messages
@@ -90,7 +100,8 @@ tables while restating the ordering.
 - `docs/usage.md` — § Display & Output paragraph, the `-n` and `-osum` rows,
   and the `-osum` example comment.
 - `tests/capture-regression.sh`, `tests/validate-regression.sh` —
-  `strip_nondeterministic()` (D3); the two copies remain byte-identical.
+  `strip_nondeterministic()` (D3) and the filter-status check that guards its
+  closing anchor (D5); the two copies of the filter remain byte-identical.
 - `tests/reference-output/*.txt` — re-blessed, see below.
 - `features/180-named-pipeline-stages.md` — stage-10 membership row reordered
   to match the render order.
@@ -119,3 +130,4 @@ of lines is identical to the committed version, so only placement moved.
 | `-V` section sequence | Identical to the pre-change build; no section is emitted by `print_summary_table()`, and the verbose surface flushes before the bar graph |
 | `-osum` | Still suppresses the table; the echoed options print at the end |
 | `-t` timing rows | Render inside the summary, at the end |
+| Anchor guard (D5) | Filter status probed through the harness's own pipeline shape: summary present → 0, summary absent → 3, no `TOP OVERALL` at all → 0 |

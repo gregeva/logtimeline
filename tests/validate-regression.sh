@@ -95,10 +95,13 @@ DPM5K_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k
 # references freeze, so it is dropped. The drop is bounded: the run summary
 # closes the output, and its first line (the echoed options) ends the skip so
 # the category totals, the HIGHLIGHTED row and the file/format legend stay
-# inside the asserted surface. Must match capture-regression.sh exactly.
+# inside the asserted surface. Per tests/HARNESS-DESIGN.md, an anchor that
+# matches nothing is a failure: if the skip is still open at end of input the
+# filter exits 3, so a truncated surface aborts instead of being asserted.
+# Must match capture-regression.sh exactly.
 strip_nondeterministic() {
     perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[^\]]+\]/log timeline [VERSION]/' \
-    | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; $skip=0 if /^(?:environment|command-line) options: /; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
+    | perl -ne 'BEGIN{$skip=0} END{ $? = 3 if $skip } $skip=1 if /TOP OVERALL/; $skip=0 if /^(?:environment|command-line) options: /; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
 }
 
 # Verify reference directory exists
@@ -169,6 +172,14 @@ run_test() {
 
     if [[ "${pipe_status[0]}" -ne 0 ]]; then
         emit_regression_fail "$name" "ltl exited ${pipe_status[0]} (stderr below)" "$stderrfile"
+        return
+    fi
+    # strip_nondeterministic exits 3 when it reached end of input still skipping,
+    # i.e. the run summary that ends the TOP OVERALL skip never appeared. Per
+    # tests/HARNESS-DESIGN.md an anchor that matches nothing is a failure, not a
+    # smaller surface that quietly passes.
+    if [[ "${pipe_status[1]}" -ne 0 ]]; then
+        emit_regression_fail "$name" "output filter found no run summary to end the TOP OVERALL skip; the asserted surface would be truncated (stderr below)" "$stderrfile"
         return
     fi
     # Runtime-warning cleanliness (HARNESS-DESIGN.md section Runtime-warning
