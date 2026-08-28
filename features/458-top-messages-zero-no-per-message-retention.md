@@ -69,19 +69,37 @@ The notice is a behavioural notice, not progress output, so it is not gated behi
 its final pass, its `-V message-grouping` section and its own notices never run.
 
 `-so` is included even though the issue names only `-g` and `-mdm`: it is in the same
-class — it orders the messages table and nothing else.
+class — it orders the messages table and nothing else. Ranking a set of rows that will
+never exist is not a partial capability, so `-so` is reported inert exactly as `-g`
+and `-mdm` are.
 
 **Consequence.** The three unsatisfiable-sort notices (#418) are suppressed under
 `-n 0`: `apply_parse_time_sort_gate()`, `apply_pre_walk_sort_gate()` and
-`apply_post_walk_sort_gate()` all return early. With no message retained there is
-nothing to rank, so there is no fallback to report. `-V statistics-demand` still
-records the operand and its family truthfully (`fallback=none`).
+`apply_post_walk_sort_gate()` all return early. Those notices exist to tell the user
+that a requested ranking could not be satisfied and what it fell back to; with no
+message retained there is nothing ranked at all, so a fallback notice would report a
+substitution that never happened — the inert-option notice above is the accurate
+statement, and it is the only one printed. `-V statistics-demand` still records the
+operand and its family truthfully (`sort_gate: operand=<key> family=<family>
+observed=n/a fallback=none`), so the diagnostic surface still shows what the user
+asked for.
 
-### D4 — No MESSAGES CSV file is created
+### D4 — No MESSAGES CSV file is created, and the user is told
 
 `-o` continues to write the STATS CSV (per time bucket). The MESSAGES CSV is the
 per-message store written out; with no rows there is no file. A header-only CSV would
 read as a run that found nothing rather than one that was asked to keep nothing.
+
+A CSV request is therefore half-served, and a user who scripts around the file names
+must learn that at run time rather than by finding one file where they expected two.
+`-o` is not listed among the inert options — its per-time-bucket half still runs — so
+it is reported on its own line of the same notice, emitted whenever a CSV was
+requested under `-n 0` (a behavioural notice, so never gated behind
+`--disable-progress`). Exact text, on stderr:
+
+```
+Note: -n/--top-messages 0 retains no message, so -o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written
+```
 
 ### D5 — The thread-pool summary follows the same top-N operand
 
@@ -90,22 +108,24 @@ a top-N of zero leaves it no rows. It is skipped rather than printed empty.
 
 **Consequence.** `-tpas` with `-n 0` produces no thread-pool table. This is the one
 decision here that touches a surface the issue does not mention; it follows from the
-operand being shared, not from message retention. *Open for the architect: if the
-thread-pool summary should keep its own row count independent of `-n`, that is a
-separate operand and a separate change.*
+operand being shared, not from message retention. Giving the thread-pool summary a
+row count of its own, independent of `-n`, would be a new operand with its own name,
+help row and documentation — a separate requirement and a separate issue, not part of
+this one. Until such an operand exists, `-n` governs both tables and `-n 0` empties
+both.
 
 ## What changed, by surface
 
 | surface | change |
 |---|---|
 | `ltl` — hot path | `read_and_process_logs()`: message-capture branch gated on `$capture_messages` |
-| `ltl` — option resolution | `adapt_to_command_line_options()`: `$capture_messages` resolved before the sort resolution; inert-option notice and grouping fold before the statistics-demand resolution |
+| `ltl` — option resolution | `adapt_to_command_line_options()`: `$capture_messages` resolved before the sort resolution; inert-option notice, half-served-CSV notice and grouping fold before the statistics-demand resolution |
 | `ltl` — demand registry | `@STAT_CONSUMERS`: all three message-store consumers (`messages-table`, `messages-csv`, `sort-on`) read `$capture_messages`. `$message_duration_stats_demand` reduces to `!$omit_durations && $capture_messages`: both of its surfaces exist only for retained messages, so retention is the single condition |
 | `ltl` — sort gates | `apply_parse_time_sort_gate()`, `apply_pre_walk_sort_gate()`, `apply_post_walk_sort_gate()` return early |
 | `ltl` — render | `pipeline_render()`: MESSAGES CSV open, `print_message_summary()`, `print_threadpool_summary()` and the MESSAGES file-handle close all gated |
 | `ltl` — help | `print_help()` `-n` row documents `0` |
 | `docs/usage.md` | `-n` row documents `0` (parity with `--help`) |
-| `tests/validate-statistics-demand.sh` | scenarios 9 and 10 |
+| `tests/validate-statistics-demand.sh` | scenarios 9 to 12 |
 | `tests/baseline/run-benchmark.sh` | `no-messages\|-n 0` scenario |
 | `tests/baseline/compare-results.sh` | `no-messages` in the table-view scenario list |
 
@@ -200,6 +220,15 @@ belongs to the release-cut benchmark run (release steps 13–14), not to this br
   takes the same path as zero (D2) — the message store reports `store_demand: 0` and
   `population: 0`. Proved to fail with `-n 5` substituted: both assertions failed with
   their `asserts`/`produced_by`/`contract` triple surfaced.
+- **scenario-12-no-message-retention-csv-request** (`-bs 1440 -oe -n 0 -o`): the
+  half-served-CSV notice is printed verbatim on stderr; the STATS CSV file exists and
+  no MESSAGES CSV file does. The run gets its own scratch directory so the two file
+  assertions see only its own artifacts, and it is shaped to what it reads — a stderr
+  notice and a directory listing, never a bucket row. All three assertions were proved
+  to fail: the notice pattern finds no match in the stderr of the same run with `-n 5`
+  substituted, the STATS-CSV check fails against an empty directory, and the
+  MESSAGES-CSV absence check fails against the `-n 5` run's output directory, which
+  contains both files.
 
 The render assertions read the displayed surface because "the messages table is
 absent" and "the timeline is present" are properties of that surface with no

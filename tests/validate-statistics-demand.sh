@@ -715,6 +715,39 @@ fi
 echo
 
 ############################################################
+# A CSV request under -n 0 is half-served: the STATS CSV is written, the
+# MESSAGES CSV is not, and the user is told so at run time. The run gets its
+# own scratch directory so the two file assertions see only its own artifacts
+# (scenario 2 also writes CSVs into the shared workdir). `-bs 1440 -oe`: this
+# scenario reads a stderr notice and which files exist, never a bucket row.
+current_scenario="scenario-12-no-message-retention-csv-request"
+echo "--- $current_scenario ---"
+CSV_ONLY_DIR="$WORKDIR/csv-no-message-retention"
+mkdir -p "$CSV_ONLY_DIR"
+cd "$CSV_ONLY_DIR"
+out=$(run_section statistics-demand -bs 1440 -oe -n 0 -o)
+cd "$WORKDIR"
+check_capture_warnings "$out"
+assert_line "$out.stderr" \
+    pattern     'Note: -n/--top-messages 0 retains no message, so -o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written' \
+    asserts     'A CSV request is reported as half-served when no message is retained: the user is told at run time which of the two files is not written and why' \
+    produced_by 'adapt_to_command_line_options() in ltl (per-message retention fold, before the statistics-demand resolution)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+assert_command \
+    command     "ls '$CSV_ONLY_DIR'/*-LTL-STATS-*.csv" \
+    label       'the STATS CSV is still written' \
+    asserts     'Retaining no message does not affect the per-time-bucket CSV: -o still writes it' \
+    produced_by 'pipeline_render() in ltl (STATS CSV open, gated only on the CSV request)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+assert_command \
+    command     "! ls '$CSV_ONLY_DIR'/*-LTL-MESSAGES-*.csv" \
+    label       'no MESSAGES CSV file is created' \
+    asserts     'The MESSAGES CSV is the per-message store written out: with nothing retained no file is created, not even a header-only one' \
+    produced_by 'pipeline_render() in ltl (MESSAGES CSV open gated on message retention)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+echo
+
+############################################################
 echo "=== validate-statistics-demand: $pass passed, $fail failed ==="
 if [[ $fail -gt 0 ]]; then
     echo "Failures:"

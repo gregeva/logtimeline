@@ -10505,6 +10505,12 @@ sub adapt_to_command_line_options {
         print STDERR "Note: -n/--top-messages 0 retains no message, so "
             . join(', ', @inert) . (@inert == 1 ? " has" : " have") . " no effect\n"
             if @inert;
+        # -o is not inert: its per-time-bucket half still runs. Only the
+        # per-message CSV disappears with the store it writes out, so it is
+        # reported on its own line rather than joined into the list above.
+        print STDERR "Note: -n/--top-messages 0 retains no message, so "
+            . "-o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written\n"
+            if $write_messages_to_csv;
     }
 
     # Duration-statistics demand resolution: each statistics store is captured
