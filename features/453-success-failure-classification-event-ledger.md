@@ -89,10 +89,35 @@ No site today is gated on "is this an event ledger". The event-ledger property g
 | `csv` | no (user data; unknown coverage) | inherits the global default; `category_bucket` is `DATA`, so effectively unclassified unless #387 lets a user declare |
 | all diagnostics formats (`mt1*`, `mt2`, `mt5`, `mt7`, `mt8`, `mt10*`, `mt11`, `mt16`, `mt17`) | no | inherit the global default: failure `category_bucket ^(ERROR|FATAL|CRITICAL)$`, no success criterion (D7) |
 
-## `-V` section-contract changes (stub — completed at implementation)
+## `-V` section-contract changes
 
-- `format-detection` per-file block: `is_access_log:` → `metrics_observed:` (byte-identical semantics) and new `event_ledger: yes|no`.
-- New sub-section `format-detection / classification` (D11), run-level: `lines_included`, `successes`, `failures`, `classified`, `unclassified`, `unclassified_pct`. Exact line shapes and counter semantics (what increments, when, edge cases) are locked at implementation and recorded here and in the umbrella's section-contract.
+This doc owns the `format-detection / classification` sub-section and the two per-file key changes below; the umbrella `features/log-format-registry.md` section-contract cross-references it. Consumed by `tests/validate-format-detection.sh`. Renames and removals are breaking per `tests/HARNESS-DESIGN.md`.
+
+**Per-file keys (`format-detection`):** `is_access_log:` → `metrics_observed: yes|no` (D18; byte-identical semantics: any line of the file observed a metric, or the format is statistics-eligible); new `event_ledger: yes|no` immediately after it (D19; the flag of the bound entry, following a mid-file flip). Both print `-` in the no-bind-attempts block.
+
+**Sub-section `=== format-detection / classification ===` (D20, locked 2026-08-28; run-level, one per run, emitted inside the parent before its END marker; closed by `=== END format-detection / classification ===`). Every key is deterministic — harnesses assert values.**
+
+```
+lines_included: N
+successes: N
+failures: N
+classified: N
+unclassified: N
+unclassified_pct: X.X
+unmatched_lines: N
+event_ledger_files: N/M
+rule_changes: N
+rule_change: file=<path> line=N from=<entry> to=<entry>
+default_failure: <signature>
+```
+
+- `lines_included` — the existing run counter (`$total_lines_included`), unchanged: matched lines that survived filtering.
+- `successes` / `failures` — lines whose `$line_outcome` was 1 / 2 at the include point (D16, D17). A line discarded by a filter is in neither.
+- `classified` — `successes + failures`. `unclassified` — `lines_included − classified`. `unclassified_pct` — `unclassified / lines_included × 100`, one decimal; `0.0` when `lines_included` is 0.
+- `unmatched_lines` — run total of the per-file `unmatched_lines:` key (R5: thrown away, never included).
+- `event_ledger_files` — files whose bound entry has `event_ledger` set / files with a bind; `0/0` when nothing bound.
+- `rule_changes` — count of mid-file flips whose old and new occupant carry different criteria signatures (D19). `rule_change:` — one line per such flip, input order (file order, then line number); **absent** when the count is 0.
+- `default_failure` — the criteria signature of the resolved global default's failure list (D15), so a capture is self-describing about the default in force. The signature is the canonical string of `field=pattern` conditions, criteria joined by `|`, conditions within a criterion by `&`, e.g. `category_bucket=^(?:ERROR|FATAL|CRITICAL)$`.
 
 ## Performance obligation
 
@@ -111,7 +136,7 @@ Walked piece by piece with the architect; each piece locks its decisions here be
 3. **Hot-path evaluation** — D16 (locked).
 4. **Data model** — D17 (locked).
 5. **`$is_access_log` → `metrics_observed` rename and `event_ledger` per-file binding** — D18, D19 (locked).
-6. **`-V format-detection / classification` section-contract** — line shapes and counter semantics — open.
+6. **`-V format-detection / classification` section-contract** — D20 (locked).
 7. **Prototype charter** — candidates, baseline arm, scale, exit criteria — open.
 8. **Stages and merge gate** — order of landing, parity fixtures — open.
 
