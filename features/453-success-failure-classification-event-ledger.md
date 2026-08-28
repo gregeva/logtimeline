@@ -137,7 +137,7 @@ Walked piece by piece with the architect; each piece locks its decisions here be
 4. **Data model** — D17 (locked).
 5. **`$is_access_log` → `metrics_observed` rename and `event_ledger` per-file binding** — D18, D19 (locked).
 6. **`-V format-detection / classification` section-contract** — D20 (locked).
-7. **Prototype charter** — candidates, baseline arm, scale, exit criteria — open.
+7. **Prototype charter** — D21 (locked).
 8. **Stages and merge gate** — order of landing, parity fixtures — open.
 
 ### 1. Schema shape — D14
@@ -194,6 +194,21 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
     2. records it for the `classification` sub-section (piece 6): a run count `rule_changes: N` and one line per change — file, line number, old entry → new entry.
   - The notice is **registered on #412** (notices surface) as a producer to migrate, 2026-08-28, with its text shape and the `-V` state that lets a harness assert it without reading the rendered note. Every user-informational message this issue adds is registered there in the same way at the moment it is specified.
   - Run-level, the sub-section also carries `event_ledger_files: N/M`. What a consumer does when a run mixes ledger and non-ledger files is that consumer's decision (#452's column default) and is handed forward, not settled here.
+
+### 7. Prototype charter — D21
+
+- **D21 — Prototype charter** (2026-08-28; `prototype/453-*`, no production code).
+  - **Baselining is the project's benchmark tooling, not the prototype**: `tests/baseline/run-benchmark.sh` on the four-case set against the committed `tests/baseline/results/0.18.0-453-before.tsv` via `compare-results.sh` (§ *Performance obligation*). The prototype ranks mechanisms against each other; the benchmark proves the chosen ones on the real tool.
+  - **Prototype protocol** — the `prototype/58-probe-mini.pl` precedent: single-entry recognition with the entry's production block code copied verbatim, lines pre-loaded, candidates differing only in the classification code; every candidate must be byte-identical in outcome to a reference evaluator on every line (`--verify-only`); `58-measure.pm` medians with ranges, 5 runs.
+  - **Fixture families** (from `prototype/58-generate-fixtures.sh`): pure-access (`mt3`, majority 2xx), pure-scriptlog (`mt1std`, default failure criterion, mostly INFO), pure-gc (`mt6`, declines — the zero-cost path), at 1k / 10k / 100k / 1m lines.
+  - **Candidates per criterion class:**
+    1. literal alternation on a short field (`category_bucket ^(?:ERROR|FATAL|CRITICAL)$`): inline regex vs hash-set `exists` vs `eq` chain;
+    2. status family (`status_code ^[45]\d\d$` / `^[123]\d\d$`): regex vs generated integer compare vs first-character test;
+    3. message text (`WARN` + `timed out` conjunction): regex vs `index()` pre-gate + regex;
+    4. evaluation order (D4, failure first): cost on the access fixture where every 2xx line pays both tests, against the alternative order;
+    5. call shape: inlined source vs `FR_CLASSIFY` closure call (confirms the closure stays on the CSV path only);
+    6. counting at the include point: `%bucket_outcomes{$bucket}{successes}++` vs two flat hashes vs array-of-two per bucket, against the #306 constant (~1 µs per hash-field update).
+  - **Exit bar** (architect, 2026-08-28): no measurable regression on the declining family; classification plus counting ≤ 3 % of `parse/read_files` per line on the classifying families. A chosen mechanism per class with medians and ranges, and the resulting Dxx, are written here before implementation begins.
 
 ## Open items
 
