@@ -121,27 +121,38 @@ family's missing observation flag are in scope here for that reason.
   (`n_floor`: 4 for shape moments, 2 for `std_dev`/`cv`, else 1). Already observable
   through the `sort_selection` telemetry counters as `defined=0`.
 
-### D4 — One observation flag, resolved from the sort key, not a per-metric map
+### D4 — Derived from existing accumulators; no new per-line work
 
-The runtime gate is a **single boolean**: was the raw input to the *resolved sort
-key's source metric* ever seen. It is resolved at parse time from `$sort_key` to its
-family and set where that family's raw value is extracted.
+The gate answers one question: **was the raw input to the resolved sort key's source
+metric ever observed during the run.** That answer is **derived after the read loop
+from accumulators the tool already maintains** — it is not a new per-line flag.
 
-Rejected: a per-metric observation map (`observed{duration}`, `observed{bytes}`,
-`observed{count}`, `observed{<udm>}`). It is more general and would serve `-V`
-surfaces, but it puts per-metric bookkeeping on the hot path for every run including
-the default sort, where nothing reads it — the same shape as #478 (highlight
-bookkeeping evaluated per line when no highlight is active and when the metric is
-absent). The single flag is set only when a statistic sort was actually requested.
+| family | existing state the answer is read from |
+|---|---|
+| duration | `$durations_observed` (set at the extraction site; already gates the table variant) |
+| bytes | `$bytes_observed` (set inside the conditional the loop already enters) |
+| count | count accumulation is per-bucket (`count_occurrences`); the run-wide answer is established without adding per-line work |
+| occurrences | always satisfiable — the fallback target, needs no observation |
 
-The single flag also covers the count family, which has no observation flag today,
-and gives runway for user-defined metrics as `-so` operands: a UDM name is not known
-until `parse_udm_configs()` runs, and a family-keyed flag would need extending per
-metric where a sort-key-resolved flag does not.
+**Why derivation, not observation.** The mechanism originally proposed — a package
+global set per line — is already measured in this codebase and already rejected:
+`ltl:11453` records from #432 that a package-global read-compare-write on every line
+cost **~1.5% of total runtime**, for a flag that only needs to know whether *any*
+line carried the value. That is why the bytes observation was moved inside a
+conditional the loop was already entering. Adding a fourth flag of the same shape
+would re-introduce a cost this repository has already paid to remove, and would
+repeat #478's pattern — per-line bookkeeping evaluated when it cannot affect the
+result.
 
-Registered on **#443** (user-defined metric diagnostics), whose zero-match notice
-must distinguish "the spec never matched" from "the field is genuinely absent" — the
-same observed/not-observed question, needing the equivalent per-UDM boolean.
+Deriving costs nothing per line, so the default `occurrences` sort — which #303 calls
+sacred — is provably untouched: there is no new statement on the hot path to regress
+it.
+
+Also rejected, and for the same reason: a per-metric observation map
+(`observed{duration}`, `observed{bytes}`, `observed{count}`, `observed{<udm>}`).
+Registered on **#443**, whose zero-match notice must separate "the spec never
+matched" from "the field is genuinely absent" — the same question, needing the
+equivalent per-UDM state, with the better vantage point on where it should live.
 
 ### D5 — Parse-time cases fall back literally
 
@@ -219,101 +230,98 @@ measurement, not an invariant, and asserting on one makes the harness sensitive 
 machine speed. Timings remain the right instrument for the *performance* claim, which
 is verified by benchmark (see the performance obligation above), not by harness.
 
-### D10 — Prototype scope: the three metric surfaces, not an arm matrix
+### D10 — No prototype is required; D4 removed the hot-path change
 
-**What is prototyped: the three key surfaces where the observation is taken** —
-duration, bytes, count. Each is measured for the cost of establishing whether its
-family's source metric was observed during the run, at staged scale
-(1k → 10k → 100k → millions), against the current read loop extracted verbatim as
-baseline (2026-08-21 F9 rule; constants sliced from `ltl`, never restated).
+CLAUDE.md § Development Phases makes prototyping mandatory when work introduces a new
+per-line hot-path cost. **D4 removes that cost from the design**: the gate is derived
+after the read loop from accumulators that already exist, so there is no new per-line
+statement to size and nothing for a staged-scale prototype to compare.
 
-**What is NOT prototyped up front:** a matrix of avoidance strategies. Optimisation
-variants — folding the set into an existing conditional, hoisting it behind the
-sort-requested gate, deriving the answer post-loop from existing accumulators — are
-built and measured **only if the before/after benchmark shows a regression**. Guessing
-at cheap forms and racing them against each other before knowing whether anything is
-slow is the failure mode this issue's own performance obligation exists to prevent.
+This is the intended outcome of the "validate the premise" rule (2026-07-13), applied
+before building rather than after: the premise of a prototype here was that a per-line
+observation was needed. It is not. The relevant constant was already measured in this
+codebase — `ltl:11453` records a package-global read-compare-write per line at **~1.5%
+of total runtime** (#432), which is why the bytes observation rides a conditional the
+loop already enters. Re-measuring it would rediscover a number the tree already
+states.
 
-**The measured constant already in the tree.** `ltl:11453` records, from #432, that a
-package-global read-compare-write on every line measured **~1.5% of total runtime**,
-for a flag that only needs to know whether any line carried bytes — which is why the
-bytes observation is set inside a conditional the loop was already entering. The
-duration flag two lines above still uses the guarded read-compare-write form
-(`$durations_observed = 1 if $durations_observed != 1 && …`). Both shapes are already
-in the code; the prototype measures the surfaces against that known constant rather
-than rediscovering it.
+**What is prototyped instead: nothing up front.** If the before/after benchmark under
+D11 shows a regression, that is what licenses building and measuring optimisation
+candidates — with the profile workflow
+(`features/nytprof-profiling-workflow.md`) to locate it first, so the candidates
+address a measured cause rather than a guess.
 
-**Worth checking first, cheaply:** whether the answer is derivable post-loop from
-state the read loop already maintains. `$durations_observed` and `$bytes_observed`
-exist today; the count family accumulates `count_occurrences` per bucket. If
-unsatisfiability can be read off existing accumulators, the per-line addition is not
-needed for that family at all and the hot-path question dissolves rather than being
-optimised.
+### D11 — Before/after benchmarking is still the gate
 
-### D11 — Before/after benchmarking is the gate, not the prototype
+The prototype obligation is discharged by D10; the measurement obligation is not.
+The benchmark runs before and after the change:
 
-The prototype sizes the surfaces. The **benchmark decides**, run before and after
-the change on the same input:
+- **No regression on the default `occurrences` sort**, which #303 calls sacred. D4
+  makes this expected rather than hoped for — there is no new hot-path statement —
+  and the benchmark proves it rather than arguing it.
+- **The claimed improvement is verified, not asserted.** The pre-walk skip is supposed
+  to remove the +76% statistics-phase cost measured in #415, on the same shape of
+  input. A fix whose benefit is never measured is indistinguishable from one that does
+  nothing.
+- **Time and memory both.** The gate holds per-run state only, so memory is expected
+  flat; a deviation is a finding.
 
-- **No regression on the default `occurrences` sort**, which #303 calls sacred. This
-  is the path that must be provably untouched, since it is the one that never reads
-  the flag.
-- **The claimed improvement is verified**, not asserted: the pre-walk skip is
-  supposed to remove the +76% statistics-phase cost measured in #415, on the same
-  shape of input.
-- **Time and memory both.** The flag is per-run state, so memory is expected flat;
-  a deviation is a finding.
+The `-V` lines added under D12 are the instrument for the second point: the fallback
+decision is observable in the same run that is being timed.
 
-A regression found here is what licenses building the optimisation arms above —
-and profiling per `features/nytprof-profiling-workflow.md` if the delta is
-unexplained.
+### D12 — The gating state is exposed on `-V statistics-demand`
+
+The variables the gate resolves — the sort key's resolved metric family, whether that
+family's source was observed, and which of the three detection points fired — are
+emitted on the `statistics-demand` section.
+
+**Why that section.** It already owns "calculated-statistic sort selection
+(defined/fill split, per-pass call attribution)" and already carries the
+`sort_selection` and `sort_calc` lines this work sits directly alongside. The gating
+state is the same subject one step earlier: what the sort path decided before it ran,
+or decided instead of running. A second section would split one subject across two
+surfaces.
+
+**What it buys, and why it is not optional:**
+
+- **Observing the situation.** A run that falls back can be interrogated for *why* —
+  which family, observed or not, which detection point — instead of inferring it from
+  an absent table column.
+- **Finding bugs.** A fallback that fires when it should not, or fails to fire when it
+  should, is otherwise invisible: both look like a table in occurrences order.
+- **Tying the harness to it.** D8's scenarios currently assert a terminal notice and
+  the absence of a `sort_selection` line. Exposed gating state gives them a positive
+  assertion of the decision itself, rather than only its consequences — the
+  difference between asserting the tool stayed quiet and asserting it decided
+  correctly.
+
+Adding these lines makes this a `-V` surface change, which carries the standing
+obligations: `tests/HARNESS-DESIGN.md` is consulted before the section is touched, the
+line shapes and the semantics of every emitted key are recorded in the owning feature
+doc's section contract in the **same commit**, and each new assertion gets a sabotage
+proof. The owning doc for this section is
+`features/duration-statistics.md § -V statistics-demand section contract`.
 
 ## Performance obligation — MANDATORY, not discretionary
 
-This issue is both a hot-path change and a performance fix, so measurement governs it
-at both ends. CLAUDE.md § Development Phases makes prototyping mandatory when work
-introduces a new per-line hot-path cost; this does.
+This issue is a performance fix, so measurement governs it. It is **no longer a
+hot-path change**: D4 derives the gate from existing accumulators, so nothing is added
+to the read loop. D10 records why that discharges the prototyping obligation; D11
+records the benchmarking that still applies.
 
-### The hot-path surface is exactly one thing
+**The measurement that matters is before/after, both directions:**
 
-Of everything in this design, **only D4's observation flag executes per line.** The
-parse-time gates, the pre-walk skip, the post-walk detection and both notices are all
-once-per-run and cannot appear in a per-line profile.
+1. **The default `occurrences` sort must not regress at all** (#303 calls it sacred).
+   With no new per-line statement this is expected — the benchmark proves it.
+2. **The claimed improvement is verified.** The pre-walk skip should remove the +76%
+   statistics-phase cost measured in #415, on the same shape of input.
+3. **Time and memory both.** Per-run state only, so memory is expected flat; a
+   deviation is a finding.
+4. **Profile if a delta is unexplained** — `features/nytprof-profiling-workflow.md`.
+   A surprise is investigated, not accepted.
 
-That makes the prototype question narrow and answerable: what does setting the flag
-cost per line, and can it be hoisted so a run that requested no statistic sort pays
-nothing at all? #478 is the standing example of the failure mode — bookkeeping
-evaluated per line when it cannot affect the result.
-
-### Before implementation
-
-1. **Prototype the flag** in `prototype/`, comparing candidates against the current
-   code as baseline at staged scale (1k → 10k → 100k → millions). Per the 2026-08-21
-   F9 rule the baseline arm is the production code path extracted verbatim — call
-   shape, variable scoping and data movement included — not a convenience wrapper.
-   Per the 2026-08-27 rule, constants are sliced from `ltl`, never restated from
-   memory; where a value must be restated, the source symbol is named beside it.
-2. **Record the measured result** (medians with ranges) and the lessons as decisions
-   in this doc BEFORE writing production code.
-
-### After implementation — both directions
-
-3. **Regression check on the unaffected path.** The default `occurrences` sort is
-   sacred (#303 design record) and must not regress at all. Benchmark before and
-   after against the last released baseline.
-4. **Improvement measurement on the affected path.** The pre-walk skip is claimed to
-   remove the +76% statistics-phase cost measured in #415. That claim is verified by
-   measurement on the same shape of input, not asserted — a fix whose benefit is
-   never measured is indistinguishable from one that does nothing.
-5. **Memory as well as time.** Both are captured; the flag is per-run state, so the
-   expectation is flat, and a deviation from flat is a finding.
-6. **Profile if the numbers are unexplained.** `features/nytprof-profiling-workflow.md`
-   is the workflow; a surprising delta is investigated rather than accepted, and the
-   profile-ready contract applies to anything given a counter.
-
-Guessing at the cheap implementation and iterating through variants against the full
-tool is not the process — the prototype exists so the candidate is chosen on measured
-evidence in one pass.
+A regression is what licenses building optimisation candidates, located by profile
+first so they address a measured cause rather than a guess.
 
 ## Open items
 
