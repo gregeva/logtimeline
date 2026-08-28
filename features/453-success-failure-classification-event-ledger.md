@@ -140,6 +140,7 @@ Walked piece by piece with the architect; each piece locks its decisions here be
 7. **Prototype charter** — D21 (locked).
 8. **Stages and merge gate** — D22, D23 (locked).
 9. **S0 prototype findings** — D24–D32 (locked from measurement, 2026-08-28).
+10. **Consequences for S2/S3/S5** — proposed D33 (awaiting lock) and two stage obligations.
 
 ### 1. Schema shape — D14
 
@@ -281,6 +282,16 @@ Probe: `prototype/453-run.sh` assembles `prototype/453-extract-slice.sh` (the pr
   | GC (mt6, declines) | 0 | — | — | 0.044 | ≈ 0.04 µs | not measurable |
 
   The application log is the tight case (a cheap block, 7.25 µs/line, and nearly every line classified); the S3 benchmark against `0.18.0-453-before.tsv` on the real loop is the proof, the prototype is the ranking.
+
+### 10. Consequences of the S0 findings for the later stages (recorded 2026-08-28)
+
+Each item follows from a locked decision above; none reopens one. Item 1 is a decision awaiting the architect's lock; items 2 and 3 are stage obligations.
+
+- **Proposed D33 — Classification joins the registry's load-time self-test** (from D25: a criterion is compiled one of three ways — hash set, `index()`, or regex — depending on the shape the build recognises). The compiled form must be proven equal to the declared pattern at startup, the way every entry's sample lines already prove extraction: each spec sample carries its expected outcome (`expect_outcomes => [ 2, 1, … ]` beside `expect`, one integer per sample: 2 failure, 1 success, 0 unclassified), and the build gate dies if the compiled classifier disagrees on any sample. This turns a mis-recognised pattern shape from a silent misclassification into a startup error. Lands in S2 with the criteria compiler. **Status: proposed, not locked.**
+
+- **S3 obligation — the per-message `outcomes` slots ride through consolidation and CSV** (from D30: the per-message store is an array indexed by outcome on the existing message entry). D17 makes the per-message counters part of the consolidation stats source summed by `merge_consolidation_stats()`; with the array shape that sum is element-wise (`outcomes[1]`, `outcomes[2]`), and the CSV message rows read the same slots. The S3 harness scenarios must include a consolidated run (`-g`) whose merged success/failure counts equal the unconsolidated totals.
+
+- **S5 obligation — look for an existing per-line "entry changed" signal before adding the D32 compare** (from D32: the block sets a criteria-signature id and the include point compares it). The compare is the largest single item on the tightest family (0.044 of ≈ 0.18 µs on the application log). The read loop already binds `is_access_log` per file and keeps per-entry match counts; if it already notices the winning entry changing for a file, the signature compare sits inside that branch at no per-line cost. Verified on the code at S5 — if no such branch exists, D32's per-line compare stands as measured. In either case the change branch must also remember the file's previous classifying **entry** (not only its signature id) so the D19 note can name the old and new formats.
 
 ## Open items
 
