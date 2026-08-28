@@ -56,7 +56,9 @@ The success and failure counts are brought into the existing data model — the 
 - **D8 — `mt12` tomcat_codebeamer is an event ledger classified as the access family** (2026-08-28). One line per request, status code captured (`status_code` field, category folded to the `Nxx` family).
 - **D9 — `mt6` java_gc_g1 is an event ledger whose classification is deferred to #483** (2026-08-28). Every pause is logged, so coverage is maximal; what makes a pause a success or a failure is a research question, filed as #483 (success/failure classification criteria for the Java G1 GC log format; blocked by this issue). Until it lands the entry declines to classify, exercising #452's "no classification configured" notice on a real format.
 
-## `$is_access_log` site inventory and proposed replacement (open — needs the architect's confirmation)
+- **D10 — Every `$is_access_log` site maps to `metrics_observed`; no existing site becomes event-ledger-gated** (2026-08-28). The three statistics-capture gates stay on "metrics observed". *Metrics observed is not the same thing as event ledger* — a format may carry duration metrics with partial coverage, or maximal coverage with no metrics — and the event-ledger flag's first readers are this issue's reconciliation shortfall (a defect only on an event ledger) and #452's column default and notices. The `-V format-detection` key `is_access_log:` → `metrics_observed:` rename follows `tests/HARNESS-DESIGN.md` § stability contract (harness, umbrella section-contract, this doc, same commit). The observable-value rename mapping in `tests/baseline/compare-results.sh` (`TIMING_TMAP_AWK`) pairs benchmark TIMING rows across releases; `is_access_log` is not a benchmark row, so that table is not touched by this rename — if any renamed value does surface in a benchmark TSV, an old → new entry is added there in the same commit.
+
+## `$is_access_log` site inventory and replacement (confirmed 2026-08-28, D10)
 
 | Site (function / snippet) | Meaning today | Proposed property |
 |---|---|---|
@@ -92,10 +94,9 @@ Classification is a new per-line hot-path cost (one or more field regex matches 
 
 ## Open items
 
-1. Site-inventory gating table above — confirm.
-2. Name and placement of the R5 counters on `-V` (this issue's surface vs #452's analysis overview).
-3. Expressibility in #387 (user-defined YAML formats): confirm the field+pattern, list-of-conjunctions shape maps onto what #387 will accept — checked at #387 planning, recorded here.
-4. Whether `errRate` (R7) keeps its own bucket-name path for the `-HL` highlight buckets, which are not classification outcomes.
+1. Name and placement of the R5 counters on `-V` (this issue's surface vs #452's analysis overview).
+2. Expressibility in #387 (user-defined YAML formats): confirm the field+pattern, list-of-conjunctions shape maps onto what #387 will accept — checked at #387 planning, recorded here.
+3. Whether `errRate` (R7) keeps its own bucket-name path for the `-HL` highlight buckets, which are not classification outcomes.
 
 ## Merge gate
 
