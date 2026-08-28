@@ -154,7 +154,7 @@ Each log format definition must include:
 - **Timestamp format**: How to parse the timestamp
 - **Duration field**: Which field contains duration (if any)
 - **Duration unit**: The unit for duration values (ns, us, ms, s) - this is format-specific knowledge
-- **Access log flag**: Whether this is an access log format
+- **Event ledger flag** and **success/failure classification**: whether the format has maximal coverage of the operations it describes, and how its lines are recognised as successes or failures — specified in `features/453-success-failure-classification-event-ledger.md` (#453); this replaces the former access-log flag
 - **Format name/description**: Human-readable identifier
 - **Examples**: Sample log lines for documentation and testing
 
