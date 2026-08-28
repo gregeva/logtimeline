@@ -494,6 +494,12 @@ my %rate_csv_suffix = ( 's' => '_sec', 'm' => '_min', 'h' => '_hr', 'd' => '_day
 my $pause_output = 0;
 my $omit_values = 0;
 my ( $sort_type, $sort_key, $sort_ascending ) = ( "occurrences", "occurrences", 0 );
+# Unsatisfiable statistic sort (#418). Resolved once from the -so operand at parse
+# time and consulted at each of the three detection points (option parsing, before
+# the population walk, after it); emitted on -V statistics-demand as the sort_gate
+# line. `fallback` names the detection point that moved the sort to occurrences,
+# or 'none' when the requested ranking stood.
+my %sort_gate = ( operand => undef, family => 'occurrences', observed => undef, fallback => 'none' );
 my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 
 # CLI option resolution tracking (Issue #231) — populated in
@@ -4693,6 +4699,15 @@ sub emit_statistics_demand_verbose {
     # statistics phase's calculation telemetry lives here.
     push @verbose_output, "threadpool_population: " . $stats_population_threadpools;
 
+    # Unsatisfiable-sort gate (#418): the -so operand as typed, the metric family
+    # it resolves to, whether that family's source metric was observed in the run
+    # (n/a where no detection point needed it), and the detection point that moved
+    # the sort to occurrences — none when the requested ranking stood.
+    push @verbose_output, "sort_gate: operand=" . ($sort_gate{operand} // 'occurrences')
+        . " family="   . $sort_gate{family}
+        . " observed=" . ($sort_gate{observed} // 'n/a')
+        . " fallback=" . $sort_gate{fallback};
+
     push @verbose_output, "=== END statistics-demand ===";
 }
 
@@ -6545,7 +6560,7 @@ sub print_help {
 
     # Sorting
     $out .= help_subheading("Sorting");
-    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. A bare metric name means its total: bytes, duration (alias time), count. Aggregates: occurrences, bytes_occurrences, bytes_min, bytes_mean, bytes_max, count_occurrences, count_min, count_mean, count_max, impact. Stats: min, mean, max, stddev, cv. Percentiles: p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999. Shape: iqr, skewness, kurtosis, bimodality_coef. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details.");
+    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. A bare metric name means its total: bytes, duration (alias time), count. Aggregates: occurrences, bytes_occurrences, bytes_min, bytes_mean, bytes_max, count_occurrences, count_min, count_mean, count_max, impact. Stats: min, mean, max, stddev, cv. Percentiles: p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999. Shape: iqr, skewness, kurtosis, bimodality_coef. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details. When no message can be ranked by the chosen metric, a note says so and the table is ordered by occurrences.");
     $out .= help_opt("-sa,  --sort-ascending",        "Reverse the sort order to show lowest values first");
 
     # Heatmap
@@ -9355,6 +9370,81 @@ sub trim  { my $s = shift; $s =~ s/^\s+|\s+$//g; return $s }
 
 # Canonical built-in name for a token, or undef. Safe to call at option
 # parse time, before parse_udm_configs() has run.
+# Every -so sort key draws on one source metric. Unsatisfiability of a sort is a
+# property of that metric family, not of the individual operand (#418): the family
+# has a parse-time killer (its --omit-* flag) and a run-wide observation state, and
+# an operand can rank exactly when its family's source was collected. Occurrences
+# is the line tally and always satisfiable; it is the fallback target.
+sub sort_key_metric_family {
+    my ($key) = @_;
+    return 'occurrences' if $key eq 'occurrences';
+    return 'bytes'       if $key eq 'total_bytes' || $key =~ /^bytes_/;
+    return 'count'       if $key =~ /^count_/;
+    return 'duration';
+}
+
+# Parse-time detection point (#418): the source metric of the requested sort key is
+# switched off by its --omit-* flag, so no key can ever rank. The sort falls back to
+# occurrences literally — the calculated-statistic branch is never entered — and the
+# notice names the contradiction rather than an absence of data, because the values
+# were never collected.
+sub apply_parse_time_sort_gate {
+    my ($operand) = @_;
+    $sort_gate{operand} = $operand;
+    $sort_gate{family}  = sort_key_metric_family($sort_key);
+    my %killer = (
+        duration => [ $omit_durations, '-od/--omit-durations' ],
+        bytes    => [ $omit_bytes,     '-ob/--omit-bytes'     ],
+        count    => [ $omit_count,     '-oc/--omit-count'     ],
+    );
+    my $k = $killer{ $sort_gate{family} };
+    return unless $k && $k->[0];
+    print STDERR "Note: cannot apply -so/--sort-on $operand because $k->[1] discards the $sort_gate{family} metric - the messages table is ordered by occurrences\n";
+    ( $sort_type, $sort_key ) = ( 'occurrences', 'occurrences' );
+    $sort_gate{observed} = 0;
+    $sort_gate{fallback} = 'parse';
+}
+
+# Runtime detection points (#418), both reached only when a statistic sort survived
+# option parsing. The sort falls back to occurrences and the notice says why: before
+# the walk, the family's source metric was never observed; after it, values were
+# observed but the statistic could not be produced from them (no key reached its
+# eligibility floor). Both texts are generic across the metric families.
+sub sort_fallback_to_occurrences {
+    my ($detection_point) = @_;
+    print STDERR $detection_point eq 'pre-walk'
+        ? "Note: no $sort_gate{family} values were found - the requested sort (-so/--sort-on $sort_gate{operand}) could not be produced, so the messages table is ordered by occurrences\n"
+        : "Note: the requested sort (-so/--sort-on $sort_gate{operand}) could not be produced from the $sort_gate{family} values in this run - the messages table is ordered by occurrences\n";
+    ( $sort_type, $sort_key ) = ( 'occurrences', 'occurrences' );
+    $sort_gate{fallback} = $detection_point;
+}
+
+# Before the population walk: was the family's source metric observed anywhere in
+# the run? Derived from accumulators the read loop already maintains — nothing is
+# added per line. When it was not, no key can rank, so the walk and the re-sort are
+# skipped outright rather than run to an empty defined block.
+sub apply_pre_walk_sort_gate {
+    return if $sort_key eq 'occurrences';
+    my $family = $sort_gate{family};
+    my $observed = $family eq 'duration' ? $durations_observed
+                 : $family eq 'bytes'    ? $bytes_observed
+                 : $family eq 'count'    ? ( grep { $log_analysis{$_}{count_occurrences} } keys %log_analysis ) ? 1 : 0
+                 :                         1;
+    $sort_gate{observed} = $observed ? 1 : 0;
+    sort_fallback_to_occurrences('pre-walk') unless $observed;
+}
+
+# After the walk: values were observed, but no key in any category met the
+# statistic's eligibility floor, so the defined block is empty everywhere and the
+# fill block — already ranked by occurrences — is the whole table. Only a
+# calculated statistic (a %STAT_FIELD_GROUP key) has a floor above one observation;
+# an available-value sort key whose family was observed always ranks something.
+sub apply_post_walk_sort_gate {
+    my ($defined_keys) = @_;
+    return if !exists $STAT_FIELD_GROUP{$sort_key} || $defined_keys;
+    sort_fallback_to_occurrences('post-walk');
+}
+
 sub builtin_metric_name {
     my ($token) = @_;
     return undef unless defined $token;
@@ -10066,6 +10156,7 @@ sub adapt_to_command_line_options {
     #
     # `duration` is the metric's own sum and is not a prefixed statistic, so it is
     # excluded from the strip.
+    my $sort_operand_typed = $sort_type;
     $sort_type =~ s/^duration_//i unless $sort_type =~ /^duration$/i;
 
     # The whitelist is matched case-insensitively, as every arm of the resolution
@@ -10121,6 +10212,8 @@ sub adapt_to_command_line_options {
         # %log_messages under the same key name they're invoked by on -so (#220, #222).
         $sort_key = lc $sort_type;
     }
+
+    apply_parse_time_sort_gate($sort_operand_typed);
 
     parse_udm_configs() if @udm_raw_args;
 
@@ -12694,6 +12787,8 @@ sub calculate_all_statistics {
     $elapsed_stats_bucket_stats += tv_interval($t0_bucket_stats);
 
     ## STATS FOR TOP LOG MESSAGES ##
+    apply_pre_walk_sort_gate();
+    my $sort_defined_keys = 0;
     # if( $durations_observed ) {
         foreach my $category (sort keys %log_messages) {
             # Collect and sort the log keys based on the count within each log_key
@@ -12818,7 +12913,9 @@ sub calculate_all_statistics {
                 #   reference set and fill any remaining display slots ranked
                 #   by occurrences under the same conventions as the
                 #   occurrences sort. Their statistic columns render blank —
-                #   the blank is the signal; no notice is printed.
+                #   the blank is the signal; no notice is printed while any
+                #   key ranks. When no key does, apply_post_walk_sort_gate()
+                #   says so (#418).
                 #
                 # Pass 1 (population, defined block only) computes just the
                 # sort statistic's demand group per key into a transient map;
@@ -12941,6 +13038,7 @@ sub calculate_all_statistics {
                 }
 
                 @sorted_log_keys = (@defined_sorted, @fill_sorted);
+                $sort_defined_keys += scalar keys %sort_value;
                 $message_key_order{$category} = \@sorted_log_keys;
                 @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)];
                 $elapsed_stats_sort_selection += tv_interval($t0_sort_selection);
@@ -13063,6 +13161,7 @@ sub calculate_all_statistics {
             $elapsed_stats_group_calc += tv_interval($t0_group_calc);
         # }
     }
+    apply_post_walk_sort_gate($sort_defined_keys);
 
     ## STATS FOR THREAD POOL ACTIVITY ##
     my %threadpools;

@@ -70,6 +70,7 @@ store: <bucket|message>
   sort_selection: statistic=<field> defined=<N> fill=<N> demoted=<N>
   sort_calc: population=<N> topn=<N>
 threadpool_population: <N>
+sort_gate: operand=<operand> family=<duration|bytes|count|occurrences> observed=<0|1|n/a> fallback=<none|parse|pre-walk|post-walk>
 === END statistics-demand ===
 ```
 
@@ -91,6 +92,29 @@ threadpool_population: <N>
   `finalize/calculate_statistics/threadpool_stats` sub-stage row. The
   sub-stage TIMING row contract itself is owned by
   features/417-substage-statistics-timing.md.
+- `sort_gate` (#418) — phase-level line after `threadpool_population`,
+  emitted on every run: the unsatisfiable-sort gate's resolved state
+  (features/418-unsatisfiable-sort-selection-cost.md § D2–D5, D12).
+  - `operand` — the `-so` operand as the user typed it (`occurrences` when
+    `-so` was not given).
+  - `family` — the source metric the operand draws on, resolved by
+    `sort_key_metric_family()`: `duration` (the statistic ladder, `duration`,
+    `impact`), `bytes` (`bytes`, `bytes_*`), `count` (`count`, `count_*`),
+    `occurrences` (always satisfiable).
+  - `observed` — whether the family's source metric was observed in the run,
+    read after the read loop from `$durations_observed`, `$bytes_observed`,
+    or the per-bucket `count_occurrences` accumulators
+    (`apply_pre_walk_sort_gate()`). `0` at parse-time fallback (the values
+    were never collected); `n/a` when no detection point consulted it — the
+    occurrences sort, where nothing can be unsatisfiable.
+  - `fallback` — the detection point that moved the sort to occurrences:
+    `parse` (the family's `--omit-*` flag is set; the calculated-statistic
+    branch is never entered, so no `sort_selection` line exists), `pre-walk`
+    (family never observed; the population walk is skipped, so likewise no
+    `sort_selection` line), `post-walk` (values observed but every key fell
+    below the statistic's eligibility floor; `sort_selection` reports
+    `defined=0`), or `none` (the requested ranking stood). Each fallback
+    prints one `Note:` on stderr.
 - Group order fixed: terminal_core, csv_body, extended_percentiles,
   shape_moments (both for the `group` demand lines and the `group_calc`
   counter lines). Store order fixed: bucket, message.

@@ -226,7 +226,7 @@ ltl -so occurrences -sa access.log
 
 Percentile and shape metrics require a sufficient sample size to be statistically meaningful: `p999` ≥ ~1k, `p9999` ≥ ~100k, `p99999` ≥ ~1M. `bimodality_coef` is a *screening* statistic — at n < 100 small-sample noise can produce false positives. Skewness/kurtosis/bimodality_coef are undefined (blank in CSV) when n < 4.
 
-When sorting on a statistic, messages that have no defined value for it (no recorded durations, or too few samples for that statistic) are not ranked by it: they are listed after the ranked messages, ordered by occurrence count. Their blank statistic column is the signal. With `-sa`, ascending means the smallest defined value first — never the undefined ones.
+When sorting on a statistic, messages that have no defined value for it (no recorded durations, or too few samples for that statistic) are not ranked by it: they are listed after the ranked messages, ordered by occurrence count. Their blank statistic column is the signal. With `-sa`, ascending means the smallest defined value first — never the undefined ones. When no message at all can be ranked — the metric was switched off with its `--omit-*` option, the run never observed it, or no message had enough values for the statistic — a note says so and the table is ordered by occurrences.
 
 ### Percentile data model and algorithm
 
