@@ -18,6 +18,8 @@ When multiple files are specified, logtimeline processes them sequentially and c
 
 Glob expansion is performed internally by logtimeline rather than relying on the shell, ensuring consistent behavior across platforms — particularly on Windows where the shell does not expand wildcards. Only regular files are accepted; directories and other non-file entries in a glob result are silently skipped.
 
+That internal expansion only happens if the pattern actually reaches logtimeline. On macOS and Linux, an unquoted wildcard is expanded by the shell first, and logtimeline receives the list of names the shell already matched — or, in some shells, the command is refused outright when the pattern matched nothing. It makes no difference for a single-level pattern, but it silently narrows a recursive sweep to whatever the shell already found. Put wildcard patterns in double quotes whenever you use `-r`: `ltl -r "logs/*.log"`.
+
 ## Options
 
 ### Time & Buckets
@@ -102,7 +104,7 @@ These options control which metrics logtimeline extracts and computes during pro
 | `-os, --omit-stats` | Deprecated: use `-od, --omit-durations` to skip capturing durations, or `-hst, --hide-stats` to hide the statistics panel |
 | `-oe, --omit-empty` | Skip time buckets that contain zero log entries |
 | `-ni, --no-index` | Do not read or update `ltl-index.csv`, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it |
-| `-r, --recursive` | Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. `logs/access/*.log` becomes every `.log` file anywhere under `logs/access`; `*.log` recurses from the current directory. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end. |
+| `-r, --recursive` | Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. `"logs/access/*.log"` becomes every `.log` file anywhere under `logs/access`; `"*.log"` recurses from the current directory. Put the pattern in double quotes so your shell passes it through unchanged: an unquoted pattern is expanded, or rejected, by the shell before ltl sees it, and the sweep then covers only what the shell already matched. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end. |
 | `-or, --omit-rate` | Hide the error/message rate from the legend |
 | `-od, --omit-durations` | Suppress duration extraction and related columns (significantly reduces memory and processing time on large files) |
 | `-ob, --omit-bytes` | Suppress byte-size extraction and related columns |
