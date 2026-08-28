@@ -61,16 +61,26 @@ absence of data — the values were never collected, so "none were found" would
 misdescribe what happened:
 
 ```
-Note: cannot sort on <operand> because -XX/--long-option discards the <metric>
-metric - the messages table is ordered by occurrences
+Note: cannot apply -so/--sort-on <operand> because -XX/--long-option discards the
+<metric> metric - the messages table is ordered by occurrences
 ```
 
-**Absence (runtime).** The metric was collectable but nothing produced a value, or no
-key reached the statistic's eligibility floor:
+**Absence (runtime), before the walk.** The metric was collectable but the run never
+observed a value:
 
 ```
-Note: no <metric> values were found - the requested sort on <operand> could not be
-produced, so the messages table is ordered by occurrences
+Note: no <metric> values were found - the requested sort (-so/--sort-on <operand>)
+could not be produced, so the messages table is ordered by occurrences
+```
+
+**Absence (runtime), after the walk.** Values were observed, but no key reached the
+statistic's eligibility floor. "No values were found" would be false here — the
+values exist, there were never enough per message — so the reason is stated as what
+the run had, not what it lacked (architect, 2026-08-28):
+
+```
+Note: the requested sort (-so/--sort-on <operand>) could not be produced from the
+<metric> values in this run - the messages table is ordered by occurrences
 ```
 
 Both carry the two parts locked in the specification interview: **why** the ranking
@@ -83,6 +93,7 @@ blanks reports "no values here", not "your requested ordering was not applied", 
 only the second explains the row order.
 
 **Option names appear in both forms, short then long** — `-od/--omit-durations`,
+and the sort option itself as `-so/--sort-on <operand>` (architect, 2026-08-28),
 matching the existing `-os/--omit-stats` deprecation notice. The long form is the
 self-documenting half: a notice is read by someone who may not have written the
 command line, and `-od` alone does not say what it does. This applies to every
@@ -175,9 +186,11 @@ is a ranking; an empty ranking is the tool doing something other than what was a
 
 ### D7 — Notice delivery
 
-Ships ad-hoc on the terminal, on the surface that exists after message processing.
-Registered on **#412** (notices surface — structured pre-chart render area) as a
-producer to collect when that work happens; #412 is not in 0.18.0.
+Ships ad-hoc on the terminal — three `print STDERR "Note: ..."` sites
+(`apply_parse_time_sort_gate()`, `sort_fallback_to_occurrences()` pre-walk and
+post-walk texts). Registered on **#412** (notices surface — structured pre-chart
+render area) on 2026-08-28 as producers to migrate to its producer/consumer model
+when that work happens; #412 is not in 0.18.0.
 
 Per the repository's CLI conventions the notice is **not** gated behind
 `--disable-progress`: it is a behavioural notice reporting what the tool decided on

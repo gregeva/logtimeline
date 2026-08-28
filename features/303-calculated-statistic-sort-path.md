@@ -76,7 +76,13 @@ zero; under `-sa` duration-less keys flood the top) is replaced by:
    sort field is #302-tuned (significant performance work went into sorting
    this hash); do not introduce a different tiebreak rule.
 4. **No notice/warning output** when the fill block appears — the blank
-   statistic column on fill rows is the signal.
+   statistic column on fill rows is the signal. Amended for the **degenerate**
+   case only (#418): when the defined block is empty — the family's source
+   metric was switched off, never observed, or no key met the eligibility
+   floor — no ranking was produced and most operands render no column to be
+   blank, so a note says the sort could not be produced and that the table is
+   ordered by occurrences. See features/418-unsatisfiable-sort-selection-cost.md
+   § D1, D6.
 5. Follow the principles already present in the sorting code wherever this
    contract is silent; do not invent new ordering rules that create
    incoherence with the existing implementation.
