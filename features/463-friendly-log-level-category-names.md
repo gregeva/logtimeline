@@ -114,11 +114,72 @@ right stays put. Every shipped name fits: the longest,
 `1xx Informational, highlighted`, is exactly 30. A label longer than the column
 is truncated to it at render, so no future entry can misalign the surface.
 
+### D5 — The lookup stays in GLOBALS, beside the category vocabulary it parallels (architect's delegate, 2026-08-28)
+
+`%category_display_names` is declared in GLOBALS immediately after
+`@log_levels` and `%log_level_set`, and above `%colors`, and it stays there.
+
+A category already lives on three global surfaces: the ordered `@log_levels`
+list that fixes the row order of the summary table, the `%log_level_set`
+membership map, and the `%colors` table that gives it its colour (whose `-HL`
+twin is generated from the plain entry). The descriptive name is a fourth
+surface of exactly the same kind — keyed by category name, global, and shared
+by every format — and it is the only optional one. Keeping it in that
+neighbourhood means adding a category is one edit region rather than four
+scattered ones, and the omission of an entry is visible right beside the three
+surfaces that do carry it.
+
+The alternatives were both declined: a per-format declaration inside the format
+registry, already declined by D1 [one global lookup shared by every format]
+because the HTTP families would be duplicated across every access entry and
+drift; and a separate configuration surface, which belongs to the open question
+below rather than to this drop.
+
+### D6 — `2xx Success` stands as the display text (architect's delegate, 2026-08-28)
+
+The five shipped names read as a set: `1xx Informational`, `2xx Success`,
+`3xx Redirection`, `4xx Client error`, `5xx Server error`. `2xx Success` is
+kept as it is — it is the family's conventional name, it is what a reader
+scanning the column recognises immediately, and it holds the same short
+noun-phrase shape as its four siblings, which is what lets the column be read
+down rather than row by row.
+
+### D7 — A category with no entry keeps its raw name, `-HL` suffix included (architect's delegate, 2026-08-28)
+
+The requirement is that where no entry exists, the category's own name is
+displayed unchanged. For a highlighted twin with no entry, its own name is the
+raw key — suffix and all. The behaviour is therefore as specified, and it is
+not changed here.
+
+The visible consequence, in a table covering more than one format, is a mixed
+convention. Rendering an access log and a Windchill method-server log together
+(`-h orders -h 'Error level'`) gives:
+
+```
+  FATAL                                   1
+  ERROR-HL                                1
+  WARN                                    1
+  ...
+  5xx Server error, highlighted           1
+  5xx Server error                        1
+```
+
+`ERROR-HL` and `5xx Server error, highlighted` say the same thing two different
+ways, three rows apart. Resolving it would mean either entries for every
+remaining category vocabulary, or a rendered highlight indicator that the code
+appends — and appending a marker is precisely what the requirement declines,
+because where the indicator reads naturally is a judgement about each phrase.
+Both are a decision for whoever picks it up; this drop leaves the specified
+behaviour in place and records the observation as a possible follow-up.
+
 ## Open question — not decided in this drop
 
-Whether a user can supply or override entries, or whether the set ships with
-the tool. **This drop ships the set with the tool: there is no user override.**
-The question stays open on #463 for a later decision.
+Of the two open questions the requirement carries, the first — global lookup or
+per-format declaration — is decided by D1 [one global lookup shared by every
+format]. The second stays open: whether a user can supply or override entries,
+or whether the set ships with the tool. **This drop ships the set with the
+tool: there is no user override**, and the question stays open on #463 for a
+later decision.
 
 ## Affected surfaces
 
@@ -199,6 +260,9 @@ blessed along with them.
 
 - User-supplied or user-overridden entries (the open question above).
 - Descriptive names for any vocabulary other than the HTTP status families.
+- The mixed convention a multi-format table shows between a raw `-HL` row and a
+  descriptive `, highlighted` row — behaviour as specified, recorded as a
+  possible follow-up in D7 [a category with no entry keeps its raw name].
 - The legend and the CSV (D3).
 - The category table's row shape — #448 (relative percentage and contribution
   bar per category) changes the same rows; whichever lands second inherits the
