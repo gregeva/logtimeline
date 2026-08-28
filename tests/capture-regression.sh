@@ -81,10 +81,16 @@ for f in "$ACCESS_LOG" "$SCRIPT_LOG" "$APACHE_LOG" "$PLOT_LOG" "$DPM5K_LOG"; do
     fi
 done
 
-# Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin
+# Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin.
+#
+# The TOP OVERALL MESSAGES block is not part of the layout surface these
+# references freeze, so it is dropped. The drop is bounded: the run summary
+# closes the output, and its first line (the echoed options) ends the skip so
+# the category totals, the HIGHLIGHTED row and the file/format legend stay
+# inside the captured surface.
 strip_nondeterministic() {
     perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[^\]]+\]/log timeline [VERSION]/' \
-    | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
+    | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; $skip=0 if /^(?:environment|command-line) options: /; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
 }
 
 # Create output directory

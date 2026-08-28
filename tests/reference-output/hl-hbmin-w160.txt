@@ -46,6 +46,10 @@
  2026-01-25 06:00 4xx: 2 3xx: 7 113 2xx: 545  0:5.6/m │ █████████████████████████    3m         2.5 MiB  │  P50:47.1ms P95:1.3s   P99:5.3s   P999:7.4s   CV:3.13
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+  TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [200] GET /Windchill/sslClientAuth/servlet/odata/v7/ProdMgmt/$metadata                                     37   35ms   72ms   5.3s   3.27       9.8 sec 
+
 command-line options: --disable-progress -ni -n 1 --terminal-width 160 -du us -hbmin 5000 
 
   ─────────────────────────────────────────   
@@ -60,8 +64,4 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -du us -h
   LINES INCLUDED                        677   
   LINES READ                            677   
   ─────────────────────────────────────────   
-
-  TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
- ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  [200] GET /Windchill/sslClientAuth/servlet/odata/v7/ProdMgmt/$metadata                                     37   35ms   72ms   5.3s   3.27       9.8 sec 
 

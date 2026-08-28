@@ -57,7 +57,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0";
+my $version_number = "0.18.0-457";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -6658,10 +6658,10 @@ sub print_help {
 
     # Display & Output
     $out .= help_subheading("Display & Output");
-    $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the summary table (default: 10)");
+    $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the top-messages table (default: 10)");
     $out .= help_opt("-o,   --output-csv",            "Write all extracted data to a CSV file for external analysis");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from -du), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
-    $out .= help_opt("-osum, --omit-summary",         "Hide the summary table printed after the bar graph");
+    $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
     $out .= help_opt("-hl,  --hide-legend",           "Hide the legend column (category breakdowns and rates)");
     $out .= help_opt("-ho,  --hide-occurrences",      "Hide the occurrences bar graph column, freeing space for other metric columns");
     $out .= help_opt("-hd,  --hide-duration",         "Hide the duration bar graph column");
@@ -16935,8 +16935,8 @@ sub pipeline_finalize {
 # Receives: finalized statistics and bucket structures; resolved demand.
 # Emits: normalized/scaled display data (layout before scaling), index-drift
 # detection plus the verbose/telemetry surface flush, bar graph, histograms,
-# summary tables, message/threadpool summaries, CSV output lifecycle, and the
-# persistent index file (#46).
+# message/threadpool summaries, the closing run summary, CSV output lifecycle,
+# and the persistent index file (#46).
 sub pipeline_render {
     # NORMALIZE DATA FOR CONSOLE OUTPUT #
     $start_time = [gettimeofday];
@@ -16991,16 +16991,6 @@ sub pipeline_render {
     print_histograms() if $histogram_enabled;  # Issue #25: Histograms appear after bar graph
     close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
 
-    # Issue #356 (S1): capture the peak through normalize/bar-graph/CSV rendering
-    # so the displayed MAXIMUM MEMORY USED reflects everything up to this point.
-    # The output stages below can no longer move the peak materially (#362 clamped
-    # the only O(-n) allocation); their residual is covered by the post-output
-    # measurement and visible under -mem debug.
-    measure_memory_structures();
-
-    print_summary_table();
-    memory_debug_decomposition("after_summary_table");
-
     if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
         $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
         my $csv_file_name = build_csv_filename('MESSAGES');
@@ -17035,6 +17025,18 @@ sub pipeline_render {
 
     print_threadpool_summary() if $include_threadpool_summary;										    # Print threadpool summaries
     memory_debug_decomposition("after_threadpool_summary") if $include_threadpool_summary;
+
+    # Issue #356 (S1): capture the peak across every rendered analysis section so
+    # the MAXIMUM MEMORY USED the summary reports accounts for all of them. The
+    # summary render's own residual is covered by the post-output measurement
+    # below and visible under -mem debug.
+    measure_memory_structures();
+
+    # The summary reports on the run itself -- the span analysed, the files read,
+    # the totals, timing and memory -- so it closes the output, leaving the
+    # analysis sections above it contiguous on screen.
+    print_summary_table();
+    memory_debug_decomposition("after_summary_table");
 
     # Issue #356 (S1): post-output measurement keeps the recorded peak honest for
     # the full process lifetime; surfaced by the -mem debug "end" line below.

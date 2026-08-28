@@ -62,6 +62,10 @@
                            P25: 35.6ms   P50: 47.1ms   P75: 89.6ms   P90: 542.7ms   P95: 1.3s   P99: 5.3s   P99.9: 7.4s   P99.99: 7.4s          
                               P25: 147.8ms   P50: 353.1ms   P75: 1s   P90: 3.2s   P95: 5.3s   P99: 6.9s   P99.9: 7.4s   P99.99: 7.4s            
 
+  TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [200] GET /Windchill/sslClientAuth/servlet/odata/v6/ProdMgmt/$metadata                                     12  106ms  167ms   5.4s   2.18       8.4 sec 
+
 command-line options: --disable-progress -ni -n 1 -hgdm bin --terminal-width 160 -du us -hg duration -hdmin 100 
 
   ─────────────────────────────────────────   
@@ -77,8 +81,4 @@ command-line options: --disable-progress -ni -n 1 -hgdm bin --terminal-width 160
   LINES INCLUDED                        677   
   LINES READ                            677   
   ─────────────────────────────────────────   
-
-  TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
- ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  [200] GET /Windchill/sslClientAuth/servlet/odata/v6/ProdMgmt/$metadata                                     12  106ms  167ms   5.4s   2.18       8.4 sec 
 

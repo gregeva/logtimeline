@@ -149,14 +149,14 @@ ltl -g 80 -iqs -is access.log
 
 ### Display & Output
 
-These options control what is shown and how. After the timeline bar graph, logtimeline prints a summary table ranking the top contributing messages — `-n` controls how many entries appear, and `-osum` suppresses it entirely. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. The light background mode (`-lbg`) switches color gradients for white or light terminal backgrounds. The dark background mode (`-dbg`) forces the dark gradients and overrides `-lbg` if both are passed. The pause option (`-p`) is useful when output exceeds the terminal height.
+These options control what is shown and how. After the timeline bar graph, logtimeline prints the table ranking the top contributing messages — `-n` controls how many entries appear. The run summary — category totals, line counts, timing, memory and the files that were read — comes after all the analysis content, at the end of the output, and `-osum` suppresses it. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. The light background mode (`-lbg`) switches color gradients for white or light terminal backgrounds. The dark background mode (`-dbg`) forces the dark gradients and overrides `-lbg` if both are passed. The pause option (`-p`) is useful when output exceeds the terminal height.
 
 | Option | Description |
 |--------|-------------|
-| `-n, --top-messages <N>` | Number of unique messages to show in the summary table (default: 10) |
+| `-n, --top-messages <N>` | Number of unique messages to show in the top-messages table (default: 10) |
 | `-o, --output-csv` | Write all extracted data to a CSV file for external analysis |
 | `-cp, --csv-precision <mode>` | Control CSV decimal precision: `default` (per-family decimals derived from `-du`), `full` (raw precise floats), or an integer N (cap all numeric columns at N decimals) |
-| `-osum, --omit-summary` | Hide the summary table printed after the bar graph |
+| `-osum, --omit-summary` | Hide the run summary printed at the end of the output |
 | `-hl, --hide-legend` | Hide the legend column (category breakdowns and rates) |
 | `-ho, --hide-occurrences` | Hide the occurrences bar graph column, freeing space for other metric columns |
 | `-hd, --hide-duration` | Hide the duration bar graph column |
@@ -171,11 +171,11 @@ These options control what is shown and how. After the timeline bar graph, logti
 | `-V, --verbose [<section>...]` | Emit diagnostic sections. Bare `-V` emits all; `-V <name>[,<name>...]` or repeated `-V` selects sections; `-V list` prints known sections. See "Verbose output (`-V`)" section below |
 
 ```bash
-# Show top 50 messages in the summary table
+# Show top 50 messages in the top-messages table
 ltl -n 50 access.log
 # Export full analysis data to CSV
 ltl -o access.log
-# Hide the summary table, show only the timeline
+# Hide the run summary, show only the analysis content
 ltl -osum access.log
 # Use color gradients suited for light terminal backgrounds
 ltl -lbg access.log
