@@ -140,7 +140,7 @@ Walked piece by piece with the architect; each piece locks its decisions here be
 7. **Prototype charter** — D21 (locked).
 8. **Stages and merge gate** — D22, D23 (locked).
 9. **S0 prototype findings** — D24–D32 (locked from measurement, 2026-08-28).
-10. **Consequences for S2/S3/S5** — proposed D33 (awaiting lock) and two stage obligations.
+10. **Consequences for S2/S3/S5** — D33 (locked) and two stage obligations.
 
 ### 1. Schema shape — D14
 
@@ -223,7 +223,7 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
   |---|---|---|
   | S0 | prototype per D21; findings recorded as D24–D32 (done 2026-08-28) | mechanism choice |
   | S1 | mechanical rename `$is_access_log` → `$metrics_observed`, `-V` key, harness assertion, umbrella contract (D18) | parity: full suite green, benchmark flat |
-  | S2 | `classification` / `event_ledger` on the specs, `%classification_default`, build-time resolution and criteria signature, `FR_EVENT_LEDGER` / `FR_CLASSIFY`, generated `$line_outcome`, per-file `event_ledger:` key — no counting yet (D14–D16) | the decide cost alone |
+  | S2 | `classification` / `event_ledger` on the specs, `%classification_default`, build-time resolution and criteria signature, `FR_EVENT_LEDGER` / `FR_CLASSIFY`, generated `$line_outcome`, per-file `event_ledger:` key, `expect_outcomes` self-test (D33) — no counting yet (D14–D16, D25–D27, D32, D33) | the decide cost alone |
   | S3 | counting at the include point, per-message keys, consolidation merge, the `classification` sub-section and its harness scenarios (D17, D20) | the counting cost alone |
   | S4 | `errRate` reads the failure counter, category regex removed (D13); the highlighted-error fix (D12); parity fixtures: access log and application log unhighlighted are byte-identical, a highlighted run shows the corrected rate | — |
   | S5 | format-change handling (D19): entry-change check, note, `rule_change:` lines, the two synthetic fixtures and their scenarios | the per-line reference compare |
@@ -285,9 +285,9 @@ Probe: `prototype/453-run.sh` assembles `prototype/453-extract-slice.sh` (the pr
 
 ### 10. Consequences of the S0 findings for the later stages (recorded 2026-08-28)
 
-Each item follows from a locked decision above; none reopens one. Item 1 is a decision awaiting the architect's lock; items 2 and 3 are stage obligations.
+Each item follows from a locked decision above; none reopens one. Item 1 is a locked decision; items 2 and 3 are stage obligations.
 
-- **Proposed D33 — Classification joins the registry's load-time self-test** (from D25: a criterion is compiled one of three ways — hash set, `index()`, or regex — depending on the shape the build recognises). The compiled form must be proven equal to the declared pattern at startup, the way every entry's sample lines already prove extraction: each spec sample carries its expected outcome (`expect_outcomes => [ 2, 1, … ]` beside `expect`, one integer per sample: 2 failure, 1 success, 0 unclassified), and the build gate dies if the compiled classifier disagrees on any sample. This turns a mis-recognised pattern shape from a silent misclassification into a startup error. Lands in S2 with the criteria compiler. **Status: proposed, not locked.**
+- **D33 — Classification joins the registry's load-time self-test** (locked 2026-08-28) (from D25: a criterion is compiled one of three ways — hash set, `index()`, or regex — depending on the shape the build recognises). The compiled form must be proven equal to the declared pattern at startup, the way every entry's sample lines already prove extraction: each spec sample carries its expected outcome (`expect_outcomes => [ 2, 1, … ]` beside `expect`, one integer per sample: 2 failure, 1 success, 0 unclassified), and the build gate dies if the compiled classifier disagrees on any sample. This turns a mis-recognised pattern shape from a silent misclassification into a startup error. Lands in S2 with the criteria compiler.
 
 - **S3 obligation — the per-message `outcomes` slots ride through consolidation and CSV** (from D30: the per-message store is an array indexed by outcome on the existing message entry). D17 makes the per-message counters part of the consolidation stats source summed by `merge_consolidation_stats()`; with the array shape that sum is element-wise (`outcomes[1]`, `outcomes[2]`), and the CSV message rows read the same slots. The S3 harness scenarios must include a consolidated run (`-g`) whose merged success/failure counts equal the unconsolidated totals.
 
