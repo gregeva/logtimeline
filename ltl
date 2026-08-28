@@ -14601,13 +14601,16 @@ sub normalize_data_for_output {
     foreach my $bucket (keys %log_occurrences) {
         my $total_occurrences = 0;
         my $total_bytes = $log_stats{$bucket}{bytes};
-        my $error_occurrences = 0;
+        # The error rate reads the bucket's failure counter (#453 D13): the
+        # outcome was decided per line by the format's classification, so
+        # rendering never re-derives it from category names, and a
+        # highlighted failure (category suffixed -HL) counts like any other.
+        my $error_occurrences = $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[2] // 0) : 0;
 
         foreach my $category_bucket (keys %{$log_occurrences{$bucket}}) {
             my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
             next unless $occurrences > 0 && $category_bucket !~ /^(?:empty|err-rate|msg-rate)$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
             $total_occurrences += $occurrences;
-            $error_occurrences += $occurrences if $category_bucket =~ /^(?:FATAL|ERROR|5xx|4xx)$/i;
         }
 
         # this part takes the time windows error and message counts and converts them to a rate (unit controlled by -ru, default per minute)

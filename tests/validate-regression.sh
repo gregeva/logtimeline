@@ -329,6 +329,19 @@ run_test "hl-histogram-hdmin-w160" "$LTL" $HL_COMMON -dm raw --terminal-width 16
 run_test "hl-filelegend-two-files-w160" "$LTL" $HL_COMMON --terminal-width 160 -hdmin 100000 "$DPM5K_LOG" "$PLOT_LOG"
 
 # ---------------------------------------------------------------------------
+# #453 — the error rate reads the per-line failure classification (D13), so
+# a highlighted failure counts toward errRate like any other (D12). The
+# unhighlighted access run is the R7 parity anchor: its errRate must stay
+# 4/d on the ten-status-family fixture; the highlighted runs pin the
+# corrected rate (a highlighted 404 still counts: 4/d, not 3/d; a
+# highlighted ERROR on a diagnostics log: 2/d, not 1/d).
+# ---------------------------------------------------------------------------
+FIXTURES="$SCRIPT_DIR/fixtures"
+run_test "errrate-access-unhighlighted-w160"          "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d "$FIXTURES/http-status-families.txt"
+run_test "errrate-access-highlighted-failure-w160"    "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d -h store/missing "$FIXTURES/http-status-families.txt"
+run_test "errrate-diagnostics-highlighted-failure-w160" "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d -h ERROR "$FIXTURES/log-level-vocabulary.txt"
+
+# ---------------------------------------------------------------------------
 # Bin data model — the shipped default for both display surfaces (#450)
 # ---------------------------------------------------------------------------
 # The -dm raw scenarios above pin the sort-and-index path, which users reach
