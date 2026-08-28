@@ -107,7 +107,7 @@ Classification is a new per-line hot-path cost (one or more field regex matches 
 Walked piece by piece with the architect; each piece locks its decisions here before the next opens.
 
 1. **Schema shape on a spec entry** — D14 (locked).
-2. **Global default: where it lives, how an entry overrides it, how an entry declines** — open.
+2. **Global default: where it lives, how an entry overrides it, how an entry declines** — D15 (locked).
 3. **Hot-path evaluation** — where classification runs relative to extraction, probes and masking; compiled-closure shape; what the prototype must measure — open.
 4. **Data model** — per-bucket and per-message success/failure counters, the run-level R5 counters, the `errRate` replacement (D13) — open.
 5. **`$is_access_log` → `metrics_observed` rename and `event_ledger` per-file binding** — the `-V format-detection` contract change, harness update — open.
@@ -128,6 +128,15 @@ Walked piece by piece with the architect; each piece locks its decisions here be
   ```
 
   Each criterion is a hash of *field ⇒ pattern* — all conditions must hold (R3 all-of); each outcome is a list of criteria — any one suffices (R3 any-of). Field names are the record field names of `@format_record_fields` (`status_code`, `category_bucket`, `message`, …) plus `line` for the raw line (D1). `event_ledger` defaults to 0 when absent. How an entry inherits or declines is piece 2.
+
+### 2. Global default — D15
+
+- **D15 — One default structure, resolved once at registry build; declining is explicit and accepts two spellings** (2026-08-28).
+  - `%classification_default` in GLOBALS has the same shape as an entry's `classification` value and is failure-only (D7): `failure => [ { category_bucket => '^(?:ERROR|FATAL|CRITICAL)$' } ]`, no `success` key.
+  - `build_format_registry()` resolves each entry per outcome: an outcome the entry names replaces the default's list for that outcome (D3); an outcome it omits is inherited. Every compiled entry carries a fully resolved classification; the scan path never consults the default.
+  - An **absent** `classification` key inherits the whole default. **Declining** is explicit and either spelling is accepted: `classification => 'none'` or `classification => {}` — both resolve to "classifies nothing", inherit nothing, and produce no classification code in the entry's generated block (the `mt6` case, D9), so a declining format pays nothing per line.
+  - Hot-path impact of the declaration vocabulary is nil: sentinel, empty hash and absent key are read once at build time and never again; per-line cost is set solely by the resolved shape (piece 3).
+  - User documentation (#387 user-defined formats, `docs/`) states the three forms — absent inherits, `'none'`/`{}` declines, a partial declaration replaces per outcome — in those words.
 
 ## Open items
 
