@@ -133,6 +133,9 @@ my %verbose_section_registry = (
     'udm-counting' => {
         description => 'Per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313).',
     },
+    'udm-specs' => {
+        description => 'Per -udm specification: how the spec was read (unit, aggregation, transform, extraction method, key, source), each compiled pattern, the run-wide production derived from the bucket accumulators, the intent hint if any, and parse-time rejections (Issues #443, #449).',
+    },
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
@@ -152,6 +155,7 @@ my @verbose_section_order = qw(
     statistics-demand
     profile
     udm-counting
+    udm-specs
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -4803,6 +4807,114 @@ sub emit_udm_counting_verbose {
     push @verbose_output, "=== END udm-counting ===";
 }
 
+# Issue #443: fold the per-bucket UDM accumulators into one run-wide row per
+# metric. Runs once, on first demand — the zero-match notice or -V udm-specs —
+# after the read loop; nothing is counted per line. A run-wide distinct is not
+# derivable (the per-bucket value sets are freed after counting), so counting
+# metrics carry the largest per-bucket distinct instead.
+my $udm_production_derived = 0;
+sub derive_udm_production {
+    return \%udm_production if $udm_production_derived;
+    $udm_production_derived = 1;
+    for my $config (@udm_configs) {
+        my $name = $config->{name};
+        my %p = ( occurrences => 0, buckets => 0 );
+        for my $bucket (keys %log_analysis) {
+            my $occ = $log_analysis{$bucket}{"udm_${name}_occurrences"};
+            next unless $occ;
+            $p{occurrences} += $occ;
+            $p{buckets}++;
+            if ($config->{agg_kind} eq 'counting') {
+                my $distinct = $log_stats{$bucket}{"udm_${name}_distinct"};
+                $p{distinct_max} = $distinct
+                    if defined $distinct && (!defined $p{distinct_max} || $distinct > $p{distinct_max});
+            } else {
+                $p{sum} += $log_analysis{$bucket}{"udm_${name}_sum"} // 0;
+                my ($min, $max) = ($log_analysis{$bucket}{"udm_${name}_min"}, $log_analysis{$bucket}{"udm_${name}_max"});
+                $p{min} = $min if defined $min && (!defined $p{min} || $min < $p{min});
+                $p{max} = $max if defined $max && (!defined $p{max} || $max > $p{max});
+            }
+        }
+        $udm_production{$name} = \%p;
+    }
+    return \%udm_production;
+}
+
+# The interpretation the extraction loop acts on, rendered from the config entry
+# the parser built — the one description shared by the zero-match notice and
+# -V udm-specs, so both describe what the run did.
+sub udm_read_as {
+    my ($config, $config_idx) = @_;
+    my $unit = defined $config->{unit} ? $config->{unit} : 'none';
+    my $key  = $config->{extraction} eq 'regex' ? '-' : ($config->{token_key} // $config->{base_name});
+    my $source = 'line';
+    if ($csv_detected && defined $config_idx) {
+        my $col = $csv_udm_col_indices[$config_idx];
+        if (defined $col && $col >= 0) {
+            my ($col_name) = grep { $csv_col_index{$_} == $col } keys %csv_col_index;
+            $source = 'csv:' . ($col_name // $col);
+        } else {
+            $source = 'csv:unbound';
+        }
+    }
+    return join('  ',
+        "unit=$unit($config->{unit_type})",
+        "aggregation=$config->{aggregation}",
+        "transform=" . ($config->{transform} // 'none'),
+        "extraction=$config->{extraction}",
+        "key='$key'",
+        "source=$source",
+    );
+}
+
+# Issue #443: one notice per metric whose derived occurrences are zero, spoken
+# after the read loop. Registered on #412 as a producer for the notices surface.
+sub emit_udm_zero_match_notices {
+    return unless @udm_configs;
+    my $production = derive_udm_production();
+    for my $idx (0 .. $#udm_configs) {
+        my $config = $udm_configs[$idx];
+        next if $production->{$config->{name}}{occurrences};
+        print STDERR "Note: -udm '$config->{raw_arg}': no metrics produced from matching lines\n";
+        print STDERR "      read as: " . udm_read_as($config, $idx) . "  matched against the whole line\n";
+        print STDERR "      pattern: $_\n" for @{$config->{patterns}};
+        if (($config->{hint} // '') eq 'token_key_has_regex_chars') {
+            print STDERR "      hint: the token key '$config->{token_key}' contains regex characters and is matched literally - if you meant a regex, wrap it in slashes: /$config->{token_key}/\n";
+        }
+    }
+}
+
+sub emit_udm_specs_verbose {
+    return unless section_requested('udm-specs');
+    push @verbose_output, "=== udm-specs ===";
+    my $production = derive_udm_production();
+    my @entries = (
+        (map { { spec_index => $udm_configs[$_]{spec_index}, config_idx => $_ } } 0 .. $#udm_configs),
+        (map { { spec_index => $_->{spec_index}, rejected => $_ } } @udm_rejected_specs),
+    );
+    for my $entry (sort { $a->{spec_index} <=> $b->{spec_index} } @entries) {
+        if ($entry->{rejected}) {
+            push @verbose_output, "udm: spec='$entry->{rejected}{spec}' rejected=$entry->{rejected}{reason}";
+            next;
+        }
+        my $config = $udm_configs[$entry->{config_idx}];
+        my $p = $production->{$config->{name}};
+        push @verbose_output, "udm: name=$config->{name} spec='$config->{raw_arg}'";
+        push @verbose_output, "  read_as: " . udm_read_as($config, $entry->{config_idx});
+        my $i = 0;
+        push @verbose_output, "  pattern[" . $i++ . "]: $_" for @{$config->{patterns}};
+        my $produced = "occurrences=$p->{occurrences} buckets=$p->{buckets}";
+        if ($p->{occurrences}) {
+            $produced .= $config->{agg_kind} eq 'counting'
+                ? " distinct_max=" . ($p->{distinct_max} // 0)
+                : " sum=$p->{sum} min=$p->{min} max=$p->{max}";
+        }
+        push @verbose_output, "  produced: $produced";
+        push @verbose_output, "  hint: $config->{hint}" if defined $config->{hint};
+    }
+    push @verbose_output, "=== END udm-specs ===";
+}
+
 # Section name, field names, consumer-name strings, and the three-value audit
 # enum (none|low|high) are locked at:
 #   features/187-histogram-bin-counter-percentiles.md § Decision 8
@@ -6888,9 +7000,10 @@ sub parse_udm_configs {
     # Every name the function field accepts; one of these in the unit slot is a
     # mis-slotted function, not a unit (Issue #443)
     my %function_names = map { $_ => 1 } qw( sum min max mean avg count distinct dcount unique ratio rate drate delta idelta );
+    my $spec_index = -1;
     my $reject = sub {
         my ($spec, $reason) = @_;
-        push @udm_rejected_specs, { spec => $spec, reason => $reason };
+        push @udm_rejected_specs, { spec => $spec, reason => $reason, spec_index => $spec_index };
     };
 
     # Case normalization: map lowercase variants to canonical forms
@@ -6899,6 +7012,7 @@ sub parse_udm_configs {
     $time_unit_canonical{'min'} = 'm';
 
     foreach my $raw_arg (@udm_raw_args) {
+        $spec_index++;
         my $arg = $raw_arg;
         my ($custom_pattern, $custom_pattern_text, $name, $unit, $function);
         my @patterns;
@@ -7050,6 +7164,7 @@ sub parse_udm_configs {
             name        => $name,
             base_name   => $name,
             raw_arg     => $raw_arg,
+            spec_index  => $spec_index,
             extraction  => defined $custom_pattern ? 'regex' : defined $token_key ? 'token_key' : 'name',
             hint        => $hint,
             unit        => $unit,
@@ -16762,6 +16877,7 @@ sub pipeline_finalize {
     $start_time = [gettimeofday];
     print "Calculate statistics..." unless $disable_progress;
     calculate_all_statistics();
+    emit_udm_zero_match_notices();
     $end_time = [gettimeofday];
     $elapsed_finalize_calculate_statistics = tv_interval($start_time, $end_time);
     measure_memory_structures();
@@ -16836,6 +16952,8 @@ sub pipeline_render {
     emit_profile_verbose();
 
     emit_udm_counting_verbose();
+
+    emit_udm_specs_verbose();
 
     print_verbose_output();
 
