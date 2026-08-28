@@ -289,6 +289,8 @@ my( @exclude_args, @include_args, @highlight_args, @threadpool_activity_args );
 my $ltl_config_raw = '';                                 # Raw LTL_CONFIG env var string for display
 my ( @udm_configs, @udm_raw_args, %udm_last_value );
 my %udm_distinct;                           # Per-bucket distinct value sets for counting aggregations (Issue #313), freed after counting like %log_sessions
+my @udm_rejected_specs;                     # -udm arguments skipped at parse time: { spec, reason } (Issue #443), reported on -V udm-specs
+my %udm_production;                         # Run-wide per-metric production derived from the bucket accumulators after the read loop (Issue #443)
 my ( $csv_separator_override, @udm_csv_message_col_names );
 my ( $csv_detected, $csv_separator, $csv_timestamp_col, %csv_col_index );
 my ( @csv_udm_col_indices, @csv_message_col_indices );
@@ -6883,6 +6885,13 @@ sub parse_udm_configs {
     my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );
     my %udm_agg_aliases = ( avg => 'mean', dcount => 'distinct', unique => 'distinct' );
     my %counting_aggs = map { $_ => 1 } qw( count distinct ratio rate drate );
+    # Every name the function field accepts; one of these in the unit slot is a
+    # mis-slotted function, not a unit (Issue #443)
+    my %function_names = map { $_ => 1 } qw( sum min max mean avg count distinct dcount unique ratio rate drate delta idelta );
+    my $reject = sub {
+        my ($spec, $reason) = @_;
+        push @udm_rejected_specs, { spec => $spec, reason => $reason };
+    };
 
     # Case normalization: map lowercase variants to canonical forms
     my %byte_unit_canonical = map { lc($_) => $_ } keys %byte_units;
@@ -6891,16 +6900,18 @@ sub parse_udm_configs {
 
     foreach my $raw_arg (@udm_raw_args) {
         my $arg = $raw_arg;
-        my ($custom_pattern, $name, $unit, $function);
+        my ($custom_pattern, $custom_pattern_text, $name, $unit, $function);
         my @patterns;
 
         # Extract trailing /pattern/ if present (right-to-left parsing)
         if ($arg =~ s{:(/.*/)$}{}) {
             my $pat_str = $1;
             $pat_str =~ s{^/|/$}{}g;  # Strip delimiters
+            $custom_pattern_text = $pat_str;
             eval { $custom_pattern = qr/$pat_str/ };
             if ($@) {
                 print STDERR "Warning: Invalid regex in -udm '$raw_arg': $@\n";
+                $reject->($raw_arg, 'invalid_regex');
                 next;
             }
             @patterns = ($custom_pattern);
@@ -6915,11 +6926,23 @@ sub parse_udm_configs {
 
         unless (defined $name && $name ne '') {
             print STDERR "Warning: -udm requires a metric name: '$raw_arg'\n";
+            $reject->($raw_arg, 'missing_name');
             next;
         }
 
         if (defined $token_key && defined $custom_pattern) {
             print STDERR "Warning: -udm '$raw_arg' supplies both a token key and a /pattern/ - use one or the other, skipping\n";
+            $reject->($raw_arg, 'key_and_regex');
+            next;
+        }
+
+        # A function name in the unit slot is the spec 'name:distinct:...' written
+        # without the empty unit field; the metric would run with the wrong meaning
+        if (defined $unit && $unit =~ /^(\w+)(?:\(\w+\))?$/ && $function_names{$1}) {
+            my $rest = join(':', grep { defined } $unit, $function, $token_key);
+            $rest .= ":/$custom_pattern_text/" if defined $custom_pattern_text;
+            print STDERR "Warning: '$unit' in the unit slot of -udm '$raw_arg' is a function, not a unit - did you mean '$name" . "::$rest'? (leave the unit slot empty when there is no unit), skipping\n";
+            $reject->($raw_arg, 'unit_slot_holds_function');
             next;
         }
 
@@ -6930,6 +6953,7 @@ sub parse_udm_configs {
             $function =~ s/^(\w+)/exists $udm_agg_aliases{$1} ? $udm_agg_aliases{$1} : $1/e;
             if ($function =~ /^(count|distinct|ratio|rate|drate)\(/) {
                 print STDERR "Warning: Counting aggregation '$1' cannot be combined with a transform in -udm '$raw_arg', skipping\n";
+                $reject->($raw_arg, 'counting_with_transform');
                 next;
             } elsif ($function =~ /^(sum|min|max|mean)\((delta|idelta)\)$/) {
                 $aggregation = $1;
@@ -6941,11 +6965,21 @@ sub parse_udm_configs {
                 $aggregation = $1;
             } else {
                 print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: sum, min, max, mean, count, distinct, ratio, rate, drate, delta, idelta, or combined e.g. max(delta))\n";
+                $reject->($raw_arg, 'unknown_function');
                 next;
             }
         }
         $aggregation //= 'sum';
         my $agg_kind = $counting_aggs{$aggregation} ? 'counting' : 'numeric';
+
+        # A pattern with no metacharacters matches one constant string, so a
+        # distinct-based aggregation over it can only ever produce 1
+        if (defined $custom_pattern_text && $aggregation =~ /^(?:distinct|ratio|drate)$/
+            && $custom_pattern_text !~ /[\\()\[\]*+?^\$|.{}]/) {
+            print STDERR "Warning: the pattern /$custom_pattern_text/ in -udm '$raw_arg' is a fixed string, so '$aggregation' can only ever be 1 - give it a capture group or a varying pattern, skipping\n";
+            $reject->($raw_arg, 'literal_pattern_under_distinct');
+            next;
+        }
 
         # Counting aggregations operate on raw extracted strings: units do not apply
         if ($agg_kind eq 'counting' && defined $unit) {
@@ -7007,9 +7041,17 @@ sub parse_udm_configs {
             }
         }
 
+        # Intent hint (Issue #443): a token key is matched literally, so regex
+        # characters in it are near-certainly an undelimited regex. Recorded
+        # here, spoken only if the run then produces nothing for the metric.
+        my $hint = (defined $token_key && $token_key =~ /[\\()\[\]*+?^\$|]/) ? 'token_key_has_regex_chars' : undef;
+
         push @udm_configs, {
             name        => $name,
             base_name   => $name,
+            raw_arg     => $raw_arg,
+            extraction  => defined $custom_pattern ? 'regex' : defined $token_key ? 'token_key' : 'name',
+            hint        => $hint,
             unit        => $unit,
             function    => $function,
             transform   => $transform,
@@ -10811,7 +10853,9 @@ sub read_and_process_logs {
                         # Regex: existing pattern matching
                         foreach my $pattern (@{$config->{patterns}}) {
                             if (/$pattern/) {
-                                $matched_value = $1;
+                                # The capture group narrows the value; without one the
+                                # whole matched text is the value (Issue #443)
+                                $matched_value = defined $1 ? $1 : substr($_, $-[0], $+[0] - $-[0]);
                                 last;
                             }
                         }
