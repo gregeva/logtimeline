@@ -216,7 +216,7 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
 
 ### 8. Stages, documentation surfaces and merge gate — D22, D23
 
-- **D22 — Stages, one commit each, each measured against `0.18.0-453-before.tsv` before the next opens** (2026-08-28):
+- **D22 — Stages, one commit each, committed AND pushed to `origin` at the end of every stage, each measured against `0.18.0-453-before.tsv` before the next opens** (architect, 2026-08-28: this is a large job and the work of each stage is pushed as soon as that stage closes — no stage's work sits unpushed while the next opens):
 
   | stage | content | isolates |
   |---|---|---|
