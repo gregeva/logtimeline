@@ -52,6 +52,9 @@ The success and failure counts are brought into the existing data model — the 
 - **D4 — A line matching both outcomes is a failure** (2026-08-28, carried as the assumption stated to the architect; not objected). The conservative reading for a reliability figure.
 - **D5 — The `$is_access_log` retirement rides this branch** (2026-08-28). It is a rename to `metrics_observed` (the meaning the variable actually carries) plus the introduction of the event-ledger property as a first-class, per-file-bound property; not a large cleanup.
 - **D6 — Event ledger is first-class and bound per file** (2026-08-28). The property lives on the entry, is fixed for a file when its variant is elected (and re-bound on a mid-file flip like every other variant-carried property), and replaces `$is_access_log` at every site where *the type of log* was the intended meaning.
+- **D7 — Global default classification declares failure only** (2026-08-28). Success cannot be asserted from a diagnostics log: an `INFO` line is not evidence that an operation succeeded. Every non-failure diagnostics line is unclassified, so the reliability figure is unavailable by default on those logs — the coverage argument applied to the default.
+- **D8 — `mt12` tomcat_codebeamer is an event ledger classified as the access family** (2026-08-28). One line per request, status code captured (`status_code` field, category folded to the `Nxx` family).
+- **D9 — `mt6` java_gc_g1 is an event ledger whose classification is deferred to #483** (2026-08-28). Every pause is logged, so coverage is maximal; what makes a pause a success or a failure is a research question, filed as #483 (success/failure classification criteria for the Java G1 GC log format; blocked by this issue). Until it lands the entry declines to classify, exercising #452's "no classification configured" notice on a real format.
 
 ## `$is_access_log` site inventory and proposed replacement (open — needs the architect's confirmation)
 
@@ -69,15 +72,14 @@ The success and failure counts are brought into the existing data model — the 
 
 No site today is gated on "is this an event ledger". The event-ledger property gets its first consumers in #452 (column default, notices 1 and 2) and in this issue's own reconciliation counter (R5 shortfall is reported as a defect only on an event ledger — #452 notice 2).
 
-## Proposed per-format declarations (open — the architect decides)
+## Per-format declarations (decided 2026-08-28; D7–D9)
 
 | Entry | event_ledger | classification |
 |---|---|---|
-| `mt4` tomcat_access_common, `mt3` tomcat_access_with_duration, `mt3us` httpd_access_with_duration, `mt9` jboss_access | yes | success `status_code ^[123]\d\d$`; failure `status_code ^[45]\d\d$` |
-| `mt12` tomcat_codebeamer | ? — an access-style line per request with `[%Dms]`; needs the architect's read | as access family if yes |
-| `mt6` java_gc_g1 | ? — every pause is logged, but "success/failure" has no meaning for a pause line | declines to classify |
-| `csv` | no (user data; unknown coverage) | inherits global default (level-based on `category_bucket`, which is `DATA` — so effectively unclassified) unless #387 lets a user declare |
-| all diagnostics formats (`mt1*`, `mt2`, `mt5`, `mt7`, `mt8`, `mt10*`, `mt11`, `mt16`, `mt17`) | no | inherit global default: failure `category_bucket ^(ERROR|FATAL|CRITICAL)$`; success — **open**: whether the default declares a success criterion at all for diagnostics logs (a `INFO` line is not evidence an operation succeeded) |
+| `mt4` tomcat_access_common, `mt3` tomcat_access_with_duration, `mt3us` httpd_access_with_duration, `mt9` jboss_access, `mt12` tomcat_codebeamer | yes | success `status_code ^[123]\d\d$`; failure `status_code ^[45]\d\d$` |
+| `mt6` java_gc_g1 | yes | declines to classify until #483 (GC pause success/failure criteria) lands |
+| `csv` | no (user data; unknown coverage) | inherits the global default; `category_bucket` is `DATA`, so effectively unclassified unless #387 lets a user declare |
+| all diagnostics formats (`mt1*`, `mt2`, `mt5`, `mt7`, `mt8`, `mt10*`, `mt11`, `mt16`, `mt17`) | no | inherit the global default: failure `category_bucket ^(ERROR|FATAL|CRITICAL)$`, no success criterion (D7) |
 
 ## `-V` section-contract changes (stub — completed at implementation)
 
@@ -91,10 +93,9 @@ Classification is a new per-line hot-path cost (one or more field regex matches 
 ## Open items
 
 1. Site-inventory gating table above — confirm.
-2. Per-format declarations table above — decide, in particular `mt12`, `mt6`, and whether the diagnostics default declares a success criterion.
-3. Name and placement of the R5 counters on `-V` (this issue's surface vs #452's analysis overview).
-4. Expressibility in #387 (user-defined YAML formats): confirm the field+pattern, list-of-conjunctions shape maps onto what #387 will accept — checked at #387 planning, recorded here.
-5. Whether `errRate` (R7) keeps its own bucket-name path for the `-HL` highlight buckets, which are not classification outcomes.
+2. Name and placement of the R5 counters on `-V` (this issue's surface vs #452's analysis overview).
+3. Expressibility in #387 (user-defined YAML formats): confirm the field+pattern, list-of-conjunctions shape maps onto what #387 will accept — checked at #387 planning, recorded here.
+4. Whether `errRate` (R7) keeps its own bucket-name path for the `-HL` highlight buckets, which are not classification outcomes.
 
 ## Merge gate
 
