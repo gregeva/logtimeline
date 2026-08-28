@@ -4,7 +4,7 @@
 
 - Issue: #453 (per-variant success/failure line classification and an event-ledger property in the format registry schema, retiring `$is_access_log`)
 - Branch: `453-success-failure-classification-event-ledger` off `release/0.18.0`
-- Phase: planning (requirements and specification closed 2026-08-28 with R1–R10, D1–D13; before-baseline `tests/baseline/results/0.18.0-453-before.tsv` committed)
+- Phase: planning closed 2026-08-28 (R1–R10, D1–D23; before-baseline `tests/baseline/results/0.18.0-453-before.tsv` committed); next stage S0 (prototype, D21) on instruction
 - Umbrella: #23 / `features/log-format-registry.md` (system of record for the registry; § *1. Format Definition Properties* lists the per-format properties this issue extends)
 - Consumers: #452 (reliability column and analysis-overview surface), #455 (success/failure filter and highlight criteria), #456 (per-message success/failure indicator), #193 (timeout detection on error responses)
 
@@ -225,7 +225,7 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
   | S5 | format-change handling (D19): entry-change check, note, `rule_change:` lines, the two synthetic fixtures and their scenarios | the per-line reference compare |
   | S6 | documentation (D23), CLAUDE.md registry paragraph, `docs/usage.md` rows, completion gate | — |
 
-- **D23 — Two user-facing surfaces for formats** (2026-08-28): `--help formats` — syntax and usage: the known formats, how a format declares classification (the three forms of D15: absent inherits, `'none'`/`{}` declines, a partial declaration replaces per outcome), the `event_ledger` flag, `-lf`; and `--explain formats` (+ `docs/explain/formats.md`, wiki-synced like the other explain pages) — the reasoning: what an event ledger is (R10's one-line coverage definition), the Google SRE Workbook SLI/coverage framing and why a reliability figure is legitimate only over a maximal-coverage source, what is legitimate to read from a diagnostics log and what is not. `--help` and `docs/usage.md` stay in parity (`tests/validate-help-content.sh`).
+- **D23 — Two user-facing surfaces** (2026-08-28): `--help formats` — syntax and usage: the known formats, how a format declares classification (the three forms of D15: absent inherits, `'none'`/`{}` declines, a partial declaration replaces per outcome), the `event_ledger` flag, `-lf`; and `--explain classification` (+ `docs/explain/classification.md`, wiki-synced like the other explain pages) — the reasoning: what success/failure classification is and what an unclassified line means, what an event ledger is (R10's one-line coverage definition), the Google SRE Workbook SLI/coverage framing and why a reliability figure is legitimate only over a maximal-coverage source, what is legitimate to read from a diagnostics log and what is not. The explain topic is named for the concept, not the mechanism that carries it (architect, 2026-08-28). `--help` and `docs/usage.md` stay in parity (`tests/validate-help-content.sh`).
 
 ## Open items
 
