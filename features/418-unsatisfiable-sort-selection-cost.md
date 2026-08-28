@@ -172,6 +172,53 @@ Per the repository's CLI conventions the notice is **not** gated behind
 `--disable-progress`: it is a behavioural notice reporting what the tool decided on
 the user's behalf, not a progress indicator.
 
+### D8 — Harness placement: `tests/validate-statistics-demand.sh`
+
+The existing `-so` coverage lives there — `scenario-3-sort-on-skewness` and
+`scenario-3b-sort-on-p99` already assert the `sort_selection` and `sort_calc`
+counters on exactly this code path, with the `asserts`/`produced_by`/`contract`
+triple and a sabotage record dated 2026-07-13. New scenarios join them rather than
+starting a new harness, so one harness owns the whole `-so` selection contract.
+
+Scenarios to add, one per detection point in D3 plus the family sweep:
+
+| scenario | invocation | asserts |
+|---|---|---|
+| parse-time contradiction, duration | `-so p99 -od` | contradiction notice on the terminal; **no** `sort_selection` line (the branch was never entered, per D5) |
+| parse-time contradiction, bytes | `-so bytes_mean -ob` | same shape, bytes family |
+| parse-time contradiction, count | `-so count_mean -oc` | same shape, count family |
+| runtime absence | `-so p99` on a duration-free fixture | absence notice; walk skipped |
+| post-walk floor unmet | `-so skewness` where no key reaches n≥4 | absence notice; `sort_selection: … defined=0 fill=<all>` |
+
+The parse-time scenarios need no new fixture — the harness's existing access log
+serves, since the contradiction is decided before a line is read. The runtime-absence
+scenario needs a duration-free input; `tests/fixtures/log-level-vocabulary.txt`
+already reproduces it (see the Reproduction table above).
+
+Per the invocation-coherence rule (CLAUDE.md, 2026-08-23), each scenario is shaped to
+what it asserts. These read a notice and a counter line, never a bucket, so they
+inherit the harness's existing `--disable-progress -ni --terminal-width 200` shape
+and add nothing that allocates buckets.
+
+Each new assertion gets its own sabotage proof recorded in the harness beside the
+existing record, per `tests/HARNESS-DESIGN.md` § Proving a new assertion can fail.
+
+### D9 — The skipped walk is asserted through the existing telemetry, not #417 timings
+
+Absence of the `sort_selection` line is already contractual in this harness and
+already sabotage-proven: `scenario-1` asserts no such line under the default sort,
+and `scenario-3` asserts none on the bucket store, with sabotage probe 3 (lines
+emitted unconditionally) confirming both fail when the contract breaks.
+
+A parse-time fallback (D5) therefore asserts **the same absence** — the branch was
+never entered, so no telemetry exists to emit. That is a boolean the harness can
+check today and it needs no new instrumentation.
+
+The #417 sub-stage timings are rejected as the assertion vehicle: a timing is a
+measurement, not an invariant, and asserting on one makes the harness sensitive to
+machine speed. Timings remain the right instrument for the *performance* claim, which
+is verified by benchmark (see the performance obligation above), not by harness.
+
 ## Performance obligation — MANDATORY, not discretionary
 
 This issue is both a hot-path change and a performance fix, so measurement governs it
@@ -221,10 +268,7 @@ evidence in one pass.
 
 ## Open items
 
-- Harness placement: `tests/validate-statistics-demand.sh` carries the existing `-so`
-  scenarios and the `sort_selection` counter assertions.
-- Whether the skipped walk is asserted through the `sort_selection` telemetry
-  (absence of the section) or through the #417 sub-stage timings.
+- The prototype itself (arms, input shape, staged scale) — the next planning step.
 
 ## Related
 
