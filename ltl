@@ -970,6 +970,35 @@ my @log_levels = (
 # element per line.
 my %log_level_set = map { $_ => 1 } @log_levels;
 
+# Descriptive names the category summary table shows in place of a raw
+# category name. One table shared by every format: a category name means
+# the same thing whichever producer emitted it, and the HTTP status
+# families are common to every access-log format. A category with no entry
+# here renders its own name unchanged, so a vocabulary that already reads
+# plainly (INFO, ERROR, Pause Full, ...) needs nothing.
+#
+# The highlighted twin of a category carries its own entry rather than a
+# marker the code appends: the descriptive text is longer and differently
+# shaped than the raw name, so where the indicator reads naturally is a
+# judgement about each phrase. The trailing form keeps the family name at
+# the left edge of the column, lining the highlighted row up with the plain
+# row beneath it.
+#
+# Every name fits $category_column_width in print_summary_table(), so the
+# totals stay aligned down the table; a longer one is truncated there.
+my %category_display_names = (
+    '1xx'    => '1xx Informational',
+    '1xx-HL' => '1xx Informational, highlighted',
+    '2xx'    => '2xx Success',
+    '2xx-HL' => '2xx Success, highlighted',
+    '3xx'    => '3xx Redirection',
+    '3xx-HL' => '3xx Redirection, highlighted',
+    '4xx'    => '4xx Client error',
+    '4xx-HL' => '4xx Client error, highlighted',
+    '5xx'    => '5xx Server error',
+    '5xx-HL' => '5xx Server error, highlighted',
+);
+
 # Characters selected and usable for drawing the bar charts
 my %blocks = (
     # Full and partial blocks
@@ -16002,6 +16031,14 @@ sub render_histogram_legend {
     return ($result, $result_hl);
 }
 
+# The label a category is rendered under: its descriptive name where one is
+# defined, its own name otherwise. One resolution surface for the category
+# vocabulary — every consumer that renders a category as a label calls this.
+sub category_display_name {
+    my ( $category ) = @_;
+    return $category_display_names{$category} // $category;
+}
+
 # Echo the options the run was invoked with, directly under the timeline view
 # they produced: each view is meant to be screenshot with the command that made
 # it, so the reader can reproduce it (docs/purpose.md). Printed for every run,
@@ -16072,7 +16109,14 @@ sub print_summary_table {
         next if $category_bucket =~ /^(empty|err-rate|msg-rate)$/;
         next unless $category_totals{$category_bucket};
 
-        push @summary_table, sprintf( $table_format, $category_bucket, $category_totals{$category_bucket} );
+        # The column is fixed-width and the totals align down the table, so a
+        # label wider than the column is cut to it rather than pushing the
+        # total out of line.
+        my $category_label = category_display_name( $category_bucket );
+        $category_label = substr( $category_label, 0, $category_column_width )
+            if length( $category_label ) > $category_column_width;
+
+        push @summary_table, sprintf( $table_format, $category_label, $category_totals{$category_bucket} );
     }
 
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
