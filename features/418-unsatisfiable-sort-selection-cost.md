@@ -183,36 +183,46 @@ Per the repository's CLI conventions the notice is **not** gated behind
 `--disable-progress`: it is a behavioural notice reporting what the tool decided on
 the user's behalf, not a progress indicator.
 
-### D8 — Harness placement: `tests/validate-statistics-demand.sh`
+### D8 — A short addition to the existing statistics harness, asserting the path taken
 
-The existing `-so` coverage lives there — `scenario-3-sort-on-skewness` and
-`scenario-3b-sort-on-p99` already assert the `sort_selection` and `sort_calc`
-counters on exactly this code path, with the `asserts`/`produced_by`/`contract`
-triple and a sabotage record dated 2026-07-13. New scenarios join them rather than
-starting a new harness, so one harness owns the whole `-so` selection contract.
+New scenarios are a **short addition** to `tests/validate-statistics-demand.sh` — the
+harness that already owns statistics-calculation path coverage, including
+`scenario-3-sort-on-skewness` and `scenario-3b-sort-on-p99`, which assert the
+`sort_selection` and `sort_calc` counters on exactly this code path with a 2026-07-13
+sabotage record. No new harness; no restatement of coverage that already exists.
 
-Scenarios to add, one per detection point in D3 plus the family sweep:
+**The assertions are operational: they prove the path expected in a given situation
+is the path taken.** Output-shape assertions alone (a notice printed, a column
+missing) cannot distinguish a correct decision from a coincidence — an
+occurrences-ordered table looks identical whether the gate fired for the right reason,
+the wrong reason, or not at all. The D12 `-V` lines exist so the decision itself is
+assertable:
 
-| scenario | invocation | asserts |
-|---|---|---|
-| parse-time contradiction, duration | `-so p99 -od` | contradiction notice on the terminal; **no** `sort_selection` line (the branch was never entered, per D5) |
-| parse-time contradiction, bytes | `-so bytes_mean -ob` | same shape, bytes family |
-| parse-time contradiction, count | `-so count_mean -oc` | same shape, count family |
-| runtime absence | `-so p99` on a duration-free fixture | absence notice; walk skipped |
-| post-walk floor unmet | `-so skewness` where no key reaches n≥4 | absence notice; `sort_selection: … defined=0 fill=<all>` |
+| situation | path that must be taken |
+|---|---|
+| sort operand's family switched off at parse time | parse-time fallback; calculated-statistic branch **never entered** (no `sort_selection` telemetry at all, per D5) |
+| family collectable but nothing observed in the run | pre-walk fallback; **population walk skipped**, not run-and-discarded |
+| values observed, no key meets the eligibility floor | walk runs, `defined=0` with every key in `fill` |
+| ordinary partial case (some keys rank) | unchanged behaviour, no notice — the #303 contract still holds (D6) |
 
-The parse-time scenarios need no new fixture — the harness's existing access log
-serves, since the contradiction is decided before a line is read. The runtime-absence
-scenario needs a duration-free input; `tests/fixtures/log-level-vocabulary.txt`
-already reproduces it (see the Reproduction table above).
+The last row matters as much as the first three: the amendment is scoped to the
+degenerate case, so a scenario proving the partial case did **not** change is part of
+the addition.
 
-Per the invocation-coherence rule (CLAUDE.md, 2026-08-23), each scenario is shaped to
-what it asserts. These read a notice and a counter line, never a bucket, so they
-inherit the harness's existing `--disable-progress -ni --terminal-width 200` shape
-and add nothing that allocates buckets.
+**Scenario shapes are determined during development**, from what the implementation
+actually distinguishes — the table above states what must be proved, not a
+pre-committed scenario list. Coverage spans all three metric families (D2), since the
+sweep found the defect in each.
 
-Each new assertion gets its own sabotage proof recorded in the harness beside the
-existing record, per `tests/HARNESS-DESIGN.md` § Proving a new assertion can fail.
+The existing access log serves the parse-time cases (decided before a line is read);
+`tests/fixtures/log-level-vocabulary.txt` reproduces the duration-free case. Per the
+invocation-coherence rule (2026-08-23) each scenario inherits the harness's existing
+`--disable-progress -ni --terminal-width 200` shape — these read a notice and a
+counter line, never a bucket.
+
+Each new assertion carries the `asserts`/`produced_by`/`contract` triple and a
+sabotage proof recorded beside the existing record
+(`tests/HARNESS-DESIGN.md` § Proving a new assertion can fail).
 
 ### D9 — The skipped walk is asserted through the existing telemetry, not #417 timings
 
