@@ -6658,10 +6658,10 @@ sub print_help {
 
     # Display & Output
     $out .= help_subheading("Display & Output");
-    $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the summary table (default: 10)");
+    $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the top-messages table (default: 10)");
     $out .= help_opt("-o,   --output-csv",            "Write all extracted data to a CSV file for external analysis");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from -du), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
-    $out .= help_opt("-osum, --omit-summary",         "Hide the summary table printed after the bar graph");
+    $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
     $out .= help_opt("-hl,  --hide-legend",           "Hide the legend column (category breakdowns and rates)");
     $out .= help_opt("-ho,  --hide-occurrences",      "Hide the occurrences bar graph column, freeing space for other metric columns");
     $out .= help_opt("-hd,  --hide-duration",         "Hide the duration bar graph column");
@@ -16002,24 +16002,11 @@ sub render_histogram_legend {
     return ($result, $result_hl);
 }
 
-sub print_summary_table {
-    my $category_column_width = 30;
-    my $occurrences_column_width = 10;
-    my $table_padding = 2;
-    my $padding = " " x $table_padding;
-    my $column_padding = " " x 1;
-    my $table_format = "$padding%-${category_column_width}s %${occurrences_column_width}d$padding\n";
-    my $summary_table_width = $table_padding + $category_column_width + 1 + $occurrences_column_width + $table_padding;
-    my $file_detail_width = $terminal_width - ( $summary_table_width + $table_padding * 2 );
-    my ( @summary_table, @file_details );
-    my ( @match_char ) = ( "$colors{'red'}χ", "$colors{'green'}√", "$colors{'green-HL'}√" );
-
-    ## FORMAT MIN/MAX LOG TIMESTAMPS FOR THE SUMMARY ##
-    my $min_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_min));
-    my $max_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_max));
-    $min_timestamp_str .= sprintf ".%03d", ($output_timestamp_min-int($output_timestamp_min))*1000 if $print_milliseconds;
-    $max_timestamp_str .= sprintf ".%03d", ($output_timestamp_max-int($output_timestamp_max))*1000 if $print_milliseconds;
-
+# Echo the options the run was invoked with, directly under the timeline view
+# they produced: each view is meant to be screenshot with the command that made
+# it, so the reader can reproduce it (docs/purpose.md). Printed for every run,
+# including one whose run summary is suppressed.
+sub print_run_options {
     ## PRINT COMMAND AND ARGUMENTS ##
     if ($ltl_config_raw ne '') {
         print "\n$colors{'bright-black'}environment options: $ltl_config_raw$colors{'NC'}";
@@ -16054,8 +16041,27 @@ sub print_summary_table {
         print "\n$colors{'bright-black'}command-line options: $cli_options$colors{'NC'}";
     }
     print "\n";
+}
 
+sub print_summary_table {
     return if $omit_summary;
+
+    my $category_column_width = 30;
+    my $occurrences_column_width = 10;
+    my $table_padding = 2;
+    my $padding = " " x $table_padding;
+    my $column_padding = " " x 1;
+    my $table_format = "$padding%-${category_column_width}s %${occurrences_column_width}d$padding\n";
+    my $summary_table_width = $table_padding + $category_column_width + 1 + $occurrences_column_width + $table_padding;
+    my $file_detail_width = $terminal_width - ( $summary_table_width + $table_padding * 2 );
+    my ( @summary_table, @file_details );
+    my ( @match_char ) = ( "$colors{'red'}χ", "$colors{'green'}√", "$colors{'green-HL'}√" );
+
+    ## FORMAT MIN/MAX LOG TIMESTAMPS FOR THE SUMMARY ##
+    my $min_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_min));
+    my $max_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_max));
+    $min_timestamp_str .= sprintf ".%03d", ($output_timestamp_min-int($output_timestamp_min))*1000 if $print_milliseconds;
+    $max_timestamp_str .= sprintf ".%03d", ($output_timestamp_max-int($output_timestamp_max))*1000 if $print_milliseconds;
 
     ## START SUMMARY STATISTIC TABLE ##
     push @summary_table, sprintf( "\n  " . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
@@ -16935,8 +16941,8 @@ sub pipeline_finalize {
 # Receives: finalized statistics and bucket structures; resolved demand.
 # Emits: normalized/scaled display data (layout before scaling), index-drift
 # detection plus the verbose/telemetry surface flush, bar graph, histograms,
-# summary tables, message/threadpool summaries, CSV output lifecycle, and the
-# persistent index file (#46).
+# echoed options, message/threadpool summaries, the closing run summary, CSV
+# output lifecycle, and the persistent index file (#46).
 sub pipeline_render {
     # NORMALIZE DATA FOR CONSOLE OUTPUT #
     $start_time = [gettimeofday];
@@ -16991,15 +16997,7 @@ sub pipeline_render {
     print_histograms() if $histogram_enabled;  # Issue #25: Histograms appear after bar graph
     close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
 
-    # Issue #356 (S1): capture the peak through normalize/bar-graph/CSV rendering
-    # so the displayed MAXIMUM MEMORY USED reflects everything up to this point.
-    # The output stages below can no longer move the peak materially (#362 clamped
-    # the only O(-n) allocation); their residual is covered by the post-output
-    # measurement and visible under -mem debug.
-    measure_memory_structures();
-
-    print_summary_table();
-    memory_debug_decomposition("after_summary_table");
+    print_run_options();
 
     if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
         $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
@@ -17035,6 +17033,18 @@ sub pipeline_render {
 
     print_threadpool_summary() if $include_threadpool_summary;										    # Print threadpool summaries
     memory_debug_decomposition("after_threadpool_summary") if $include_threadpool_summary;
+
+    # Issue #356 (S1): capture the peak across every rendered analysis section so
+    # the MAXIMUM MEMORY USED the summary reports accounts for all of them. The
+    # summary render's own residual is covered by the post-output measurement
+    # below and visible under -mem debug.
+    measure_memory_structures();
+
+    # The summary reports on the run itself -- the span analysed, the files read,
+    # the totals, timing and memory -- so it closes the output, leaving the
+    # analysis sections above it contiguous on screen.
+    print_summary_table();
+    memory_debug_decomposition("after_summary_table");
 
     # Issue #356 (S1): post-output measurement keeps the recorded peak honest for
     # the full process lifetime; surfaced by the -mem debug "end" line below.
