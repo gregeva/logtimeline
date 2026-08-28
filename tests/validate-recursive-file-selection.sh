@@ -373,7 +373,7 @@ for variant in "with-r" "without-r"; do
         label       "a pattern matching nothing is a hard error ($variant)" \
         asserts     'A file pattern that selects no file leaves nothing to read, so the run stops with the same could-not-open-any-files error whether or not -r was given' \
         produced_by 'the empty-@in_files guard in adapt_to_command_line_options() in ltl, rendered via print_usage()' \
-        contract    'features/420-recursive-file-selection.md § D2 — a pattern with nothing to match against selects nothing, with or without -r'
+        contract    'features/445-unquoted-glob-consumed-by-shell-before-r.md § The failure message — a pattern matching no file stops the run with the same could-not-open-any-files error, with or without -r'
 done
 
 assert_command \
