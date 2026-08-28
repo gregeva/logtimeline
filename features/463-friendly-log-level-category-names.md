@@ -1,0 +1,196 @@
+# Feature: Descriptive names for log categories in the category summary table
+
+## Overview
+
+The category summary table printed after the timeline lists every log level or
+event class found in the input, with its total. A category is named by whatever
+the log format declares — `INFO`, `Pause Full`, `4xx`. Where that name does not
+tell a reader what the category *is*, the table now shows a descriptive name in
+its place.
+
+The motivating case is the HTTP status families. `4xx` and `5xx` are sufficient
+to a reader who already knows them and say nothing to a reader who does not —
+and the category table is exactly where a reader who is not steeped in the
+format is trying to work out what they are looking at.
+
+## GitHub Issue
+
+- #463 (FEATURE: friendly descriptive names for log level categories in the
+  summary table) — the requirement.
+
+## Requirements
+
+- **R1** — A lookup from a category name to a descriptive name. Where an entry
+  exists, the category summary table shows the descriptive name.
+- **R2** — Where no entry exists, the table shows the category's own name,
+  unchanged. Formats whose category vocabulary already reads plainly need no
+  entries and are unaffected.
+- **R3** — The HTTP status families get entries under their conventional family
+  names.
+- **R4** — A highlighted category (the `-HL` twin of a category) gets the same
+  treatment, with the highlight indicated at a position that suits the
+  descriptive text rather than mechanically appended by code.
+
+## Locked decisions
+
+### D1 — One global lookup, shared by every format (architect, 2026-08-26)
+
+The mapping is global: one table, not a per-format declaration in the format
+registry. A category name means the same thing whichever producer emitted it,
+and the HTTP status families are common to every access-log format, so
+declaring them per format would duplicate the same five rows across every
+access entry and let them drift.
+
+The shipped entries, all of them HTTP status families:
+
+| Category | Displayed as |
+|---|---|
+| `1xx` | `1xx Informational` |
+| `2xx` | `2xx Success` |
+| `3xx` | `3xx Redirection` |
+| `4xx` | `4xx Client error` |
+| `5xx` | `5xx Server error` |
+
+The numeric family is kept at the front of the descriptive name rather than
+replaced by it: a reader who already knows the shorthand loses nothing, and a
+reader who does not gains the meaning without having to map one to the other.
+No other category has an entry — the log-level vocabulary (`INFO`, `ERROR`,
+`WARN`, …), the GC pause kinds and the Workgroup Manager lifecycle categories
+all name themselves.
+
+Placement: `%category_display_names` sits in the GLOBALS section immediately
+after `@log_levels` / `%log_level_set`, beside the category vocabulary and the
+category colours (`%colors`) it parallels — the existing global per-category
+surfaces — rather than inside any format registry entry. `features/395-wgm-client-log-format.md`
+§ *Log-category consistency* lists the three surfaces a category already lives
+on; this is a fourth, and the only optional one.
+
+### D2 — The highlighted twin is its own entry, with the indicator trailing
+
+Each category with a descriptive name carries a second entry for its `-HL`
+twin, exactly as the requirement asks: the descriptive text is longer and
+differently shaped than the raw name, so where the highlight indicator belongs
+is a judgement about that phrase, not something code can append correctly in
+general.
+
+The shape chosen for the five families is a trailing `, highlighted`:
+
+```
+  5xx Server error, highlighted           1
+  5xx Server error                        1
+```
+
+Two reasons. It keeps the family name at the left edge of a left-aligned
+column, so the highlighted row and the plain row directly beneath it line up
+and read as a pair — a leading `Highlighted ` breaks that alignment on the one
+axis the eye uses to scan the table. And it matches the vocabulary the rendered
+surface already uses for the same idea: the table's own `HIGHLIGHTED` total row
+and the `TOP HIGHLIGHTED MESSAGES` heading.
+
+A parenthetical form (`5xx Server error (highlighted)`) was rejected on width:
+`1xx Informational (highlighted)` is 31 characters against a 30-character
+column, which would push its total out of line — see D4.
+
+### D3 — The legend and the CSV keep the raw category name
+
+Only the category summary table changes.
+
+- **The per-bucket legend** beside the timeline keeps `4xx: 12`. The legend is
+  repeated on every bucket row and its width is a budget shared with the bar
+  graph, which is derived from the summed lengths of every category's
+  `name: count` entry; descriptive names would multiply it and take the space
+  the timeline exists to show.
+- **The CSV (`-o`)** keeps `4xx` and `4xx-HL` as column names. The header is a
+  machine-readable contract addressed by name by external tooling and by the
+  column-rules validator (`tests/csv-output/rules/stats-columns.tsv`).
+
+### D4 — The name fits the column, and a longer one is cut to it
+
+`print_summary_table()` renders the category cell at a fixed
+`$category_column_width` of 30 with the total right-aligned beside it, so the
+totals align down the whole table and the file-details pane rendered to its
+right stays put. Every shipped name fits: the longest,
+`1xx Informational, highlighted`, is exactly 30. A label longer than the column
+is truncated to it at render, so no future entry can misalign the surface.
+
+## Open question — not decided in this drop
+
+Whether a user can supply or override entries, or whether the set ships with
+the tool. **This drop ships the set with the tool: there is no user override.**
+The question stays open on #463 for a later decision.
+
+## Affected surfaces
+
+| Surface | Change |
+|---|---|
+| `%category_display_names` in `ltl` (GLOBALS) | New: the global lookup, ten entries (five families and their highlighted twins) |
+| `category_display_name()` in `ltl` | New: the one resolution surface — descriptive name where defined, the category's own name otherwise |
+| `print_summary_table()` in `ltl` | Renders the resolved label, truncated to the category column width |
+| `docs/usage.md` § Display & Output | Describes the Category table, the family names, and the `, highlighted` row |
+| `docs/test-logs.md` § AccessLogs | Documents the new fixture |
+| `tests/reference-output/hl-*.txt` (6 files) | Re-blessed: the snapshot harness freezes the rendered table, which now shows the descriptive names |
+
+No CLI option was added, so `print_help()` is unchanged; `docs/usage.md` gained
+prose only, with no option row on either surface to keep in step.
+
+## Test coverage
+
+`tests/validate-category-names.sh` — a render-invariant harness
+(`tests/HARNESS-DESIGN.md` § Render-invariant harnesses): the rendered category
+table is the surface under test, not a proxy for internal state. 24 assertions
+across three scenarios, all `-bs 1440 -oe -n 1` on ten-line fixtures spanning
+seconds, with `-lf tomcat_access_with_duration` pinning the format so the run
+does not depend on filename evidence.
+
+- **`http-status-families`** — `tests/fixtures/http-status-families.txt`
+  (two lines per family; `-h orders` highlights one 2xx, one 4xx and one 5xx
+  line so three families show both rows). Asserts each family's descriptive
+  name and each highlighted twin, reading the label and total at their exact
+  column offsets so the assertion covers the geometry as well as the text;
+  asserts that no row is still labelled with a raw family name (the descriptive
+  name replaces it, it is not shown alongside); asserts the legend still shows
+  `5xx: <count>`.
+- **`csv-keeps-raw-category-names`** — the same run with `-o`; asserts the stats
+  CSV header carries `1xx 2xx 2xx-HL 3xx 4xx 4xx-HL 5xx 5xx-HL` and no
+  descriptive text.
+- **`unmapped-categories-keep-their-own-name`** —
+  `tests/fixtures/log-level-vocabulary.txt`; asserts `FATAL ERROR WARN INFO
+  DEBUG TRACE` each label a row under their own name.
+
+**Proof the assertions can fail** (`tests/HARNESS-DESIGN.md` § Proving a new
+assertion can fail), 2026-08-28:
+
+- Bypassing the lookup in `category_display_name()` so it returns the raw name:
+  16 of the 24 assertions fail — every family row, every highlighted twin and
+  every raw-name-replaced check — while the legend, CSV and unmapped-level
+  assertions still pass, which is the correct partition.
+- Feeding each checker a doctored input directly: a render whose 30-character
+  highlighted row has its total displaced one column right, a name that labels
+  no row, a raw name still labelling a row, a legend carrying the descriptive
+  text, and a stats CSV header carrying it. All five fail with the expected
+  diagnostic.
+
+**Colour-environment parity** (`tests/HARNESS-DESIGN.md` § Colour rendering is
+controlled): `FORCE_COLOR=3 CI=1` and `env -u FORCE_COLOR -u NO_COLOR CI=1` both
+report 24 passed, 0 failed.
+
+**Neighbouring harnesses over the same surface**, run on the finished change:
+`tests/validate-log-level-vocabulary.sh` 8/0 (it reads the same category table
+for the unmapped levels), `tests/validate-duration-display.sh` 21/0,
+`tests/validate-regression.sh` 71/0 after the six re-blessed references.
+
+The six re-blessed references were identified by capturing a full reference set
+into a temporary directory and diffing it against the committed set: exactly
+six files differed, and every differing line was a category row acquiring its
+descriptive name. Only those six were copied over, so no unrelated drift was
+blessed along with them.
+
+## Out of scope
+
+- User-supplied or user-overridden entries (the open question above).
+- Descriptive names for any vocabulary other than the HTTP status families.
+- The legend and the CSV (D3).
+- The category table's row shape — #448 (relative percentage and contribution
+  bar per category) changes the same rows; whichever lands second inherits the
+  other's shape, and its R7 (the bar may begin at the first character of the
+  category name) now meets a name whose length varies by category.

@@ -55,10 +55,10 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -du us -h
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2026-01-22 08:49 and 2026-01-25 07:41
   ─────────────────────────────────────────   
-  4xx                                     4      [√] logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log                       [1]
-  3xx                                     7   
-  2xx-HL                                 34      Log Formats
-  2xx                                   632   
+  4xx Client error                        4      [√] logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log                       [1]
+  3xx Redirection                         7   
+  2xx Success, highlighted               34      Log Formats
+  2xx Success                           632   
   ─────────────────────────────────────────      1 tomcat_access_with_duration
   HIGHLIGHTED                            34   
   LINES INCLUDED                        677   
