@@ -241,3 +241,80 @@ failed with their `asserts`/`produced_by`/`contract` triple surfaced. The 4 that
 still passed are the ones asserting behaviour `-n 0` does *not* change (the bucket
 store stays demanded, the timeline and its percentiles are still rendered, and the
 CSV/extended/shape groups are undemanded on any terminal-only run).
+
+## Completion gate
+
+Run on `5928714` (`#458: restore release version for the completion gate`), the
+commit being merged — the branch rebased onto `release/0.18.0` at `3129fea`
+(release notes for #463, the descriptive category names) with `$version_number`
+restored to `0.18.0`.
+
+**No benchmark was run.** The architect has ruled that performance benchmarks are
+not part of feature work; `tests/baseline/run-benchmark.sh` was not invoked and no
+`458-*.tsv` result was produced. The dev-scale before/after under § Measurement
+above measures what the option does, not what the change did to the tool, and
+stands on its own.
+
+### Rebase
+
+Two conflicts, both the same one-line edit on two surfaces: the `-n` option
+description in `print_help()` and its row in `docs/usage.md`. #457 (the run summary
+printed at the end of the output) renamed the table the option controls from "the
+summary table" to "the top-messages table" on both surfaces; this branch had
+extended the same sentence to document `0`. Resolved by keeping the release
+branch's name for the table and this branch's documentation of `0` after it, so
+the merged row reads "Number of unique messages to show in the top-messages table
+(default: 10). 0 keeps no individual message at all: …". Both surfaces carry the
+same merge, so the `--help`/`docs/usage.md` parity `validate-help-content.sh`
+enforces is preserved. `perl -c ltl` clean; no regression golden conflicted.
+
+### Harness suite — 28 of 28 pass
+
+Every harness exited 0 and its summary line reports checks actually run — 1 175
+passing, 0 failing, across the whole suite.
+
+| Harness | Summary |
+|---|---|
+| `validate-csv-output` | 21 scenarios, 21 pass, 0 fail |
+| `validate-statistics` | 21 scenarios, 21 pass, 0 fail |
+| `validate-category-names` | PASS 26, FAIL 0 |
+| `validate-csv-input` | 4 pass, 0 fail |
+| `validate-distribution-shape` | 8 passed, 0 failed |
+| `validate-doc-examples` | 46 passed, 0 failed, 9 skipped |
+| `validate-duration-display` | 21 passed, 0 failed |
+| `validate-explain` | 148 passed, 0 failed |
+| `validate-format-detection` | 192 passed, 0 failed |
+| `validate-format-registry` | 22 passed, 0 failed |
+| `validate-heatmap-palette` | 85 passed, 0 failed |
+| `validate-help-content` | 11 passed, 0 failed |
+| `validate-help-layout` | 6 passed, 0 failed |
+| `validate-histogram-bin-counters` | 84 passed, 0 failed |
+| `validate-histogram-ticks` | 21 passed, 0 failed |
+| `validate-index-read-back` | 59 passed, 0 failed |
+| `validate-log-level-vocabulary` | PASS 8, FAIL 0 |
+| `validate-message-control-characters` | PASS 11, FAIL 0 |
+| `validate-message-grouping-notices` | 4 passed, 0 failed |
+| `validate-numeric-criteria-notices` | 10 passed, 0 failed |
+| `validate-profile-render` | 22 passed, 0 failed |
+| `validate-profile` | 50 passed, 0 failed |
+| `validate-recursive-file-selection` | 22 passed, 0 failed |
+| `validate-regression` | 71 passed, 0 failed, 0 skipped |
+| `validate-runtime-config` | 36 passed, 0 failed |
+| `validate-statistics-demand` | 95 passed, 0 failed |
+| `validate-udm-counting` | 28 passed, 0 failed |
+| `validate-udm-specs` | 43 passed, 0 failed |
+
+`validate-csv-output.sh` ran before `validate-statistics.sh` for the shared `CI=1`
+cache. `./tests/cleanup-test-artifacts.sh` was run afterwards.
+
+### Statistics-drift advisories
+
+No T3 or T4 failure on any of the three layers, so nothing blocks. The advisory
+counts are 943 T2 cells, all on the algorithm-aware oracle layer, and 28 registered
+known failures — every one of them the single projection onto the shared bin
+geometry already tracked as #469 (bin-model percentile projection error), listed in
+`tests/statistics-drift/known-failures.tsv`. Both counts are identical to the run
+recorded for #463 (descriptive category names) on the same release branch, which is
+what a change that retains fewer messages but alters no statistic should produce:
+every drift scenario runs with a positive `-n`, so none of them takes the `-n 0`
+path at all.
