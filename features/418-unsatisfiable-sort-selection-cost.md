@@ -172,6 +172,53 @@ Per the repository's CLI conventions the notice is **not** gated behind
 `--disable-progress`: it is a behavioural notice reporting what the tool decided on
 the user's behalf, not a progress indicator.
 
+## Performance obligation — MANDATORY, not discretionary
+
+This issue is both a hot-path change and a performance fix, so measurement governs it
+at both ends. CLAUDE.md § Development Phases makes prototyping mandatory when work
+introduces a new per-line hot-path cost; this does.
+
+### The hot-path surface is exactly one thing
+
+Of everything in this design, **only D4's observation flag executes per line.** The
+parse-time gates, the pre-walk skip, the post-walk detection and both notices are all
+once-per-run and cannot appear in a per-line profile.
+
+That makes the prototype question narrow and answerable: what does setting the flag
+cost per line, and can it be hoisted so a run that requested no statistic sort pays
+nothing at all? #478 is the standing example of the failure mode — bookkeeping
+evaluated per line when it cannot affect the result.
+
+### Before implementation
+
+1. **Prototype the flag** in `prototype/`, comparing candidates against the current
+   code as baseline at staged scale (1k → 10k → 100k → millions). Per the 2026-08-21
+   F9 rule the baseline arm is the production code path extracted verbatim — call
+   shape, variable scoping and data movement included — not a convenience wrapper.
+   Per the 2026-08-27 rule, constants are sliced from `ltl`, never restated from
+   memory; where a value must be restated, the source symbol is named beside it.
+2. **Record the measured result** (medians with ranges) and the lessons as decisions
+   in this doc BEFORE writing production code.
+
+### After implementation — both directions
+
+3. **Regression check on the unaffected path.** The default `occurrences` sort is
+   sacred (#303 design record) and must not regress at all. Benchmark before and
+   after against the last released baseline.
+4. **Improvement measurement on the affected path.** The pre-walk skip is claimed to
+   remove the +76% statistics-phase cost measured in #415. That claim is verified by
+   measurement on the same shape of input, not asserted — a fix whose benefit is
+   never measured is indistinguishable from one that does nothing.
+5. **Memory as well as time.** Both are captured; the flag is per-run state, so the
+   expectation is flat, and a deviation from flat is a finding.
+6. **Profile if the numbers are unexplained.** `features/nytprof-profiling-workflow.md`
+   is the workflow; a surprising delta is investigated rather than accepted, and the
+   profile-ready contract applies to anything given a counter.
+
+Guessing at the cheap implementation and iterating through variants against the full
+tool is not the process — the prototype exists so the candidate is chosen on measured
+evidence in one pass.
+
 ## Open items
 
 - Harness placement: `tests/validate-statistics-demand.sh` carries the existing `-so`
