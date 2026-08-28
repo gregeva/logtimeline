@@ -159,3 +159,79 @@ else, including the echoed options line, changes position or content.
 | `-t` timing rows | Render inside the summary, at the end |
 | Anchor guard (D5) | Filter status probed through the harness's own pipeline shape: summary present → 0, summary absent → 3, `-osum` in the echoed options → 0 |
 | Echoed options position (D1) | Byte-identical to the release branch: the ten re-blessed references sort equal to their release-branch versions, and the sixty-one `-osum` references are unchanged |
+
+## Completion gate
+
+Run on `2d3d7de` (`#457: restore release version for the completion gate`), the
+commit being merged, after rebasing onto `origin/release/0.18.0` (`b94a75e`,
+the #445 quoted-`-r` release-notes commit). The rebase was clean — no
+conflicts. `$version_number` reads `0.18.0`.
+
+### Harness suite — 27 of 27 exit 0
+
+| Harness | Summary line |
+|---|---|
+| `validate-csv-output.sh` | CSV output integrity: 21 scenarios, 21 pass, 0 fail |
+| `validate-statistics.sh` | Statistics drift: 21 scenarios, 21 pass, 0 fail |
+| `validate-csv-input.sh` | CSV input robustness: 4 pass, 0 fail |
+| `validate-distribution-shape.sh` | 8 passed, 0 failed |
+| `validate-doc-examples.sh` | 46 passed, 0 failed, 9 skipped |
+| `validate-duration-display.sh` | 21 passed, 0 failed |
+| `validate-explain.sh` | 148 passed, 0 failed |
+| `validate-format-detection.sh` | 192 passed, 0 failed |
+| `validate-format-registry.sh` | 22 passed, 0 failed |
+| `validate-heatmap-palette.sh` | 85 passed, 0 failed |
+| `validate-help-content.sh` | 11 passed, 0 failed |
+| `validate-help-layout.sh` | 6 passed, 0 failed |
+| `validate-histogram-bin-counters.sh` | 84 passed, 0 failed |
+| `validate-histogram-ticks.sh` | Total: 21 \| Passed: 21 \| Failed: 0 |
+| `validate-index-read-back.sh` | 59 passed, 0 failed |
+| `validate-log-level-vocabulary.sh` | PASS: 8, FAIL: 0 |
+| `validate-message-control-characters.sh` | PASS: 11, FAIL: 0 |
+| `validate-message-grouping-notices.sh` | 4 passed, 0 failed |
+| `validate-numeric-criteria-notices.sh` | 10 passed, 0 failed |
+| `validate-profile-render.sh` | 22 passed, 0 failed |
+| `validate-profile.sh` | 50 passed, 0 failed |
+| `validate-recursive-file-selection.sh` | 22 passed, 0 failed |
+| `validate-regression.sh` | 71 passed, 0 failed, 0 skipped |
+| `validate-runtime-config.sh` | 36 passed, 0 failed |
+| `validate-statistics-demand.sh` | 75 passed, 0 failed |
+| `validate-udm-counting.sh` | 28 passed, 0 failed |
+| `validate-udm-specs.sh` | 43 passed, 0 failed |
+
+`validate-statistics.sh` tiers: zero T4 and zero T3 on every layer — the drift
+check against the committed baselines, the intra-row arithmetic invariants, and
+the NumPy/SciPy oracle. 943 T2 advisories, all on the oracle layer and all
+pre-existing (they are the tolerance band between `ltl`'s bin-model percentiles
+and the oracle's exact ones, not a difference this branch introduced). 31 oracle
+cells are registered known failures for #469 (bin-model percentile projection
+onto the shared geometry) in `tests/statistics-drift/known-failures.tsv`.
+
+`./tests/cleanup-test-artifacts.sh` run afterwards; the tree is clean.
+
+### Before/after benchmark
+
+`single-day-access-log-standard` (761,698 lines), run back-to-back on this
+machine: *before* from a worktree of `origin/release/0.18.0`, *after* from this
+branch's gated tip. No metric worse by more than 5%.
+
+| Metric | Before | After | Delta | Change |
+|---|---|---|---|---|
+| `TIMING/total` | 10 s | 10.0 s | −77 ms | −0.8% |
+| `parse/read_files` | 9.9 s | 9.8 s | −80 ms | −0.8% |
+| `finalize/calculate_statistics` | 151 ms | 155 ms | +4 ms | +2.6% |
+| `finalize/calculate_statistics/bucket_stats` | 100 ms | 104 ms | +4 ms | +4.0% |
+| `finalize/calculate_statistics/group_calc` | 46 ms | 45 ms | −1 ms | −2.2% |
+| `finalize/calculate_statistics/sort_selection` | 6 ms | 6 ms | 0 ms | 0.0% |
+| `detect/registry_build` | 9 ms | 8 ms | −1 ms | −11.1% |
+| `render/normalize_data` | 1 ms | 1 ms | 0 ms | 0.0% |
+| `MEMORY/rss_peak` | 142.1 MB | 142.3 MB | +144 KB | +0.1% |
+
+The change is a render-order change with no per-line or per-key work added, so
+the timing movements are run-to-run noise on a single pair of runs, not
+attribution. The +144 KB on peak RSS is the direction D2 predicts — the
+measurement instant now sits after the message and thread-pool tables have been
+rendered — and it is 0.1%, an order of magnitude inside the 5% threshold.
+
+Both benchmark TSVs were deleted afterwards and the base worktree removed; they
+are instruments, not deliverables.
