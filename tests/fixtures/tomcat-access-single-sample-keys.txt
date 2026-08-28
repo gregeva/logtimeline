@@ -1,0 +1,12 @@
+192.0.2.10 - - [07/May/2025:00:00:00 +0000] "POST /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 14305 0
+192.0.2.10 - - [07/May/2025:00:02:00 +0000] "GET /Thingworx/Things/SampleThing/Properties/Status HTTP/1.1" 200 512 0
+192.0.2.11 - - [07/May/2025:00:04:00 +0000] "POST /Thingworx/Things/SampleThing/Services/GetDateAndTime HTTP/1.1" 200 86 58
+192.0.2.12 - - [07/May/2025:00:06:00 +0000] "POST /Thingworx/Things/SampleDataTable/Services/QueryDataTableEntries HTTP/1.1" 200 20480 166
+127.0.0.1 - - [07/May/2025:00:08:00 +0000] "POST /Thingworx/Things/SampleStream/Services/QueryStreamEntriesWithData HTTP/1.1" 200 102400 1000
+192.0.2.10 - - [07/May/2025:00:10:00 +0000] "GET /Thingworx/Mashups/SampleDashboard HTTP/1.1" 200 65536 1
+192.0.2.10 - - [07/May/2025:00:12:00 +0000] "POST /Thingworx/ThingTemplates/RemoteThing/Services/QueryImplementingThingsWithNamedData HTTP/1.1" 200 5519 6
+192.0.2.11 - - [07/May/2025:00:14:00 +0000] "GET /Thingworx/Composer/index.html HTTP/1.1" 200 3072 12
+192.0.2.12 - - [07/May/2025:00:16:00 +0000] "POST /Thingworx/Things/SampleTimer/Services/Trigger HTTP/1.1" 200 0 0
+127.0.0.1 - - [07/May/2025:00:18:00 +0000] "GET /Thingworx/health HTTP/1.1" 200 2 0
+192.0.2.10 - - [07/May/2025:00:20:00 +0000] "POST /Thingworx/Things/SampleFileRepository/Services/GetFileListing HTTP/1.1" 200 8192 300
+192.0.2.10 - - [07/May/2025:00:22:00 +0000] "GET /Thingworx/Resources/Images/logo.png HTTP/1.1" 200 4096 2
