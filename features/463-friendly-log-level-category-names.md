@@ -256,6 +256,88 @@ six files differed, and every differing line was a category row acquiring its
 descriptive name. Only those six were copied over, so no unrelated drift was
 blessed along with them.
 
+## Completion gate
+
+Run on `43df560` (`#463: restore release version for the completion gate`), the
+commit being merged — the branch rebased onto `release/0.18.0` at `58842fa`
+(release notes for #457, the run summary printed last) with `$version_number`
+restored to `0.18.0`.
+
+**No benchmark was run.** The architect has ruled that performance benchmarks
+are not part of feature work; `tests/baseline/run-benchmark.sh` was not invoked
+and no `463-*.tsv` result was produced.
+
+### Rebase
+
+One conflict, in `ltl`. #457 (the run summary printed at the end of the output)
+split `print_summary_table()`, lifting its command-and-arguments block out into
+a new `print_run_options()` and adding `return if $omit_summary;` to what
+remained — so the release branch's new sub landed on the same lines as this
+branch's new `category_display_name()` and its edit to the summary table's
+header. Resolved by keeping the release branch's split intact and placing
+`category_display_name()` immediately above `print_run_options()`; the label
+lookup inside the category loop merged cleanly into the retained
+`print_summary_table()`. `perl -c` clean, and the whole-file diff against
+`release/0.18.0` is exactly this branch's four changes: the
+`%category_display_names` table in GLOBALS, `category_display_name()`, the
+truncating label lookup in the category loop, and the version line.
+
+The six re-blessed regression references and `docs/usage.md` merged
+automatically and were verified rather than assumed: each reference differs from
+its `release/0.18.0` version only in the category rows acquiring their
+descriptive names, with #457's relocation of the summary block preserved, and
+`tests/validate-regression.sh` passes 71/0 against them.
+
+### Harness suite — 28 of 28 pass
+
+Every harness exited 0 and its summary line reports checks actually run —
+1 155 passing, 0 failing, across the whole suite.
+
+| Harness | Summary |
+|---|---|
+| `validate-csv-output` | 21 scenarios, 21 pass, 0 fail |
+| `validate-statistics` | 21 scenarios, 21 pass, 0 fail |
+| `validate-category-names` | PASS 26, FAIL 0 |
+| `validate-csv-input` | 4 pass, 0 fail |
+| `validate-distribution-shape` | 8 passed, 0 failed |
+| `validate-doc-examples` | 46 passed, 0 failed, 9 skipped |
+| `validate-duration-display` | 21 passed, 0 failed |
+| `validate-explain` | 148 passed, 0 failed |
+| `validate-format-detection` | 192 passed, 0 failed |
+| `validate-format-registry` | 22 passed, 0 failed |
+| `validate-heatmap-palette` | 85 passed, 0 failed |
+| `validate-help-content` | 11 passed, 0 failed |
+| `validate-help-layout` | 6 passed, 0 failed |
+| `validate-histogram-bin-counters` | 84 passed, 0 failed |
+| `validate-histogram-ticks` | 21 passed, 0 failed |
+| `validate-index-read-back` | 59 passed, 0 failed |
+| `validate-log-level-vocabulary` | PASS 8, FAIL 0 |
+| `validate-message-control-characters` | PASS 11, FAIL 0 |
+| `validate-message-grouping-notices` | 4 passed, 0 failed |
+| `validate-numeric-criteria-notices` | 10 passed, 0 failed |
+| `validate-profile-render` | 22 passed, 0 failed |
+| `validate-profile` | 50 passed, 0 failed |
+| `validate-recursive-file-selection` | 22 passed, 0 failed |
+| `validate-regression` | 71 passed, 0 failed, 0 skipped |
+| `validate-runtime-config` | 36 passed, 0 failed |
+| `validate-statistics-demand` | 75 passed, 0 failed |
+| `validate-udm-counting` | 28 passed, 0 failed |
+| `validate-udm-specs` | 43 passed, 0 failed |
+
+`validate-csv-output` was run first so `validate-statistics` shared its `CI=1`
+cache. `./tests/cleanup-test-artifacts.sh` was run afterwards.
+
+### Statistics-drift advisories
+
+No T3 or T4 failure on any of the three layers, so nothing blocks. The advisory
+counts are 943 T2 cells, all on the algorithm-aware oracle layer, and 28
+registered known failures — every one of them the single projection onto the
+shared bin geometry already tracked as #469 (bin-model percentile projection
+error), listed in `tests/statistics-drift/known-failures.tsv`. None is
+attributable to this change: it adds a render-time label lookup and touches no
+statistic, and the CSV column names are unchanged by D3 [the legend and the CSV
+keep the raw category name].
+
 ## Out of scope
 
 - User-supplied or user-overridden entries (the open question above).
