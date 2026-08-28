@@ -396,7 +396,7 @@ Verification gates: `validate-help-content.sh`, `validate-help-layout.sh`, `CI=1
 - **Issues**: #443 (user-defined metrics fail silently), #449 (`-V` surface for user-defined metrics — folded into #443, delivered together, closes with it)
 - **Branch**: `443-user-defined-metrics-fail-silently`
 - **Target release**: v0.18.0
-- **Phase**: Planning walkthrough complete 2026-08-28; decisions locked below; implementation awaiting go-ahead.
+- **Phase**: Implemented 2026-08-28 (S1–S6 landed, completion gate passed).
 
 ### Problem
 
@@ -458,15 +458,15 @@ Stability: keys above are the contract; additions are non-breaking, renames and 
 | `emit_udm_zero_match_notices()` (post-walk) | after the read loop, one per metric with derived occurrences 0 | `Note: -udm '<spec>': no metrics produced from matching lines` + `read as:` + `pattern:` (+ `hint:` per D6) |
 | `parse_udm_configs()` | option parsing — D5 (i) and (ii) | `Warning: … in -udm '<spec>' … skipping` (existing warn-and-skip shape) |
 
-### Implementation plan (awaiting approval)
+### Implementation plan (approved 2026-08-28)
 
-- [ ] **S1 — Parser.** D5 checks in `parse_udm_configs()`; the config entry carries `raw_arg`, `extraction` (`name|token_key|regex`), and `hint` (D6 evaluated at parse, spoken only per D4(b)); rejected specs recorded (spec + reason token) for `-V`.
-- [ ] **S2 — Extraction site.** D2: value = `$1` when defined, else the whole match (`substr($_, $-[0], $+[0] - $-[0])`).
-- [ ] **S3 — Post-walk derivation and notice.** One walk over `%log_analysis` producing the per-metric `produced` row (D7); `emit_udm_zero_match_notices()` (D8/D9) at the post-walk notice position.
-- [ ] **S4 — `-V udm-specs`.** Section registry entry, `@verbose_section_order`, `emit_udm_specs_verbose()` reading S1 + S3 state; HARNESS-DESIGN reserved-names entry.
-- [ ] **S5 — Docs.** D12 on `print_help()` and `docs/usage.md` in one commit; the spec-grammar line stays, with the end-anchored reading stated beneath it.
-- [ ] **S6 — Tests.** `tests/validate-udm-specs.sh` on a crafted fixture at `-bs 1440 -oe`: undelimited regex-shaped key (notice + hint, `occurrences=0`); delimited regex with no capture group (`distinct`=2, no notice); well-formed regex absent from the file (notice, no hint); function in the unit slot (warning, `rejected=unit_slot_holds_function`, no column); literal pattern under `distinct` (rejected); `delta` with a single match (notice, no hint); positive control cross-checked against STATS CSV totals; runtime-warning cleanliness.
-- [ ] **Completion gate** — full harness suite + `single-day-access-log-standard` benchmark against `v0.17.0.tsv`, version restored to `0.18.0`.
+- [x] **S1 — Parser.** D5 checks in `parse_udm_configs()`; the config entry carries `raw_arg`, `extraction` (`name|token_key|regex`), and `hint` (D6 evaluated at parse, spoken only per D4(b)); rejected specs recorded (spec + reason token) for `-V`.
+- [x] **S2 — Extraction site.** D2: value = `$1` when defined, else the whole match (`substr($_, $-[0], $+[0] - $-[0])`).
+- [x] **S3 — Post-walk derivation and notice.** One walk over `%log_analysis` producing the per-metric `produced` row (D7); `emit_udm_zero_match_notices()` (D8/D9) at the post-walk notice position.
+- [x] **S4 — `-V udm-specs`.** Section registry entry, `@verbose_section_order`, `emit_udm_specs_verbose()` reading S1 + S3 state; HARNESS-DESIGN reserved-names entry.
+- [x] **S5 — Docs.** D12 on `print_help()` and `docs/usage.md` in one commit; the spec-grammar line stays, with the end-anchored reading stated beneath it.
+- [x] **S6 — Tests.** `tests/validate-udm-specs.sh` (43 assertions, each proven to fail under sabotage: whole-match reverted, hint disabled) on the crafted fixture `tests/fixtures/udm-specs.txt` at `-bs 1440 -oe`: undelimited regex-shaped key (notice + hint, `occurrences=0`); delimited regex with no capture group (`distinct`=2, no notice); well-formed regex absent from the file (notice, no hint); function in the unit slot (warning, `rejected=unit_slot_holds_function`, no column); literal pattern under `distinct` (rejected); `delta` with a single match (notice, no hint); positive control cross-checked against STATS CSV totals; runtime-warning cleanliness.
+- [x] **Completion gate** (2026-08-28, version restored to `0.18.0`) — all 27 `tests/validate-*.sh` exit 0 with assertions confirmed; `single-day-access-log-standard` before (pre-change `release/0.18.0` worktree) vs after on the same machine: total 9.8 s → 9.7 s (−0.6 %), peak RSS +0.3 %, nothing worse than 5 %. That case runs no `-udm`, so the changed extraction line was measured directly: `-udm 'b::max:/HTTP\/1.1" \d+ (\d+) /'` on the 148 MB access log, 3 runs each — `parse/read_files` median before 12.82 s (12.77–12.94), after 12.80 s (12.76–13.04): inside the run-to-run noise. The per-feature gate rule in CLAUDE.md was corrected on this branch (before/after on the same machine, never against a released baseline).
 
 ## Future Enhancements (Out of Scope)
 
