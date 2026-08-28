@@ -110,7 +110,7 @@ Walked piece by piece with the architect; each piece locks its decisions here be
 2. **Global default: where it lives, how an entry overrides it, how an entry declines** — D15 (locked).
 3. **Hot-path evaluation** — D16 (locked).
 4. **Data model** — D17 (locked).
-5. **`$is_access_log` → `metrics_observed` rename and `event_ledger` per-file binding** — the `-V format-detection` contract change, harness update — open.
+5. **`$is_access_log` → `metrics_observed` rename and `event_ledger` per-file binding** — D18, D19 (locked).
 6. **`-V format-detection / classification` section-contract** — line shapes and counter semantics — open.
 7. **Prototype charter** — candidates, baseline arm, scale, exit criteria — open.
 8. **Stages and merge gate** — order of landing, parity fixtures — open.
@@ -156,6 +156,18 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
   - **Per message:** `successes` / `failures` keys on the `%log_messages{$category}{$log_key}` entry, incremented on both the metrics path and the plain path (every site where its `occurrences++` runs), carried in the consolidation stats source and summed by `merge_consolidation_stats()`.
   - **Run level:** `$total_successes`, `$total_failures` beside `$total_lines_included`; `classified`, `unclassified`, `unclassified_pct` derived at emission, never stored.
   - **`errRate`:** `$bucket_outcomes{$bucket}{failures} / $bucket_size_seconds * $rate_multiplier{$rate_unit}`; the category-name regex is removed (D13). For every shipped format the failure set equals today's `FATAL|ERROR|5xx|4xx` set (plus `CRITICAL`, which no shipped format emits), so the rate is byte-identical except for D12's highlighted-error fix.
+
+### 5. Rename and per-file binding — D18, D19
+
+- **D18 — Mechanical rename, one commit** (2026-08-28). `$is_access_log` → `$metrics_observed` at every inventory site; the record-field slot, `%format_detection{...}{is_access_log}` and the `-V format-detection` per-file key become `metrics_observed:` with byte-identical semantics; the `FR_STATS` and `%format_detection` schema comments follow. `tests/validate-format-detection.sh` has its assertion rewritten to the new key in the same commit, and its `asserts` text (which cites `ltl:4799-4802` line numbers) corrected to the function name. The umbrella `features/log-format-registry.md` format-detection section-contract, which lists `is_access_log:` among the byte-preserved keys, is amended to record the rename.
+
+- **D19 — A mid-file flip follows the new occupant for `event_ledger` and for classification, and a criteria change is surfaced to the user and on the observability surface** (2026-08-28).
+  - New slot `FR_EVENT_LEDGER`. `$fdd->{event_ledger}` is set from the bound entry at first bind and re-set when a flip changes the group's occupant for that file — never on the per-line path. Emitted as `event_ledger: yes|no` after `metrics_observed:`.
+  - After a flip, lines are classified under the new occupant's resolved criteria (they are compiled into its scan block, so this is automatic). Lines classified *before* the flip are not revisited — the read is streaming — so the counters may carry outcomes decided under two rule sets.
+  - Each compiled entry carries a **criteria signature** (a canonical string of its resolved classification, computed once at registry build) so the flip-time check is one string compare between the old and new occupant, on the rare flip path only. When the signatures differ, the tool:
+    1. prints a user-facing note (a behavioural notice, never gated behind `--disable-progress`; on the #412 notices surface once it exists, on stderr in the `Note:` form of `format_variant_ambiguity_note()` until then): a classification rule change occurred mid-file at line N of `<file>` because the detected log format was adapted from `<old format>` to `<new format>`; lines before that point were classified under the previous rules;
+    2. records it for the `classification` sub-section (piece 6): a run count `rule_changes: N` and one line per change — file, line number, old entry → new entry.
+  - Run-level, the sub-section also carries `event_ledger_files: N/M`. What a consumer does when a run mixes ledger and non-ledger files is that consumer's decision (#452's column default) and is handed forward, not settled here.
 
 ## Open items
 
