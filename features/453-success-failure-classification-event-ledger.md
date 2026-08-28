@@ -4,7 +4,7 @@
 
 - Issue: #453 (per-variant success/failure line classification and an event-ledger property in the format registry schema, retiring `$is_access_log`)
 - Branch: `453-success-failure-classification-event-ledger` off `release/0.18.0`
-- Phase: requirements and specification (2026-08-28)
+- Phase: planning (requirements and specification closed 2026-08-28 with R1–R10, D1–D13; before-baseline `tests/baseline/results/0.18.0-453-before.tsv` committed)
 - Umbrella: #23 / `features/log-format-registry.md` (system of record for the registry; § *1. Format Definition Properties* lists the per-format properties this issue extends)
 - Consumers: #452 (reliability column and analysis-overview surface), #455 (success/failure filter and highlight criteria), #456 (per-message success/failure indicator), #193 (timeout detection on error responses)
 
@@ -98,7 +98,36 @@ No site today is gated on "is this an event ledger". The event-ledger property g
 
 **Before/after measurement is part of the development process for this branch, not only the completion gate** (architect, 2026-08-28). The change touches the hot path, so a named set of benchmark cases is captured on the branch *before* any production code is written, labelled by the branch's version stamp (`0.18.0-453-before`), and **committed** under `tests/baseline/results/` so every subsequent step can be compared against it as a sanity check (`tests/baseline/compare-results.sh summary tests/baseline/results/0.18.0-453-before.tsv <step>.tsv`). The case set (decided 2026-08-28): `single-day-access-log-standard` (event ledger, status classification, gate case), `single-day-application-log-standard` (diagnostics default D7, `mt1` metric-bearing vs plain lines), `multi-day-custom-logs-standard` (UDM / count-probe path), `single-day-access-log-top25-consolidate` (consolidation stats-source gate). Intermediate step captures are labelled by step and are not deliverables unless the doc says otherwise.
 
+Release baselines (`v*.tsv`) are captured on different hardware and are not comparable to captures made in the development environment; every comparison on this branch is against `0.18.0-453-before.tsv`.
+
 Classification is a new per-line hot-path cost (one or more field regex matches per included line, on every format). Per CLAUDE.md § Development Phases 2(b) the prototype is **mandatory**, not a judgment call. Decisions that depend on it: the compiled shape of the criteria (per-entry closure compiled at registry build time, in the same manner as the D33 message-metric probes, vs interpreted list walk), and whether the global default is compiled into each entry's closure or evaluated as a fallback. The prototype extracts the production scan structure per `prototype/459-order-independence/extract-subs.sh` and measures on metric-bearing and metric-less lines.
+
+## Planning
+
+Walked piece by piece with the architect; each piece locks its decisions here before the next opens.
+
+1. **Schema shape on a spec entry** — D14 (locked).
+2. **Global default: where it lives, how an entry overrides it, how an entry declines** — open.
+3. **Hot-path evaluation** — where classification runs relative to extraction, probes and masking; compiled-closure shape; what the prototype must measure — open.
+4. **Data model** — per-bucket and per-message success/failure counters, the run-level R5 counters, the `errRate` replacement (D13) — open.
+5. **`$is_access_log` → `metrics_observed` rename and `event_ledger` per-file binding** — the `-V format-detection` contract change, harness update — open.
+6. **`-V format-detection / classification` section-contract** — line shapes and counter semantics — open.
+7. **Prototype charter** — candidates, baseline arm, scale, exit criteria — open.
+8. **Stages and merge gate** — order of landing, parity fixtures — open.
+
+### 1. Schema shape — D14
+
+- **D14 — A spec entry declares `classification` and `event_ledger` as plain data** (2026-08-28):
+
+  ```perl
+  classification => {
+      success => [ { status_code => '^[123]\d\d$' } ],
+      failure => [ { status_code => '^[45]\d\d$' } ],
+  },
+  event_ledger => 1,
+  ```
+
+  Each criterion is a hash of *field ⇒ pattern* — all conditions must hold (R3 all-of); each outcome is a list of criteria — any one suffices (R3 any-of). Field names are the record field names of `@format_record_fields` (`status_code`, `category_bucket`, `message`, …) plus `line` for the raw line (D1). `event_ledger` defaults to 0 when absent. How an entry inherits or declines is piece 2.
 
 ## Open items
 
