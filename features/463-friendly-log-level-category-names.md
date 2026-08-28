@@ -138,8 +138,8 @@ prose only, with no option row on either surface to keep in step.
 
 `tests/validate-category-names.sh` — a render-invariant harness
 (`tests/HARNESS-DESIGN.md` § Render-invariant harnesses): the rendered category
-table is the surface under test, not a proxy for internal state. 24 assertions
-across three scenarios, all `-bs 1440 -oe -n 1` on ten-line fixtures spanning
+table is the surface under test, not a proxy for internal state. 26 assertions
+across four scenarios, all `-bs 1440 -oe -n 1` on ten-line fixtures spanning
 seconds, with `-lf tomcat_access_with_duration` pinning the format so the run
 does not depend on filename evidence.
 
@@ -151,6 +151,11 @@ does not depend on filename evidence.
   asserts that no row is still labelled with a raw family name (the descriptive
   name replaces it, it is not shown alongside); asserts the legend still shows
   `5xx: <count>`.
+- **`longest-name-fills-the-column`** — the same fixture with the highlight on
+  its 1xx line, the only way the 30-character `1xx Informational, highlighted`
+  reaches the render; the other scenario's highlight never produces it, so the
+  exact-fit boundary the cell width turns on would otherwise go unrendered by
+  any test. Asserts that row and its plain twin at their exact column offsets.
 - **`csv-keeps-raw-category-names`** — the same run with `-o`; asserts the stats
   CSV header carries `1xx 2xx 2xx-HL 3xx 4xx 4xx-HL 5xx 5xx-HL` and no
   descriptive text.
@@ -162,7 +167,7 @@ does not depend on filename evidence.
 assertion can fail), 2026-08-28:
 
 - Bypassing the lookup in `category_display_name()` so it returns the raw name:
-  16 of the 24 assertions fail — every family row, every highlighted twin and
+  16 of the assertions fail — every family row, every highlighted twin and
   every raw-name-replaced check — while the legend, CSV and unmapped-level
   assertions still pass, which is the correct partition.
 - Feeding each checker a doctored input directly: a render whose 30-character
@@ -170,10 +175,14 @@ assertion can fail), 2026-08-28:
   no row, a raw name still labelling a row, a legend carrying the descriptive
   text, and a stats CSV header carrying it. All five fail with the expected
   diagnostic.
+- Cutting the label one character shorter than the column: exactly the one
+  boundary assertion fails (`1xx Informational, highlighted` no longer labels a
+  row), 25 of 26 still pass. The cell-width boundary is therefore under test
+  and nothing else depends on it.
 
 **Colour-environment parity** (`tests/HARNESS-DESIGN.md` § Colour rendering is
 controlled): `FORCE_COLOR=3 CI=1` and `env -u FORCE_COLOR -u NO_COLOR CI=1` both
-report 24 passed, 0 failed.
+report 26 passed, 0 failed.
 
 **Neighbouring harnesses over the same surface**, run on the finished change:
 `tests/validate-log-level-vocabulary.sh` 8/0 (it reads the same category table

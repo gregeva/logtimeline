@@ -313,6 +313,33 @@ assert_command \
     contract    'features/463-friendly-log-level-category-names.md § D3 — the legend and the CSV keep the raw category name'
 
 # ---------------------------------------------------------------------------
+# Scenario: the longest shipped name fills the category cell exactly.
+# The same fixture with the highlight on its 1xx line, which is the only way
+# the 30-character name reaches the render. The other scenario's highlight
+# never produces it, so the exact-fit boundary would otherwise go unrendered
+# by any test - and it is the boundary the fixed-width cell turns on.
+# ---------------------------------------------------------------------------
+
+current_scenario="longest-name-fills-the-column"
+echo "[$current_scenario]"
+
+WIDEST_RENDER="$TMP_DIR/widest.txt"
+capture_render "$WIDEST_RENDER" --disable-progress -ni -lf "$ACCESS_FORMAT" \
+    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -h upload "$FAMILIES_FIXTURE"
+
+while read -r raw total descriptive; do
+    assert_command \
+        command     "check_category_row '$WIDEST_RENDER' '$descriptive' '$total'" \
+        label       "$raw is named [$descriptive] with its total aligned" \
+        asserts     'The longest shipped descriptive name fills the fixed-width category cell exactly, so its total still lands in the aligned total column. This is the boundary the cell width turns on: a name one character longer is cut to the cell, and a cell one character narrower would cut this name.' \
+        produced_by "$FAMILY_PRODUCED" \
+        contract    'features/463-friendly-log-level-category-names.md § D4 — the name fits the column, and a longer one is cut to it'
+done <<'ROWS'
+1xx-HL 1 1xx Informational, highlighted
+1xx 1 1xx Informational
+ROWS
+
+# ---------------------------------------------------------------------------
 # Scenario: the CSV contract is unchanged by the descriptive names.
 # ---------------------------------------------------------------------------
 
