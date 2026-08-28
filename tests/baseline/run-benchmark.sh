@@ -10,7 +10,7 @@
 #   all   — all file selections x all scenarios
 #   <name> — run a single named test case (e.g. "twx-unique-errors-standard")
 #
-# Test cases are the cross-product of 7 file selections x 7 option scenarios = 49 total.
+# Test cases are the cross-product of 7 file selections x 10 option scenarios = 70 total.
 #
 # Issue #56: Memory Baseline Profiling
 
@@ -88,6 +88,10 @@ FILE_SELECTIONS+=("month-many-servers-access-logs|xl|7.6 GB, 140 files|AccessLog
 declare -a SCENARIOS=()
 
 SCENARIOS+=("standard|")
+# The counterpart of every retaining scenario: no message is kept, so the peak
+# and the parse-stage cost read without the per-message store. Compared against
+# `standard` on the same file selection.
+SCENARIOS+=("no-messages|-n 0")
 SCENARIOS+=("top25|-n 25")
 SCENARIOS+=("top25-consolidate|-n 25 -g")
 SCENARIOS+=("heatmap|-hm")

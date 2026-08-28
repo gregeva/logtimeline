@@ -155,7 +155,7 @@ Alongside the messages ranking, logtimeline prints a **Category** table totallin
 
 | Option | Description |
 |--------|-------------|
-| `-n, --top-messages <N>` | Number of unique messages to show in the top-messages table (default: 10) |
+| `-n, --top-messages <N>` | Number of unique messages to show in the top-messages table (default: 10). `0` keeps no individual message at all: no message table, no message CSV and no per-message statistics, so a log with many distinct messages costs far less memory. The timeline and the statistics over the whole population are unchanged, and inclusion/exclusion filtering still applies. Message grouping (`-g`), the message statistics data model (`-mdm`) and the message ranking (`-so`) then have nothing to act on and are ignored, with a note saying so |
 | `-o, --output-csv` | Write all extracted data to a CSV file for external analysis |
 | `-cp, --csv-precision <mode>` | Control CSV decimal precision: `default` (per-family decimals derived from `-du`), `full` (raw precise floats), or an integer N (cap all numeric columns at N decimals) |
 | `-osum, --omit-summary` | Hide the run summary printed at the end of the output |

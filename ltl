@@ -243,6 +243,12 @@ my ( $highlight_count_min, $highlight_count_max );
 my $numeric_highlight_active = 0;   # any numeric highlight bound given
 my $highlight_active = 0;           # regex/file highlight OR numeric highlight given; gates all highlight rendering
 my $top_n_messages = 10;
+# Per-message retention gate. A top-message count of 0 means the per-message
+# store is never populated, so nothing downstream of it exists: no per-key
+# statistics, no messages table, no MESSAGES CSV. Resolved once in
+# adapt_to_command_line_options() and read as a single scalar by the per-line
+# capture branch in read_and_process_logs().
+my $capture_messages = 1;
 my ( $write_messages_to_csv, $csv, $csv_fh, $csv_file_args ) = ( 0, undef, undef, "" );
 my $total_lines_read = 0;
 my $total_lines_included = 0;
@@ -784,13 +790,13 @@ my @STAT_CONSUMERS = (
       active => sub { $write_messages_to_csv },
       groups => [qw(terminal_core csv_body extended_percentiles shape_moments)] },
     { name => 'messages-table', store => 'message',
-      active => sub { $top_n_messages > 0 },
+      active => sub { $capture_messages },
       groups => ['terminal_core'] },
     { name => 'messages-csv', store => 'message',
-      active => sub { $write_messages_to_csv },
+      active => sub { $capture_messages && $write_messages_to_csv },
       groups => [qw(terminal_core csv_body extended_percentiles shape_moments)] },
     { name => 'sort-on', store => 'message',
-      active => sub { defined $sort_key && exists $STAT_FIELD_GROUP{$sort_key} },
+      active => sub { $capture_messages && defined $sort_key && exists $STAT_FIELD_GROUP{$sort_key} },
       groups => sub { [ $STAT_FIELD_GROUP{$sort_key} ] } },
 );
 
@@ -6687,7 +6693,7 @@ sub print_help {
 
     # Display & Output
     $out .= help_subheading("Display & Output");
-    $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the top-messages table (default: 10)");
+    $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the top-messages table (default: 10). 0 keeps no individual message at all: no message table, no message CSV and no per-message statistics, so a log with many distinct messages costs far less memory. The timeline and the statistics over the whole population are unchanged, and inclusion/exclusion filtering still applies. Message grouping (-g), the message statistics data model (-mdm) and the message ranking (-so) then have nothing to act on and are ignored, with a note saying so.");
     $out .= help_opt("-o,   --output-csv",            "Write all extracted data to a CSV file for external analysis");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from -du), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
@@ -9581,6 +9587,7 @@ sub apply_parse_time_sort_gate {
     my ($operand) = @_;
     $sort_gate{operand} = $operand;
     $sort_gate{family}  = sort_key_metric_family($sort_key);
+    return unless $capture_messages;    # no message is retained, so none is ranked
     my %killer = (
         duration => [ $omit_durations, '-od/--omit-durations' ],
         bytes    => [ $omit_bytes,     '-ob/--omit-bytes'     ],
@@ -9613,6 +9620,7 @@ sub sort_fallback_to_occurrences {
 # added per line. When it was not, no key can rank, so the walk and the re-sort are
 # skipped outright rather than run to an empty defined block.
 sub apply_pre_walk_sort_gate {
+    return unless $capture_messages;    # no message is retained, so none is ranked
     return if $sort_key eq 'occurrences';
     my $family = $sort_gate{family};
     my $observed = $family eq 'duration' ? $durations_observed
@@ -9630,6 +9638,7 @@ sub apply_pre_walk_sort_gate {
 # an available-value sort key whose family was observed always ranks something.
 sub apply_post_walk_sort_gate {
     my ($defined_keys) = @_;
+    return unless $capture_messages;    # no message is retained, so none is ranked
     return if !exists $STAT_FIELD_GROUP{$sort_key} || $defined_keys;
     sort_fallback_to_occurrences('post-walk');
 }
@@ -10082,6 +10091,12 @@ sub adapt_to_command_line_options {
     # key string per absorbed key and nothing else reads it.
     $consolidation_membership_wanted = section_requested('message-grouping') ? 1 : 0;
 
+    # Per-message retention: asking for no message rows means no message is ever
+    # retained. Resolved here, ahead of every option block that consults it (the
+    # sort resolution, the consolidation fold, the statistics-demand resolution),
+    # so those blocks see one settled answer.
+    $capture_messages = ( $top_n_messages > 0 ) ? 1 : 0;
+
     $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
     $filter_range{'end'} = $filter_range_end if defined(  $filter_range_end );
 
@@ -10476,6 +10491,28 @@ sub adapt_to_command_line_options {
         $hide_stats = 1;
     }
 
+    # With no message retained, the options that only configure the per-message
+    # store have nothing left to configure. They are not an error - the retention
+    # setting simply wins - but the user is told, because the tool is discarding
+    # something they asked for. Message grouping is switched off here rather than
+    # left to find an empty store, so its final pass and its notices never run.
+    unless ($capture_messages) {
+        my @inert;
+        push @inert, '-g/--group-similar'              if $group_similar_sensitivity ne "none";
+        push @inert, '-mdm/--message-stats-data-model' if defined $data_model_message;
+        push @inert, '-so/--sort-on'                   if $sort_key ne 'occurrences';
+        $group_similar_sensitivity = "none";
+        print STDERR "Note: -n/--top-messages 0 retains no message, so "
+            . join(', ', @inert) . (@inert == 1 ? " has" : " have") . " no effect\n"
+            if @inert;
+        # -o is not inert: its per-time-bucket half still runs. Only the
+        # per-message CSV disappears with the store it writes out, so it is
+        # reported on its own line rather than joined into the list above.
+        print STDERR "Note: -n/--top-messages 0 retains no message, so "
+            . "-o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written\n"
+            if $write_messages_to_csv;
+    }
+
     # Duration-statistics demand resolution: each statistics store is captured
     # and computed only when at least one of its output surfaces is active.
     # Duration-based sort keys (-so min/mean/p50/...) order the messages table
@@ -10487,10 +10524,10 @@ sub adapt_to_command_line_options {
            (!$hide_stats && !$heatmap_enabled)   # timeline latency-statistics column (heatmap replaces it)
         || $write_messages_to_csv                # STATS CSV statistics columns
     ) ) ? 1 : 0;
-    $message_duration_stats_demand = ( !$omit_durations && (
-           $top_n_messages > 0                   # messages-table statistics variant
-        || $write_messages_to_csv                # MESSAGES CSV statistics columns
-    ) ) ? 1 : 0;
+    # Both message-store surfaces - the messages-table statistics variant and the
+    # MESSAGES CSV statistics columns - exist only for retained messages, so
+    # retention is the single condition on this store's demand.
+    $message_duration_stats_demand = ( !$omit_durations && $capture_messages ) ? 1 : 0;
 
     # Statistics-group demand (#305): layer per-group demand on top of the
     # store-level booleans above, from the consumer declarations in
@@ -11322,7 +11359,11 @@ sub read_and_process_logs {
                 $total_lines_included++;
                 $profile_included_samples++ if $profile_mode;
 
-                if( defined( $message ) ) {
+                # $capture_messages leads the test so that a run retaining no
+                # message pays a single scalar read per line and skips key
+                # construction, grouping and per-key accumulation entirely; a
+                # retaining run pays that one boolean and nothing else.
+                if( $capture_messages && defined( $message ) ) {
                     my $log_key = "";
                     my $max_object_length = 25;
                     my $log_level = $status_code > 0 ? $status_code : $category_bucket;			# If we received an actual HTTP status code, use that for the message statistic data model
@@ -17043,7 +17084,10 @@ sub pipeline_render {
 
     print_run_options();
 
-    if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
+    # The MESSAGES CSV is the per-message store written out. With no message
+    # retained there are no rows and no file: a header-only CSV would look like
+    # a run that found nothing rather than one that was asked to keep nothing.
+    if( $write_messages_to_csv && $capture_messages ) {                     # If write to CSV enabled, open filehandles
         $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
         my $csv_file_name = build_csv_filename('MESSAGES');
         open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
@@ -17071,11 +17115,13 @@ sub pipeline_render {
         $csv->print($csv_fh, [qw(category message occurrences bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
     }
 
-    print_message_summary();														                    # Print and write message summaries
+    print_message_summary() if $capture_messages;									                    # Print and write message summaries
     memory_debug_decomposition("after_message_summary");
-    close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
+    close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && $capture_messages && defined $csv_fh );	# Close the file handle
 
-    print_threadpool_summary() if $include_threadpool_summary;										    # Print threadpool summaries
+    # The thread-pool summary is ranked by the same top-N operand as the
+    # messages table, so a top-N of zero leaves it no rows to show.
+    print_threadpool_summary() if $include_threadpool_summary && $capture_messages;					    # Print threadpool summaries
     memory_debug_decomposition("after_threadpool_summary") if $include_threadpool_summary;
 
     # Issue #356 (S1): capture the peak across every rendered analysis section so
