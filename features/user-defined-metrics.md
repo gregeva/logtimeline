@@ -390,6 +390,84 @@ Verification gates: `validate-help-content.sh`, `validate-help-layout.sh`, `CI=1
 - **Check observability surfaces before promising oracle tests.** The highlight oracle was specced against values (`sessions-HL`, UDM `-HL`) that existed on no machine-readable surface; honoring HARNESS-DESIGN required adding the `-V udm-counting` section mid-phase (user-approved). Asking "where will the harness read this from?" per test-strategy bullet would have surfaced the need at planning time.
 - **`.gitignore` blocks `*.log` repo-wide** — fixture logs under `tests/fixtures/` must use `.txt` (matching the `logs/AccessLogs/*.txt` convention).
 
+## Diagnostics and `-V udm-specs` (Issues #443, #449)
+
+### Status
+- **Issues**: #443 (user-defined metrics fail silently), #449 (`-V` surface for user-defined metrics — folded into #443, delivered together, closes with it)
+- **Branch**: `443-user-defined-metrics-fail-silently`
+- **Target release**: v0.18.0
+- **Phase**: Implemented 2026-08-28 (S1–S6 landed, completion gate passed).
+
+### Problem
+
+A `-udm` specification that produces nothing says nothing. A regex written into the fourth field without `/…/` delimiters is, by the grammar, a token key — escaped character-for-character into a pattern that can never match; a delimited regex with no capture group leaves `$1` undefined at the extraction site and is dropped; a correct regex aimed at text absent from the file matches nothing. All three produce an empty column and no message, and so does the case that is not a mistake at all: the field genuinely never appears.
+
+### How the parser reads a spec (established from the code, 2026-08-28)
+
+The documented grammar `name[:unit[:function]][:key|:/regex/]` reads as if the regex has a fixed fourth slot. The parser does not work that way: `parse_udm_configs()` first looks for `:/…/` at the **end** of the argument, wherever it sits, removes it and compiles it, and only then splits the remainder on `:` into name, unit, function, key. So `rows:/(\d+) rows/`, `rows::/…/` and `rows:::/…/` all read identically (the first is the example in `docs/usage.md`). A fourth field without slashes is always a token key, matched literally after `quotemeta`. "Regex in the wrong slot" is therefore not a defect class; the only regex-shaped mistake is missing delimiters.
+
+### Locked decisions (architect, 2026-08-28)
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D1 — the grammar does not change | An undelimited fourth field stays a token key. The mistake is diagnosed, never silently reinterpreted as a regex. | Reinterpreting would change the meaning of specs that are correct today (a literal key that happens to contain `.`), and a spec the tool silently rewrote is worse than one it explains. |
+| D2 — whole match when no capture group | A slash-delimited regex is an explicit declaration of the regex form. With a capture group, its text is the value; without one, the whole matched text is. Works for every aggregation including `distinct`, since the match varies line to line. | The group is a narrowing device, not a requirement; the tool does not second-guess an explicit declaration. |
+| D3 — the run never stops | Every diagnostic — parse-time defect or end-of-run notice — is spoken and the run continues. Parse-time defects keep the existing disposition: warn immediately, skip that metric. | A `-udm` is a selector aimed at a metric with no certainty it exists in the input: across a folder of twenty files the field may be in one of them. Stopping early would discard the analysis the user came for. |
+| D4 — three diagnostic tiers | (a) **Hard defects provable from the spec alone** are spoken at parse time, before any file is read. (b) **Strong intent hints** are spoken only inside the end-of-run zero-match notice, never at parse time — the user may have it right. (c) **Speculative guesses** are never shown. | A user should not read a multi-gigabyte log to learn something knowable in the first millisecond; but a hint carries the tool's authority, and a spec that then matched needs no hint. |
+| D5 — parse-time hard defects | Added to the existing set (invalid regex, missing name, key + regex both given, counting aggregation wrapped around a transform, unknown function): **(i)** a function or transform name in the unit slot (`name:distinct:…`, `name:max`, `name:delta`) — the message names the fix, `did you mean 'name::distinct'?`; **(ii)** a slash-delimited pattern with no metacharacters and no capture group under `distinct`/`ratio`/`drate` — the whole match is a constant, so distinct can only ever be 1. Both: warn + skip, per D3. | Today (i) is "Unknown unit 'distinct', treating as raw number" and the metric runs with the wrong meaning. Both checks are exact, not heuristic. |
+| D6 — the one strong-intent hint | A token key containing regex characters (`\ ( ) [ ] * + ? ^ $ \|`) earns, in the zero-match notice only: *the token key is matched literally — if you meant a regex, wrap it in slashes: `/…/`*. No other hint rules exist; the tier is this single rule until another exact one is agreed. | The token key is passed through `quotemeta`, so those characters can only be literal; a backslash or capture group in a literal key is near-certainly an undelimited regex. |
+| D7 — no new counters, nothing on the hot path | The run-wide "what did each metric produce" state is **derived after the read loop by one walk over `%log_analysis`**, folding the per-bucket accumulators that already exist (`udm_<name>_occurrences`, `_sum`, `_min`, `_max`, their `-HL` twins, `_distinct` for counting metrics once counted). The walk runs only when something reads it: the zero-match check or `-V udm-specs`. A run-wide distinct is not derivable (the value sets are freed after counting) and is not fabricated; counting metrics report occurrences and the largest per-bucket distinct. | A per-line counter — even one gated on "is the surface active" — is a hot-path cost paid on every run for a surface most runs never read; #418 D4 (derive from existing accumulators rather than add per-line work) already measured and rejected that shape. Same reasoning, same conclusion. |
+| D8 — one notice line for every case | The zero-match notice fires per metric whose derived occurrences are 0 across all buckets, with a single first line for every case: `no metrics produced from matching lines`. Under `delta`/`idelta` a metric that matched only its first line (no previous value) or only counter resets accumulates nothing and reads as zero — the wording is accurate for that case too, and no second variant is introduced for it. | Two wordings for an edge case (delta with a single match) is not worth the surface. The one line is true in every case D7 can produce. |
+| D9 — notice shape | Printed after the read loop, before the chart (the position #418's post-walk sort notice uses). Lines: `Note: -udm '<spec>': no metrics produced from matching lines`; `read as: name=… unit=… aggregation=… transform=… extraction=<name|token key '…'|regex> matched against the whole line`; `pattern: <compiled source>`; and `hint: …` only when D6 fires. No file count, no input-source detail — the notice is about the spec. | The `read as:` and `pattern:` lines are printed from the config entry the parser built — the same data the extraction loop reads — never from a second reading of the spec (one resolution surface per vocabulary). |
+| D10 — `-V udm-specs` is a new section | Sibling of `udm-counting` (which stays per-bucket *results*): per-spec resolution and the derived run-wide production, present on every run whether or not anything matched. Section contract below; harness `tests/validate-udm-specs.sh`. | The developer-validation purpose: what was interpreted and what the run produced, inspectable regardless of outcome. Extending `udm-counting` would mix per-bucket results with per-spec resolution. |
+| D11 — producers registered on #412 | Every notice this issue introduces is registered on #412 (notices surface) as an ad-hoc producer to migrate, in the same table shape #418 used (producing sub, when it fires, text shape). | #412 is not in 0.18.0; the inventory it needs must not be reconstructed later. |
+| D12 — documented match target | `--help` and `docs/usage.md` state, in the same commit: the pattern matches the whole raw log line; the capture group is optional (D2); the `/regex/` is recognised by its slashes at the end of the spec so `rows:/…/` and `rows:::/…/` read the same; an undelimited fourth field is always a literal token key; the unit slot is left empty when there is no unit (`name::max`). | Both surfaces are silent on the match target today, and the reported use case depends on it. |
+
+### `-V udm-specs` section-contract
+
+Emitted after the read loop (it reads the D7 walk). One block per `-udm` argument, in command-line order, including arguments rejected at parse time.
+
+```
+=== udm-specs ===
+udm: name=<name> spec='<raw argument>'
+  read_as: unit=<unit|none>(<time|bytes|number|raw>) aggregation=<agg> transform=<delta|idelta|none> extraction=<name|token_key|regex> key='<key>' source=<line|csv:<column>>
+  pattern[<i>]: <compiled pattern source, one line per pattern>
+  produced: occurrences=<N> buckets=<N> sum=<v> min=<v> max=<v>           # numeric metrics
+  produced: occurrences=<N> buckets=<N> distinct_max=<N>                  # counting metrics
+  hint: token_key_has_regex_chars                                         # only when D6 fires
+udm: spec='<raw argument>' rejected=<reason-token>                        # parse-time skip (D5 and the existing checks)
+=== END udm-specs ===
+```
+
+| key | meaning |
+|---|---|
+| `name` | the resolved metric name (after the #99 duplicate-name `:aggregation` suffix, if applied) |
+| `spec` | the argument as given, unmodified |
+| `read_as` | every field of the interpretation the extraction loop acts on: unit and its type, aggregation, transform, extraction method (`name` = default patterns built from the name; `token_key` = built from the fourth field; `regex` = the delimited pattern), the key those patterns were built from, and the source (`line`, or `csv:<column>` when the file is columnar and the metric is bound to a column) |
+| `pattern[i]` | the source of each compiled pattern, in scan order — as compiled, not as typed |
+| `produced` | the D7 fold over all buckets: `occurrences` summed, `buckets` = number of buckets with occurrences > 0, `sum` summed, `min` = min of bucket mins, `max` = max of bucket maxes; counting metrics carry `distinct_max` = the largest per-bucket distinct instead of sum/min/max. `occurrences=0` is exactly the condition that fires the D8 notice |
+| `hint` | the token of the D6 rule that fired; absent otherwise |
+| `rejected` | the parse-time check that skipped the spec: `invalid_regex`, `missing_name`, `key_and_regex`, `counting_with_transform`, `unknown_function`, `unit_slot_holds_function`, `literal_pattern_under_distinct` |
+
+Stability: keys above are the contract; additions are non-breaking, renames and removals follow HARNESS-DESIGN. Consumer: `tests/validate-udm-specs.sh`.
+
+### Notice producers registered on #412
+
+| producer (`ltl`) | when | text shape |
+|---|---|---|
+| `emit_udm_zero_match_notices()` (post-walk) | after the read loop, one per metric with derived occurrences 0 | `Note: -udm '<spec>': no metrics produced from matching lines` + `read as:` + `pattern:` (+ `hint:` per D6) |
+| `parse_udm_configs()` | option parsing — D5 (i) and (ii) | `Warning: … in -udm '<spec>' … skipping` (existing warn-and-skip shape) |
+
+### Implementation plan (approved 2026-08-28)
+
+- [x] **S1 — Parser.** D5 checks in `parse_udm_configs()`; the config entry carries `raw_arg`, `extraction` (`name|token_key|regex`), and `hint` (D6 evaluated at parse, spoken only per D4(b)); rejected specs recorded (spec + reason token) for `-V`.
+- [x] **S2 — Extraction site.** D2: value = `$1` when defined, else the whole match (`substr($_, $-[0], $+[0] - $-[0])`).
+- [x] **S3 — Post-walk derivation and notice.** One walk over `%log_analysis` producing the per-metric `produced` row (D7); `emit_udm_zero_match_notices()` (D8/D9) at the post-walk notice position.
+- [x] **S4 — `-V udm-specs`.** Section registry entry, `@verbose_section_order`, `emit_udm_specs_verbose()` reading S1 + S3 state; HARNESS-DESIGN reserved-names entry.
+- [x] **S5 — Docs.** D12 on `print_help()` and `docs/usage.md` in one commit; the spec-grammar line stays, with the end-anchored reading stated beneath it.
+- [x] **S6 — Tests.** `tests/validate-udm-specs.sh` (43 assertions, each proven to fail under sabotage: whole-match reverted, hint disabled) on the crafted fixture `tests/fixtures/udm-specs.txt` at `-bs 1440 -oe`: undelimited regex-shaped key (notice + hint, `occurrences=0`); delimited regex with no capture group (`distinct`=2, no notice); well-formed regex absent from the file (notice, no hint); function in the unit slot (warning, `rejected=unit_slot_holds_function`, no column); literal pattern under `distinct` (rejected); `delta` with a single match (notice, no hint); positive control cross-checked against STATS CSV totals; runtime-warning cleanliness.
+- [x] **Completion gate** (2026-08-28, version restored to `0.18.0`) — all 27 `tests/validate-*.sh` exit 0 with assertions confirmed; `single-day-access-log-standard` before (pre-change `release/0.18.0` worktree) vs after on the same machine: total 9.8 s → 9.7 s (−0.6 %), peak RSS +0.3 %, nothing worse than 5 %. That case runs no `-udm`, so the changed extraction line was measured directly: `-udm 'b::max:/HTTP\/1.1" \d+ (\d+) /'` on the 148 MB access log, 3 runs each — `parse/read_files` median before 12.82 s (12.77–12.94), after 12.80 s (12.76–13.04): inside the run-to-run noise. The per-feature gate rule in CLAUDE.md was corrected on this branch (before/after on the same machine, never against a released baseline).
+
 ## Future Enhancements (Out of Scope)
 
 - ~~CSV column naming convention for UDM stats~~ — Done: consistent `name[_unit]_stat` lowercase pattern across both STATS and MESSAGES CSVs. Unit included between name and stat when defined (e.g., `latency_ms_occurrences`), omitted when unitless (e.g., `rows_occurrences`). Count columns normalized from PascalCase to `count_stat`.

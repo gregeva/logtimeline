@@ -361,7 +361,7 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 
 | Option | Description |
 |--------|-------------|
-| `-udm, --user-defined-metrics <spec>` | Extract a custom numeric metric from each log line (see format below) |
+| `-udm, --user-defined-metrics <spec>` | Extract a custom metric from each log line (see format below). Patterns match against the whole raw line, not only the message. A metric that produces nothing is reported after the read, with how its spec was read |
 | `-ucm, --udm-csv-message <cols>` | Treat the message field as CSV and name the columns for use with `-udm` |
 | `-ucs, --udm-csv-separator <sep>` | Set the CSV field delimiter when using `-ucm` (default: comma) |
 
@@ -370,10 +370,10 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 | Part | Description |
 |------|-------------|
 | `name` | Metric name and column label — also used as default pattern to match `name=value` or `name: value` when no `key` or `/regex/` is given |
-| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — omit for raw numbers. Ignored for counting aggregations |
+| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — leave empty for raw numbers (`name::max`, not `name:max`). Ignored for counting aggregations |
 | `function` | **Aggregations:** `sum` (default), `min`, `max`, `mean` (alias `avg`) — **Counting:** `count`, `distinct` (alias `dcount`, `unique`), `ratio`, `rate`, `drate` — **Transforms:** `delta` (clamped ≥0), `idelta` (unclamped) — **Combined:** `sum(delta)`, `mean(delta)`, `max(idelta)`, etc. |
-| `key` | Token key — builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. `exception_variety::distinct:JavaException` extracts the `JavaException:` token but labels the column `exception_variety` |
-| `/regex/` | Custom extraction pattern with one capture group around the value to extract (overrides default name/key matching). e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |
+| `key` | Token key — builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. `exception_variety::distinct:JavaException` extracts the `JavaException:` token but labels the column `exception_variety`. A fourth field without `/…/` is always a token key and is matched literally |
+| `/regex/` | Custom extraction pattern, recognised by its slashes at the end of the spec — `rows:/…/` and `rows:::/…/` read the same (overrides default name/key matching). A capture group narrows the value; without one the whole match is the value. e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |
 
 **Counting aggregations** count extracted values per time bucket instead of doing arithmetic on them, and fully support text tokens (IDs, usernames, class names):
 
@@ -384,6 +384,8 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 | `ratio` | Occurrences per unique value — the repetition factor: how many times the average value repeated |
 | `rate` | Occurrences per rate unit (see `-ru`; default per-minute) |
 | `drate` | Unique values per rate unit (see `-ru`; default per-minute) |
+
+A spec that is wrong in a way provable from the spec alone — a function name in the unit slot, a fixed-string pattern under `distinct`, an invalid regex — is reported immediately and that metric is skipped; the run continues. A well-formed metric that produces nothing is reported after the read with how the spec was read (unit, aggregation, extraction method, the compiled pattern), and, when the token key contains regex characters, a hint to wrap it in slashes. `-V udm-specs` shows the same interpretation and what each metric produced on every run.
 
 Counting metrics ignore the `unit` field and cannot be combined with `delta`/`idelta` transforms. Highlighting — whether by pattern (`-h`) or by numeric criteria (`-hdmin` and friends) — works as it does for the sessions column: highlighted lines contribute to both the bucket total and the highlight value. In the STATS CSV, each counting metric emits one column named `name_function` (e.g. `users_distinct`), with the rate-unit suffix appended for `rate`/`drate` (e.g. `logins_rate_min`); in the MESSAGES CSV, `count` carries per-message occurrences while `distinct`/`ratio`/`rate`/`drate` are blank — unique values are counted per time bucket, not per message.
 
