@@ -171,6 +171,11 @@ my %verbose_sections_requested;   # Populated by adapt_to_command_line_options()
 my %verbose_section_buffer;
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_sessions );
+# Per-bucket success/failure outcomes (#453 D17/D30): $bucket_outcomes{$bucket}[1]
+# successes, [2] failures, written only for classified lines; a bucket's
+# unclassified count is occurrences minus both, derived at emission. Kept
+# out of %log_analysis so the statistics population is unchanged.
+my %bucket_outcomes;
 # Per-category message-key display order, computed once in calculate_all_statistics()
 # and reused by print_message_summary() so the same keys are not sorted twice
 # (Issue #302). Keyed by category ('plain'/'highlight').
@@ -246,6 +251,7 @@ my $top_n_messages = 10;
 my ( $write_messages_to_csv, $csv, $csv_fh, $csv_file_args ) = ( 0, undef, undef, "" );
 my $total_lines_read = 0;
 my $total_lines_included = 0;
+my ( $total_successes, $total_failures ) = ( 0, 0 );   # run-level classification outcomes (#453 R5)
 my @progress_history = ();     # rolling history for lines/sec calculation: [ [timestamp, lines_read], ... ]
 my $total_lines_highlighted = 0;
 my $legend_length = 0;
@@ -2475,6 +2481,7 @@ my @format_cls_sets;      # literal-alternation criteria as hash sets (D25),
 my %format_cls_set_id;    # canonical alternative list => set index
 my @format_cls_sig_str;   # criteria-signature string per signature id (0 = 'none')
 my %format_cls_sig_id;    # signature string => id
+my $format_cls_rule_changes = 0;   # mid-file classifying-entry changes with differing signatures (D19)
 
 # The single generated scan sub (see compile_format_scan_sub) and the
 # regeneration inputs promotion needs: the entry snapshot the generated
@@ -4580,6 +4587,35 @@ sub emit_format_detection_verbose {
             ? sprintf('%.1f', $format_scan_nomatch_sample_us / $format_scan_nomatch_samples)
             : '-');
     push @verbose_output, "=== END format-detection / scan ===";
+
+    # Run-level classification counters (#453 R5/D20): the three counters
+    # carried together, their derived shortfall, the unmatched run total
+    # beside it, the ledger-file ratio, the rule-change count, and the
+    # signature of the default failure rule in force.
+    my $classified   = $total_successes + $total_failures;
+    my $unclassified = $total_lines_included - $classified;
+    my $unmatched    = 0;
+    my ($ledger_files, $bound_files) = (0, 0);
+    for my $file (@in_files) {
+        my $fdd = $format_detection{$file} or next;
+        $unmatched += $fdd->{unmatched_lines} // 0;
+        next unless defined $fdd->{match_type};
+        $bound_files++;
+        $ledger_files++ if $fdd->{event_ledger};
+    }
+    (my $default_failure = format_classification_signature({ failure => $classification_default{failure} })) =~ s/^failure=//;
+    push @verbose_output, "=== format-detection / classification ===";
+    push @verbose_output, "lines_included: $total_lines_included";
+    push @verbose_output, "successes: $total_successes";
+    push @verbose_output, "failures: $total_failures";
+    push @verbose_output, "classified: $classified";
+    push @verbose_output, "unclassified: $unclassified";
+    push @verbose_output, "unclassified_pct: " . ($total_lines_included ? sprintf('%.1f', $unclassified / $total_lines_included * 100) : '0.0');
+    push @verbose_output, "unmatched_lines: $unmatched";
+    push @verbose_output, "event_ledger_files: $ledger_files/$bound_files";
+    push @verbose_output, "rule_changes: $format_cls_rule_changes";
+    push @verbose_output, "default_failure: $default_failure";
+    push @verbose_output, "=== END format-detection / classification ===";
 
     push @verbose_output, "=== END format-detection ===";
 }
@@ -7941,6 +7977,7 @@ sub group_similar_messages {
             $log_messages{$category}{$canonical_log_key} = {
                 occurrences       => $cluster->{occurrences},
                 is_consolidated   => 1,
+                ($cluster->{outcomes} ? (outcomes => $cluster->{outcomes}) : ()),
             };
 
             my $entry = $log_messages{$category}{$canonical_log_key};
@@ -8610,6 +8647,10 @@ sub merge_bin_state {
 sub merge_consolidation_stats {
     my ($target, $source) = @_;
     $target->{occurrences} += ($source->{occurrences} // 0);
+    # Success/failure outcome slots (#453 D30): element-wise, slot 1 and 2.
+    if (my $so = $source->{outcomes}) {
+        $target->{outcomes}[$_] += $so->[$_] for grep { $so->[$_] } 1, 2;
+    }
 
     # Duration stats
     if (defined $source->{total_duration}) {
@@ -9400,6 +9441,7 @@ sub named_structure_sizes {
     require Devel::Size;
     return (
         log_occurrences        => Devel::Size::total_size(\%log_occurrences),
+        bucket_outcomes        => Devel::Size::total_size(\%bucket_outcomes),
         log_analysis           => Devel::Size::total_size(\%log_analysis),
         log_messages           => Devel::Size::total_size(\%log_messages),
         log_messages_counters  => Devel::Size::total_size(\%log_messages_counters),
@@ -9766,6 +9808,8 @@ my %csv_column_family = (
     'message'           => 'meta',
     'timestamp'         => 'meta',
     'occurrences'       => 'meta',
+    'successes'         => 'meta',
+    'failures'          => 'meta',
     # bytes
     'bytes_occurrences' => 'meta',
     'bytes_min'         => 'bytes',
@@ -11662,6 +11706,10 @@ sub read_and_process_logs {
 
                 $log_occurrences{$bucket}{$category_bucket}{occurrences}++;
                 $total_lines_included++;
+                if ($line_outcome) {
+                    $bucket_outcomes{$bucket}[$line_outcome]++;
+                    if ($line_outcome == 2) { $total_failures++ } else { $total_successes++ }
+                }
                 $profile_included_samples++ if $profile_mode;
 
                 if( defined( $message ) ) {
@@ -11704,6 +11752,7 @@ sub read_and_process_logs {
                         if ($is_new_key) {
                             # Build stats source from parsed line values for merge_consolidation_stats()
                             my $stats_source = { occurrences => 1 };
+                            $stats_source->{outcomes}[$line_outcome] = 1 if $line_outcome;
                             if ($metrics_observed) {
                                 $stats_source->{total_bytes} = $bytes if defined $bytes;
                                 if (defined $count) {
@@ -11798,6 +11847,7 @@ sub read_and_process_logs {
                         });
 
                         $log_messages{$category}{$log_key}{occurrences}++;
+                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $line_outcome;
 
                         # Bytes carries the same aggregate family as count (#432).
                         # bytes_occurrences counts lines that actually carried a
@@ -11954,6 +12004,7 @@ sub read_and_process_logs {
                         }
                     } else {
                         $log_messages{$category}{$log_key}{occurrences}++;
+                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $line_outcome;
                     }
                     }  # end: if (!$consolidation_s1_matched)
                 }
@@ -16747,6 +16798,7 @@ sub print_message_summary {
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
                     my $message = substr( $key, 0, $col_width{1} );                         # truncate message for printing if too long to fit in column
                     my $occurrences = $log_messages{$grouping}{$key}{occurrences};
+                    my $outcomes = $log_messages{$grouping}{$key}{outcomes};
                     my $count_occurrences = $log_messages{$grouping}{$key}{count_occurrences};
                     my $count_min = $log_messages{$grouping}{$key}{count_min};
                     my $count_mean = $log_messages{$grouping}{$key}{count_mean};
@@ -16839,14 +16891,16 @@ sub print_message_summary {
                             }
                         }
                         # Issue #268: format each numeric column per the resolved
-                        # --csv-precision mode. Column names mirror the header at
-                        # ltl:11541 so format_csv_value() can resolve each value's
-                        # family. Pre-formatted strings (bytes_nice, duration_nice)
+                        # --csv-precision mode. Column names mirror the MESSAGES
+                        # header pipeline_render() writes, so format_csv_value()
+                        # can resolve each value's family. Pre-formatted strings (bytes_nice, duration_nice)
                         # and metadata pass through unchanged.
                         $csv->print($csv_fh, [
                             $grouping,
                             $key,
                             format_csv_value($occurrences,       'occurrences'),
+                            format_csv_value($outcomes ? ($outcomes->[1] // 0) : 0, 'successes'),
+                            format_csv_value($outcomes ? ($outcomes->[2] // 0) : 0, 'failures'),
                             format_csv_value($bytes_occurrences, 'bytes_occurrences'),
                             format_csv_value($bytes_min,         'bytes_min'),
                             format_csv_value($bytes_mean,        'bytes_mean'),
@@ -17412,7 +17466,7 @@ sub pipeline_render {
         # convention (#432). The duration statistics take the duration_ prefix here
         # even though the CLI keeps their bare spellings, so every column on this
         # surface names its metric.
-        $csv->print($csv_fh, [qw(category message occurrences bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
+        $csv->print($csv_fh, [qw(category message occurrences successes failures bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
     }
 
     print_message_summary();														                    # Print and write message summaries
