@@ -11,11 +11,11 @@
  2025-04-10 06:00 ERROR: 23 498 WARN: 4474 4 INFO: 1  0.2:41.7/m │ ████████████████████   31.5m    16.4 K │ █  ██ █|█████ ████████████████████|████|██| ██    ██
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────┴─1ms───────14ms─────────244ms────────4.3s────────1.5m
 
+command-line options: --disable-progress -ni -n 1 -dm raw --terminal-width 160 -hm duration -hdmin 963 
+
   TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   [WARN] [WC_0K010012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - Brembo.UTM.ShiftInstances_TG SaveShi        4   1.5s   3.6s   4.4s   0.41      12.1 sec 
-
-command-line options: --disable-progress -ni -n 1 -dm raw --terminal-width 160 -hm duration -hdmin 963 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-04-10 06:00 and 2025-04-10 06:07

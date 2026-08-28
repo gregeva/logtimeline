@@ -175,7 +175,7 @@ These options control what is shown and how. After the timeline bar graph, logti
 ltl -n 50 access.log
 # Export full analysis data to CSV
 ltl -o access.log
-# Hide the run summary, show only the analysis content
+# Hide the run summary at the end of the output
 ltl -osum access.log
 # Use color gradients suited for light terminal backgrounds
 ltl -lbg access.log

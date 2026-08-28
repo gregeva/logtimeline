@@ -3007,11 +3007,11 @@
  2025-12-15 22:00 WARN: 48                              0:0.4/m │                                                                                               
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+command-line options: --disable-progress -ni -n 1 --terminal-width 160 -hdmin 100000 
+
   TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   [INFO] [https-openssl-nio-44] [S.c.t.d.e.DSLScript] SUCCEEDED - Rolex.Gre.Manager_TG GetComplexPlotB        2   2.1m   2.3m   2.3m   0.04       4.4 min 
-
-command-line options: --disable-progress -ni -n 1 --terminal-width 160 -hdmin 100000 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-04-10 06:00 and 2025-12-15 23:57

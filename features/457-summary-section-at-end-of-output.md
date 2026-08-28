@@ -19,6 +19,12 @@ only: nothing in what the summary contains, or how it is rendered, changes.
 `print_message_summary()` and `print_threadpool_summary()`, immediately before
 the post-output memory measurement and `write_index_file()`.
 
+The echoed options lines did **not** move. They were printed by
+`print_summary_table()` ahead of its `-osum` early return; they are now
+`print_run_options()`, called from `pipeline_render()` at the position the
+summary render used to occupy — directly under the bar graph and any
+histograms — so the bytes at that point in the output are unchanged.
+
 Rendered order on the terminal:
 
 | | before | after |
@@ -26,9 +32,10 @@ Rendered order on the terminal:
 | 1 | `-V` sections (`print_verbose_output()`) | `-V` sections |
 | 2 | bar graph / heatmap | bar graph / heatmap |
 | 3 | histograms (`-hg`) | histograms (`-hg`) |
-| 4 | **run summary** | top-messages tables |
-| 5 | top-messages tables | thread-pool tables (`-tpa`/`-tpas`) |
-| 6 | thread-pool tables (`-tpa`/`-tpas`) | **run summary** |
+| 4 | echoed environment / command-line options | echoed environment / command-line options |
+| 5 | **run summary** | top-messages tables |
+| 6 | top-messages tables | thread-pool tables (`-tpa`/`-tpas`) |
+| 7 | thread-pool tables (`-tpa`/`-tpas`) | **run summary** |
 
 ## What printed after the summary before the change
 
@@ -43,25 +50,34 @@ persistent index file. Nothing else.
 | Output | Stream / stage | Disposition |
 |---|---|---|
 | `-t` per-stage timing rows | rows of the summary's own table | Moved with the summary; no separate handling |
-| Echoed `environment options:` / `command-line options:` lines | stdout, emitted by `print_summary_table()` ahead of its `-osum` early return | Moved with the summary — same run-report block, and they sit directly above the table on screen. Under `-osum` they stay the only thing that stage prints, and now close the output |
+| Echoed `environment options:` / `command-line options:` lines | stdout, their own `print_run_options()` stage | Stay directly under the bar graph, where they were (D1) |
 | `-r` unreadable-directory report | stderr, tail of `read_and_process_logs()` | Left where it is. It is a diagnostic about reading the input, on the other stream and in an earlier stage; moving it would relocate it across both |
 | Format-ambiguity note, numeric-filter "no metric" note, UDM zero-match notices, bin-consolidation notice | stderr, parse and finalize stages | Unchanged, for the same reason |
 
 ## Decisions
 
-**D1 — the whole of `print_summary_table()` moves, including the echoed
-options lines and including under `-osum`.** The echoed options are part of the
-same run report and render as one block with the table.
-*Consequence:* with `-osum`, the echoed options now appear at the end of the
-output instead of directly below the bar graph.
+**D1 — only the summary table moves; the echoed options stay directly under
+the timeline bar graph.** They are extracted into `print_run_options()` and
+called from the position the summary render used to hold, so that stretch of
+output is byte-for-byte what it was before this issue. Two reasons: the
+options belong to the view above them — `docs/purpose.md` states that each view
+can be screenshot with the command-line options displayed for reproducibility,
+which only holds while the options sit with the timeline they describe — and
+under `-osum` moving them would have ended the run on a dangling options line
+with nothing under it.
+*Consequence:* the run report is no longer one contiguous block. The options
+echo is a caption on the timeline; the summary is the closing section, and
+`-osum` suppresses that section alone.
 
 **D2 — the peak-memory measurement moves with the summary.** The
 `measure_memory_structures()` call that feeds `MAXIMUM MEMORY USED` sits
-immediately before the summary render, so it still accounts for every rendered
-section above it — which now includes the message and thread-pool tables.
+immediately before the summary render, so the measurement instant is now after
+every analysis section has been printed — the message and thread-pool tables
+included — rather than before them.
 *Consequence:* the reported peak covers more of the run than before and can
-read marginally higher on the same input. It was already documented as
-covering "everything up to this point"; the point moved.
+read marginally higher on the same input. Measured: 26.9 → 27.0 MiB on the
+434-line fixture, no change on the 5k-line access log. It was already
+documented as covering "everything up to this point"; the point moved.
 
 **D3 — the regression harness's output filter is bounded, not removed.**
 `strip_nondeterministic()` in `tests/capture-regression.sh` and
@@ -69,20 +85,26 @@ covering "everything up to this point"; the point moved.
 heading to end of output. With the summary now below that heading, the same
 rule would have silently dropped the summary out of the asserted surface — the
 category totals, the `HIGHLIGHTED` row, the file legend and the format legend,
-which the highlight scenarios exist to assert. The skip now ends at the
-summary's first line (the echoed options).
+which the highlight scenarios exist to assert. The skip ends on the summary's
+first line: the rule above the `Category` header, matched by its shape (two
+spaces of indent, box-drawing rule, right padding) rather than by a hard-coded
+width, so the wider rules inside the skipped message tables do not close it.
 *Consequence:* the asserted surface is unchanged from before this issue; the
 `TOP OVERALL` block stays excluded.
 
-**D5 — the bounded skip fails loudly when its closing anchor is absent.**
-Ending the skip on a content line makes the filter silent about a run that
-never prints one: it would drop the whole tail and hand back a smaller surface
-that still compares clean. `tests/HARNESS-DESIGN.md` § "a grep that matches
-nothing is a failure" governs exactly this, so the filter now exits 3 when it
-reaches end of input with the skip still open, and both harnesses check that
-status alongside `ltl`'s own.
+**D5 — the bounded skip fails loudly when its closing anchor is absent,
+except where no summary is printed.** Ending the skip on a content line makes
+the filter silent about a run that never prints one: it would drop the whole
+tail and hand back a smaller surface that still compares clean.
+`tests/HARNESS-DESIGN.md` § "a grep that matches nothing is a failure" governs
+exactly this, so the filter exits 3 when it reaches end of input with the skip
+still open, and both harnesses check that status alongside `ltl`'s own. A run
+passing `-osum` prints no summary, so for it the skip legitimately runs to end
+of output; the filter recognises this from the echoed options line, which
+under D1 sits above the skipped block and names the option.
 *Consequence:* a truncated surface aborts the capture or fails the scenario
-instead of quietly narrowing what is asserted.
+instead of quietly narrowing what is asserted, while the sixty-one `-osum`
+scenarios keep the pre-existing skip-to-end behaviour.
 
 **D4 — `docs/usage.md` § Display & Output no longer calls two different things
 "the summary table".** The paragraph claimed `-osum` suppressed the
@@ -95,8 +117,10 @@ tables while restating the ordering.
 
 ## Surfaces changed
 
-- `ltl` — `pipeline_render()` call order and its stage comment; the `-n` and
-  `-osum` rows of `print_help()`.
+- `ltl` — `pipeline_render()` call order and its stage comment; the echoed
+  options extracted from `print_summary_table()` into `print_run_options()`
+  and called from the summary's former position (D1); the `-n` and `-osum`
+  rows of `print_help()`.
 - `docs/usage.md` — § Display & Output paragraph, the `-n` and `-osum` rows,
   and the `-osum` example comment.
 - `tests/capture-regression.sh`, `tests/validate-regression.sh` —
@@ -111,8 +135,11 @@ tables while restating the ordering.
 Re-blessed with the sanctioned procedure, `./tests/capture-regression.sh`; no
 golden was hand-edited. Ten of the seventy-one references changed — every
 scenario that keeps the summary (the `hl-*` highlight scenarios; the rest pass
-`-osum`). Each changed file was checked to be a pure reordering: the sorted set
-of lines is identical to the committed version, so only placement moved.
+`-osum`, and their references are byte-identical to the release branch). Each
+changed file was checked against the release branch's version of the same file
+and is a pure reordering: sorted, the two are identical, so only placement
+moved — the summary block travels below the top-messages table and nothing
+else, including the echoed options line, changes position or content.
 
 ## Verification
 
@@ -128,6 +155,7 @@ of lines is identical to the committed version, so only placement moved.
 | `tests/validate-message-control-characters.sh` | 11 passed, 0 failed |
 | CSV output (`-o`) | STATS and MESSAGES files byte-identical to the pre-change build on the same input |
 | `-V` section sequence | Identical to the pre-change build; no section is emitted by `print_summary_table()`, and the verbose surface flushes before the bar graph |
-| `-osum` | Still suppresses the table; the echoed options print at the end |
+| `-osum` | Still suppresses the summary; the echoed options print under the bar graph and the output ends with the top-messages table |
 | `-t` timing rows | Render inside the summary, at the end |
-| Anchor guard (D5) | Filter status probed through the harness's own pipeline shape: summary present → 0, summary absent → 3, no `TOP OVERALL` at all → 0 |
+| Anchor guard (D5) | Filter status probed through the harness's own pipeline shape: summary present → 0, summary absent → 3, `-osum` in the echoed options → 0 |
+| Echoed options position (D1) | Byte-identical to the release branch: the ten re-blessed references sort equal to their release-branch versions, and the sixty-one `-osum` references are unchanged |

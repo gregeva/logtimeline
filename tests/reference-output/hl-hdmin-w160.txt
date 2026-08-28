@@ -46,11 +46,11 @@
  2026-01-25 06:00 4xx: 2 1 3xx: 6 148 2xx: 510  0:5.6/m │ █████████████████████████   3m         2.5 MiB │  P50:47.1ms P95:1.3s   P99:5.3s   P999:7.4s   CV:3.13
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+command-line options: --disable-progress -ni -n 1 --terminal-width 160 -du us -hdmin 100 
+
   TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   [200] GET /Windchill/sslClientAuth/servlet/odata/v6/ProdMgmt/$metadata                                     12  106ms  167ms   5.4s   2.18       8.4 sec 
-
-command-line options: --disable-progress -ni -n 1 --terminal-width 160 -du us -hdmin 100 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2026-01-22 08:49 and 2026-01-25 07:41
