@@ -233,4 +233,4 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
 
 ## Merge gate
 
-Standard completion gate (CLAUDE.md per-feature step 1): full `tests/validate-*.sh` suite and the `single-day-access-log-standard` benchmark against `tests/baseline/results/v0.17.0.tsv` (or the latest released baseline), on the commit being merged, with `$version_number` restored to `0.18.0`. Parity fixtures for the retirement must include both metric-bearing and plain lines on `mt1std`, and an access-log fixture whose `errRate` is compared byte-for-byte before and after R7.
+Standard completion gate (CLAUDE.md per-feature step 1): full `tests/validate-*.sh` suite and the four-case benchmark set compared against the committed before-baseline `tests/baseline/results/0.18.0-453-before.tsv` (§ *Performance obligation*) — never against a released `v*.tsv`, which was captured on other hardware — on the commit being merged, with `$version_number` restored to `0.18.0`. Parity fixtures for the retirement must include both metric-bearing and plain lines on `mt1std`, and an access-log fixture whose `errRate` is compared byte-for-byte before and after R7.
