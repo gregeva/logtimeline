@@ -57,7 +57,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0";
+my $version_number = "0.18.0-445";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -5241,12 +5241,14 @@ sub print_title {
 }
 
 sub print_usage {
-    my ( $error_reason, $parser_text ) = @_;
+    my ( $error_reason, $parser_text, $hint ) = @_;
     # All command-line diagnostics go to STDERR so both the parser's own
     # message and ltl's error line appear together as one block, out of any
     # piped data stream. Layout: usage paragraph, one blank line, the error
-    # block (the raw parser line if any, then ltl's Error line), one blank
-    # line, then the help pointer.
+    # block (the raw parser line if any, then ltl's Error line, then the
+    # optional remediation hint), one blank line, then the help pointer.
+    # The hint carries its own newlines: it is pre-wrapped guidance a caller
+    # supplies when the failure has a known remedy worth spelling out.
     print STDERR "Usage: ltl [-bs <N>] [-n <N>] [-i <regex>] [-e <regex>] [-h <regex>] [-st <time>] [-et <time>]\n";
     print STDERR "           [-ov] [-or] [-ru <unit>] [-osum] [-so <field>] [-hm [metric]] [-hg [metric]] <logfile> ...\n";
     print STDERR "\n";
@@ -5254,6 +5256,7 @@ sub print_usage {
     # escape-free at line start regardless of colour settings.
     print STDERR $parser_text if defined $parser_text && $parser_text ne '';
     print STDERR bs_bold("Error: $error_reason") . "\n" if defined $error_reason;
+    print STDERR $hint if defined $hint && $hint ne '';
     print STDERR "\n";
     print STDERR "Try 'ltl --help' for more information.\n";
     return;
@@ -6638,7 +6641,7 @@ sub print_help {
     $out .= help_opt("-os,  --omit-stats",            "Deprecated: use -od, --omit-durations to skip capturing durations, or -hst, --hide-stats to hide the statistics panel");
     $out .= help_opt("-oe,  --omit-empty",            "Skip time buckets that contain zero log entries");
     $out .= help_opt("-ni,  --no-index",              "Do not read or update ltl-index.csv, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it");
-    $out .= help_opt("-r,   --recursive",             "Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. logs/access/*.log becomes every .log file anywhere under logs/access; *.log recurses from the current directory. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end.");
+    $out .= help_opt("-r,   --recursive",             "Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. \"logs/access/*.log\" becomes every .log file anywhere under logs/access; \"*.log\" recurses from the current directory. Put the pattern in double quotes so your shell passes it through unchanged: an unquoted pattern is expanded, or rejected, by the shell before ltl sees it, and the sweep then covers only what the shell already matched. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end.");
     $out .= help_opt("-or,  --omit-rate",             "Hide the error/message rate from the legend");
     $out .= help_opt("-od,  --omit-durations",        "Suppress duration extraction and related columns (significantly reduces memory and processing time on large files)");
     $out .= help_opt("-ob,  --omit-bytes",            "Suppress byte-size extraction and related columns");
@@ -10297,7 +10300,21 @@ sub adapt_to_command_line_options {
         @in_files = grep { !$seen_in_file{$_}++ } @in_files;
     }
 
-    do { print_usage( "unable to open any files" ); exit 2; } unless @in_files;
+    # A pattern the shell expanded, or refused to expand, before ltl started is
+    # the commonest reason a recursive sweep selects nothing, and once the shell
+    # has run there is no evidence left to detect it from: what arrives is a
+    # plain list of names, indistinguishable from a legitimate literal argument.
+    # The guidance therefore rides on this failure only, where the run has
+    # already stopped and it cannot mislead a successful one.
+    unless (@in_files) {
+        my $quoting_hint;
+        $quoting_hint = "Hint: with -r, put the file pattern in double quotes - ltl -r \"logs/*.log\" - so\n"
+                      . "      your shell passes it through unchanged. An unquoted pattern is expanded,\n"
+                      . "      or rejected, by the shell before ltl ever sees it.\n"
+            if $recursive_files;
+        print_usage( "unable to open any files", undef, $quoting_hint );
+        exit 2;
+    }
     # Duration keeps its bare spellings on the CLI because duration is the tool's
     # subject: every statistic in the summary table is a duration statistic unless
     # it says otherwise. A user who has learned the metric_aggregate convention from
