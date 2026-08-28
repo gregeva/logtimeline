@@ -219,6 +219,55 @@ measurement, not an invariant, and asserting on one makes the harness sensitive 
 machine speed. Timings remain the right instrument for the *performance* claim, which
 is verified by benchmark (see the performance obligation above), not by harness.
 
+### D10 — Prototype scope: the three metric surfaces, not an arm matrix
+
+**What is prototyped: the three key surfaces where the observation is taken** —
+duration, bytes, count. Each is measured for the cost of establishing whether its
+family's source metric was observed during the run, at staged scale
+(1k → 10k → 100k → millions), against the current read loop extracted verbatim as
+baseline (2026-08-21 F9 rule; constants sliced from `ltl`, never restated).
+
+**What is NOT prototyped up front:** a matrix of avoidance strategies. Optimisation
+variants — folding the set into an existing conditional, hoisting it behind the
+sort-requested gate, deriving the answer post-loop from existing accumulators — are
+built and measured **only if the before/after benchmark shows a regression**. Guessing
+at cheap forms and racing them against each other before knowing whether anything is
+slow is the failure mode this issue's own performance obligation exists to prevent.
+
+**The measured constant already in the tree.** `ltl:11453` records, from #432, that a
+package-global read-compare-write on every line measured **~1.5% of total runtime**,
+for a flag that only needs to know whether any line carried bytes — which is why the
+bytes observation is set inside a conditional the loop was already entering. The
+duration flag two lines above still uses the guarded read-compare-write form
+(`$durations_observed = 1 if $durations_observed != 1 && …`). Both shapes are already
+in the code; the prototype measures the surfaces against that known constant rather
+than rediscovering it.
+
+**Worth checking first, cheaply:** whether the answer is derivable post-loop from
+state the read loop already maintains. `$durations_observed` and `$bytes_observed`
+exist today; the count family accumulates `count_occurrences` per bucket. If
+unsatisfiability can be read off existing accumulators, the per-line addition is not
+needed for that family at all and the hot-path question dissolves rather than being
+optimised.
+
+### D11 — Before/after benchmarking is the gate, not the prototype
+
+The prototype sizes the surfaces. The **benchmark decides**, run before and after
+the change on the same input:
+
+- **No regression on the default `occurrences` sort**, which #303 calls sacred. This
+  is the path that must be provably untouched, since it is the one that never reads
+  the flag.
+- **The claimed improvement is verified**, not asserted: the pre-walk skip is
+  supposed to remove the +76% statistics-phase cost measured in #415, on the same
+  shape of input.
+- **Time and memory both.** The flag is per-run state, so memory is expected flat;
+  a deviation is a finding.
+
+A regression found here is what licenses building the optimisation arms above —
+and profiling per `features/nytprof-profiling-workflow.md` if the delta is
+unexplained.
+
 ## Performance obligation — MANDATORY, not discretionary
 
 This issue is both a hot-path change and a performance fix, so measurement governs it
@@ -268,7 +317,7 @@ evidence in one pass.
 
 ## Open items
 
-- The prototype itself (arms, input shape, staged scale) — the next planning step.
+- None. Planning is complete; the prototype is the next executable step.
 
 ## Related
 
