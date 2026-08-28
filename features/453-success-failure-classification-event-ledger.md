@@ -167,6 +167,7 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
   - Each compiled entry carries a **criteria signature** (a canonical string of its resolved classification, computed once at registry build) so the flip-time check is one string compare between the old and new occupant, on the rare flip path only. When the signatures differ, the tool:
     1. prints a user-facing note (a behavioural notice, never gated behind `--disable-progress`; on the #412 notices surface once it exists, on stderr in the `Note:` form of `format_variant_ambiguity_note()` until then): a classification rule change occurred mid-file at line N of `<file>` because the detected log format was adapted from `<old format>` to `<new format>`; lines before that point were classified under the previous rules;
     2. records it for the `classification` sub-section (piece 6): a run count `rule_changes: N` and one line per change — file, line number, old entry → new entry.
+  - The notice is **registered on #412** (notices surface) as a producer to migrate, 2026-08-28, with its text shape and the `-V` state that lets a harness assert it without reading the rendered note. Every user-informational message this issue adds is registered there in the same way at the moment it is specified.
   - Run-level, the sub-section also carries `event_ledger_files: N/M`. What a consumer does when a run mixes ledger and non-ledger files is that consumer's decision (#452's column default) and is handed forward, not settled here.
 
 ## Open items
