@@ -90,9 +90,22 @@ DPM5K_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k
 # the life of the branch, per CLAUDE.md § Version Stamping, so every development
 # build carries a suffix. Matching only [0-9.]+ made every scenario fail on any
 # branch, for the one reason the goldens are explicitly meant to ignore.
+#
+# The TOP OVERALL MESSAGES block is not part of the layout surface these
+# references freeze, so it is dropped. The drop is bounded by the run summary
+# that closes the output: the skip ends on the summary's first line -- the rule
+# above the Category header, two spaces in and padded on the right -- so the
+# category totals, the HIGHLIGHTED row and the file/format legend stay inside
+# the asserted surface. Per tests/HARNESS-DESIGN.md an anchor that matches
+# nothing is a failure: reaching end of input with the skip still open exits 3,
+# so a truncated surface aborts instead of being asserted. A run invoked with
+# -osum prints no summary, and the echoed options line -- which sits under the
+# bar graph, ahead of the skipped block -- says so, so such a run has nothing
+# to close the skip and is exempt.
+# Must match capture-regression.sh exactly.
 strip_nondeterministic() {
     perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[^\]]+\]/log timeline [VERSION]/' \
-    | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
+    | perl -ne 'BEGIN{$skip=0; $want_summary=1} END{ $? = 3 if $skip && $want_summary } $want_summary=0 if /^(?:environment|command-line) options: / && /(?:^|\s)(?:-osum|--omit-summary)(?=\s|$)/; $skip=1 if /TOP OVERALL/; $skip=0 if /^ {2}(?:─)+ +$/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
 }
 
 # Verify reference directory exists
@@ -163,6 +176,14 @@ run_test() {
 
     if [[ "${pipe_status[0]}" -ne 0 ]]; then
         emit_regression_fail "$name" "ltl exited ${pipe_status[0]} (stderr below)" "$stderrfile"
+        return
+    fi
+    # strip_nondeterministic exits 3 when it reached end of input still skipping,
+    # i.e. the run summary that ends the TOP OVERALL skip never appeared. Per
+    # tests/HARNESS-DESIGN.md an anchor that matches nothing is a failure, not a
+    # smaller surface that quietly passes.
+    if [[ "${pipe_status[1]}" -ne 0 ]]; then
+        emit_regression_fail "$name" "output filter found no run summary to end the TOP OVERALL skip; the asserted surface would be truncated (stderr below)" "$stderrfile"
         return
     fi
     # Runtime-warning cleanliness (HARNESS-DESIGN.md section Runtime-warning

@@ -48,20 +48,20 @@
 
 command-line options: --disable-progress -ni -n 1 --terminal-width 160 -du us -h BomTransformation -hdmin 100 
 
+  TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [200] GET /Windchill/sslClientAuth/servlet/odata/v2/BomTransformation/$metadata                            10  133ms  184ms  903ms   0.94       2.5 sec 
+
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2026-01-22 08:49 and 2026-01-25 07:41
   ─────────────────────────────────────────   
-  4xx                                     4      [√] logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log                       [1]
-  3xx                                     7   
-  2xx-HL                                 19      Log Formats
-  2xx                                   647   
+  4xx Client error                        4      [√] logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log                       [1]
+  3xx Redirection                         7   
+  2xx Success, highlighted               19      Log Formats
+  2xx Success                           647   
   ─────────────────────────────────────────      1 tomcat_access_with_duration
   HIGHLIGHTED                            19   
   LINES INCLUDED                        677   
   LINES READ                            677   
   ─────────────────────────────────────────   
-
-  TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
- ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  [200] GET /Windchill/sslClientAuth/servlet/odata/v2/BomTransformation/$metadata                            10  133ms  184ms  903ms   0.94       2.5 sec 
 

@@ -970,6 +970,35 @@ my @log_levels = (
 # element per line.
 my %log_level_set = map { $_ => 1 } @log_levels;
 
+# Descriptive names the category summary table shows in place of a raw
+# category name. One table shared by every format: a category name means
+# the same thing whichever producer emitted it, and the HTTP status
+# families are common to every access-log format. A category with no entry
+# here renders its own name unchanged, so a vocabulary that already reads
+# plainly (INFO, ERROR, Pause Full, ...) needs nothing.
+#
+# The highlighted twin of a category carries its own entry rather than a
+# marker the code appends: the descriptive text is longer and differently
+# shaped than the raw name, so where the indicator reads naturally is a
+# judgement about each phrase. The trailing form keeps the family name at
+# the left edge of the column, lining the highlighted row up with the plain
+# row beneath it.
+#
+# Every name fits $category_column_width in print_summary_table(), so the
+# totals stay aligned down the table; a longer one is truncated there.
+my %category_display_names = (
+    '1xx'    => '1xx Informational',
+    '1xx-HL' => '1xx Informational, highlighted',
+    '2xx'    => '2xx Success',
+    '2xx-HL' => '2xx Success, highlighted',
+    '3xx'    => '3xx Redirection',
+    '3xx-HL' => '3xx Redirection, highlighted',
+    '4xx'    => '4xx Client error',
+    '4xx-HL' => '4xx Client error, highlighted',
+    '5xx'    => '5xx Server error',
+    '5xx-HL' => '5xx Server error, highlighted',
+);
+
 # Characters selected and usable for drawing the bar charts
 my %blocks = (
     # Full and partial blocks
@@ -5241,12 +5270,14 @@ sub print_title {
 }
 
 sub print_usage {
-    my ( $error_reason, $parser_text ) = @_;
+    my ( $error_reason, $parser_text, $hint ) = @_;
     # All command-line diagnostics go to STDERR so both the parser's own
     # message and ltl's error line appear together as one block, out of any
     # piped data stream. Layout: usage paragraph, one blank line, the error
-    # block (the raw parser line if any, then ltl's Error line), one blank
-    # line, then the help pointer.
+    # block (the raw parser line if any, then ltl's Error line, then the
+    # optional remediation hint), one blank line, then the help pointer.
+    # The hint carries its own newlines: it is pre-wrapped guidance a caller
+    # supplies when the failure has a known remedy worth spelling out.
     print STDERR "Usage: ltl [-bs <N>] [-n <N>] [-i <regex>] [-e <regex>] [-h <regex>] [-st <time>] [-et <time>]\n";
     print STDERR "           [-ov] [-or] [-ru <unit>] [-osum] [-so <field>] [-hm [metric]] [-hg [metric]] <logfile> ...\n";
     print STDERR "\n";
@@ -5254,6 +5285,7 @@ sub print_usage {
     # escape-free at line start regardless of colour settings.
     print STDERR $parser_text if defined $parser_text && $parser_text ne '';
     print STDERR bs_bold("Error: $error_reason") . "\n" if defined $error_reason;
+    print STDERR $hint if defined $hint && $hint ne '';
     print STDERR "\n";
     print STDERR "Try 'ltl --help' for more information.\n";
     return;
@@ -6638,7 +6670,7 @@ sub print_help {
     $out .= help_opt("-os,  --omit-stats",            "Deprecated: use -od, --omit-durations to skip capturing durations, or -hst, --hide-stats to hide the statistics panel");
     $out .= help_opt("-oe,  --omit-empty",            "Skip time buckets that contain zero log entries");
     $out .= help_opt("-ni,  --no-index",              "Do not read or update ltl-index.csv, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it");
-    $out .= help_opt("-r,   --recursive",             "Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. logs/access/*.log becomes every .log file anywhere under logs/access; *.log recurses from the current directory. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end.");
+    $out .= help_opt("-r,   --recursive",             "Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. \"logs/access/*.log\" becomes every .log file anywhere under logs/access; \"*.log\" recurses from the current directory. Put the pattern in double quotes so your shell passes it through unchanged: an unquoted pattern is expanded, or rejected, by the shell before ltl sees it, and the sweep then covers only what the shell already matched. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end.");
     $out .= help_opt("-or,  --omit-rate",             "Hide the error/message rate from the legend");
     $out .= help_opt("-od,  --omit-durations",        "Suppress duration extraction and related columns (significantly reduces memory and processing time on large files)");
     $out .= help_opt("-ob,  --omit-bytes",            "Suppress byte-size extraction and related columns");
@@ -6655,10 +6687,10 @@ sub print_help {
 
     # Display & Output
     $out .= help_subheading("Display & Output");
-    $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the summary table (default: 10)");
+    $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the top-messages table (default: 10)");
     $out .= help_opt("-o,   --output-csv",            "Write all extracted data to a CSV file for external analysis");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from -du), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
-    $out .= help_opt("-osum, --omit-summary",         "Hide the summary table printed after the bar graph");
+    $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
     $out .= help_opt("-hl,  --hide-legend",           "Hide the legend column (category breakdowns and rates)");
     $out .= help_opt("-ho,  --hide-occurrences",      "Hide the occurrences bar graph column, freeing space for other metric columns");
     $out .= help_opt("-hd,  --hide-duration",         "Hide the duration bar graph column");
@@ -10297,7 +10329,21 @@ sub adapt_to_command_line_options {
         @in_files = grep { !$seen_in_file{$_}++ } @in_files;
     }
 
-    do { print_usage( "unable to open any files" ); exit 2; } unless @in_files;
+    # A pattern the shell expanded, or refused to expand, before ltl started is
+    # the commonest reason a recursive sweep selects nothing, and once the shell
+    # has run there is no evidence left to detect it from: what arrives is a
+    # plain list of names, indistinguishable from a legitimate literal argument.
+    # The guidance therefore rides on this failure only, where the run has
+    # already stopped and it cannot mislead a successful one.
+    unless (@in_files) {
+        my $quoting_hint;
+        $quoting_hint = "Hint: with -r, put the file pattern in double quotes - ltl -r \"logs/*.log\" - so\n"
+                      . "      your shell passes it through unchanged. An unquoted pattern is expanded,\n"
+                      . "      or rejected, by the shell before ltl ever sees it.\n"
+            if $recursive_files;
+        print_usage( "unable to open any files", undef, $quoting_hint );
+        exit 2;
+    }
     # Duration keeps its bare spellings on the CLI because duration is the tool's
     # subject: every statistic in the summary table is a duration statistic unless
     # it says otherwise. A user who has learned the metric_aggregate convention from
@@ -15985,24 +16031,19 @@ sub render_histogram_legend {
     return ($result, $result_hl);
 }
 
-sub print_summary_table {
-    my $category_column_width = 30;
-    my $occurrences_column_width = 10;
-    my $table_padding = 2;
-    my $padding = " " x $table_padding;
-    my $column_padding = " " x 1;
-    my $table_format = "$padding%-${category_column_width}s %${occurrences_column_width}d$padding\n";
-    my $summary_table_width = $table_padding + $category_column_width + 1 + $occurrences_column_width + $table_padding;
-    my $file_detail_width = $terminal_width - ( $summary_table_width + $table_padding * 2 );
-    my ( @summary_table, @file_details );
-    my ( @match_char ) = ( "$colors{'red'}χ", "$colors{'green'}√", "$colors{'green-HL'}√" );
+# The label a category is rendered under: its descriptive name where one is
+# defined, its own name otherwise. One resolution surface for the category
+# vocabulary — every consumer that renders a category as a label calls this.
+sub category_display_name {
+    my ( $category ) = @_;
+    return $category_display_names{$category} // $category;
+}
 
-    ## FORMAT MIN/MAX LOG TIMESTAMPS FOR THE SUMMARY ##
-    my $min_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_min));
-    my $max_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_max));
-    $min_timestamp_str .= sprintf ".%03d", ($output_timestamp_min-int($output_timestamp_min))*1000 if $print_milliseconds;
-    $max_timestamp_str .= sprintf ".%03d", ($output_timestamp_max-int($output_timestamp_max))*1000 if $print_milliseconds;
-
+# Echo the options the run was invoked with, directly under the timeline view
+# they produced: each view is meant to be screenshot with the command that made
+# it, so the reader can reproduce it (docs/purpose.md). Printed for every run,
+# including one whose run summary is suppressed.
+sub print_run_options {
     ## PRINT COMMAND AND ARGUMENTS ##
     if ($ltl_config_raw ne '') {
         print "\n$colors{'bright-black'}environment options: $ltl_config_raw$colors{'NC'}";
@@ -16037,8 +16078,27 @@ sub print_summary_table {
         print "\n$colors{'bright-black'}command-line options: $cli_options$colors{'NC'}";
     }
     print "\n";
+}
 
+sub print_summary_table {
     return if $omit_summary;
+
+    my $category_column_width = 30;
+    my $occurrences_column_width = 10;
+    my $table_padding = 2;
+    my $padding = " " x $table_padding;
+    my $column_padding = " " x 1;
+    my $table_format = "$padding%-${category_column_width}s %${occurrences_column_width}d$padding\n";
+    my $summary_table_width = $table_padding + $category_column_width + 1 + $occurrences_column_width + $table_padding;
+    my $file_detail_width = $terminal_width - ( $summary_table_width + $table_padding * 2 );
+    my ( @summary_table, @file_details );
+    my ( @match_char ) = ( "$colors{'red'}χ", "$colors{'green'}√", "$colors{'green-HL'}√" );
+
+    ## FORMAT MIN/MAX LOG TIMESTAMPS FOR THE SUMMARY ##
+    my $min_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_min));
+    my $max_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_max));
+    $min_timestamp_str .= sprintf ".%03d", ($output_timestamp_min-int($output_timestamp_min))*1000 if $print_milliseconds;
+    $max_timestamp_str .= sprintf ".%03d", ($output_timestamp_max-int($output_timestamp_max))*1000 if $print_milliseconds;
 
     ## START SUMMARY STATISTIC TABLE ##
     push @summary_table, sprintf( "\n  " . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
@@ -16049,7 +16109,14 @@ sub print_summary_table {
         next if $category_bucket =~ /^(empty|err-rate|msg-rate)$/;
         next unless $category_totals{$category_bucket};
 
-        push @summary_table, sprintf( $table_format, $category_bucket, $category_totals{$category_bucket} );
+        # The column is fixed-width and the totals align down the table, so a
+        # label wider than the column is cut to it rather than pushing the
+        # total out of line.
+        my $category_label = category_display_name( $category_bucket );
+        $category_label = substr( $category_label, 0, $category_column_width )
+            if length( $category_label ) > $category_column_width;
+
+        push @summary_table, sprintf( $table_format, $category_label, $category_totals{$category_bucket} );
     }
 
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
@@ -16918,8 +16985,8 @@ sub pipeline_finalize {
 # Receives: finalized statistics and bucket structures; resolved demand.
 # Emits: normalized/scaled display data (layout before scaling), index-drift
 # detection plus the verbose/telemetry surface flush, bar graph, histograms,
-# summary tables, message/threadpool summaries, CSV output lifecycle, and the
-# persistent index file (#46).
+# echoed options, message/threadpool summaries, the closing run summary, CSV
+# output lifecycle, and the persistent index file (#46).
 sub pipeline_render {
     # NORMALIZE DATA FOR CONSOLE OUTPUT #
     $start_time = [gettimeofday];
@@ -16974,15 +17041,7 @@ sub pipeline_render {
     print_histograms() if $histogram_enabled;  # Issue #25: Histograms appear after bar graph
     close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
 
-    # Issue #356 (S1): capture the peak through normalize/bar-graph/CSV rendering
-    # so the displayed MAXIMUM MEMORY USED reflects everything up to this point.
-    # The output stages below can no longer move the peak materially (#362 clamped
-    # the only O(-n) allocation); their residual is covered by the post-output
-    # measurement and visible under -mem debug.
-    measure_memory_structures();
-
-    print_summary_table();
-    memory_debug_decomposition("after_summary_table");
+    print_run_options();
 
     if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
         $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
@@ -17018,6 +17077,18 @@ sub pipeline_render {
 
     print_threadpool_summary() if $include_threadpool_summary;										    # Print threadpool summaries
     memory_debug_decomposition("after_threadpool_summary") if $include_threadpool_summary;
+
+    # Issue #356 (S1): capture the peak across every rendered analysis section so
+    # the MAXIMUM MEMORY USED the summary reports accounts for all of them. The
+    # summary render's own residual is covered by the post-output measurement
+    # below and visible under -mem debug.
+    measure_memory_structures();
+
+    # The summary reports on the run itself -- the span analysed, the files read,
+    # the totals, timing and memory -- so it closes the output, leaving the
+    # analysis sections above it contiguous on screen.
+    print_summary_table();
+    memory_debug_decomposition("after_summary_table");
 
     # Issue #356 (S1): post-output measurement keeps the recorded peak honest for
     # the full process lifetime; surfaced by the -mem debug "end" line below.

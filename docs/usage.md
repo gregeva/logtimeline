@@ -18,6 +18,8 @@ When multiple files are specified, logtimeline processes them sequentially and c
 
 Glob expansion is performed internally by logtimeline rather than relying on the shell, ensuring consistent behavior across platforms — particularly on Windows where the shell does not expand wildcards. Only regular files are accepted; directories and other non-file entries in a glob result are silently skipped.
 
+That internal expansion only happens if the pattern actually reaches logtimeline. On macOS and Linux, an unquoted wildcard is expanded by the shell first, and logtimeline receives the list of names the shell already matched — or, in some shells, the command is refused outright when the pattern matched nothing. It makes no difference for a single-level pattern, but it silently narrows a recursive sweep to whatever the shell already found. Put wildcard patterns in double quotes whenever you use `-r`: `ltl -r "logs/*.log"`.
+
 ## Options
 
 ### Time & Buckets
@@ -102,7 +104,7 @@ These options control which metrics logtimeline extracts and computes during pro
 | `-os, --omit-stats` | Deprecated: use `-od, --omit-durations` to skip capturing durations, or `-hst, --hide-stats` to hide the statistics panel |
 | `-oe, --omit-empty` | Skip time buckets that contain zero log entries |
 | `-ni, --no-index` | Do not read or update `ltl-index.csv`, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it |
-| `-r, --recursive` | Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. `logs/access/*.log` becomes every `.log` file anywhere under `logs/access`; `*.log` recurses from the current directory. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end. |
+| `-r, --recursive` | Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. `"logs/access/*.log"` becomes every `.log` file anywhere under `logs/access`; `"*.log"` recurses from the current directory. Put the pattern in double quotes so your shell passes it through unchanged: an unquoted pattern is expanded, or rejected, by the shell before ltl sees it, and the sweep then covers only what the shell already matched. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end. |
 | `-or, --omit-rate` | Hide the error/message rate from the legend |
 | `-od, --omit-durations` | Suppress duration extraction and related columns (significantly reduces memory and processing time on large files) |
 | `-ob, --omit-bytes` | Suppress byte-size extraction and related columns |
@@ -147,14 +149,16 @@ ltl -g 80 -iqs -is access.log
 
 ### Display & Output
 
-These options control what is shown and how. After the timeline bar graph, logtimeline prints a summary table ranking the top contributing messages — `-n` controls how many entries appear, and `-osum` suppresses it entirely. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. The light background mode (`-lbg`) switches color gradients for white or light terminal backgrounds. The dark background mode (`-dbg`) forces the dark gradients and overrides `-lbg` if both are passed. The pause option (`-p`) is useful when output exceeds the terminal height.
+These options control what is shown and how. After the timeline bar graph, logtimeline prints the table ranking the top contributing messages — `-n` controls how many entries appear. The run summary — category totals, line counts, timing, memory and the files that were read — comes after all the analysis content, at the end of the output, and `-osum` suppresses it. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. The light background mode (`-lbg`) switches color gradients for white or light terminal backgrounds. The dark background mode (`-dbg`) forces the dark gradients and overrides `-lbg` if both are passed. The pause option (`-p`) is useful when output exceeds the terminal height.
+
+Alongside the messages ranking, logtimeline prints a **Category** table totalling every log level or event class it found — `INFO`, `ERROR`, the GC pause kinds, the HTTP status families, and so on. Where a category name is not self-explanatory the table names it descriptively: HTTP status families read as `2xx Success`, `3xx Redirection`, `4xx Client error`, `5xx Server error` and `1xx Informational`. When a highlight is active a category that has highlighted lines gets a second row of its own, ending in `, highlighted`, directly above the row for the rest of that category. Every other category keeps its own name unchanged. The short name is what the per-bucket legend beside the timeline shows, and it is also what names the columns in the CSV (`-o`), so both stay compact and stable for tooling.
 
 | Option | Description |
 |--------|-------------|
-| `-n, --top-messages <N>` | Number of unique messages to show in the summary table (default: 10) |
+| `-n, --top-messages <N>` | Number of unique messages to show in the top-messages table (default: 10) |
 | `-o, --output-csv` | Write all extracted data to a CSV file for external analysis |
 | `-cp, --csv-precision <mode>` | Control CSV decimal precision: `default` (per-family decimals derived from `-du`), `full` (raw precise floats), or an integer N (cap all numeric columns at N decimals) |
-| `-osum, --omit-summary` | Hide the summary table printed after the bar graph |
+| `-osum, --omit-summary` | Hide the run summary printed at the end of the output |
 | `-hl, --hide-legend` | Hide the legend column (category breakdowns and rates) |
 | `-ho, --hide-occurrences` | Hide the occurrences bar graph column, freeing space for other metric columns |
 | `-hd, --hide-duration` | Hide the duration bar graph column |
@@ -169,11 +173,11 @@ These options control what is shown and how. After the timeline bar graph, logti
 | `-V, --verbose [<section>...]` | Emit diagnostic sections. Bare `-V` emits all; `-V <name>[,<name>...]` or repeated `-V` selects sections; `-V list` prints known sections. See "Verbose output (`-V`)" section below |
 
 ```bash
-# Show top 50 messages in the summary table
+# Show top 50 messages in the top-messages table
 ltl -n 50 access.log
 # Export full analysis data to CSV
 ltl -o access.log
-# Hide the summary table, show only the timeline
+# Hide the run summary at the end of the output
 ltl -osum access.log
 # Use color gradients suited for light terminal backgrounds
 ltl -lbg access.log
