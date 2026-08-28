@@ -62,6 +62,8 @@ The success and failure counts are brought into the existing data model — the 
 
 - **D12 — Highlighted lines are classified like every other line; the `errRate` exclusion of `-HL` buckets is a bug and is fixed here** (2026-08-28). Today a line matching a highlight filter has its category bucket renamed (`ERROR` → `ERROR-HL`, `5xx` → `5xx-HL`) and the anchored `errRate` regex never counts it, so the error rate drops by exactly the highlighted errors on any run with a highlight filter. Classification is independent of highlighting; R7's "no change to what a user observes" carries this one stated exception, and the release note records it as a bug fix.
 
+- **D13 — One classification surface; rendering reads counters, it never classifies** (2026-08-28). Success and failure are decided once, per line, at classification time, and accumulated into the per-bucket and per-message stores (R6). The render-time `errRate` computation (`$error_occurrences += $occurrences if $category_bucket =~ /^(?:FATAL|ERROR|5xx|4xx)$/i` in the bar-graph preparation) is removed and the rate reads the bucket's failure counter. No second site — render, CSV, `-V`, a consumer issue — may re-derive an outcome from bucket names, levels or status codes.
+
 ## `$is_access_log` site inventory and replacement (confirmed 2026-08-28, D10)
 
 | Site (function / snippet) | Meaning today | Proposed property |
@@ -94,14 +96,13 @@ No site today is gated on "is this an event ledger". The event-ledger property g
 
 ## Performance obligation
 
-**Before/after measurement is part of the development process for this branch, not only the completion gate** (architect, 2026-08-28). The change touches the hot path, so a named set of benchmark cases is captured on the branch *before* any production code is written, labelled by the branch's version stamp (`0.18.0-453-before`), and **committed** under `tests/baseline/results/` so every subsequent step can be compared against it as a sanity check (`tests/baseline/compare-results.sh summary tests/baseline/results/0.18.0-453-before.tsv <step>.tsv`). The case set is recorded here once chosen; intermediate step captures are labelled by step and are not deliverables unless the doc says otherwise.
+**Before/after measurement is part of the development process for this branch, not only the completion gate** (architect, 2026-08-28). The change touches the hot path, so a named set of benchmark cases is captured on the branch *before* any production code is written, labelled by the branch's version stamp (`0.18.0-453-before`), and **committed** under `tests/baseline/results/` so every subsequent step can be compared against it as a sanity check (`tests/baseline/compare-results.sh summary tests/baseline/results/0.18.0-453-before.tsv <step>.tsv`). The case set (decided 2026-08-28): `single-day-access-log-standard` (event ledger, status classification, gate case), `single-day-application-log-standard` (diagnostics default D7, `mt1` metric-bearing vs plain lines), `multi-day-custom-logs-standard` (UDM / count-probe path), `single-day-access-log-top25-consolidate` (consolidation stats-source gate). Intermediate step captures are labelled by step and are not deliverables unless the doc says otherwise.
 
 Classification is a new per-line hot-path cost (one or more field regex matches per included line, on every format). Per CLAUDE.md § Development Phases 2(b) the prototype is **mandatory**, not a judgment call. Decisions that depend on it: the compiled shape of the criteria (per-entry closure compiled at registry build time, in the same manner as the D33 message-metric probes, vs interpreted list walk), and whether the global default is compiled into each entry's closure or evaluated as a fallback. The prototype extracts the production scan structure per `prototype/459-order-independence/extract-subs.sh` and measures on metric-bearing and metric-less lines.
 
 ## Open items
 
 1. Expressibility in #387 (user-defined YAML formats): confirm the field+pattern, list-of-conjunctions shape maps onto what #387 will accept — checked at #387 planning, recorded here.
-2. The before-measurement case set (§ *Performance obligation*).
 
 ## Merge gate
 
