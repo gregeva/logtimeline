@@ -11,9 +11,10 @@
 #
 # The descriptive names are longer than the raw ones, so this harness also
 # holds the column geometry: the name occupies a fixed-width cell and the
-# totals stay aligned down the table. A name that outgrew the column would
-# push its total out of line and misalign the whole surface, including the
-# file-details pane rendered beside it.
+# totals stay aligned down the table. The label is cut to that cell at render,
+# so a name that outgrew the column loses its tail rather than pushing the total
+# out of line and misaligning the file-details pane beside it. Reading the label
+# and the total at their exact offsets catches either outcome.
 #
 # The short raw name stays on the two surfaces where it is the contract: the
 # per-bucket legend (a horizontal budget shared with the bar graph) and the
@@ -286,7 +287,7 @@ while read -r raw total descriptive; do
     assert_command \
         command     "check_category_row '$RENDER' '$descriptive' '$total'" \
         label       "$raw highlighted is named [$descriptive] with its total aligned" \
-        asserts     "The highlighted twin of a category carries its own descriptive name rather than a marker appended by code, so the indicator sits where the phrase reads naturally. The trailing form keeps the family name at the left edge of the cell, aligned with the plain row beneath it, and the longest of these names fills the cell exactly - one character more would displace the total." \
+        asserts     "The highlighted twin of a category carries its own descriptive name rather than a marker appended by code, so the indicator sits where the phrase reads naturally. The trailing form keeps the family name at the left edge of the cell, aligned with the plain row beneath it, and the longest of these names fills the cell exactly - one character more would be cut to the cell and lose its last character." \
         produced_by "$FAMILY_PRODUCED" \
         contract    'features/463-friendly-log-level-category-names.md § D2 — the highlighted twin is its own lookup entry, indicator trailing'
 done <<'ROWS'

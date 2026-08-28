@@ -89,7 +89,8 @@ and the `TOP HIGHLIGHTED MESSAGES` heading.
 
 A parenthetical form (`5xx Server error (highlighted)`) was rejected on width:
 `1xx Informational (highlighted)` is 31 characters against a 30-character
-column, which would push its total out of line — see D4.
+column, so D4 would cut it to `1xx Informational (highlighted` and the closing
+bracket would be lost.
 
 ### D3 — The legend and the CSV keep the raw category name
 
