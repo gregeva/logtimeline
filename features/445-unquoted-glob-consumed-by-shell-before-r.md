@@ -135,3 +135,101 @@ Harnesses run on the final content: `validate-recursive-file-selection.sh`
 22 passed / 0 failed (17 before this change), `validate-help-content.sh` 11/0,
 `validate-help-layout.sh` 6/0, `validate-runtime-config.sh` 36/0,
 `validate-doc-examples.sh` 46 passed / 0 failed / 9 skipped.
+
+## Completion gate
+
+Run on `0d7fe5d` (`#445: restore release version for the completion gate`), the
+commit offered for merge. The branch was already sitting on the
+`release/0.18.0` tip (`ab6b1c8`), so the rebase was a no-op and no conflict
+arose. `$version_number` restored from `0.18.0-445` to `0.18.0` in the gated
+commit.
+
+Scope test: the diff touches `ltl` and `tests/validate-recursive-file-selection.sh`,
+so both halves of the gate are in force.
+
+### Harness suite — 27 of 27 exit 0
+
+| Harness | Summary line |
+|---|---|
+| `validate-csv-output` | CSV output integrity: 21 scenarios, 21 pass, 0 fail |
+| `validate-statistics` | Statistics drift: 21 scenarios, 21 pass, 0 fail |
+| `validate-csv-input` | CSV input robustness: 4 pass, 0 fail |
+| `validate-distribution-shape` | 8 passed, 0 failed |
+| `validate-doc-examples` | 46 passed, 0 failed, 9 skipped |
+| `validate-duration-display` | 21 passed, 0 failed |
+| `validate-explain` | 148 passed, 0 failed |
+| `validate-format-detection` | 192 passed, 0 failed |
+| `validate-format-registry` | 22 passed, 0 failed |
+| `validate-heatmap-palette` | 85 passed, 0 failed |
+| `validate-help-content` | 11 passed, 0 failed |
+| `validate-help-layout` | 6 passed, 0 failed |
+| `validate-histogram-bin-counters` | 84 passed, 0 failed |
+| `validate-histogram-ticks` | Total: 21, Passed: 21, Failed: 0 |
+| `validate-index-read-back` | 59 passed, 0 failed |
+| `validate-log-level-vocabulary` | PASS: 8, FAIL: 0 |
+| `validate-message-control-characters` | PASS: 11, FAIL: 0 |
+| `validate-message-grouping-notices` | 4 passed, 0 failed |
+| `validate-numeric-criteria-notices` | 10 passed, 0 failed |
+| `validate-profile-render` | 22 passed, 0 failed |
+| `validate-profile` | 50 passed, 0 failed |
+| `validate-recursive-file-selection` | 22 passed, 0 failed |
+| `validate-regression` | 71 passed, 0 failed, 0 skipped |
+| `validate-runtime-config` | 36 passed, 0 failed |
+| `validate-statistics-demand` | 75 passed, 0 failed |
+| `validate-udm-counting` | 28 passed, 0 failed |
+| `validate-udm-specs` | 43 passed, 0 failed |
+
+`validate-statistics`: zero T4 and zero T3 on every scenario, so nothing
+blocking. T2 advisories are present as usual (largest concentrations:
+`thingworx-bin-consolidated/messages` 176, `codebeamer-bin-consolidated/messages`
+84, `tomcat-default/messages` 76) together with 28 pre-registered `XFAIL`
+entries on the three `*-bin-consolidated` scenarios, which report
+`L3=OK-WITH-XFAIL`. None of these surfaces is touched by this change.
+
+`./tests/cleanup-test-artifacts.sh` run afterwards.
+
+### Before/after benchmark
+
+`single-day-access-log-standard`, run back-to-back on this machine: `445-before`
+on a worktree of `origin/release/0.18.0` (`ab6b1c8`), `445-after` on `0d7fe5d`.
+761,698 lines read and included on both sides.
+
+| Metric | Before | After | Delta |
+|---|---|---|---|
+| `total` (elapsed) | 10.151 s | 9.861 s | −290 ms (−2.9%) |
+| `parse/read_files` | 9.990 s | 9.701 s | −289 ms (−2.9%) |
+| `finalize/calculate_statistics` | 151 ms | 151 ms | 0 |
+| `detect/registry_build` | 9 ms | 8 ms | −1 ms |
+| `detect/scan_sub_compile` | 4 ms | 5 ms | +1 ms |
+| `MEMORY/rss_peak` | 142.6 MB | 142.6 MB | +16 KB (0.0%) |
+
+One metric breached the 5% threshold and was investigated: `MEMORY/format_scan_subs`
+read +48 KB (+6.7%), and reproduced at +48 KB (+6.8%) on an immediate second
+before/after pair.
+
+**It is not a regression — the metric's run-to-run spread is wider than the
+delta.** `format_scan_subs` is not a structure size: it is the whole-process
+resident-set delta measured across the `eval` that compiles the generated scan
+sub, so it is quantized to the 16 KB page and it captures every page the
+allocator happens to fault in during that window, not the sub's own footprint.
+48 KB is exactly three pages.
+
+Five runs of each arm on the benchmark's own file and options, plus a control
+arm consisting of the release-branch `ltl` with 2,040 bytes of inert comment
+text inserted (the branch adds 1,330 bytes):
+
+| Arm | Samples (KB) | Median | Range |
+|---|---|---|---|
+| `release/0.18.0` | 768, 784, 784, 816, 816 | 784 KB | 768–816 KB |
+| this branch | 768, 768, 800, 800, 816 | 800 KB | 768–816 KB |
+| release + inert padding | 736, 784, 800, 816, 832 | 784 KB | 736–832 KB |
+
+Every sample from this branch falls inside the release branch's own range, and
+the inert-padding control spans a wider band than either. `format_scan_subs_compiled`
+is 1 on every run of every arm, so the compile work itself is unchanged. The
+single-sample-per-side benchmark pair cannot resolve a three-page difference in
+a metric that moves three to six pages between identical runs.
+
+`MEMORY/rss_peak`, which does account for the whole process, is flat (0.0% on
+the first pair, −0.3% on the second), and elapsed time improved on both pairs.
+Gate passed; both TSV pairs deleted.
