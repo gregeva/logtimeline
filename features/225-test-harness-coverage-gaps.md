@@ -139,7 +139,7 @@ This sub-issue addresses the **silent unit-misinterpretation risk**: Apache HTTP
 | 2 | apache-httpd-us | `ApacheHTTP2Server-...2026-01-25.log` | `tomcat_access_with_duration` (misclassified — see below) | 3 |
 | 3 | codebeamer | `codebeamer_access_log.2025-10-29.txt` | `tomcat_codebeamer` | 12 |
 | 4 | thingworx-standard | `ApplicationLog.2025-05-05.0.log` | `thingworx_standard` | 1 |
-| 5 | thingworx-with-metrics | `ScriptLog-DPMExtended-clean.log` | `thingworx_standard` (`is_access_log: yes`) | 1 |
+| 5 | thingworx-with-metrics | `ScriptLog-DPMExtended-clean.log` | `thingworx_standard` (`metrics_observed: yes`) | 1 |
 | 6 | tw-edge-c-sdk | `rea-assets-5402_-TW_SSL_READ-...log` | `tw_edge_c_sdk` | 11 |
 | 7 | csv-with-udm | `results_data_idonly-timestampMs.csv` | `csv` | 13 |
 

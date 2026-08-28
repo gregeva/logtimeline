@@ -356,7 +356,7 @@ my %match_type_to_slug = (
 # Schema per file:
 #   match_type         => integer 1-13 (first successful bind for this file)
 #   slug               => string from %match_type_to_slug
-#   is_access_log      => 0|1
+#   metrics_observed   => 0|1
 #   ts_precision       => 'ms' | 's' | undef
 #   matched_lines      => integer
 #   unmatched_lines    => integer
@@ -392,7 +392,7 @@ use constant {
     FR_TRANSFORMS      => 7,   # [ transform primitive names ] (post-capture)
     FR_TIME            => 8,   # { layout, precision, tz } — declarative time contract
     FR_DURATION_UNIT   => 9,   # declared unit of the duration field (undef = none)
-    FR_STATS           => 10,  # statistics-eligible: sets is_access_log statically
+    FR_STATS           => 10,  # statistics-eligible: sets metrics_observed statically
     FR_GUARD           => 11,  # cheap superset guard closure or undef (D28)
     FR_EXTRACT         => 12,  # compiled extraction closure (fixed-order list return)
     FR_MESSAGE_METRICS => 13,  # declared in-message metric probes (D33)
@@ -2418,14 +2418,14 @@ sub emit_index_readback_verbose {
 # return-list costs an extra full copy of every field per line (~1 us on
 # the message-bearing formats). read_and_process_logs() reads the same
 # lexicals; its per-line loop no longer declares them. status_code and
-# is_access_log are numeric (0 default); bytes/duration default undef;
+# metrics_observed are numeric (0 default); bytes/duration default undef;
 # the string fields default '' unless clobbered (see above).
 my @format_record_fields = qw(timestamp_str category_bucket object instance
                               user session platform thread message
-                              bytes duration status_code is_access_log);
+                              bytes duration status_code metrics_observed);
 my ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message );
 my ( $bytes, $duration );
-my ( $status_code, $is_access_log );
+my ( $status_code, $metrics_observed );
 # Set by the generated blocks alongside the record fields: the parsed
 # whole-second epoch and the fractional milliseconds stripped from
 # $timestamp_str (the strip runs before parsing so the date key excludes
@@ -2498,7 +2498,7 @@ my %format_transform_code = (
 # the closure behind an index() superset gate, never fused into the
 # recognition regex), the three-part time contract (D23/D31), duration
 # unit (D18; producer variants of one shape are variant-group members, D47),
-# statistics eligibility (static is_access_log; formats whose probes set
+# statistics eligibility (static metrics_observed; formats whose probes set
 # it per line leave this 0 and set marks_metrics_observed on the probe
 # block), cheap superset guards (D28: only the expensive-to-reject access
 # siblings carry one), reserved event_pairs (D23: validated empty in this
@@ -3477,14 +3477,14 @@ sub format_entry_block_src {
     for my $f (@format_record_fields) {
         next if $is_target{$f};
         if    ($f eq 'bytes' || $f eq 'duration') { push @dflt_undef, "\$$f"; }
-        elsif ($f eq 'status_code' || $f eq 'is_access_log') { push @dflt_zero, "\$$f"; }
+        elsif ($f eq 'status_code' || $f eq 'metrics_observed') { push @dflt_zero, "\$$f"; }
         elsif ($clobbered->{$f}) { push @dflt_undef, "\$$f"; }
         else { push @dflt_empty, "\$$f"; }
     }
     push @body, '( ' . join(', ', @dflt_empty) . ' ) = ("") x ' . scalar(@dflt_empty) . ';' if @dflt_empty;
     push @body, '( ' . join(', ', @dflt_undef) . ' ) = (undef) x ' . scalar(@dflt_undef) . ';' if @dflt_undef;
     push @body, '( ' . join(', ', @dflt_zero) . ' ) = (0) x ' . scalar(@dflt_zero) . ';' if @dflt_zero;
-    push @body, "\$is_access_log = 1;" if $spec->{stats_eligible};
+    push @body, "\$metrics_observed = 1;" if $spec->{stats_eligible};
 
     # In-message metric probes (D33): index() superset gate, per-probe
     # index() guards, probe regexes, then the conditional mask + the
@@ -3499,7 +3499,7 @@ sub format_entry_block_src {
         }
         my $any_defined = join(' || ', map { "defined \$$_->{field}" } @{ $mm->{probes} });
         my @mask_block;
-        push @mask_block, "        \$is_access_log = 1;" if $mm->{marks_metrics_observed};
+        push @mask_block, "        \$metrics_observed = 1;" if $mm->{marks_metrics_observed};
         push @mask_block, "        \$message =~ s/$mm->{mask}{pattern}/$mm->{mask}{replace}/g;" if $mm->{mask};
         push @body,
             "if (index(\$message, '$mm->{gate_lit}') >= 0) {\n"
@@ -3678,7 +3678,7 @@ sub compile_format_scan_sub {
 sub format_record_reset {
     ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = ("") x 9;
     ( $bytes, $duration ) = ( undef, undef );
-    ( $status_code, $is_access_log ) = ( 0, 0 );
+    ( $status_code, $metrics_observed ) = ( 0, 0 );
     ( $timestamp, $fractional_ms ) = ( undef, 0 );
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
     timestamp_date_cache_clear();
@@ -3710,7 +3710,7 @@ sub format_validate_scan_sub {
     $format_scan_validating = 1;
     my @saved_record = ( $timestamp_str, $category_bucket, $object, $instance, $user,
                          $session, $platform, $thread, $message, $bytes, $duration,
-                         $status_code, $is_access_log, $timestamp, $fractional_ms,
+                         $status_code, $metrics_observed, $timestamp, $fractional_ms,
                          $format_last_ts_str, $format_last_ts_epoch );
     my $saved_cache = timestamp_date_cache_snapshot();
     for my $e (@$entries) {
@@ -3727,7 +3727,7 @@ sub format_validate_scan_sub {
     $format_scan_validating = $was_validating;
     ( $timestamp_str, $category_bucket, $object, $instance, $user,
       $session, $platform, $thread, $message, $bytes, $duration,
-      $status_code, $is_access_log, $timestamp, $fractional_ms,
+      $status_code, $metrics_observed, $timestamp, $fractional_ms,
       $format_last_ts_str, $format_last_ts_epoch ) = @saved_record;
     timestamp_date_cache_restore($saved_cache);
     return;
@@ -3846,9 +3846,9 @@ sub build_format_registry {
             { include_query_string => 0, include_session => 0 });
         for my $i (0 .. $#{ $spec->{samples} }) {
             ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = (undef) x 9;
-            ( $bytes, $duration, $status_code, $is_access_log ) = (undef) x 4;
+            ( $bytes, $duration, $status_code, $metrics_observed ) = (undef) x 4;
             $extract->( $spec->{samples}[$i] );
-            my @got = ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message, $bytes, $duration, $status_code, $is_access_log );
+            my @got = ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message, $bytes, $duration, $status_code, $metrics_observed );
             my $want = $spec->{expect}[$i]
                 or die "ltl: format registry: entry '$spec->{name}' sample " . ($i + 1) . " has no expected record\n";
             for my $f (0 .. $#format_record_fields) {
@@ -4195,7 +4195,7 @@ sub emit_format_detection_verbose {
             # filtered out entirely, or read error before parse).
             push @verbose_output, "  format: -";
             push @verbose_output, "  match_type: -";
-            push @verbose_output, "  is_access_log: -";
+            push @verbose_output, "  metrics_observed: -";
             push @verbose_output, "  matched_lines: 0";
             push @verbose_output, "  unmatched_lines: 0";
             push @verbose_output, "  first_match_line: -";
@@ -4208,7 +4208,7 @@ sub emit_format_detection_verbose {
         my $mt   = defined $fdd->{match_type} ? $fdd->{match_type} : '-';
         push @verbose_output, "  format: $slug";
         push @verbose_output, "  match_type: $mt";
-        push @verbose_output, "  is_access_log: " . ($fdd->{is_access_log} ? 'yes' : 'no');
+        push @verbose_output, "  metrics_observed: " . ($fdd->{metrics_observed} ? 'yes' : 'no');
         push @verbose_output, "  matched_lines: $fdd->{matched_lines}";
         push @verbose_output, "  unmatched_lines: $fdd->{unmatched_lines}";
         push @verbose_output, "  first_match_line: " .
@@ -10788,7 +10788,7 @@ sub read_and_process_logs {
             }
             s/[\r\n]+$//;                                   # Remove Windows line endings (CRLF) or Unix line endings (LF) if present
             $line_number++;
-            # The 13 record fields ($timestamp_str .. $is_access_log) are
+            # The 13 record fields ($timestamp_str .. $metrics_observed) are
             # file-scoped lexicals written directly by the extraction
             # closures; per-line state for them is established by the match
             # (or by the CSV branches' explicit resets), not re-declared here.
@@ -10860,7 +10860,7 @@ sub read_and_process_logs {
 
                 $category_bucket = "DATA";
                 $is_line_match = 1;
-                $is_access_log = 1;
+                $metrics_observed = 1;
                 $match_type = 13;
                 $line_entry = $format_registry_entry{csv};
                 # Record lexicals the CSV path does not produce: reset
@@ -10948,7 +10948,7 @@ sub read_and_process_logs {
 
                             $category_bucket = "DATA";
                             $is_line_match = 1;
-                            $is_access_log = 1;
+                            $metrics_observed = 1;
                             $match_type = 13;
                             $line_entry = $format_registry_entry{csv};
                             ( $object, $instance, $user, $session, $platform, $thread ) = ("") x 6;
@@ -10984,7 +10984,7 @@ sub read_and_process_logs {
                 ( $count ) = $message =~ / count\s*=\s*(\d+)/;
                 if( defined $count ) {
                     $message =~ s/ count\s*=\s*\d+/ count=?/g;                  # mask out actual count values for grouping purposes
-                    $is_access_log = 1;
+                    $metrics_observed = 1;
                 }
             }
 
@@ -11056,7 +11056,7 @@ sub read_and_process_logs {
                     $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13;
                 }
             }
-            $is_access_log = 1 if %udm_values;
+            $metrics_observed = 1 if %udm_values;
 
             if( $is_line_match ) {
                 # Format-detection tracking (Issue #228). First successful
@@ -11065,7 +11065,7 @@ sub read_and_process_logs {
                 my $fdd = $format_detection{$in_file} //= {
                     match_type       => undef,
                     slug             => undef,
-                    is_access_log    => 0,
+                    metrics_observed => 0,
                     matched_lines    => 0,
                     unmatched_lines  => 0,
                     first_match_line => undef,
@@ -11085,7 +11085,7 @@ sub read_and_process_logs {
                     format_variant_ambiguity_note($line_entry) if $line_entry;
                 }
                 $fdd->{matched_lines}++;
-                $fdd->{is_access_log} = 1 if $is_access_log;
+                $fdd->{metrics_observed} = 1 if $metrics_observed;
                 $line_entry->[FR_MATCHES]++ if $line_entry;
 
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
@@ -11362,7 +11362,7 @@ sub read_and_process_logs {
                         if ($is_new_key) {
                             # Build stats source from parsed line values for merge_consolidation_stats()
                             my $stats_source = { occurrences => 1 };
-                            if ($is_access_log) {
+                            if ($metrics_observed) {
                                 $stats_source->{total_bytes} = $bytes if defined $bytes;
                                 if (defined $count) {
                                     $stats_source->{count_sum} = $count;
@@ -11419,7 +11419,7 @@ sub read_and_process_logs {
 
                     ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
                     if (!$consolidation_s1_matched) {
-                    if( $is_access_log ) {
+                    if( $metrics_observed ) {
 
                         # Initialize the hash if not already done (don't initialize it all, allowing for lazy population of only the fields we need)
                         # Issue #287: under -mdm bin, additionally allocate sidecar accumulators
@@ -11617,7 +11617,7 @@ sub read_and_process_logs {
                 }
 
                 ## CAPTURE TIME-WINDOWS BASED STATISTICS DATA ##
-                if( $is_access_log  ) {
+                if( $metrics_observed  ) {
                     # Latency-statistics surfaces (timeline latency column, stats CSV
                     # columns, messages-table statistics variant) activate only when a
                     # duration value was actually observed in the data. A source that
@@ -11938,7 +11938,7 @@ sub read_and_process_logs {
                 my $fdd = $format_detection{$in_file} //= {
                     match_type       => undef,
                     slug             => undef,
-                    is_access_log    => 0,
+                    metrics_observed => 0,
                     matched_lines    => 0,
                     unmatched_lines  => 0,
                     first_match_line => undef,
@@ -11955,7 +11955,7 @@ sub read_and_process_logs {
             my $fdd = $format_detection{$in_file} //= {
                 match_type       => undef,
                 slug             => undef,
-                is_access_log    => 0,
+                metrics_observed => 0,
                 matched_lines    => 0,
                 unmatched_lines  => 0,
                 first_match_line => undef,

@@ -482,13 +482,13 @@ scenario_thingworx_with_metrics() {
         pattern     '^  format: thingworx_standard$' \
         asserts     'ThingWorx ScriptLog with durationMS=/bytes= fields also binds to `thingworx_standard` - the duration/bytes capture happens within match_type 1, not as a separate slug' \
         produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    '%match_type_to_slug in ltl GLOBALS - ThingWorx logs with or without metrics share the same slug; metric presence is signaled via is_access_log=yes'
+        contract    '%match_type_to_slug in ltl GLOBALS - ThingWorx logs with or without metrics share the same slug; metric presence is signaled via metrics_observed=yes'
 
     assert_line "$out" \
-        pattern     '^  is_access_log: yes$' \
-        asserts     'A ThingWorx log with durationMS= or bytes= flips is_access_log to yes per ltl:4799-4802' \
-        produced_by 'emit_format_detection_verbose() in ltl (per-file is_access_log field)' \
-        contract    'features/225-test-harness-coverage-gaps.md section #228 - is_access_log distinguishes ThingWorx logs that have parseable latency/bytes from ones that do not'
+        pattern     '^  metrics_observed: yes$' \
+        asserts     'A ThingWorx log carrying durationMS= or bytes= fields reports metrics_observed: yes for the file - at least one of its lines observed a metric' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file metrics_observed field), fed by read_and_process_logs() folding the per-line $metrics_observed set by the format spec probe declaring marks_metrics_observed' \
+        contract    'features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (D18) and features/log-format-registry.md section `-V format-detection` section-contract - metrics_observed distinguishes ThingWorx logs that have parseable latency/bytes from ones that do not'
 }
 
 scenario_tw_edge_c_sdk() {
