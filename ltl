@@ -357,6 +357,7 @@ my %match_type_to_slug = (
 #   match_type         => integer 1-13 (first successful bind for this file)
 #   slug               => string from %match_type_to_slug
 #   metrics_observed   => 0|1
+#   event_ledger       => 0|1 (the bound entry's FR_EVENT_LEDGER, #453)
 #   ts_precision       => 'ms' | 's' | undef
 #   matched_lines      => integer
 #   unmatched_lines    => integer
@@ -415,6 +416,14 @@ use constant {
     FR_FILENAME        => 22,  # filename evidence (D45): { matcher, stem, date,
                                # index, ext, placement } or undef
     FR_FILENAME_SAMPLES=> 23,  # producer-true names the matcher must accept
+    FR_EVENT_LEDGER    => 24,  # 1 = event ledger: maximal coverage of the
+                               # operations the format describes (#453 R8)
+    FR_CLASSIFY        => 25,  # write-direct classification closure (sets
+                               # $line_outcome / $line_cls_sig from the record
+                               # lexicals) — the CSV path's call shape (D29);
+                               # undef on scanned entries, whose blocks inline it
+    FR_CLS_SIG         => 26,  # criteria-signature id of the entry's resolved
+                               # classification (0 = declines) (D32)
 };
 my @format_registry;           # scanned entries, static cascade order: one
                                # occupant per variant-group slot (D47/F1)
@@ -2426,6 +2435,18 @@ my @format_record_fields = qw(timestamp_str category_bucket object instance
 my ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message );
 my ( $bytes, $duration );
 my ( $status_code, $metrics_observed );
+# Per-line classification (#453 D16): the winning entry's generated block
+# (or the CSV path's FR_CLASSIFY closure) writes the outcome — 2 failure,
+# 1 success, 0 unclassified — and the criteria-signature id of the rules
+# that decided it (D32). Neither is reset by the loop: every block assigns
+# both, a declining entry included.
+my ( $line_outcome, $line_cls_sig ) = ( 0, 0 );
+my %format_record_ref = (
+    timestamp_str => \$timestamp_str, category_bucket => \$category_bucket, object => \$object,
+    instance => \$instance, user => \$user, session => \$session, platform => \$platform,
+    thread => \$thread, message => \$message, bytes => \$bytes, duration => \$duration,
+    status_code => \$status_code, metrics_observed => \$metrics_observed,
+);
 # Set by the generated blocks alongside the record fields: the parsed
 # whole-second epoch and the fractional milliseconds stripped from
 # $timestamp_str (the strip runs before parsing so the date key excludes
@@ -2435,6 +2456,25 @@ my ( $status_code, $metrics_observed );
 # than the date lookup plus arithmetic.
 my ( $timestamp, $fractional_ms );
 my ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
+
+# Success/failure classification (#453). The global default is failure-only
+# (D7): a diagnostics log cannot assert success, so every non-failure line
+# stays unclassified. An entry that declares an outcome replaces the
+# default's list for that outcome; one that declares nothing inherits the
+# whole default; 'none' or {} declines (D15). Criteria are field => pattern
+# on the extracted record (any-of across criteria, all-of within one, D2);
+# the resolved shape is compiled once at registry build into each entry's
+# generated block (format_classification_src). The tables below are the
+# build-time products the generated code references.
+my %classification_default = (
+    failure => [ { category_bucket => '^(?:ERROR|FATAL|CRITICAL)$' } ],
+);
+my @format_cls_sets;      # literal-alternation criteria as hash sets (D25),
+                          # indexed by the id spliced into the generated code;
+                          # one set per distinct alternative list
+my %format_cls_set_id;    # canonical alternative list => set index
+my @format_cls_sig_str;   # criteria-signature string per signature id (0 = 'none')
+my %format_cls_sig_id;    # signature string => id
 
 # The single generated scan sub (see compile_format_scan_sub) and the
 # regeneration inputs promotion needs: the entry snapshot the generated
@@ -2541,7 +2581,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-05-05 00:00:00', 'ERROR', 'c.p.a.u.JobPurgeScheduler', '', 'SuperUser', '', '', 'pool-1-thread-1', 'Job purge completed', undef, undef, '0', '0' ],
         [ '2025-05-05 00:00:01', 'INFO', 'S.c.t.d.e.DSLScript', '', 'Administrator', 'F0000000-0000-0000-0000-00000000000F', 'platform-1', 'TWEventProcessor-4', 'Executed service durationMs=? result bytes=? count=7', '1024', '42', '0', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 2, 0 ] },
     { name => 'mt10', slug => 'connection_server_standard', match_type => 10, scanned => 1, head_class => 'digit',
       variant_group => 'connection_server', variant_default => 1,
       filename => { stem => 'cxserver', index => 'dot_n_dash_n', ext => '.log', placement => 'before',
@@ -2565,7 +2606,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-08-14 21:00:34', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-12', 'Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size', undef, undef, '0', '0' ],
         [ '2025-08-14 21:00:35', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in ? millseconds', undef, '152', '0', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     # Integration Runtime: byte-identical line shape to Connection Server
     # (same Vert.x/logback encoder) but its dates are yyyy-dd-MM (#385).
     # Selected per file by provenance evidence (D47); its samples carry
@@ -2593,7 +2635,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.i.IntegrationRuntimeConfiguration', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted', undef, undef, '0', '0' ],
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.s.SecurityManagerBootstrapper', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'initializing KeyStore provider', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     # Windchill Workgroup Manager client logs: one line shape shared by the
     # genlwsc / uwgm_client / uwgm files (each file's own header block
     # declares `columns "date time tz msgtype logid tid area message"` and
@@ -2633,7 +2676,8 @@ sub format_registry_specs {
         [ '2024-09-16T05:40:41', 'DEBUG', 'uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader', undef, undef, undef, 'P3e68', 'T2950', 'UWGMLIB_PREFERENCES: [AutoCAD]', undef, undef, '0', '0' ],
         [ '2024-09-16T05:40:43', 'ERROR', 'UWGM', undef, undef, undef, 'P3e68', 'T2950', 'UWGMCLNT_UI: UwgmEmbedZBrowser::Init Service unavailable', undef, undef, '0', '0' ],
         [ '2024-09-16T05:40:44', 'START', 'uwgm.session1.act#111761707663362.srvtxn#0', undef, undef, undef, 'P3e68', 'T2950', 'Server Transaction started', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0, 0, 0, 2, 0 ] },
     { name => 'mt1gen', slug => 'thingworx_standard', match_type => 1, scanned => 1, head_class => 'digit',
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
@@ -2648,7 +2692,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-02-04 12:05:57', 'DEBUG', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
         [ '2025-02-04 12:05:58', 'WARN', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     { name => 'mt2', slug => 'thingworx_rac_client', match_type => 2, scanned => 1, head_class => 'bracket_digit',
       pattern_src => '^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3}).*? \[[L: ]*([^\]]*)\]',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
@@ -2663,13 +2708,17 @@ sub format_registry_specs {
       expect => [
         [ '2025-02-04 12:06:22', 'TRACE', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
         [ '2025-03-01 08:00:00', 'INFO', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     { name => 'mt12', slug => 'tomcat_codebeamer', match_type => 12, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.]+)ms\] \[(.+)s\]',
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[6,'duration'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      event_ledger => 1,
+      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
+                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
       guard => { lit => 'ms] [' },
       expect_ancestors => [],
       samples => [
@@ -2679,29 +2728,39 @@ sub format_registry_specs {
       expect => [
         [ '29/Oct/2025:08:52:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /urlversioned/202510290803/images/newskin/login_page/icon_qa.png', '20097', '5', '200', '1' ],
         [ '29/Oct/2025:08:52:12', '2xx', undef, undef, undef, undef, undef, undef, 'GET /cb/item', '512', '12', '200', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 1, 1 ] },
     { name => 'mt4', slug => 'tomcat_access_common', match_type => 4, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$',
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => undef, stats_eligible => 1,
+      event_ledger => 1,
+      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
+                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
       guard => { tail_one_token => 1 },
       expect_ancestors => [],
       samples => [
         '43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626',
         '10.0.0.1 - - [02/Feb/2025:00:01:00 +0000] "GET /health HTTP/1.1" 204 -',
+        '10.0.0.2 - - [02/Feb/2025:00:02:00 +0000] "POST /Thingworx/Things/T1/Services/Run HTTP/1.1" 500 512',
       ],
       expect => [
         [ '02/Feb/2025:00:00:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Thingworx/Metrics', '17626', undef, '200', '1' ],
         [ '02/Feb/2025:00:01:00', '2xx', undef, undef, undef, undef, undef, undef, 'GET /health', undef, undef, '204', '1' ],
-      ] },
+        [ '02/Feb/2025:00:02:00', '5xx', undef, undef, undef, undef, undef, undef, 'POST /Thingworx/Things/T1/Services/Run', '512', undef, '500', '1' ],
+      ],
+      expect_outcomes => [ 1, 1, 2 ] },
     { name => 'mt9', slug => 'jboss_access', match_type => 9, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$',
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[8,'duration'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      event_ledger => 1,
+      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
+                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
       guard => { lit => '" "' },
       expect_ancestors => [],
       samples => [
@@ -2711,7 +2770,8 @@ sub format_registry_specs {
       expect => [
         [ '13/Mar/2025:09:02:41', '2xx', undef, undef, undef, undef, undef, undef, 'GET /async/prediction/evaluation', '51', '651', '200', '1' ],
         [ '13/Mar/2025:09:02:42', '2xx', undef, undef, undef, undef, undef, undef, 'POST /async/prediction/jobs', '88', '12', '201', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 1, 1 ] },
     { name => 'mt3', slug => 'tomcat_access_with_duration', match_type => 3, scanned => 1, head_class => 'any',
       variant_group => 'access_with_duration', variant_default => 1,
       filename => { stem => 'localhost_access_log', date => 'iso', ext => '.txt', placement => 'before',
@@ -2721,17 +2781,23 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      event_ledger => 1,
+      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
+                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
       expect_ancestors => [ 'mt12', 'mt4', 'mt9' ],
       samples => [
         '43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295',
         '10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1',
         '1.2.3.4 - - [05/May/2025:00:00:01 +0000] "GET /Thingworx/Things/T1 HTTP/1.1" 200 100 25 http-nio-8443-exec-3 AB12CD34EF',
+        '10.0.0.3 - - [05/May/2025:00:00:02 +0000] "GET /Thingworx/Things/T2 HTTP/1.1" 404 0 3',
       ],
       expect => [
         [ '02/Feb/2025:00:00:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Thingworx/Metrics', '17626', '295', '200', '1' ],
         [ '05/May/2025:00:00:00', '2xx', undef, undef, undef, undef, undef, undef, 'POST /Thingworx/WS', '261', '1', '200', '1' ],
         [ '05/May/2025:00:00:01', '2xx', undef, undef, undef, 'AB12CD34EF', undef, 'http-nio-8443-exec-3', 'GET /Thingworx/Things/T1', '100', '25', '200', '1' ],
-      ] },
+        [ '05/May/2025:00:00:02', '4xx', undef, undef, undef, undef, undef, undef, 'GET /Thingworx/Things/T2', '0', '3', '404', '1' ],
+      ],
+      expect_outcomes => [ 1, 1, 1, 2 ] },
     # Apache HTTP Server 2.x / Tomcat 10.1+: same `%h %l %u %t "%r" %s %b %D`
     # shape as Tomcat 6-9 but %D is microseconds (#17). Selected per file by
     # provenance evidence (D47) — httpd names its log `access_log` /
@@ -2745,13 +2811,17 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'us', stats_eligible => 1,
+      event_ledger => 1,
+      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
+                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
       expect_ancestors => [ 'mt12', 'mt4', 'mt9' ],
       samples => [
         '127.0.0.1 - - [22/Jan/2026:08:49:51 +0000] "GET /Windchill/servlet/WindchillGW/wt.httpgw.HTTPServer/ping HTTP/1.1" 200 209 173542',
       ],
       expect => [
         [ '22/Jan/2026:08:49:51', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Windchill/servlet/WindchillGW/wt.httpgw.HTTPServer/ping', '209', '173542', '200', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 1 ] },
     { name => 'mt5', slug => 'connection_server_json', match_type => 5, scanned => 1, head_class => 'brace',
       pattern_src => '^{"\@timestamp":"([^"]*).*"level":"([^"]*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
@@ -2766,7 +2836,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-02-02 21:03:06', 'WARN', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
         [ '2025-02-02 21:03:07', 'INFO', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     # The event name is a closed alternation, not an open `(.+?)`: G1's
     # concurrent-cycle lines (`Concurrent Mark Cycle`, `Concurrent Cycle`,
     # `Concurrent Undo Cycle`) share this line head but are deliberately
@@ -2785,6 +2856,8 @@ sub format_registry_specs {
       transforms => [ 'gc_heap_delta' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 1,
+      event_ledger => 1,
+      classification => 'none',   # every pause is logged (a ledger); what makes one a failure is #483
       expect_ancestors => [],
       samples => [
         '[2025-04-05T11:10:47.867+0000][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 2433M->66M(49152M) 18.406ms',
@@ -2801,7 +2874,8 @@ sub format_registry_specs {
         [ '2025-04-05T11:10:50', 'Pause Cleanup', undef, undef, undef, undef, undef, undef, undef, '0', '0.204', '0', '1' ],
         [ '2024-10-16T05:27:56', 'To-space exhausted', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
         [ '2025-06-05T11:17:57', 'Using G1', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0, 0, 0, 0, 0 ] },
     { name => 'mt7', slug => 'tw_analytics_v2', match_type => 7, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+)\s+\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[.,]\d{3})\] (.*)$',
       field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],
@@ -2816,7 +2890,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-02-19 18:31:00', 'ERROR', undef, undef, undef, undef, undef, undef, 'com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!', undef, undef, '0', '0' ],
         [ '2025-02-20 04:49:11', 'INFO', undef, undef, undef, undef, undef, undef, 'org.ehcache.core.EhcacheManager: Cache \'scorefunc_cachex\' created in EhcacheManager.', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 2, 0 ] },
     { name => 'mt8', slug => 'tw_analytics_worker', match_type => 8, scanned => 1, head_class => 'digit',
       pattern_src => '^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^ ]*)\s+\[([^]]+)\]\s+(\w+)\s+(.*)$',
       field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'message'] ],
@@ -2831,7 +2906,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-02-20 10:06:10', 'WARN', undef, undef, undef, undef, undef, 'nioEventLoopGroup-2-1', 'io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]', undef, undef, '0', '0' ],
         [ '2025-02-20 10:06:11', 'INFO', undef, undef, undef, undef, undef, 'pool-2-thread-1', 'io.netty.util.ResourceLeakDetector - Leak detection level set to SIMPLE.', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     # Windchill Method Server / Background Method Server log4j diagnostic
     # log: `%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%t] %c %x - %m`. One layout
     # for the whole service family (MethodServer, BackgroundMethodServer,
@@ -2868,7 +2944,8 @@ sub format_registry_specs {
         [ '2025-07-18 04:46:41', 'INFO', 'wt.method.server.startup', undef, '', undef, undef, 'main', 'Starting BackgroundMethodServer', undef, undef, '0', '0' ],
         [ '2025-07-18 08:19:31', 'ERROR', 'com.ptc.windchill.esi.txn.ESITransactionUtility', undef, 'wcadmin', undef, undef, 'ActiveMQ Session Task-3', 'Exception while fetching a transaction from the input parameters. (wt.federation.federationResource/109) wt.util.WTException: Unable to find target object "OR:wt.part.WTPart:123456789".', undef, undef, '0', '0' ],
         [ '2025-07-18 04:52:55', 'WARN', 'wt.jmx.notif.methodContextGauge', undef, '', undef, undef, 'JMX Monitor ThreadGroup<main> Executor Pool [Thread-21]', 'Time=2025-07-18 04:52:55.257 +0000, Name=MethodContextsGaugeNotifier', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 2, 0 ] },
     { name => 'mt11', slug => 'tw_edge_c_sdk', match_type => 11, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+) (\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}[,.]\d+) (.*)',
       field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],
@@ -2885,7 +2962,8 @@ sub format_registry_specs {
         [ '2025-08-09 18:19:04', 'INFO', 'change_notification_source.cpp:11', undef, undef, undef, undef, undef, 'OnProvisioningChanged provisioning change update receive', undef, undef, '0', '0' ],
         [ '2025-08-09 18:27:18', 'ERROR', undef, undef, undef, undef, undef, undef, 'TW_SSL_READ: Error reading from SSL strea', undef, undef, '0', '0' ],
         [ '2025-08-09 18:27:18', 'FORCE', 'twx_connection.cpp:246', undef, undef, undef, undef, undef, 'Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 2, 0 ] },
     # CSV is a stateful per-file stage outside the ordered scan (D32): its
     # matcher is the two-line confirmation in read_and_process_logs()
     # (detect_and_parse_csv_header), not a regex, so this entry is never
@@ -3417,6 +3495,214 @@ sub compile_format_guard {
     die "ltl: format registry: unknown guard spec for compile_format_guard\n";
 }
 
+# --- Success/failure classification (#453) ---------------------------------
+#
+# Resolve an entry's declared classification against %classification_default
+# (D15). Returns undef for a declining entry ('none' or {}), otherwise
+# { failure => [criteria], success => [criteria] } with every outcome the
+# entry did not name inherited from the default. Validates the declaration
+# shape loudly: outcomes are success/failure only, each a list of criteria,
+# each criterion a non-empty hash of record field (or 'line') => pattern.
+sub format_classification_resolve {
+    my ($spec) = @_;
+    my $decl = $spec->{classification};
+    my $where = "ltl: format registry: entry '$spec->{name}' classification";
+    return undef if defined $decl && !ref $decl && $decl eq 'none';
+    return undef if ref $decl eq 'HASH' && !%$decl;
+    die "$where must be a hash of outcome => [ criteria ], or 'none'\n"
+        if defined $decl && ref $decl ne 'HASH';
+    for my $k (keys %{ $decl // {} }) {
+        die "$where names unknown outcome '$k' (success|failure)\n" unless $k eq 'success' || $k eq 'failure';
+    }
+    my %is_field = map { $_ => 1 } @format_record_fields, 'line';
+    my %resolved;
+    for my $outcome (qw(failure success)) {
+        my $list = ($decl && exists $decl->{$outcome}) ? $decl->{$outcome} : $classification_default{$outcome};
+        next unless defined $list;
+        die "$where outcome '$outcome' must be a list of criteria\n" unless ref $list eq 'ARRAY';
+        for my $crit (@$list) {
+            die "$where outcome '$outcome': a criterion is a non-empty hash of field => pattern\n"
+                unless ref $crit eq 'HASH' && %$crit;
+            for my $f (sort keys %$crit) {
+                die "$where names unknown field '$f' (a record field of \@format_record_fields, or 'line')\n" unless $is_field{$f};
+                my $pat = $crit->{$f};
+                die "$where pattern for '$f' must be a string\n" if ref $pat || !defined $pat || !length $pat;
+                die "$where pattern for '$f' contains the m~~ delimiter\n" if index($pat, '~') >= 0;
+                die "$where pattern for '$f' contains an interpolating \$ or \@ (the pattern is spliced into generated source)\n"
+                    if $pat =~ /(?<!\\)[\$\@](?=[A-Za-z_{])/;
+                eval { qr/$pat/ } or die "$where pattern for '$f' does not compile: $@";
+            }
+        }
+        $resolved{$outcome} = $list;
+    }
+    # An outcome declared as an empty list classifies nothing; when both
+    # are empty the entry declines exactly as 'none' does.
+    return undef unless grep { @{ $resolved{$_} // [] } } qw(failure success);
+    return \%resolved;
+}
+
+# Canonical criteria signature (D19/D32): outcomes in failure, success
+# order as "outcome=<criteria>", criteria joined by '|', the conditions of
+# one criterion joined by '&' in field order, outcomes joined by ';'. A
+# declining entry is 'none'. Two entries with the same resolved rules have
+# the same signature, so a same-rules occupant flip is never a rule change.
+sub format_classification_signature {
+    my ($resolved) = @_;
+    return 'none' unless $resolved;
+    my @parts;
+    for my $outcome (qw(failure success)) {
+        my $list = $resolved->{$outcome};
+        next unless $list && @$list;
+        push @parts, "$outcome=" . join('|', map { my $c = $_; join('&', map { "$_=$c->{$_}" } sort keys %$c) } @$list);
+    }
+    return join(';', @parts);
+}
+
+# Single-quoted Perl string literal for generated source.
+sub format_classification_quote {
+    my ($lit) = @_;
+    $lit =~ s/([\\'])/\\$1/g;
+    return "'$lit'";
+}
+
+# The longest literal run a pattern requires of every match (D27's index()
+# gate), or undef when none can be asserted safely: any alternation, or
+# any quantified group, can make a run optional, so those patterns get the
+# regex alone. A run inside a character class or an escape is not a
+# candidate, and a run whose last character carries a quantifier loses it.
+# Any extended group other than (?:...) — a flag such as (?i), a
+# lookaround, a named group — disqualifies the pattern: its text is not a
+# literal the line must carry.
+sub format_classification_required_literal {
+    my ($pattern) = @_;
+    return undef if $pattern =~ /\|/ || $pattern =~ /\)[?*{]/ || $pattern =~ /\(\?[^:]/;
+    (my $p = $pattern) =~ s/\\.|\[(?:\\.|[^\]])*\]/\x00/g;
+    my $best = '';
+    while ($p =~ /([A-Za-z0-9 _:=,;\/-]+)/g) {
+        my $run = $1;
+        my $next = substr($p, pos($p), 1);
+        $run = substr($run, 0, -1) if length $next && $next =~ /^[?*+{]$/;
+        $best = $run if length($run) > length($best);
+    }
+    return length($best) >= 4 ? $best : undef;
+}
+
+# Compile one field condition to inline source (D25/D27) — returns
+# (source, cost rank). A literal alternation anchored at both ends
+# (^(?:A|B)$, ^A$) becomes a hash-set exists / a string eq; a
+# metacharacter-free pattern becomes index(); anything else is spliced as
+# a literal m~~ match, fronted by an index() gate on its required literal
+# when one exists. $guard_defined adds the defined test for a field the
+# entry may leave undef. The rank orders conditions within a criterion
+# cheapest first: short-field set/eq/index before any regex, and message
+# or whole-line tests last.
+sub format_classification_cond_src {
+    my ($field, $pattern, $guard_defined) = @_;
+    my $var = $field eq 'line' ? '$_[0]' : "\$$field";
+    my $long = ($field eq 'message' || $field eq 'line') ? 3 : 0;
+    my ($src, $rank);
+    my $lit = '[^\\\\.*+?()\[\]{}|^$]+';
+    if ($pattern =~ /^\^\((?:\?:)?($lit(?:\|$lit)*)\)\$$/ || $pattern =~ /^\^($lit)\$$/) {
+        my @alts = split /\|/, $1;
+        if (@alts == 1) {
+            $src = "$var eq " . format_classification_quote($alts[0]);
+        } else {
+            my $id = $format_cls_set_id{ join("\0", sort @alts) } //= do {
+                push @format_cls_sets, { map { $_ => 1 } @alts };
+                $#format_cls_sets;
+            };
+            $src = "exists \$format_cls_sets[$id]\{$var\}";
+        }
+        $rank = $long;
+    } elsif ($pattern !~ /[\\.*+?()\[\]{}|^\$]/) {
+        $src = "index($var, " . format_classification_quote($pattern) . ") >= 0";
+        $rank = $long + 1;
+    } else {
+        my $gate = format_classification_required_literal($pattern);
+        $src = (defined $gate ? "index($var, " . format_classification_quote($gate) . ") >= 0 && " : '')
+             . "$var =~ m~$pattern~";
+        $rank = $long + 2;
+    }
+    $src = "defined $var && $src" if $guard_defined;
+    return ("($src)", $rank);
+}
+
+# One entry's classification statement (D16): failure first (D4/D28), then
+# success; a declining entry assigns the unclassified outcome so the loop
+# never resets the lexical (D31). Both the outcome and the entry's
+# criteria-signature id are written. Built once per spec at registry
+# build (the hash sets it references are allocated here) and spliced
+# verbatim into every block and closure compiled for the entry.
+sub format_classification_src {
+    my ($spec) = @_;
+    my ($cls, $sig) = ($spec->{_cls}, $spec->{_cls_sig});
+    return "\$line_outcome = 0; \$line_cls_sig = $sig;" unless $cls;
+    # A field gets a defined guard unless the entry always defines it: the
+    # two zero-default fields never are undef; a captured field is taken as
+    # always defined only when no expected record leaves it undef (an
+    # optional capture group or an undef-producing transform shows up
+    # there), and bytes/duration are always guarded.
+    my %is_target = map { $_->[1] => 1 } @{ $spec->{field_map} };
+    my %zero_default = ( status_code => 1, metrics_observed => 1 );
+    my %may_undef = ( bytes => 1, duration => 1 );
+    for my $row (@{ $spec->{expect} // [] }) {
+        for my $i (0 .. $#format_record_fields) {
+            $may_undef{ $format_record_fields[$i] } = 1 unless defined $row->[$i];
+        }
+    }
+    my $guard = sub { my ($f) = @_; $f ne 'line' && !$zero_default{$f} && (!$is_target{$f} || $may_undef{$f}) };
+    my $outcome_src = sub {
+        my ($list) = @_;
+        my @crit;
+        for my $c (@$list) {
+            my @conds = sort { $a->[1] <=> $b->[1] }
+                        map { [ format_classification_cond_src($_, $c->{$_}, $guard->($_)) ] }
+                        sort keys %$c;
+            push @crit, @conds == 1 ? $conds[0][0] : '(' . join(' && ', map { $_->[0] } @conds) . ')';
+        }
+        return join(' || ', @crit);
+    };
+    my $f = ($cls->{failure} && @{ $cls->{failure} }) ? $outcome_src->($cls->{failure}) : undef;
+    my $s = ($cls->{success} && @{ $cls->{success} }) ? $outcome_src->($cls->{success}) : undef;
+    my $expr = defined $f && defined $s ? "($f) ? 2 : ($s) ? 1 : 0"
+             : defined $f               ? "($f) ? 2 : 0"
+             : defined $s               ? "($s) ? 1 : 0"
+             :                            '0';
+    return "\$line_outcome = $expr; \$line_cls_sig = $sig;";
+}
+
+# Interpreted reading of a resolved classification over the current record
+# lexicals — the reference the compiled form is proven against at build
+# (D33). Every pattern is applied as the regex it was declared as.
+sub format_classification_reference {
+    my ($cls, $line) = @_;
+    return 0 unless $cls;
+    for my $o ([ failure => 2 ], [ success => 1 ]) {
+        my $list = $cls->{ $o->[0] } or next;
+        for my $c (@$list) {
+            my $all = 1;
+            for my $f (keys %$c) {
+                my $v = $f eq 'line' ? $line : ${ $format_record_ref{$f} };
+                unless (defined $v && $v =~ /$c->{$f}/) { $all = 0; last }
+            }
+            return $o->[1] if $all;
+        }
+    }
+    return 0;
+}
+
+# The entry's classification as a write-direct closure over the record
+# lexicals (the CSV path's call shape, D29; the generated blocks inline
+# the same source). Returns the outcome it wrote.
+sub compile_format_classifier {
+    my ($spec) = @_;
+    my $src = "sub {\n$spec->{_cls_src}\nreturn \$line_outcome;\n}";
+    my $closure = eval $src;
+    die "ltl: format registry: classification codegen failed for entry '$spec->{name}': $@\nGENERATED SOURCE:\n$src\n"
+        if $@ || ref $closure ne 'CODE';
+    return $closure;
+}
+
 # Generate one entry's extraction closure from its declarative definition
 # (D27 codegen, amended by the S5 gate probe): the closure writes the
 # file-scoped record lexicals directly and returns 1, so the hot path
@@ -3517,6 +3803,11 @@ sub format_entry_block_src {
             or die "ltl: format registry: entry '$spec->{name}' references unknown transform '$t'\n";
         push @body, $code;
     }
+
+    # Classification (#453 D16): decided here, after the entry's own metric
+    # masks and transforms and before the timestamp, so a message criterion
+    # sees the message as the block leaves it.
+    push @body, $spec->{_cls_src};
 
     # Inline timestamp handling (D31 taken to its P8 conclusion: the
     # closure-call overhead disappears when the parse is inlined into the
@@ -3679,6 +3970,7 @@ sub format_record_reset {
     ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = ("") x 9;
     ( $bytes, $duration ) = ( undef, undef );
     ( $status_code, $metrics_observed ) = ( 0, 0 );
+    ( $line_outcome, $line_cls_sig ) = ( 0, 0 );
     ( $timestamp, $fractional_ms ) = ( undef, 0 );
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
     timestamp_date_cache_clear();
@@ -3711,6 +4003,7 @@ sub format_validate_scan_sub {
     my @saved_record = ( $timestamp_str, $category_bucket, $object, $instance, $user,
                          $session, $platform, $thread, $message, $bytes, $duration,
                          $status_code, $metrics_observed, $timestamp, $fractional_ms,
+                         $line_outcome, $line_cls_sig,
                          $format_last_ts_str, $format_last_ts_epoch );
     my $saved_cache = timestamp_date_cache_snapshot();
     for my $e (@$entries) {
@@ -3728,6 +4021,7 @@ sub format_validate_scan_sub {
     ( $timestamp_str, $category_bucket, $object, $instance, $user,
       $session, $platform, $thread, $message, $bytes, $duration,
       $status_code, $metrics_observed, $timestamp, $fractional_ms,
+      $line_outcome, $line_cls_sig,
       $format_last_ts_str, $format_last_ts_epoch ) = @saved_record;
     timestamp_date_cache_restore($saved_cache);
     return;
@@ -3810,6 +4104,23 @@ sub build_format_registry {
         push @{ $group_members{ $spec->{group} } }, $spec->{name};
     }
 
+    # Classification (#453 D15/D32): resolve every entry against the global
+    # default once, assign each distinct resolved rule set a signature id
+    # (0 = declines), and generate the entry's classification source once —
+    # the hash sets it references are allocated here, never per compile.
+    @format_cls_sets = ();
+    %format_cls_set_id = ();
+    @format_cls_sig_str = ('none');
+    %format_cls_sig_id = ( none => 0 );
+    for my $spec (@specs) {
+        die "ltl: format registry: entry '$spec->{name}' event_ledger must be 0 or 1\n"
+            if defined $spec->{event_ledger} && $spec->{event_ledger} !~ /^[01]$/;
+        $spec->{_cls} = format_classification_resolve($spec);
+        my $sig = format_classification_signature($spec->{_cls});
+        $spec->{_cls_sig} = $format_cls_sig_id{$sig} //= do { push @format_cls_sig_str, $sig; $#format_cls_sig_str };
+        $spec->{_cls_src} = format_classification_src($spec);
+    }
+
     # Compile recognition patterns once; validate reserved slots.
     my %patterns;
     for my $spec (@specs) {
@@ -3844,9 +4155,14 @@ sub build_format_registry {
     for my $spec (grep { $_->{scanned} } @specs) {
         my $extract = compile_format_extractor($spec, $clobbered_by{ $spec->{name} },
             { include_query_string => 0, include_session => 0 });
+        my $want_o = $spec->{expect_outcomes};
+        die "ltl: format registry: entry '$spec->{name}' declares " . (ref $want_o eq 'ARRAY' ? scalar(@$want_o) : 'no')
+          . " expect_outcomes for " . scalar(@{ $spec->{samples} }) . " samples (one integer per sample: 2 failure, 1 success, 0 unclassified)\n"
+            unless ref $want_o eq 'ARRAY' && @$want_o == @{ $spec->{samples} };
         for my $i (0 .. $#{ $spec->{samples} }) {
             ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = (undef) x 9;
             ( $bytes, $duration, $status_code, $metrics_observed ) = (undef) x 4;
+            ( $line_outcome, $line_cls_sig ) = ( -1, -1 );   # sentinels: the block must write both
             $extract->( $spec->{samples}[$i] );
             my @got = ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message, $bytes, $duration, $status_code, $metrics_observed );
             my $want = $spec->{expect}[$i]
@@ -3859,6 +4175,21 @@ sub build_format_registry {
                   . ", expected " . (defined $w ? "'$w'" : 'undef')
                   . " (produced_by compile_format_extractor(); contract: expected records in format_registry_specs() transcribe the retired cascade branch)\n";
             }
+            # D33 (#453): the compiled classifier must give the declared
+            # outcome for every sample AND agree with the interpreted
+            # reading of the declared patterns — a pattern shape the
+            # compiler mis-recognises is a startup error, not a silent
+            # misclassification.
+            die "ltl: format registry: classification self-test failure for entry '$spec->{name}' sample " . ($i + 1)
+              . ": compiled classifier gives $line_outcome, expected $want_o->[$i]"
+              . " (produced_by format_classification_src(); contract: expect_outcomes in format_registry_specs() declare each sample's outcome under the entry's resolved criteria)\n"
+                unless $line_outcome == $want_o->[$i];
+            my $ref_o = format_classification_reference($spec->{_cls}, $spec->{samples}[$i]);
+            die "ltl: format registry: classification compiler disagrees with the declared patterns for entry '$spec->{name}' sample " . ($i + 1)
+              . ": compiled $line_outcome, interpreted $ref_o (produced_by format_classification_cond_src())\n"
+                unless $ref_o == $line_outcome;
+            die "ltl: format registry: entry '$spec->{name}' block wrote criteria-signature id $line_cls_sig, expected $spec->{_cls_sig}\n"
+                unless $line_cls_sig == $spec->{_cls_sig};
         }
     }
 
@@ -3960,6 +4291,9 @@ sub build_format_registry {
         $entry->[FR_GROUP_DEFAULT]   = $group_default{ $spec->{group} } eq $spec->{name} ? 1 : 0;
         $entry->[FR_FILENAME]        = $filename{ $spec->{name} };
         $entry->[FR_FILENAME_SAMPLES]= $spec->{filename}{samples} // [];
+        $entry->[FR_EVENT_LEDGER]    = $spec->{event_ledger} ? 1 : 0;
+        $entry->[FR_CLASSIFY]        = $spec->{scanned} ? undef : compile_format_classifier($spec);
+        $entry->[FR_CLS_SIG]         = $spec->{_cls_sig};
         if ($spec->{scanned}) {
             push @format_registry_members, $entry;
             push @format_registry, $entry if $entry->[FR_GROUP_DEFAULT];
@@ -4196,6 +4530,7 @@ sub emit_format_detection_verbose {
             push @verbose_output, "  format: -";
             push @verbose_output, "  match_type: -";
             push @verbose_output, "  metrics_observed: -";
+            push @verbose_output, "  event_ledger: -";
             push @verbose_output, "  matched_lines: 0";
             push @verbose_output, "  unmatched_lines: 0";
             push @verbose_output, "  first_match_line: -";
@@ -4209,6 +4544,7 @@ sub emit_format_detection_verbose {
         push @verbose_output, "  format: $slug";
         push @verbose_output, "  match_type: $mt";
         push @verbose_output, "  metrics_observed: " . ($fdd->{metrics_observed} ? 'yes' : 'no');
+        push @verbose_output, "  event_ledger: " . ($fdd->{event_ledger} ? 'yes' : 'no');
         push @verbose_output, "  matched_lines: $fdd->{matched_lines}";
         push @verbose_output, "  unmatched_lines: $fdd->{unmatched_lines}";
         push @verbose_output, "  first_match_line: " .
@@ -10868,6 +11204,7 @@ sub read_and_process_logs {
                 ( $object, $instance, $user, $session, $platform, $thread ) = ("") x 6;
                 ( $bytes, $duration ) = ( undef, undef );
                 $status_code = 0;
+                $line_entry->[FR_CLASSIFY]->($_);
 
             ## Registry scan (#58): recognition + extraction in one step ##
             # Pinned-closure MTF over the compiled registry entries, cheap
@@ -10954,6 +11291,7 @@ sub read_and_process_logs {
                             ( $object, $instance, $user, $session, $platform, $thread ) = ("") x 6;
                             ( $bytes, $duration ) = ( undef, undef );
                             $status_code = 0;
+                            $line_entry->[FR_CLASSIFY]->($_);
                         } else {
                             # Field count mismatch — not CSV, reset
                             $csv_detected = 0;
@@ -11066,6 +11404,7 @@ sub read_and_process_logs {
                     match_type       => undef,
                     slug             => undef,
                     metrics_observed => 0,
+                    event_ledger     => 0,
                     matched_lines    => 0,
                     unmatched_lines  => 0,
                     first_match_line => undef,
@@ -11074,6 +11413,9 @@ sub read_and_process_logs {
                     $fdd->{match_type}       = $match_type;
                     $fdd->{slug}             = $match_type_to_slug{$match_type} // 'unknown';
                     $fdd->{first_match_line} = $line_number;
+                    # The bound entry's event-ledger flag becomes the
+                    # file's property (#453 R8/D19).
+                    $fdd->{event_ledger}     = $line_entry ? $line_entry->[FR_EVENT_LEDGER] : 0;
                     # D18: the bound format's duration unit varies across
                     # producers and no -du was given — tell the user which
                     # assumption is in effect, once per run. Phrased run-level
@@ -11939,6 +12281,7 @@ sub read_and_process_logs {
                     match_type       => undef,
                     slug             => undef,
                     metrics_observed => 0,
+                    event_ledger     => 0,
                     matched_lines    => 0,
                     unmatched_lines  => 0,
                     first_match_line => undef,
@@ -11956,6 +12299,7 @@ sub read_and_process_logs {
                 match_type       => undef,
                 slug             => undef,
                 metrics_observed => 0,
+                event_ledger     => 0,
                 matched_lines    => 0,
                 unmatched_lines  => 0,
                 first_match_line => undef,

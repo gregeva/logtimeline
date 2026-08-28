@@ -345,6 +345,12 @@ scenario_tomcat_common() {
         asserts     'Every line of the derived common-format fixture parses as match_type 4 (no fallthroughs to other branches)' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
         contract    'Derived 1:1 from the hand-truncated 5000-line Tomcat 9 fixture; if that fixture changes, the expected count changes in the same commit'
+
+    assert_line "$out" \
+        pattern     '^  event_ledger: yes$' \
+        asserts     'An access log is an event ledger: the server writes one line per request it handled, so the file reports event_ledger: yes and its lines can be read as attempted events. A common-format access log has no duration field, which does not change that - the ledger property is a property of the producer, not of the fields present.' \
+        produced_by "emit_format_detection_verbose() in ltl (per-file event_ledger field, bound in read_and_process_logs() from the first matching entry's FR_EVENT_LEDGER slot)" \
+        contract    'features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (R8, D19) - event_ledger: yes|no follows metrics_observed: in every file block'
 }
 
 scenario_jboss_enhanced() {
@@ -467,6 +473,12 @@ scenario_thingworx_standard() {
         asserts     'ThingWorx standard log binds to internal match_type 1' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
         contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type 1 covers both full ThingWorx and the Logback-style fallback at ltl:4655'
+
+    assert_line "$out" \
+        pattern     '^  event_ledger: no$' \
+        asserts     'An application log is not an event ledger: it records what the code chose to log, so there is no one-line-per-request relationship and the file reports event_ledger: no - its line counts must not be read as attempted events' \
+        produced_by "emit_format_detection_verbose() in ltl (per-file event_ledger field, bound in read_and_process_logs() from the first matching entry's FR_EVENT_LEDGER slot)" \
+        contract    'features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (R8, D19) - event_ledger: yes|no follows metrics_observed: in every file block'
 }
 
 scenario_thingworx_with_metrics() {
@@ -535,6 +547,12 @@ scenario_csv_with_udm() {
         asserts     'CSV path uses internal match_type 13' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
         contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type 13 is reserved for the CSV path'
+
+    assert_line "$out" \
+        pattern     '^  event_ledger: no$' \
+        asserts     'A CSV file read through -udm is not an event ledger: its rows are measurements the user supplied, with no guarantee that one row is one handled request, so the file reports event_ledger: no' \
+        produced_by "emit_format_detection_verbose() in ltl (per-file event_ledger field, bound in read_and_process_logs() from the first matching entry's FR_EVENT_LEDGER slot)" \
+        contract    'features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (R8, D19) - event_ledger: yes|no follows metrics_observed: in every file block'
 }
 
 # Shared shape for the six registry-sample scenarios: write the fixture
@@ -543,8 +561,10 @@ scenario_csv_with_udm() {
 # same lines build_format_registry() validates at every startup (D24), so
 # a passing scenario proves the end-to-end path (file -> scan -> section)
 # for a format the corpus has no committed fixture for.
+# The fifth argument is optional: a scenario that names the expected
+# event_ledger value gets that assertion too; one that omits it does not.
 assert_registry_sample_scenario() {
-    local fixture="$1" slug="$2" mt="$3" nlines="$4"
+    local fixture="$1" slug="$2" mt="$3" nlines="$4" event_ledger="${5:-}"
     local out
     out=$(run_format_detection "$fixture")
     check_capture_warnings "$out"
@@ -586,6 +606,14 @@ assert_registry_sample_scenario() {
         asserts     "Every line of the whole-file sample is recognised by the registry patterns directly ($nlines lines), without touching scan_attempts" \
         produced_by 'sample_file_for_detection() in ltl (direct pattern recognition, static cascade order)' \
         contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+
+    if [[ -n "$event_ledger" ]]; then
+        assert_line "$out" \
+            pattern     "^  event_ledger: $event_ledger\$" \
+            asserts     "A file bound to slug \`$slug\` reports event_ledger: $event_ledger - whether the producer writes one line per event it handled, so that the file's lines may be read as attempted events" \
+            produced_by "emit_format_detection_verbose() in ltl (per-file event_ledger field, bound in read_and_process_logs() from the first matching entry's FR_EVENT_LEDGER slot)" \
+            contract    'features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (R8, D19) - event_ledger: yes|no follows metrics_observed: in every file block'
+    fi
 }
 
 scenario_thingworx_rac_client() {
@@ -622,7 +650,10 @@ scenario_java_gc_g1() {
 [2024-10-16T05:27:56.233+0000][info][gc] GC(144521) To-space exhausted
 [2025-06-05T11:17:57.418+0000][info][gc] Using G1
 EOF
-    assert_registry_sample_scenario "$log" java_gc_g1 6 6
+    # A GC log is an event ledger even though it classifies no outcome: the
+    # JVM writes one line per collection it performed, so the lines are the
+    # events. event_ledger and outcome classification are independent.
+    assert_registry_sample_scenario "$log" java_gc_g1 6 6 yes
 }
 
 scenario_tw_analytics_v2() {
