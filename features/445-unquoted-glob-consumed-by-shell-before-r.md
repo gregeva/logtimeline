@@ -57,6 +57,22 @@ selects.
   so the explanation belongs beside that claim rather than only in the `-r`
   row.
 
+- **D5 — The quoting guidance and the quoted examples are scoped to `-r`, and
+  to nothing else.** This is what the issue's "What is wanted" section asks
+  for: every documented **`-r`** example teaches the quoted form. The
+  non-recursive glob example — `ltl logs/2025-05-*.txt`, in the examples block
+  of `print_help()` and in the synopsis of `docs/usage.md` — stays unquoted,
+  and so does any other example that does not pass `-r`. Without `-r`, a
+  pattern the shell expanded selects exactly the set `ltl` would have selected
+  itself, so there is no silent under-selection to guard against; and when the
+  pattern matches nothing, both sides fail loudly — zsh refuses the command
+  outright, and any shell that passes the pattern through unexpanded leaves
+  `ltl` to stop with `Error: unable to open any files`. Quoting is therefore
+  not the explanation for anything a reader of those examples can hit, and
+  quoting them would teach a remedy for a problem the example does not have.
+  Same reasoning as D2 (the failure-message hint fires only under `-r`),
+  applied to the documented examples rather than to the failure message.
+
 ## What changed, by surface
 
 | Surface | Change |
