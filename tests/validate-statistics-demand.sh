@@ -3,7 +3,8 @@
 # per-store statistics-group demand resolution with raising consumers, the
 # per-store moment source, and the per-store statistics-calculation counters
 # (stats_calls invocations plus per-group computed/skipped_demand/ineligible)
-# (Issues #305, #303).
+# (Issues #305, #303), and the resolution when the run retains no message at
+# all (-n 0, Issue #458).
 # Usage: ./tests/validate-statistics-demand.sh
 #
 # Follows the self-documenting assertion design from tests/HARNESS-DESIGN.md
@@ -590,6 +591,102 @@ if body=$(extract_section "$out"); then
         label       'message store_demand agrees with runtime-config message-duration-stats-demand' \
         asserts     'The statistics-demand store_demand line and the runtime-config message-duration-stats-demand boolean report the same resolved value (single resolution surface)' \
         produced_by 'emit_statistics_demand_verbose() and emit_runtime_config_verbose() in ltl, both reading $message_duration_stats_demand' \
+        contract    "$CONTRACT"
+fi
+echo
+
+############################################################
+# -n 0 retains no message at all, so the message store has no consumer, no
+# population and no rendered table — while the bucket store and the timeline
+# are untouched. The demand side is read from the statistics-demand section
+# and the store size from benchmark-data's COUNTS rows; the two render
+# assertions read the displayed surface itself, because "the messages table is
+# absent" and "the timeline is present" are properties of that surface with no
+# internal-state equivalent (tests/HARNESS-DESIGN.md section Render-invariant
+# harnesses). The layout is pinned by run_section's --terminal-width 200 and
+# ANSI is stripped before matching.
+current_scenario="scenario-9-no-message-retention"
+echo "--- $current_scenario ---"
+out=$(run_section statistics-demand,benchmark-data -n 0)
+check_capture_warnings "$out"
+sed -E 's/\x1b\[[0-9;]*m//g' "$out" > "$out.plain"
+if body=$(extract_section "$out"); then
+    sm=$(extract_store "$body" message)
+    assert_line "$sm" \
+        pattern     '^  store_demand: 0$' \
+        asserts     'With no message retained the message store has no active consumer, so its store demand is 0' \
+        produced_by 'adapt_to_command_line_options() in ltl (store-level demand resolution gated on $capture_messages)' \
+        contract    "$CONTRACT"
+    assert_line "$sm" \
+        pattern     '^  population: 0$' \
+        asserts     'No message key is walked because none was ever stored: the message store block-boundary population is 0' \
+        produced_by 'calculate_all_statistics() in ltl ($stats_population_messages, per-category population accumulation)' \
+        contract    "$CONTRACT"
+    for group in terminal_core csv_body extended_percentiles shape_moments; do
+        assert_line "$sm" \
+            pattern     "^  group $group: demanded=0 consumers=-\$" \
+            asserts     "With the message store undemanded no group can be demanded on it ($group)" \
+            produced_by 'resolve_statistics_group_demand() in ltl (store-level demand is a precondition for every consumer)' \
+            contract    "$CONTRACT"
+    done
+    assert_line "$sm" \
+        pattern     '^  stats_calls: 0$' \
+        asserts     'The per-message statistics primitive is never invoked when no message is retained' \
+        produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (stats_calls in %stats_demand_telemetry)' \
+        contract    "$CONTRACT"
+    sb=$(extract_store "$body" bucket)
+    assert_line "$sb" \
+        pattern     '^  store_demand: 1$' \
+        asserts     'Retaining no message leaves the per-time-bucket store untouched: the timeline latency column still consumes it' \
+        produced_by 'adapt_to_command_line_options() in ltl (store-level demand resolution)' \
+        contract    "$CONTRACT"
+fi
+assert_line "$out" \
+    pattern     '^COUNTS[[:space:]]+log_messages_entries[[:space:]]+0$' \
+    asserts     'No log message is added to the per-message store, so it holds zero entries at the end of the run' \
+    produced_by 'emit_benchmark_data_verbose() in ltl (COUNTS rows over %log_messages)' \
+    contract    'tests/HARNESS-DESIGN.md section Reserved section names — benchmark-data COUNTS rows are stability-contracted; renames are breaking'
+assert_line "$out" \
+    pattern     '^COUNTS[[:space:]]+log_messages_population[[:space:]]+0$' \
+    asserts     'The walk-time message population re-emitted into benchmark-data agrees with the statistics-demand population line (one source, two surfaces)' \
+    produced_by 'emit_benchmark_data_verbose() in ltl (re-emitted $stats_population_messages)' \
+    contract    'tests/HARNESS-DESIGN.md section Counters serving benchmark attribution — one source, two surfaces'
+assert_command \
+    command     "! grep -qE 'TOP (OVERALL|HIGHLIGHTED) MESSAGES' '$out.plain'" \
+    label       'neither messages-table header is rendered' \
+    asserts     'The message summary table is skipped entirely - not printed empty, and not printed with a header only' \
+    produced_by 'pipeline_render() in ltl (print_message_summary is not called when no message is retained)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+assert_line "$out.plain" \
+    pattern     '^[[:space:]]+timestamp[[:space:]]+legend[[:space:]]+occurrences[[:space:]]' \
+    asserts     'The timeline bar graph is still produced when no message is retained' \
+    produced_by 'print_bar_graph() in ltl (column header row)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+assert_line "$out.plain" \
+    pattern     'P50:[0-9]+' \
+    asserts     'Statistics over the whole population are still computed and displayed: the timeline latency column carries its percentiles' \
+    produced_by 'print_bar_graph() in ltl (latency statistics column, fed by the per-time-bucket store)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+echo
+
+############################################################
+# The options that configure only the per-message store are ignored rather than
+# rejected, and the tool says so on stderr. The notice is a behavioural notice,
+# not progress output, so it is emitted whatever --disable-progress is set to.
+current_scenario="scenario-10-no-message-retention-inert-options"
+echo "--- $current_scenario ---"
+out=$(run_section statistics-demand -n 0 -g 85 -mdm bin -so p50)
+check_capture_warnings "$out"
+assert_line "$out.stderr" \
+    pattern     'Note: -n/--top-messages 0 retains no message, so .*-g/--group-similar.*-mdm/--message-stats-data-model.*-so/--sort-on have no effect' \
+    asserts     'Message grouping, the message statistics data model and the message ranking are reported inert (not rejected) when no message is retained, naming each option the user passed' \
+    produced_by 'adapt_to_command_line_options() in ltl (per-message retention fold, before the statistics-demand resolution)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+if body=$(extract_section "$out"); then
+    assert_line "$body" \
+        pattern     '^sort_gate: operand=p50 family=duration observed=n/a fallback=none$' \
+        asserts     'A ranking request is recorded as given but never falls back, because with no message retained there is nothing to rank and no fallback to report' \
+        produced_by 'apply_parse_time_sort_gate() / apply_pre_walk_sort_gate() / apply_post_walk_sort_gate() in ltl' \
         contract    "$CONTRACT"
 fi
 echo

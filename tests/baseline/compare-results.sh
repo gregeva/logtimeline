@@ -762,6 +762,7 @@ TABLE_AWK_COMMON='
 
         ns = 0
         scenarios[++ns] = "standard"
+        scenarios[++ns] = "no-messages"
         scenarios[++ns] = "top25"
         scenarios[++ns] = "top25-consolidate"
         scenarios[++ns] = "heatmap"
@@ -772,14 +773,15 @@ TABLE_AWK_COMMON='
         scenarios[++ns] = "sort-skewness"
 
         slabel[1] = "standard"
-        slabel[2] = "top25"
-        slabel[3] = "top25-cons"
-        slabel[4] = "heatmap"
-        slabel[5] = "histogram"
-        slabel[6] = "hm+hg"
-        slabel[7] = "hm+hg+cons"
-        slabel[8] = "sort-p99"
-        slabel[9] = "sort-skew"
+        slabel[2] = "no-msgs"
+        slabel[3] = "top25"
+        slabel[4] = "top25-cons"
+        slabel[5] = "heatmap"
+        slabel[6] = "histogram"
+        slabel[7] = "hm+hg"
+        slabel[8] = "hm+hg+cons"
+        slabel[9] = "sort-p99"
+        slabel[10] = "sort-skew"
     }
 
     NR == FNR && FNR == 1 { next }

@@ -88,6 +88,10 @@ FILE_SELECTIONS+=("month-many-servers-access-logs|xl|7.6 GB, 140 files|AccessLog
 declare -a SCENARIOS=()
 
 SCENARIOS+=("standard|")
+# The counterpart of every retaining scenario: no message is kept, so the peak
+# and the parse-stage cost read without the per-message store. Compared against
+# `standard` on the same file selection.
+SCENARIOS+=("no-messages|-n 0")
 SCENARIOS+=("top25|-n 25")
 SCENARIOS+=("top25-consolidate|-n 25 -g")
 SCENARIOS+=("heatmap|-hm")
