@@ -58,6 +58,8 @@ The success and failure counts are brought into the existing data model — the 
 
 - **D10 — Every `$is_access_log` site maps to `metrics_observed`; no existing site becomes event-ledger-gated** (2026-08-28). The three statistics-capture gates stay on "metrics observed". *Metrics observed is not the same thing as event ledger* — a format may carry duration metrics with partial coverage, or maximal coverage with no metrics — and the event-ledger flag's first readers are this issue's reconciliation shortfall (a defect only on an event ledger) and #452's column default and notices. The `-V format-detection` key `is_access_log:` → `metrics_observed:` rename follows `tests/HARNESS-DESIGN.md` § stability contract (harness, umbrella section-contract, this doc, same commit). The observable-value rename mapping in `tests/baseline/compare-results.sh` (`TIMING_TMAP_AWK`) pairs benchmark TIMING rows across releases; `is_access_log` is not a benchmark row, so that table is not touched by this rename — if any renamed value does surface in a benchmark TSV, an old → new entry is added there in the same commit.
 
+- **D11 — The R5 counters are emitted as a `format-detection / classification` sub-section** (2026-08-28). The counters are a property of classification, and the owning section and its harness (`tests/validate-format-detection.sh`) already exist. #452 reads the same accumulators onto its analysis-overview surface when it lands; this issue does not create that surface.
+
 ## `$is_access_log` site inventory and replacement (confirmed 2026-08-28, D10)
 
 | Site (function / snippet) | Meaning today | Proposed property |
@@ -86,7 +88,7 @@ No site today is gated on "is this an event ledger". The event-ledger property g
 ## `-V` section-contract changes (stub — completed at implementation)
 
 - `format-detection` per-file block: `is_access_log:` → `metrics_observed:` (byte-identical semantics) and new `event_ledger: yes|no`.
-- New run-level counters for R5 (surface to be named at planning: candidates are a `classification` sub-section of `format-detection`, or the #452 analysis-overview surface) — `lines_included`, `successes`, `failures`, `classified`, `unclassified`, `unclassified_pct`.
+- New sub-section `format-detection / classification` (D11), run-level: `lines_included`, `successes`, `failures`, `classified`, `unclassified`, `unclassified_pct`. Exact line shapes and counter semantics (what increments, when, edge cases) are locked at implementation and recorded here and in the umbrella's section-contract.
 
 ## Performance obligation
 
@@ -94,9 +96,8 @@ Classification is a new per-line hot-path cost (one or more field regex matches 
 
 ## Open items
 
-1. Name and placement of the R5 counters on `-V` (this issue's surface vs #452's analysis overview).
-2. Expressibility in #387 (user-defined YAML formats): confirm the field+pattern, list-of-conjunctions shape maps onto what #387 will accept — checked at #387 planning, recorded here.
-3. Whether `errRate` (R7) keeps its own bucket-name path for the `-HL` highlight buckets, which are not classification outcomes.
+1. Expressibility in #387 (user-defined YAML formats): confirm the field+pattern, list-of-conjunctions shape maps onto what #387 will accept — checked at #387 planning, recorded here.
+2. Whether `errRate` (R7) keeps its own bucket-name path for the `-HL` highlight buckets, which are not classification outcomes.
 
 ## Merge gate
 
