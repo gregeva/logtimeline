@@ -138,7 +138,7 @@ Walked piece by piece with the architect; each piece locks its decisions here be
 5. **`$is_access_log` → `metrics_observed` rename and `event_ledger` per-file binding** — D18, D19 (locked).
 6. **`-V format-detection / classification` section-contract** — D20 (locked).
 7. **Prototype charter** — D21 (locked).
-8. **Stages and merge gate** — order of landing, parity fixtures — open.
+8. **Stages and merge gate** — D22, D23 (locked).
 
 ### 1. Schema shape — D14
 
@@ -186,12 +186,13 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
 
 - **D18 — Mechanical rename, one commit** (2026-08-28). `$is_access_log` → `$metrics_observed` at every inventory site; the record-field slot, `%format_detection{...}{is_access_log}` and the `-V format-detection` per-file key become `metrics_observed:` with byte-identical semantics; the `FR_STATS` and `%format_detection` schema comments follow. `tests/validate-format-detection.sh` has its assertion rewritten to the new key in the same commit, and its `asserts` text (which cites `ltl:4799-4802` line numbers) corrected to the function name. The umbrella `features/log-format-registry.md` format-detection section-contract, which lists `is_access_log:` among the byte-preserved keys, is amended to record the rename.
 
-- **D19 — A mid-file flip follows the new occupant for `event_ledger` and for classification, and a criteria change is surfaced to the user and on the observability surface** (2026-08-28).
-  - New slot `FR_EVENT_LEDGER`. `$fdd->{event_ledger}` is set from the bound entry at first bind and re-set when a flip changes the group's occupant for that file — never on the per-line path. Emitted as `event_ledger: yes|no` after `metrics_observed:`.
-  - After a flip, lines are classified under the new occupant's resolved criteria (they are compiled into its scan block, so this is automatic). Lines classified *before* the flip are not revisited — the read is streaming — so the counters may carry outcomes decided under two rule sets.
-  - Each compiled entry carries a **criteria signature** (a canonical string of its resolved classification, computed once at registry build) so the flip-time check is one string compare between the old and new occupant, on the rare flip path only. When the signatures differ, the tool:
-    1. prints a user-facing note (a behavioural notice, never gated behind `--disable-progress`; on the #412 notices surface once it exists, on stderr in the `Note:` form of `format_variant_ambiguity_note()` until then): a classification rule change occurred mid-file at line N of `<file>` because the detected log format was adapted from `<old format>` to `<new format>`; lines before that point were classified under the previous rules;
-    2. records it for the `classification` sub-section (piece 6): a run count `rule_changes: N` and one line per change — file, line number, old entry → new entry.
+- **D19 — Mid-file format change follows the new entry for `event_ledger` and for classification, and a criteria change is surfaced to the user and on the observability surface** (2026-08-28; trigger broadened the same day — see below).
+  - New slot `FR_EVENT_LEDGER`. `$fdd->{event_ledger}` is set from the bound entry at first bind and re-set whenever the classifying entry changes for that file. Emitted as `event_ledger: yes|no` after `metrics_observed:`.
+  - A line is classified under the criteria of the entry that matched it (compiled into that entry's scan block, so this is automatic whether the change is a variant-group occupant flip or a different format winning the scan). Lines classified *before* the change are not revisited — the read is streaming — so the counters may carry outcomes decided under two rule sets.
+  - **Trigger — any change of classifying entry between consecutive included lines of a file, not only a variant-group flip** (architect, 2026-08-28). Both shipped variant groups share their classification within the group, so a group flip alone never changes criteria; a file in which a second format wins the scan mid-way (an access log followed by application-log lines) does. The check is at the include point: compare `$line_entry` with the file's last classifying entry (one reference compare per included line — a prototype item under D21 class 6), and on change compare the two entries' **criteria signatures** (a canonical string of the resolved classification, computed once at registry build). When the signatures differ, the tool:
+    1. prints a user-facing note **once per file, at the first change** (a behavioural notice, never gated behind `--disable-progress`; on the #412 notices surface once it exists, on stderr in the `Note:` form of `format_variant_ambiguity_note()` until then): the classification rules changed at line N of `<file>` because the detected log format changed from `<old format>` to `<new format>`; lines before that point were classified under the previous rules;
+    2. records it for the `classification` sub-section (piece 6): `rule_changes: N` counts every change in the run; `rule_change:` lines list at most the first 10 per file (an interleaved file would otherwise emit one line per alternation).
+  - **Harness coverage is a synthetic fixture, not a deferral**: `tests/fixtures/classification-format-switch.txt`, built from the shipped formats' own sample lines — Tomcat access-log lines (`mt3`, status-code criteria) followed by ThingWorx application-log lines (`mt1std`, the default level criterion) — so the scan binds one format and then the other, the signatures differ, and the note and the `-V` lines fire on a real run. A second fixture interleaves them to prove the once-per-file note and the 10-line cap.
   - The notice is **registered on #412** (notices surface) as a producer to migrate, 2026-08-28, with its text shape and the `-V` state that lets a harness assert it without reading the rendered note. Every user-informational message this issue adds is registered there in the same way at the moment it is specified.
   - Run-level, the sub-section also carries `event_ledger_files: N/M`. What a consumer does when a run mixes ledger and non-ledger files is that consumer's decision (#452's column default) and is handed forward, not settled here.
 
@@ -209,6 +210,22 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
     5. call shape: inlined source vs `FR_CLASSIFY` closure call (confirms the closure stays on the CSV path only);
     6. counting at the include point: `%bucket_outcomes{$bucket}{successes}++` vs two flat hashes vs array-of-two per bucket, against the #306 constant (~1 µs per hash-field update).
   - **Exit bar** (architect, 2026-08-28): no measurable regression on the declining family; classification plus counting ≤ 3 % of `parse/read_files` per line on the classifying families. A chosen mechanism per class with medians and ranges, and the resulting Dxx, are written here before implementation begins.
+
+### 8. Stages, documentation surfaces and merge gate — D22, D23
+
+- **D22 — Stages, one commit each, each measured against `0.18.0-453-before.tsv` before the next opens** (2026-08-28):
+
+  | stage | content | isolates |
+  |---|---|---|
+  | S0 | prototype per D21; findings recorded as D24+ | mechanism choice |
+  | S1 | mechanical rename `$is_access_log` → `$metrics_observed`, `-V` key, harness assertion, umbrella contract (D18) | parity: full suite green, benchmark flat |
+  | S2 | `classification` / `event_ledger` on the specs, `%classification_default`, build-time resolution and criteria signature, `FR_EVENT_LEDGER` / `FR_CLASSIFY`, generated `$line_outcome`, per-file `event_ledger:` key — no counting yet (D14–D16) | the decide cost alone |
+  | S3 | counting at the include point, per-message keys, consolidation merge, the `classification` sub-section and its harness scenarios (D17, D20) | the counting cost alone |
+  | S4 | `errRate` reads the failure counter, category regex removed (D13); the highlighted-error fix (D12); parity fixtures: access log and application log unhighlighted are byte-identical, a highlighted run shows the corrected rate | — |
+  | S5 | format-change handling (D19): entry-change check, note, `rule_change:` lines, the two synthetic fixtures and their scenarios | the per-line reference compare |
+  | S6 | documentation (D23), CLAUDE.md registry paragraph, `docs/usage.md` rows, completion gate | — |
+
+- **D23 — Two user-facing surfaces for formats** (2026-08-28): `--help formats` — syntax and usage: the known formats, how a format declares classification (the three forms of D15: absent inherits, `'none'`/`{}` declines, a partial declaration replaces per outcome), the `event_ledger` flag, `-lf`; and `--explain formats` (+ `docs/explain/formats.md`, wiki-synced like the other explain pages) — the reasoning: what an event ledger is (R10's one-line coverage definition), the Google SRE Workbook SLI/coverage framing and why a reliability figure is legitimate only over a maximal-coverage source, what is legitimate to read from a diagnostics log and what is not. `--help` and `docs/usage.md` stay in parity (`tests/validate-help-content.sh`).
 
 ## Open items
 
