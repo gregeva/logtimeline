@@ -196,6 +196,10 @@ belongs to the release-cut benchmark run (release steps 13–14), not to this br
 - **scenario-10-no-message-retention-inert-options** (`-n 0 -g 85 -mdm bin -so p50`):
   the inert-option notice names all three options; `sort_gate` records the operand
   with `fallback=none`.
+- **scenario-11-negative-top-messages-retains-nothing** (`-n -5`): a negative count
+  takes the same path as zero (D2) — the message store reports `store_demand: 0` and
+  `population: 0`. Proved to fail with `-n 5` substituted: both assertions failed with
+  their `asserts`/`produced_by`/`contract` triple surfaced.
 
 The render assertions read the displayed surface because "the messages table is
 absent" and "the timeline is present" are properties of that surface with no

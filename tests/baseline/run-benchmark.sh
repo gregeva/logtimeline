@@ -10,7 +10,7 @@
 #   all   — all file selections x all scenarios
 #   <name> — run a single named test case (e.g. "twx-unique-errors-standard")
 #
-# Test cases are the cross-product of 7 file selections x 7 option scenarios = 49 total.
+# Test cases are the cross-product of 7 file selections x 10 option scenarios = 70 total.
 #
 # Issue #56: Memory Baseline Profiling
 

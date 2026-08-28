@@ -4,7 +4,7 @@
 # per-store moment source, and the per-store statistics-calculation counters
 # (stats_calls invocations plus per-group computed/skipped_demand/ineligible)
 # (Issues #305, #303), and the resolution when the run retains no message at
-# all (-n 0, Issue #458).
+# all (-n 0, or any non-positive count, Issue #458).
 # Usage: ./tests/validate-statistics-demand.sh
 #
 # Follows the self-documenting assertion design from tests/HARNESS-DESIGN.md
@@ -687,6 +687,29 @@ if body=$(extract_section "$out"); then
         pattern     '^sort_gate: operand=p50 family=duration observed=n/a fallback=none$' \
         asserts     'A ranking request is recorded as given but never falls back, because with no message retained there is nothing to rank and no fallback to report' \
         produced_by 'apply_parse_time_sort_gate() / apply_pre_walk_sort_gate() / apply_post_walk_sort_gate() in ltl' \
+        contract    "$CONTRACT"
+fi
+echo
+
+############################################################
+# A negative top-message count takes the same path as zero: it cannot rank a
+# row either, so nothing is retained. Read from the demand section alone —
+# nothing here depends on the render or on the bucket axis.
+current_scenario="scenario-11-negative-top-messages-retains-nothing"
+echo "--- $current_scenario ---"
+out=$(run_section statistics-demand -n -5)
+check_capture_warnings "$out"
+if body=$(extract_section "$out"); then
+    sm=$(extract_store "$body" message)
+    assert_line "$sm" \
+        pattern     '^  store_demand: 0$' \
+        asserts     'A negative top-message count retains nothing, exactly as zero does: the message store has no active consumer' \
+        produced_by 'adapt_to_command_line_options() in ltl (retention resolved from the top-message count being greater than zero)' \
+        contract    "$CONTRACT"
+    assert_line "$sm" \
+        pattern     '^  population: 0$' \
+        asserts     'No message key is walked under a negative top-message count, because none was ever stored' \
+        produced_by 'calculate_all_statistics() in ltl ($stats_population_messages, per-category population accumulation)' \
         contract    "$CONTRACT"
 fi
 echo
