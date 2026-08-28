@@ -1,0 +1,8 @@
+family	fixture	lines	class	arm	median_s	min_s	max_s	us_per_line	delta_us_per_line	pct_of_budget
+access	pure-access-1m.log	1000000	-	baseline	2.617551	2.566473	2.680266	2.6176	+0.0000	0.00
+access	pure-access-1m.log	1000000	2	c2-bucketmap	2.666781	2.626654	2.695521	2.6668	+0.0492	0.37
+access	pure-access-1m.log	1000000	6	c6-none	2.698856	2.691451	2.794264	2.6989	+0.0813	0.61
+access	pure-access-1m.log	1000000	6	c6-array-idx	2.745137	2.739284	2.749185	2.7451	+0.1276	0.96
+access	pure-access-1m.log	1000000	2	c2-litset2	2.634905	2.627489	2.700150	2.6349	+0.0174	0.13
+access	pure-access-1m.log	1000000	6	c6-array-idx-guarded	2.704068	2.702812	2.717749	2.7041	+0.0865	0.65
+access	pure-access-1m.log	1000000	6	c6-array-idx-guarded+msg	2.824477	2.819152	2.897112	2.8245	+0.2069	1.55

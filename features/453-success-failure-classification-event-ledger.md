@@ -4,7 +4,7 @@
 
 - Issue: #453 (per-variant success/failure line classification and an event-ledger property in the format registry schema, retiring `$is_access_log`)
 - Branch: `453-success-failure-classification-event-ledger` off `release/0.18.0`
-- Phase: planning closed 2026-08-28 (R1–R10, D1–D23; before-baseline `tests/baseline/results/0.18.0-453-before.tsv` committed); next stage S0 (prototype, D21) on instruction
+- Phase: S0 prototype complete 2026-08-28 (D24–D32 locked from measurement; `prototype/453-*`, results in `prototype/453-results/`); next stage S1 (rename, D18) on instruction
 - Umbrella: #23 / `features/log-format-registry.md` (system of record for the registry; § *1. Format Definition Properties* lists the per-format properties this issue extends)
 - Consumers: #452 (reliability column and analysis-overview surface), #455 (success/failure filter and highlight criteria), #456 (per-message success/failure indicator), #193 (timeout detection on error responses)
 
@@ -139,6 +139,7 @@ Walked piece by piece with the architect; each piece locks its decisions here be
 6. **`-V format-detection / classification` section-contract** — D20 (locked).
 7. **Prototype charter** — D21 (locked).
 8. **Stages and merge gate** — D22, D23 (locked).
+9. **S0 prototype findings** — D24–D32 (locked from measurement, 2026-08-28).
 
 ### 1. Schema shape — D14
 
@@ -151,6 +152,8 @@ Walked piece by piece with the architect; each piece locks its decisions here be
   },
   event_ledger => 1,
   ```
+
+  (Illustration amended by D26: the shipped access entries declare `category_bucket => '^(?:4xx|5xx)$'` / `'^(?:1xx|2xx|3xx)$'` so the criteria compile to the D25 literal-set form; the `status_code` regex above remains a legal but ~9× costlier declaration.)
 
   Each criterion is a hash of *field ⇒ pattern* — all conditions must hold (R3 all-of); each outcome is a list of criteria — any one suffices (R3 any-of). Field names are the record field names of `@format_record_fields` (`status_code`, `category_bucket`, `message`, …) plus `line` for the raw line (D1). `event_ledger` defaults to 0 when absent. How an entry inherits or declines is piece 2.
 
@@ -177,7 +180,7 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
 ### 4. Data model — D17
 
 - **D17 — Dedicated per-bucket outcome store; per-message keys on the existing entry; run totals beside `lines_included`** (2026-08-28).
-  - **Per bucket:** `%bucket_outcomes{$bucket}{successes|failures}`, incremented at the include point (beside `$log_occurrences{$bucket}{$category_bucket}{occurrences}++; $total_lines_included++` — after filtering, outside the metrics gate). Deliberately *not* in `%log_analysis{$bucket}`: that hash's key set is the statistics population (`$stats_population_buckets = scalar keys %log_analysis`; the per-bucket statistics loop iterates it), and adding non-metric buckets to it would change the reported population and the statistics pass.
+  - **Per bucket** (shape amended by D30 to `$bucket_outcomes{$bucket}[$line_outcome]`, guarded): `%bucket_outcomes{$bucket}{successes|failures}`, incremented at the include point (beside `$log_occurrences{$bucket}{$category_bucket}{occurrences}++; $total_lines_included++` — after filtering, outside the metrics gate). Deliberately *not* in `%log_analysis{$bucket}`: that hash's key set is the statistics population (`$stats_population_buckets = scalar keys %log_analysis`; the per-bucket statistics loop iterates it), and adding non-metric buckets to it would change the reported population and the statistics pass.
   - **Per message:** `successes` / `failures` keys on the `%log_messages{$category}{$log_key}` entry, incremented on both the metrics path and the plain path (every site where its `occurrences++` runs), carried in the consolidation stats source and summed by `merge_consolidation_stats()`.
   - **Run level:** `$total_successes`, `$total_failures` beside `$total_lines_included`; `classified`, `unclassified`, `unclassified_pct` derived at emission, never stored.
   - **`errRate`:** `$bucket_outcomes{$bucket}{failures} / $bucket_size_seconds * $rate_multiplier{$rate_unit}`; the category-name regex is removed (D13). For every shipped format the failure set equals today's `FATAL|ERROR|5xx|4xx` set (plus `CRITICAL`, which no shipped format emits), so the rate is byte-identical except for D12's highlighted-error fix.
@@ -217,7 +220,7 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
 
   | stage | content | isolates |
   |---|---|---|
-  | S0 | prototype per D21; findings recorded as D24+ | mechanism choice |
+  | S0 | prototype per D21; findings recorded as D24–D32 (done 2026-08-28) | mechanism choice |
   | S1 | mechanical rename `$is_access_log` → `$metrics_observed`, `-V` key, harness assertion, umbrella contract (D18) | parity: full suite green, benchmark flat |
   | S2 | `classification` / `event_ledger` on the specs, `%classification_default`, build-time resolution and criteria signature, `FR_EVENT_LEDGER` / `FR_CLASSIFY`, generated `$line_outcome`, per-file `event_ledger:` key — no counting yet (D14–D16) | the decide cost alone |
   | S3 | counting at the include point, per-message keys, consolidation merge, the `classification` sub-section and its harness scenarios (D17, D20) | the counting cost alone |
@@ -226,6 +229,58 @@ Per-line order in `read_and_process_logs()` today: generated scan block (extract
   | S6 | documentation (D23), CLAUDE.md registry paragraph, `docs/usage.md` rows, completion gate | — |
 
 - **D23 — Two user-facing surfaces** (2026-08-28): `--help formats` — syntax and usage: the known formats, how a format declares classification (the three forms of D15: absent inherits, `'none'`/`{}` declines, a partial declaration replaces per outcome), the `event_ledger` flag, `-lf`; and `--explain classification` (+ `docs/explain/classification.md`, wiki-synced like the other explain pages) — the reasoning: what success/failure classification is and what an unclassified line means, what an event ledger is (R10's one-line coverage definition), the Google SRE Workbook SLI/coverage framing and why a reliability figure is legitimate only over a maximal-coverage source, what is legitimate to read from a diagnostics log and what is not. The explain topic is named for the concept, not the mechanism that carries it (architect, 2026-08-28): `--help formats` is the technical mechanics, `--explain classification` the methodology, and the two are inherently tied — the references are **bi-directional**: `--help formats` points at `--explain classification` where the `event_ledger` flag and the classification forms are described, so the reasoning is reachable from the place a reader first meets the flag; and `--explain classification` points back at `--help formats` where it names the declaration, so a reader who arrives from the methodology (or from #452's reliability column) can find which formats classify and how a declaration is written. **The wiki reflects the same three surfaces**: `docs/explain/classification.md` is added to the release-process wiki sync (CLAUDE.md § Post-release step 20) as `Classification-Reference.md` in the same S6 commit that creates it, and `docs/usage.md` (synced as `Home.md`) carries the `--help formats` content in parity. `--help` and `docs/usage.md` stay in parity (`tests/validate-help-content.sh`).
+
+### 9. S0 prototype findings — D24–D32
+
+Probe: `prototype/453-run.sh` assembles `prototype/453-extract-slice.sh` (the production `format_entry_block_src()`, `format_guard_cond_src()`, transforms table, specs and timestamp cache sliced verbatim from `ltl`) in front of `prototype/453-classify-mini.pl`. The baseline arm per family is a one-entry scan sub in the production shape (whitespace dispatch, guard, literal pattern condition, extraction body, entry-ref return); candidate arms splice their classification source into that body after the transforms and before the timestamp memo (D16), and every arm is proven outcome-identical to an interpreted reference evaluator on every line before it is timed (`prototype/453-results/verification.txt`: zero mismatches on every fixture). Lines are pre-loaded; medians of 5 runs after a warm-up; raw TSVs in `prototype/453-results/`. Deltas are per line against the baseline arm and expressed as a percentage of the mapped benchmark case's `parse/read_files` per line from `0.18.0-453-before.tsv` (access 13.35 µs, ScriptLog 10.80 µs, ApplicationLog 7.25 µs). **Noise floor:** within one run the baseline's min–max spread is 0.01–0.03 µs/line at 1 m; between runs the same arm drifts by up to 0.05 µs/line. Differences under 0.03 µs are ties.
+
+- **D24 — Charter corrections recorded from the prototype** (2026-08-28).
+  - The D21 fixture description was wrong: `pure-scriptlog` (ScriptLog pool) is 75 % `ERROR` / 13 % `WARN` / 12 % `INFO`, and `ApplicationLog.2025-05-05.0.log` (the application-log benchmark file) is 96 % `ERROR`. No INFO-dominated ThingWorx log exists in the corpus at scale, so the D7 diagnostics default (nearly every line unclassified) is measured on a **synthetic** family, `synth-info`: the ScriptLog pool with every level rewritten to `INFO` except every 20th line (95.6 % INFO, 3.7 % ERROR, 0.6 % WARN). Both real families are kept as the classified-heavy diagnostics case.
+  - Realism limits: single-entry sub (clobbered-field set empty), cold-closure form (`ENTRY_PLACEHOLDER` → `undef`, probe signals inert), in-memory lines. The block itself costs 2.1–3.6 µs/line here against 7–13 µs per line in the real loop, so the percentages below are conservative for the mechanism and exact for the denominator the charter names.
+  - The per-message hash-field update measures ~0.05 µs here, not the ~1 µs the charter cited from #306; the charter's figure is not what this probe reproduces and is not used.
+
+- **D25 — Literal alternations compile to hash-set lookups; every other pattern compiles to an inline regex** (2026-08-28). A criterion pattern of the form `^(?:A|B|C)$` (anchored, alternatives free of regex metacharacters) becomes `exists $set{$field}` on a set built once at registry build; anything else is spliced as a literal `m//`. Measured on the default rule `category_bucket ^(?:ERROR|FATAL|CRITICAL)$`:
+
+  | fixture (lines) | regex | hash-set | eq chain |
+  |---|---|---|---|
+  | ScriptLog 1 m (75 % ERROR) | +0.082 µs (0.8 %) | **+0.021 (0.2 %)** | +0.085 |
+  | synth-info 1 m (96 % INFO) | +0.029 | **+0.019** | +0.052 |
+  | ApplicationLog 480 k | +0.105 (1.5 %) | **+0.036 (0.5 %)** | +0.034 |
+
+  The `eq` chain is competitive only when the first alternative matches most lines; the set is flat regardless of which literal hits. No integer-compare or first-character specialisation for status codes: on the access fixture two disjoint literal sets cost +0.017 µs (0.13 %) against integer compares +0.034, first-char +0.062 and the regex `^[45]\d\d$` +0.150 (1.1 %) — the set is both cheapest and the same mechanism as the default rule.
+
+- **D26 — The access family declares its criteria on `category_bucket`, after the `status_bucket` transform** (2026-08-28): `failure => [ { category_bucket => '^(?:4xx|5xx)$' } ]`, `success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ]`. D14's example (`status_code => '^[45]\d\d$'`) stays a legal declaration but compiles to the regex path and costs ~9× more per line; D14's illustration is amended to the bucket form.
+
+- **D27 — Message-text criteria: a metacharacter-free pattern compiles to `index()`; a pattern with metacharacters compiles to an `index()` gate on its longest literal run followed by the regex; within a criterion, conditions are emitted cheapest-first (set/index on short fields before the message)** (2026-08-28). Measured with `WARN` + `timed out` added to the default rule, ScriptLog 1 m: two regexes +0.124 µs (1.1 %), set + `index()` **+0.058 (0.5 %)**, set + index gate + regex +0.080; ApplicationLog: +0.126 / **+0.060** / +0.065.
+
+- **D28 — Failure-first order stands (D4, D16) and costs nothing measurable under D25** (2026-08-28). Success-first saves 0.03–0.05 µs only when both outcomes are regexes (every 2xx line pays two matches); with disjoint literal sets the first `exists` misses in the same time the second hits.
+
+- **D29 — Inline in the block; the `FR_CLASSIFY` closure exists for the CSV path only; the interpreted walk is rejected** (2026-08-28). Same logic behind a closure call: +0.06–0.12 µs (0.5–1.6 % of budget) on every family; the interpreted list walk over the resolved structure: +0.49–1.0 µs — 4.2–8.3 % of budget on its own, over the 3 % bar before counting.
+
+- **D30 — Per-bucket outcome store is an array indexed by outcome, incremented only for classified lines; per-message outcomes use the same slot shape on the existing message entry** (2026-08-28; amends D17's `{successes|failures}` hash shape). `$bucket_outcomes{$bucket}[$line_outcome]++ if $line_outcome;` — slot 1 successes, slot 2 failures, slot 0 never written; unclassified per bucket is derived at emission as occurrences − successes − failures, never stored. Counting cost over classify-only, three shapes on three populations (1 m / 480 k):
+
+  | fixture | nested hash `{successes\|failures}` | array, always | **array, guarded** |
+  |---|---|---|---|
+  | access (100 % classified) | +0.117 µs | +0.046 | **+0.005** |
+  | synth-info (4 % classified) | +0.007 | +0.028 | **−0.006** |
+  | ApplicationLog (96 % classified) | +0.097 | +0.062 | **+0.062** |
+
+  The guard makes the unclassified line free and the classified line one hash lookup plus one array element; the unguarded array pays on every line, and the nested hash pays a second hash lookup on every classified line. Per message, the increment in the production shape (the entry's `occurrences++` already runs per line; add `{outcomes}[$line_outcome]++ if $line_outcome` beside it) costs **+0.05 µs** on access and **+0.03–0.05** on the application log; holding the entry ref in a lexical first is no cheaper (+0.042 vs +0.050 on access; +0.045 vs +0.033 on the application log — a tie).
+
+- **D31 — A declining entry emits `$line_outcome = 0;` into its block; the loop never resets the lexical** (2026-08-28). On the GC family (mt6, 29 % of lines never match) neither form is measurable (−0.09 / −0.08 µs at 1 m, inside the floor); the in-block form is chosen because it costs nothing outside declining blocks and classifying blocks assign the lexical anyway.
+
+- **D32 — The D19 per-line check compares a criteria-signature id the block sets, not entry references** (2026-08-28). Each entry's block emits `$line_cls_sig = N;` (an integer assigned per distinct resolved-criteria signature at registry build) and the include point compares `$line_cls_sig != $file_cls_sig`. Measured on access 1 m: ref compare +0.065 µs, array-element id +0.058, block-set id **+0.044** — within a tie of each other, but the block-set id makes two entries with identical rules (both shipped variant groups) compare equal by construction, so a same-rules occupant flip never enters the change branch and the signature comparison D19 specifies is the per-line check itself.
+
+- **Exit bar** (D21: ≤ 3 % of `parse/read_files` per line on classifying families, nothing measurable on the declining one) — per-line sum of the chosen mechanisms, ± 0.05 µs cross-run drift:
+
+  | family | classify | bucket count | message count | D19 check | total | of budget |
+  |---|---|---|---|---|---|---|
+  | access (mt3) | 0.017 | 0.005 | 0.050 | 0.044 | **≈ 0.12 µs** | **0.9 %** |
+  | ScriptLog (mt1std, 75 % ERROR) | 0.021 | 0.068 | 0.050 | 0.044 | **≈ 0.18 µs** | **1.7 %** |
+  | ApplicationLog (mt1std, 96 % ERROR) | 0.036 | 0.062 | 0.040 | 0.044 | **≈ 0.18 µs** | **2.5 %** |
+  | GC (mt6, declines) | 0 | — | — | 0.044 | ≈ 0.04 µs | not measurable |
+
+  The application log is the tight case (a cheap block, 7.25 µs/line, and nearly every line classified); the S3 benchmark against `0.18.0-453-before.tsv` on the real loop is the proof, the prototype is the ranking.
 
 ## Open items
 

@@ -1,0 +1,7 @@
+family	fixture	lines	class	arm	median_s	min_s	max_s	us_per_line	delta_us_per_line	pct_of_budget
+gc	pure-gc-100k.log	100000	-	baseline	0.358522	0.357419	0.363628	3.5852	+0.0000	n/a
+gc	pure-gc-100k.log	100000	0	c0-emit-zero	0.357962	0.353817	0.360778	3.5796	-0.0056	n/a
+gc	pure-gc-100k.log	100000	0	c0-loop-reset	0.354644	0.351179	0.359925	3.5464	-0.0388	n/a
+gc	pure-gc-1m.log	1000000	-	baseline	3.605652	3.529989	3.623773	3.6057	+0.0000	n/a
+gc	pure-gc-1m.log	1000000	0	c0-emit-zero	3.515880	3.502596	3.533488	3.5159	-0.0898	n/a
+gc	pure-gc-1m.log	1000000	0	c0-loop-reset	3.526601	3.520036	3.561470	3.5266	-0.0791	n/a
