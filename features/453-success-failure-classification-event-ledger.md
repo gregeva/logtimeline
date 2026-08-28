@@ -108,7 +108,7 @@ Walked piece by piece with the architect; each piece locks its decisions here be
 
 1. **Schema shape on a spec entry** — D14 (locked).
 2. **Global default: where it lives, how an entry overrides it, how an entry declines** — D15 (locked).
-3. **Hot-path evaluation** — where classification runs relative to extraction, probes and masking; compiled-closure shape; what the prototype must measure — open.
+3. **Hot-path evaluation** — D16 (locked).
 4. **Data model** — per-bucket and per-message success/failure counters, the run-level R5 counters, the `errRate` replacement (D13) — open.
 5. **`$is_access_log` → `metrics_observed` rename and `event_ledger` per-file binding** — the `-V format-detection` contract change, harness update — open.
 6. **`-V format-detection / classification` section-contract** — line shapes and counter semantics — open.
@@ -137,6 +137,17 @@ Walked piece by piece with the architect; each piece locks its decisions here be
   - An **absent** `classification` key inherits the whole default. **Declining** is explicit and either spelling is accepted: `classification => 'none'` or `classification => {}` — both resolve to "classifies nothing", inherit nothing, and produce no classification code in the entry's generated block (the `mt6` case, D9), so a declining format pays nothing per line.
   - Hot-path impact of the declaration vocabulary is nil: sentinel, empty hash and absent key are read once at build time and never again; per-line cost is set solely by the resolved shape (piece 3).
   - User documentation (#387 user-defined formats, `docs/`) states the three forms — absent inherits, `'none'`/`{}` declines, a partial declaration replaces per outcome — in those words.
+
+### 3. Hot-path evaluation — D16
+
+Per-line order in `read_and_process_logs()` today: generated scan block (extraction → in-block metric probes and their masks → transforms → timestamp) → count-metric probe (masks `count=`) → thread pool → UDM capture (masks values) → filtering conditions → highlight (appends `-HL` to the category) → statistics capture. Filtering runs after the block, so an outcome cannot be *counted* inside it (R5); the bucket and message key exist only at statistics capture (R6).
+
+- **D16 — Decide in the block, count after the filter** (2026-08-28).
+  1. `build_format_registry()` compiles each entry's resolved classification into generated source — one generator, the D33 message-probe precedent — inlined into the entry's scan block after the transforms. It sets one per-line lexical, `$line_outcome`: `2` failure, `1` success, `0` unclassified. Failure is evaluated first, so D4 (both match → failure) costs nothing. A declining entry emits nothing; the lexical keeps its per-line default `0`.
+  2. Counters — per bucket, per message key, and the run-level R5 set — increment at the existing statistics-capture point, after filtering. The `-HL` suffix is appended after the block, so highlighted lines classify normally (D12) with no special case.
+  3. The CSV path never runs a scan block: the same generated source is compiled standalone into an `FR_CLASSIFY` closure the CSV branch calls — one generator, two call shapes.
+  4. A `message` criterion sees the message as it stands at the end of the block: after the format's own metric masks (`bytes=?`), before the count/UDM masks. Documented in one sentence wherever criteria are described.
+  - **Efficiency is a hard requirement, not a preference** (architect, 2026-08-28): everything here is per line on every format, so the prototype (piece 7) compares mechanisms, not just confirms one — at minimum: a literal-alternation pattern (`^(?:ERROR|FATAL|CRITICAL)$`, paid by every diagnostics line under the default) emitted as a hash-set lookup vs a regex; `status_code` family tests as generated integer compares vs a regex; `index()` pre-gates for literal message criteria; per-criterion inline regex vs precompiled `qr//` in a closure.
 
 ## Open items
 
