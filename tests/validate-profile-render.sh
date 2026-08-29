@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # validate-profile-render.sh — Render-invariant harness for the --profile
-# folded timeline labels and summary first/last-seen (Issue #256).
+# folded timeline labels and summary first/last-seen (Issues #256 and #451).
 #
 # This is a RENDER-INVARIANT harness (tests/HARNESS-DESIGN.md § Render-invariant
 # harnesses): the system under test is the rendered terminal surface itself —
 # the folded labels in the timestamp column and the summary heading — not
 # internal state. It runs ltl at a pinned --terminal-width, strips ANSI, and
 # asserts the label INVARIANTS the surface must hold to, regardless of the data:
-#   - day/workday: every timeline label is HH:MM, no weekday token
-#   - week/workweek: each included weekday appears exactly once (at its day
-#     boundary); the leftmost weekday matches the mode's week start
-#   - work modes: no excluded-day weekday is rendered
+#   - singular modes: every timeline label is HH:MM, no weekday token
+#   - plural modes: each included weekday appears exactly once (at its day
+#     boundary); the leftmost weekday is the mode's first kept day
+#   - any mode that keeps a subset of days: no excluded-day weekday is rendered
 #   - summary first/last-seen render as folded positions, not calendar dates
 # These are properties, not frozen output, so the harness does not duplicate the
 # snapshot regression harness (validate-regression.sh).
@@ -55,7 +55,7 @@ neutralize_colour_env
 WIDTH=120
 
 PRODUCED_BY='print_bar_graph() in ltl renders the timestamp column from $output_timestamp_format (set in adapt_to_command_line_options() to %H:%M or %a %H:%M under --profile) and blanks a repeated weekday at the day boundary; the summary heading is built in print_summary_table(). Bucket keys are folded by fold_epoch() in read_and_process_logs().'
-CONTRACT='Issue #256 + tests/HARNESS-DESIGN.md § Render-invariant harnesses. The folded-label forms (time-only for day/workday, weekday-once for week/workweek, week-start Mon default / Sun for -alt, excluded-day suppression) are the locked rendered surface for --profile.'
+CONTRACT='Issues #256 and #451 + tests/HARNESS-DESIGN.md § Render-invariant harnesses. The folded-label forms (time-only for the singular modes, weekday-once for the plural ones, leftmost label = the mode first kept day per #451 D2, excluded-day suppression) are the locked rendered surface for --profile.'
 
 for f in "$LTL" "$GENERATOR" "$CHECKER"; do
     if [[ ! -e "$f" ]]; then echo "ERROR: required file missing: $f" >&2; exit 1; fi
@@ -157,8 +157,13 @@ echo "Validating --profile rendered-label invariants (Issue #256)"
 echo "Surfaces: timeline timestamp column + summary first/last-seen; width $WIDTH"
 echo ""
 
-# --- day-period modes: time-only labels, no weekday token --------------------
-for mode in day workday workday-alt; do
+# Whether a mode drops any day, and so has a no-excluded assertion to make.
+# Driven off the mode's geometry rather than its name: day and week keep every
+# day, everything else keeps a subset.
+mode_drops_days() { [[ "$1" != "day" && "$1" != "week" && "$1" != "week-alt" ]]; }
+
+# --- singular modes: time-only labels, no weekday token ----------------------
+for mode in day workday workday-alt weekday weekday-alt weekend weekend-alt; do
     current_scenario="$mode"
     echo "[$current_scenario]"
     render="$TMP_ROOT/$mode.txt"
@@ -167,24 +172,24 @@ for mode in day workday workday-alt; do
     assert_command \
         command "$(check "$render" time-only)" \
         label   "every timeline label is HH:MM with no weekday token" \
-        asserts 'day/workday fold onto a 24h axis, so the timestamp column shows time-of-day only; no weekday token (Mon, Sun, ...) may appear on any row.'
+        asserts 'The singular modes stack their kept days onto one 24h axis, so the timestamp column shows time-of-day only; no weekday token (Mon, Sun, ...) may appear on any row.'
 
     assert_command \
         command "$(check "$render" summary-folded "$mode")" \
         label   "summary first/last-seen render as folded time-of-day positions" \
-        asserts 'Under a day-period fold the summary heading shows folded positions (HH:MM), never a calendar date.'
+        asserts 'Under a 24-hour fold the summary heading shows folded positions (HH:MM), never a calendar date.'
 
-    if [[ "$mode" != "day" ]]; then
+    if mode_drops_days "$mode"; then
         assert_command \
             command "$(check "$render" no-excluded "$mode")" \
             label   "no excluded-day weekday token rendered" \
-            asserts 'workday drops the weekend (Sat/Sun); workday-alt drops Fri/Sat. Even though labels are time-only, no excluded-day data should reach the timeline (the fold drops those rows).'
+            asserts 'workday and weekday drop the weekend (Sat/Sun) and their -alt forms drop Fri/Sat; weekend keeps only Sat/Sun and weekend-alt only Fri/Sat. Even though labels are time-only, no excluded-day data should reach the timeline (the fold drops those rows).'
     fi
     echo ""
 done
 
-# --- week-period modes: weekday once, correct start, excluded suppressed -----
-for mode in week week-alt workweek workweek-alt; do
+# --- plural modes: weekday once, correct start, excluded suppressed ----------
+for mode in week week-alt workweek workweek-alt weekdays weekdays-alt weekends weekends-alt; do
     current_scenario="$mode"
     echo "[$current_scenario]"
     render="$TMP_ROOT/$mode.txt"
@@ -193,18 +198,18 @@ for mode in week week-alt workweek workweek-alt; do
     assert_command \
         command "$(check "$render" weekday-once "$mode")" \
         label   "each included weekday appears exactly once (at its day boundary)" \
-        asserts 'week/workweek prefix the weekday on the first bucket of each day and blank it on later rows; each included weekday must therefore appear exactly once, and the set must equal the mode included set.'
+        asserts 'The plural modes prefix the weekday on the first bucket of each day and blank it on later rows; each included weekday must therefore appear exactly once, and the set must equal the mode included set.'
 
     assert_command \
         command "$(check "$render" first-weekday "$mode")" \
-        label   "leftmost weekday label matches the week start" \
-        asserts 'Default modes start the week on Monday (ISO); -alt modes start on Sunday. The first weekday label rendered must be that start day.'
+        label   "leftmost weekday label is the mode first kept day" \
+        asserts "The leftmost weekday label is the mode's own first kept day (#451 D2): Mon for the ISO-anchored modes, Sun for their -alt forms, Sat for weekends and Fri for weekends-alt — whose two kept days render contiguously rather than in their positions inside a full Mon-Sun frame."
 
-    if [[ "$mode" == workweek* ]]; then
+    if mode_drops_days "$mode"; then
         assert_command \
             command "$(check "$render" no-excluded "$mode")" \
             label   "no excluded-day weekday token rendered" \
-            asserts 'workweek renders only Mon-Fri (no Sat/Sun); workweek-alt renders only Sun-Thu (no Fri/Sat).'
+            asserts 'workweek and weekdays render only Mon-Fri (no Sat/Sun) and their -alt forms only Sun-Thu (no Fri/Sat); weekends renders only Sat/Sun and weekends-alt only Fri/Sat.'
     fi
 
     assert_command \

@@ -20,3 +20,5 @@ numeric-filter-boundary-inclusive	tests/fixtures/numeric-highlight-boundary.txt	
 numeric-highlight-count-absent-format	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-bs 240 -n 25 -ic -hcmin 1	bytes,duration,percentile,dispersion,shape,level	expected/numeric-highlight-count-absent-format.tsv
 omit-stats-csv-decoupling	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-bs 240 -n 25 -os	bytes,duration,percentile,dispersion,shape,level
 gc-g1-categories	tests/fixtures/gc-g1-categories.txt	-bs 1440 -oe -n 1	duration,bytes,percentile,dispersion,shape,level
+profile-weekend	@PROFILE_LOG@	-bs 1440 -oe -n 25 -pr weekend	duration,percentile,dispersion,shape,bytes
+profile-weekends	@PROFILE_LOG@	-bs 1440 -oe -n 25 -pr weekends	duration,percentile,dispersion,shape,bytes
