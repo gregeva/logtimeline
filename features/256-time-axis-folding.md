@@ -59,16 +59,16 @@ The feature's correctness splits along the two harness categories `tests/HARNESS
 
 ### State-observability — excluded-day sample dropping (`-V`)
 
-The core correctness claim that has no visual proxy is that excluded days contribute **zero** samples: under `workweek`/`workday`, no Saturday/Sunday sample lands in any bucket; under the `-alt` variants, no Friday/Saturday sample does. This is computed state and must be asserted through a dedicated, named `-V` section (never by grepping the graph) — the implementation must expose folded bucket membership / per-mode included-vs-dropped sample counts in `-V`. The harness feeds a fixture with known per-weekday sample counts and asserts the dropped-day count equals the input's weekend (or Fri+Sat) total and the surviving buckets sum to the rest. Tracking invariant: `included + dropped = total_matched`. The section's `profile_window_seconds` field reports the rendered window length (kept days × 86400) — see `features/451-weekday-weekend-profile-modes.md` D3, which corrected it from the internal fold modulus.
+The core correctness claim that has no visual proxy is that excluded days contribute **zero** samples: under `workweek`/`workday` (and the `weekdays`/`weekday` forms #451 adds), no Saturday/Sunday sample lands in any bucket; under the `-alt` variants, no Friday/Saturday sample does; under the weekend modes, only those two days contribute and the other five are dropped. This is computed state and must be asserted through a dedicated, named `-V` section (never by grepping the graph) — the implementation must expose folded bucket membership / per-mode included-vs-dropped sample counts in `-V`. The harness feeds a fixture with known per-weekday sample counts and asserts the dropped-day count equals the days the mode excludes and the surviving buckets sum to the rest. Tracking invariant: `included + dropped = total_matched` — which the weekend modes are the first to satisfy with `dropped` exceeding `included`. The section's `profile_window_seconds` field reports the rendered window length (kept days × 86400) — see `features/451-weekday-weekend-profile-modes.md` D3, which corrected it from the internal fold modulus.
 
 ### Render-invariant — timeline x-axis + summary-table first/last seen
 
 Properties of the rendered terminal surface itself (reference: `tests/validate-duration-display.sh`). Run `ltl` at a pinned `--terminal-width`, strip ANSI, and assert:
 
-- **`day`/`workday`:** x-axis labels are time-only (`09:15`); **no weekday token** (`Mon`, `Sun`, …) appears anywhere on the axis.
-- **`week`/`workweek`:** each weekday name appears **exactly once**, at its day boundary (first bucket of the day); subsequent buckets within that day are time-only.
+- **Singular modes** (`day`, `workday`, and the `weekday`/`weekend` forms #451 adds): x-axis labels are time-only (`09:15`); **no weekday token** (`Mon`, `Sun`, …) appears anywhere on the axis.
+- **Plural modes** (`week`, `workweek`, `weekdays`, `weekends`): each weekday name appears **exactly once**, at its day boundary (first bucket of the day); subsequent buckets within that day are time-only.
 - **Week start:** the leftmost weekday label is the mode's first kept day — `Mon` for `week`/`workweek`, `Sun` for their `-alt` forms, `Sat` for `weekends`, `Fri` for `weekends-alt` (#451 D2).
-- **Excluded days:** `workweek`/`workday` render no `Sat`/`Sun` labels; under `-alt`, no `Fri`/`Sat`.
+- **Excluded days:** no mode renders a label for a day it drops — `workweek`/`workday`/`weekdays`/`weekday` render no `Sat`/`Sun`, their `-alt` forms no `Fri`/`Sat`, and the weekend modes render only their own two days.
 - **Summary-table first/last seen:** render as folded positions (`Mon 08:30`), not calendar dates.
 
 These assert *invariants*, not frozen output, so they do not duplicate `validate-regression.sh`.

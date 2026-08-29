@@ -11,7 +11,10 @@ Extends time-axis folding (`features/256-time-axis-folding.md`) with eight modes
 
 ## Status
 
-Scoped 2026-08-29; decisions D1–D5 locked. Not started.
+Scoped 2026-08-29; decisions D1–D5 locked. Implemented on branch
+`451-weekday-weekend-profile-modes`: the eight modes, the contiguous plural
+weekend axes, the `profile_window_seconds` rename with its value correction,
+`--help profile`, and the harness sweep across all five mode-table sites.
 
 ## Requirements
 
@@ -80,6 +83,39 @@ Section name `profile`. Fields, in order:
 | `included_weekdays` | the kept days, comma-joined, in the mode's axis order (first kept day first) |
 | `samples_included` | matched lines on kept days |
 | `samples_dropped` | matched lines on excluded days; `included + dropped = total_matched` |
+
+Both derived fields are computed from the mode's own geometry rather than stored
+per mode: `profile_window_seconds()` returns 86400 for any mode whose label
+format is time-only and kept-days × 86400 otherwise, and
+`profile_included_weekdays()` walks the week from the mode's first kept day.
+Adding a mode therefore cannot leave either field stale.
+
+## Implementation notes
+
+**N1 — the fold modulus stays 604800 for every plural mode.** `fold_epoch()`
+uses `$cfg->{period}` only to choose between the time-of-day branch and the
+day-offset branch, so a plural mode keeps 604800 whatever its window length;
+D3's window is a separate derived quantity and the modulus is no longer emitted
+anywhere.
+
+**N2 — the plural weekend anchors are the modes' own first kept day** (Saturday
+172800 for `weekends`, Friday 86400 for `weekends-alt`), which places the two
+kept days at day offsets 0 and 1.
+
+**N3 — what actually asserts D2.** The failure D2 guards against is a weekend
+window that *wraps*: anchoring `weekends` on Sunday puts Sat at offset 6 and Sun
+at offset 0, so the axis renders all seven weekday labels with five empty days
+between them. That is caught by the existing `first-weekday` and `no-excluded`
+render assertions (verified by sabotage: the leftmost label becomes `Sun` and
+excluded days render). A *non-wrapping* anchor change — anchoring `weekends` on
+Monday, giving offsets 5 and 6 — is not observable at all: the kept days are
+still adjacent, the empty backfill runs only between the folded min and max, and
+the rendered output is byte-identical. No assertion was added for it, because
+there is no behaviour to assert.
+
+**N4 — the run-summary fold heading** takes its wording from
+`profile_fold_phrase()`, so a plural mode reads "folded onto a single Sat-Sun
+profile" rather than "a single weekends profile".
 
 ## Merge gate
 
