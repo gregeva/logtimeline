@@ -36,9 +36,11 @@ Decided 2026-08-29. No separate issue; each site moves as part of the drop that 
 
 | Site | Today | Moves under |
 |---|---|---|
-| `SUCCESS/FAILURE CLASSIFIED` rows (`print_summary_table()`) | 3 significant digits, fit-to-row | #448 — this logic becomes the named formatter; the row calls it |
-| Memory breakdown rows (`print_summary_table()`) | integer, `(<1%)` floor, 5 characters | #448 — call-site swap, output byte-identical, proven by the existing goldens |
+| `SUCCESS/FAILURE CLASSIFIED` rows (`print_summary_table()`) | 3 significant digits, fit-to-row | #448 — **done**: the logic became `format_percentage()`, and the row calls it through `share_row_text()` |
+| Memory breakdown rows (`print_summary_table()`) | integer, `(<1%)` floor, 5 characters | #448 — **done**: a call-site swap, output byte-identical |
 | Per-file progress percentage (`read_and_process_logs()`) | integer, clamped | #446 — replaced by the reshaped line, which calls the formatter |
 | Histogram y-axis ticks and `0%` baseline corner | integer, 3 characters | already conforms in shape; swapped to the formatter at the next touch of that renderer |
+
+The formatter shipped under #448 as `format_percentage( $value, %params )`, where `$value` is the percentage itself. Beyond the four parameters above it takes `parens` (wrap the figure in brackets), `floor_at` with `floor_text` (below `floor_at`, the marker replaces the figure — the memory rows' `<1%` is a threshold on the raw value, not a rounds-to-zero test), and `pad` (right-align within `width`, inside the brackets where they are in use, which is what keeps `( 3%)` aligned with `(97%)`).
 
 Outside the convention by design: `-V` diagnostic fields carrying percentages (`unclassified_pct`, consolidation reduction and eviction lines) are stability-contracted machine-read values, not presentation, and keep their shape.

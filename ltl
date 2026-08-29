@@ -68,6 +68,9 @@ my $recursive_files = 0;                                                # -r: ex
 my @unreadable_directories;                                             # -r sweep: directories that could not be opened, reported once at the tail of read_and_process_logs()
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
+# Contribution bar drawn over the category rows of the run summary (#448).
+# On by default; the variants exist to be judged against real logs.
+my ( $summary_bar_off, $summary_bar_mono, $summary_bar_absolute, $summary_bar_log, $summary_bar_reverse ) = ( 0, 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_detect_registry_build, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0,0 );
 # Statistics-phase sub-stage timing (#417): accumulated wall-clock per block,
 # start/stop pairs at block boundaries only — never inside a per-key loop.
@@ -1116,33 +1119,41 @@ my %colors = (
 # 256 Colors: Uses codes like \e[38;5;<color_code>m for foreground and \e[48;5;<color_code>m for background.
 # True Color (24-bit): Uses codes like \e[38;2;<r>;<g>;<b>m for foreground and \e[48;2;<r>;<g>;<b>m for background.
 
-# Dynamically create new keys with -HL for highlighted versions of each color
+# The saturated 256-colour equivalent of each of the eight ANSI colours. A
+# highlight fill has to be the vivid form of the hue, not the terminal's
+# palette entry for it, so a category reads as the same colour whether it is
+# drawn as text or as a background.
+my @ansi_saturated_256 = ( 16, 196, 46, 226, 21, 201, 51, 231 );
+
+# The background a foreground colour is highlighted on. One rule for every
+# colour, so a category added later inherits a fill without an entry
+# anywhere: a colour already given as a 256-colour index is filled with that
+# same index, and an ANSI colour (30-37 or the bright 90-97) is filled with
+# the saturated 256-colour form of its own hue. Where a foreground sets the
+# colour more than once the last one wins, as the terminal itself resolves
+# it. Returns undef for a foreground that names no colour at all.
+sub derive_background_color {
+    my ($fg) = @_;
+    return undef unless defined $fg;
+
+    my ($kind, $code);
+    while ( $fg =~ /\e\[(?:[0-9;]*;)?(?:(38;5;(\d+))|(3[0-7]|9[0-7]))m/g ) {
+        if ( defined $1 ) { ($kind, $code) = ('256', $2) }
+        else              { ($kind, $code) = ('ansi', $3) }
+    }
+    return undef unless defined $kind;
+
+    return "\033[48;5;${code}m" if $kind eq '256';
+    return "\033[48;5;$ansi_saturated_256[ $code % 10 ]m";
+}
+
+# Every colour gets a -HL twin drawn on a background derived from its own
+# foreground, so a highlighted row reads as the same colour filled in. A
+# foreground naming no colour keeps the terminal's own background.
 foreach my $key (keys %colors) {
     next if $key eq 'NC';
-    my $new_key = "$key-HL";
-    my $original_fg_color = $colors{$key};
-    $original_fg_color =~ s/^\e\[(.*?)m/$1/g;
-
-    my $bg_color_256;
-    my $has_background = 0;
-    if ($original_fg_color eq "0;31") {    # Red
-        $bg_color_256 = "196";            # 256-color code for Red
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;33") { # Yellow
-        $bg_color_256 = "226";            # 256-color code for Yellow
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;32") { # Green
-        $bg_color_256 = "46";             # 256-color code for Green
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;34") { # Blue
-        $bg_color_256 = "21";             # 256-color code for Blue
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;35") { # Magenta
-        $bg_color_256 = "201";            # 256-color code for Magenta
-        $has_background = 1;
-    }
-
-    $colors{$new_key} = $has_background ? "$colors{$key}\033[48;5;${bg_color_256}m" : "$colors{$key}\033[49m";       # allows specifying background for some highlighted colors only
+    my $background = derive_background_color( $colors{$key} );
+    $colors{"$key-HL"} = $colors{$key} . ( $background // "\033[49m" );
 }
 
 ## SUBS ##
@@ -2184,6 +2195,9 @@ sub _classify_argv_provenance {
                 'omit-values|ov', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
                 'recursive|r',
                 'omit-summary|osum', 'omit-rate|or', 'omit-durations|od',
+                'summary-bar-off|sbo', 'summary-bar-mono|sbm',
+                'summary-bar-absolute|sba', 'summary-bar-log|sbl',
+                'summary-bar-reverse|sbr',
                 'omit-bytes|ob', 'omit-count|oc', 'include-count|ic',
                 'include-query-string|iqs', 'include-session|is',
                 'hide-session|hs', 'hide-occurrences|ho', 'hide-legend|hl',
@@ -2291,6 +2305,11 @@ sub emit_runtime_config_verbose {
         'no-index'                          => $no_index,
         'recursive'                         => $recursive_files,
         'omit-summary'                      => $omit_summary,
+        'summary-bar-off'                   => $summary_bar_off,
+        'summary-bar-mono'                  => $summary_bar_mono,
+        'summary-bar-absolute'              => $summary_bar_absolute,
+        'summary-bar-log'                   => $summary_bar_log,
+        'summary-bar-reverse'               => $summary_bar_reverse,
         'omit-rate'                         => $omit_rate,
         'omit-durations'                    => $omit_durations,
         'omit-bytes'                        => $omit_bytes,
@@ -7302,6 +7321,11 @@ sub print_help {
     $out .= help_opt("-o,   --output-csv",            "Write all extracted data to a CSV file for external analysis");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from -du), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
+    $out .= help_opt("-sbo, --summary-bar-off",       "Hide the contribution bar drawn across the category rows of the run summary (the share percentage stays)");
+    $out .= help_opt("-sbm, --summary-bar-mono",      "Draw the contribution bar in plain foreground and background instead of each category's own colour");
+    $out .= help_opt("-sba, --summary-bar-absolute",  "Scale the contribution bar so the full row width is every included line, instead of the largest category filling the row");
+    $out .= help_opt("-sbl, --summary-bar-log",       "Scale the contribution bar logarithmically, giving the smallest categories a visible length when one category dominates");
+    $out .= help_opt("-sbr, --summary-bar-reverse",   "Draw the contribution bar from the right edge of the row towards the left");
     $out .= help_opt("-hl,  --hide-legend",           "Hide the legend column (category breakdowns and rates)");
     $out .= help_opt("-ho,  --hide-occurrences",      "Hide the occurrences bar graph column, freeing space for other metric columns");
     $out .= help_opt("-hd,  --hide-duration",         "Hide the duration bar graph column");
@@ -10158,6 +10182,105 @@ sub format_cv_display {
     return sprintf('%.2f', $cv);
 }
 
+# The single resolution surface for every percentage ltl prints
+# (docs/percentage-presentation.md). A percentage is not one number format:
+# it is one formatter given per-surface parameters, which degrades until the
+# value fits the space the surface can spare.
+#
+# Call as format_percentage( $value, %params ). $value is the percentage
+# itself (0..100), not a fraction. Parameters, all optional:
+#
+#   mode        'significant' (default) - a target count of SIGNIFICANT
+#                   digits, so the precision follows the magnitude:
+#                   98.2%, 1.11%, 0.107% all carry three.
+#               'decimals'  - a fixed count of decimal places: 99.950%.
+#               'integer'   - whole percent, no decimal point: 20%.
+#   digits      the count for the chosen mode (default 3 for significant,
+#               0 for integer; decimals mode requires it).
+#   width       the characters the rendered string may occupy, parentheses
+#               and the '%' sign included. Undefined means unbounded.
+#   floor       true to round DOWN (a progress figure must never read ahead
+#               of the work it reports); false (default) to round to
+#               nearest, which is what a share wants.
+#   parens      true to wrap the value in parentheses: (20%).
+#   floor_at    a value below which the surface declines to state a figure,
+#               reporting floor_text instead: a share of 0.4% shown as a
+#               whole percent would read '0%', which claims more than the
+#               measurement supports.
+#   floor_text  the string shown in place of a value below floor_at, e.g.
+#               '<1%'. Wrapped by parens like any other value.
+#   pad         right-align the figure within `width`, so a column of them
+#               lines up. Where parens are in use the padding goes inside
+#               them, keeping the brackets hard against the field edges.
+#
+# Degradation, when the value does not fit `width`: decimals are dropped one
+# at a time, never below a whole percent, and the '%' sign is always kept.
+# What a surface does when even the whole percent will not fit is the
+# surface's own decision - the caller inspects the returned length. The
+# formatter never exceeds `width` unless the integer part alone is wider,
+# which no percentage of a total can be beyond '100%'.
+sub format_percentage {
+    my ($value, %p) = @_;
+    return '' unless defined $value;
+
+    my $mode   = $p{mode} // 'significant';
+    my $parens = $p{parens} ? 1 : 0;
+    my $width  = $p{width};
+
+    # Decimal places the requested precision asks for, before any fitting.
+    my $decimals;
+    if ($mode eq 'integer') {
+        $decimals = 0;
+    } elsif ($mode eq 'decimals') {
+        $decimals = $p{digits} // 0;
+    } else {
+        # Significant digits: the integer part consumes as many of them as
+        # its own magnitude needs, and the remainder become decimals.
+        my $digits = $p{digits} // 3;
+        my $magnitude = $value >= 100 ? 3 : $value >= 10 ? 2 : $value >= 1 ? 1 : 0;
+        $decimals = $digits - $magnitude;
+        $decimals = 0 if $decimals < 0;
+    }
+
+    # Padding sits inside the brackets, so the inner budget is what the
+    # figure itself has to fit into.
+    my $inner_width = defined $width ? $width - ( $parens ? 2 : 0 ) : undef;
+    my $wrap = sub {
+        my $text = shift;
+        $text = sprintf( "%*s", $inner_width, $text )
+            if $p{pad} && defined $inner_width;
+        return $parens ? "($text)" : $text;
+    };
+
+    # Below the surface's floor the figure is not stated at all: the marker
+    # says the share is smaller than the precision can express, where a
+    # rounded rendering would assert a value the measurement does not carry.
+    return $wrap->( $p{floor_text} )
+        if defined $p{floor_at} && defined $p{floor_text} && $value < $p{floor_at};
+
+    # Rounding direction. Flooring is applied at the working precision so a
+    # progress figure never rounds up past the work actually done.
+    my $render = sub {
+        my $d = shift;
+        my $v = $value;
+        if ($p{floor}) {
+            my $scale = 10 ** $d;
+            $v = int( $v * $scale ) / $scale;
+        }
+        return sprintf( "%.*f%%", $d, $v );
+    };
+
+    my $figure = $render->($decimals);
+    if ( defined $inner_width ) {
+        while ( length($figure) > $inner_width && $decimals > 0 ) {
+            $decimals--;
+            $figure = $render->($decimals);
+        }
+    }
+
+    return $wrap->($figure);
+}
+
 
 # utility function for formating numbers to normal format
 sub normalize { $_[0] =~ s/\.0+$//r }
@@ -10554,6 +10677,11 @@ sub adapt_to_command_line_options {
         'no-index|ni' => \$no_index,
         'recursive|r' => \$recursive_files,
         'omit-summary|osum' => \$omit_summary,
+        'summary-bar-off|sbo' => \$summary_bar_off,
+        'summary-bar-mono|sbm' => \$summary_bar_mono,
+        'summary-bar-absolute|sba' => \$summary_bar_absolute,
+        'summary-bar-log|sbl' => \$summary_bar_log,
+        'summary-bar-reverse|sbr' => \$summary_bar_reverse,
         'omit-rate|or' => \$omit_rate,
         'omit-durations|od' => \$omit_durations,
         'omit-bytes|ob' => \$omit_bytes,
@@ -16779,11 +16907,129 @@ sub print_run_options {
     print "\n";
 }
 
+# Geometry of the run summary table. The label cell, the total cell and the
+# single space between them are one row-width budget: a value wider than the
+# total cell runs left into whatever slack the label leaves, and the rows stay
+# right-aligned to the same boundary down the table.
+my $summary_category_column_width   = 30;
+my $summary_occurrences_column_width = 10;
+my $summary_row_width = $summary_category_column_width + 1 + $summary_occurrences_column_width;
+
+# One row of the summary table carrying a count and, where a denominator is
+# given, that count's share of it: "633 (98.2%)", right-aligned to the table
+# boundary (docs/percentage-presentation.md). The share carries three
+# significant digits and gives them up one at a time when the row is too
+# tight; the count is never given up, so a row that still will not fit drops
+# the share entirely and shows the count alone.
+#
+# Returns the row's text without the table's outer padding, so a caller that
+# draws over the row (the category contribution bar) knows exactly which
+# characters are its own.
+sub share_row_text {
+    my ($label, $count, $denominator) = @_;
+
+    my $value = $count;
+    if ( $denominator ) {
+        my $fit   = $summary_row_width - length($label) - 1;
+        # What the share may occupy: the row's slack once the count and the
+        # space separating it from the share are spoken for.
+        my $slack = $fit - length($count) - 1;
+        my $share = format_percentage( $count / $denominator * 100,
+                                       mode => 'significant', digits => 3, parens => 1,
+                                       width => $slack );
+        $value = "$count $share";
+        $value = $count if length($value) > $fit;
+    }
+
+    my $gap = $summary_row_width - length($label) - length($value);
+    $gap = 1 if $gap < 1;
+    return $label . ( ' ' x $gap ) . $value;
+}
+
+# How many of the row's characters a category's bar fills. The reference the
+# share is taken against is the largest category by default, so the biggest
+# row spans the row and every other is drawn relative to it: with the table
+# width standing for the whole population instead, a dominant category leaves
+# most of the width unused and the small contributors are squeezed into a few
+# characters each. -sba takes that absolute reading; the printed percentage
+# carries the true share either way. -sbl compresses the scale so a category
+# holding a fraction of a percent still has a length to see.
+sub summary_bar_extent {
+    my ($count, $reference, $width) = @_;
+    return 0 unless $reference && $count > 0 && $width > 0;
+
+    my $fraction = $count / $reference;
+    $fraction = 1 if $fraction > 1;
+
+    if ($summary_bar_log) {
+        # Logarithmic against the same reference, so the reference still fills
+        # the row and the decades below it are spread across the rest of the
+        # width instead of collapsing onto the first character. The scale runs
+        # one decade below the smallest count a category can have, so a single
+        # line lands inside the range rather than exactly at its foot, where
+        # every log scale sends it and where it would be indistinguishable
+        # from the linear rendering the option exists to improve on.
+        my $decades = log( $reference ) / log( 10 ) + 1;
+        my $position = 1 + ( log( $fraction ) / log( 10 ) ) / $decades;
+        $fraction = $position > 0 ? $position : 0;
+    }
+
+    my $extent = int( $fraction * $width + 0.5 );
+    # A category with lines to its name is never drawn as nothing: the bar
+    # exists to show that it is present as much as how much of it there is.
+    $extent = 1 if $extent < 1;
+    $extent = $width if $extent > $width;
+    return $extent;
+}
+
+# One category row with its contribution bar drawn over the row's own text.
+# The text is overdrawn rather than accompanied by a separate bar column: it
+# is the technique the timeline's proportional columns use, and it costs the
+# table no width at all. The foreground switches at the fill edge so the text
+# stays legible on both sides of it, and the colour is reset before the
+# table's trailing padding so the fill cannot bleed into the file-details
+# pane printed beside it on the same physical line.
+sub summary_category_row {
+    my ($row_text, $category_bucket, $extent) = @_;
+
+    return $row_text unless $extent > 0;
+
+    my ($filled_color, $plain_color);
+    if ($summary_bar_mono) {
+        # A plain fill, so the bar's length can be judged without the
+        # category colours arguing with it.
+        $filled_color = "\033[7m";
+        $plain_color  = $colors{'NC'};
+    } else {
+        $filled_color = $colors{"$category_bucket-HL"} // $colors{'NC'};
+        $plain_color  = $colors{$category_bucket}      // $colors{'NC'};
+    }
+
+    # The bar covers the leading $extent characters, or the trailing ones
+    # when it is drawn from the right edge.
+    my $width = length($row_text);
+    my ($fill_from, $fill_to) = $summary_bar_reverse
+        ? ( $width - $extent, $width - 1 )
+        : ( 0, $extent - 1 );
+
+    my $out = '';
+    my $inside = 0;
+    for my $i ( 0 .. $width - 1 ) {
+        my $should_fill = ( $i >= $fill_from && $i <= $fill_to ) ? 1 : 0;
+        if ( $should_fill != $inside || $i == 0 ) {
+            $out .= $should_fill ? $filled_color : $plain_color;
+            $inside = $should_fill;
+        }
+        $out .= substr( $row_text, $i, 1 );
+    }
+    return $out . $colors{'NC'};
+}
+
 sub print_summary_table {
     return if $omit_summary;
 
-    my $category_column_width = 30;
-    my $occurrences_column_width = 10;
+    my $category_column_width    = $summary_category_column_width;
+    my $occurrences_column_width = $summary_occurrences_column_width;
     my $table_padding = 2;
     my $padding = " " x $table_padding;
     my $column_padding = " " x 1;
@@ -16804,10 +17050,19 @@ sub print_summary_table {
     push @summary_table, sprintf( "  " . "%-${category_column_width}s %${occurrences_column_width}s$padding\n", "Category", "Total" ); 
     push @summary_table, sprintf( "  " . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
 
-    foreach my $category_bucket (@log_levels) {
-        next if $category_bucket =~ /^(empty|err-rate|msg-rate)$/;
-        next unless $category_totals{$category_bucket};
+    # Categories with lines to show, and the largest of them: the bar is drawn
+    # relative to that largest row unless -sba asks for the absolute reading
+    # against every included line.
+    my @categories_shown = grep { $category_totals{$_} }
+                           grep { !/^(empty|err-rate|msg-rate)$/ } @log_levels;
+    my $largest_category_total = 0;
+    for my $category_bucket (@categories_shown) {
+        $largest_category_total = $category_totals{$category_bucket}
+            if $category_totals{$category_bucket} > $largest_category_total;
+    }
+    my $bar_reference = $summary_bar_absolute ? $total_lines_included : $largest_category_total;
 
+    foreach my $category_bucket (@categories_shown) {
         # The column is fixed-width and the totals align down the table, so a
         # label wider than the column is cut to it rather than pushing the
         # total out of line.
@@ -16815,7 +17070,19 @@ sub print_summary_table {
         $category_label = substr( $category_label, 0, $category_column_width )
             if length( $category_label ) > $category_column_width;
 
-        push @summary_table, sprintf( $table_format, $category_label, $category_totals{$category_bucket} );
+        # The share is of the lines included, presented as the classified rows
+        # present theirs: the count, then the percentage in brackets, the pair
+        # right-aligned to the table boundary.
+        my $row_text = share_row_text( $category_label,
+                                       $category_totals{$category_bucket},
+                                       $total_lines_included );
+
+        my $extent = $summary_bar_off ? 0
+                   : summary_bar_extent( $category_totals{$category_bucket},
+                                         $bar_reference, length($row_text) );
+
+        push @summary_table,
+            $padding . summary_category_row( $row_text, $category_bucket, $extent ) . "$padding\n";
     }
 
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
@@ -16824,30 +17091,12 @@ sub print_summary_table {
     # Classified lines (#453): each row is shown when its outcome was declared
     # by a bound format or observed. The share is of all classified lines and
     # is omitted when no line was a success (failures would always read 100%).
-    # The value is right-aligned to the table boundary and may run left into
-    # the label column's slack; its precision is three significant digits
-    # (98.2%, 1.11%, 0.107%), reduced only when the row would not fit.
     {
         my $classified = $total_successes + $total_failures;
-        my $row_width  = $category_column_width + 1 + $occurrences_column_width;
         my $emit = sub {
             my ($label, $n) = @_;
-            my $value = $n;
-            if ($total_successes) {
-                my $pct   = $n / $classified * 100;
-                my $int_digits = $pct >= 100 ? 3 : $pct >= 10 ? 2 : $pct >= 1 ? 1 : 0;
-                my $decimals = 3 - $int_digits;
-                my $fit = $row_width - length($label) - 1;
-                while (1) {
-                    $value = sprintf( "%d (%.*f%%)", $n, $decimals, $pct );
-                    last if length($value) <= $fit || $decimals == 0;
-                    $decimals--;
-                }
-                $value = $n if length($value) > $fit;
-            }
-            my $gap = $row_width - length($label) - length($value);
-            $gap = 1 if $gap < 1;
-            push @summary_table, $padding . $label . ( ' ' x $gap ) . $value . "$padding\n";
+            push @summary_table,
+                $padding . share_row_text( $label, $n, $total_successes ? $classified : undef ) . "$padding\n";
         };
         $emit->( "SUCCESS CLASSIFIED", $total_successes ) if $cls_success_declared || $total_successes;
         $emit->( "FAILURE CLASSIFIED", $total_failures )  if $cls_failure_declared || $total_failures;
@@ -16896,7 +17145,11 @@ sub print_summary_table {
                 my $category_width = $category_column_width + 2;
                 my $occurrences_width = $occurrences_column_width - 2;
                 my $pct = $max_memory_usage > 0 ? ($size / $max_memory_usage) * 100 : 0;
-                my $pct_str = $pct < 1 ? "(<1%)" : sprintf("(%2.0f%%)", $pct);
+                # Whole percent in a fixed five-character parenthesised field;
+                # a structure holding less than one percent of the peak says so
+                # rather than rounding down to a flat 0%.
+                my $pct_str = format_percentage( $pct, mode => 'integer', width => 5, parens => 1,
+                                                 floor_at => 1, floor_text => '<1%', pad => 1 );
 
                 my $indented_label = sprintf(" %-25s %5s", $label, $pct_str);
                 push @summary_table, sprintf( "$padding%-${category_width}s %${occurrences_width}s$padding\n", $indented_label, format_bytes( $size, 'B', 0 ) );
