@@ -1116,33 +1116,41 @@ my %colors = (
 # 256 Colors: Uses codes like \e[38;5;<color_code>m for foreground and \e[48;5;<color_code>m for background.
 # True Color (24-bit): Uses codes like \e[38;2;<r>;<g>;<b>m for foreground and \e[48;2;<r>;<g>;<b>m for background.
 
-# Dynamically create new keys with -HL for highlighted versions of each color
+# The saturated 256-colour equivalent of each of the eight ANSI colours. A
+# highlight fill has to be the vivid form of the hue, not the terminal's
+# palette entry for it, so a category reads as the same colour whether it is
+# drawn as text or as a background.
+my @ansi_saturated_256 = ( 16, 196, 46, 226, 21, 201, 51, 231 );
+
+# The background a foreground colour is highlighted on. One rule for every
+# colour, so a category added later inherits a fill without an entry
+# anywhere: a colour already given as a 256-colour index is filled with that
+# same index, and an ANSI colour (30-37 or the bright 90-97) is filled with
+# the saturated 256-colour form of its own hue. Where a foreground sets the
+# colour more than once the last one wins, as the terminal itself resolves
+# it. Returns undef for a foreground that names no colour at all.
+sub derive_background_color {
+    my ($fg) = @_;
+    return undef unless defined $fg;
+
+    my ($kind, $code);
+    while ( $fg =~ /\e\[(?:[0-9;]*;)?(?:(38;5;(\d+))|(3[0-7]|9[0-7]))m/g ) {
+        if ( defined $1 ) { ($kind, $code) = ('256', $2) }
+        else              { ($kind, $code) = ('ansi', $3) }
+    }
+    return undef unless defined $kind;
+
+    return "\033[48;5;${code}m" if $kind eq '256';
+    return "\033[48;5;$ansi_saturated_256[ $code % 10 ]m";
+}
+
+# Every colour gets a -HL twin drawn on a background derived from its own
+# foreground, so a highlighted row reads as the same colour filled in. A
+# foreground naming no colour keeps the terminal's own background.
 foreach my $key (keys %colors) {
     next if $key eq 'NC';
-    my $new_key = "$key-HL";
-    my $original_fg_color = $colors{$key};
-    $original_fg_color =~ s/^\e\[(.*?)m/$1/g;
-
-    my $bg_color_256;
-    my $has_background = 0;
-    if ($original_fg_color eq "0;31") {    # Red
-        $bg_color_256 = "196";            # 256-color code for Red
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;33") { # Yellow
-        $bg_color_256 = "226";            # 256-color code for Yellow
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;32") { # Green
-        $bg_color_256 = "46";             # 256-color code for Green
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;34") { # Blue
-        $bg_color_256 = "21";             # 256-color code for Blue
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;35") { # Magenta
-        $bg_color_256 = "201";            # 256-color code for Magenta
-        $has_background = 1;
-    }
-
-    $colors{$new_key} = $has_background ? "$colors{$key}\033[48;5;${bg_color_256}m" : "$colors{$key}\033[49m";       # allows specifying background for some highlighted colors only
+    my $background = derive_background_color( $colors{$key} );
+    $colors{"$key-HL"} = $colors{$key} . ( $background // "\033[49m" );
 }
 
 ## SUBS ##
