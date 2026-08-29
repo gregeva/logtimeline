@@ -14601,10 +14601,11 @@ sub normalize_data_for_output {
     foreach my $bucket (keys %log_occurrences) {
         my $total_occurrences = 0;
         my $total_bytes = $log_stats{$bucket}{bytes};
-        # The error rate reads the bucket's failure counter (#453 D13): the
-        # outcome was decided per line by the format's classification, so
-        # rendering never re-derives it from category names, and a
-        # highlighted failure (category suffixed -HL) counts like any other.
+        # The error count the rate below is normalised from is the bucket's
+        # failure counter (#453 D13): the outcome was decided per line by
+        # the format's classification, so rendering never re-derives it
+        # from category names, and a highlighted failure (category
+        # suffixed -HL) counts like any other.
         my $error_occurrences = $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[2] // 0) : 0;
 
         foreach my $category_bucket (keys %{$log_occurrences{$bucket}}) {
