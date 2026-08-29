@@ -1479,13 +1479,13 @@ scenario_classification_summary_rows() {
     assert_no_runtime_warnings "$r_gc.stderr" "$current_scenario gc"
 
     assert_line "$r_access" \
-        pattern     '^  SUCCESS CLASSIFIED +6 \(60\.0%\) *$' \
+        pattern     '^  SUCCESS CLASSIFIED +6 \(60%\) *$' \
         asserts     'An access log shows the success count with its share of all classified lines (6 of 10), right-aligned to the table boundary' \
         produced_by "$SUMMARY_ROWS_PRODUCER" \
         contract    "$CLASSIFICATION_CONTRACT - summary rows (architect, 2026-08-29): share = count / (successes + failures), three significant digits"
 
     assert_line "$r_access" \
-        pattern     '^  FAILURE CLASSIFIED +4 \(40\.0%\) *$' \
+        pattern     '^  FAILURE CLASSIFIED +4 \(40%\) *$' \
         asserts     'The failure row carries the complementary share' \
         produced_by "$SUMMARY_ROWS_PRODUCER" \
         contract    "$CLASSIFICATION_CONTRACT - summary rows: both rows shown when both outcomes are declared"

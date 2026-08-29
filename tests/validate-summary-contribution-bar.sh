@@ -170,38 +170,61 @@ capture_render() {
 row_bar_report() {
     "$PERL" -e '
         my ($render, $label, $row_width) = @ARGV;
+        # One reader for the fill state of a rendered row, shared by every
+        # caller that needs it. Returns the number of glyphs inside the row
+        # that carry a background, and (in list context) the per-glyph flags.
+        #
+        # SGR parameters are read as whole values, longest first: a 256-colour
+        # triplet carries its own digits, so 38;5;0 — the black foreground a
+        # bar fill pairs with — must not be mistaken for a reset because it
+        # ends in ";0". That misreading made a full-width bar measure as zero.
+        sub count_filled_glyphs {
+            my ($line, $row_width) = @_;
+            my ($pos, $bg) = (0, "");
+            my @fill;
+            while ($line =~ /\G(\e\[([0-9;]*)m|.)/gs) {
+                my ($tok, $sgr) = ($1, $2);
+                if (defined $sgr) {
+                    my @params = split /;/, $sgr, -1;
+                    my $is_reset = ( $sgr eq "" );
+                    my $i = 0;
+                    while ($i <= $#params) {
+                        my $prm = $params[$i];
+                        if (($prm eq "38" || $prm eq "48") && ($params[$i+1] // "") eq "5") {
+                            $bg = $sgr if $prm eq "48";
+                            $i += 3; next;
+                        }
+                        $is_reset = 1 if $prm eq "0" || $prm eq "49";
+                        $bg = $sgr if $prm eq "7";
+                        $i++;
+                    }
+                    # A reset clears the background unless this same escape
+                    # also sets one.
+                    $bg = "" if $is_reset && $sgr !~ /(?:^|;)48;5;\d+(?:;|$)/;
+                    next;
+                }
+                $pos++;
+                next if $pos <= 2;                    # table padding
+                last if $pos > 2 + $row_width;        # past the row
+                push @fill, ( $bg ne "" ? 1 : 0 );
+            }
+            my $n = 0; $n += $_ for @fill;
+            return wantarray ? ($n, @fill) : $n;
+        }
         open my $fh, "<", $render or die "cannot open $render: $!\n";
         my $row;
         while (my $line = <$fh>) {
             ( my $plain = $line ) =~ s/\e\[[0-9;]*m//g;
             next unless length($plain) >= 2 + $row_width;
             next unless substr($plain, 0, 2) eq "  ";
-            next unless substr($plain, 2, $row_width) =~ /^\Q$label\E\s/;
+            next unless substr($plain, 2, $row_width) =~ /^\Q$label\E\s+\d/;
             # Keep only the table row: the file-details pane is printed on the
             # same physical line, past the row boundary, and is not ours.
             my ($glyphs, $kept, $bg) = (0, "", "");
             my $tail_reset = 0;
-            my @fill;      # per glyph index: is a background set?
-            my $pos = 0;
-            # Two leading spaces of table padding sit before the row.
-            while ($line =~ /\G(\e\[([0-9;]*)m|.)/gs) {
-                my ($tok, $sgr) = ($1, $2);
-                if (defined $sgr) {
-                    $kept .= $tok;
-                    if ($sgr =~ /(?:^|;)(?:0|49)(?:;|$)/ || $sgr eq "") { $bg = "" }
-                    elsif ($sgr =~ /(?:^|;)48;5;\d+(?:;|$)/) { $bg = $sgr }
-                    elsif ($sgr =~ /(?:^|;)7(?:;|$)/)        { $bg = $sgr }
-                    $tail_reset = ( $sgr eq "0" || $sgr =~ /(?:^|;)0(?:;|$)/ ) ? 1 : 0;
-                    next;
-                }
-                $pos++;
-                next if $pos <= 2;                    # table padding
-                last if $pos > 2 + $row_width;        # past the row
-                $glyphs++;
-                push @fill, ( $bg ne "" ? 1 : 0 );
-            }
-            my $extent = 0;
-            $extent++ for grep { $_ } @fill;
+            my ($extent, @fill) = count_filled_glyphs($line, $row_width);
+            my $kept = join "", ($line =~ /(\e\[[0-9;]*m)/g);
+            $tail_reset = ( $line =~ /\e\[0m[^\e]*$/ ) ? 1 : 0;
             my ($side) = ("none");
             if ($extent > 0) {
                 $side = $fill[0] ? "left" : "right";
@@ -251,37 +274,34 @@ check_row_field() {
     return 1
 }
 
-# The colour table gives every colour a highlighted twin, and the twin of a
-# category colour carries a background. This is what lets the bar be filled in
-# a category's own colour without a per-category fill table: the twin is
-# derived from the foreground by one rule.
+# Every category must resolve to an entry in the bar-colour table, because the
+# bar is drawn with that entry's fill. A category whose colour finds no entry
+# renders with no bar at all — silently, and only for that category.
 check_every_category_has_a_fill() {
     "$PERL" -e '
         my ($ltl) = @ARGV;
         open my $fh, "<", $ltl or die "cannot open $ltl: $!\n";
         my $src = do { local $/; <$fh> };
         close $fh;
-        # Everything the twins are built from is sliced out of ltl and run
-        # here, the construction loop included, so this checks what the tool
-        # actually builds rather than a second implementation of the rule.
+        # The tables and the resolver are sliced out of ltl and run here, so
+        # this checks what the tool actually resolves rather than a second
+        # implementation of the rule.
         my ($levels) = $src =~ /(^my \@log_levels = \(.*?^\);)/ms;
         my ($table)  = $src =~ /(^my %colors = \(.*?^\);)/ms;
-        my ($sat)    = $src =~ /(^my \@ansi_saturated_256 = .*?;)/ms;
-        my ($derive) = $src =~ /(^sub derive_background_color \{.*?^\}$)/ms;
-        my ($build)  = $src =~ /(^foreach my \$key \(keys %colors\) \{.*?^\}$)/ms;
+        my ($bars)   = $src =~ /(^my \@column_colors = \(.*?^\);)/ms;
+        my ($resolve)= $src =~ /(^sub summary_bar_color \{.*?^\}$)/ms;
         my %part = ( "\@log_levels" => $levels, "%colors" => $table,
-                     "\@ansi_saturated_256" => $sat,
-                     "derive_background_color()" => $derive,
-                     "the -HL twin construction loop" => $build );
+                     "\@column_colors" => $bars,
+                     "summary_bar_color()" => $resolve );
         my @missing = sort grep { !defined $part{$_} } keys %part;
         if (@missing) {
             print "could not read out of ltl: @missing\n";
             exit 1;
         }
-        s/^my // for ($levels, $table, $sat);
-        our (@log_levels, %colors, @ansi_saturated_256);
-        eval "$levels\n$table\n$sat\n$derive\n$build; 1"
-            or do { print "could not evaluate the colour table: $@\n"; exit 1 };
+        s/^my // for ($levels, $table, $bars);
+        our (@log_levels, %colors, @column_colors, %bar_entry_by_hue);
+        eval "$levels\n$table\n$bars\n$resolve; 1"
+            or do { print "could not evaluate the colour tables: $@\n"; exit 1 };
 
         # Categories that reach the summary table, excluding the derived rate
         # rows and the normalisation placeholder, which are not categories.
@@ -291,20 +311,23 @@ check_every_category_has_a_fill() {
 
         my @without;
         for my $category (@categories) {
-            my $fg = $colors{$category};
-            unless (defined $fg) { push @without, "$category (no colour at all)"; next }
-            my $bg = derive_background_color($fg);
-            push @without, $category unless defined $bg;
-            # The -HL twin the renderer actually reads must carry that background.
-            my $twin = $colors{"$category-HL"};
-            push @without, "$category-HL (twin missing the background)"
-                if defined $bg && ( !defined $twin || index($twin, $bg) < 0 );
+            unless (defined $colors{$category}) {
+                push @without, "$category (no colour at all)"; next;
+            }
+            my $entry = summary_bar_color($category);
+            unless ($entry) { push @without, "$category (no bar-table entry)"; next }
+            # The fill the renderer reads must invert: a background paired
+            # with the black foreground the timeline bars use.
+            push @without, "$category (fill carries no background)"
+                unless $entry->{highlighted_bg} =~ /48;5;\d+m/;
+            push @without, "$category (fill does not blacken the text)"
+                unless $entry->{highlighted_bg} =~ /38;5;0m/;
         }
         if (@without) {
-            print "categories with no highlighted fill: @without\n";
+            print "categories with no usable bar fill: @without\n";
             exit 1;
         }
-        printf "all %d categories have a highlighted twin carrying a derived background\n",
+        printf "all %d categories resolve to a bar fill that inverts\n",
             scalar @categories;
         exit 0;
     ' "$1"
@@ -362,11 +385,11 @@ for label in '2xx Success' '5xx Server error'; do
 done
 
 assert_command \
-    command     "check_row_field '$DEFAULT_RENDER' '5xx Server error' fill 'ESC[48;5;196m'" \
-    label       'the bar is filled in the category own colour' \
-    asserts     "The fill is the category's own colour, so a row is recognisable by the same colour whether it is read as text or as a bar. 5xx is red, and red's highlighted twin fills with the saturated 256-colour red derived from that foreground rather than from a per-category table." \
-    produced_by 'derive_background_color() in ltl, applied to every colour when the -HL twins are built' \
-    contract    'features/448-category-summary-share-and-bar.md § D2 — the fill colour is derived from the category foreground by one rule for every colour'
+    command     "check_row_field '$DEFAULT_RENDER' '5xx Server error' fill 'ESC[48;5;124m'" \
+    label       'a plain row is filled in the subdued shade of its own colour' \
+    asserts     "The fill is the category's own colour, so a row is recognisable by the same colour whether it is read as text or as a bar. A plain row takes the subdued shade of that colour — the same one the timeline bars use for their unhighlighted length — so that the vivid shade is left to mean something." \
+    produced_by 'summary_category_row() in ltl, reading plain_bg from the bar-colour table' \
+    contract    'features/448-category-summary-share-and-bar.md § D2 — the bar uses the same bar mechanism and colour table as the timeline columns'
 
 # ---------------------------------------------------------------------------
 # Scenario: every category can be filled.
@@ -376,15 +399,15 @@ assert_command \
 # (CREATE) and any 256-colour category had no highlighted background at all.
 # ---------------------------------------------------------------------------
 
-current_scenario="every-category-colour-has-a-highlighted-twin"
+current_scenario="every-category-colour-resolves-to-a-bar-fill"
 echo "[$current_scenario]"
 
 assert_command \
     command     "check_every_category_has_a_fill '$LTL'" \
-    label       'every category colour has a highlighted twin carrying a background' \
-    asserts     'The bar is filled with the category colour highlighted twin, so a category whose twin carries no background would render with no bar at all — silently, and only for that category. One derivation rule covers every colour ltl defines, including the 256-colour ones, so a category added later inherits a fill without an entry anywhere.' \
-    produced_by 'derive_background_color() in ltl, applied over %colors when the -HL twins are built' \
-    contract    'features/448-category-summary-share-and-bar.md § D2 — every category colour gets a highlighted twin; no explicit per-category fill table'
+    label       'every category colour resolves to a bar fill that inverts' \
+    asserts     'The bar is drawn with the bar-colour table entry for the hue of the category colour, so a category that resolves to no entry would render with no bar at all — silently, and only for that category. The entry must invert: a background paired with a black foreground, which is what keeps the row readable on a dark terminal and on a light one, since the terminal supplies the surrounding foreground.' \
+    produced_by 'summary_bar_color() in ltl, resolving a category colour against @column_colors' \
+    contract    'features/448-category-summary-share-and-bar.md § D2 — the bar uses the same bar mechanism and colour table as the timeline columns'
 
 # ---------------------------------------------------------------------------
 # Scenario: -sbo removes the bar and leaves the numbers.
@@ -510,6 +533,47 @@ check_log_scale_spreads_the_tail() {
     local linear="$1" logscale="$2"
     "$PERL" -e '
         my ($linear_file, $log_file, $row_width, @labels) = @ARGV;
+        # One reader for the fill state of a rendered row, shared by every
+        # caller that needs it. Returns the number of glyphs inside the row
+        # that carry a background, and (in list context) the per-glyph flags.
+        #
+        # SGR parameters are read as whole values, longest first: a 256-colour
+        # triplet carries its own digits, so 38;5;0 — the black foreground a
+        # bar fill pairs with — must not be mistaken for a reset because it
+        # ends in ";0". That misreading made a full-width bar measure as zero.
+        sub count_filled_glyphs {
+            my ($line, $row_width) = @_;
+            my ($pos, $bg) = (0, "");
+            my @fill;
+            while ($line =~ /\G(\e\[([0-9;]*)m|.)/gs) {
+                my ($tok, $sgr) = ($1, $2);
+                if (defined $sgr) {
+                    my @params = split /;/, $sgr, -1;
+                    my $is_reset = ( $sgr eq "" );
+                    my $i = 0;
+                    while ($i <= $#params) {
+                        my $prm = $params[$i];
+                        if (($prm eq "38" || $prm eq "48") && ($params[$i+1] // "") eq "5") {
+                            $bg = $sgr if $prm eq "48";
+                            $i += 3; next;
+                        }
+                        $is_reset = 1 if $prm eq "0" || $prm eq "49";
+                        $bg = $sgr if $prm eq "7";
+                        $i++;
+                    }
+                    # A reset clears the background unless this same escape
+                    # also sets one.
+                    $bg = "" if $is_reset && $sgr !~ /(?:^|;)48;5;\d+(?:;|$)/;
+                    next;
+                }
+                $pos++;
+                next if $pos <= 2;                    # table padding
+                last if $pos > 2 + $row_width;        # past the row
+                push @fill, ( $bg ne "" ? 1 : 0 );
+            }
+            my $n = 0; $n += $_ for @fill;
+            return wantarray ? ($n, @fill) : $n;
+        }
         my %extent;
         for my $which (["linear", $linear_file], ["log", $log_file]) {
             my ($name, $file) = @$which;
@@ -520,20 +584,12 @@ check_log_scale_spreads_the_tail() {
                 for my $line (@lines) {
                     ( my $plain = $line ) =~ s/\e\[[0-9;]*m//g;
                     next unless length($plain) >= 2 + $row_width;
-                    next unless substr($plain, 2, $row_width) =~ /^\Q$label\E\s/;
-                    my ($pos, $bg, $filled) = (0, "", 0);
-                    while ($line =~ /\G(\e\[([0-9;]*)m|.)/gs) {
-                        my ($tok, $sgr) = ($1, $2);
-                        if (defined $sgr) {
-                            if ($sgr =~ /(?:^|;)(?:0|49)(?:;|$)/ || $sgr eq "") { $bg = "" }
-                            elsif ($sgr =~ /(?:^|;)(?:48;5;\d+|7)(?:;|$)/) { $bg = $sgr }
-                            next;
-                        }
-                        $pos++;
-                        next if $pos <= 2;
-                        last if $pos > 2 + $row_width;
-                        $filled++ if $bg ne "";
-                    }
+                    next unless substr($plain, 2, $row_width) =~ /^\Q$label\E\s+\d/;
+                    # The background state machine lives in one place only —
+                    # row_bar_report()'"'"'s reader, invoked here — so a change to
+                    # how a fill is recognised cannot reach one caller and
+                    # miss the other.
+                    my $filled = count_filled_glyphs($line, $row_width);
                     $extent{$name}{$label} = $filled;
                     last;
                 }
@@ -602,6 +658,97 @@ assert_command \
     asserts     "The bar follows what the tool already does for its other bars: the escapes are emitted regardless of whether stdout is a terminal, so a redirected run carries the same rows an interactive one does. NO_COLOR gates the help renderer, not the analytical output, and this assertion is what stops that distinction being erased by accident." \
     produced_by "$BAR_PRODUCED" \
     contract    'features/448-category-summary-share-and-bar.md § D6 — non-terminal output follows what the tool does today; the ANSI escapes are emitted regardless of TTY'
+
+# ---------------------------------------------------------------------------
+# Scenario: a share too small to fill a character draws no bar.
+#
+# The main fixture cannot reach this case. Its smallest category is 1 of 40,
+# which at a 41-character row computes to int(0.025 * 41 + 0.5) = 1 on its own
+# merits — so a forced one-character minimum would produce the same extent the
+# arithmetic already gives, and no assertion over that fixture can tell the two
+# apart. What is needed is not more skew but more dynamic range: a ratio beyond
+# the row width, so the honest extent is zero.
+#
+# This fixture holds 200 / 3 / 1 lines. Against the largest, over a
+# 41-character row: 41, 1 and 0 characters. The 5xx row at 0.49 % is the case
+# that matters — one character is nearly 2.4 % of the row, so drawing it would
+# claim about five times its true size.
+# ---------------------------------------------------------------------------
+
+current_scenario="a-share-below-one-character-draws-no-bar"
+echo "[$current_scenario]"
+
+SUBCHAR_FIXTURE="$REPO_DIR/tests/fixtures/category-contribution-subcharacter.txt"
+if [[ ! -f "$SUBCHAR_FIXTURE" ]]; then
+    echo "ERROR: fixture not found: $SUBCHAR_FIXTURE"; exit 1
+fi
+
+SUBCHAR_RENDER="$TMP_DIR/subcharacter.txt"
+# shellcheck disable=SC2046
+capture_render "$SUBCHAR_RENDER" ansi \
+    --disable-progress -ni -lf "$ACCESS_FORMAT" \
+    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" "$SUBCHAR_FIXTURE"
+
+while IFS='|' read -r label extent; do
+    assert_command \
+        command     "check_row_field '$SUBCHAR_RENDER' '$label' extent '$extent'" \
+        label       "[$label] fills $extent of $ROW_WIDTH characters" \
+        asserts     'The bar states a proportion, so it is never rounded up to a character the share has not earned. At a 41-character row one character is nearly 2.4 per cent; a category holding under half of that draws no bar at all, and the printed percentage carries the value. Rounding it up to one character would overstate the smallest category by several times over, on the surface whose only job is to show relative size.' \
+        produced_by "$BAR_PRODUCED" \
+        contract    'features/448-category-summary-share-and-bar.md § D3 — the bar length is the share of the largest category, with no minimum'
+done <<'SUBROWS'
+2xx Success|41
+3xx Redirection|1
+5xx Server error|0
+SUBROWS
+
+# The option that exists for exactly this case must still answer it: -sbl
+# compresses the scale so the row that draws nothing linearly gets a length.
+SUBCHAR_LOG_RENDER="$TMP_DIR/subcharacter-log.txt"
+# shellcheck disable=SC2046
+capture_render "$SUBCHAR_LOG_RENDER" ansi \
+    --disable-progress -ni -lf "$ACCESS_FORMAT" \
+    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -sbl "$SUBCHAR_FIXTURE"
+
+assert_command \
+    command     "check_row_field '$SUBCHAR_LOG_RENDER' '5xx Server error' extent 12" \
+    label       'under -sbl the sub-character category has a visible bar' \
+    asserts     'Dropping the minimum does not leave the small categories invisible: -sbl is the option for seeing them, and it must give a length to the row the linear scale correctly draws as nothing. If it did not, removing the minimum would have taken away the only way to see a rare category.' \
+    produced_by "$BAR_PRODUCED" \
+    contract    'features/448-category-summary-share-and-bar.md § D5 — -sbl gives the tail rows a visible length'
+
+# ---------------------------------------------------------------------------
+# Scenario: a highlighted row and its plain twin are filled in different shades.
+#
+# The bar-colour table carries two shades per hue and the timeline uses both:
+# the vivid one marks the highlighted length, the subdued one carries the rest.
+# The summary rows must do the same, or a highlighted category and its plain
+# twin render identically and the highlight says nothing. Highlighting one of
+# the two paths in the dominant category splits it into exactly that pair.
+# ---------------------------------------------------------------------------
+
+current_scenario="highlighted-and-plain-twins-differ-in-shade"
+echo "[$current_scenario]"
+
+HL_RENDER="$TMP_DIR/highlighted.txt"
+# shellcheck disable=SC2046
+capture_render "$HL_RENDER" ansi \
+    --disable-progress -ni -lf "$ACCESS_FORMAT" \
+    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -h /catalog "$SUBCHAR_FIXTURE"
+
+assert_command \
+    command     "check_row_field '$HL_RENDER' '2xx Success (HL)' fill 'ESC[48;5;46m'" \
+    label       'the highlighted row is filled in the vivid shade' \
+    asserts     'The highlighted twin takes the vivid shade of its hue, the same one the timeline bars use to mark their highlighted length, so a highlighted category is the one that stands out of the table.' \
+    produced_by "$BAR_PRODUCED" \
+    contract    'features/448-category-summary-share-and-bar.md § D2 — the bar uses the same bar mechanism and colour table as the timeline columns'
+
+assert_command \
+    command     "check_row_field '$HL_RENDER' '2xx Success' fill 'ESC[48;5;34m'" \
+    label       'the plain twin is filled in the subdued shade of the same hue' \
+    asserts     'The plain row takes the subdued shade of the same hue, so the pair reads as one category split in two rather than as two unrelated ones. Rendering both in the vivid shade makes the highlight invisible — the two rows come out identical and nothing says which is which.' \
+    produced_by "$BAR_PRODUCED" \
+    contract    'features/448-category-summary-share-and-bar.md § D2 — the bar uses the same bar mechanism and colour table as the timeline columns'
 
 echo
 echo "─────────────────────────────────────────"

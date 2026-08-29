@@ -1053,15 +1053,15 @@ my %log_level_set = map { $_ => 1 } @log_levels;
 # totals stay aligned down the table; a longer one is truncated there.
 my %category_display_names = (
     '1xx'    => '1xx Informational',
-    '1xx-HL' => '1xx Informational, highlighted',
+    '1xx-HL' => '1xx Informational (HL)',
     '2xx'    => '2xx Success',
-    '2xx-HL' => '2xx Success, highlighted',
+    '2xx-HL' => '2xx Success (HL)',
     '3xx'    => '3xx Redirection',
-    '3xx-HL' => '3xx Redirection, highlighted',
+    '3xx-HL' => '3xx Redirection (HL)',
     '4xx'    => '4xx Client error',
-    '4xx-HL' => '4xx Client error, highlighted',
+    '4xx-HL' => '4xx Client error (HL)',
     '5xx'    => '5xx Server error',
-    '5xx-HL' => '5xx Server error, highlighted',
+    '5xx-HL' => '5xx Server error (HL)',
 );
 
 # Characters selected and usable for drawing the bar charts
@@ -1144,42 +1144,33 @@ my %colors = (
 # Bright 8 Colors: Uses codes like \e[90m for bright black (grey), \e[91m for bright red, etc.
 # 256 Colors: Uses codes like \e[38;5;<color_code>m for foreground and \e[48;5;<color_code>m for background.
 # True Color (24-bit): Uses codes like \e[38;2;<r>;<g>;<b>m for foreground and \e[48;2;<r>;<g>;<b>m for background.
-
-# The saturated 256-colour equivalent of each of the eight ANSI colours. A
-# highlight fill has to be the vivid form of the hue, not the terminal's
-# palette entry for it, so a category reads as the same colour whether it is
-# drawn as text or as a background.
-my @ansi_saturated_256 = ( 16, 196, 46, 226, 21, 201, 51, 231 );
-
-# The background a foreground colour is highlighted on. One rule for every
-# colour, so a category added later inherits a fill without an entry
-# anywhere: a colour already given as a 256-colour index is filled with that
-# same index, and an ANSI colour (30-37 or the bright 90-97) is filled with
-# the saturated 256-colour form of its own hue. Where a foreground sets the
-# colour more than once the last one wins, as the terminal itself resolves
-# it. Returns undef for a foreground that names no colour at all.
-sub derive_background_color {
-    my ($fg) = @_;
-    return undef unless defined $fg;
-
-    my ($kind, $code);
-    while ( $fg =~ /\e\[(?:[0-9;]*;)?(?:(38;5;(\d+))|(3[0-7]|9[0-7]))m/g ) {
-        if ( defined $1 ) { ($kind, $code) = ('256', $2) }
-        else              { ($kind, $code) = ('ansi', $3) }
-    }
-    return undef unless defined $kind;
-
-    return "\033[48;5;${code}m" if $kind eq '256';
-    return "\033[48;5;$ansi_saturated_256[ $code % 10 ]m";
-}
-
-# Every colour gets a -HL twin drawn on a background derived from its own
-# foreground, so a highlighted row reads as the same colour filled in. A
-# foreground naming no colour keeps the terminal's own background.
+# Dynamically create new keys with -HL for highlighted versions of each color
 foreach my $key (keys %colors) {
     next if $key eq 'NC';
-    my $background = derive_background_color( $colors{$key} );
-    $colors{"$key-HL"} = $colors{$key} . ( $background // "\033[49m" );
+    my $new_key = "$key-HL";
+    my $original_fg_color = $colors{$key};
+    $original_fg_color =~ s/^\e\[(.*?)m/$1/g;
+
+    my $bg_color_256;
+    my $has_background = 0;
+    if ($original_fg_color eq "0;31") {    # Red
+        $bg_color_256 = "196";            # 256-color code for Red
+        $has_background = 1;
+    } elsif ($original_fg_color eq "0;33") { # Yellow
+        $bg_color_256 = "226";            # 256-color code for Yellow
+        $has_background = 1;
+    } elsif ($original_fg_color eq "0;32") { # Green
+        $bg_color_256 = "46";             # 256-color code for Green
+        $has_background = 1;
+    } elsif ($original_fg_color eq "0;34") { # Blue
+        $bg_color_256 = "21";             # 256-color code for Blue
+        $has_background = 1;
+    } elsif ($original_fg_color eq "0;35") { # Magenta
+        $bg_color_256 = "201";            # 256-color code for Magenta
+        $has_background = 1;
+    }
+
+    $colors{$new_key} = $has_background ? "$colors{$key}\033[48;5;${bg_color_256}m" : "$colors{$key}\033[49m";       # allows specifying background for some highlighted colors only
 }
 
 ## SUBS ##
@@ -10448,7 +10439,15 @@ sub format_percentage {
             my $scale = 10 ** $d;
             $v = int( $v * $scale ) / $scale;
         }
-        return sprintf( "%.*f%%", $d, $v );
+        my $t = sprintf( "%.*f", $d, $v );
+        # A trailing zero after the decimal states a precision the value does
+        # not have: 0.340 and 0.34 are the same number, and the zero is read
+        # as a measured digit. Trim them, and the point with the last of them.
+        if ( $t =~ /\./ ) {
+            $t =~ s/0+$//;
+            $t =~ s/\.$//;
+        }
+        return $t . '%';
     };
 
     my $figure = $render->($decimals);
@@ -17152,6 +17151,13 @@ sub share_row_text {
         $value = $count if length($value) > $fit;
     }
 
+    # The value is what the eye reads down the table, so it keeps its place and
+    # the label gives way: a label too long for the room left is truncated to
+    # it, never allowed to push the count and share out of alignment or run
+    # into them. One space always separates the two.
+    my $room = $summary_row_width - length($value) - 1;
+    $label = substr( $label, 0, $room ) if $room >= 0 && length($label) > $room;
+
     my $gap = $summary_row_width - length($label) - length($value);
     $gap = 1 if $gap < 1;
     return $label . ( ' ' x $gap ) . $value;
@@ -17185,25 +17191,67 @@ sub summary_bar_extent {
         $fraction = $position > 0 ? $position : 0;
     }
 
+    # The bar states a proportion, so it is never rounded up to a character
+    # the share has not earned: at a 42-character row one character is nearly
+    # 2.4 %, and a category holding 0.03 % that is drawn one character wide
+    # claims about seventy times its true size. A share too small to fill a
+    # character draws none, and the printed percentage carries the value.
+    # -sbl is the option for seeing the small categories at a length.
     my $extent = int( $fraction * $width + 0.5 );
-    # A category with lines to its name is never drawn as nothing: the bar
-    # exists to show that it is present as much as how much of it there is.
-    $extent = 1 if $extent < 1;
     $extent = $width if $extent > $width;
     return $extent;
+}
+
+# The bar-colour entry a category draws its contribution bar with. Categories
+# name their colour as an ANSI foreground code and @column_colors keys its
+# entries by hue, so the two are matched on the hue itself: the code's final
+# digit identifies it (31 red, 32 green, 33/93 yellow, 34 blue, 35 magenta,
+# 36 cyan), whichever intensity prefix it carries. Resolving through the one
+# table means a category added later inherits the same fill the timeline's
+# bars use, with nothing to add anywhere. Returns undef for a category whose
+# colour has no bar entry, which draws no fill.
+my %bar_entry_by_hue;
+sub summary_bar_color {
+    my ($category_bucket) = @_;
+    my $fg = $colors{$category_bucket} or return undef;
+
+    unless (%bar_entry_by_hue) {
+        for my $entry (@column_colors) {
+            next unless $entry->{fg} =~ /(?:^|\D)(?:38;5;\d+|[349][0-7])m/;
+            my ($hue) = $entry->{fg} =~ /(?:^|\D)[349](\d)m/ or next;
+            $bar_entry_by_hue{$hue} //= $entry;
+        }
+    }
+
+    my ($hue) = $fg =~ /(?:^|\D)[349](\d)m/ or return undef;
+    return $bar_entry_by_hue{$hue};
 }
 
 # One category row with its contribution bar drawn over the row's own text.
 # The text is overdrawn rather than accompanied by a separate bar column: it
 # is the technique the timeline's proportional columns use, and it costs the
-# table no width at all. The foreground switches at the fill edge so the text
-# stays legible on both sides of it, and the colour is reset before the
-# table's trailing padding so the fill cannot bleed into the file-details
-# pane printed beside it on the same physical line.
+# table no width at all.
+#
+# The fill is an inversion, exactly as the timeline's duration and bytes bars
+# are: outside the bar the text is the category's own colour on the terminal's
+# background; inside it the background becomes the colour and the text turns
+# black. Never a foreground and a background colour at once — that inversion
+# is what keeps the row readable on a dark terminal and on a light one, since
+# the terminal supplies the surrounding foreground either way. The colour is
+# reset before the table's trailing padding so the fill cannot bleed into the
+# file-details pane printed beside it on the same physical line.
 sub summary_category_row {
     my ($row_text, $category_bucket, $extent) = @_;
 
-    return $row_text unless $extent > 0;
+    my $bar = summary_bar_color($category_bucket);
+    my $category_fg = $bar ? $bar->{fg} : ( $colors{$category_bucket} // $colors{'NC'} );
+
+    # The row is always in the category's own colour: the bar inverts the part
+    # it covers, it does not decide whether the row is coloured. A category
+    # whose share is too small to fill a character, or a run with the bar
+    # switched off, still reads in its own colour like every other row.
+    return $category_fg . $row_text . $colors{'NC'}
+        if !$bar || $extent <= 0;
 
     my ($filled_color, $plain_color);
     if ($summary_bar_mono) {
@@ -17212,8 +17260,14 @@ sub summary_category_row {
         $filled_color = "\033[7m";
         $plain_color  = $colors{'NC'};
     } else {
-        $filled_color = $colors{"$category_bucket-HL"} // $colors{'NC'};
-        $plain_color  = $colors{$category_bucket}      // $colors{'NC'};
+        # Two shades of the one hue, as the timeline's bars use: the vivid
+        # fill marks the highlighted rows so they stand out, and the subdued
+        # one carries the rest. A highlighted row drawn in the same shade as
+        # its plain twin says nothing about which is which.
+        $filled_color = $category_bucket =~ /-HL$/
+            ? $bar->{highlighted_bg}
+            : $bar->{plain_bg};
+        $plain_color  = $category_fg;
     }
 
     # The bar covers the leading $extent characters, or the trailing ones
@@ -17274,12 +17328,10 @@ sub print_summary_table {
     my $bar_reference = $summary_bar_absolute ? $total_lines_included : $largest_category_total;
 
     foreach my $category_bucket (@categories_shown) {
-        # The column is fixed-width and the totals align down the table, so a
-        # label wider than the column is cut to it rather than pushing the
-        # total out of line.
+        # share_row_text() fits the label to whatever the count and share
+        # leave, so the label is passed whole and the fitting happens in the
+        # one place that knows how much room there is.
         my $category_label = category_display_name( $category_bucket );
-        $category_label = substr( $category_label, 0, $category_column_width )
-            if length( $category_label ) > $category_column_width;
 
         # The share is of the lines included, presented as the classified rows
         # present theirs: the count, then the percentage in brackets, the pair
