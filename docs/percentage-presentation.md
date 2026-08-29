@@ -29,3 +29,16 @@ Degradation, when the formatted value does not fit `width`: drop decimals one at
 ## Why one sub
 
 Two percentage renderers had already diverged before this convention existed (the memory rows' `(<1%)` field and #453's three-significant-digit row value), and two more were specified without reference to either. One resolution surface per value class is a standing rule of this repository (CLAUDE.md, 2026-07-09): the formatter is one named sub, and adding a percentage anywhere means calling it with parameters, never writing a new one.
+
+## Migration of the existing sites
+
+Decided 2026-08-29. No separate issue; each site moves as part of the drop that touches it.
+
+| Site | Today | Moves under |
+|---|---|---|
+| `SUCCESS/FAILURE CLASSIFIED` rows (`print_summary_table()`) | 3 significant digits, fit-to-row | #448 — this logic becomes the named formatter; the row calls it |
+| Memory breakdown rows (`print_summary_table()`) | integer, `(<1%)` floor, 5 characters | #448 — call-site swap, output byte-identical, proven by the existing goldens |
+| Per-file progress percentage (`read_and_process_logs()`) | integer, clamped | #446 — replaced by the reshaped line, which calls the formatter |
+| Histogram y-axis ticks and `0%` baseline corner | integer, 3 characters | already conforms in shape; swapped to the formatter at the next touch of that renderer |
+
+Outside the convention by design: `-V` diagnostic fields carrying percentages (`unclassified_pct`, consolidation reduction and eviction lines) are stability-contracted machine-read values, not presentation, and keep their shape.
