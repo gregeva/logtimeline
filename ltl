@@ -484,6 +484,7 @@ my %format_evidence_weights = (
 # no-match path. Per-line timer pairs around every scan are deliberately
 # NOT used — the clock calls would cost more than many scans they measure.
 use constant FORMAT_SCAN_NOMATCH_SAMPLE_EVERY => 256;
+use constant FORMAT_CLS_RULE_CHANGE_LINES_MAX  => 10;   # rule_change: lines kept per file (D19)
 my $format_scan_promotions = 0;        # actual reorders via format_registry_promote()
 my $format_scan_validating  = 0;       # per-compile validation in flight: promotion is suppressed
 my $format_scan_subs_compiled = 0;     # generated scan subs minted this run
@@ -2482,6 +2483,9 @@ my %format_cls_set_id;    # canonical alternative list => set index
 my @format_cls_sig_str;   # criteria-signature string per signature id (0 = 'none')
 my %format_cls_sig_id;    # signature string => id
 my $format_cls_rule_changes = 0;   # mid-file classifying-entry changes with differing signatures (D19)
+my @format_cls_rule_change_lines;   # 'rule_change: file=... line=N from=... to=...' in input order,
+                                    # at most FORMAT_CLS_RULE_CHANGE_LINES_MAX per file
+my %format_cls_rule_change_count;   # file => number of rule changes seen in it (the note fires on the first)
 
 # The single generated scan sub (see compile_format_scan_sub) and the
 # regeneration inputs promotion needs: the entry snapshot the generated
@@ -3701,6 +3705,30 @@ sub format_classification_reference {
 # The entry's classification as a write-direct closure over the record
 # lexicals (the CSV path's call shape, D29; the generated blocks inline
 # the same source). Returns the outcome it wrote.
+# A file's classification rules changed at an included line (D19/D32): the
+# include point saw a criteria-signature id different from the one the
+# file's lines were being classified under. Counts the change, keeps the
+# first FORMAT_CLS_RULE_CHANGE_LINES_MAX per file for the classification
+# sub-section, re-binds the file's event-ledger property to the new entry,
+# and tells the user once per file. The note is a behavioural notice: it
+# prints regardless of --disable-progress, and must never carry an
+# ` at ... line` suffix (runtime-warning discriminator, HARNESS-DESIGN.md).
+# Registered on #412 as a producer for the notices surface.
+sub format_classification_rule_change {
+    my ($file, $line_number, $old_entry, $new_entry) = @_;
+    $format_cls_rule_changes++;
+    my $n = ++$format_cls_rule_change_count{$file};
+    push @format_cls_rule_change_lines,
+        "rule_change: file=$file line=$line_number from=$old_entry->[FR_SLUG] to=$new_entry->[FR_SLUG]"
+        if $n <= FORMAT_CLS_RULE_CHANGE_LINES_MAX;
+    $format_detection{$file}{event_ledger} = $new_entry->[FR_EVENT_LEDGER] if $format_detection{$file};
+    print STDERR "Note: $file line $line_number: the classification rules changed because the detected log format changed from "
+        . $old_entry->[FR_SLUG] . " to " . $new_entry->[FR_SLUG]
+        . " - lines before this point were classified under the previous rules\n"
+        if $n == 1;
+    return;
+}
+
 sub compile_format_classifier {
     my ($spec) = @_;
     my $src = "sub {\n$spec->{_cls_src}\nreturn \$line_outcome;\n}";
@@ -4614,6 +4642,7 @@ sub emit_format_detection_verbose {
     push @verbose_output, "unmatched_lines: $unmatched";
     push @verbose_output, "event_ledger_files: $ledger_files/$bound_files";
     push @verbose_output, "rule_changes: $format_cls_rule_changes";
+    push @verbose_output, @format_cls_rule_change_lines;
     push @verbose_output, "default_failure: $default_failure";
     push @verbose_output, "=== END format-detection / classification ===";
 
@@ -11125,6 +11154,9 @@ sub read_and_process_logs {
         # with their cached classification — extraction deferred to the
         # replay — then switches to the streaming path. N=0: no lines held.
         my ( $file_scan_attempts, $file_scan_failed ) = ( 0, 0 );  # scan telemetry (Issue #228)
+        # Criteria-signature id and entry the file's included lines are being
+        # classified under (D19/D32); -1 so the first included line binds them.
+        my ( $file_cls_sig, $file_cls_entry ) = ( -1, undef );
         my @window_held;
         my $window_replay_started = 0;
         if ($window_n > 0) {
@@ -11709,6 +11741,14 @@ sub read_and_process_logs {
                 if ($line_outcome) {
                     $bucket_outcomes{$bucket}[$line_outcome]++;
                     if ($line_outcome == 2) { $total_failures++ } else { $total_successes++ }
+                }
+                # The line was classified under different criteria than the
+                # file's previous included line (D32: one integer compare per
+                # line; entries with identical rules share an id, so a flip
+                # between them never enters here).
+                if ($line_cls_sig != $file_cls_sig) {
+                    format_classification_rule_change($in_file, $line_number, $file_cls_entry, $line_entry) if $file_cls_entry;
+                    ( $file_cls_sig, $file_cls_entry ) = ( $line_cls_sig, $line_entry );
                 }
                 $profile_included_samples++ if $profile_mode;
 

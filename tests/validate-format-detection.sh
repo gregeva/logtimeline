@@ -940,6 +940,7 @@ scenario_scan_telemetry_nomatch() {
 # assertion: classification counts a line at the include point and never reads
 # a bucket.
 CLASSIFICATION_CONTRACT='features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (D20)'
+RULE_CHANGE_PRODUCER='format_classification_rule_change() in ltl, called from the include point in read_and_process_logs() when $line_cls_sig differs from the file'"'"'s current signature; lines emitted by emit_format_detection_verbose()'
 CLASSIFICATION_PRODUCER='emit_format_detection_verbose() in ltl (format-detection / classification sub-section, reading $total_successes/$total_failures accumulated at the include point in read_and_process_logs())'
 
 # Read one key of the classification sub-section out of a capture. A missing
@@ -1360,6 +1361,101 @@ scenario_unit_ambiguity_warning() {
 # fixture pairs files a year apart), and these scenarios assert detection,
 # not buckets — no empty-bucket memory for a time axis nobody reads.
 
+scenario_classification_format_switch() {
+    current_scenario="classification-format-switch"
+    echo "[$current_scenario]"
+
+    # D19: a file in which a second format wins the scan mid-way. Four Tomcat
+    # access-log lines (status-code criteria) followed by three ThingWorx
+    # application-log lines (the default level criterion): the criteria
+    # signatures differ, so the change at line 5 is counted, listed, told to
+    # the user once, and the file's event-ledger property follows the new
+    # entry.
+    local log="$REPO_DIR/tests/fixtures/classification-format-switch.txt"
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^rule_changes: 1$' \
+        asserts     'One change of classifying entry with differing criteria signatures is counted for the run' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_changes counts mid-file changes whose old and new entry carry different criteria signatures (D19, D32)"
+
+    assert_line "$out" \
+        pattern     '^rule_change: file=.*/classification-format-switch\.txt line=5 from=tomcat_access_with_duration to=thingworx_standard$' \
+        asserts     'The change is listed with the file, the line at which the new rules took effect, and the old and new format slugs' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_change: file=<path> line=N from=<slug> to=<slug> (D19)"
+
+    assert_line "$out.stderr" \
+        pattern     '^Note: .*classification-format-switch\.txt line 5: the classification rules changed because the detected log format changed from tomcat_access_with_duration to thingworx_standard - lines before this point were classified under the previous rules$' \
+        asserts     'The user is told, on stderr, at which line the rules changed, from which format to which, and that earlier lines were classified under the previous rules' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - D19 note text; registered on #412 as a producer to migrate"
+
+    assert_line "$out" \
+        pattern     '^  event_ledger: no$' \
+        asserts     'The file'"'"'s event-ledger property follows the entry its lines are classified under: an access log (ledger) that turns into an application log (not a ledger) ends the run as a non-ledger file' \
+        produced_by 'format_classification_rule_change() in ltl re-binding $format_detection{$file}{event_ledger}' \
+        contract    "$CLASSIFICATION_CONTRACT - event_ledger re-set whenever the classifying entry changes (D19)"
+
+    assert_line "$out" \
+        pattern     '^successes: 3$' \
+        asserts     'The three 2xx access lines before the change are successes under the access rules and are not revisited after it' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - lines classified before the change are not revisited (D19)"
+
+    assert_line "$out" \
+        pattern     '^failures: 2$' \
+        asserts     'The 404 line (access rules) and the ERROR line (default level rule) are both failures: each line is classified under the criteria of the entry that matched it' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - a line is classified under the criteria of the entry that matched it (D19)"
+}
+
+scenario_classification_format_interleaved() {
+    current_scenario="classification-format-interleaved"
+    echo "[$current_scenario]"
+
+    # D19's second fixture: the two formats alternate line by line (24 lines,
+    # 23 changes). Every change is counted, only the first ten are listed,
+    # and the user is told once per file, not once per change.
+    local log="$REPO_DIR/tests/fixtures/classification-format-interleaved.txt"
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^rule_changes: 23$' \
+        asserts     'Every alternation between the two formats is counted, not only the listed ones' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_changes counts every change in the run (D19)"
+
+    local listed
+    listed=$(grep -c '^rule_change: ' "$out" || true)
+    assert_command \
+        command     "[[ '$listed' == '10' ]]" \
+        label       "exactly 10 rule_change: lines listed for 23 changes (observed: $listed)" \
+        asserts     'The listing is capped at the first ten changes per file so an interleaved file does not emit one line per alternation' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_change: lines list at most the first 10 per file (D19)"
+
+    assert_line "$out" \
+        pattern     '^rule_change: file=.*/classification-format-interleaved\.txt line=11 from=thingworx_standard to=tomcat_access_with_duration$' \
+        asserts     'The tenth listed change is the one at line 11: the listing is the first ten in file order, and the from/to slugs swap direction with every alternation' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_change: lines in input order (D19)"
+
+    local notes
+    notes=$(grep -c '^Note: .*the classification rules changed' "$out.stderr" || true)
+    assert_command \
+        command     "[[ '$notes' == '1' ]]" \
+        label       "exactly one rule-change note on stderr for 23 changes (observed: $notes)" \
+        asserts     'The user is told once per file, at the first change, however many times the rules change afterwards' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - note once per file, at the first change (D19)"
+}
+
 scenario_variant_connection_server() {
     current_scenario="variant-connection-server"
     echo "[$current_scenario]"
@@ -1752,6 +1848,8 @@ scenario_classification_access; echo ""
 scenario_classification_declining; echo ""
 scenario_classification_default; echo ""
 scenario_classification_consolidation_reconciles; echo ""
+scenario_classification_format_switch; echo ""
+scenario_classification_format_interleaved; echo ""
 scenario_unit_ambiguity_warning; echo ""
 scenario_variant_connection_server; echo ""
 scenario_variant_integration_runtime_named; echo ""
