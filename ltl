@@ -57,7 +57,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0";
+my $version_number = "0.18.0-451";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -283,20 +283,34 @@ my $output_timestamp_max = 0;
 # maps a timestamp to a synthetic epoch inside one reference period, so the
 # whole pipeline (bucket keys, stats, heatmap, the strftime label path)
 # collapses onto that period unchanged. gmtime(epoch 0) is a Thursday, so the
-# first Monday is at +4 days (345600) and the first Sunday at +3 days (259200).
-#   period:   length of the fold window in seconds
-#   anchor:   synthetic epoch the window starts at (so gmtime yields the right wday)
+# weekday anchors sit at +1 day (Fri, 86400), +2 (Sat, 172800), +3 (Sun,
+# 259200) and +4 (Mon, 345600).
+#   period:   fold modulus in seconds: 86400 folds onto one 24h axis, 604800
+#             keeps each day's identity by offsetting from the anchor weekday
+#   anchor:   synthetic epoch the window starts at (so gmtime yields the right
+#             wday); for a multi-day mode it is the first day the axis renders,
+#             which makes the kept days contiguous from offset 0
 #   include:  wday set (0=Sun..6=Sat) kept; undef = all days; others are dropped
 #   format:   strftime label format ('%H:%M' time-only, '%a %H:%M' weekday+time)
+# The rendered profile window (kept days x 86400, reported by -V profile) is
+# derived from these by profile_window_seconds(), not stored here.
 my $profile_mode = '';
 my %profile_modes = (
-    'day'          => { period => 86400,  anchor => 0,      include => undef,            format => '%H:%M' },
-    'workday'      => { period => 86400,  anchor => 0,      include => { 1,1,2,1,3,1,4,1,5,1 }, format => '%H:%M' },
-    'workday-alt'  => { period => 86400,  anchor => 0,      include => { 0,1,1,1,2,1,3,1,4,1 }, format => '%H:%M' },
-    'week'         => { period => 604800, anchor => 345600, include => undef,            format => '%a %H:%M' },
-    'week-alt'     => { period => 604800, anchor => 259200, include => undef,            format => '%a %H:%M' },
-    'workweek'     => { period => 604800, anchor => 345600, include => { 1,1,2,1,3,1,4,1,5,1 }, format => '%a %H:%M' },
-    'workweek-alt' => { period => 604800, anchor => 259200, include => { 0,1,1,1,2,1,3,1,4,1 }, format => '%a %H:%M' },
+    'day'           => { period => 86400,  anchor => 0,      include => undef,                   format => '%H:%M' },
+    'workday'       => { period => 86400,  anchor => 0,      include => { 1,1,2,1,3,1,4,1,5,1 }, format => '%H:%M' },
+    'workday-alt'   => { period => 86400,  anchor => 0,      include => { 0,1,1,1,2,1,3,1,4,1 }, format => '%H:%M' },
+    'weekday'       => { period => 86400,  anchor => 0,      include => { 1,1,2,1,3,1,4,1,5,1 }, format => '%H:%M' },
+    'weekday-alt'   => { period => 86400,  anchor => 0,      include => { 0,1,1,1,2,1,3,1,4,1 }, format => '%H:%M' },
+    'weekend'       => { period => 86400,  anchor => 0,      include => { 6,1,0,1 },             format => '%H:%M' },
+    'weekend-alt'   => { period => 86400,  anchor => 0,      include => { 5,1,6,1 },             format => '%H:%M' },
+    'week'          => { period => 604800, anchor => 345600, include => undef,                   format => '%a %H:%M' },
+    'week-alt'      => { period => 604800, anchor => 259200, include => undef,                   format => '%a %H:%M' },
+    'workweek'      => { period => 604800, anchor => 345600, include => { 1,1,2,1,3,1,4,1,5,1 }, format => '%a %H:%M' },
+    'workweek-alt'  => { period => 604800, anchor => 259200, include => { 0,1,1,1,2,1,3,1,4,1 }, format => '%a %H:%M' },
+    'weekdays'      => { period => 604800, anchor => 345600, include => { 1,1,2,1,3,1,4,1,5,1 }, format => '%a %H:%M' },
+    'weekdays-alt'  => { period => 604800, anchor => 259200, include => { 0,1,1,1,2,1,3,1,4,1 }, format => '%a %H:%M' },
+    'weekends'      => { period => 604800, anchor => 172800, include => { 6,1,0,1 },             format => '%a %H:%M' },
+    'weekends-alt'  => { period => 604800, anchor => 86400,  include => { 5,1,6,1 },             format => '%a %H:%M' },
 );
 my ( $profile_dropped_samples, $profile_included_samples ) = ( 0, 0 );
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
@@ -1963,11 +1977,15 @@ sub _validate_dm {
 }
 
 # --profile|-pr: accept only the known fold modes; die at parse time otherwise.
+# The mode list is long enough that reciting it here buries the error, so the
+# message names the base vocabularies and points at the full reference.
 sub _validate_profile {
     my ($value) = @_;
     return if defined $value && exists $profile_modes{$value};
-    my $valid = join(', ', sort keys %profile_modes);
-    die "--profile: '" . (defined $value ? $value : '') . "' is not a valid profile mode; valid values are $valid\n";
+    die "--profile: '" . (defined $value ? $value : '')
+      . "' is not a valid profile mode; the modes are day, week, workday, workweek, weekday,"
+      . " weekdays, weekend and weekends, each with an -alt variant."
+      . " Run 'ltl --help profile' for what each one keeps and folds onto.\n";
 }
 
 # Fold a timestamp onto its position within the mode's reference period.
@@ -1994,6 +2012,54 @@ sub fold_epoch {
         $offset = $days_from_anchor * 86400 + $sec_of_day;
     }
     return $cfg->{anchor} + $offset;
+}
+
+# The length of the window the profile renders, in seconds: the number of days
+# the mode keeps, times 86400. A singular mode collapses every kept day onto
+# one 24h axis, so its window is always a day however many days it draws from;
+# a plural mode keeps each kept day's identity, so its window is the whole
+# contiguous run. This is what -V profile reports; the fold modulus
+# ($cfg->{period}) is internal and no user surface exposes it.
+sub profile_window_seconds {
+    my ($mode) = @_;
+    my $cfg = $profile_modes{$mode} or return undef;
+    return 86400 if $cfg->{period} == 86400;
+    my $kept_days = defined $cfg->{include} ? scalar(keys %{ $cfg->{include} }) : 7;
+    return $kept_days * 86400;
+}
+
+# The weekdays a mode keeps, named, in the order its axis renders them: from
+# the mode's first kept day onward. For a singular mode there is no rendered
+# weekday axis, but the same order names the days it draws from.
+sub profile_included_weekdays {
+    my ($mode) = @_;
+    my $cfg = $profile_modes{$mode} or return ();
+    my @names = qw(Sun Mon Tue Wed Thu Fri Sat);
+    my $start = (gmtime($cfg->{anchor}))[6];
+    # A singular mode anchors at epoch 0 (Thursday) and has no axis of its own,
+    # so it lists from the week start its calendar convention implies.
+    $start = ($mode =~ /-alt$/ ? 0 : 1) if $cfg->{period} == 86400;
+    my @included;
+    for my $i (0 .. 6) {
+        my $wday = ($start + $i) % 7;
+        next if defined $cfg->{include} && !$cfg->{include}{$wday};
+        push @included, $names[$wday];
+    }
+    return @included;
+}
+
+# The phrase the run-summary heading uses to say what the analysis was folded
+# onto. A singular mode names the 24-hour axis and the days it draws from; a
+# plural mode names the run of days the axis spans.
+sub profile_fold_phrase {
+    my ($mode) = @_;
+    my $cfg = $profile_modes{$mode} or return $mode;
+    my @days = profile_included_weekdays($mode);
+    my $days_span = "$days[0]-$days[-1]";
+    return "a single 24-hour profile of every day"     if $mode eq 'day';
+    return "a single $days_span week"                  if !defined $cfg->{include};
+    return "a single 24-hour profile of $days_span"    if $cfg->{period} == 86400;
+    return "a single $days_span profile";
 }
 
 # Issue #266: resolve the user-supplied data-model selector for a surface.
@@ -5161,9 +5227,9 @@ sub emit_statistics_demand_verbose {
 # count of lines that fell on a weekday the mode excludes.
 #
 # Locked surface: section name 'profile'; field names profile_active, mode,
-# period_seconds, included_weekdays, samples_included, samples_dropped; the
-# profile_active enum (yes|no). Weekdays are listed in the mode's own axis
-# order (Mon-first for default, Sun-first for -alt), comma-joined.
+# profile_window_seconds, included_weekdays, samples_included, samples_dropped;
+# the profile_active enum (yes|no). Weekdays are listed in the mode's own axis
+# order (first kept day first), comma-joined.
 sub emit_profile_verbose {
     return unless section_requested('profile');
 
@@ -5175,24 +5241,10 @@ sub emit_profile_verbose {
         return;
     }
 
-    my $cfg = $profile_modes{$profile_mode};
-    # Render the included weekday set in calendar order: -alt modes start the
-    # week on Sunday (wday 0), the others on Monday (wday 1). Day-period modes
-    # have no week axis, but the list still shows which days they keep, so the
-    # same calendar order applies rather than the epoch-0 fold anchor.
-    my @names = qw(Sun Mon Tue Wed Thu Fri Sat);
-    my $list_start = ($profile_mode =~ /-alt$/) ? 0 : 1;
-    my @included;
-    for my $i (0 .. 6) {
-        my $wday = ($list_start + $i) % 7;
-        next if defined $cfg->{include} && !$cfg->{include}{$wday};
-        push @included, $names[$wday];
-    }
-
     push @verbose_output, "profile_active: yes";
     push @verbose_output, "mode: $profile_mode";
-    push @verbose_output, "period_seconds: $cfg->{period}";
-    push @verbose_output, "included_weekdays: " . join(',', @included);
+    push @verbose_output, "profile_window_seconds: " . profile_window_seconds($profile_mode);
+    push @verbose_output, "included_weekdays: " . join(',', profile_included_weekdays($profile_mode));
     push @verbose_output, "samples_included: $profile_included_samples";
     push @verbose_output, "samples_dropped: $profile_dropped_samples";
     push @verbose_output, "=== END profile ===";
@@ -6312,6 +6364,67 @@ sub print_help_formats {
     return $out;
 }
 
+# `ltl --help profile`: the -pr/--profile mode reference. The main --help row
+# names the base modes and points here; this is where a reader chooses one.
+# Rows are generated from the same mode table the fold uses, so a mode can
+# never be documented into existence or left out of the listing.
+sub print_help_profile {
+    my $out = '';
+    $out .= get_title_string();
+    $out .= help_wrap(
+        "-pr/--profile folds the timeline onto one representative period, so every date in the log overlays into a single profile view - what a typical Tuesday at 09:15 looks like across weeks of logs, rather than a flat timeline weeks wide. Folding tightens each bucket's statistics (more samples per bucket) and surfaces the recurring daily and weekly structure a chronological view hides.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    $out .= help_wrap(
+        "Each mode decides two things: which days it keeps, and whether it folds them onto one 24-hour axis or keeps each day's identity along the axis. Days the mode does not keep are dropped before folding - they contribute no samples at all, so the statistics describe only the days named below. Every mode has an -alt variant that applies the Sunday-anchored calendar instead of the ISO one, moving the start of the week and, for the work and weekend modes, which days count.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+
+    $out .= help_heading("MODES");
+
+    # Grouped so the singular/plural pairs of one vocabulary read together.
+    my @groups = (
+        [ 'Every day',  [qw(day week week-alt)] ],
+        [ 'Work days',  [qw(workday workday-alt workweek workweek-alt)] ],
+        [ 'Weekdays',   [qw(weekday weekday-alt weekdays weekdays-alt)] ],
+        [ 'Weekends',   [qw(weekend weekend-alt weekends weekends-alt)] ],
+    );
+    for my $group (@groups) {
+        my ($label, $modes) = @$group;
+        $out .= help_subheading_tight($label);
+        for my $mode (@$modes) {
+            my $cfg = $profile_modes{$mode};
+            my @days = profile_included_weekdays($mode);
+            my $kept = @days == 7 ? 'every day' : "$days[0]-$days[-1]";
+            my $axis = $cfg->{period} == 86400
+                ? 'folded onto one 24-hour axis, labelled by time of day'
+                : "folded onto a $days[0]-to-$days[-1] axis, each day labelled by name";
+            $out .= help_opt($mode, ucfirst($kept) . ", $axis.");
+        }
+        $out .= "\n";
+    }
+
+    $out .= help_heading("CHOOSING A MODE");
+    $out .= help_wrap(
+        "Singular or plural is the question of whether the days differ from one another. A singular mode (day, workday, weekday, weekend) answers 'what does an hour of the day look like' by stacking every kept day on top of the others; a plural mode (week, workweek, weekdays, weekends) answers 'how does Tuesday differ from Friday' by giving each kept day its own stretch of the axis.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    $out .= help_wrap(
+        "weekday and workday keep the same days and produce the same numbers; they are two names because a weekday is a calendar notion and a work week is a regional convention, and either may be the word you reach for. The weekend modes are the only way to profile Saturday and Sunday on their own - batch windows, low-traffic baselines, weekend-only incidents.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    $out .= help_wrap(
+        "Folding composes with -bs, which sets the bucket granularity within the folded period, and with the -st/-et time-range and -i/-e pattern filters, which apply to the original timestamps before the fold - so a date range is selected first, then overlaid.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    return $out;
+}
+
 # `ltl --explain` (no argument): grouped list of available topics across
 # all categories. Each category transition emits a top-level section
 # heading (STATISTICS, VISUALIZATIONS) and the group subheadings follow
@@ -7131,7 +7244,7 @@ sub print_help {
     $out .= help_opt("-bs,  --bucket-size <N>",       "Set the width of each time bucket on the timeline (default unit: minutes; -s switches to seconds, -ms switches to milliseconds)");
     $out .= help_opt("-s,   --seconds",               "Interpret bucket size as seconds instead of minutes");
     $out .= help_opt("-ms,  --milliseconds",          "Switch the -bs <N> bucket width to milliseconds (and render timestamps with .fff precision). Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured.");
-    $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto a single day or week so every date overlays into one profile. day/workday show time-of-day only; week/workweek prefix the weekday. workday/workweek keep work days only (Mon-Fri); the -alt variants use a Sunday-anchored week (Sun-Thu work days). Modes: day, week, week-alt, workweek, workweek-alt, workday, workday-alt");
+    $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto one representative period so every date overlays into a single profile. The singular modes (day, workday, weekday, weekend) stack their days onto one 24-hour axis; the plural ones (week, workweek, weekdays, weekends) keep each day's identity on the axis. Each has an -alt variant using the Sunday-anchored calendar. Run 'ltl --help profile' for which days each mode keeps and how to choose one.");
     $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A full date (YYYY-MM-DD HH:MM:SS[.mmm]) is an absolute cutoff; a bare time (HH:MM[:SS[.mmm]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight.");
     $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a full date is an absolute cutoff; a bare time applies to every day.");
     $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when it cannot be determined from the format or the file name (ns, us, ms, s)");
@@ -10304,8 +10417,13 @@ sub dispatch_informational_options {
             $out =~ s/^\n+//;
             pipe_to_pager($out);
         }
+        elsif ($help_topic eq 'profile') {
+            my $out = print_help_profile();
+            $out =~ s/^\n+//;
+            pipe_to_pager($out);
+        }
         else {
-            print_usage("unknown --help topic '$help_topic' (try: statistics, formats)");
+            print_usage("unknown --help topic '$help_topic' (try: statistics, formats, profile)");
             exit 1;
         }
         exit 0;
@@ -16793,7 +16911,7 @@ sub print_summary_table {
 
     # Wrap heading text if it exceeds available width
     my $heading_text = $profile_mode
-        ? "These file(s) were processed with analysis folded onto a single $profile_mode profile, spanning $min_timestamp_str to $max_timestamp_str"
+        ? "These file(s) were processed with analysis folded onto " . profile_fold_phrase($profile_mode) . ", spanning $min_timestamp_str to $max_timestamp_str"
         : "These file(s) were processed with analysis including results between $min_timestamp_str and $max_timestamp_str";
     my $heading_content_width = $file_detail_width - length($column_padding) - length($padding);
     if ($heading_content_width > 20) {
