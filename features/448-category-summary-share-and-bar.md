@@ -11,7 +11,8 @@ The category rows of the run summary show an absolute count and nothing else. Th
 
 ## Status
 
-Scoped 2026-08-29; decisions D1–D8 locked. Not started.
+Scoped 2026-08-29; decisions D1–D8 locked. Implemented 2026-08-29 on branch
+`448-category-summary-share-and-bar`, every decision as locked.
 
 ## Scope
 
@@ -64,11 +65,25 @@ All are visible: `--help` rows, `docs/usage.md` rows, `-V runtime-config` proven
 ## In-drop obligations
 
 - The five options: `GetOptions` specs, `print_help()` rows, `docs/usage.md` rows, `_classify_argv_provenance()` and `emit_runtime_config_verbose()` entries — same commit (`tests/validate-help-content.sh`, `tests/validate-runtime-config.sh`).
-- `tests/validate-category-names.sh` reads label and total at exact column offsets; its row regexes are updated for the `count (pct%)` value.
+- `tests/validate-category-names.sh` reads label and total at exact column offsets; its row regexes are updated for the `count (pct%)` value. Both it and the vocabulary harness now anchor the label at the row's left edge and the value at the row boundary, which is the geometry that actually keeps the table aligned — a fixed total column stopped being one when the value gained the right to run into the label's slack.
 - `tests/validate-log-level-vocabulary.sh` reconciles category totals against `LINES INCLUDED` by parsing the rows; it must still find the count.
-- The ten `hl-*` regression references contain the category rows and are re-blessed (`tests/capture-regression.sh`). They strip ANSI, so **no golden can assert the bar**: a colour-aware scenario (under `tests/lib/colour-env.sh`, verified with `FORCE_COLOR=3` and without) asserts the fill, its extent, its reset before the pane, `-sbm`, `-sbr`, and that `-sbo` emits no fill.
-- The derived-background rule and the closed `-HL` gap get their own assertion (every entry in the category colour table has a highlighted twin with a background).
+- Thirteen regression references carry the category rows and are re-blessed (`tests/capture-regression.sh`) — the ten `hl-*` plus the three `errrate-*`. They strip ANSI, so **no golden can assert the bar**: `tests/validate-summary-contribution-bar.sh` (under `tests/lib/colour-env.sh`, identical counts with `FORCE_COLOR=3`, with `NO_COLOR=1` and with neither) asserts the fill, its extent and contiguity, its colour, its reset before the pane, and each of the five options.
+- The derived-background rule and the closed `-HL` gap get their own assertion (every entry in the category colour table has a highlighted twin with a background). It slices the colour table, `derive_background_color()` and the twin-construction loop out of `ltl` and runs them, so it checks what the tool builds rather than a second implementation of the rule.
 - `docs/usage.md` § Display & Output describes the run summary; the paragraph gains the share and the bar.
+
+## Implementation notes
+
+**N1 — The shared formatter is `format_percentage( $value, %params )`.** `$value` is the percentage itself, not a fraction. Parameters, all optional: `mode` (`significant` — the default — / `decimals` / `integer`), `digits`, `width` (parentheses and the `%` sign included), `floor` (round down rather than to nearest), `parens`, `floor_at` + `floor_text` (below `floor_at` the marker is shown in place of a figure), and `pad` (right-align within `width`, inside the parentheses where they are in use). It returns the rendered string and never exceeds `width`, dropping decimals one at a time and never below a whole percent. What a surface does when even the whole percent will not fit is the surface's own decision — the caller inspects the returned length. This is the signature #446 (progress line) and #452 (reliability column) call.
+
+**N2 — The two migrated sites are byte-identical.** The classified rows and the memory breakdown rows were checked against their previous implementations over 100 000 percentage values and 984 label/count/width combinations before the swap, and the memory rows' existing goldens confirm it. Two properties of the memory field that a rounds-to-zero reading would have lost: its `<1%` marker is a threshold on the raw value (a share of 0.6 % is `(<1%)`, not `(1%)`), and its padding sits *inside* the brackets (`( 3%)`), which is why `pad` pads the figure rather than the wrapped string.
+
+**N3 — `share_row_text()` composes the row.** It is the single builder for a summary row carrying a count and, where a denominator is given, that count's share — used by both the classified rows and the category rows. It returns the row text without the table's outer padding, so the bar renderer knows exactly which characters are the row's own.
+
+**N4 — The row geometry is one source.** `$summary_category_column_width` (30), `$summary_occurrences_column_width` (10) and the derived `$summary_row_width` (41) are file-scoped, because the row builder and the table renderer both need them and a second copy would drift.
+
+**N5 — The logarithmic scale runs one decade below the smallest count.** The obvious formula — spreading `log10(count/reference)` over `log10(reference)` decades — maps a single-line category to exactly zero, so the one case `-sbl` exists for rendered as the one-character stub the linear scale already gave it. The span is therefore `log10(reference) + 1`. Caught by the new harness, not by inspection: on the fixture the smallest category goes from 1 to 16 of 41 characters.
+
+**N6 — The `-HL` derivation is additive.** `derive_background_color()` replaced a five-branch ladder over foreground codes. The five backgrounds it produced are reproduced exactly and 23 further colours gain one; no colour lost a background. Where a foreground sets the colour more than once (`white` is `\033[36m\033[37m`), the last code wins, as the terminal itself resolves it. `msg-rate` is a reset and names no colour, so it derives none — it is not a category row.
 
 ## Merge gate
 
