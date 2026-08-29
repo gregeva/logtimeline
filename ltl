@@ -68,6 +68,9 @@ my $recursive_files = 0;                                                # -r: ex
 my @unreadable_directories;                                             # -r sweep: directories that could not be opened, reported once at the tail of read_and_process_logs()
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
+# Contribution bar drawn over the category rows of the run summary (#448).
+# On by default; the variants exist to be judged against real logs.
+my ( $summary_bar_off, $summary_bar_mono, $summary_bar_absolute, $summary_bar_log, $summary_bar_reverse ) = ( 0, 0, 0, 0, 0 );
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_detect_registry_build, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0,0 );
 # Statistics-phase sub-stage timing (#417): accumulated wall-clock per block,
 # start/stop pairs at block boundaries only — never inside a per-key loop.
@@ -2192,6 +2195,9 @@ sub _classify_argv_provenance {
                 'omit-values|ov', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
                 'recursive|r',
                 'omit-summary|osum', 'omit-rate|or', 'omit-durations|od',
+                'summary-bar-off|sbo', 'summary-bar-mono|sbm',
+                'summary-bar-absolute|sba', 'summary-bar-log|sbl',
+                'summary-bar-reverse|sbr',
                 'omit-bytes|ob', 'omit-count|oc', 'include-count|ic',
                 'include-query-string|iqs', 'include-session|is',
                 'hide-session|hs', 'hide-occurrences|ho', 'hide-legend|hl',
@@ -2299,6 +2305,11 @@ sub emit_runtime_config_verbose {
         'no-index'                          => $no_index,
         'recursive'                         => $recursive_files,
         'omit-summary'                      => $omit_summary,
+        'summary-bar-off'                   => $summary_bar_off,
+        'summary-bar-mono'                  => $summary_bar_mono,
+        'summary-bar-absolute'              => $summary_bar_absolute,
+        'summary-bar-log'                   => $summary_bar_log,
+        'summary-bar-reverse'               => $summary_bar_reverse,
         'omit-rate'                         => $omit_rate,
         'omit-durations'                    => $omit_durations,
         'omit-bytes'                        => $omit_bytes,
@@ -7310,6 +7321,11 @@ sub print_help {
     $out .= help_opt("-o,   --output-csv",            "Write all extracted data to a CSV file for external analysis");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from -du), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
+    $out .= help_opt("-sbo, --summary-bar-off",       "Hide the contribution bar drawn across the category rows of the run summary (the share percentage stays)");
+    $out .= help_opt("-sbm, --summary-bar-mono",      "Draw the contribution bar in plain foreground and background instead of each category's own colour");
+    $out .= help_opt("-sba, --summary-bar-absolute",  "Scale the contribution bar so the full row width is every included line, instead of the largest category filling the row");
+    $out .= help_opt("-sbl, --summary-bar-log",       "Scale the contribution bar logarithmically, giving the smallest categories a visible length when one category dominates");
+    $out .= help_opt("-sbr, --summary-bar-reverse",   "Draw the contribution bar from the right edge of the row towards the left");
     $out .= help_opt("-hl,  --hide-legend",           "Hide the legend column (category breakdowns and rates)");
     $out .= help_opt("-ho,  --hide-occurrences",      "Hide the occurrences bar graph column, freeing space for other metric columns");
     $out .= help_opt("-hd,  --hide-duration",         "Hide the duration bar graph column");
@@ -10661,6 +10677,11 @@ sub adapt_to_command_line_options {
         'no-index|ni' => \$no_index,
         'recursive|r' => \$recursive_files,
         'omit-summary|osum' => \$omit_summary,
+        'summary-bar-off|sbo' => \$summary_bar_off,
+        'summary-bar-mono|sbm' => \$summary_bar_mono,
+        'summary-bar-absolute|sba' => \$summary_bar_absolute,
+        'summary-bar-log|sbl' => \$summary_bar_log,
+        'summary-bar-reverse|sbr' => \$summary_bar_reverse,
         'omit-rate|or' => \$omit_rate,
         'omit-durations|od' => \$omit_durations,
         'omit-bytes|ob' => \$omit_bytes,
@@ -16925,6 +16946,82 @@ sub share_row_text {
     return $label . ( ' ' x $gap ) . $value;
 }
 
+# How many of the row's characters a category's bar fills. The reference the
+# share is taken against is the largest category by default, so the biggest
+# row spans the row and every other is drawn relative to it: with the table
+# width standing for the whole population instead, a dominant category leaves
+# most of the width unused and the small contributors are squeezed into a few
+# characters each. -sba takes that absolute reading; the printed percentage
+# carries the true share either way. -sbl compresses the scale so a category
+# holding a fraction of a percent still has a length to see.
+sub summary_bar_extent {
+    my ($count, $reference, $width) = @_;
+    return 0 unless $reference && $count > 0 && $width > 0;
+
+    my $fraction = $count / $reference;
+    $fraction = 1 if $fraction > 1;
+
+    if ($summary_bar_log) {
+        # Logarithmic against the same reference: the reference still fills
+        # the row, and the decades below it are spread over the remaining
+        # width rather than collapsing onto the first character.
+        my $decades = log( $reference ) / log( 10 );
+        $decades = 1 if $decades < 1;
+        my $position = 1 + ( log( $fraction ) / log( 10 ) ) / $decades;
+        $fraction = $position > 0 ? $position : 0;
+    }
+
+    my $extent = int( $fraction * $width + 0.5 );
+    # A category with lines to its name is never drawn as nothing: the bar
+    # exists to show that it is present as much as how much of it there is.
+    $extent = 1 if $extent < 1;
+    $extent = $width if $extent > $width;
+    return $extent;
+}
+
+# One category row with its contribution bar drawn over the row's own text.
+# The text is overdrawn rather than accompanied by a separate bar column: it
+# is the technique the timeline's proportional columns use, and it costs the
+# table no width at all. The foreground switches at the fill edge so the text
+# stays legible on both sides of it, and the colour is reset before the
+# table's trailing padding so the fill cannot bleed into the file-details
+# pane printed beside it on the same physical line.
+sub summary_category_row {
+    my ($row_text, $category_bucket, $extent) = @_;
+
+    return $row_text unless $extent > 0;
+
+    my ($filled_color, $plain_color);
+    if ($summary_bar_mono) {
+        # A plain fill, so the bar's length can be judged without the
+        # category colours arguing with it.
+        $filled_color = "\033[7m";
+        $plain_color  = $colors{'NC'};
+    } else {
+        $filled_color = $colors{"$category_bucket-HL"} // $colors{'NC'};
+        $plain_color  = $colors{$category_bucket}      // $colors{'NC'};
+    }
+
+    # The bar covers the leading $extent characters, or the trailing ones
+    # when it is drawn from the right edge.
+    my $width = length($row_text);
+    my ($fill_from, $fill_to) = $summary_bar_reverse
+        ? ( $width - $extent, $width - 1 )
+        : ( 0, $extent - 1 );
+
+    my $out = '';
+    my $inside = 0;
+    for my $i ( 0 .. $width - 1 ) {
+        my $should_fill = ( $i >= $fill_from && $i <= $fill_to ) ? 1 : 0;
+        if ( $should_fill != $inside || $i == 0 ) {
+            $out .= $should_fill ? $filled_color : $plain_color;
+            $inside = $should_fill;
+        }
+        $out .= substr( $row_text, $i, 1 );
+    }
+    return $out . $colors{'NC'};
+}
+
 sub print_summary_table {
     return if $omit_summary;
 
@@ -16950,10 +17047,19 @@ sub print_summary_table {
     push @summary_table, sprintf( "  " . "%-${category_column_width}s %${occurrences_column_width}s$padding\n", "Category", "Total" ); 
     push @summary_table, sprintf( "  " . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
 
-    foreach my $category_bucket (@log_levels) {
-        next if $category_bucket =~ /^(empty|err-rate|msg-rate)$/;
-        next unless $category_totals{$category_bucket};
+    # Categories with lines to show, and the largest of them: the bar is drawn
+    # relative to that largest row unless -sba asks for the absolute reading
+    # against every included line.
+    my @categories_shown = grep { $category_totals{$_} }
+                           grep { !/^(empty|err-rate|msg-rate)$/ } @log_levels;
+    my $largest_category_total = 0;
+    for my $category_bucket (@categories_shown) {
+        $largest_category_total = $category_totals{$category_bucket}
+            if $category_totals{$category_bucket} > $largest_category_total;
+    }
+    my $bar_reference = $summary_bar_absolute ? $total_lines_included : $largest_category_total;
 
+    foreach my $category_bucket (@categories_shown) {
         # The column is fixed-width and the totals align down the table, so a
         # label wider than the column is cut to it rather than pushing the
         # total out of line.
@@ -16961,7 +17067,19 @@ sub print_summary_table {
         $category_label = substr( $category_label, 0, $category_column_width )
             if length( $category_label ) > $category_column_width;
 
-        push @summary_table, sprintf( $table_format, $category_label, $category_totals{$category_bucket} );
+        # The share is of the lines included, presented as the classified rows
+        # present theirs: the count, then the percentage in brackets, the pair
+        # right-aligned to the table boundary.
+        my $row_text = share_row_text( $category_label,
+                                       $category_totals{$category_bucket},
+                                       $total_lines_included );
+
+        my $extent = $summary_bar_off ? 0
+                   : summary_bar_extent( $category_totals{$category_bucket},
+                                         $bar_reference, length($row_text) );
+
+        push @summary_table,
+            $padding . summary_category_row( $row_text, $category_bucket, $extent ) . "$padding\n";
     }
 
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );

@@ -157,12 +157,19 @@ These options control what is shown and how. After the timeline bar graph, logti
 
 Alongside the messages ranking, logtimeline prints a **Category** table totalling every log level or event class it found — `INFO`, `ERROR`, the GC pause kinds, the HTTP status families, and so on. Where a category name is not self-explanatory the table names it descriptively: HTTP status families read as `2xx Success`, `3xx Redirection`, `4xx Client error`, `5xx Server error` and `1xx Informational`. When a highlight is active a category that has highlighted lines gets a second row of its own, ending in `, highlighted`, directly above the row for the rest of that category. Every other category keeps its own name unchanged. The short name is what the per-bucket legend beside the timeline shows, and it is also what names the columns in the CSV (`-o`), so both stay compact and stable for tooling.
 
+Each category row shows its share of the lines included beside its total — `2 (20.0%)` — to three significant digits, so a small category still reads exactly rather than collapsing to `0%`. Where a long name leaves too little room the share gives up its decimals first and then the percentage itself; the count is always shown. Behind the row's text a bar is filled in the category's own colour, the text staying legible inside the fill and outside it, so the distribution reads without going through the numbers. By default the largest category fills the row and every other bar is drawn relative to it, which gives the small categories the whole row width to be distinguished in — the percentage beside each one carries the absolute share. `-sba` scales against every included line instead, so the bar lengths sum to the full row. `-sbl` scales logarithmically, which is what makes the tail visible when one category holds almost everything. `-sbr` draws from the right, `-sbm` drops the category colours in favour of a plain fill, and `-sbo` removes the bar and leaves the numbers.
+
 | Option | Description |
 |--------|-------------|
 | `-n, --top-messages <N>` | Number of unique messages to show in the top-messages table (default: 10). `0` keeps no individual message at all: no message table, no message CSV and no per-message statistics, so a log with many distinct messages costs far less memory. The timeline and the statistics over the whole population are unchanged, and inclusion/exclusion filtering still applies. Message grouping (`-g`), the message statistics data model (`-mdm`) and the message ranking (`-so`) then have nothing to act on and are ignored, with a note saying so |
 | `-o, --output-csv` | Write all extracted data to a CSV file for external analysis |
 | `-cp, --csv-precision <mode>` | Control CSV decimal precision: `default` (per-family decimals derived from `-du`), `full` (raw precise floats), or an integer N (cap all numeric columns at N decimals) |
 | `-osum, --omit-summary` | Hide the run summary printed at the end of the output |
+| `-sbo, --summary-bar-off` | Hide the contribution bar drawn across the category rows of the run summary (the share percentage stays) |
+| `-sbm, --summary-bar-mono` | Draw the contribution bar in plain foreground and background instead of each category's own colour |
+| `-sba, --summary-bar-absolute` | Scale the contribution bar so the full row width is every included line, instead of the largest category filling the row |
+| `-sbl, --summary-bar-log` | Scale the contribution bar logarithmically, giving the smallest categories a visible length when one category dominates |
+| `-sbr, --summary-bar-reverse` | Draw the contribution bar from the right edge of the row towards the left |
 | `-hl, --hide-legend` | Hide the legend column (category breakdowns and rates) |
 | `-ho, --hide-occurrences` | Hide the occurrences bar graph column, freeing space for other metric columns |
 | `-hd, --hide-duration` | Hide the duration bar graph column |
