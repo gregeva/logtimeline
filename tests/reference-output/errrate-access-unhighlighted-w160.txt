@@ -16,15 +16,15 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-05-07 00:00 and 2025-05-07 00:00
   ─────────────────────────────────────────   
-  5xx Server error                2 (20.0%)      [√] tests/fixtures/http-status-families.txt                                                              [1]
-  4xx Client error                2 (20.0%)   
-  3xx Redirection                 2 (20.0%)      Log Formats
-  2xx Success                     2 (20.0%)   
-  1xx Informational               2 (20.0%)      1 tomcat_access_with_duration
+  5xx Server error                  2 (20%)      [√] tests/fixtures/http-status-families.txt                                                              [1]
+  4xx Client error                  2 (20%)   
+  3xx Redirection                   2 (20%)      Log Formats
+  2xx Success                       2 (20%)   
+  1xx Informational                 2 (20%)      1 tomcat_access_with_duration
   ─────────────────────────────────────────   
   LINES INCLUDED                         10   
-  SUCCESS CLASSIFIED              6 (60.0%)   
-  FAILURE CLASSIFIED              4 (40.0%)   
+  SUCCESS CLASSIFIED                6 (60%)   
+  FAILURE CLASSIFIED                4 (40%)   
   LINES READ                             10   
   ─────────────────────────────────────────   
 

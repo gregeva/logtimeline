@@ -307,9 +307,9 @@ while read -r raw total descriptive; do
         produced_by "$FAMILY_PRODUCED" \
         contract    'features/463-friendly-log-level-category-names.md § D2 — the highlighted twin is its own lookup entry, indicator trailing'
 done <<'ROWS'
-2xx-HL 1 2xx Success, highlighted
-4xx-HL 1 4xx Client error, highlighted
-5xx-HL 1 5xx Server error, highlighted
+2xx-HL 1 2xx Success (HL)
+4xx-HL 1 4xx Client error (HL)
+5xx-HL 1 5xx Server error (HL)
 ROWS
 
 for raw in 1xx 2xx 2xx-HL 3xx 4xx 4xx-HL 5xx 5xx-HL; do
@@ -351,7 +351,7 @@ while read -r raw total descriptive; do
         produced_by "$FAMILY_PRODUCED" \
         contract    'features/463-friendly-log-level-category-names.md § D4 — the name fits the column, and a longer one is cut to it'
 done <<'ROWS'
-1xx-HL 1 1xx Informational, highlighted
+1xx-HL 1 1xx Informational (HL)
 1xx 1 1xx Informational
 ROWS
 

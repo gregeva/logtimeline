@@ -32,8 +32,8 @@ The issue body's R1–R14 stand, amended as follows by the scoping session:
 
 ```
   Category                            Total
-  5xx Server error                2 (20.0%)
-  1xx Informational, highlighted  2 (20.0%)
+  5xx Server error                  2 (20%)
+  1xx Informational (HL)            2 (20%)
 ```
 
 A label that fills its 30-character cell leaves 10 characters for the value; on such a row a large count loses decimals first. The bar still carries the share. The row formatter shipped inside `print_summary_table()` for the classified rows (the `$emit` closure) is lifted into the shared percentage formatter that both the classified rows and the category rows call — `docs/percentage-presentation.md` (parameters for this surface: 3 significant digits, row slack, rounded; degrades decimals then the percentage).
@@ -68,7 +68,7 @@ All are visible: `--help` rows, `docs/usage.md` rows, `-V runtime-config` proven
 - `tests/validate-category-names.sh` reads label and total at exact column offsets; its row regexes are updated for the `count (pct%)` value. Both it and the vocabulary harness now anchor the label at the row's left edge and the value at the row boundary, which is the geometry that actually keeps the table aligned — a fixed total column stopped being one when the value gained the right to run into the label's slack.
 - `tests/validate-log-level-vocabulary.sh` reconciles category totals against `LINES INCLUDED` by parsing the rows; it must still find the count.
 - Thirteen regression references carry the category rows and are re-blessed (`tests/capture-regression.sh`) — the ten `hl-*` plus the three `errrate-*`. They strip ANSI, so **no golden can assert the bar**: `tests/validate-summary-contribution-bar.sh` (under `tests/lib/colour-env.sh`, identical counts with `FORCE_COLOR=3`, with `NO_COLOR=1` and with neither) asserts the fill, its extent and contiguity, its colour, its reset before the pane, and each of the five options.
-- The derived-background rule and the closed `-HL` gap get their own assertion (every entry in the category colour table has a highlighted twin with a background). It slices the colour table, `derive_background_color()` and the twin-construction loop out of `ltl` and runs them, so it checks what the tool builds rather than a second implementation of the rule.
+- Every category must resolve to a bar-colour entry whose fill inverts (a background paired with the black foreground). The assertion slices the colour tables and `summary_bar_color()` out of `ltl` and runs them, so it checks what the tool resolves rather than a second implementation of the rule.
 - `docs/usage.md` § Display & Output describes the run summary; the paragraph gains the share and the bar.
 
 ## Implementation notes
@@ -83,7 +83,33 @@ All are visible: `--help` rows, `docs/usage.md` rows, `-V runtime-config` proven
 
 **N5 — The logarithmic scale runs one decade below the smallest count.** The obvious formula — spreading `log10(count/reference)` over `log10(reference)` decades — maps a single-line category to exactly zero, so the one case `-sbl` exists for rendered as the one-character stub the linear scale already gave it. The span is therefore `log10(reference) + 1`. Caught by the new harness, not by inspection: on the fixture the smallest category goes from 1 to 16 of 41 characters.
 
-**N6 — The `-HL` derivation is additive.** `derive_background_color()` replaced a five-branch ladder over foreground codes. The five backgrounds it produced are reproduced exactly and 23 further colours gain one; no colour lost a background. Where a foreground sets the colour more than once (`white` is `\033[36m\033[37m`), the last code wins, as the terminal itself resolves it. `msg-rate` is a reset and names no colour, so it derives none — it is not a category row.
+**N6 — The bar is the timeline's bar, and its colour table is the timeline's table.** The fill comes from `@column_colors` — the entries already drawing the duration and bytes columns — resolved by hue in `summary_bar_color()`: a category names its colour as an ANSI foreground code, the table keys its entries by hue, and the final digit of the code matches the two. Nothing is added per category, and a category added later inherits its fill from the colour it already uses.
+
+The mechanism is an **inversion**, not a colour pair: outside the bar the text is the category's own colour on the terminal's background; inside it, the background becomes the colour and the text turns black (`38;5;0`). That is what lets one rendering stay readable on a dark terminal and on a light one, since the terminal supplies the surrounding foreground either way. Both shades of the hue are used, as the timeline uses them: the vivid `highlighted_bg` for a `-HL` row, the subdued `plain_bg` for its plain twin, so a highlighted category is visibly the one that stands out.
+
+### Defects found in the delivered implementation (2026-08-29)
+
+All five were reported from real runs after the drop merged, and all five are the same root cause: the bar was built from a newly invented `-HL` colour vocabulary instead of the bar mechanism the requirement named.
+
+**D-1 — The message-table header lost its plain cyan.** The `-HL` twins had been changed from an explicit five-colour table to a rule applied to every colour, which gave `bright-cyan-HL` (the TOP OVERALL MESSAGES header) and `bright-yellow-HL` a background they never had. That header was never in scope. The original table is restored; the derivation is gone, and was only ever needed because the wrong vocabulary was chosen for the bar.
+
+**D-2 — The bar did not invert.** It painted `$colors{"<category>-HL"}` over the row: a foreground and a background at once, rather than the inversion described above.
+
+**D-3 — Trailing zeros in the share.** Three significant digits were rendered without trimming, so a value whose last digit was zero printed it (`20.0%`). Fixed in `format_percentage()`, so every surface that calls it is corrected at once; the rule is now written into `docs/percentage-presentation.md` § The convention.
+
+**D-4 — A share too small to fill a character was drawn one character wide.** `summary_bar_extent()` carried `$extent = 1 if $extent < 1`. At a 41-character row one character is nearly 2.4 %, so a category holding 0.034 % was drawn claiming about seventy times its size — on the one surface whose job is to state a proportion. The minimum is removed; `-sbl` remains the way to see the small categories, and does so correctly.
+
+**D-5 — A row with no bar lost its colour entirely.** `summary_category_row()` returned the raw text when the extent was zero, so once D-4's minimum was gone the sub-character rows printed in the terminal default instead of red, yellow and magenta. The row is always drawn in the category's colour; the bar inverts the part it covers and decides nothing about whether the row is coloured.
+
+Two presentation corrections landed with them: the highlighted rows read `(HL)` rather than `, highlighted`, and `share_row_text()` now fits the label to whatever the count and share leave, so an over-long label can never push the value out of alignment (it previously produced 45- and 50-character rows against a 41-character budget). Label fitting lives only in the row builder now; the call site's own truncation to a fixed 30 characters was removed as a second surface for one decision.
+
+### Why the harness did not catch any of them
+
+`tests/validate-summary-contribution-bar.sh` passed 23 assertions against all five defects. Three gaps, each now closed:
+
+- **No highlight scenario at all**, so nothing compared a `-HL` row with its plain twin — the D-2 and shade defects were invisible by construction. A scenario now highlights one of two paths in the dominant category and asserts the two shades differ.
+- **Insufficient dynamic range in the fixture.** Its smallest category was 1 of 40, which at a 41-character row computes to exactly 1 on its own merits, so D-4's forced minimum produced the same extent the arithmetic already gave and no assertion could tell them apart. What was needed was not more skew but a ratio beyond the row width; the new fixture is 200 / 3 / 1.
+- **The harness's own fill reader misread the fill.** It treated `38;5;0` — the black foreground every bar fill pairs with — as a reset, because the parameter ends in `;0`, so a full-width bar measured as zero. The reader now parses SGR parameters as whole values, and the second copy of it inside the log-scale check was converged into the one reader.
 
 ## Merge gate
 
@@ -91,8 +117,8 @@ Touches `ltl`, harnesses and goldens: the full `tests/validate-*.sh` suite and t
 
 ## Related
 
-- #463 (friendly category names) — its § Out of scope anticipated this drop: "whichever lands second inherits the other's shape". #448 inherits the 30-character exact-fit labels and the `, highlighted` twin rows.
+- #463 (friendly category names) — its § Out of scope anticipated this drop: "whichever lands second inherits the other's shape". #448 inherits the 30-character exact-fit labels and the ` (HL)` twin rows.
 - #457 (summary at the end) — the regression-filter anchor constraint in D4.
 - #453 (success/failure classification) — the share convention in D1; merged 2026-08-29.
 - #452 (reliability percentage column) — a third percentage surface; not a dependency. All percentage surfaces share one formatter with per-surface parameters: `docs/percentage-presentation.md`.
-- #475 / #476 (missing severity levels; per-format level declarations) — add rows; D2's derivation rule means they inherit the fill and the highlighted twin with no new table.
+- #475 / #476 (missing severity levels; per-format level declarations) — add rows; because the fill is resolved from the bar-colour table by hue, a new level inherits its bar from the colour it is already given, with no new table.

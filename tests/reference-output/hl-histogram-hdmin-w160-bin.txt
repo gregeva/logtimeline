@@ -72,9 +72,9 @@ command-line options: --disable-progress -ni -n 1 -hgdm bin --terminal-width 160
   Category                            Total      These file(s) were processed with analysis including results between 2026-01-22 08:49 and 2026-01-25 07:41
   ─────────────────────────────────────────   
   4xx Client error               4 (0.591%)      [√] logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log                       [1]
-  3xx Redirection, highlighted   1 (0.148%)   
+  3xx Redirection (HL)           1 (0.148%)   
   3xx Redirection                6 (0.886%)      Log Formats
-  2xx Success, highlighted      153 (22.6%)   
+  2xx Success (HL)              153 (22.6%)   
   2xx Success                   513 (75.8%)      1 tomcat_access_with_duration
   ─────────────────────────────────────────   
   HIGHLIGHTED                           154   

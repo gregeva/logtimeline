@@ -33,7 +33,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -ic -hcmi
   ─────────────────────────────────────────   
   ERROR                          66 (2.21%)      [√] logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log                           [1]
   WARN                         1044 (34.9%)   
-  INFO-HL                        45 (1.50%)      Log Formats
+  INFO-HL                         45 (1.5%)      Log Formats
   INFO                         1837 (61.4%)   
   ─────────────────────────────────────────      1 thingworx_standard
   HIGHLIGHTED                            45   

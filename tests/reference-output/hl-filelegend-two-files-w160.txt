@@ -3017,7 +3017,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -hdmin 10
   Category                            Total      These file(s) were processed with analysis including results between 2025-04-10 06:00 and 2025-12-15 23:57
   ─────────────────────────────────────────   
   ERROR-HL                       1 (0.013%)      [√] logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log                            [1]
-  ERROR                          88 (1.10%)      [√] logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log                           [1]
+  ERROR                           88 (1.1%)      [√] logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log                           [1]
   WARN                         6016 (75.3%)   
   INFO-HL                        2 (0.025%)      Log Formats
   INFO                         1885 (23.6%)   
