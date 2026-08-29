@@ -16962,11 +16962,14 @@ sub summary_bar_extent {
     $fraction = 1 if $fraction > 1;
 
     if ($summary_bar_log) {
-        # Logarithmic against the same reference: the reference still fills
-        # the row, and the decades below it are spread over the remaining
-        # width rather than collapsing onto the first character.
-        my $decades = log( $reference ) / log( 10 );
-        $decades = 1 if $decades < 1;
+        # Logarithmic against the same reference, so the reference still fills
+        # the row and the decades below it are spread across the rest of the
+        # width instead of collapsing onto the first character. The scale runs
+        # one decade below the smallest count a category can have, so a single
+        # line lands inside the range rather than exactly at its foot, where
+        # every log scale sends it and where it would be indistinguishable
+        # from the linear rendering the option exists to improve on.
+        my $decades = log( $reference ) / log( 10 ) + 1;
         my $position = 1 + ( log( $fraction ) / log( 10 ) ) / $decades;
         $fraction = $position > 0 ? $position : 0;
     }
