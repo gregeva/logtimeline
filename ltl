@@ -171,6 +171,11 @@ my %verbose_sections_requested;   # Populated by adapt_to_command_line_options()
 my %verbose_section_buffer;
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_sessions );
+# Per-bucket success/failure outcomes (#453 D17/D30): $bucket_outcomes{$bucket}[1]
+# successes, [2] failures, written only for classified lines; a bucket's
+# unclassified count is occurrences minus both, derived at emission. Kept
+# out of %log_analysis so the statistics population is unchanged.
+my %bucket_outcomes;
 # Per-category message-key display order, computed once in calculate_all_statistics()
 # and reused by print_message_summary() so the same keys are not sorted twice
 # (Issue #302). Keyed by category ('plain'/'highlight').
@@ -252,6 +257,7 @@ my $capture_messages = 1;
 my ( $write_messages_to_csv, $csv, $csv_fh, $csv_file_args ) = ( 0, undef, undef, "" );
 my $total_lines_read = 0;
 my $total_lines_included = 0;
+my ( $total_successes, $total_failures ) = ( 0, 0 );   # run-level classification outcomes (#453 R5)
 my @progress_history = ();     # rolling history for lines/sec calculation: [ [timestamp, lines_read], ... ]
 my $total_lines_highlighted = 0;
 my $legend_length = 0;
@@ -362,7 +368,8 @@ my %match_type_to_slug = (
 # Schema per file:
 #   match_type         => integer 1-13 (first successful bind for this file)
 #   slug               => string from %match_type_to_slug
-#   is_access_log      => 0|1
+#   metrics_observed   => 0|1
+#   event_ledger       => 0|1 (the bound entry's FR_EVENT_LEDGER, #453)
 #   ts_precision       => 'ms' | 's' | undef
 #   matched_lines      => integer
 #   unmatched_lines    => integer
@@ -398,7 +405,7 @@ use constant {
     FR_TRANSFORMS      => 7,   # [ transform primitive names ] (post-capture)
     FR_TIME            => 8,   # { layout, precision, tz } — declarative time contract
     FR_DURATION_UNIT   => 9,   # declared unit of the duration field (undef = none)
-    FR_STATS           => 10,  # statistics-eligible: sets is_access_log statically
+    FR_STATS           => 10,  # statistics-eligible: sets metrics_observed statically
     FR_GUARD           => 11,  # cheap superset guard closure or undef (D28)
     FR_EXTRACT         => 12,  # compiled extraction closure (fixed-order list return)
     FR_MESSAGE_METRICS => 13,  # declared in-message metric probes (D33)
@@ -421,6 +428,14 @@ use constant {
     FR_FILENAME        => 22,  # filename evidence (D45): { matcher, stem, date,
                                # index, ext, placement } or undef
     FR_FILENAME_SAMPLES=> 23,  # producer-true names the matcher must accept
+    FR_EVENT_LEDGER    => 24,  # 1 = event ledger: maximal coverage of the
+                               # operations the format describes (#453 R8)
+    FR_CLASSIFY        => 25,  # write-direct classification closure (sets
+                               # $line_outcome / $line_cls_sig from the record
+                               # lexicals) — the CSV path's call shape (D29);
+                               # undef on scanned entries, whose blocks inline it
+    FR_CLS_SIG         => 26,  # criteria-signature id of the entry's resolved
+                               # classification (0 = declines) (D32)
 };
 my @format_registry;           # scanned entries, static cascade order: one
                                # occupant per variant-group slot (D47/F1)
@@ -475,6 +490,7 @@ my %format_evidence_weights = (
 # no-match path. Per-line timer pairs around every scan are deliberately
 # NOT used — the clock calls would cost more than many scans they measure.
 use constant FORMAT_SCAN_NOMATCH_SAMPLE_EVERY => 256;
+use constant FORMAT_CLS_RULE_CHANGE_LINES_MAX  => 10;   # rule_change: lines kept per file (D19)
 my $format_scan_promotions = 0;        # actual reorders via format_registry_promote()
 my $format_scan_validating  = 0;       # per-compile validation in flight: promotion is suppressed
 my $format_scan_subs_compiled = 0;     # generated scan subs minted this run
@@ -2424,14 +2440,26 @@ sub emit_index_readback_verbose {
 # return-list costs an extra full copy of every field per line (~1 us on
 # the message-bearing formats). read_and_process_logs() reads the same
 # lexicals; its per-line loop no longer declares them. status_code and
-# is_access_log are numeric (0 default); bytes/duration default undef;
+# metrics_observed are numeric (0 default); bytes/duration default undef;
 # the string fields default '' unless clobbered (see above).
 my @format_record_fields = qw(timestamp_str category_bucket object instance
                               user session platform thread message
-                              bytes duration status_code is_access_log);
+                              bytes duration status_code metrics_observed);
 my ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message );
 my ( $bytes, $duration );
-my ( $status_code, $is_access_log );
+my ( $status_code, $metrics_observed );
+# Per-line classification (#453 D16): the winning entry's generated block
+# (or the CSV path's FR_CLASSIFY closure) writes the outcome — 2 failure,
+# 1 success, 0 unclassified — and the criteria-signature id of the rules
+# that decided it (D32). Neither is reset by the loop: every block assigns
+# both, a declining entry included.
+my ( $line_outcome, $line_cls_sig ) = ( 0, 0 );
+my %format_record_ref = (
+    timestamp_str => \$timestamp_str, category_bucket => \$category_bucket, object => \$object,
+    instance => \$instance, user => \$user, session => \$session, platform => \$platform,
+    thread => \$thread, message => \$message, bytes => \$bytes, duration => \$duration,
+    status_code => \$status_code, metrics_observed => \$metrics_observed,
+);
 # Set by the generated blocks alongside the record fields: the parsed
 # whole-second epoch and the fractional milliseconds stripped from
 # $timestamp_str (the strip runs before parsing so the date key excludes
@@ -2441,6 +2469,30 @@ my ( $status_code, $is_access_log );
 # than the date lookup plus arithmetic.
 my ( $timestamp, $fractional_ms );
 my ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
+
+# Success/failure classification (#453). The global default is failure-only
+# (D7): a diagnostics log cannot assert success, so every non-failure line
+# stays unclassified. An entry that declares an outcome replaces the
+# default's list for that outcome; one that declares nothing inherits the
+# whole default; 'none' or {} declines (D15). Criteria are field => pattern
+# on the extracted record (any-of across criteria, all-of within one, D2);
+# the resolved shape is compiled once at registry build into each entry's
+# generated block (format_classification_src). The tables below are the
+# build-time products the generated code references.
+my %classification_default = (
+    failure => [ { category_bucket => '^(?:ERROR|FATAL|CRITICAL)$' } ],
+);
+my @format_cls_sets;      # literal-alternation criteria as hash sets (D25),
+                          # indexed by the id spliced into the generated code;
+                          # one set per distinct alternative list
+my %format_cls_set_id;    # canonical alternative list => set index
+my @format_cls_sig_str;   # criteria-signature string per signature id (0 = 'none')
+my %format_cls_sig_id;    # signature string => id
+my $format_cls_rule_changes = 0;   # mid-file classifying-entry changes with differing signatures (D19)
+my @format_cls_rule_change_lines;   # 'rule_change: file=... line=N from=... to=...' in input order,
+                                    # at most FORMAT_CLS_RULE_CHANGE_LINES_MAX per file
+my %format_cls_rule_change_count;   # file => number of rule changes seen in it (the note fires on the first)
+my ( $cls_success_declared, $cls_failure_declared ) = ( 0, 0 );   # any bound entry declared rules for the outcome (summary rows)
 
 # The single generated scan sub (see compile_format_scan_sub) and the
 # regeneration inputs promotion needs: the entry snapshot the generated
@@ -2504,7 +2556,7 @@ my %format_transform_code = (
 # the closure behind an index() superset gate, never fused into the
 # recognition regex), the three-part time contract (D23/D31), duration
 # unit (D18; producer variants of one shape are variant-group members, D47),
-# statistics eligibility (static is_access_log; formats whose probes set
+# statistics eligibility (static metrics_observed; formats whose probes set
 # it per line leave this 0 and set marks_metrics_observed on the probe
 # block), cheap superset guards (D28: only the expensive-to-reject access
 # siblings carry one), reserved event_pairs (D23: validated empty in this
@@ -2547,7 +2599,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-05-05 00:00:00', 'ERROR', 'c.p.a.u.JobPurgeScheduler', '', 'SuperUser', '', '', 'pool-1-thread-1', 'Job purge completed', undef, undef, '0', '0' ],
         [ '2025-05-05 00:00:01', 'INFO', 'S.c.t.d.e.DSLScript', '', 'Administrator', 'F0000000-0000-0000-0000-00000000000F', 'platform-1', 'TWEventProcessor-4', 'Executed service durationMs=? result bytes=? count=7', '1024', '42', '0', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 2, 0 ] },
     { name => 'mt10', slug => 'connection_server_standard', match_type => 10, scanned => 1, head_class => 'digit',
       variant_group => 'connection_server', variant_default => 1,
       filename => { stem => 'cxserver', index => 'dot_n_dash_n', ext => '.log', placement => 'before',
@@ -2571,7 +2624,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-08-14 21:00:34', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-12', 'Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size', undef, undef, '0', '0' ],
         [ '2025-08-14 21:00:35', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in ? millseconds', undef, '152', '0', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     # Integration Runtime: byte-identical line shape to Connection Server
     # (same Vert.x/logback encoder) but its dates are yyyy-dd-MM (#385).
     # Selected per file by provenance evidence (D47); its samples carry
@@ -2599,7 +2653,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.i.IntegrationRuntimeConfiguration', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted', undef, undef, '0', '0' ],
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.s.SecurityManagerBootstrapper', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'initializing KeyStore provider', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     # Windchill Workgroup Manager client logs: one line shape shared by the
     # genlwsc / uwgm_client / uwgm files (each file's own header block
     # declares `columns "date time tz msgtype logid tid area message"` and
@@ -2639,7 +2694,8 @@ sub format_registry_specs {
         [ '2024-09-16T05:40:41', 'DEBUG', 'uwgmclnt.clntpref_read.prefmgr_addread.pref_file_reader', undef, undef, undef, 'P3e68', 'T2950', 'UWGMLIB_PREFERENCES: [AutoCAD]', undef, undef, '0', '0' ],
         [ '2024-09-16T05:40:43', 'ERROR', 'UWGM', undef, undef, undef, 'P3e68', 'T2950', 'UWGMCLNT_UI: UwgmEmbedZBrowser::Init Service unavailable', undef, undef, '0', '0' ],
         [ '2024-09-16T05:40:44', 'START', 'uwgm.session1.act#111761707663362.srvtxn#0', undef, undef, undef, 'P3e68', 'T2950', 'Server Transaction started', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0, 0, 0, 2, 0 ] },
     { name => 'mt1gen', slug => 'thingworx_standard', match_type => 1, scanned => 1, head_class => 'digit',
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\+\d{4} \[L: ([^\]]*)\]',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
@@ -2654,7 +2710,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-02-04 12:05:57', 'DEBUG', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
         [ '2025-02-04 12:05:58', 'WARN', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     { name => 'mt2', slug => 'thingworx_rac_client', match_type => 2, scanned => 1, head_class => 'bracket_digit',
       pattern_src => '^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3}).*? \[[L: ]*([^\]]*)\]',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
@@ -2669,13 +2726,17 @@ sub format_registry_specs {
       expect => [
         [ '2025-02-04 12:06:22', 'TRACE', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
         [ '2025-03-01 08:00:00', 'INFO', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     { name => 'mt12', slug => 'tomcat_codebeamer', match_type => 12, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?\[([0-9.]+)ms\] \[(.+)s\]',
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[6,'duration'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      event_ledger => 1,
+      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
+                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
       guard => { lit => 'ms] [' },
       expect_ancestors => [],
       samples => [
@@ -2685,29 +2746,39 @@ sub format_registry_specs {
       expect => [
         [ '29/Oct/2025:08:52:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /urlversioned/202510290803/images/newskin/login_page/icon_qa.png', '20097', '5', '200', '1' ],
         [ '29/Oct/2025:08:52:12', '2xx', undef, undef, undef, undef, undef, undef, 'GET /cb/item', '512', '12', '200', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 1, 1 ] },
     { name => 'mt4', slug => 'tomcat_access_common', match_type => 4, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$',
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => undef, stats_eligible => 1,
+      event_ledger => 1,
+      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
+                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
       guard => { tail_one_token => 1 },
       expect_ancestors => [],
       samples => [
         '43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626',
         '10.0.0.1 - - [02/Feb/2025:00:01:00 +0000] "GET /health HTTP/1.1" 204 -',
+        '10.0.0.2 - - [02/Feb/2025:00:02:00 +0000] "POST /Thingworx/Things/T1/Services/Run HTTP/1.1" 500 512',
       ],
       expect => [
         [ '02/Feb/2025:00:00:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Thingworx/Metrics', '17626', undef, '200', '1' ],
         [ '02/Feb/2025:00:01:00', '2xx', undef, undef, undef, undef, undef, undef, 'GET /health', undef, undef, '204', '1' ],
-      ] },
+        [ '02/Feb/2025:00:02:00', '5xx', undef, undef, undef, undef, undef, undef, 'POST /Thingworx/Things/T1/Services/Run', '512', undef, '500', '1' ],
+      ],
+      expect_outcomes => [ 1, 1, 2 ] },
     { name => 'mt9', slug => 'jboss_access', match_type => 9, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+ ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$',
       field_map => [ [2,'timestamp_str'],[3,'message'],[4,'category_bucket'],[5,'bytes'],[8,'duration'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      event_ledger => 1,
+      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
+                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
       guard => { lit => '" "' },
       expect_ancestors => [],
       samples => [
@@ -2717,7 +2788,8 @@ sub format_registry_specs {
       expect => [
         [ '13/Mar/2025:09:02:41', '2xx', undef, undef, undef, undef, undef, undef, 'GET /async/prediction/evaluation', '51', '651', '200', '1' ],
         [ '13/Mar/2025:09:02:42', '2xx', undef, undef, undef, undef, undef, undef, 'POST /async/prediction/jobs', '88', '12', '201', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 1, 1 ] },
     { name => 'mt3', slug => 'tomcat_access_with_duration', match_type => 3, scanned => 1, head_class => 'any',
       variant_group => 'access_with_duration', variant_default => 1,
       filename => { stem => 'localhost_access_log', date => 'iso', ext => '.txt', placement => 'before',
@@ -2727,17 +2799,23 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      event_ledger => 1,
+      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
+                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
       expect_ancestors => [ 'mt12', 'mt4', 'mt9' ],
       samples => [
         '43.52.82.172 - - [02/Feb/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295',
         '10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1',
         '1.2.3.4 - - [05/May/2025:00:00:01 +0000] "GET /Thingworx/Things/T1 HTTP/1.1" 200 100 25 http-nio-8443-exec-3 AB12CD34EF',
+        '10.0.0.3 - - [05/May/2025:00:00:02 +0000] "GET /Thingworx/Things/T2 HTTP/1.1" 404 0 3',
       ],
       expect => [
         [ '02/Feb/2025:00:00:11', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Thingworx/Metrics', '17626', '295', '200', '1' ],
         [ '05/May/2025:00:00:00', '2xx', undef, undef, undef, undef, undef, undef, 'POST /Thingworx/WS', '261', '1', '200', '1' ],
         [ '05/May/2025:00:00:01', '2xx', undef, undef, undef, 'AB12CD34EF', undef, 'http-nio-8443-exec-3', 'GET /Thingworx/Things/T1', '100', '25', '200', '1' ],
-      ] },
+        [ '05/May/2025:00:00:02', '4xx', undef, undef, undef, undef, undef, undef, 'GET /Thingworx/Things/T2', '0', '3', '404', '1' ],
+      ],
+      expect_outcomes => [ 1, 1, 1, 2 ] },
     # Apache HTTP Server 2.x / Tomcat 10.1+: same `%h %l %u %t "%r" %s %b %D`
     # shape as Tomcat 6-9 but %D is microseconds (#17). Selected per file by
     # provenance evidence (D47) — httpd names its log `access_log` /
@@ -2751,13 +2829,17 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'us', stats_eligible => 1,
+      event_ledger => 1,
+      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
+                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
       expect_ancestors => [ 'mt12', 'mt4', 'mt9' ],
       samples => [
         '127.0.0.1 - - [22/Jan/2026:08:49:51 +0000] "GET /Windchill/servlet/WindchillGW/wt.httpgw.HTTPServer/ping HTTP/1.1" 200 209 173542',
       ],
       expect => [
         [ '22/Jan/2026:08:49:51', '2xx', undef, undef, undef, undef, undef, undef, 'GET /Windchill/servlet/WindchillGW/wt.httpgw.HTTPServer/ping', '209', '173542', '200', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 1 ] },
     { name => 'mt5', slug => 'connection_server_json', match_type => 5, scanned => 1, head_class => 'brace',
       pattern_src => '^{"\@timestamp":"([^"]*).*"level":"([^"]*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'] ],
@@ -2772,7 +2854,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-02-02 21:03:06', 'WARN', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
         [ '2025-02-02 21:03:07', 'INFO', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     # The event name is a closed alternation, not an open `(.+?)`: G1's
     # concurrent-cycle lines (`Concurrent Mark Cycle`, `Concurrent Cycle`,
     # `Concurrent Undo Cycle`) share this line head but are deliberately
@@ -2791,6 +2874,8 @@ sub format_registry_specs {
       transforms => [ 'gc_heap_delta' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 1,
+      event_ledger => 1,
+      classification => 'none',   # every pause is logged (a ledger); what makes one a failure is #483
       expect_ancestors => [],
       samples => [
         '[2025-04-05T11:10:47.867+0000][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 2433M->66M(49152M) 18.406ms',
@@ -2807,7 +2892,8 @@ sub format_registry_specs {
         [ '2025-04-05T11:10:50', 'Pause Cleanup', undef, undef, undef, undef, undef, undef, undef, '0', '0.204', '0', '1' ],
         [ '2024-10-16T05:27:56', 'To-space exhausted', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
         [ '2025-06-05T11:17:57', 'Using G1', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0, 0, 0, 0, 0 ] },
     { name => 'mt7', slug => 'tw_analytics_v2', match_type => 7, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+)\s+\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[.,]\d{3})\] (.*)$',
       field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],
@@ -2822,7 +2908,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-02-19 18:31:00', 'ERROR', undef, undef, undef, undef, undef, undef, 'com.thingworx.sdk.impl.transport.netty.NettyChannelHandler: [ClientHandler: 76b37675] WebSocket error: An existing connection was forcibly closed by the remote host, closing connection!', undef, undef, '0', '0' ],
         [ '2025-02-20 04:49:11', 'INFO', undef, undef, undef, undef, undef, undef, 'org.ehcache.core.EhcacheManager: Cache \'scorefunc_cachex\' created in EhcacheManager.', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 2, 0 ] },
     { name => 'mt8', slug => 'tw_analytics_worker', match_type => 8, scanned => 1, head_class => 'digit',
       pattern_src => '^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^ ]*)\s+\[([^]]+)\]\s+(\w+)\s+(.*)$',
       field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'message'] ],
@@ -2837,7 +2924,8 @@ sub format_registry_specs {
       expect => [
         [ '2025-02-20 10:06:10', 'WARN', undef, undef, undef, undef, undef, 'nioEventLoopGroup-2-1', 'io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x8171dc41]', undef, undef, '0', '0' ],
         [ '2025-02-20 10:06:11', 'INFO', undef, undef, undef, undef, undef, 'pool-2-thread-1', 'io.netty.util.ResourceLeakDetector - Leak detection level set to SIMPLE.', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 0 ] },
     # Windchill Method Server / Background Method Server log4j diagnostic
     # log: `%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%t] %c %x - %m`. One layout
     # for the whole service family (MethodServer, BackgroundMethodServer,
@@ -2874,7 +2962,8 @@ sub format_registry_specs {
         [ '2025-07-18 04:46:41', 'INFO', 'wt.method.server.startup', undef, '', undef, undef, 'main', 'Starting BackgroundMethodServer', undef, undef, '0', '0' ],
         [ '2025-07-18 08:19:31', 'ERROR', 'com.ptc.windchill.esi.txn.ESITransactionUtility', undef, 'wcadmin', undef, undef, 'ActiveMQ Session Task-3', 'Exception while fetching a transaction from the input parameters. (wt.federation.federationResource/109) wt.util.WTException: Unable to find target object "OR:wt.part.WTPart:123456789".', undef, undef, '0', '0' ],
         [ '2025-07-18 04:52:55', 'WARN', 'wt.jmx.notif.methodContextGauge', undef, '', undef, undef, 'JMX Monitor ThreadGroup<main> Executor Pool [Thread-21]', 'Time=2025-07-18 04:52:55.257 +0000, Name=MethodContextsGaugeNotifier', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 2, 0 ] },
     { name => 'mt11', slug => 'tw_edge_c_sdk', match_type => 11, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+) (\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}[,.]\d+) (.*)',
       field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],
@@ -2891,7 +2980,8 @@ sub format_registry_specs {
         [ '2025-08-09 18:19:04', 'INFO', 'change_notification_source.cpp:11', undef, undef, undef, undef, undef, 'OnProvisioningChanged provisioning change update receive', undef, undef, '0', '0' ],
         [ '2025-08-09 18:27:18', 'ERROR', undef, undef, undef, undef, undef, undef, 'TW_SSL_READ: Error reading from SSL strea', undef, undef, '0', '0' ],
         [ '2025-08-09 18:27:18', 'FORCE', 'twx_connection.cpp:246', undef, undef, undef, undef, undef, 'Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed', undef, undef, '0', '0' ],
-      ] },
+      ],
+      expect_outcomes => [ 0, 2, 0 ] },
     # CSV is a stateful per-file stage outside the ordered scan (D32): its
     # matcher is the two-line confirmation in read_and_process_logs()
     # (detect_and_parse_csv_header), not a regex, so this entry is never
@@ -3423,6 +3513,238 @@ sub compile_format_guard {
     die "ltl: format registry: unknown guard spec for compile_format_guard\n";
 }
 
+# --- Success/failure classification (#453) ---------------------------------
+#
+# Resolve an entry's declared classification against %classification_default
+# (D15). Returns undef for a declining entry ('none' or {}), otherwise
+# { failure => [criteria], success => [criteria] } with every outcome the
+# entry did not name inherited from the default. Validates the declaration
+# shape loudly: outcomes are success/failure only, each a list of criteria,
+# each criterion a non-empty hash of record field (or 'line') => pattern.
+sub format_classification_resolve {
+    my ($spec) = @_;
+    my $decl = $spec->{classification};
+    my $where = "ltl: format registry: entry '$spec->{name}' classification";
+    return undef if defined $decl && !ref $decl && $decl eq 'none';
+    return undef if ref $decl eq 'HASH' && !%$decl;
+    die "$where must be a hash of outcome => [ criteria ], or 'none'\n"
+        if defined $decl && ref $decl ne 'HASH';
+    for my $k (keys %{ $decl // {} }) {
+        die "$where names unknown outcome '$k' (success|failure)\n" unless $k eq 'success' || $k eq 'failure';
+    }
+    my %is_field = map { $_ => 1 } @format_record_fields, 'line';
+    my %resolved;
+    for my $outcome (qw(failure success)) {
+        my $list = ($decl && exists $decl->{$outcome}) ? $decl->{$outcome} : $classification_default{$outcome};
+        next unless defined $list;
+        die "$where outcome '$outcome' must be a list of criteria\n" unless ref $list eq 'ARRAY';
+        for my $crit (@$list) {
+            die "$where outcome '$outcome': a criterion is a non-empty hash of field => pattern\n"
+                unless ref $crit eq 'HASH' && %$crit;
+            for my $f (sort keys %$crit) {
+                die "$where names unknown field '$f' (a record field of \@format_record_fields, or 'line')\n" unless $is_field{$f};
+                my $pat = $crit->{$f};
+                die "$where pattern for '$f' must be a string\n" if ref $pat || !defined $pat || !length $pat;
+                die "$where pattern for '$f' contains the m~~ delimiter\n" if index($pat, '~') >= 0;
+                die "$where pattern for '$f' contains an interpolating \$ or \@ (the pattern is spliced into generated source)\n"
+                    if $pat =~ /(?<!\\)[\$\@](?=[A-Za-z_{])/;
+                eval { qr/$pat/ } or die "$where pattern for '$f' does not compile: $@";
+            }
+        }
+        $resolved{$outcome} = $list;
+    }
+    # An outcome declared as an empty list classifies nothing; when both
+    # are empty the entry declines exactly as 'none' does.
+    return undef unless grep { @{ $resolved{$_} // [] } } qw(failure success);
+    return \%resolved;
+}
+
+# Canonical criteria signature (D19/D32): outcomes in failure, success
+# order as "outcome=<criteria>", criteria joined by '|', the conditions of
+# one criterion joined by '&' in field order, outcomes joined by ';'. A
+# declining entry is 'none'. Two entries with the same resolved rules have
+# the same signature, so a same-rules occupant flip is never a rule change.
+sub format_classification_signature {
+    my ($resolved) = @_;
+    return 'none' unless $resolved;
+    my @parts;
+    for my $outcome (qw(failure success)) {
+        my $list = $resolved->{$outcome};
+        next unless $list && @$list;
+        push @parts, "$outcome=" . join('|', map { my $c = $_; join('&', map { "$_=$c->{$_}" } sort keys %$c) } @$list);
+    }
+    return join(';', @parts);
+}
+
+# Single-quoted Perl string literal for generated source.
+sub format_classification_quote {
+    my ($lit) = @_;
+    $lit =~ s/([\\'])/\\$1/g;
+    return "'$lit'";
+}
+
+# The longest literal run a pattern requires of every match (D27's index()
+# gate), or undef when none can be asserted safely: any alternation, or
+# any quantified group, can make a run optional, so those patterns get the
+# regex alone. A run inside a character class or an escape is not a
+# candidate, and a run whose last character carries a quantifier loses it.
+# Any extended group other than (?:...) — a flag such as (?i), a
+# lookaround, a named group — disqualifies the pattern: its text is not a
+# literal the line must carry.
+sub format_classification_required_literal {
+    my ($pattern) = @_;
+    return undef if $pattern =~ /\|/ || $pattern =~ /\)[?*{]/ || $pattern =~ /\(\?[^:]/;
+    (my $p = $pattern) =~ s/\\.|\[(?:\\.|[^\]])*\]/\x00/g;
+    my $best = '';
+    while ($p =~ /([A-Za-z0-9 _:=,;\/-]+)/g) {
+        my $run = $1;
+        my $next = substr($p, pos($p), 1);
+        $run = substr($run, 0, -1) if length $next && $next =~ /^[?*+{]$/;
+        $best = $run if length($run) > length($best);
+    }
+    return length($best) >= 4 ? $best : undef;
+}
+
+# Compile one field condition to inline source (D25/D27) — returns
+# (source, cost rank). A literal alternation anchored at both ends
+# (^(?:A|B)$, ^A$) becomes a hash-set exists / a string eq; a
+# metacharacter-free pattern becomes index(); anything else is spliced as
+# a literal m~~ match, fronted by an index() gate on its required literal
+# when one exists. $guard_defined adds the defined test for a field the
+# entry may leave undef. The rank orders conditions within a criterion
+# cheapest first: short-field set/eq/index before any regex, and message
+# or whole-line tests last.
+sub format_classification_cond_src {
+    my ($field, $pattern, $guard_defined) = @_;
+    my $var = $field eq 'line' ? '$_[0]' : "\$$field";
+    my $long = ($field eq 'message' || $field eq 'line') ? 3 : 0;
+    my ($src, $rank);
+    my $lit = '[^\\\\.*+?()\[\]{}|^$]+';
+    if ($pattern =~ /^\^\((?:\?:)?($lit(?:\|$lit)*)\)\$$/ || $pattern =~ /^\^($lit)\$$/) {
+        my @alts = split /\|/, $1;
+        if (@alts == 1) {
+            $src = "$var eq " . format_classification_quote($alts[0]);
+        } else {
+            my $id = $format_cls_set_id{ join("\0", sort @alts) } //= do {
+                push @format_cls_sets, { map { $_ => 1 } @alts };
+                $#format_cls_sets;
+            };
+            $src = "exists \$format_cls_sets[$id]\{$var\}";
+        }
+        $rank = $long;
+    } elsif ($pattern !~ /[\\.*+?()\[\]{}|^\$]/) {
+        $src = "index($var, " . format_classification_quote($pattern) . ") >= 0";
+        $rank = $long + 1;
+    } else {
+        my $gate = format_classification_required_literal($pattern);
+        $src = (defined $gate ? "index($var, " . format_classification_quote($gate) . ") >= 0 && " : '')
+             . "$var =~ m~$pattern~";
+        $rank = $long + 2;
+    }
+    $src = "defined $var && $src" if $guard_defined;
+    return ("($src)", $rank);
+}
+
+# One entry's classification statement (D16): failure first (D4/D28), then
+# success; a declining entry assigns the unclassified outcome so the loop
+# never resets the lexical (D31). Both the outcome and the entry's
+# criteria-signature id are written. Built once per spec at registry
+# build (the hash sets it references are allocated here) and spliced
+# verbatim into every block and closure compiled for the entry.
+sub format_classification_src {
+    my ($spec) = @_;
+    my ($cls, $sig) = ($spec->{_cls}, $spec->{_cls_sig});
+    return "\$line_outcome = 0; \$line_cls_sig = $sig;" unless $cls;
+    # A field gets a defined guard unless the entry always defines it: the
+    # two zero-default fields never are undef; a captured field is taken as
+    # always defined only when no expected record leaves it undef (an
+    # optional capture group or an undef-producing transform shows up
+    # there), and bytes/duration are always guarded.
+    my %is_target = map { $_->[1] => 1 } @{ $spec->{field_map} };
+    my %zero_default = ( status_code => 1, metrics_observed => 1 );
+    my %may_undef = ( bytes => 1, duration => 1 );
+    for my $row (@{ $spec->{expect} // [] }) {
+        for my $i (0 .. $#format_record_fields) {
+            $may_undef{ $format_record_fields[$i] } = 1 unless defined $row->[$i];
+        }
+    }
+    my $guard = sub { my ($f) = @_; $f ne 'line' && !$zero_default{$f} && (!$is_target{$f} || $may_undef{$f}) };
+    my $outcome_src = sub {
+        my ($list) = @_;
+        my @crit;
+        for my $c (@$list) {
+            my @conds = sort { $a->[1] <=> $b->[1] }
+                        map { [ format_classification_cond_src($_, $c->{$_}, $guard->($_)) ] }
+                        sort keys %$c;
+            push @crit, @conds == 1 ? $conds[0][0] : '(' . join(' && ', map { $_->[0] } @conds) . ')';
+        }
+        return join(' || ', @crit);
+    };
+    my $f = ($cls->{failure} && @{ $cls->{failure} }) ? $outcome_src->($cls->{failure}) : undef;
+    my $s = ($cls->{success} && @{ $cls->{success} }) ? $outcome_src->($cls->{success}) : undef;
+    my $expr = defined $f && defined $s ? "($f) ? 2 : ($s) ? 1 : 0"
+             : defined $f               ? "($f) ? 2 : 0"
+             : defined $s               ? "($s) ? 1 : 0"
+             :                            '0';
+    return "\$line_outcome = $expr; \$line_cls_sig = $sig;";
+}
+
+# Interpreted reading of a resolved classification over the current record
+# lexicals — the reference the compiled form is proven against at build
+# (D33). Every pattern is applied as the regex it was declared as.
+sub format_classification_reference {
+    my ($cls, $line) = @_;
+    return 0 unless $cls;
+    for my $o ([ failure => 2 ], [ success => 1 ]) {
+        my $list = $cls->{ $o->[0] } or next;
+        for my $c (@$list) {
+            my $all = 1;
+            for my $f (keys %$c) {
+                my $v = $f eq 'line' ? $line : ${ $format_record_ref{$f} };
+                unless (defined $v && $v =~ /$c->{$f}/) { $all = 0; last }
+            }
+            return $o->[1] if $all;
+        }
+    }
+    return 0;
+}
+
+# The entry's classification as a write-direct closure over the record
+# lexicals (the CSV path's call shape, D29; the generated blocks inline
+# the same source). Returns the outcome it wrote.
+# A file's classification rules changed at an included line (D19/D32): the
+# include point saw a criteria-signature id different from the one the
+# file's lines were being classified under. Counts the change, keeps the
+# first FORMAT_CLS_RULE_CHANGE_LINES_MAX per file for the classification
+# sub-section, re-binds the file's event-ledger property to the new entry,
+# and tells the user once per file. The note is a behavioural notice: it
+# prints regardless of --disable-progress, and must never carry an
+# ` at ... line` suffix (runtime-warning discriminator, HARNESS-DESIGN.md).
+# Registered on #412 as a producer for the notices surface.
+sub format_classification_rule_change {
+    my ($file, $line_number, $old_entry, $new_entry) = @_;
+    $format_cls_rule_changes++;
+    my $n = ++$format_cls_rule_change_count{$file};
+    push @format_cls_rule_change_lines,
+        "rule_change: file=$file line=$line_number from=$old_entry->[FR_SLUG] to=$new_entry->[FR_SLUG]"
+        if $n <= FORMAT_CLS_RULE_CHANGE_LINES_MAX;
+    $format_detection{$file}{event_ledger} = $new_entry->[FR_EVENT_LEDGER] if $format_detection{$file};
+    print STDERR "Note: $file line $line_number: the classification rules changed because the detected log format changed from "
+        . $old_entry->[FR_SLUG] . " to " . $new_entry->[FR_SLUG]
+        . " - lines before this point were classified under the previous rules\n"
+        if $n == 1;
+    return;
+}
+
+sub compile_format_classifier {
+    my ($spec) = @_;
+    my $src = "sub {\n$spec->{_cls_src}\nreturn \$line_outcome;\n}";
+    my $closure = eval $src;
+    die "ltl: format registry: classification codegen failed for entry '$spec->{name}': $@\nGENERATED SOURCE:\n$src\n"
+        if $@ || ref $closure ne 'CODE';
+    return $closure;
+}
+
 # Generate one entry's extraction closure from its declarative definition
 # (D27 codegen, amended by the S5 gate probe): the closure writes the
 # file-scoped record lexicals directly and returns 1, so the hot path
@@ -3483,14 +3805,14 @@ sub format_entry_block_src {
     for my $f (@format_record_fields) {
         next if $is_target{$f};
         if    ($f eq 'bytes' || $f eq 'duration') { push @dflt_undef, "\$$f"; }
-        elsif ($f eq 'status_code' || $f eq 'is_access_log') { push @dflt_zero, "\$$f"; }
+        elsif ($f eq 'status_code' || $f eq 'metrics_observed') { push @dflt_zero, "\$$f"; }
         elsif ($clobbered->{$f}) { push @dflt_undef, "\$$f"; }
         else { push @dflt_empty, "\$$f"; }
     }
     push @body, '( ' . join(', ', @dflt_empty) . ' ) = ("") x ' . scalar(@dflt_empty) . ';' if @dflt_empty;
     push @body, '( ' . join(', ', @dflt_undef) . ' ) = (undef) x ' . scalar(@dflt_undef) . ';' if @dflt_undef;
     push @body, '( ' . join(', ', @dflt_zero) . ' ) = (0) x ' . scalar(@dflt_zero) . ';' if @dflt_zero;
-    push @body, "\$is_access_log = 1;" if $spec->{stats_eligible};
+    push @body, "\$metrics_observed = 1;" if $spec->{stats_eligible};
 
     # In-message metric probes (D33): index() superset gate, per-probe
     # index() guards, probe regexes, then the conditional mask + the
@@ -3505,7 +3827,7 @@ sub format_entry_block_src {
         }
         my $any_defined = join(' || ', map { "defined \$$_->{field}" } @{ $mm->{probes} });
         my @mask_block;
-        push @mask_block, "        \$is_access_log = 1;" if $mm->{marks_metrics_observed};
+        push @mask_block, "        \$metrics_observed = 1;" if $mm->{marks_metrics_observed};
         push @mask_block, "        \$message =~ s/$mm->{mask}{pattern}/$mm->{mask}{replace}/g;" if $mm->{mask};
         push @body,
             "if (index(\$message, '$mm->{gate_lit}') >= 0) {\n"
@@ -3523,6 +3845,11 @@ sub format_entry_block_src {
             or die "ltl: format registry: entry '$spec->{name}' references unknown transform '$t'\n";
         push @body, $code;
     }
+
+    # Classification (#453 D16): decided here, after the entry's own metric
+    # masks and transforms and before the timestamp, so a message criterion
+    # sees the message as the block leaves it.
+    push @body, $spec->{_cls_src};
 
     # Inline timestamp handling (D31 taken to its P8 conclusion: the
     # closure-call overhead disappears when the parse is inlined into the
@@ -3684,7 +4011,8 @@ sub compile_format_scan_sub {
 sub format_record_reset {
     ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = ("") x 9;
     ( $bytes, $duration ) = ( undef, undef );
-    ( $status_code, $is_access_log ) = ( 0, 0 );
+    ( $status_code, $metrics_observed ) = ( 0, 0 );
+    ( $line_outcome, $line_cls_sig ) = ( 0, 0 );
     ( $timestamp, $fractional_ms ) = ( undef, 0 );
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
     timestamp_date_cache_clear();
@@ -3716,7 +4044,8 @@ sub format_validate_scan_sub {
     $format_scan_validating = 1;
     my @saved_record = ( $timestamp_str, $category_bucket, $object, $instance, $user,
                          $session, $platform, $thread, $message, $bytes, $duration,
-                         $status_code, $is_access_log, $timestamp, $fractional_ms,
+                         $status_code, $metrics_observed, $timestamp, $fractional_ms,
+                         $line_outcome, $line_cls_sig,
                          $format_last_ts_str, $format_last_ts_epoch );
     my $saved_cache = timestamp_date_cache_snapshot();
     for my $e (@$entries) {
@@ -3733,7 +4062,8 @@ sub format_validate_scan_sub {
     $format_scan_validating = $was_validating;
     ( $timestamp_str, $category_bucket, $object, $instance, $user,
       $session, $platform, $thread, $message, $bytes, $duration,
-      $status_code, $is_access_log, $timestamp, $fractional_ms,
+      $status_code, $metrics_observed, $timestamp, $fractional_ms,
+      $line_outcome, $line_cls_sig,
       $format_last_ts_str, $format_last_ts_epoch ) = @saved_record;
     timestamp_date_cache_restore($saved_cache);
     return;
@@ -3816,6 +4146,23 @@ sub build_format_registry {
         push @{ $group_members{ $spec->{group} } }, $spec->{name};
     }
 
+    # Classification (#453 D15/D32): resolve every entry against the global
+    # default once, assign each distinct resolved rule set a signature id
+    # (0 = declines), and generate the entry's classification source once —
+    # the hash sets it references are allocated here, never per compile.
+    @format_cls_sets = ();
+    %format_cls_set_id = ();
+    @format_cls_sig_str = ('none');
+    %format_cls_sig_id = ( none => 0 );
+    for my $spec (@specs) {
+        die "ltl: format registry: entry '$spec->{name}' event_ledger must be 0 or 1\n"
+            if defined $spec->{event_ledger} && $spec->{event_ledger} !~ /^[01]$/;
+        $spec->{_cls} = format_classification_resolve($spec);
+        my $sig = format_classification_signature($spec->{_cls});
+        $spec->{_cls_sig} = $format_cls_sig_id{$sig} //= do { push @format_cls_sig_str, $sig; $#format_cls_sig_str };
+        $spec->{_cls_src} = format_classification_src($spec);
+    }
+
     # Compile recognition patterns once; validate reserved slots.
     my %patterns;
     for my $spec (@specs) {
@@ -3850,11 +4197,16 @@ sub build_format_registry {
     for my $spec (grep { $_->{scanned} } @specs) {
         my $extract = compile_format_extractor($spec, $clobbered_by{ $spec->{name} },
             { include_query_string => 0, include_session => 0 });
+        my $want_o = $spec->{expect_outcomes};
+        die "ltl: format registry: entry '$spec->{name}' declares " . (ref $want_o eq 'ARRAY' ? scalar(@$want_o) : 'no')
+          . " expect_outcomes for " . scalar(@{ $spec->{samples} }) . " samples (one integer per sample: 2 failure, 1 success, 0 unclassified)\n"
+            unless ref $want_o eq 'ARRAY' && @$want_o == @{ $spec->{samples} };
         for my $i (0 .. $#{ $spec->{samples} }) {
             ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = (undef) x 9;
-            ( $bytes, $duration, $status_code, $is_access_log ) = (undef) x 4;
+            ( $bytes, $duration, $status_code, $metrics_observed ) = (undef) x 4;
+            ( $line_outcome, $line_cls_sig ) = ( -1, -1 );   # sentinels: the block must write both
             $extract->( $spec->{samples}[$i] );
-            my @got = ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message, $bytes, $duration, $status_code, $is_access_log );
+            my @got = ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message, $bytes, $duration, $status_code, $metrics_observed );
             my $want = $spec->{expect}[$i]
                 or die "ltl: format registry: entry '$spec->{name}' sample " . ($i + 1) . " has no expected record\n";
             for my $f (0 .. $#format_record_fields) {
@@ -3865,6 +4217,21 @@ sub build_format_registry {
                   . ", expected " . (defined $w ? "'$w'" : 'undef')
                   . " (produced_by compile_format_extractor(); contract: expected records in format_registry_specs() transcribe the retired cascade branch)\n";
             }
+            # D33 (#453): the compiled classifier must give the declared
+            # outcome for every sample AND agree with the interpreted
+            # reading of the declared patterns — a pattern shape the
+            # compiler mis-recognises is a startup error, not a silent
+            # misclassification.
+            die "ltl: format registry: classification self-test failure for entry '$spec->{name}' sample " . ($i + 1)
+              . ": compiled classifier gives $line_outcome, expected $want_o->[$i]"
+              . " (produced_by format_classification_src(); contract: expect_outcomes in format_registry_specs() declare each sample's outcome under the entry's resolved criteria)\n"
+                unless $line_outcome == $want_o->[$i];
+            my $ref_o = format_classification_reference($spec->{_cls}, $spec->{samples}[$i]);
+            die "ltl: format registry: classification compiler disagrees with the declared patterns for entry '$spec->{name}' sample " . ($i + 1)
+              . ": compiled $line_outcome, interpreted $ref_o (produced_by format_classification_cond_src())\n"
+                unless $ref_o == $line_outcome;
+            die "ltl: format registry: entry '$spec->{name}' block wrote criteria-signature id $line_cls_sig, expected $spec->{_cls_sig}\n"
+                unless $line_cls_sig == $spec->{_cls_sig};
         }
     }
 
@@ -3966,6 +4333,9 @@ sub build_format_registry {
         $entry->[FR_GROUP_DEFAULT]   = $group_default{ $spec->{group} } eq $spec->{name} ? 1 : 0;
         $entry->[FR_FILENAME]        = $filename{ $spec->{name} };
         $entry->[FR_FILENAME_SAMPLES]= $spec->{filename}{samples} // [];
+        $entry->[FR_EVENT_LEDGER]    = $spec->{event_ledger} ? 1 : 0;
+        $entry->[FR_CLASSIFY]        = $spec->{scanned} ? undef : compile_format_classifier($spec);
+        $entry->[FR_CLS_SIG]         = $spec->{_cls_sig};
         if ($spec->{scanned}) {
             push @format_registry_members, $entry;
             push @format_registry, $entry if $entry->[FR_GROUP_DEFAULT];
@@ -4201,7 +4571,8 @@ sub emit_format_detection_verbose {
             # filtered out entirely, or read error before parse).
             push @verbose_output, "  format: -";
             push @verbose_output, "  match_type: -";
-            push @verbose_output, "  is_access_log: -";
+            push @verbose_output, "  metrics_observed: -";
+            push @verbose_output, "  event_ledger: -";
             push @verbose_output, "  matched_lines: 0";
             push @verbose_output, "  unmatched_lines: 0";
             push @verbose_output, "  first_match_line: -";
@@ -4214,7 +4585,8 @@ sub emit_format_detection_verbose {
         my $mt   = defined $fdd->{match_type} ? $fdd->{match_type} : '-';
         push @verbose_output, "  format: $slug";
         push @verbose_output, "  match_type: $mt";
-        push @verbose_output, "  is_access_log: " . ($fdd->{is_access_log} ? 'yes' : 'no');
+        push @verbose_output, "  metrics_observed: " . ($fdd->{metrics_observed} ? 'yes' : 'no');
+        push @verbose_output, "  event_ledger: " . ($fdd->{event_ledger} ? 'yes' : 'no');
         push @verbose_output, "  matched_lines: $fdd->{matched_lines}";
         push @verbose_output, "  unmatched_lines: $fdd->{unmatched_lines}";
         push @verbose_output, "  first_match_line: " .
@@ -4250,6 +4622,36 @@ sub emit_format_detection_verbose {
             ? sprintf('%.1f', $format_scan_nomatch_sample_us / $format_scan_nomatch_samples)
             : '-');
     push @verbose_output, "=== END format-detection / scan ===";
+
+    # Run-level classification counters (#453 R5/D20): the three counters
+    # carried together, their derived shortfall, the unmatched run total
+    # beside it, the ledger-file ratio, the rule-change count, and the
+    # signature of the default failure rule in force.
+    my $classified   = $total_successes + $total_failures;
+    my $unclassified = $total_lines_included - $classified;
+    my $unmatched    = 0;
+    my ($ledger_files, $bound_files) = (0, 0);
+    for my $file (@in_files) {
+        my $fdd = $format_detection{$file} or next;
+        $unmatched += $fdd->{unmatched_lines} // 0;
+        next unless defined $fdd->{match_type};
+        $bound_files++;
+        $ledger_files++ if $fdd->{event_ledger};
+    }
+    (my $default_failure = format_classification_signature({ failure => $classification_default{failure} })) =~ s/^failure=//;
+    push @verbose_output, "=== format-detection / classification ===";
+    push @verbose_output, "lines_included: $total_lines_included";
+    push @verbose_output, "successes: $total_successes";
+    push @verbose_output, "failures: $total_failures";
+    push @verbose_output, "classified: $classified";
+    push @verbose_output, "unclassified: $unclassified";
+    push @verbose_output, "unclassified_pct: " . ($total_lines_included ? sprintf('%.1f', $unclassified / $total_lines_included * 100) : '0.0');
+    push @verbose_output, "unmatched_lines: $unmatched";
+    push @verbose_output, "event_ledger_files: $ledger_files/$bound_files";
+    push @verbose_output, "rule_changes: $format_cls_rule_changes";
+    push @verbose_output, @format_cls_rule_change_lines;
+    push @verbose_output, "default_failure: $default_failure";
+    push @verbose_output, "=== END format-detection / classification ===";
 
     push @verbose_output, "=== END format-detection ===";
 }
@@ -5561,6 +5963,8 @@ my @explain_groups = (
     # sub-topics per chart (e.g. heatmap-duration, heatmap-bytes).
     { category => 'visualizations', name => 'heatmap',            topics => [qw(heatmap)] },
     { category => 'visualizations', name => 'histogram',          topics => [qw(histogram)] },
+    # Methodology: the reasoning behind a figure rather than a figure itself.
+    { category => 'methodology',    name => 'classification',     topics => [qw(classification)] },
 );
 
 # Top-level section-heading labels (rendered as bold uppercase by
@@ -5568,6 +5972,7 @@ my @explain_groups = (
 my %explain_category_heading = (
     statistics     => 'STATISTICS',
     visualizations => 'VISUALIZATIONS',
+    methodology    => 'METHODOLOGY',
 );
 
 # Number of leading groups tagged 'statistics'. --help statistics slices
@@ -5590,6 +5995,7 @@ my %explain_summary = (
     bimodality_coef => 'Sarle\'s bimodality coefficient (>0.555 = suspect multimodal)',
     heatmap         => 'Color-intensity time-vs-value visualization (-hm)',
     histogram       => 'Bin-counter distribution chart with percentile ticks (-hg)',
+    classification  => 'Success/failure classification, the event-ledger property, and what a log can legitimately tell you',
 );
 
 # Topic content registry. Each value is an arrayref of typed block hashrefs:
@@ -5842,6 +6248,70 @@ sub print_help_statistics {
     return $out;
 }
 
+# `ltl --help formats`: the formats the registry recognises and how each
+# one classifies its lines (#453 D23). Read from the built registry and
+# the specs, so the list can never drift from what the tool detects.
+sub print_help_formats {
+    # --help exits before the pipeline builds the registry; build it here
+    # so the listing is read from the same compiled, self-validated specs.
+    build_format_registry() unless %format_registry_spec;
+    my $out = '';
+    $out .= get_title_string();
+    $out .= help_wrap(
+        "Log formats ltl recognises, and how each one decides whether a line is a success or a failure. Detection is automatic, per file; -lf <name> reads every file as one named format instead. The success/failure counts appear as the SUCCESS CLASSIFIED and FAILURE CLASSIFIED rows of the run summary (each with its share of all classified lines), feed errRate, and are detailed in the classification sub-section of -V format-detection. Use 'ltl --explain classification' for what the classification means and when a figure built on it can be trusted.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    $out .= help_heading("KNOWN FORMATS");
+    $out .= help_wrap(
+        "'event ledger' marks a format with maximum coverage of the operations it describes: every operation of that kind produces a line, so a rate computed over its lines is a rate over everything that happened. A diagnostics log records what a component chose to log, and is not one.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n\n";
+    my $describe = sub {
+        my ($list) = @_;
+        return 'none' unless $list && @$list;
+        return join(' or ', map { my $c = $_; join(' and ', map { "$_ matches $c->{$_}" } sort keys %$c) } @$list);
+    };
+    my %seen_slug;
+    for my $spec (sort { $a->{slug} cmp $b->{slug} } values %format_registry_spec) {
+        next if $seen_slug{ $spec->{slug} }++;
+        my $ledger = $spec->{event_ledger} ? 'event ledger' : 'not an event ledger';
+        my $cls;
+        if (!$spec->{_cls}) {
+            $cls = 'declines to classify (no success/failure figure can be produced)';
+        } elsif (!exists $spec->{classification}) {
+            $cls = 'inherits the default rules';
+        } else {
+            my $decl = ref $spec->{classification} eq 'HASH' ? $spec->{classification} : {};
+            $cls = join('; ', map {
+                my $o = $_;
+                my $src = exists $decl->{$o} ? '' : ' (inherited from the default)';
+                "$o: " . $describe->($spec->{_cls}{$o}) . $src
+            } qw(success failure));
+        }
+        $out .= help_opt($spec->{slug}, "$ledger. $cls.");
+    }
+    $out .= "\n";
+    $out .= help_heading("HOW A FORMAT DECLARES CLASSIFICATION");
+    $out .= help_wrap(
+        "Each format carries a classification declaration beside its pattern, field map and time contract. A criterion names a record field (status_code, category_bucket, message, or line for the raw text) and a pattern the field's value must match; an outcome lists criteria, any one of which classifies the line; one criterion may name several fields, all of which must match. Three forms exist: a format that declares nothing inherits the default (failure: " . $describe->($classification_default{failure}) . "; success: " . $describe->($classification_default{success}) . "); a format that declares 'none' declines to classify; a format that declares one or both outcomes replaces the default for each outcome it names. A line the rules say nothing about is unclassified - neither a success nor a failure.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n\n";
+    $out .= help_wrap(
+        "Every line is classified under the rules of the format that recognised it. If the detected format changes part-way through a file, the lines after the change follow the new format's rules, the file's event-ledger property follows the new format, and a note names the line and the two formats; -V format-detection records the change under the classification sub-section (rule_changes, rule_change lines).",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n\n";
+    $out .= help_wrap(
+        "See 'ltl --explain classification' for the reasoning behind the event-ledger property and what may legitimately be read from each kind of log.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    return $out;
+}
+
 # `ltl --explain` (no argument): grouped list of available topics across
 # all categories. Each category transition emits a top-level section
 # heading (STATISTICS, VISUALIZATIONS) and the group subheadings follow
@@ -5961,6 +6431,12 @@ my $explain_bc_operational = q{This is the cheapest, most actionable multimodali
 my $explain_bc_uses = q{Common operational triggers: (1) cache effectiveness investigations -- a bimodal API is often a caching layer working partially; modes are "served from cache" vs "fell through to backend"; if BC drops over time without changes, your cache is degrading. (2) Hidden two-population effects -- authenticated vs unauthenticated, read-from-replica vs read-from-primary, or other internal branching producing two distinct latency profiles. (3) Queueing detection -- queued vs unqueued requests are bimodal by construction; high BC on an API that shouldn't have queues signals contention. (4) Distribution-shape fingerprinting -- skewness + kurtosis + bimodality_coef together form a 3-column shape signature that's diagnostic without needing the heatmap.};
 my $explain_bc_caveats = q{Sarle's BC is a *screen*, not a test. Two important caveats: small-sample false positives -- at n < 100 random noise alone produces BC > 0.555, so high BC on a low-traffic API is a hint not a verdict; and skewed-bimodal blind spots -- if the two modes are very unequal (99% fast / 1% slow), the dominant mode's mass overwhelms the skewness-squared term and BC may stay below threshold even though the distribution is technically bimodal. The case where BC works best is comparable mode populations (say 30/70 to 50/50). For verification when BC flags a candidate, Hartigan's dip test is the gold-standard follow-up (computationally expensive; not shipped in ltl).};
 my $explain_bc_compute = q{Sarle's formula with sample-size correction: `BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))`. The denominator's sample-size adjustment is what distinguishes Sarle's BC from the unadjusted moment-based version -- it prevents small-sample false positives from being even worse. Requires n >= 4 and non-zero std_dev; emitted blank otherwise. Total cost: three arithmetic operations on numbers (skewness, kurtosis, n) already computed for the other shape moments.};
+
+# --- classification (--explain classification) ---
+my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as SUCCESS CLASSIFIED and FAILURE CLASSIFIED beneath LINES INCLUDED, each with its share of all classified lines; the classification sub-section of -V format-detection adds how many lines were unclassified and what share of the included lines they are. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
+my $explain_classification_ledger = q{Whether a success/failure figure means anything depends less on the rules than on the log. An *event ledger* is a format with maximum coverage of the operations it describes: every operation of that kind produces exactly one line, so a count over its lines is a count over everything that happened. An access log is an event ledger for requests; a garbage-collection log is one for pauses. A diagnostics log is not: it records what a component chose to write, at whatever level it chose, and says nothing about the operations that produced no line. This is the coverage argument of the Google SRE Workbook chapter on implementing SLOs (https://sre.google/workbook/implementing-slos/): a service-level indicator is a ratio of good events to all events, and the denominator is only honest when the source sees all events. A reliability figure -- successes over classified lines -- is therefore legitimate only over an event ledger. Each format declares whether it is one, the property is reported per file on -V format-detection (event_ledger), and consumers that compute a ratio read it to decide whether to show one.};
+my $explain_classification_reading = q{What a diagnostics log can legitimately tell you: how many failure-level lines there were, when they clustered, and which messages produced them -- the errRate column, and the per-message failure counts in the MESSAGES CSV. What it cannot tell you: a success rate, an availability, or any ratio whose denominator is "all operations", because most operations never wrote a line. The unclassified share is the warning sign: on a diagnostics log it is usually most of the file. On an event ledger the same share is a data-quality figure -- lines that carried a status the rules do not cover -- and a low value means the ratio can be trusted.};
+my $explain_classification_compute = q{Classification runs as each line is recognised, so it costs nothing to re-derive later: each format's rules are compiled once at startup into its recognition step, and the outcome is accumulated per time bucket (errRate reads the bucket's failure count, normalised to the -ru rate unit as before) and per message key (the successes and failures columns of -o CSV, which survive -g consolidation). If the detected format changes part-way through a file, lines after the change are classified under the new format's rules, the file's event-ledger property follows the new format, a note names the line and both formats, and -V format-detection lists the change. Lines already classified are not revisited. The rules themselves are documented per format under 'ltl --help formats', which also shows how a format declares them.};
 
 # --- heatmap (--explain heatmap) ---
 my $explain_heatmap_intuition = q{The heatmap (-hm) replaces the per-bucket latency statistics column with a color-intensity visualization showing how values are distributed *within* each time bucket. Where percentile statistics collapse a distribution to a handful of numbers, the heatmap reveals its full shape -- bimodal distributions, shifting modes over time, outlier clustering, long tails, and rare-but-extreme events all become visually apparent at a glance. Each row of the heatmap is one time bucket; each cell in the row represents a logarithmic value range; cell color intensity is proportional to the number of entries in that range.};
@@ -6338,6 +6814,22 @@ my $explain_histogram_notes = q{The X-axis log scale means that visual distance 
 
 sub populate_explain_topics {
     %explain_topics = (
+
+        # ---- classification ----
+        classification => [
+            { type => 'heading',   text => 'CLASSIFICATION' },
+            { type => 'paragraph', text => $explain_classification_intuition },
+            { type => 'subheading', text => 'The event-ledger property' },
+            { type => 'paragraph', text => $explain_classification_ledger },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_classification_reading },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl access.log                         # run summary: SUCCESS CLASSIFIED / FAILURE CLASSIFIED rows with their shares\n    ltl -V format-detection access.log    # classification sub-section: successes, failures, unclassified share, event_ledger_files\n    ltl -o -bs 60 access.log               # MESSAGES CSV: successes and failures per message key\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_classification_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => "'ltl --help formats' (which formats classify, and how a declaration is written), -lf, -V format-detection, -ru." },
+        ],
 
         # ---- min ----
         min => [
@@ -6763,8 +7255,8 @@ sub print_help {
     # INFO
     $out .= help_heading("INFO");
     $out .= help_opt("-v,   --version",       "Print the version number and exit");
-    $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic (e.g. 'statistics') shows that topic's index.");
-    $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic; with no topic, lists available topics.");
+    $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic shows that topic's index: 'statistics' (every statistic ltl computes) or 'formats' (the log formats it recognises and how each classifies successes and failures).");
+    $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic, a visualization or a method (e.g. 'classification'); with no topic, lists available topics.");
     $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' additionally emits per-phase memory diagnostics on stderr");
     $out .= help_opt("-t,   --timing",          "Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary");
 
@@ -7611,6 +8103,7 @@ sub group_similar_messages {
             $log_messages{$category}{$canonical_log_key} = {
                 occurrences       => $cluster->{occurrences},
                 is_consolidated   => 1,
+                ($cluster->{outcomes} ? (outcomes => $cluster->{outcomes}) : ()),
             };
 
             my $entry = $log_messages{$category}{$canonical_log_key};
@@ -8280,6 +8773,10 @@ sub merge_bin_state {
 sub merge_consolidation_stats {
     my ($target, $source) = @_;
     $target->{occurrences} += ($source->{occurrences} // 0);
+    # Success/failure outcome slots (#453 D30): element-wise, slot 1 and 2.
+    if (my $so = $source->{outcomes}) {
+        $target->{outcomes}[$_] += $so->[$_] for grep { $so->[$_] } 1, 2;
+    }
 
     # Duration stats
     if (defined $source->{total_duration}) {
@@ -9070,6 +9567,7 @@ sub named_structure_sizes {
     require Devel::Size;
     return (
         log_occurrences        => Devel::Size::total_size(\%log_occurrences),
+        bucket_outcomes        => Devel::Size::total_size(\%bucket_outcomes),
         log_analysis           => Devel::Size::total_size(\%log_analysis),
         log_messages           => Devel::Size::total_size(\%log_messages),
         log_messages_counters  => Devel::Size::total_size(\%log_messages_counters),
@@ -9436,6 +9934,8 @@ my %csv_column_family = (
     'message'           => 'meta',
     'timestamp'         => 'meta',
     'occurrences'       => 'meta',
+    'successes'         => 'meta',
+    'failures'          => 'meta',
     # bytes
     'bytes_occurrences' => 'meta',
     'bytes_min'         => 'bytes',
@@ -9799,8 +10299,13 @@ sub dispatch_informational_options {
             $out =~ s/^\n+//;
             pipe_to_pager($out);
         }
+        elsif ($help_topic eq 'formats') {
+            my $out = print_help_formats();
+            $out =~ s/^\n+//;
+            pipe_to_pager($out);
+        }
         else {
-            print_usage("unknown --help topic '$help_topic' (try: statistics)");
+            print_usage("unknown --help topic '$help_topic' (try: statistics, formats)");
             exit 1;
         }
         exit 0;
@@ -10782,6 +11287,9 @@ sub read_and_process_logs {
         # with their cached classification — extraction deferred to the
         # replay — then switches to the streaming path. N=0: no lines held.
         my ( $file_scan_attempts, $file_scan_failed ) = ( 0, 0 );  # scan telemetry (Issue #228)
+        # Criteria-signature id and entry the file's included lines are being
+        # classified under (D19/D32); -1 so the first included line binds them.
+        my ( $file_cls_sig, $file_cls_entry ) = ( -1, undef );
         my @window_held;
         my $window_replay_started = 0;
         if ($window_n > 0) {
@@ -10825,7 +11333,7 @@ sub read_and_process_logs {
             }
             s/[\r\n]+$//;                                   # Remove Windows line endings (CRLF) or Unix line endings (LF) if present
             $line_number++;
-            # The 13 record fields ($timestamp_str .. $is_access_log) are
+            # The 13 record fields ($timestamp_str .. $metrics_observed) are
             # file-scoped lexicals written directly by the extraction
             # closures; per-line state for them is established by the match
             # (or by the CSV branches' explicit resets), not re-declared here.
@@ -10897,7 +11405,7 @@ sub read_and_process_logs {
 
                 $category_bucket = "DATA";
                 $is_line_match = 1;
-                $is_access_log = 1;
+                $metrics_observed = 1;
                 $match_type = 13;
                 $line_entry = $format_registry_entry{csv};
                 # Record lexicals the CSV path does not produce: reset
@@ -10905,6 +11413,7 @@ sub read_and_process_logs {
                 ( $object, $instance, $user, $session, $platform, $thread ) = ("") x 6;
                 ( $bytes, $duration ) = ( undef, undef );
                 $status_code = 0;
+                $line_entry->[FR_CLASSIFY]->($_);
 
             ## Registry scan (#58): recognition + extraction in one step ##
             # Pinned-closure MTF over the compiled registry entries, cheap
@@ -10985,12 +11494,13 @@ sub read_and_process_logs {
 
                             $category_bucket = "DATA";
                             $is_line_match = 1;
-                            $is_access_log = 1;
+                            $metrics_observed = 1;
                             $match_type = 13;
                             $line_entry = $format_registry_entry{csv};
                             ( $object, $instance, $user, $session, $platform, $thread ) = ("") x 6;
                             ( $bytes, $duration ) = ( undef, undef );
                             $status_code = 0;
+                            $line_entry->[FR_CLASSIFY]->($_);
                         } else {
                             # Field count mismatch — not CSV, reset
                             $csv_detected = 0;
@@ -11021,7 +11531,7 @@ sub read_and_process_logs {
                 ( $count ) = $message =~ / count\s*=\s*(\d+)/;
                 if( defined $count ) {
                     $message =~ s/ count\s*=\s*\d+/ count=?/g;                  # mask out actual count values for grouping purposes
-                    $is_access_log = 1;
+                    $metrics_observed = 1;
                 }
             }
 
@@ -11093,7 +11603,7 @@ sub read_and_process_logs {
                     $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13;
                 }
             }
-            $is_access_log = 1 if %udm_values;
+            $metrics_observed = 1 if %udm_values;
 
             if( $is_line_match ) {
                 # Format-detection tracking (Issue #228). First successful
@@ -11102,7 +11612,8 @@ sub read_and_process_logs {
                 my $fdd = $format_detection{$in_file} //= {
                     match_type       => undef,
                     slug             => undef,
-                    is_access_log    => 0,
+                    metrics_observed => 0,
+                    event_ledger     => 0,
                     matched_lines    => 0,
                     unmatched_lines  => 0,
                     first_match_line => undef,
@@ -11111,6 +11622,9 @@ sub read_and_process_logs {
                     $fdd->{match_type}       = $match_type;
                     $fdd->{slug}             = $match_type_to_slug{$match_type} // 'unknown';
                     $fdd->{first_match_line} = $line_number;
+                    # The bound entry's event-ledger flag becomes the
+                    # file's property (#453 R8/D19).
+                    $fdd->{event_ledger}     = $line_entry ? $line_entry->[FR_EVENT_LEDGER] : 0;
                     # D18: the bound format's duration unit varies across
                     # producers and no -du was given — tell the user which
                     # assumption is in effect, once per run. Phrased run-level
@@ -11122,7 +11636,7 @@ sub read_and_process_logs {
                     format_variant_ambiguity_note($line_entry) if $line_entry;
                 }
                 $fdd->{matched_lines}++;
-                $fdd->{is_access_log} = 1 if $is_access_log;
+                $fdd->{metrics_observed} = 1 if $metrics_observed;
                 $line_entry->[FR_MATCHES]++ if $line_entry;
 
                 $bytes = 0 if( defined( $bytes ) && $bytes < 0 );
@@ -11357,6 +11871,23 @@ sub read_and_process_logs {
 
                 $log_occurrences{$bucket}{$category_bucket}{occurrences}++;
                 $total_lines_included++;
+                if ($line_outcome) {
+                    $bucket_outcomes{$bucket}[$line_outcome]++;
+                    if ($line_outcome == 2) { $total_failures++ } else { $total_successes++ }
+                }
+                # The line was classified under different criteria than the
+                # file's previous included line (D32: one integer compare per
+                # line; entries with identical rules share an id, so a flip
+                # between them never enters here).
+                if ($line_cls_sig != $file_cls_sig) {
+                    format_classification_rule_change($in_file, $line_number, $file_cls_entry, $line_entry) if $file_cls_entry;
+                    ( $file_cls_sig, $file_cls_entry ) = ( $line_cls_sig, $line_entry );
+                    # Once per bind: which outcomes this file's rules can produce
+                    # decides which summary rows are shown at all.
+                    my $cls = $format_registry_spec{ $line_entry->[FR_NAME] }{_cls};
+                    $cls_success_declared = 1 if $cls && $cls->{success} && @{ $cls->{success} };
+                    $cls_failure_declared = 1 if $cls && $cls->{failure} && @{ $cls->{failure} };
+                }
                 $profile_included_samples++ if $profile_mode;
 
                 # $capture_messages leads the test so that a run retaining no
@@ -11403,7 +11934,8 @@ sub read_and_process_logs {
                         if ($is_new_key) {
                             # Build stats source from parsed line values for merge_consolidation_stats()
                             my $stats_source = { occurrences => 1 };
-                            if ($is_access_log) {
+                            $stats_source->{outcomes}[$line_outcome] = 1 if $line_outcome;
+                            if ($metrics_observed) {
                                 $stats_source->{total_bytes} = $bytes if defined $bytes;
                                 if (defined $count) {
                                     $stats_source->{count_sum} = $count;
@@ -11460,7 +11992,7 @@ sub read_and_process_logs {
 
                     ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
                     if (!$consolidation_s1_matched) {
-                    if( $is_access_log ) {
+                    if( $metrics_observed ) {
 
                         # Initialize the hash if not already done (don't initialize it all, allowing for lazy population of only the fields we need)
                         # Issue #287: under -mdm bin, additionally allocate sidecar accumulators
@@ -11497,6 +12029,7 @@ sub read_and_process_logs {
                         });
 
                         $log_messages{$category}{$log_key}{occurrences}++;
+                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $line_outcome;
 
                         # Bytes carries the same aggregate family as count (#432).
                         # bytes_occurrences counts lines that actually carried a
@@ -11653,12 +12186,13 @@ sub read_and_process_logs {
                         }
                     } else {
                         $log_messages{$category}{$log_key}{occurrences}++;
+                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $line_outcome;
                     }
                     }  # end: if (!$consolidation_s1_matched)
                 }
 
                 ## CAPTURE TIME-WINDOWS BASED STATISTICS DATA ##
-                if( $is_access_log  ) {
+                if( $metrics_observed  ) {
                     # Latency-statistics surfaces (timeline latency column, stats CSV
                     # columns, messages-table statistics variant) activate only when a
                     # duration value was actually observed in the data. A source that
@@ -11979,7 +12513,8 @@ sub read_and_process_logs {
                 my $fdd = $format_detection{$in_file} //= {
                     match_type       => undef,
                     slug             => undef,
-                    is_access_log    => 0,
+                    metrics_observed => 0,
+                    event_ledger     => 0,
                     matched_lines    => 0,
                     unmatched_lines  => 0,
                     first_match_line => undef,
@@ -11996,7 +12531,8 @@ sub read_and_process_logs {
             my $fdd = $format_detection{$in_file} //= {
                 match_type       => undef,
                 slug             => undef,
-                is_access_log    => 0,
+                metrics_observed => 0,
+                event_ledger     => 0,
                 matched_lines    => 0,
                 unmatched_lines  => 0,
                 first_match_line => undef,
@@ -14247,13 +14783,17 @@ sub normalize_data_for_output {
     foreach my $bucket (keys %log_occurrences) {
         my $total_occurrences = 0;
         my $total_bytes = $log_stats{$bucket}{bytes};
-        my $error_occurrences = 0;
+        # The error count the rate below is normalised from is the bucket's
+        # failure counter (#453 D13): the outcome was decided per line by
+        # the format's classification, so rendering never re-derives it
+        # from category names, and a highlighted failure (category
+        # suffixed -HL) counts like any other.
+        my $error_occurrences = $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[2] // 0) : 0;
 
         foreach my $category_bucket (keys %{$log_occurrences{$bucket}}) {
             my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
             next unless $occurrences > 0 && $category_bucket !~ /^(?:empty|err-rate|msg-rate)$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
             $total_occurrences += $occurrences;
-            $error_occurrences += $occurrences if $category_bucket =~ /^(?:FATAL|ERROR|5xx|4xx)$/i;
         }
 
         # this part takes the time windows error and message counts and converts them to a rate (unit controlled by -ru, default per minute)
@@ -16163,6 +16703,37 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
     push @summary_table, sprintf( $table_format, "HIGHLIGHTED", $total_lines_highlighted ) if $highlight_active;
     push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
+    # Classified lines (#453): each row is shown when its outcome was declared
+    # by a bound format or observed. The share is of all classified lines and
+    # is omitted when no line was a success (failures would always read 100%).
+    # The value is right-aligned to the table boundary and may run left into
+    # the label column's slack; its precision is three significant digits
+    # (98.2%, 1.11%, 0.107%), reduced only when the row would not fit.
+    {
+        my $classified = $total_successes + $total_failures;
+        my $row_width  = $category_column_width + 1 + $occurrences_column_width;
+        my $emit = sub {
+            my ($label, $n) = @_;
+            my $value = $n;
+            if ($total_successes) {
+                my $pct   = $n / $classified * 100;
+                my $int_digits = $pct >= 100 ? 3 : $pct >= 10 ? 2 : $pct >= 1 ? 1 : 0;
+                my $decimals = 3 - $int_digits;
+                my $fit = $row_width - length($label) - 1;
+                while (1) {
+                    $value = sprintf( "%d (%.*f%%)", $n, $decimals, $pct );
+                    last if length($value) <= $fit || $decimals == 0;
+                    $decimals--;
+                }
+                $value = $n if length($value) > $fit;
+            }
+            my $gap = $row_width - length($label) - length($value);
+            $gap = 1 if $gap < 1;
+            push @summary_table, $padding . $label . ( ' ' x $gap ) . $value . "$padding\n";
+        };
+        $emit->( "SUCCESS CLASSIFIED", $total_successes ) if $cls_success_declared || $total_successes;
+        $emit->( "FAILURE CLASSIFIED", $total_failures )  if $cls_failure_declared || $total_failures;
+    }
     push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
     if ($show_timing) {
         push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "DETECT: FORMAT REGISTRY BUILD", format_time( $elapsed_detect_registry_build, 's', 'medium', " " ) );
@@ -16444,6 +17015,7 @@ sub print_message_summary {
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
                     my $message = substr( $key, 0, $col_width{1} );                         # truncate message for printing if too long to fit in column
                     my $occurrences = $log_messages{$grouping}{$key}{occurrences};
+                    my $outcomes = $log_messages{$grouping}{$key}{outcomes};
                     my $count_occurrences = $log_messages{$grouping}{$key}{count_occurrences};
                     my $count_min = $log_messages{$grouping}{$key}{count_min};
                     my $count_mean = $log_messages{$grouping}{$key}{count_mean};
@@ -16536,14 +17108,16 @@ sub print_message_summary {
                             }
                         }
                         # Issue #268: format each numeric column per the resolved
-                        # --csv-precision mode. Column names mirror the header at
-                        # ltl:11541 so format_csv_value() can resolve each value's
-                        # family. Pre-formatted strings (bytes_nice, duration_nice)
+                        # --csv-precision mode. Column names mirror the MESSAGES
+                        # header pipeline_render() writes, so format_csv_value()
+                        # can resolve each value's family. Pre-formatted strings (bytes_nice, duration_nice)
                         # and metadata pass through unchanged.
                         $csv->print($csv_fh, [
                             $grouping,
                             $key,
                             format_csv_value($occurrences,       'occurrences'),
+                            format_csv_value($outcomes ? ($outcomes->[1] // 0) : 0, 'successes'),
+                            format_csv_value($outcomes ? ($outcomes->[2] // 0) : 0, 'failures'),
                             format_csv_value($bytes_occurrences, 'bytes_occurrences'),
                             format_csv_value($bytes_min,         'bytes_min'),
                             format_csv_value($bytes_mean,        'bytes_mean'),
@@ -17112,7 +17686,7 @@ sub pipeline_render {
         # convention (#432). The duration statistics take the duration_ prefix here
         # even though the CLI keeps their bare spellings, so every column on this
         # surface names its metric.
-        $csv->print($csv_fh, [qw(category message occurrences bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
+        $csv->print($csv_fh, [qw(category message occurrences successes failures bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
     }
 
     print_message_summary() if $capture_messages;									                    # Print and write message summaries

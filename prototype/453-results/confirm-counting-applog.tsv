@@ -1,0 +1,6 @@
+family	fixture	lines	class	arm	median_s	min_s	max_s	us_per_line	delta_us_per_line	pct_of_budget
+scriptlog	pure-applog-480k.log	479904	-	baseline	1.028494	1.026720	1.031195	2.1431	+0.0000	0.00
+scriptlog	pure-applog-480k.log	479904	6	c6-none	1.070665	1.068974	1.134128	2.2310	+0.0879	1.21
+scriptlog	pure-applog-480k.log	479904	6	c6-nested-hash	1.117143	1.109047	1.123183	2.3278	+0.1847	2.55
+scriptlog	pure-applog-480k.log	479904	6	c6-array-idx	1.100463	1.097524	1.106035	2.2931	+0.1500	2.07
+scriptlog	pure-applog-480k.log	479904	6	c6-array-idx-guarded	1.100411	1.096934	1.102858	2.2930	+0.1499	2.07

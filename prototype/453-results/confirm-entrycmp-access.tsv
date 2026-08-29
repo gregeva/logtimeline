@@ -1,0 +1,6 @@
+family	fixture	lines	class	arm	median_s	min_s	max_s	us_per_line	delta_us_per_line	pct_of_budget
+access	pure-access-1m.log	1000000	-	baseline	2.617213	2.605975	2.641207	2.6172	+0.0000	0.00
+access	pure-access-1m.log	1000000	6	c6-array-idx-guarded	2.762245	2.750655	2.782710	2.7622	+0.1450	1.09
+access	pure-access-1m.log	1000000	6	c6-entry-refcmp	2.826919	2.816463	2.921908	2.8269	+0.2097	1.57
+access	pure-access-1m.log	1000000	6	c6-entry-aelem-id	2.819892	2.802144	2.843733	2.8199	+0.2027	1.52
+access	pure-access-1m.log	1000000	6	c6-entry-block-id	2.806441	2.792647	2.839848	2.8064	+0.1892	1.42

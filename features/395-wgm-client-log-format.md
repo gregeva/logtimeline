@@ -43,7 +43,7 @@ read loop already strips.
 | message | `(.*)` | `message` | Free text; freely carries further `: ` sub-structure (`UWGMCLNT_UI: UwgmApp::init Entered`, `$generic: columns "…"`). |
 
 `instance`, `user`, `session`, `bytes`, `duration` are undef; `status_code` and
-`is_access_log` are 0. Occurrences only: no line-level duration, bytes or
+`metrics_observed` are 0. Occurrences only: no line-level duration, bytes or
 count, `stats_eligible => 0`, `duration_unit => undef`.
 
 ### Time contract

@@ -1,0 +1,7 @@
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+43.52.82.172 - - [05/May/2025:00:00:11 +0000] "GET /Thingworx/Metrics?x-thingworx-session=false HTTP/1.1" 200 17626 295
+1.2.3.4 - - [05/May/2025:00:00:01 +0000] "GET /Thingworx/Things/T1 HTTP/1.1" 200 100 25 http-nio-8443-exec-3 AB12CD34EF
+10.0.0.3 - - [05/May/2025:00:00:02 +0000] "GET /Thingworx/Things/T2 HTTP/1.1" 404 0 3
+2025-05-05 00:00:00.006+0000 [L: ERROR] [O: c.p.a.u.JobPurgeScheduler] [I: ] [U: SuperUser] [S: ] [P: ] [T: pool-1-thread-1] Job purge completed
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+2025-05-05 00:00:02.000+0000 [L: WARN] [O: c.p.a.u.JobPurgeScheduler] [I: ] [U: SuperUser] [S: ] [P: ] [T: pool-1-thread-1] Job purge slow

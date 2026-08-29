@@ -3024,6 +3024,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -hdmin 10
   ─────────────────────────────────────────      1 thingworx_standard
   HIGHLIGHTED                             3   
   LINES INCLUDED                       7992   
+  FAILURE CLASSIFIED                     89   
   LINES READ                           7992   
   ─────────────────────────────────────────   
 

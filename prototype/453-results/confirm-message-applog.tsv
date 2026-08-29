@@ -1,0 +1,5 @@
+family	fixture	lines	class	arm	median_s	min_s	max_s	us_per_line	delta_us_per_line	pct_of_budget
+scriptlog	pure-applog-480k.log	479904	-	baseline	1.023837	1.021368	1.028577	2.1334	+0.0000	0.00
+scriptlog	pure-applog-480k.log	479904	6	c6-msg-base	1.136065	1.131309	1.153936	2.3673	+0.2339	3.23
+scriptlog	pure-applog-480k.log	479904	6	c6-msg-relookup	1.151997	1.151015	1.156529	2.4005	+0.2671	3.68
+scriptlog	pure-applog-480k.log	479904	6	c6-msg-heldref	1.157467	1.154985	1.179232	2.4119	+0.2785	3.84
