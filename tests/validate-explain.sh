@@ -335,7 +335,7 @@ assert_max_line_width() {
 # Scenarios
 # ============================================================================
 
-TOPICS=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef heatmap histogram)
+TOPICS=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef heatmap histogram classification)
 
 # --- Scenario 1: every topic renders non-empty with the expected heading. ---
 scenario_all_topics_render() {
@@ -567,8 +567,8 @@ scenario_help_statistics() {
             contract    'Issue #261: the statistics index covers every statistic in %explain_topics'
     done
 
-    # heatmap and histogram must NOT appear in --help statistics.
-    for topic in heatmap histogram; do
+    # heatmap, histogram and classification must NOT appear in --help statistics.
+    for topic in heatmap histogram classification; do
         assert_no_line "$out" \
             pattern     "^    ${topic}[[:space:]]" \
             asserts     "Visualization topic '$topic' must not appear in --help statistics; it belongs to --explain only" \

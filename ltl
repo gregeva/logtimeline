@@ -57,7 +57,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0-453";
+my $version_number = "0.18.0";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -5956,6 +5956,8 @@ my @explain_groups = (
     # sub-topics per chart (e.g. heatmap-duration, heatmap-bytes).
     { category => 'visualizations', name => 'heatmap',            topics => [qw(heatmap)] },
     { category => 'visualizations', name => 'histogram',          topics => [qw(histogram)] },
+    # Methodology: the reasoning behind a figure rather than a figure itself.
+    { category => 'methodology',    name => 'classification',     topics => [qw(classification)] },
 );
 
 # Top-level section-heading labels (rendered as bold uppercase by
@@ -5963,6 +5965,7 @@ my @explain_groups = (
 my %explain_category_heading = (
     statistics     => 'STATISTICS',
     visualizations => 'VISUALIZATIONS',
+    methodology    => 'METHODOLOGY',
 );
 
 # Number of leading groups tagged 'statistics'. --help statistics slices
@@ -5985,6 +5988,7 @@ my %explain_summary = (
     bimodality_coef => 'Sarle\'s bimodality coefficient (>0.555 = suspect multimodal)',
     heatmap         => 'Color-intensity time-vs-value visualization (-hm)',
     histogram       => 'Bin-counter distribution chart with percentile ticks (-hg)',
+    classification  => 'Success/failure classification, the event-ledger property, and what a log can legitimately tell you',
 );
 
 # Topic content registry. Each value is an arrayref of typed block hashrefs:
@@ -6237,6 +6241,70 @@ sub print_help_statistics {
     return $out;
 }
 
+# `ltl --help formats`: the formats the registry recognises and how each
+# one classifies its lines (#453 D23). Read from the built registry and
+# the specs, so the list can never drift from what the tool detects.
+sub print_help_formats {
+    # --help exits before the pipeline builds the registry; build it here
+    # so the listing is read from the same compiled, self-validated specs.
+    build_format_registry() unless %format_registry_spec;
+    my $out = '';
+    $out .= get_title_string();
+    $out .= help_wrap(
+        "Log formats ltl recognises, and how each one decides whether a line is a success or a failure. Detection is automatic, per file; -lf <name> reads every file as one named format instead. The success/failure counts feed errRate and the classification sub-section of -V format-detection. Use 'ltl --explain classification' for what the classification means and when a figure built on it can be trusted.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    $out .= help_heading("KNOWN FORMATS");
+    $out .= help_wrap(
+        "'event ledger' marks a format with maximum coverage of the operations it describes: every operation of that kind produces a line, so a rate computed over its lines is a rate over everything that happened. A diagnostics log records what a component chose to log, and is not one.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n\n";
+    my $describe = sub {
+        my ($list) = @_;
+        return 'none' unless $list && @$list;
+        return join(' or ', map { my $c = $_; join(' and ', map { "$_ matches $c->{$_}" } sort keys %$c) } @$list);
+    };
+    my %seen_slug;
+    for my $spec (sort { $a->{slug} cmp $b->{slug} } values %format_registry_spec) {
+        next if $seen_slug{ $spec->{slug} }++;
+        my $ledger = $spec->{event_ledger} ? 'event ledger' : 'not an event ledger';
+        my $cls;
+        if (!$spec->{_cls}) {
+            $cls = 'declines to classify (no success/failure figure can be produced)';
+        } elsif (!exists $spec->{classification}) {
+            $cls = 'inherits the default rules';
+        } else {
+            my $decl = ref $spec->{classification} eq 'HASH' ? $spec->{classification} : {};
+            $cls = join('; ', map {
+                my $o = $_;
+                my $src = exists $decl->{$o} ? '' : ' (inherited from the default)';
+                "$o: " . $describe->($spec->{_cls}{$o}) . $src
+            } qw(success failure));
+        }
+        $out .= help_opt($spec->{slug}, "$ledger. $cls.");
+    }
+    $out .= "\n";
+    $out .= help_heading("HOW A FORMAT DECLARES CLASSIFICATION");
+    $out .= help_wrap(
+        "Each format carries a classification declaration beside its pattern, field map and time contract. A criterion names a record field (status_code, category_bucket, message, or line for the raw text) and a pattern the field's value must match; an outcome lists criteria, any one of which classifies the line; one criterion may name several fields, all of which must match. Three forms exist: a format that declares nothing inherits the default (failure: " . $describe->($classification_default{failure}) . "; success: " . $describe->($classification_default{success}) . "); a format that declares 'none' declines to classify; a format that declares one or both outcomes replaces the default for each outcome it names. A line the rules say nothing about is unclassified - neither a success nor a failure.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n\n";
+    $out .= help_wrap(
+        "Every line is classified under the rules of the format that recognised it. If the detected format changes part-way through a file, the lines after the change follow the new format's rules, the file's event-ledger property follows the new format, and a note names the line and the two formats; -V format-detection records the change under the classification sub-section (rule_changes, rule_change lines).",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n\n";
+    $out .= help_wrap(
+        "See 'ltl --explain classification' for the reasoning behind the event-ledger property and what may legitimately be read from each kind of log.",
+        indent       => 0,
+        first_indent => 0,
+    ) . "\n";
+    return $out;
+}
+
 # `ltl --explain` (no argument): grouped list of available topics across
 # all categories. Each category transition emits a top-level section
 # heading (STATISTICS, VISUALIZATIONS) and the group subheadings follow
@@ -6356,6 +6424,12 @@ my $explain_bc_operational = q{This is the cheapest, most actionable multimodali
 my $explain_bc_uses = q{Common operational triggers: (1) cache effectiveness investigations -- a bimodal API is often a caching layer working partially; modes are "served from cache" vs "fell through to backend"; if BC drops over time without changes, your cache is degrading. (2) Hidden two-population effects -- authenticated vs unauthenticated, read-from-replica vs read-from-primary, or other internal branching producing two distinct latency profiles. (3) Queueing detection -- queued vs unqueued requests are bimodal by construction; high BC on an API that shouldn't have queues signals contention. (4) Distribution-shape fingerprinting -- skewness + kurtosis + bimodality_coef together form a 3-column shape signature that's diagnostic without needing the heatmap.};
 my $explain_bc_caveats = q{Sarle's BC is a *screen*, not a test. Two important caveats: small-sample false positives -- at n < 100 random noise alone produces BC > 0.555, so high BC on a low-traffic API is a hint not a verdict; and skewed-bimodal blind spots -- if the two modes are very unequal (99% fast / 1% slow), the dominant mode's mass overwhelms the skewness-squared term and BC may stay below threshold even though the distribution is technically bimodal. The case where BC works best is comparable mode populations (say 30/70 to 50/50). For verification when BC flags a candidate, Hartigan's dip test is the gold-standard follow-up (computationally expensive; not shipped in ltl).};
 my $explain_bc_compute = q{Sarle's formula with sample-size correction: `BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))`. The denominator's sample-size adjustment is what distinguishes Sarle's BC from the unadjusted moment-based version -- it prevents small-sample false positives from being even worse. Requires n >= 4 and non-zero std_dev; emitted blank otherwise. Total cost: three arithmetic operations on numbers (skewness, kurtosis, n) already computed for the other shape moments.};
+
+# --- classification (--explain classification) ---
+my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure, and the classification sub-section of -V format-detection reports how many such lines there were and what share of the included lines they are. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
+my $explain_classification_ledger = q{Whether a success/failure figure means anything depends less on the rules than on the log. An *event ledger* is a format with maximum coverage of the operations it describes: every operation of that kind produces exactly one line, so a count over its lines is a count over everything that happened. An access log is an event ledger for requests; a garbage-collection log is one for pauses. A diagnostics log is not: it records what a component chose to write, at whatever level it chose, and says nothing about the operations that produced no line. This is the coverage argument of the Google SRE Workbook chapter on implementing SLOs (https://sre.google/workbook/implementing-slos/): a service-level indicator is a ratio of good events to all events, and the denominator is only honest when the source sees all events. A reliability figure -- successes over classified lines -- is therefore legitimate only over an event ledger. Each format declares whether it is one, the property is reported per file on -V format-detection (event_ledger), and consumers that compute a ratio read it to decide whether to show one.};
+my $explain_classification_reading = q{What a diagnostics log can legitimately tell you: how many failure-level lines there were, when they clustered, and which messages produced them -- the errRate column, and the per-message failure counts in the MESSAGES CSV. What it cannot tell you: a success rate, an availability, or any ratio whose denominator is "all operations", because most operations never wrote a line. The unclassified share is the warning sign: on a diagnostics log it is usually most of the file. On an event ledger the same share is a data-quality figure -- lines that carried a status the rules do not cover -- and a low value means the ratio can be trusted.};
+my $explain_classification_compute = q{Classification runs as each line is recognised, so it costs nothing to re-derive later: each format's rules are compiled once at startup into its recognition step, and the outcome is accumulated per time bucket (errRate reads the bucket's failure count, normalised to the -ru rate unit as before) and per message key (the successes and failures columns of -o CSV, which survive -g consolidation). If the detected format changes part-way through a file, lines after the change are classified under the new format's rules, the file's event-ledger property follows the new format, a note names the line and both formats, and -V format-detection lists the change. Lines already classified are not revisited. The rules themselves are documented per format under 'ltl --help formats', which also shows how a format declares them.};
 
 # --- heatmap (--explain heatmap) ---
 my $explain_heatmap_intuition = q{The heatmap (-hm) replaces the per-bucket latency statistics column with a color-intensity visualization showing how values are distributed *within* each time bucket. Where percentile statistics collapse a distribution to a handful of numbers, the heatmap reveals its full shape -- bimodal distributions, shifting modes over time, outlier clustering, long tails, and rare-but-extreme events all become visually apparent at a glance. Each row of the heatmap is one time bucket; each cell in the row represents a logarithmic value range; cell color intensity is proportional to the number of entries in that range.};
@@ -6733,6 +6807,22 @@ my $explain_histogram_notes = q{The X-axis log scale means that visual distance 
 
 sub populate_explain_topics {
     %explain_topics = (
+
+        # ---- classification ----
+        classification => [
+            { type => 'heading',   text => 'CLASSIFICATION' },
+            { type => 'paragraph', text => $explain_classification_intuition },
+            { type => 'subheading', text => 'The event-ledger property' },
+            { type => 'paragraph', text => $explain_classification_ledger },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_classification_reading },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -V format-detection access.log    # classification sub-section: successes, failures, unclassified share, event_ledger_files\n    ltl -o -bs 60 access.log               # MESSAGES CSV: successes and failures per message key\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_classification_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => "'ltl --help formats' (which formats classify, and how a declaration is written), -lf, -V format-detection, -ru." },
+        ],
 
         # ---- min ----
         min => [
@@ -7158,8 +7248,8 @@ sub print_help {
     # INFO
     $out .= help_heading("INFO");
     $out .= help_opt("-v,   --version",       "Print the version number and exit");
-    $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic (e.g. 'statistics') shows that topic's index.");
-    $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic; with no topic, lists available topics.");
+    $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic shows that topic's index: 'statistics' (every statistic ltl computes) or 'formats' (the log formats it recognises and how each classifies successes and failures).");
+    $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic, a visualization or a method (e.g. 'classification'); with no topic, lists available topics.");
     $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' additionally emits per-phase memory diagnostics on stderr");
     $out .= help_opt("-t,   --timing",          "Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary");
 
@@ -10199,8 +10289,13 @@ sub dispatch_informational_options {
             $out =~ s/^\n+//;
             pipe_to_pager($out);
         }
+        elsif ($help_topic eq 'formats') {
+            my $out = print_help_formats();
+            $out =~ s/^\n+//;
+            pipe_to_pager($out);
+        }
         else {
-            print_usage("unknown --help topic '$help_topic' (try: statistics)");
+            print_usage("unknown --help topic '$help_topic' (try: statistics, formats)");
             exit 1;
         }
         exit 0;

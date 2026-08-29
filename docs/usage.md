@@ -423,6 +423,20 @@ ltl -tpas app.log
 ltl -tpa "http-" -tpa "async-" app.log
 ```
 
+### Log formats and classification
+
+`ltl --help formats` lists every log format ltl recognises and, for each, whether it is an *event ledger* and how it classifies its lines as successes and failures. Detection is automatic per file; `-lf <name>` reads every file as one named format instead.
+
+An **event ledger** is a format with maximum coverage of the operations it describes: every operation of that kind produces a line, so a rate computed over its lines is a rate over everything that happened (an access log for requests, a garbage-collection log for pauses). A diagnostics log records what a component chose to log, and is not one. The distinction decides whether a reliability figure built on the counts can be trusted — see `ltl --explain classification` and the [Classification Reference](Classification-Reference) wiki page.
+
+Each format carries a classification declaration beside its pattern, field map and time contract. A criterion names a record field (`status_code`, `category_bucket`, `message`, or `line` for the raw text) and a pattern the field's value must match; an outcome lists criteria, any one of which classifies the line; one criterion may name several fields, all of which must match. Three forms exist:
+
+- a format that declares nothing inherits the default — failure: `category_bucket` matches `^(?:ERROR|FATAL|CRITICAL)$`; success: none;
+- a format that declares `none` declines to classify — no success/failure figure can be produced from it;
+- a format that declares one or both outcomes replaces the default for each outcome it names.
+
+A line the rules say nothing about is unclassified — neither a success nor a failure. Every line is classified under the rules of the format that recognised it: if the detected format changes part-way through a file, lines after the change follow the new format's rules, the file's event-ledger property follows the new format, and a note names the line and both formats. The counts feed `errRate`, the `successes`/`failures` columns of the MESSAGES CSV, and the `classification` sub-section of `-V format-detection` (successes, failures, unclassified share, `event_ledger_files`, `rule_changes`).
+
 ### Verbose output (`-V`)
 
 The `-V` flag emits diagnostic sections describing internal state — effective configuration (CLI + environment), index pre-seed lookups, bin-counter feature state, message-grouping statistics, log-format detection, the compiled format registry, heatmap palette resolution, benchmark data. Each section is named and bracketed by `=== <name> ===` / `=== END <name> ===` markers so it can be extracted by `grep`, `sed`, or `awk`.
@@ -483,8 +497,8 @@ Version, help, and diagnostic options.
 | Option | Description |
 |--------|-------------|
 | `-v, --version` | Print the version number and exit |
-| `-?, --help [<topic>]` | Show the help screen and exit; naming a topic (e.g. `statistics`) shows that topic's index |
-| `-ex, --explain [<topic>]` | Show long-form documentation for a statistic; with no topic, lists available topics |
+| `-?, --help [<topic>]` | Show the help screen and exit; naming a topic shows that topic's index: `statistics` (every statistic ltl computes) or `formats` (the log formats it recognises and how each classifies successes and failures) |
+| `-ex, --explain [<topic>]` | Show long-form documentation for a statistic, a visualization or a method (e.g. `classification`); with no topic, lists available topics |
 | `-mem, --memory-usage [debug]` | Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; `debug` additionally emits per-phase memory diagnostics on stderr |
 | `-t, --timing` | Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary |
 
