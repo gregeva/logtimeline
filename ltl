@@ -2486,6 +2486,7 @@ my $format_cls_rule_changes = 0;   # mid-file classifying-entry changes with dif
 my @format_cls_rule_change_lines;   # 'rule_change: file=... line=N from=... to=...' in input order,
                                     # at most FORMAT_CLS_RULE_CHANGE_LINES_MAX per file
 my %format_cls_rule_change_count;   # file => number of rule changes seen in it (the note fires on the first)
+my ( $cls_success_declared, $cls_failure_declared ) = ( 0, 0 );   # any bound entry declared rules for the outcome (summary rows)
 
 # The single generated scan sub (see compile_format_scan_sub) and the
 # regeneration inputs promotion needs: the entry snapshot the generated
@@ -6251,7 +6252,7 @@ sub print_help_formats {
     my $out = '';
     $out .= get_title_string();
     $out .= help_wrap(
-        "Log formats ltl recognises, and how each one decides whether a line is a success or a failure. Detection is automatic, per file; -lf <name> reads every file as one named format instead. The success/failure counts feed errRate and the classification sub-section of -V format-detection. Use 'ltl --explain classification' for what the classification means and when a figure built on it can be trusted.",
+        "Log formats ltl recognises, and how each one decides whether a line is a success or a failure. Detection is automatic, per file; -lf <name> reads every file as one named format instead. The success/failure counts appear as the SUCCESS CLASSIFIED and FAILURE CLASSIFIED rows of the run summary (each with its share of all classified lines), feed errRate, and are detailed in the classification sub-section of -V format-detection. Use 'ltl --explain classification' for what the classification means and when a figure built on it can be trusted.",
         indent       => 0,
         first_indent => 0,
     ) . "\n";
@@ -6426,7 +6427,7 @@ my $explain_bc_caveats = q{Sarle's BC is a *screen*, not a test. Two important c
 my $explain_bc_compute = q{Sarle's formula with sample-size correction: `BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))`. The denominator's sample-size adjustment is what distinguishes Sarle's BC from the unadjusted moment-based version -- it prevents small-sample false positives from being even worse. Requires n >= 4 and non-zero std_dev; emitted blank otherwise. Total cost: three arithmetic operations on numbers (skewness, kurtosis, n) already computed for the other shape moments.};
 
 # --- classification (--explain classification) ---
-my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure, and the classification sub-section of -V format-detection reports how many such lines there were and what share of the included lines they are. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
+my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as SUCCESS CLASSIFIED and FAILURE CLASSIFIED beneath LINES INCLUDED, each with its share of all classified lines; the classification sub-section of -V format-detection adds how many lines were unclassified and what share of the included lines they are. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
 my $explain_classification_ledger = q{Whether a success/failure figure means anything depends less on the rules than on the log. An *event ledger* is a format with maximum coverage of the operations it describes: every operation of that kind produces exactly one line, so a count over its lines is a count over everything that happened. An access log is an event ledger for requests; a garbage-collection log is one for pauses. A diagnostics log is not: it records what a component chose to write, at whatever level it chose, and says nothing about the operations that produced no line. This is the coverage argument of the Google SRE Workbook chapter on implementing SLOs (https://sre.google/workbook/implementing-slos/): a service-level indicator is a ratio of good events to all events, and the denominator is only honest when the source sees all events. A reliability figure -- successes over classified lines -- is therefore legitimate only over an event ledger. Each format declares whether it is one, the property is reported per file on -V format-detection (event_ledger), and consumers that compute a ratio read it to decide whether to show one.};
 my $explain_classification_reading = q{What a diagnostics log can legitimately tell you: how many failure-level lines there were, when they clustered, and which messages produced them -- the errRate column, and the per-message failure counts in the MESSAGES CSV. What it cannot tell you: a success rate, an availability, or any ratio whose denominator is "all operations", because most operations never wrote a line. The unclassified share is the warning sign: on a diagnostics log it is usually most of the file. On an event ledger the same share is a data-quality figure -- lines that carried a status the rules do not cover -- and a low value means the ratio can be trusted.};
 my $explain_classification_compute = q{Classification runs as each line is recognised, so it costs nothing to re-derive later: each format's rules are compiled once at startup into its recognition step, and the outcome is accumulated per time bucket (errRate reads the bucket's failure count, normalised to the -ru rate unit as before) and per message key (the successes and failures columns of -o CSV, which survive -g consolidation). If the detected format changes part-way through a file, lines after the change are classified under the new format's rules, the file's event-ledger property follows the new format, a note names the line and both formats, and -V format-detection lists the change. Lines already classified are not revisited. The rules themselves are documented per format under 'ltl --help formats', which also shows how a format declares them.};
@@ -6817,7 +6818,7 @@ sub populate_explain_topics {
             { type => 'subheading', text => 'Operational use' },
             { type => 'paragraph', text => $explain_classification_reading },
             { type => 'subheading', text => 'Example' },
-            { type => 'pre',       text => "    ltl -V format-detection access.log    # classification sub-section: successes, failures, unclassified share, event_ledger_files\n    ltl -o -bs 60 access.log               # MESSAGES CSV: successes and failures per message key\n" },
+            { type => 'pre',       text => "    ltl access.log                         # run summary: SUCCESS CLASSIFIED / FAILURE CLASSIFIED rows with their shares\n    ltl -V format-detection access.log    # classification sub-section: successes, failures, unclassified share, event_ledger_files\n    ltl -o -bs 60 access.log               # MESSAGES CSV: successes and failures per message key\n" },
             { type => 'subheading', text => 'How ltl computes this' },
             { type => 'paragraph', text => $explain_classification_compute },
             { type => 'subheading', text => 'See also' },
@@ -11844,6 +11845,11 @@ sub read_and_process_logs {
                 if ($line_cls_sig != $file_cls_sig) {
                     format_classification_rule_change($in_file, $line_number, $file_cls_entry, $line_entry) if $file_cls_entry;
                     ( $file_cls_sig, $file_cls_entry ) = ( $line_cls_sig, $line_entry );
+                    # Once per bind: which outcomes this file's rules can produce
+                    # decides which summary rows are shown at all.
+                    my $cls = $format_registry_spec{ $line_entry->[FR_NAME] }{_cls};
+                    $cls_success_declared = 1 if $cls && $cls->{success} && @{ $cls->{success} };
+                    $cls_failure_declared = 1 if $cls && $cls->{failure} && @{ $cls->{failure} };
                 }
                 $profile_included_samples++ if $profile_mode;
 
@@ -16656,6 +16662,37 @@ sub print_summary_table {
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
     push @summary_table, sprintf( $table_format, "HIGHLIGHTED", $total_lines_highlighted ) if $highlight_active;
     push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
+    # Classified lines (#453): each row is shown when its outcome was declared
+    # by a bound format or observed. The share is of all classified lines and
+    # is omitted when no line was a success (failures would always read 100%).
+    # The value is right-aligned to the table boundary and may run left into
+    # the label column's slack; its precision is three significant digits
+    # (98.2%, 1.11%, 0.107%), reduced only when the row would not fit.
+    {
+        my $classified = $total_successes + $total_failures;
+        my $row_width  = $category_column_width + 1 + $occurrences_column_width;
+        my $emit = sub {
+            my ($label, $n) = @_;
+            my $value = $n;
+            if ($total_successes) {
+                my $pct   = $n / $classified * 100;
+                my $int_digits = $pct >= 100 ? 3 : $pct >= 10 ? 2 : $pct >= 1 ? 1 : 0;
+                my $decimals = 3 - $int_digits;
+                my $fit = $row_width - length($label) - 1;
+                while (1) {
+                    $value = sprintf( "%d (%.*f%%)", $n, $decimals, $pct );
+                    last if length($value) <= $fit || $decimals == 0;
+                    $decimals--;
+                }
+                $value = $n if length($value) > $fit;
+            }
+            my $gap = $row_width - length($label) - length($value);
+            $gap = 1 if $gap < 1;
+            push @summary_table, $padding . $label . ( ' ' x $gap ) . $value . "$padding\n";
+        };
+        $emit->( "SUCCESS CLASSIFIED", $total_successes ) if $cls_success_declared || $total_successes;
+        $emit->( "FAILURE CLASSIFIED", $total_failures )  if $cls_failure_declared || $total_failures;
+    }
     push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
     if ($show_timing) {
         push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "DETECT: FORMAT REGISTRY BUILD", format_time( $elapsed_detect_registry_build, 's', 'medium', " " ) );

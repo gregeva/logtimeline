@@ -940,6 +940,7 @@ scenario_scan_telemetry_nomatch() {
 # assertion: classification counts a line at the include point and never reads
 # a bucket.
 CLASSIFICATION_CONTRACT='features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (D20)'
+SUMMARY_ROWS_PRODUCER='print_summary_table() in ltl (the SUCCESS CLASSIFIED / FAILURE CLASSIFIED rows, reading $total_successes/$total_failures and the $cls_*_declared flags set at the include point)'
 RULE_CHANGE_PRODUCER='format_classification_rule_change() in ltl, called from the include point in read_and_process_logs() when $line_cls_sig differs from the file'"'"'s current signature; lines emitted by emit_format_detection_verbose()'
 CLASSIFICATION_PRODUCER='emit_format_detection_verbose() in ltl (format-detection / classification sub-section, reading $total_successes/$total_failures accumulated at the include point in read_and_process_logs())'
 
@@ -1456,6 +1457,65 @@ scenario_classification_format_interleaved() {
         contract    "$CLASSIFICATION_CONTRACT - note once per file, at the first change (D19)"
 }
 
+scenario_classification_summary_rows() {
+    current_scenario="classification-summary-rows"
+    echo "[$current_scenario]"
+
+    # The rendering surface of the counters: SUCCESS CLASSIFIED / FAILURE
+    # CLASSIFIED rows under LINES INCLUDED in the run summary, each shown when
+    # its outcome was declared or observed, the share of classified lines
+    # beside the count and omitted when no line was a success.
+    local dir="$TMP_DIR/$current_scenario"
+    mkdir -p "$dir"
+    local access="$REPO_DIR/tests/fixtures/http-status-families.txt"
+    local diag="$REPO_DIR/tests/fixtures/log-level-vocabulary.txt"
+    local gc="$REPO_DIR/tests/fixtures/gc-g1-categories.txt"
+    local r_access="$dir/access.txt" r_diag="$dir/diag.txt" r_gc="$dir/gc.txt"
+    "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$access" 2> "$r_access.stderr" > "$r_access"
+    assert_no_runtime_warnings "$r_access.stderr" "$current_scenario access"
+    "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$diag" 2> "$r_diag.stderr" > "$r_diag"
+    assert_no_runtime_warnings "$r_diag.stderr" "$current_scenario diagnostics"
+    "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$gc" 2> "$r_gc.stderr" > "$r_gc"
+    assert_no_runtime_warnings "$r_gc.stderr" "$current_scenario gc"
+
+    assert_line "$r_access" \
+        pattern     '^  SUCCESS CLASSIFIED +6 \(60\.0%\) *$' \
+        asserts     'An access log shows the success count with its share of all classified lines (6 of 10), right-aligned to the table boundary' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows (architect, 2026-08-29): share = count / (successes + failures), three significant digits"
+
+    assert_line "$r_access" \
+        pattern     '^  FAILURE CLASSIFIED +4 \(40\.0%\) *$' \
+        asserts     'The failure row carries the complementary share' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows: both rows shown when both outcomes are declared"
+
+    assert_command \
+        command     "grep -oE 'LINES INCLUDED|SUCCESS CLASSIFIED|FAILURE CLASSIFIED|LINES READ' '$r_access' | tr '\n' ' ' | grep -q '^LINES INCLUDED SUCCESS CLASSIFIED FAILURE CLASSIFIED LINES READ '" \
+        label       'rows sit between LINES INCLUDED and LINES READ in that order' \
+        asserts     'The two rows partition LINES INCLUDED and appear directly beneath it' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows placement"
+
+    assert_line "$r_diag" \
+        pattern     '^  FAILURE CLASSIFIED +2 *$' \
+        asserts     'A diagnostics log under the failure-only default shows the failure count with no share: with no successes the share would always read 100%' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows: share omitted when no line was a success"
+
+    assert_absent "$r_diag" \
+        pattern     '^  SUCCESS CLASSIFIED' \
+        asserts     'No SUCCESS CLASSIFIED row when no bound format declares success rules and no line was a success' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows: a row is shown only when its outcome was declared or observed"
+
+    assert_absent "$r_gc" \
+        pattern     'CLASSIFIED' \
+        asserts     'A declining format (GC) shows neither row' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows: nothing declared, nothing observed, nothing shown"
+}
+
 scenario_variant_connection_server() {
     current_scenario="variant-connection-server"
     echo "[$current_scenario]"
@@ -1850,6 +1910,7 @@ scenario_classification_default; echo ""
 scenario_classification_consolidation_reconciles; echo ""
 scenario_classification_format_switch; echo ""
 scenario_classification_format_interleaved; echo ""
+scenario_classification_summary_rows; echo ""
 scenario_unit_ambiguity_warning; echo ""
 scenario_variant_connection_server; echo ""
 scenario_variant_integration_runtime_named; echo ""

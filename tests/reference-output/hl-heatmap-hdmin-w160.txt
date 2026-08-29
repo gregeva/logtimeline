@@ -28,6 +28,7 @@ command-line options: --disable-progress -ni -n 1 -dm raw --terminal-width 160 -
   ─────────────────────────────────────────   
   HIGHLIGHTED                           502   
   LINES INCLUDED                       5000   
+  FAILURE CLASSIFIED                     23   
   LINES READ                           5000   
   ─────────────────────────────────────────   
 

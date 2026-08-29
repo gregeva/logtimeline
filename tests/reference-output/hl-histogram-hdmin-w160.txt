@@ -79,6 +79,8 @@ command-line options: --disable-progress -ni -n 1 -dm raw --terminal-width 160 -
   ─────────────────────────────────────────   
   HIGHLIGHTED                           154   
   LINES INCLUDED                        677   
+  SUCCESS CLASSIFIED            673 (99.4%)   
+  FAILURE CLASSIFIED             4 (0.591%)   
   LINES READ                            677   
   ─────────────────────────────────────────   
 

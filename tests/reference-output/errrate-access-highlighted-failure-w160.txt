@@ -29,6 +29,8 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 
   ─────────────────────────────────────────   
   HIGHLIGHTED                             1   
   LINES INCLUDED                         10   
+  SUCCESS CLASSIFIED              6 (60.0%)   
+  FAILURE CLASSIFIED              4 (40.0%)   
   LINES READ                             10   
   ─────────────────────────────────────────   
 

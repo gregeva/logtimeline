@@ -8,7 +8,7 @@ For a long-form explanation directly from the terminal, run `ltl --explain class
 
 ## What it is
 
-Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success — an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure, and the classification sub-section of `-V format-detection` reports how many such lines there were and what share of the included lines they are. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.
+Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success — an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as `SUCCESS CLASSIFIED` and `FAILURE CLASSIFIED` beneath `LINES INCLUDED`, each with its share of all classified lines; the classification sub-section of `-V format-detection` adds how many lines were unclassified and what share of the included lines they are. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.
 
 ## The event-ledger property
 
@@ -23,6 +23,7 @@ What a diagnostics log can legitimately tell you: how many failure-level lines t
 ## Example
 
 ```
+ltl access.log                         # run summary: SUCCESS CLASSIFIED / FAILURE CLASSIFIED rows with their shares
 ltl -V format-detection access.log    # classification sub-section: successes, failures, unclassified share, event_ledger_files
 ltl -o -bs 60 access.log               # MESSAGES CSV: successes and failures per message key
 ```

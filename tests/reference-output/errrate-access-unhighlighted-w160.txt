@@ -23,6 +23,8 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 
   1xx Informational                       2      1 tomcat_access_with_duration
   ─────────────────────────────────────────   
   LINES INCLUDED                         10   
+  SUCCESS CLASSIFIED              6 (60.0%)   
+  FAILURE CLASSIFIED              4 (40.0%)   
   LINES READ                             10   
   ─────────────────────────────────────────   
 

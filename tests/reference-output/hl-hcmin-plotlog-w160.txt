@@ -38,6 +38,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -ic -hcmi
   ─────────────────────────────────────────      1 thingworx_standard
   HIGHLIGHTED                            45   
   LINES INCLUDED                       2992   
+  FAILURE CLASSIFIED                     66   
   LINES READ                           2992   
   ─────────────────────────────────────────   
 
