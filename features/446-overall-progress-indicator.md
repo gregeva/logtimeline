@@ -11,7 +11,8 @@ The progress line reports the file in flight — its line count and, since #397 
 
 ## Status
 
-Scoped 2026-08-29; decisions D1–D7 locked. Not started.
+Scoped 2026-08-29; decisions D1–D7 locked. Implemented 2026-08-29 on
+`446-overall-progress-indicator`, all seven decisions as written.
 
 ## Research
 
@@ -63,9 +64,26 @@ Reading: file percentage over overall percentage; `line` is the position in the 
 - `docs/toolchain-guidance.md` describes progress output as including an ETA and a spinner; neither exists. Correct the sentence while the surface is being edited.
 - `features/log-format-registry.md` (D53 and the #388 deliverables list) still names the detection sample as the source of a progress percentage; the shipped per-file percentage reads the handle position, and so does this one. Correct the record.
 
+## Implementation (2026-08-29)
+
+The size sweep is `size_selected_files_for_progress()`, called from the end of `adapt_to_command_line_options()` where the selected list is final. It returns without doing anything under `--disable-progress` or below two files, so `$progress_file_count` staying 0 is what every downstream site reads as "no overall figure this run". The line is rendered by `progress_line_text()`, which both paint sites call; the percentages go through `format_percentage()` with `mode => 'integer', width => 3, floor => 1` and the counts through `format_number()`.
+
+**Reuse of the sweep.** `$progress_file_size` at the top of the per-file loop was a second `-s` over the same file; it now reads the sweep's cached size where the sweep ran. The other two size sites are untouched, as the obligation requires: `read_index_file()` needs the full `stat` for the mtime as well, so it saves nothing, and the `-V benchmark-data` FILES row sums `@files_processed` — the files actually read — which is a different set from the selected list and is harness-asserted as it stands.
+
+**The opening frame.** D4 requires a frame outside the throttle. It is painted once per file, just before the read loop, rather than only at end of run: with a 500 ms gate alone, a run that finishes inside one interval reports nothing at all, which is exactly the small-file symptom of #31 that D4 names the work-based gate as having half-fixed. The completion line still closes the run, so nothing is left parked below 100 %.
+
+**The line clear.** `progress_line_text()` fits the line to `$terminal_width - 1` characters — the prefix plus whatever the filename can have — which is precisely what the existing clear writes, so no widening was needed. One guard was: `shorten_filename()` declines to shorten below ten characters and returns the name whole, so the line truncates outright at that point rather than overrunning.
+
+### Findings
+
+- **F1 — D4's clock check is not measurable.** Read pass over the 762k-line single-day access log with the progress line painting, three runs each: before 2.76 / 2.60 / 2.53 s, after 2.50 / 2.51 / 2.51 s. The new gate is if anything marginally cheaper than the every-4,999-lines gate it replaces, and well inside run-to-run variance either way. The stride is what buys this: at 512 lines the clock is consulted about 1,500 times over a 762k-line file, so `Time::HiRes::time()` never approaches the per-line path.
+- **F2 — the release benchmark cannot see D4 at all, and this is worth knowing before it is read as evidence.** `run-benchmark.sh` invokes `ltl --disable-progress`, so the progress block is short-circuited on both sides of the comparison. Two before/after pairs of `single-day-access-log-standard` ran -3.1 % and then +2.6 % on total time, with the four absolute figures interleaving (before 9.9 / 9.4 s, after 9.6 / 9.8 s): variance on a ten-second run, not attribution. The gate passes — no metric worse than 5 % in either pair — but the instrument for D4 is F1's progress-on measurement, not this one.
+
 ## Merge gate
 
 Touches `ltl` and adds a harness scenario: the full `tests/validate-*.sh` suite plus the before/after benchmark on this machine (CLAUDE.md per-feature step 1), the benchmark being load-bearing here (D4).
+
+Run 2026-08-29 on the merged commit: 30 harnesses, 1,354 assertions passed, 3 failed. All three failures are `validate-regression.sh` scenarios (`errrate-access-unhighlighted-w160`, `errrate-access-highlighted-failure-w160`, `errrate-diagnostics-highlighted-failure-w160`) and are pre-existing and unrelated: the committed references carry an absolute path from another worktree (`/Users/gregeva/Documents/GitHub/ltl-448/tests/fixtures/...`) where the run correctly produces the repo-relative path, which is the condition #209 removed. The same three fail identically on the branch-point commit with this drop's code absent.
 
 ## Related
 

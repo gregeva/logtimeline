@@ -262,6 +262,31 @@ my $total_lines_read = 0;
 my $total_lines_included = 0;
 my ( $total_successes, $total_failures ) = ( 0, 0 );   # run-level classification outcomes (#453 R5)
 my @progress_history = ();     # rolling history for lines/sec calculation: [ [timestamp, lines_read], ... ]
+
+# Overall progress across the whole selected file set (#446). The size sweep
+# runs once, at the end of option parsing, and only when two or more files are
+# selected: with one file the overall figure would repeat the per-file one and
+# say nothing. %progress_file_sizes holds the size the sweep took per file;
+# $progress_total_bytes is their sum (the denominator); $progress_bytes_done
+# carries the bytes of the files already closed — the settled part of the
+# numerator, to which the live tell() of the file in flight is added.
+my %progress_file_sizes  = ();
+my $progress_total_bytes = 0;
+my $progress_bytes_done  = 0;
+my $progress_file_index  = 0;   # 1-based position of the file being read
+my $progress_file_count  = 0;   # N; 0 when the sweep did not run (single file)
+my $progress_last_paint  = 0;   # Time::HiRes epoch of the last repaint
+
+# Repaint cadence for the read-pass progress line. The gate is time, not work:
+# repainting on a line count makes the refresh rate follow file size and I/O
+# speed, so fast input hammers the terminal while a small file can pass with no
+# repaint at all. 500 ms is the interval curl, APT and rclone settle on
+# (docs/progress-indication-best-practices.md § What ltl adopts, point 5).
+# The clock is consulted only every PROGRESS_LINE_STRIDE lines: Time::HiRes at
+# 150k lines/sec is a real per-line cost, and the stride is the cheap integer
+# test that keeps it off the hot path.
+use constant PROGRESS_REPAINT_SECONDS => 0.5;
+use constant PROGRESS_LINE_STRIDE     => 512;
 my $total_lines_highlighted = 0;
 my $legend_length = 0;
 my $timestamp_length = 0;
@@ -9947,6 +9972,137 @@ sub shorten_filename {
     return substr($filename, 0, $left_len) . $ellipsis . substr($filename, -$right_len);
 }
 
+# Size the selected file set once, before the first file is opened, so the read
+# pass can report the run's overall completion (#446 D2). The list is final at
+# the point this runs — glob and recursive expansion, the -f filter and the -r
+# de-duplication have all been applied — so one stat sweep yields N and the
+# exact byte total. Sizing inside the traversal instead would put the same
+# computation in two places (the -r path and the glob path).
+#
+# The sweep is skipped for a single file: the overall percentage would then be
+# the per-file percentage under another name, and two identical figures side by
+# side tell the reader nothing (R4). $progress_file_count staying 0 is what the
+# rest of the surface reads as "no overall figure this run".
+#
+# Bytes own the percentage and the file counter sits beside it, unweighted —
+# the dominant industry pattern, with no weighting constant to calibrate
+# (docs/progress-indication-best-practices.md § What ltl adopts).
+sub size_selected_files_for_progress {
+    return if $disable_progress;            # the figure has no consumer
+    return if scalar(@in_files) < 2;        # single file: per-file percentage only
+
+    %progress_file_sizes  = ();
+    $progress_total_bytes = 0;
+    for my $file (@in_files) {
+        my $size = (-f $file) ? ((-s $file) // 0) : 0;
+        $progress_file_sizes{$file} = $size;
+        $progress_total_bytes += $size;
+    }
+    $progress_file_count = scalar(@in_files);
+    return;
+}
+
+# The read pass's progress line (#446 D5). Fixed-width numerics come first and
+# the filename last, because the filename is the only element whose length
+# changes from file to file: at the end of the line it cannot shift anything
+# ahead of it as the run moves between files.
+#
+#   Processing 63%/37% (file 12/340) line 412.0k, 1.2Mil total, 148.2k lines/sec: access.log
+#   Processing 63% line 412.0k, 148.2k lines/sec: access.log
+#
+# The first percentage is the file in flight, the second the run as a whole;
+# the single-file form carries neither the overall figure nor the counter. Both
+# are rendered by format_percentage() with this surface's parameters — integer,
+# three characters, floored (docs/percentage-presentation.md). Floored is the
+# load-bearing part: a progress figure that rounded up would show 100% while
+# reading was still going on, and on this surface 100% means finished.
+#
+# Returns the rendered line without its leading "\r", so the caller decides how
+# it is placed; returns the empty string when the run has nothing to report.
+sub progress_line_text {
+    my (%arg) = @_;
+    my ($file, $line_number, $file_size, $file_position) =
+        @arg{qw(file line_number file_size file_position)};
+
+    # Per-file percentage: bytes consumed from the handle over the file's size —
+    # exact and monotonic. Only for sized plain files; anything else shows the
+    # line count alone.
+    my $file_pct = "";
+    if ( defined $file_size && $file_size > 0 && defined $file_position && $file_position >= 0 ) {
+        my $pct = 100 * $file_position / $file_size;
+        $pct = 100 if $pct > 100;
+        $file_pct = format_percentage( $pct, mode => 'integer', width => 3, floor => 1 );
+    }
+
+    # Overall percentage: bytes of the files already closed plus the live
+    # position in the file in flight, over the whole selected set. Clamped at
+    # 100 — a log file can grow while it is being read — and never divided when
+    # the total is zero.
+    my $overall_pct = "";
+    if ( $progress_file_count >= 2 && $progress_total_bytes > 0 ) {
+        my $done = $progress_bytes_done;
+        $done += $file_position if defined $file_position && $file_position >= 0;
+        my $pct = 100 * $done / $progress_total_bytes;
+        $pct = 100 if $pct > 100;
+        $overall_pct = format_percentage( $pct, mode => 'integer', width => 3, floor => 1 );
+    }
+
+    my $pct_segment = "";
+    if ( $file_pct ne "" && $overall_pct ne "" ) {
+        $pct_segment = " $file_pct/$overall_pct";
+    } elsif ( $file_pct ne "" ) {
+        $pct_segment = " $file_pct";
+    } elsif ( $overall_pct ne "" ) {
+        $pct_segment = " $overall_pct";
+    }
+
+    # File counter: the companion that keeps a many-tiny-files run honest while
+    # the byte percentage stays true for a few huge ones. The index is padded to
+    # the width of N so it does not shift the rest of the line as it advances.
+    my $counter_segment = "";
+    if ( $progress_file_count >= 2 && $progress_file_index > 0 ) {
+        $counter_segment = sprintf( " (file %*d/%d)",
+            length($progress_file_count), $progress_file_index, $progress_file_count );
+    }
+
+    # Rolling lines/sec over the retained samples, and the run-wide line total.
+    # "total" names the lines read across the whole run; the run's completion is
+    # now named by the overall percentage.
+    my $rate_segment = "";
+    if (@progress_history >= 2) {
+        my $time_diff  = $progress_history[-1][0] - $progress_history[0][0];
+        my $lines_diff = $progress_history[-1][1] - $progress_history[0][1];
+        $rate_segment = ", " . format_number( $lines_diff / $time_diff ) . " lines/sec"
+            if $time_diff > 0;
+    }
+    my $total_segment = $progress_file_count >= 2
+        ? ", " . format_number($total_lines_read) . " total"
+        : "";
+
+    my $prefix = "Processing$pct_segment$counter_segment line "
+               . format_number( $line_number // 0 ) . "$total_segment$rate_segment: ";
+
+    # The filename is the variable-length element, so it absorbs the fit: it is
+    # shortened to whatever the terminal leaves, and where even a shortened name
+    # will not fit, the rate is dropped before the name is (D5).
+    my $room = $terminal_width - length($prefix) - 1;   # -1 safety margin
+    if ( $room < 10 && $rate_segment ne "" ) {
+        $prefix = "Processing$pct_segment$counter_segment line "
+                . format_number( $line_number // 0 ) . "$total_segment: ";
+        $room = $terminal_width - length($prefix) - 1;
+    }
+    return "" if $room <= 0;
+
+    # shorten_filename() declines to shorten below ten characters and hands the
+    # name back whole, which on this surface would run the line past the width
+    # the clear covers. Truncate outright at that point: the numbers are the
+    # part that must stay readable.
+    my $shown = shorten_filename( $file, $room, 1 );
+    $shown = substr( $shown, 0, $room ) if length($shown) > $room;
+
+    return $prefix . $shown;
+}
+
 sub format_number {
     my ($value, $space, $decimals) = @_;
     my %units = (
@@ -11325,6 +11481,11 @@ sub adapt_to_command_line_options {
         }
     }
 
+    # The selected file list is final here — expansion, the -f filter and the
+    # -r de-duplication are all behind us — which is what lets the overall
+    # progress denominator be exact from the first line read (#446 D2).
+    size_selected_files_for_progress();
+
     return;
 }
 
@@ -11456,7 +11617,14 @@ sub read_and_process_logs {
         open my $fh, '<', $in_file or die "Cannot open file: $in_file";
         push @files_processed, $in_file;
         my $line_number = 0;
-        my $progress_file_size = (-f $in_file) ? (-s $in_file) : 0;   # >0 enables the per-file percentage (tell($fh) / size); 0 = line count only
+        # >0 enables the per-file percentage (tell($fh) / size); 0 = line count
+        # only. Where the overall-progress sweep ran it already took this exact
+        # value for every selected file, so the size is read from there rather
+        # than stat'ed a second time (#446, in-drop obligation).
+        my $progress_file_size = exists $progress_file_sizes{$in_file}
+            ? $progress_file_sizes{$in_file}
+            : ( (-f $in_file) ? (-s $in_file) : 0 );
+        $progress_file_index++;
         $format_current_file = $in_file;
         $format_current_line_ref = \$line_number;
         my %fr_matches_at_start = map { $_ => $format_registry_entry{$_}[FR_MATCHES] } keys %format_registry_entry;
@@ -11561,6 +11729,26 @@ sub read_and_process_logs {
             }
         }
 
+        # Opening frame for this file, painted outside the throttle (#446 D4).
+        # The throttle governs repaints; without an unconditional frame at the
+        # start a run that finishes inside one interval reports nothing at all,
+        # which is the small-file symptom the work-based gate left behind
+        # (#31). The line names the file about to be read, so the reader sees
+        # what the run is doing from the first moment it does it.
+        unless ($disable_progress) {
+            my $line = progress_line_text(
+                file          => $in_file,
+                line_number   => 0,
+                file_size     => $progress_file_size,
+                file_position => 0,
+            );
+            if ($line ne "") {
+                print "\r$line";
+                $| = 1;
+            }
+            $progress_last_paint = Time::HiRes::time();
+        }
+
         while (1) {
             # Line source: held window lines replay first (carrying their
             # one-time classification), then the stream. A held line whose
@@ -11592,43 +11780,29 @@ sub read_and_process_logs {
             $total_lines_read++;
             memory_debug_sample("read_lines") if $show_memory_debug && $total_lines_read % 75000 == 0;
 
-            if ($total_lines_read % 4999 == 0 && !$disable_progress) {   # print progress based on total lines read (not per-file) to handle many small files
+            # Repaint gate (#446 D4). The stride is the cheap integer test that
+            # keeps Time::HiRes off the per-line path; the clock behind it is
+            # what actually decides, so the refresh rate follows elapsed time
+            # rather than how fast the input happens to arrive.
+            if ($total_lines_read % PROGRESS_LINE_STRIDE == 0 && !$disable_progress) {
                 my $now = Time::HiRes::time();
-                push @progress_history, [ $now, $total_lines_read ];
-                shift @progress_history if @progress_history > 50;          # keep last 50 samples for rolling average
+                if ($now - $progress_last_paint >= PROGRESS_REPAINT_SECONDS) {
+                    $progress_last_paint = $now;
+                    push @progress_history, [ $now, $total_lines_read ];
+                    shift @progress_history if @progress_history > 50;      # keep last 50 samples for rolling average
 
-                my $lines_per_sec = "";
-                if (@progress_history >= 2) {
-                    my $time_diff = $progress_history[-1][0] - $progress_history[0][0];
-                    my $lines_diff = $progress_history[-1][1] - $progress_history[0][1];
-                    if ($time_diff > 0) {
-                        $lines_per_sec = " - " . format_number($lines_diff / $time_diff) . " lines/sec";
+                    my $pos = $progress_file_size > 0 ? tell($fh) : undef;
+                    my $line = progress_line_text(
+                        file          => $in_file,
+                        line_number   => $line_number,
+                        file_size     => $progress_file_size,
+                        file_position => $pos,
+                    );
+                    if ($line ne "") {
+                        print "\r$line";
+                        $| = 1;                             # Flush output to stdout
                     }
                 }
-
-                # Per-file percentage: bytes consumed from the handle over the
-                # file's size — exact and monotonic. Floored, never rounded:
-                # 100% means the file is done, so 99.6% reports as 99%. Only
-                # for sized plain files; anything else shows the line count alone.
-                my $pct_str = "";
-                if ($progress_file_size > 0) {
-                    my $pos = tell($fh);
-                    if (defined $pos && $pos >= 0) {
-                        my $pct = int(100 * $pos / $progress_file_size);
-                        $pct = 100 if $pct > 100;
-                        $pct_str = " (${pct}% complete)";
-                    }
-                }
-
-                # Calculate available space for filename to prevent line wrapping
-                my $line_num_str = $line_number;
-                my $overall_str = format_number($total_lines_read);
-                my $fixed_len = length("Processing line $line_num_str$pct_str in file  ($overall_str overall$lines_per_sec)");
-                my $available_for_filename = $terminal_width - $fixed_len - 1;  # -1 for safety margin
-                my $display_filename = shorten_filename($in_file, $available_for_filename, 1);  # strip path, then shorten
-
-                printf("\rProcessing line %d%s in file %s (%s overall%s)", $line_number, $pct_str, $display_filename, $overall_str, $lines_per_sec);
-                $| = 1;                                     # Flush output to stdout
             }
 
             ## CSV data line (only after CSV confirmed via two-line validation) ##
@@ -12770,6 +12944,14 @@ sub read_and_process_logs {
         }
 
         close $fh;
+
+        # The file's contribution to the overall figure rolls from its live
+        # handle position to its whole size the moment it closes (#446 D2/D3).
+        # Crediting the full size — rather than however many bytes the read
+        # actually consumed — is what lets a run that skipped or short-read a
+        # file still reach 100%: every selected file sits in the denominator,
+        # so every selected file must eventually enter the numerator.
+        $progress_bytes_done += $progress_file_size;
 
         # Scan telemetry lands with the file's detection record; a file may
         # produce zero matches (or zero lines), so create the record here too.
