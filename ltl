@@ -276,6 +276,7 @@ my $progress_bytes_done  = 0;
 my $progress_file_index  = 0;   # 1-based position of the file being read
 my $progress_file_count  = 0;   # N; 0 when the sweep did not run (single file)
 my $progress_last_paint  = 0;   # Time::HiRes epoch of the last repaint
+my @deferred_notices;           # notices raised mid-read, emitted once it ends
 
 # Repaint cadence for the read-pass progress line. The gate is time, not work:
 # repainting on a line count makes the refresh rate follow file size and I/O
@@ -3448,8 +3449,8 @@ sub format_probe_signal {
     # before the held lines have been scored) the signal only counts: the
     # selection that follows sees the same evidence and decides.
     if ($kind eq 'impossible_date' && !$flipped && (defined $log_format_pin || %{ $ev->{groups} }) && !$st->{impossible_date_reported}++) {
-        print STDERR "Note: $format_current_file line $$format_current_line_ref: timestamp '$value' has an impossible date component under the "
-            . $entry->[FR_SLUG] . " format's date layout; such lines are kept at the previous line's time - use -lf to pin the correct log format\n";
+        defer_notice( "Note: $format_current_file line $$format_current_line_ref: timestamp '$value' has an impossible date component under the "
+            . $entry->[FR_SLUG] . " format's date layout; such lines are kept at the previous line's time - use -lf to pin the correct log format\n" );
     }
     return $flipped;
 }
@@ -3499,8 +3500,8 @@ sub format_variant_ambiguity_note {
         $override = '-du <unit> or -lf ' . $alt->[FR_SLUG];
     }
     $format_unit_ambiguity_warned = 1;
-    print STDERR "Note: the detected log format (" . $entry->[FR_SLUG] . ") is written by more than one producer and " . $consequence
-        . "; nothing in the file names or content decided which - use $override if the files come from the other producer\n";
+    defer_notice( "Note: the detected log format (" . $entry->[FR_SLUG] . ") is written by more than one producer and " . $consequence
+        . "; nothing in the file names or content decided which - use $override if the files come from the other producer\n" );
     return;
 }
 
@@ -3839,9 +3840,9 @@ sub format_classification_rule_change {
         "rule_change: file=$file line=$line_number from=$old_entry->[FR_SLUG] to=$new_entry->[FR_SLUG]"
         if $n <= FORMAT_CLS_RULE_CHANGE_LINES_MAX;
     $format_detection{$file}{event_ledger} = $new_entry->[FR_EVENT_LEDGER] if $format_detection{$file};
-    print STDERR "Note: $file line $line_number: the classification rules changed because the detected log format changed from "
+    defer_notice( "Note: $file line $line_number: the classification rules changed because the detected log format changed from "
         . $old_entry->[FR_SLUG] . " to " . $new_entry->[FR_SLUG]
-        . " - lines before this point were classified under the previous rules\n"
+        . " - lines before this point were classified under the previous rules\n" )
         if $n == 1;
     return;
 }
@@ -10017,6 +10018,30 @@ sub size_selected_files_for_progress {
 # load-bearing part: a progress figure that rounded up would show 100% while
 # reading was still going on, and on this surface 100% means finished.
 #
+# Hold a notice raised while the read pass is running. The progress line owns
+# the terminal row for the duration of the read, so a notice printed as it is
+# discovered lands in the middle of that row and reads as a continuation of the
+# progress text. Notices are queued here instead and emitted by
+# flush_deferred_notices() once the read is over and the row is free.
+#
+# This is where a notice discovered mid-read belongs. A notice whose condition
+# is only known after the read (the numeric-filter and unreadable-directory
+# counts at the end of read_and_process_logs()) is already past the progress
+# line and prints directly.
+sub defer_notice {
+    my ($text) = @_;
+    push @deferred_notices, $text;
+    return;
+}
+
+# Emit every notice queued during the read, in the order it was raised, once
+# the progress line has finished with the terminal.
+sub flush_deferred_notices {
+    print STDERR $_ for @deferred_notices;
+    @deferred_notices = ();
+    return;
+}
+
 # Returns the rendered line without its leading "\r", so the caller decides how
 # it is placed; returns the empty string when the run has nothing to report.
 sub progress_line_text {
@@ -13012,6 +13037,10 @@ sub read_and_process_logs {
         print " " x ( $terminal_width - length( "Processing completed." ) );
         print "\n";
     }
+
+    # Notices raised while the read was running, held back so they did not
+    # print into the progress line's row.
+    flush_deferred_notices();
 
     # Surface how many lines a numeric filter removed solely because the line
     # carried no value for the filtered metric; without this the totals shrink
