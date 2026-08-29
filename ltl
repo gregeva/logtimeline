@@ -57,7 +57,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0";
+my $version_number = "0.18.0-448";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -10158,6 +10158,105 @@ sub format_cv_display {
     return sprintf('%.2f', $cv);
 }
 
+# The single resolution surface for every percentage ltl prints
+# (docs/percentage-presentation.md). A percentage is not one number format:
+# it is one formatter given per-surface parameters, which degrades until the
+# value fits the space the surface can spare.
+#
+# Call as format_percentage( $value, %params ). $value is the percentage
+# itself (0..100), not a fraction. Parameters, all optional:
+#
+#   mode        'significant' (default) - a target count of SIGNIFICANT
+#                   digits, so the precision follows the magnitude:
+#                   98.2%, 1.11%, 0.107% all carry three.
+#               'decimals'  - a fixed count of decimal places: 99.950%.
+#               'integer'   - whole percent, no decimal point: 20%.
+#   digits      the count for the chosen mode (default 3 for significant,
+#               0 for integer; decimals mode requires it).
+#   width       the characters the rendered string may occupy, parentheses
+#               and the '%' sign included. Undefined means unbounded.
+#   floor       true to round DOWN (a progress figure must never read ahead
+#               of the work it reports); false (default) to round to
+#               nearest, which is what a share wants.
+#   parens      true to wrap the value in parentheses: (20%).
+#   floor_at    a value below which the surface declines to state a figure,
+#               reporting floor_text instead: a share of 0.4% shown as a
+#               whole percent would read '0%', which claims more than the
+#               measurement supports.
+#   floor_text  the string shown in place of a value below floor_at, e.g.
+#               '<1%'. Wrapped by parens like any other value.
+#   pad         right-align the figure within `width`, so a column of them
+#               lines up. Where parens are in use the padding goes inside
+#               them, keeping the brackets hard against the field edges.
+#
+# Degradation, when the value does not fit `width`: decimals are dropped one
+# at a time, never below a whole percent, and the '%' sign is always kept.
+# What a surface does when even the whole percent will not fit is the
+# surface's own decision - the caller inspects the returned length. The
+# formatter never exceeds `width` unless the integer part alone is wider,
+# which no percentage of a total can be beyond '100%'.
+sub format_percentage {
+    my ($value, %p) = @_;
+    return '' unless defined $value;
+
+    my $mode   = $p{mode} // 'significant';
+    my $parens = $p{parens} ? 1 : 0;
+    my $width  = $p{width};
+
+    # Decimal places the requested precision asks for, before any fitting.
+    my $decimals;
+    if ($mode eq 'integer') {
+        $decimals = 0;
+    } elsif ($mode eq 'decimals') {
+        $decimals = $p{digits} // 0;
+    } else {
+        # Significant digits: the integer part consumes as many of them as
+        # its own magnitude needs, and the remainder become decimals.
+        my $digits = $p{digits} // 3;
+        my $magnitude = $value >= 100 ? 3 : $value >= 10 ? 2 : $value >= 1 ? 1 : 0;
+        $decimals = $digits - $magnitude;
+        $decimals = 0 if $decimals < 0;
+    }
+
+    # Padding sits inside the brackets, so the inner budget is what the
+    # figure itself has to fit into.
+    my $inner_width = defined $width ? $width - ( $parens ? 2 : 0 ) : undef;
+    my $wrap = sub {
+        my $text = shift;
+        $text = sprintf( "%*s", $inner_width, $text )
+            if $p{pad} && defined $inner_width;
+        return $parens ? "($text)" : $text;
+    };
+
+    # Below the surface's floor the figure is not stated at all: the marker
+    # says the share is smaller than the precision can express, where a
+    # rounded rendering would assert a value the measurement does not carry.
+    return $wrap->( $p{floor_text} )
+        if defined $p{floor_at} && defined $p{floor_text} && $value < $p{floor_at};
+
+    # Rounding direction. Flooring is applied at the working precision so a
+    # progress figure never rounds up past the work actually done.
+    my $render = sub {
+        my $d = shift;
+        my $v = $value;
+        if ($p{floor}) {
+            my $scale = 10 ** $d;
+            $v = int( $v * $scale ) / $scale;
+        }
+        return sprintf( "%.*f%%", $d, $v );
+    };
+
+    my $figure = $render->($decimals);
+    if ( defined $inner_width ) {
+        while ( length($figure) > $inner_width && $decimals > 0 ) {
+            $decimals--;
+            $figure = $render->($decimals);
+        }
+    }
+
+    return $wrap->($figure);
+}
+
 
 # utility function for formating numbers to normal format
 sub normalize { $_[0] =~ s/\.0+$//r }
@@ -16779,11 +16878,50 @@ sub print_run_options {
     print "\n";
 }
 
+# Geometry of the run summary table. The label cell, the total cell and the
+# single space between them are one row-width budget: a value wider than the
+# total cell runs left into whatever slack the label leaves, and the rows stay
+# right-aligned to the same boundary down the table.
+my $summary_category_column_width   = 30;
+my $summary_occurrences_column_width = 10;
+my $summary_row_width = $summary_category_column_width + 1 + $summary_occurrences_column_width;
+
+# One row of the summary table carrying a count and, where a denominator is
+# given, that count's share of it: "633 (98.2%)", right-aligned to the table
+# boundary (docs/percentage-presentation.md). The share carries three
+# significant digits and gives them up one at a time when the row is too
+# tight; the count is never given up, so a row that still will not fit drops
+# the share entirely and shows the count alone.
+#
+# Returns the row's text without the table's outer padding, so a caller that
+# draws over the row (the category contribution bar) knows exactly which
+# characters are its own.
+sub share_row_text {
+    my ($label, $count, $denominator) = @_;
+
+    my $value = $count;
+    if ( $denominator ) {
+        my $fit   = $summary_row_width - length($label) - 1;
+        # What the share may occupy: the row's slack once the count and the
+        # space separating it from the share are spoken for.
+        my $slack = $fit - length($count) - 1;
+        my $share = format_percentage( $count / $denominator * 100,
+                                       mode => 'significant', digits => 3, parens => 1,
+                                       width => $slack );
+        $value = "$count $share";
+        $value = $count if length($value) > $fit;
+    }
+
+    my $gap = $summary_row_width - length($label) - length($value);
+    $gap = 1 if $gap < 1;
+    return $label . ( ' ' x $gap ) . $value;
+}
+
 sub print_summary_table {
     return if $omit_summary;
 
-    my $category_column_width = 30;
-    my $occurrences_column_width = 10;
+    my $category_column_width    = $summary_category_column_width;
+    my $occurrences_column_width = $summary_occurrences_column_width;
     my $table_padding = 2;
     my $padding = " " x $table_padding;
     my $column_padding = " " x 1;
@@ -16824,30 +16962,12 @@ sub print_summary_table {
     # Classified lines (#453): each row is shown when its outcome was declared
     # by a bound format or observed. The share is of all classified lines and
     # is omitted when no line was a success (failures would always read 100%).
-    # The value is right-aligned to the table boundary and may run left into
-    # the label column's slack; its precision is three significant digits
-    # (98.2%, 1.11%, 0.107%), reduced only when the row would not fit.
     {
         my $classified = $total_successes + $total_failures;
-        my $row_width  = $category_column_width + 1 + $occurrences_column_width;
         my $emit = sub {
             my ($label, $n) = @_;
-            my $value = $n;
-            if ($total_successes) {
-                my $pct   = $n / $classified * 100;
-                my $int_digits = $pct >= 100 ? 3 : $pct >= 10 ? 2 : $pct >= 1 ? 1 : 0;
-                my $decimals = 3 - $int_digits;
-                my $fit = $row_width - length($label) - 1;
-                while (1) {
-                    $value = sprintf( "%d (%.*f%%)", $n, $decimals, $pct );
-                    last if length($value) <= $fit || $decimals == 0;
-                    $decimals--;
-                }
-                $value = $n if length($value) > $fit;
-            }
-            my $gap = $row_width - length($label) - length($value);
-            $gap = 1 if $gap < 1;
-            push @summary_table, $padding . $label . ( ' ' x $gap ) . $value . "$padding\n";
+            push @summary_table,
+                $padding . share_row_text( $label, $n, $total_successes ? $classified : undef ) . "$padding\n";
         };
         $emit->( "SUCCESS CLASSIFIED", $total_successes ) if $cls_success_declared || $total_successes;
         $emit->( "FAILURE CLASSIFIED", $total_failures )  if $cls_failure_declared || $total_failures;
@@ -16896,7 +17016,11 @@ sub print_summary_table {
                 my $category_width = $category_column_width + 2;
                 my $occurrences_width = $occurrences_column_width - 2;
                 my $pct = $max_memory_usage > 0 ? ($size / $max_memory_usage) * 100 : 0;
-                my $pct_str = $pct < 1 ? "(<1%)" : sprintf("(%2.0f%%)", $pct);
+                # Whole percent in a fixed five-character parenthesised field;
+                # a structure holding less than one percent of the peak says so
+                # rather than rounding down to a flat 0%.
+                my $pct_str = format_percentage( $pct, mode => 'integer', width => 5, parens => 1,
+                                                 floor_at => 1, floor_text => '<1%', pad => 1 );
 
                 my $indented_label = sprintf(" %-25s %5s", $label, $pct_str);
                 push @summary_table, sprintf( "$padding%-${category_width}s %${occurrences_width}s$padding\n", $indented_label, format_bytes( $size, 'B', 0 ) );
