@@ -10,11 +10,13 @@
 # without one is unaffected.
 #
 # The descriptive names are longer than the raw ones, so this harness also
-# holds the column geometry: the name occupies a fixed-width cell and the
-# totals stay aligned down the table. The label is cut to that cell at render,
-# so a name that outgrew the column loses its tail rather than pushing the total
-# out of line and misaligning the file-details pane beside it. Reading the label
-# and the total at their exact offsets catches either outcome.
+# holds the row geometry: the name occupies a fixed-width cell at the left of
+# the row and the value — the total with its share of the lines included —
+# stays right-aligned to the row's boundary. The label is cut to its cell at
+# render, so a name that outgrew the column loses its tail rather than pushing
+# the value out of line and misaligning the file-details pane beside it.
+# Reading the label at the row's left edge and the value at its boundary
+# catches either outcome.
 #
 # The short raw name stays on the two surfaces where it is the contract: the
 # per-bucket legend (a horizontal budget shared with the bar graph) and the
@@ -138,30 +140,41 @@ capture_render() {
     fi
 }
 
-# A category row occupies a fixed-width cell: two leading spaces, the label
-# left-aligned in 30 columns, one space, the total right-aligned in 10. The
-# check reads those exact offsets, so it asserts the label AND the geometry
-# that keeps the totals aligned down the table: a label wider than its cell
-# would displace the total and fail here.
+# A category row occupies a fixed geometry: two leading spaces, then a
+# 41-character row carrying the label at its left edge and the value — the
+# total with its share of LINES INCLUDED, "2 (20.0%)" — right-aligned to the
+# row's boundary. The value is allowed to run left past the 30-character
+# label cell into whatever slack the label leaves, so the check anchors on
+# the row boundary rather than on a fixed total column; a label wider than
+# its cell would still displace the value and fail here.
+#
+# The share is asserted for shape, not for a number: the totals the callers
+# pass are what identify the row, and the share's denominator is a property
+# of the fixture as a whole rather than of the row. A value carrying no share
+# at all fails, which is what catches the share being dropped from the row.
 check_category_row() {
     "$PERL" -e '
         my ($render, $label, $total) = @ARGV;
-        my $label_cell = sprintf("%-30s", $label);
-        my $total_cell = sprintf("%10s", $total);
+        my $row_width = 41;
         open my $fh, "<", $render or die "cannot open $render: $!\n";
-        my ($label_seen, $found) = (0, 0);
+        my ($label_seen, $found, @seen) = (0, 0);
         while (my $line = <$fh>) {
-            next if length($line) < 45;
+            next if length($line) < 2 + $row_width;
             next unless substr($line, 0, 2) eq "  ";
-            my $got_label = substr($line, 2, 30);
-            next unless $got_label eq $label_cell;
+            my $row = substr($line, 2, $row_width);
+            next unless $row =~ /^\Q$label\E\s/;
             $label_seen = 1;
-            $found = 1 if substr($line, 32, 1) eq " " && substr($line, 33, 10) eq $total_cell;
+            ( my $value = $row ) =~ s/^\Q$label\E\s+//;
+            push @seen, $value;
+            # Right-aligned to the boundary: the substr above ends at it, so
+            # a value that reaches the end of $row is aligned by construction.
+            $found = 1 if $value =~ /^\Q$total\E \(\d+(?:\.\d+)?%\)$/;
         }
         close $fh;
-        if ($found) { print "row [$label] total [$total] present and aligned\n"; exit 0 }
+        if ($found) { print "row [$label] value [$total (<share>%)] present and right-aligned\n"; exit 0 }
         if ($label_seen) {
-            print "row [$label] is present but its total is not [$total] in the aligned total column\n";
+            print "row [$label] is present but its value is not [$total] with a share, right-aligned to the row boundary\n";
+            print "  saw: [$_]\n" for @seen;
             exit 1;
         }
         print "no category row labelled [$label] in the summary table\n";
@@ -170,18 +183,21 @@ check_category_row() {
 }
 
 # The descriptive name REPLACES the raw name; it is not shown in addition to
-# it. A row whose label cell is exactly the raw category name means the lookup
-# did not reach the render.
+# it. A row whose label is exactly the raw category name means the lookup did
+# not reach the render. Anchored the same way as check_category_row: the label
+# sits at the left edge of the row and the value is right-aligned to its
+# boundary, so the label is read as the text before the run of spaces.
 check_no_raw_category_row() {
     "$PERL" -e '
         my ($render, $raw) = @ARGV;
-        my $raw_cell = sprintf("%-30s", $raw);
+        my $row_width = 41;
         open my $fh, "<", $render or die "cannot open $render: $!\n";
         my $found = 0;
         while (my $line = <$fh>) {
-            next if length($line) < 45;
+            next if length($line) < 2 + $row_width;
             next unless substr($line, 0, 2) eq "  ";
-            $found = 1 if substr($line, 2, 30) eq $raw_cell;
+            my $row = substr($line, 2, $row_width);
+            $found = 1 if $row =~ /^\Q$raw\E\s+\d+(?: \(\d+(?:\.\d+)?%\))?$/;
         }
         close $fh;
         if ($found) {

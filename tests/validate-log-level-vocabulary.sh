@@ -102,23 +102,41 @@ assert_command() {
     fi
 }
 
-# A level appears as its own row in the category table. Absence means the
-# category gate discarded every line carrying it (HARNESS-DESIGN.md § Harnesses
-# must fail on missing anchors: a zero-match lookup is a hard failure).
+# A level appears as its own row in the category table, and that row carries a
+# count. Absence means the category gate discarded every line carrying the
+# level (HARNESS-DESIGN.md § Harnesses must fail on missing anchors: a
+# zero-match lookup is a hard failure).
+#
+# The row's value is the count followed by that count's share of the lines
+# included, "1 (16.7%)", right-aligned to the 41-character row boundary. The
+# count is what this harness reconciles against LINES INCLUDED, so it is read
+# out of the row rather than merely matched; the share is optional in the
+# pattern, because a row too tight to carry it drops the share and keeps the
+# count. Only the row itself is examined — the file-details pane is printed
+# on the same physical line, past the row's boundary.
 check_level_present() {
     "$PERL" -e '
         my ($render, $level) = @ARGV;
+        my $row_width = 41;
         open my $fh, "<", $render or die "cannot open $render: $!\n";
-        my $found = 0;
+        my $count;
         while (my $line = <$fh>) {
-            $found = 1 if $line =~ /^\s+\Q$level\E\s+\d+(?:\s|$)/;
+            next if length($line) < 2 + $row_width;
+            next unless substr($line, 0, 2) eq "  ";
+            my $row = substr($line, 2, $row_width);
+            $count = $1
+                if $row =~ /^\Q$level\E\s+(\d+)(?: \(\d+(?:\.\d+)?%\))?$/;
         }
         close $fh;
-        unless ($found) {
+        unless (defined $count) {
             print "level $level has no row in the category table: every line carrying it was discarded\n";
             exit 1;
         }
-        print "$level present in the category table\n";
+        unless ($count > 0) {
+            print "level $level has a row but its count is $count\n";
+            exit 1;
+        }
+        print "$level present in the category table with a count of $count\n";
         exit 0;
     ' "$1" "$2"
 }
