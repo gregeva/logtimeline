@@ -48,6 +48,33 @@ for my $k (qw(rules csv scenario file_kind expected_families v_precision)) {
 }
 $opt{profile_mode} //= '';
 
+# Which --profile modes label each row with its weekday. This mirrors the
+# format column of the fold mode table in ltl: a mode whose label format
+# carries %a writes "Wkd HH:MM", one that does not writes "HH:MM". It is a
+# table and not a name test because the two are not the same partition — the
+# singular weekday and weekend modes fold onto a 24-hour axis and carry no
+# weekday, so a name prefix would classify them with the plural forms.
+my %PROFILE_MODE_CARRIES_WEEKDAY = (
+    'day'           => 0,
+    'workday'       => 0,
+    'workday-alt'   => 0,
+    'weekday'       => 0,
+    'weekday-alt'   => 0,
+    'weekend'       => 0,
+    'weekend-alt'   => 0,
+    'week'          => 1,
+    'week-alt'      => 1,
+    'workweek'      => 1,
+    'workweek-alt'  => 1,
+    'weekdays'      => 1,
+    'weekdays-alt'  => 1,
+    'weekends'      => 1,
+    'weekends-alt'  => 1,
+);
+if ($opt{profile_mode} ne '' && !exists $PROFILE_MODE_CARRIES_WEEKDAY{ $opt{profile_mode} }) {
+    die "unknown --profile mode '$opt{profile_mode}': add it to %PROFILE_MODE_CARRIES_WEEKDAY\n";
+}
+
 my %active_family = map { $_ => 1 } split /,/, $opt{expected_families};
 
 # Parse the -V csv-output / precision block — locked observability surface
@@ -420,11 +447,11 @@ sub check_type_and_decimals {
     elsif ($type eq 'timestamp') {
         if ($opt{profile_mode} ne '') {
             # Under --profile the timestamp is a folded position, not a calendar
-            # date: week/workweek modes prefix the weekday on EVERY row (the CSV
-            # carries the full label, not the terminal's once-per-day blank), so
-            # the column reads coherently with the timeline. day/workday modes
-            # render time-of-day only.
-            my $is_week = $opt{profile_mode} =~ /^(week|workweek)/ ? 1 : 0;
+            # date: a mode that keeps each day's identity prefixes the weekday on
+            # EVERY row (the CSV carries the full label, not the terminal's
+            # once-per-day blank), so the column reads coherently with the
+            # timeline. A mode that folds onto a 24-hour axis renders time only.
+            my $is_week = $PROFILE_MODE_CARRIES_WEEKDAY{ $opt{profile_mode} };
             my $ok = $is_week
                 ? $val =~ /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{2}:\d{2}(:\d{2}(\.\d+)?)?$/
                 : $val =~ /^\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;

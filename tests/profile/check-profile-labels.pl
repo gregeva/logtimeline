@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 # check-profile-labels.pl — render-invariant checker for the --profile folded
-# timeline labels and the summary first/last-seen positions (Issue #256).
+# timeline labels and the summary first/last-seen positions
+# (Issues #256 and #451).
 #
 # The rendered terminal surface IS the system under test here (see
 # tests/HARNESS-DESIGN.md § Render-invariant harnesses): these are properties
@@ -10,20 +11,20 @@
 # Input must already have ANSI escapes stripped. The timestamp column is the
 # leading field of each bar-graph row, between the "timestamp legend ..."
 # header separator and the run of rows. Under --profile it renders as a folded
-# label: "HH:MM" (day/workday) or "Wkd HH:MM" (week/workweek, weekday shown
-# once per day boundary then blanked).
+# label: "HH:MM" (the singular modes) or "Wkd HH:MM" (the plural ones, weekday
+# shown once per day boundary then blanked).
 #
 # Usage:
 #   check-profile-labels.pl --render <file> --check <check> [--mode <mode>]
 #
 # Checks (each exits 0 on pass, non-zero with a diagnostic on first violation):
 #   time-only       every timeline label is HH:MM with NO weekday token
-#                    (day / workday modes)
+#                    (the singular modes)
 #   weekday-once     every included weekday appears exactly once across the
 #                    timeline, at a day boundary; rows within a day are
-#                    time-only (week / workweek modes). Requires --mode.
+#                    time-only (the plural modes). Requires --mode.
 #   first-weekday    the first (leftmost/topmost) weekday label equals the
-#                    mode's week-start weekday. Requires --mode.
+#                    mode's first kept day. Requires --mode.
 #   no-excluded      no excluded-day weekday token appears (work modes).
 #                    Requires --mode.
 #   summary-folded   the summary first/last-seen heading shows folded positions
@@ -52,17 +53,29 @@ chomp @lines;
 my @WD = qw(Mon Tue Wed Thu Fri Sat Sun);
 my %IS_WD = map { $_ => 1 } @WD;
 
-# Per-mode expectations (mirror features/256-time-axis-folding.md and the fold
-# mode table in ltl). included = the weekday set the mode keeps, in axis order;
-# excluded = the complementary set; first = the leftmost weekday label.
+# Per-mode expectations (mirror the fold mode table in ltl and the tables in
+# features/256-time-axis-folding.md and
+# features/451-weekday-weekend-profile-modes.md). included = the weekday set the
+# mode keeps, in axis order; excluded = the complementary set; first = the
+# leftmost weekday label, which is the mode's own first kept day (#451 D2) —
+# Mon for the ISO-anchored modes, Sun for their -alt forms, and Sat / Fri for
+# the two plural weekend modes, whose kept days render contiguously.
 my %MODE = (
-    'day'          => { week => 0 },
-    'workday'      => { week => 0, excluded => [qw(Sat Sun)] },
-    'workday-alt'  => { week => 0, excluded => [qw(Fri Sat)] },
-    'week'         => { week => 1, included => [qw(Mon Tue Wed Thu Fri Sat Sun)], first => 'Mon', excluded => [] },
-    'week-alt'     => { week => 1, included => [qw(Sun Mon Tue Wed Thu Fri Sat)], first => 'Sun', excluded => [] },
-    'workweek'     => { week => 1, included => [qw(Mon Tue Wed Thu Fri)], first => 'Mon', excluded => [qw(Sat Sun)] },
-    'workweek-alt' => { week => 1, included => [qw(Sun Mon Tue Wed Thu)], first => 'Sun', excluded => [qw(Fri Sat)] },
+    'day'           => { week => 0 },
+    'workday'       => { week => 0, excluded => [qw(Sat Sun)] },
+    'workday-alt'   => { week => 0, excluded => [qw(Fri Sat)] },
+    'weekday'       => { week => 0, excluded => [qw(Sat Sun)] },
+    'weekday-alt'   => { week => 0, excluded => [qw(Fri Sat)] },
+    'weekend'       => { week => 0, excluded => [qw(Mon Tue Wed Thu Fri)] },
+    'weekend-alt'   => { week => 0, excluded => [qw(Sun Mon Tue Wed Thu)] },
+    'week'          => { week => 1, included => [qw(Mon Tue Wed Thu Fri Sat Sun)], first => 'Mon', excluded => [] },
+    'week-alt'      => { week => 1, included => [qw(Sun Mon Tue Wed Thu Fri Sat)], first => 'Sun', excluded => [] },
+    'workweek'      => { week => 1, included => [qw(Mon Tue Wed Thu Fri)], first => 'Mon', excluded => [qw(Sat Sun)] },
+    'workweek-alt'  => { week => 1, included => [qw(Sun Mon Tue Wed Thu)], first => 'Sun', excluded => [qw(Fri Sat)] },
+    'weekdays'      => { week => 1, included => [qw(Mon Tue Wed Thu Fri)], first => 'Mon', excluded => [qw(Sat Sun)] },
+    'weekdays-alt'  => { week => 1, included => [qw(Sun Mon Tue Wed Thu)], first => 'Sun', excluded => [qw(Fri Sat)] },
+    'weekends'      => { week => 1, included => [qw(Sat Sun)], first => 'Sat', excluded => [qw(Mon Tue Wed Thu Fri)] },
+    'weekends-alt'  => { week => 1, included => [qw(Fri Sat)], first => 'Fri', excluded => [qw(Sun Mon Tue Wed Thu)] },
 );
 
 # Isolate the bar-graph timeline rows. They sit between the column header

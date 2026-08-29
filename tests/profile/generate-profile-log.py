@@ -23,11 +23,13 @@ exercise the weekday-once-per-boundary suppression. Per-weekday and total counts
 are computed and written to the manifest, so consumers never hardcode them.
 
 The month is January 2025 by default (31 days): its weekday counts are
-unequal (Fri occurs five times, Sat and Sun four), so the four work-modes have
-*distinct* expected dropped-day totals — workweek drops 16 (Sat+Sun), but
-workweek-alt drops 18 (Fri+Sat). That distinctness is deliberate: a bug that
-dropped the wrong day-set would still pass against a month where the two totals
-coincide. Override with --year / --month for other spans.
+unequal (Fri occurs five times, Sat and Sun four), so a mode and its -alt form
+have *distinct* expected day totals — the default calendar's weekend pair
+(Sat+Sun) and the Sunday-anchored one's (Fri+Sat) differ. That distinctness is
+deliberate: a bug that used the wrong day-set would still pass against a month
+where the two totals coincide. It separates both the modes that drop that pair
+(the work and weekday modes) and the ones that keep it (the weekend modes).
+Override with --year / --month for other spans.
 
 Usage:
   generate-profile-log.py <output-log-path> [--year Y] [--month M]
@@ -81,8 +83,10 @@ def build(year, month):
                 per_weekday[wd] += 1
 
     total = sum(per_weekday.values())
-    # Work-week day sets, by the same Mon=0..Sun=6 convention the modes use.
-    # workweek (default): Mon-Fri.  workweek-alt: Sun-Thu.
+    # The weekend pair under each calendar convention, by the same
+    # Mon=0..Sun=6 convention the modes use: Sat+Sun by default, Fri+Sat under
+    # the Sunday-anchored -alt calendar. The work and weekday modes drop this
+    # pair (keeping Mon-Fri / Sun-Thu); the weekend modes keep exactly it.
     weekend_default = per_weekday["Sat"] + per_weekday["Sun"]
     weekend_alt = per_weekday["Fri"] + per_weekday["Sat"]
 
@@ -96,14 +100,25 @@ def build(year, month):
         "per_weekday": per_weekday,
         "total_lines": total,
         # Dropped vs included counts the harness asserts per profile mode.
+        # The weekday modes keep the same days as their work counterparts; the
+        # weekend modes keep exactly the days those drop, so their included and
+        # dropped counts are the same two numbers the other way round.
         "expected": {
-            "day":          {"included": total, "dropped": 0},
-            "week":         {"included": total, "dropped": 0},
-            "week-alt":     {"included": total, "dropped": 0},
-            "workweek":     {"included": total - weekend_default, "dropped": weekend_default},
-            "workweek-alt": {"included": total - weekend_alt,     "dropped": weekend_alt},
-            "workday":      {"included": total - weekend_default, "dropped": weekend_default},
-            "workday-alt":  {"included": total - weekend_alt,     "dropped": weekend_alt},
+            "day":           {"included": total, "dropped": 0},
+            "week":          {"included": total, "dropped": 0},
+            "week-alt":      {"included": total, "dropped": 0},
+            "workweek":      {"included": total - weekend_default, "dropped": weekend_default},
+            "workweek-alt":  {"included": total - weekend_alt,     "dropped": weekend_alt},
+            "workday":       {"included": total - weekend_default, "dropped": weekend_default},
+            "workday-alt":   {"included": total - weekend_alt,     "dropped": weekend_alt},
+            "weekdays":      {"included": total - weekend_default, "dropped": weekend_default},
+            "weekdays-alt":  {"included": total - weekend_alt,     "dropped": weekend_alt},
+            "weekday":       {"included": total - weekend_default, "dropped": weekend_default},
+            "weekday-alt":   {"included": total - weekend_alt,     "dropped": weekend_alt},
+            "weekends":      {"included": weekend_default, "dropped": total - weekend_default},
+            "weekends-alt":  {"included": weekend_alt,     "dropped": total - weekend_alt},
+            "weekend":       {"included": weekend_default, "dropped": total - weekend_default},
+            "weekend-alt":   {"included": weekend_alt,     "dropped": total - weekend_alt},
         },
     }
     return lines, manifest

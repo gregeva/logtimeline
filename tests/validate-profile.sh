@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # validate-profile.sh — State-observability harness for time-axis folding
-# (--profile, Issue #256).
+# (--profile, Issues #256 and #451).
 #
 # This is a STATE-OBSERVABILITY harness (tests/HARNESS-DESIGN.md § Application-
 # observability contract): the system under test is internal computed state —
@@ -13,9 +13,14 @@
 # declaring, per mode, the expected samples_included / samples_dropped and the
 # total line count. The harness asserts the emitted -V values against that
 # manifest, so the expectations are the generator's declared truth rather than
-# numbers hardcoded here. The default month (January 2025) is chosen so the
-# four work-modes have distinct dropped-day totals (workweek drops 16,
-# workweek-alt drops 18) — a bug dropping the wrong day-set cannot pass.
+# numbers hardcoded here. The default month (January 2025) is chosen so that a
+# mode and its -alt form have distinct dropped-day totals — Friday occurs five
+# times, Saturday and Sunday four — so a bug dropping the wrong day-set cannot
+# pass on either the work/weekday side (Sat+Sun vs Fri+Sat dropped) or the
+# weekend side (the same pair kept instead).
+#
+# The weekend modes are the first where samples_dropped exceeds
+# samples_included: they keep two days of seven.
 #
 # Each assertion records, per HARNESS-DESIGN.md § Self-documenting assertions:
 #   - asserts:     the application invariant being tested
@@ -51,16 +56,18 @@ source "$SCRIPT_DIR/lib/colour-env.sh"
 # never inherited; issue #438).
 neutralize_colour_env
 
-PRODUCED_BY='emit_profile_verbose() in ltl (sample counts accumulated in read_and_process_logs() via fold_epoch(); included on the all-filters-passed path, dropped on the excluded-weekday path).'
-CONTRACT='Issue #256 + tests/HARNESS-DESIGN.md reserved-names list. The profile section name and field names (profile_active, mode, period_seconds, included_weekdays, samples_included, samples_dropped) are stability-contracted; renames are breaking. Expected values come from the generator manifest, the single source of truth for the fixture.'
+PRODUCED_BY='emit_profile_verbose() in ltl (the window and the weekday list are derived by profile_window_seconds() / profile_included_weekdays(); the sample counts accumulate in read_and_process_logs() via fold_epoch(), included on the all-filters-passed path, dropped on the excluded-weekday path).'
+CONTRACT='Issues #256 and #451 + tests/HARNESS-DESIGN.md reserved-names list. The profile section name and field names (profile_active, mode, profile_window_seconds, included_weekdays, samples_included, samples_dropped) are stability-contracted; renames are breaking. Expected values come from the generator manifest, the single source of truth for the fixture.'
 
-ALL_MODES=(day week week-alt workweek workweek-alt workday workday-alt)
+ALL_MODES=(day week week-alt workweek workweek-alt workday workday-alt
+           weekday weekday-alt weekdays weekdays-alt
+           weekend weekend-alt weekends weekends-alt)
 
 ONLY_MODE=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode) ONLY_MODE="$2"; shift 2 ;;
-        -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
     esac
 done
@@ -143,7 +150,12 @@ PY
 capture_section() {
     local mode="$1" outfile="$2"
     local raw="$TMP_ROOT/$mode.raw"
-    if ! "$LTL" --disable-progress -ni -V profile -pr "$mode" "$LOGFILE" \
+    # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+    # only the -V profile section is read, and the fold counts it reports are
+    # identical at any bucket size, so the month-long fixture runs at day
+    # buckets with no empty ones rather than allocating a fine time axis the
+    # assertions never look at.
+    if ! "$LTL" --disable-progress -ni -bs 1440 -oe -V profile -pr "$mode" "$LOGFILE" \
          > "$raw" 2>"$TMP_ROOT/$mode.err"; then
         echo "  FAIL  $current_mode :: ltl exited non-zero emitting -V profile" >&2
         sed 's/^/        /' "$TMP_ROOT/$mode.err" >&2
@@ -200,23 +212,35 @@ assert_field() {
     fi
 }
 
-# Expected included-weekday string per mode (calendar order: Mon-first default,
-# Sun-first for -alt; work modes drop the weekend pair). These mirror the fold
-# mode table in features/256-time-axis-folding.md.
+# Expected included-weekday string per mode, in the mode's own axis order (its
+# first kept day first). These mirror the fold mode table in ltl and the tables
+# in features/256-time-axis-folding.md and
+# features/451-weekday-weekend-profile-modes.md. An unlisted mode is a hard
+# failure, never an empty expectation that would assert nothing.
 expected_weekdays() {
     case "$1" in
-        day|week)        echo "Mon,Tue,Wed,Thu,Fri,Sat,Sun" ;;
-        week-alt)        echo "Sun,Mon,Tue,Wed,Thu,Fri,Sat" ;;
-        workweek|workday)        echo "Mon,Tue,Wed,Thu,Fri" ;;
-        workweek-alt|workday-alt) echo "Sun,Mon,Tue,Wed,Thu" ;;
-        *) echo "" ;;
+        day|week)                             echo "Mon,Tue,Wed,Thu,Fri,Sat,Sun" ;;
+        week-alt)                             echo "Sun,Mon,Tue,Wed,Thu,Fri,Sat" ;;
+        workweek|workday|weekdays|weekday)    echo "Mon,Tue,Wed,Thu,Fri" ;;
+        workweek-alt|workday-alt|weekdays-alt|weekday-alt) echo "Sun,Mon,Tue,Wed,Thu" ;;
+        weekend|weekends)                     echo "Sat,Sun" ;;
+        weekend-alt|weekends-alt)             echo "Fri,Sat" ;;
+        *) echo "ERROR: no expected_weekdays entry for mode '$1'" >&2; exit 1 ;;
     esac
 }
 
-expected_period() {
+# Expected profile_window_seconds per mode: the length of the window the profile
+# renders, which is the number of days the mode keeps times 86400. A singular
+# mode collapses its kept days onto one 24-hour axis, so its window is a day
+# however many days it draws from; a plural mode keeps each kept day's identity,
+# so its window is the whole contiguous run (#451 D3).
+expected_window() {
     case "$1" in
-        day|workday|workday-alt) echo 86400 ;;
-        *) echo 604800 ;;
+        day|workday|workday-alt|weekday|weekday-alt|weekend|weekend-alt) echo 86400 ;;
+        weekends|weekends-alt)                            echo 172800 ;;
+        workweek|workweek-alt|weekdays|weekdays-alt)      echo 432000 ;;
+        week|week-alt)                                    echo 604800 ;;
+        *) echo "ERROR: no expected_window entry for mode '$1'" >&2; exit 1 ;;
     esac
 }
 
@@ -239,17 +263,17 @@ run_mode() {
     assert_field section "$section" key mode expected "$mode" \
         asserts 'The section echoes the resolved profile mode, matching the --profile argument.'
 
-    assert_field section "$section" key period_seconds expected "$(expected_period "$mode")" \
-        asserts 'The fold period is 86400s for day/workday modes and 604800s for week/workweek modes.'
+    assert_field section "$section" key profile_window_seconds expected "$(expected_window "$mode")" \
+        asserts 'profile_window_seconds is the length of the window the profile renders: the days the mode keeps times 86400. A singular mode reports 86400 whatever days it draws from; a plural mode reports its whole contiguous run — 604800 for week, 432000 for the Mon-Fri and Sun-Thu five-day modes, 172800 for the two-day weekend modes. It is not the internal fold modulus, which no user surface exposes.'
 
     assert_field section "$section" key included_weekdays expected "$(expected_weekdays "$mode")" \
-        asserts 'The included weekday set matches the mode: all seven for day/week, Mon-Fri for workweek/workday, Sun-Thu for the -alt work modes; listed in calendar order (Mon-first default, Sun-first for -alt).'
+        asserts 'The included weekday set matches the mode — all seven for day/week, Mon-Fri for the work-week and weekdays modes, Sun-Thu for their -alt forms, Sat+Sun for the weekend modes and Fri+Sat for theirs — listed in the mode axis order, first kept day first.'
 
     assert_field section "$section" key samples_included expected "$exp_incl" \
-        asserts 'samples_included equals the count of lines on included weekdays — equal to the fixture total for day/week, and total minus the dropped weekend pair for the work modes.'
+        asserts 'samples_included equals the count of lines on included weekdays — the fixture total for day/week, and the total minus the days the mode drops for every mode that keeps a subset.'
 
     assert_field section "$section" key samples_dropped expected "$exp_drop" \
-        asserts 'samples_dropped equals the count of lines on weekdays the mode excludes: zero for day/week, the Sat+Sun pair for default work modes, the Fri+Sat pair for -alt work modes.'
+        asserts 'samples_dropped equals the count of lines on weekdays the mode excludes: zero for day/week, the Sat+Sun pair for the default work and weekday modes, the Fri+Sat pair for their -alt forms, and the five kept-out days for the weekend modes (where dropped exceeds included).'
 
     # Arithmetic invariant: included + dropped reconciles to the fixture total.
     # The fixture applies no exclude/duration filters, so every matched line is

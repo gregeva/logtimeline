@@ -31,7 +31,7 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 | `-bs, --bucket-size <N>` | Set the width of each time bucket on the timeline (default unit: minutes; `-s` switches the unit to seconds, `-ms` switches it to milliseconds) |
 | `-s, --seconds` | Interpret bucket size as seconds instead of minutes |
 | `-ms, --milliseconds` | Switch the `-bs <N>` bucket width to milliseconds (and render timestamps with `.fff` precision). Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured. |
-| `-pr, --profile <mode>` | Fold the timeline onto a single day or week so every date overlays into one profile view — e.g. what a typical Tuesday at 09:15 looks like across weeks of logs. `day` and `workday` collapse to a 24-hour axis (time-of-day labels only); `week` and `workweek` collapse to a weekday axis (the weekday is shown once per day, in bold). `workday`/`workweek` keep only work days (Mon–Fri); the `-alt` variants use a Sunday-anchored week and a Sun–Thu work week. Composes with `-bs` (granularity within the period) and the `-st`/`-et`, `-i`/`-e` filters, which apply to the original timestamps before folding. Modes: `day`, `week`, `week-alt`, `workweek`, `workweek-alt`, `workday`, `workday-alt`. |
+| `-pr, --profile <mode>` | Fold the timeline onto one representative period so every date overlays into a single profile view — e.g. what a typical Tuesday at 09:15 looks like across weeks of logs. The singular modes (`day`, `workday`, `weekday`, `weekend`) stack their days onto one 24-hour axis with time-of-day labels; the plural ones (`week`, `workweek`, `weekdays`, `weekends`) keep each day's identity on the axis, the weekday shown once per day in bold. Each mode has an `-alt` variant that uses the Sunday-anchored calendar. Days a mode does not keep are dropped before folding and contribute no samples. Composes with `-bs` (granularity within the period) and the `-st`/`-et`, `-i`/`-e` filters, which apply to the original timestamps before folding. Run `ltl --help profile` for which days each mode keeps and how to choose one. |
 | `-st, --start <timestamp>` | Only process log lines at or after this time. A full date (`YYYY-MM-DD HH:MM:SS[.mmm]`) is an absolute cutoff; a bare time (`HH:MM[:SS[.mmm]]`) is a time-of-day window applied to every day, regardless of how the logs are split across files. A bare-time start later than the end wraps past midnight. |
 | `-et, --end <timestamp>` | Only process log lines before this time. Same forms as `-st`: a full date is an absolute cutoff; a bare time applies to every day. |
 | `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when it cannot be determined from the format or the file name (`ns`, `us`, `ms`, `s`) |
@@ -49,6 +49,10 @@ ltl -ms -bs 100 -st "2025-05-05 08:15:00.000" -et "2025-05-05 08:20:00.000" app.
 ltl -bs 60 -pr week access.log
 # Workday-morning profile: only the 09:00–11:00 window, work days, folded onto one 24h axis
 ltl -bs 15 -pr workday -st 09:00 -et 11:00 access.log
+# Weekend profile: Saturday and Sunday only, folded onto one 24h axis
+ltl -bs 60 -pr weekend access.log
+# Weekend profile keeping each day apart: a Sat→Sun axis, so the two days can be compared
+ltl -bs 60 -pr weekends access.log
 ```
 
 ### Filtering & Highlighting
