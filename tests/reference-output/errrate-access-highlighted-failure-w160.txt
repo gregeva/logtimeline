@@ -20,7 +20,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-05-07 00:00 and 2025-05-07 00:00
   ─────────────────────────────────────────   
-  5xx Server error                        2      [√] /Users/gregeva/Documents/GitHub/logtimeline-wt/453/tests/fixtures/http-status-families.txt           [1]
+  5xx Server error                        2      [√] tests/fixtures/http-status-families.txt                                                              [1]
   4xx Client error, highlighted           1   
   4xx Client error                        1      Log Formats
   3xx Redirection                         2   

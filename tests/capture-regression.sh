@@ -275,7 +275,7 @@ run_test "hl-filelegend-two-files-w160" "$LTL" $HL_COMMON --terminal-width 160 -
 # corrected rate (a highlighted 404 still counts: 4/d, not 3/d; a
 # highlighted ERROR on a diagnostics log: 2/d, not 1/d).
 # ---------------------------------------------------------------------------
-FIXTURES="$SCRIPT_DIR/fixtures"
+FIXTURES="tests/fixtures"
 run_test "errrate-access-unhighlighted-w160"          "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d "$FIXTURES/http-status-families.txt"
 run_test "errrate-access-highlighted-failure-w160"    "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d -h store/missing "$FIXTURES/http-status-families.txt"
 run_test "errrate-diagnostics-highlighted-failure-w160" "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d -h ERROR "$FIXTURES/log-level-vocabulary.txt"
