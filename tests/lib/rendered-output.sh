@@ -65,15 +65,32 @@ assert_no_soft_wrap() {
         binmode(STDOUT, ":encoding(UTF-8)");
         my ($lib, $file, $width) = @ARGV;
         open my $fh, "<:encoding(UTF-8)", $file or die "cannot open $file: $!\n";
+
+        # Name the surface an offending line belongs to, and the sub that
+        # renders it, so the reader is not left counting lines into a capture
+        # to find out what overflowed. The reader must be able to act on the
+        # failure without opening the capture at all
+        # (HARNESS-DESIGN.md section Self-documenting assertions).
+        my $surface = "unclassified";
+        my $producer = "the layout engine in ltl";
         my ($n, @bad);
         while (my $line = <$fh>) {
             $n++;
-            my $w = display_width($line);
-            next if $w <= $width;
             (my $plain = $line) =~ s/\e\[[0-9;]*m//g;
             chomp $plain;
-            push @bad, sprintf("line %d is %d columns (over by %d): %s",
-                               $n, $w, $w - $width, substr($plain, 0, 60));
+
+            if    ($plain =~ /,:: ltl ::. log timeline/)  { $surface = "run banner";        $producer = "the banner block in ltl (fixed width, does not read --terminal-width)" }
+            elsif ($plain =~ /^\s*timestamp\s+legend/)    { $surface = "timeline";          $producer = "print_bar_graph() in ltl" }
+            elsif ($plain =~ /^command-line options:/)    { $surface = "run options echo";  $producer = "print_run_options() in ltl" }
+            elsif ($plain =~ /TOP (OVERALL|HIGHLIGHTED) MESSAGES/) { $surface = "messages table"; $producer = "print_message_summary() in ltl" }
+            elsif ($plain =~ /^\s*Category\s+Total/)      { $surface = "run summary";       $producer = "print_summary_table() in ltl" }
+            elsif ($plain =~ /^\s*THREADPOOLS/)           { $surface = "threadpool table";  $producer = "print_summary_table() in ltl" }
+
+            my $w = display_width($line);
+            next if $w <= $width;
+            push @bad, sprintf("line %d is %d columns (over by %d) in the %s [%s]: %s",
+                               $n, $w, $w - $width, $surface, $producer,
+                               substr($plain, 0, 52));
         }
         close $fh;
         print "$_\n" for @bad;
@@ -86,10 +103,13 @@ assert_no_soft_wrap() {
         echo "        asserts:     no line the tool prints exceeds the terminal width, so the"
         echo "                     reader can rely on character placement — a line that wraps"
         echo "                     displaces every line below it and every column with them"
-        echo "        produced_by: the layout engine in ltl (@column_layout width allocation),"
-        echo "                     and any renderer that emits a line of its own"
+        echo "        produced_by: the surface and its rendering sub are named per offending"
+        echo "                     line below; width is allocated by the layout engine in ltl"
+        echo "                     (@column_layout)"
         echo "        contract:    features/column-layout-refactor.md section Minimum supported"
         echo "                     terminal width (100 columns)"
+        echo "        capture:     $capture"
+        echo "        rendered at: --terminal-width $width"
         while IFS= read -r _line; do printf '        %s\n' "$_line"; done <<< "$report"
     } >&2
     return 1

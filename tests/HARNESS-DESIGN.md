@@ -42,6 +42,16 @@ XFAIL with its issue number. A registered scenario that *stops* overflowing is
 reported as XPASS, so a fix cannot land silently and leave a stale entry.
 Adding an entry requires a filed issue.
 
+**A failure names its own focus area.** `assert_no_soft_wrap` classifies each
+offending line by the surface it belongs to and the sub that renders it — *"line
+19 is 154 columns (over by 54) in the timeline [print_bar_graph() in ltl]"* — and
+surfaces the capture path and the width it rendered at alongside the three
+mandatory fields. A soft-wrap failure spans surfaces with different producers, so
+a single `produced_by` naming one sub would be wrong for most of the lines
+reported; the per-line attribution is what lets the reader act without opening
+the capture or re-running anything. This is the § *Self-documenting assertions*
+rule applied to a check whose failures are not confined to one renderer.
+
 **Three traps, each of which produced a wrong answer while this was built:**
 decode UTF-8 before measuring (the box-drawing rules are multi-byte, and
 counting bytes reports a 160-column rule as 480); `38;5;0` is a black
