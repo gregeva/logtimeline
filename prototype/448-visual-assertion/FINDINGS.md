@@ -44,26 +44,43 @@ surfaces a feature happens to touch.
 
 Running the check found real defects in the shipped tool:
 
-| Terminal width | Lines that wrap |
+| Terminal width | Lines that wrap (default view) |
 |---|---|
-| 80 | 10 (7 excluding the banner) |
-| 90 | 7 (5) |
+| 90 (the supported floor) | 7 (5 excluding the banner) |
 | 100 | 4 |
 | 110 | 2 |
+| 115 | 1 |
 | 120 and above | 0 |
 
-Two distinct causes:
+**That table is the default view only, and measuring one view was itself the
+mistake.** With `-hm` the heatmap emits 144 columns at width 90, 154 at 100,
+**174 at 120**, and exactly 160 at 160 — so it overflows at every width measured
+and happens to fit precisely at the width every golden is captured at. Any claim
+about rendering must name the view it was measured on, and the check must run
+across the views the tool can produce.
+
+Three distinct causes:
 
 1. **The banner is fixed at 94 columns** and ignores `--terminal-width`, so it
    wraps on any terminal narrower than that.
-2. **Messages-table rows overflow by 1–3 columns** at widths 100–110 — a layout
-   miscalculation, small in size and total in effect.
+2. **Messages-table rows overflow by 1–7 columns** at every width from 90 to
+   115 — a layout miscalculation, small in size and total in effect.
+3. **The heatmap** emits rules and rows far wider than the terminal at every
+   width measured, by up to 54 columns.
 
 Neither was caught by anything: the regression goldens are all captured at width
 160, where the output is clean, and the hidden `--validate-layout` option emits
 no layout report.
 
-Filed as a defect. The check itself is `no-soft-wrap.pl`.
+Filed as #497. A third defect found in the same investigation — the
+messages-table headings degrade to unreadable stubs (`O.`, `.`, `.`) and stop
+aligning with their columns, visible even at width 160 — is filed separately as
+#498, since the heading line fits and so is not a wrapping failure.
+
+The architect has set the **minimum supported terminal width at 90 columns**,
+which is what makes this assertable: the check runs from 90 upward.
+
+The check itself is `no-soft-wrap.pl`.
 
 **Measurement traps, each of which gave a wrong answer while this was written:**
 UTF-8 must be decoded before measuring (the box-drawing rules are multi-byte, so
