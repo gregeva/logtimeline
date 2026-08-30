@@ -564,6 +564,7 @@ my %rate_csv_suffix = ( 's' => '_sec', 'm' => '_min', 'h' => '_hr', 'd' => '_day
 
 my $pause_output = 0;
 my $omit_values = 0;
+my $precise_values = 0;
 my ( $sort_type, $sort_key, $sort_ascending ) = ( "occurrences", "occurrences", 0 );
 # Unsatisfiable statistic sort (#418). Resolved once from the -so operand at parse
 # time and consulted at each of the three detection points (option parsing, before
@@ -2209,7 +2210,7 @@ sub _classify_argv_provenance {
                 'exclude|e', 'include|i', 'highlight|h',
                 'exclude-file|ef', 'include-file|if', 'highlight-file|hf',
                 'verbose|V', 'top-messages|n',
-                'omit-values|ov', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
+                'omit-values|ov', 'precise-values|pv', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
                 'recursive|r',
                 'omit-summary|osum', 'omit-rate|or', 'omit-durations|od',
                 'summary-bar-off|sbo', 'summary-bar-mono|sbm',
@@ -2317,6 +2318,7 @@ sub emit_runtime_config_verbose {
         'end'                               => $filter_range_end,
         'top-messages'                      => $top_n_messages,
         'omit-values'                       => $omit_values,
+        'precise-values'                    => $precise_values,
         'omit-stats'                        => $omit_stats,
         'omit-empty'                        => $omit_empty,
         'no-index'                          => $no_index,
@@ -3465,7 +3467,7 @@ sub bin_consolidation_notice {
     return unless ($message_stats_capture_mode // 'raw') eq 'bin';
 
     my $detail = $message_stats_collapse_projections > 0
-        ? 'consolidation combined ' . format_number($message_stats_collapse_projections)
+        ? 'consolidation combined ' . format_number($message_stats_collapse_projections, 'medium')
           . ' message histograms onto shared bucket geometries'
         : 'consolidated rows combine each absorbed message histogram onto a shared bucket geometry';
     print STDERR "Note: $detail, so their percentiles are approximate"
@@ -7314,6 +7316,7 @@ sub print_help {
     # Recording & Processing
     $out .= help_subheading("Recording & Processing");
     $out .= help_opt("-ov,  --omit-values",           "Hide the per-bucket numeric values on the bar graph");
+    $out .= help_opt("-pv,  --precise-values",        "Show exact category totals in the legend, unshortened");
     $out .= help_opt("-os,  --omit-stats",            "Deprecated: use -od, --omit-durations to skip capturing durations, or -hst, --hide-stats to hide the statistics panel");
     $out .= help_opt("-oe,  --omit-empty",            "Skip time buckets that contain zero log entries");
     $out .= help_opt("-ni,  --no-index",              "Do not read or update ltl-index.csv, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it");
@@ -10092,15 +10095,15 @@ sub progress_line_text {
     if (@progress_history >= 2) {
         my $time_diff  = $progress_history[-1][0] - $progress_history[0][0];
         my $lines_diff = $progress_history[-1][1] - $progress_history[0][1];
-        $rate_segment = ", " . format_number( $lines_diff / $time_diff ) . " lines/sec"
+        $rate_segment = ", " . format_number( $lines_diff / $time_diff, 'medium' ) . " lines/sec"
             if $time_diff > 0;
     }
     my $total_segment = $progress_file_count >= 2
-        ? ", " . format_number($total_lines_read) . " total"
+        ? ", " . format_number($total_lines_read, 'medium') . " total"
         : "";
 
     my $prefix = "Processing$pct_segment$counter_segment line "
-               . format_number( $line_number // 0 ) . "$total_segment$rate_segment: ";
+               . format_number( $line_number // 0, 'medium' ) . "$total_segment$rate_segment: ";
 
     # The filename is the variable-length element, so it absorbs the fit: it is
     # shortened to whatever the terminal leaves, and where even a shortened name
@@ -10108,7 +10111,7 @@ sub progress_line_text {
     my $room = $terminal_width - length($prefix) - 1;   # -1 safety margin
     if ( $room < 10 && $rate_segment ne "" ) {
         $prefix = "Processing$pct_segment$counter_segment line "
-                . format_number( $line_number // 0 ) . "$total_segment: ";
+                . format_number( $line_number // 0, 'medium' ) . "$total_segment: ";
         $room = $terminal_width - length($prefix) - 1;
     }
     return "" if $room <= 0;
@@ -10123,8 +10126,13 @@ sub progress_line_text {
     return $prefix . $shown;
 }
 
+sub legend_category_total {
+    my ($occurrences) = @_;
+    return $precise_values ? $occurrences : format_number($occurrences, 'short');
+}
+
 sub format_number {
-    my ($value, $space, $decimals) = @_;
+    my ($value, $format, $space, $decimals) = @_;
     my %units = (
         '1'  => 1,
         'k' => 1000,
@@ -10133,9 +10141,21 @@ sub format_number {
         'Tril' => 1000**4,
     );
 
+    # Unit vocabulary per format tier. 'medium' is the abbreviation set used
+    # across the tool's numeric surfaces; 'short' is the single-letter
+    # engineering prefix, for surfaces where width is at a premium.
+    my %unit_names = (
+        '1'    => { short => '',  medium => '',     long => '' },
+        'k'    => { short => 'k', medium => 'k',    long => ' thousand' },
+        'Mil'  => { short => 'M', medium => 'Mil',  long => ' million' },
+        'Bil'  => { short => 'B', medium => 'Bil',  long => ' billion' },
+        'Tril' => { short => 'T', medium => 'Tril', long => ' trillion' },
+    );
+
     my @unit_order = ('1', 'k', 'Mil', 'Bil', 'Tril');
     my $formatted_value = $value;
-    my $formatted_unit = '';
+    my $formatted_unit = '1';
+    $format = "medium" if !defined $format;
     $decimals = 1 if !defined $decimals;
 
     foreach my $u (@unit_order) {                  # Determine the most relevant unit
@@ -10147,12 +10167,19 @@ sub format_number {
         }
     }
 
-    $formatted_value = sprintf("%.${decimals}f%s%s", $formatted_value, defined($space) ? " " : "", $formatted_unit eq "1" ? "" : $formatted_unit );
-    $formatted_value =~ s/\.0+(?=\s|$)//;             # remove trailing .0 if followed by space or end of string
+    my $unit_name = $unit_names{$formatted_unit}{$format};                                   # Get the appropriate unit name based on format
+    $unit_name =~ s/s$// if $formatted_value == 1 && $format eq 'long';                      # Singular units for long format
+
+    # Trailing fractional zeros carry no significance, so they are stripped from
+    # the number before the unit is appended: stripping afterwards cannot see a
+    # ".0" that a unit suffix follows, which is what left "1.0k" in place of "1k".
+    $formatted_value = sprintf("%.${decimals}f", $formatted_value);
+    $formatted_value =~ s/\.0+$//;
+
+    $formatted_value .= (defined($space) ? " " : "") . $unit_name;
 
     return $formatted_value;
 }
-
 sub format_time {
     my ($value, $unit, $format, $space) = @_;
     my %units = (
@@ -10856,6 +10883,7 @@ sub adapt_to_command_line_options {
         'verbose|V:s@' => \@verbose_args,   # Issue #226: optional, repeatable section name; bare -V = all sections
         'top-messages|n=i' => \$top_n_messages,
         'omit-values|ov' => \$omit_values,
+        'precise-values|pv' => \$precise_values,
         'omit-stats|os' => \$omit_stats,
         'omit-empty|oe' => \$omit_empty,
         'no-index|ni' => \$no_index,
@@ -13050,7 +13078,7 @@ sub read_and_process_logs {
     # by far more than the thresholds explain, with no indication why.
     for my $metric (qw(duration bytes count)) {
         next unless $numeric_filter_no_metric{$metric};
-        print STDERR "Note: " . format_number( $numeric_filter_no_metric{$metric} )
+        print STDERR "Note: " . format_number( $numeric_filter_no_metric{$metric}, 'medium' )
             . " lines carried no $metric value and were excluded by the $metric filter"
             . " (numeric filters only keep lines that carry the filtered metric)\n";
     }
@@ -13060,7 +13088,7 @@ sub read_and_process_logs {
     # tree the pattern describes unless the gap is reported.
     if (@unreadable_directories) {
         my $count = scalar @unreadable_directories;
-        print STDERR "Note: " . format_number($count)
+        print STDERR "Note: " . format_number($count, 'medium')
             . ( $count == 1 ? " directory" : " directories" )
             . " could not be read and " . ( $count == 1 ? "was" : "were" )
             . " skipped during recursive file selection: "
@@ -15305,14 +15333,14 @@ sub normalize_data_for_output {
             next if $category_bucket =~ /^(err|msg)-rate$/ && $log_occurrences{$bucket}{'err-rate'}{occurrences} == 0 && $log_occurrences{$bucket}{'msg-rate'}{occurrences} == 0;
 
             if( $category_bucket =~ /-HL$/ ) {
-                $title_length = length("$occurrences ");
+                $title_length = length(legend_category_total($occurrences) . " ");
             } elsif( $category_bucket =~ /^err-rate$/ ) {
-                $title_length = length(format_number( $occurrences ) . ":");
+                $title_length = length(format_number( $occurrences, 'medium' ) . ":");
                 $title_length += length(" ") if !$omit_values;                              # need to add the spacing between values and rate if both will be printed
             } elsif( $category_bucket =~ /^msg-rate$/ ) {
-                $title_length = length( format_number( $occurrences ) . "$rate_suffix{$rate_unit} ");
+                $title_length = length( format_number( $occurrences, 'medium' ) . "$rate_suffix{$rate_unit} ");
             } else {
-                $title_length = length("$category_bucket: $occurrences ");
+                $title_length = length("$category_bucket: " . legend_category_total($occurrences) . " ");
             }
             $bucket_legend_length += $title_length;
             $output_columns{$category_bucket} = 1 if !exists $output_columns{$category_bucket};
@@ -15542,17 +15570,17 @@ sub format_heatmap_value {
     } elsif ($metric eq 'bytes') {
         return format_bytes($value, 'B');
     } elsif ($metric eq 'count') {
-        return format_number($value);
+        return format_number($value, 'medium');
     } elsif (defined $heatmap_udm_config && ($metric eq $heatmap_udm_config->{name} || $metric eq $heatmap_udm_config->{base_name})) {
         my $ut = $heatmap_udm_config->{unit_type};
         return $ut eq 'time'  ? format_time($value, 'ms') :
                $ut eq 'bytes' ? format_bytes($value, 'B') :
-                                format_number($value);
+                                format_number($value, 'medium');
     } elsif (my ($hcfg) = grep { $_->{name} eq $metric } @histogram_udm_configs) {
         my $ut = $hcfg->{unit_type};
         return $ut eq 'time'  ? format_time($value, 'ms') :
                $ut eq 'bytes' ? format_bytes($value, 'B') :
-                                format_number($value);
+                                format_number($value, 'medium');
     } else {
         return $value;
     }
@@ -16064,23 +16092,25 @@ sub print_bar_graph {
                     if( $category_bucket =~ /(-HL|err-rate|msg-rate)$/ ) {
                         if( $category_bucket =~ /^err-rate$/ ) {
                             $rate_metrics .= " " if !$omit_values;
-                            $rate_metrics .= "${color}" . format_number( $occurrences ) . "$colors{'NC'}";
+                            $rate_metrics .= "${color}" . format_number( $occurrences, 'medium' ) . "$colors{'NC'}";
                             $rate_metrics .= "$colors{'bright-black'}:$colors{'NC'}";
                             $legend_length_bucket += length( " " ) if !$omit_values;
-                            $legend_length_bucket += length( format_number( $occurrences ) . ":" );
+                            $legend_length_bucket += length( format_number( $occurrences, 'medium' ) . ":" );
                         } elsif( $category_bucket =~ /^msg-rate$/ ) {
-                            $rate_metrics .= "${color}" . format_number( $occurrences ) . "$colors{'NC'}";
+                            $rate_metrics .= "${color}" . format_number( $occurrences, 'medium' ) . "$colors{'NC'}";
                             $rate_metrics .= "$colors{'bright-black'}$rate_suffix{$rate_unit}$colors{'NC'} ";
-                            $legend_length_bucket += length( format_number( $occurrences ) . "$rate_suffix{$rate_unit} " );
+                            $legend_length_bucket += length( format_number( $occurrences, 'medium' ) . "$rate_suffix{$rate_unit} " );
                         } else {
-                            $log_details .= "${color}$occurrences$colors{'NC'}" . " " if $category_bucket =~ /-HL$/;
-                            $legend_length_bucket += length("$occurrences ");
+                            my $hl_total = legend_category_total($occurrences);
+                            $log_details .= "${color}$hl_total$colors{'NC'}" . " " if $category_bucket =~ /-HL$/;
+                            $legend_length_bucket += length("$hl_total ");
                         }
                     } elsif( $occurrences < 1 ) {					 		# don't include the empty bucket who's purpose is to normalize the buckets represented
                         next;
                     } else {
-                        $log_details .= "$color$category_bucket: $occurrences$colors{'NC'} ";
-                        $legend_length_bucket += length("$category_bucket: $occurrences ");
+                        my $cat_total = legend_category_total($occurrences);
+                        $log_details .= "$color$category_bucket: $cat_total$colors{'NC'} ";
+                        $legend_length_bucket += length("$category_bucket: $cat_total ");
                     }
 
                     $output_columns{$category_bucket} = $occurrences;
@@ -16180,7 +16210,7 @@ sub print_bar_graph {
                         } elsif( $key =~ /^bytes$/i ) {
                             $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
                         } elsif( $key =~ /^count$/i ) {
-                            $trend_value = " " . format_number( $log_stats{$bucket}{$key}, ' ', 2);
+                            $trend_value = " " . format_number( $log_stats{$bucket}{$key}, 'medium', ' ', 2);
                         } elsif( $key =~ /^udm_(.+)$/ ) {
                             my $metric_name = $1;
                             my ($config) = grep { $_->{name} eq $metric_name } @udm_configs;
@@ -16193,14 +16223,14 @@ sub print_bar_graph {
                                 } elsif ($unit_type eq 'bytes') {
                                     $trend_value = " " . format_bytes($log_stats{$bucket}{$key}, 'B');
                                 } else {
-                                    $trend_value = " " . format_number($log_stats{$bucket}{$key}, ' ', 2);
+                                    $trend_value = " " . format_number($log_stats{$bucket}{$key}, 'medium', ' ', 2);
                                     $trend_value .= $rate_suffix{$rate_unit}
                                         if $config->{aggregation} =~ /^(rate|drate)$/;
                                 }
                             }
                         } else {
                             my $decimals = $col_w > 10 ? 2 : ($col_w > 8 ? 1 : 0);
-                            $trend_value = defined $log_stats{$bucket}{$key} ? " " . format_number( $log_stats{$bucket}{$key}, ' ', $decimals) : "";
+                            $trend_value = defined $log_stats{$bucket}{$key} ? " " . format_number( $log_stats{$bucket}{$key}, 'medium', ' ', $decimals) : "";
                         }
 
                         # Render the metric bar using color from column layout
@@ -16717,7 +16747,7 @@ sub render_histogram_row {
     if ($has_tick) {
         my $pct_val = $y_ticks->{$row}{pct};
         my $count_val = int($max_bucket * $y_ticks->{$row}{count_fraction} + 0.5);
-        my $count_str = format_number($count_val, undef, 0);  # No space, 0 decimals
+        my $count_str = format_number($count_val, 'medium', undef, 0);  # No space, 0 decimals
         $y_label = sprintf("%6s ", $count_str);  # 6 chars + space = 7
         $y_pct = sprintf(" %3d%%", $pct_val);
     } else {
