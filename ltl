@@ -10044,8 +10044,12 @@ sub progress_line_text {
     # exact and monotonic. Only for sized plain files; anything else shows the
     # line count alone.
     my $file_pct = "";
-    if ( defined $file_size && $file_size > 0 && defined $file_position && $file_position >= 0 ) {
-        my $pct = 100 * $file_position / $file_size;
+    if ( defined $file_size && defined $file_position && $file_position >= 0 ) {
+        # A zero-byte file has no bytes left to read, so it reports 0 rather
+        # than nothing: dropping the file figure would leave the overall one
+        # alone in the slot the file figure occupies, and the reader has no
+        # way to tell which of the two they are looking at.
+        my $pct = $file_size > 0 ? 100 * $file_position / $file_size : 0;
         $pct = 100 if $pct > 100;
         $file_pct = format_percentage( $pct, mode => 'integer', width => 3, floor => 1 );
     }
