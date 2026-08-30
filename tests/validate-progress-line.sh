@@ -335,6 +335,40 @@ assert_command \
     contract    'features/446-overall-progress-indicator.md D5 — truncate the variable part, never the numbers'
 
 # ---------------------------------------------------------------------------
+# Scenario: an unreadable file keeps the two-percentage shape.
+#
+# A zero-byte file has no size to divide by. Guarding the division is right;
+# dropping the file percentage with it is not, because the multi-file line then
+# renders one figure where the reader expects two — and the one left standing is
+# the OVERALL figure sitting in the slot the FILE figure occupies. The counter
+# still advances, so the run reads as though that file were most of the way
+# through. A file with nothing in it has been read in full: it reports 0%.
+# ---------------------------------------------------------------------------
+current_scenario="empty-file-keeps-both-percentages"
+
+EMPTY_PART="$TMP_DIR/part-empty.txt"
+: > "$EMPTY_PART"
+
+EMPTY_RUN="$TMP_DIR/empty.frames"
+capture_frames "$EMPTY_RUN" \
+    -ni --terminal-width "$WIDTH" -bs 1440 -oe -n 1 -lf "$ACCESS_FORMAT" \
+    "$PART1" "$EMPTY_PART" "$PART3"
+
+assert_command \
+    command     "! grep -qE '^Processing +[0-9]+% \\(file ' '$EMPTY_RUN'" \
+    label       'no multi-file frame carries a single percentage' \
+    asserts     'Every frame of a multi-file run shows the file percentage over the overall one. A frame carrying just one figure beside the file counter is the empty-file path having dropped the file percentage, which leaves the overall figure standing in the file figure position with nothing to say which it is' \
+    produced_by 'progress_line_text() in ltl' \
+    contract    'features/446-overall-progress-indicator.md D5 — the multi-file line is file percentage over overall percentage'
+
+assert_command \
+    command     "grep -qE '^Processing +0%/[0-9]+% \\(file 2/3\\)' '$EMPTY_RUN'" \
+    label       'the empty file reports 0% of itself, and the run continues' \
+    asserts     'A zero-byte file has been read in full the moment it is opened, so its own figure is 0 rather than absent; the overall figure beside it keeps climbing, and the counter still names the file in flight' \
+    produced_by 'progress_line_text() in ltl' \
+    contract    'features/446-overall-progress-indicator.md D3 — a skipped file is credited its full size, and the run still reaches 100%'
+
+# ---------------------------------------------------------------------------
 # Scenario: a notice raised mid-read does not land in the progress line's row
 # ---------------------------------------------------------------------------
 # The other scenarios pin the format with -lf, which keeps the run
