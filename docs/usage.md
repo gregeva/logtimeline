@@ -105,6 +105,7 @@ These options control which metrics logtimeline extracts and computes during pro
 | Option | Description |
 |--------|-------------|
 | `-ov, --omit-values` | Hide the per-bucket numeric values on the bar graph |
+| `-pv, --precise-values` | Show exact category totals in the legend, unshortened |
 | `-os, --omit-stats` | Deprecated: use `-od, --omit-durations` to skip capturing durations, or `-hst, --hide-stats` to hide the statistics panel |
 | `-oe, --omit-empty` | Skip time buckets that contain zero log entries |
 | `-ni, --no-index` | Do not read or update `ltl-index.csv`, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it |
