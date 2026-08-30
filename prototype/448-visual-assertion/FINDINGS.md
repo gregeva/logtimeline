@@ -66,6 +66,16 @@ Three distinct causes:
    width measured, by up to 54 columns: 154 at width 100, 174 at 120, and
    exactly 160 at 160 — which is why every golden shows it fitting.
 
+   This second cause is a **width-allocation choice, not a rendering fault**. The
+   heatmap width is settable (`-hmw`, default 52) and the overflow tracks it
+   one-for-one: at terminal width 100, `-hmw 52` gives 154, `-hmw 40` gives 142,
+   `-hmw 30` gives 103. Deriving the heatmap width from the terminal instead of
+   defaulting to a constant removes it outright, and at `-hmw 20` the only lines
+   still over budget are the messages-table rows. The architect has further
+   width-allocation work in mind — column hiding and shrinking adapted for the
+   timeline graph, and a narrower value section — which is expected to absorb
+   more of this. The durable defect is the messages-table row width.
+
 (The banner also ignores `--terminal-width` and renders at a fixed 94 columns,
 but that is below the supported floor and so out of scope.)
 
@@ -73,7 +83,8 @@ Neither was caught by anything: the regression goldens are all captured at width
 160, where the output is clean, and the hidden `--validate-layout` option emits
 no layout report.
 
-Filed as #497. A third defect found in the same investigation — the
+Filed as #497, at low priority: recorded because it was found, not because it
+blocks anything. The value of the finding is the measurement and the method. A third defect found in the same investigation — the
 messages-table headings degrade to unreadable stubs (`O.`, `.`, `.`) and stop
 aligning with their columns, visible even at width 160 — is filed separately as
 #498, since the heading line fits and so is not a wrapping failure.
