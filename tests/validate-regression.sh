@@ -51,6 +51,8 @@ source "$SCRIPT_DIR/lib/colour-env.sh"
 neutralize_colour_env
 # shellcheck source=lib/fixtures.sh
 source "$SCRIPT_DIR/lib/fixtures.sh"
+# shellcheck source=lib/rendered-output.sh
+source "$SCRIPT_DIR/lib/rendered-output.sh"
 TMP_DIR=$(mktemp -d)
 # Cleanup is unconditional — if the script aborts mid-run (under set -e),
 # the explicit `rm -rf` at the end never runs. Per tests/HARNESS-DESIGN.md,
@@ -155,6 +157,15 @@ run_test() {
     local name="$1"
     shift
     local reffile="$REF_DIR/$name.txt"
+    # The width this scenario renders at, read from its own command line, so the
+    # soft-wrap check below judges the render against the terminal it was told
+    # it had rather than against a constant.
+    local render_width=""
+    local _a _prev=""
+    for _a in "$@"; do
+        [[ "$_prev" == "--terminal-width" ]] && render_width="$_a"
+        _prev="$_a"
+    done
     local tmpfile="$TMP_DIR/$name.txt"
     local stderrfile="$TMP_DIR/$name.stderr"
     local difffile="$TMP_DIR/$name.diff"
@@ -193,6 +204,34 @@ run_test() {
         fail=$((fail + 1))
         failures+=("$name :: perl-runtime-warnings-on-stderr")
         return
+    fi
+    # Soft-wrap cleanliness: a render that is byte-identical to its reference
+    # still fails the reader if it is wider than the terminal, because the wrap
+    # displaces every line below it. Only scenarios at or above the supported
+    # floor are judged — narrower ones are outside the rendering contract
+    # (features/column-layout-refactor.md section Minimum supported terminal width).
+    if [[ -n "$render_width" && "$render_width" -ge $MIN_SUPPORTED_WIDTH ]]; then
+        local wrap_issue
+        wrap_issue=$(soft_wrap_known_failure "$name")
+        if assert_no_soft_wrap "$tmpfile" "$render_width" "$name" 2>/dev/null; then
+            # A scenario listed as a known failure that no longer wraps is
+            # reported, not silently accepted: the fix has landed and the entry
+            # is stale.
+            if [[ -n "$wrap_issue" ]]; then
+                echo "  XPASS $name :: no longer exceeds its terminal width — remove its entry from tests/rendered-output/soft-wrap-known-failures.tsv (#$wrap_issue)"
+            fi
+        elif [[ -n "$wrap_issue" ]]; then
+            # The check still ran and printed what overflowed; the block is
+            # suppressed because the defect is filed and open.
+            local wrap_detail
+            wrap_detail=$(assert_no_soft_wrap "$tmpfile" "$render_width" "$name" 2>&1 >/dev/null || true)
+            printf '%s\n' "${wrap_detail//  FAIL /  XFAIL}" >&2
+            echo "  XFAIL $name :: exceeds its terminal width — known, #$wrap_issue"
+        else
+            fail=$((fail + 1))
+            failures+=("$name :: output exceeds its terminal width")
+            return
+        fi
     fi
     if [[ ! -s "$tmpfile" ]]; then
         emit_regression_fail "$name" "captured output is empty (regression target produced nothing; stderr below)" "$stderrfile"

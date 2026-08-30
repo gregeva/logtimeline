@@ -6,6 +6,50 @@ If you are adding a new harness, modifying an existing one, or changing any `-V`
 
 This document covers **how a harness is built**, once you know what it must assert. What it must assert comes from the feature's acceptance criteria, which are derived from its requirements and agreed *before* implementation — see [`docs/test-driven-development.md`](../docs/test-driven-development.md). Where a criterion's verification method is not yet known, determining it is prototyping scope, not something to settle while writing the harness: [`prototype/README.md`](../prototype/README.md).
 
+## Asserting rendered output
+
+Two libraries assert what the tool **renders**, rather than which escape
+sequence it emitted: `tests/lib/rendered-output.sh` (harness-facing) and
+`tests/lib/rendered-output.pl` (the decoder it drives).
+
+**Why raw-escape assertions are not enough.** A `grep -q 'ESC\[48;5;196m'`
+confirms only that some code was emitted somewhere on the line. It cannot say
+which cell carries an attribute, what the combination of foreground and
+background on one cell is, how two rows compare, or that an attribute is absent.
+And it is written *from the implementation*: under #448 a bar built from the
+wrong colour vocabulary was asserted with the codes that vocabulary emits, and
+23 assertions passed against five simultaneous defects.
+
+**The unit is a cell.** `decode_line()` returns one record per displayed
+character carrying its resolved foreground and background, so a predicate can
+state the requirement: `bar_inverts()` (inside the fill the colour is the
+background and the text is black; outside it the colour is the foreground and
+there is no background), `fill_extent()`, `fill_colour()`, `text_colour()`.
+
+**No line may exceed the terminal width.** The output model rests on known
+character placement, so a line that soft-wraps displaces every line below it and
+every column with them — a rendering failure whatever the content says.
+`assert_no_soft_wrap` checks the whole capture, because a wrap anywhere in a run
+displaces the surface a harness is asserting. It applies from the minimum
+supported width upward (`MIN_SUPPORTED_WIDTH`, one value in the library;
+`features/column-layout-refactor.md` § *Minimum supported terminal width*).
+
+**Known failures are registered, never tolerated.**
+`tests/rendered-output/soft-wrap-known-failures.tsv` suppresses the block for a
+scenario whose overflow is a filed, open defect. The check still runs, the
+overflow is still measured, and the offending lines are still printed — as
+XFAIL with its issue number. A registered scenario that *stops* overflowing is
+reported as XPASS, so a fix cannot land silently and leave a stale entry.
+Adding an entry requires a filed issue.
+
+**Three traps, each of which produced a wrong answer while this was built:**
+decode UTF-8 before measuring (the box-drawing rules are multi-byte, and
+counting bytes reports a 160-column rule as 480); `38;5;0` is a black
+foreground, not a reset, so SGR parameters are read as whole values rather than
+by a regex that matches a trailing `;0`; and a row is sliced to its own width
+before decoding, because the summary table shares its physical line with the
+file-details pane.
+
 ## Why this exists
 
 Test harnesses make assertions against application output. When the application output and the harness drift apart silently — a section gets renamed, a key gets removed, a format changes — three things happen:
