@@ -4,6 +4,8 @@ This document is the source of guidance, best practices, and requirements for te
 
 If you are adding a new harness, modifying an existing one, or changing any `-V` output in `ltl`, read this document first.
 
+This document covers **how a harness is built**, once you know what it must assert. What it must assert comes from the feature's acceptance criteria, which are derived from its requirements and agreed *before* implementation — see [`docs/test-driven-development.md`](../docs/test-driven-development.md). Where a criterion's verification method is not yet known, determining it is prototyping scope, not something to settle while writing the harness: [`prototype/README.md`](../prototype/README.md).
+
 ## Why this exists
 
 Test harnesses make assertions against application output. When the application output and the harness drift apart silently — a section gets renamed, a key gets removed, a format changes — three things happen:
