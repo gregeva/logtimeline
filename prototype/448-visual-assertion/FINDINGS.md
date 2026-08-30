@@ -46,8 +46,7 @@ Running the check found real defects in the shipped tool:
 
 | Terminal width | Lines that wrap (default view) |
 |---|---|
-| 90 (the supported floor) | 7 (5 excluding the banner) |
-| 100 | 4 |
+| 100 (the supported floor) | 4 |
 | 110 | 2 |
 | 115 | 1 |
 | 120 and above | 0 |
@@ -61,12 +60,14 @@ across the views the tool can produce.
 
 Three distinct causes:
 
-1. **The banner is fixed at 94 columns** and ignores `--terminal-width`, so it
-   wraps on any terminal narrower than that.
-2. **Messages-table rows overflow by 1–7 columns** at every width from 90 to
+1. **Messages-table rows overflow by 1–7 columns** at every width from 100 to
    115 — a layout miscalculation, small in size and total in effect.
-3. **The heatmap** emits rules and rows far wider than the terminal at every
-   width measured, by up to 54 columns.
+2. **The heatmap** emits rules and rows far wider than the terminal at every
+   width measured, by up to 54 columns: 154 at width 100, 174 at 120, and
+   exactly 160 at 160 — which is why every golden shows it fitting.
+
+(The banner also ignores `--terminal-width` and renders at a fixed 94 columns,
+but that is below the supported floor and so out of scope.)
 
 Neither was caught by anything: the regression goldens are all captured at width
 160, where the output is clean, and the hidden `--validate-layout` option emits
@@ -77,8 +78,12 @@ messages-table headings degrade to unreadable stubs (`O.`, `.`, `.`) and stop
 aligning with their columns, visible even at width 160 — is filed separately as
 #498, since the heading line fits and so is not a wrapping failure.
 
-The architect has set the **minimum supported terminal width at 90 columns**,
-which is what makes this assertable: the check runs from 90 upward.
+The architect has set the **minimum supported terminal width at 100 columns**
+(2026-08-30; first stated as 90 and raised the same day, to keep the defect
+count manageable). That is what makes this assertable: the check runs from 100
+upward. It takes the banner out of scope — it renders at a fixed 94 columns, so
+it only wraps below the supported range — and leaves both remaining causes
+in scope unchanged.
 
 The check itself is `no-soft-wrap.pl`.
 
