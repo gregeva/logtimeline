@@ -3,14 +3,14 @@
 Prototype under `prototype/README.md` trigger (d): a key requirement whose
 verification method was not known. The requirement class is *"the output looks
 right"* — colour, fill, alignment — which no existing harness could assert, and
-which produced nine escaped defects across #448 and #446.
+which produced ten escaped defect classes across #448 and #446 — the tenth, soft wrapping, applies to every line the tool prints.
 
 **This is a findings report. Nothing here is built into the harnesses. The
 recommendation and its cost are below for the architect to decide on.**
 
 ## The question
 
-Nine defects reached the architect from real runs. Every one passed the
+Nine defects reached the architect from real runs, and a tenth class was named by him while this research was under way. Every one passed the
 harnesses, with assertions genuinely running — `validate-summary-contribution-bar.sh`
 passed 23 assertions against five simultaneous #448 defects. The question is
 what a harness must read in order to catch them.
@@ -31,6 +31,46 @@ that detects none of them is the existing approach with extra steps.
 | S7 | A notice printed into the progress line's row | text |
 | S8 | An empty file collapsed the line to one percentage | text |
 | S9 | An over-long label produced 45- and 50-character rows against a 41-character budget | geometry |
+| S10 | Output lines exceed the terminal width and soft-wrap, displacing every column below | geometry |
+
+### S10 — soft wrapping (added after the specimen set was first drawn up)
+
+**The most important one, and it was missing.** The application's entire output
+model rests on known character placement. A line longer than the terminal
+soft-wraps onto the next row, every line below it shifts, and every column the
+reader relies on is displaced. It is a rendering failure whatever the content
+says, and it applies to *every* line the application prints — not just the
+surfaces a feature happens to touch.
+
+Running the check found real defects in the shipped tool:
+
+| Terminal width | Lines that wrap |
+|---|---|
+| 80 | 10 (7 excluding the banner) |
+| 90 | 7 (5) |
+| 100 | 4 |
+| 110 | 2 |
+| 120 and above | 0 |
+
+Two distinct causes:
+
+1. **The banner is fixed at 94 columns** and ignores `--terminal-width`, so it
+   wraps on any terminal narrower than that.
+2. **Messages-table rows overflow by 1–3 columns** at widths 100–110 — a layout
+   miscalculation, small in size and total in effect.
+
+Neither was caught by anything: the regression goldens are all captured at width
+160, where the output is clean, and the hidden `--validate-layout` option emits
+no layout report.
+
+Filed as a defect. The check itself is `no-soft-wrap.pl`.
+
+**Measurement traps, each of which gave a wrong answer while this was written:**
+UTF-8 must be decoded before measuring (the box-drawing rules are multi-byte, so
+counting bytes reports a 160-column rule as 480 and manufactures phantom
+failures); SGR, OSC and other CSI escapes occupy no columns; C0 control
+characters occupy no column. My first run reported 19 of 40 lines overflowing at
+width 80 and every one was an artefact of counting bytes.
 
 ## Why escape-code assertions cannot see them
 
@@ -87,10 +127,16 @@ first, sabotaged output second:
 | S1 | header's cell attributes read directly | same mechanism as S5 | ✅ (not run) |
 | S3, S7, S8 | — | — | text-shaped; already assertable |
 
-**Six of nine caught by the cell method; the remaining three (S3, S7, S8) are
-text-shaped and are already assertable with plain-text checks — S7 and S8 are
-covered in `validate-progress-line.sh` today.** So the two classes together cover
-the whole specimen set.
+| S10 | `width 120 OK` | `width 100 FAIL — 4 lines wrap` | ✅ |
+
+**Seven of ten caught by measurement of the rendered output; the remaining three
+(S3, S7, S8) are text-shaped and already assertable with plain-text checks — S7
+and S8 are covered in `validate-progress-line.sh` today.** So the classes
+together cover the whole specimen set.
+
+S10 is the one that pays for itself immediately: it is a single check applicable
+to *every* run of the tool at any width, it needs no per-feature assertions, and
+it found live defects the moment it was written.
 
 Two properties worth noting, because they are what make the reports usable:
 
@@ -126,7 +172,7 @@ the self-documenting assertion wrapper the other harnesses use
 assert visual output. Estimated small — the decoder is done and the predicates
 are the part that carries the meaning.
 
-**Recommendation: adopt it for the surfaces that have already failed** — the
+**Recommendation: adopt the soft-wrap check globally and immediately** — it is one check, it applies to every line of every run, it requires no per-feature work, and it is already finding defects. Then adopt the cell decoder **for the surfaces that have already failed** — the
 category bar and any future bar-like rendering — and leave the rest alone until
 a requirement needs it. The method is worth its cost where a requirement is
 about *what the reader sees*; it is not worth retrofitting to surfaces whose
