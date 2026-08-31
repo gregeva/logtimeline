@@ -137,13 +137,7 @@ The root cause is the requirement narrowing recorded in D7, not the conditional:
 
 ### Harness defect found while fixing the monochrome option
 
-Found while running the completion gate for D-6 and fixed in the same drop, at the architect's direction.
-
-**The shared CSV capture cache never expired.** `tests/lib/csv-cache.sh` caches one `ltl -o` run per scenario so that `validate-csv-output.sh` and `validate-statistics.sh` can share it, and a `CI=1` run deliberately skips the cleanup so the second harness finds the first one's capture. Nothing ever invalidated those files. Forty artifacts left behind by a session on 2026-08-28 were read back on 2026-08-31: 21 of 23 scenarios were validated against CSVs produced by an `ltl` that predated `duration_nice` and `impact`, and both harnesses failed on output no version of the tool would produce. The same mechanism would as readily have passed a scenario that should have failed — the harness reported a result about a tool it never ran.
-
-The fix has two parts, decided by the architect: a **one-hour validity period**, and a **record of the CSV-emitting code that produced each artifact**. An artifact past the period, or produced by different CSV code, is captured again — with a warning naming the reason, because the silence is what kept this invisible for three days. The signature covers the `ltl` subs dedicated to CSV, the CSV-writing lines of the subs that write one, and the column-rule spec under `tests/csv-output/rules/`; it deliberately does not cover the whole tool, since an edit anywhere would then discard the cache and the regeneration cost would fall on every session touching an unrelated surface. What it cannot see — a value computed upstream and then written into a column — the validity period covers.
-
-Asserted in `tests/validate-csv-output.sh` § cache-validity: each staleness decision against a crafted artifact with no `ltl` run, and the refresh end to end on the smallest fixture scenario. Rule recorded in `tests/HARNESS-DESIGN.md` § Cached capture artifacts expire.
+The shared CSV capture cache never expired, so artifacts left behind by an earlier `CI=1` session were read back and validated most scenarios against an `ltl` that had since gained columns. Found while running this drop's gate and fixed in the same commit at the architect's direction. The rule is `tests/HARNESS-DESIGN.md` § Cached capture artifacts expire; the assertions are `tests/validate-csv-output.sh` § cache-validity; the incident itself is on #448 and in PR #505 (monochrome is a property of the summary table).
 
 ## Merge gate
 
