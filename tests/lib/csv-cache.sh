@@ -66,6 +66,19 @@ _CSV_CACHE_REPO_DIR="$(cd "$_CSV_CACHE_TESTS_DIR/.." && pwd)"
 # shellcheck source=logs-dir.sh
 source "$_CSV_CACHE_LIB_DIR/logs-dir.sh"
 _CSV_CACHE_DIR="$_CSV_CACHE_TESTS_DIR/.artifacts/csv"
+_CSV_CACHE_RULES_DIR="$_CSV_CACHE_TESTS_DIR/csv-output/rules"
+
+# How long a cached artifact may be read back. A CI=1 chain runs its harnesses
+# minutes apart, which is the sharing this cache exists for; an hour keeps that
+# and still refuses anything left over from an earlier working session. A CI=1
+# run deliberately skips the cleanup so the next harness can reuse its capture,
+# so without an expiry a session that never ran cleanup-test-artifacts.sh
+# leaves its artifacts to be read back indefinitely — which is what happened:
+# forty artifacts three days old validated 21 of 23 scenarios against an ltl
+# that predated two of the columns the contract had since gained, and both
+# harnesses failed against output no version of the tool would produce today
+# (#448). Overridable so the harness can put the rule itself under test.
+_CSV_CACHE_MAX_AGE_MINUTES="${CSV_CACHE_MAX_AGE_MINUTES:-60}"
 _CSV_CACHE_CLEANUP="$_CSV_CACHE_TESTS_DIR/cleanup-test-artifacts.sh"
 _CSV_CACHE_LTL="$_CSV_CACHE_REPO_DIR/ltl"
 
@@ -116,6 +129,91 @@ csv_cache_logfile_shorthand() {
     printf '%s' "$base"
 }
 
+# The sidecar recording which CSV-emitting code produced an artifact.
+csv_cache_signature_path() {
+    local msg_path="$1"
+    printf '%s__csv-signature.txt' "${msg_path%__messages.csv}"
+}
+
+# A digest of everything that decides what the CSV files contain: the subs of
+# ltl dedicated to CSV, the CSV-writing lines of the subs that write one, and
+# the column-rule spec the validators read (a column added to the tool lands in
+# both in the same commit, so the spec is a second, independent witness).
+#
+# Deliberately NOT the whole of ltl: an edit anywhere in the tool would then
+# throw the cache away, and the regeneration cost would fall on every session
+# that touches the timeline or the summary table. What this does not see — a
+# value computed further upstream and then written into a column — is covered
+# by the validity period above rather than by this digest.
+_CSV_CACHE_SIGNATURE=""
+csv_cache_ltl_signature() {
+    if [[ -z "$_CSV_CACHE_SIGNATURE" ]]; then
+        local computed
+        computed="$( "${PERL:-perl}" -e '
+            use Digest::MD5 qw(md5_hex);
+            my ($ltl, $rules_dir) = @ARGV;
+            open my $fh, "<", $ltl or die "csv-cache: cannot read $ltl: $!\n";
+            my $src = do { local $/; <$fh> };
+            close $fh;
+            my @parts;
+            while ($src =~ /^(sub (\w+) \{.*?^\})$/msg) {
+                my ($body, $name) = ($1, $2);
+                if ($name =~ /csv/i) { push @parts, $body; next }
+                my @lines = grep { /\$csv\b|\$csv_fh\b|\$csv->|csv_columns|csv_headers|csv_prefix/ }
+                            split /\n/, $body;
+                push @parts, join( "\n", @lines ) if @lines;
+            }
+            die "csv-cache: no CSV-emitting code found in $ltl\n" unless @parts;
+            my @rules = sort glob( "$rules_dir/*.tsv" );
+            die "csv-cache: no column rules found under $rules_dir\n" unless @rules;
+            for my $rule (@rules) {
+                open my $rh, "<", $rule or die "csv-cache: cannot read $rule: $!\n";
+                push @parts, do { local $/; <$rh> };
+                close $rh;
+            }
+            print md5_hex( join( "\n\n", @parts ) );
+        ' "$_CSV_CACHE_LTL" "$_CSV_CACHE_RULES_DIR" )" || return 1
+        [[ -n "$computed" ]] || return 1
+        _CSV_CACHE_SIGNATURE="$computed"
+    fi
+    printf '%s' "$_CSV_CACHE_SIGNATURE"
+}
+
+# Age of a file in whole seconds.
+_csv_cache_file_age_seconds() {
+    "${PERL:-perl}" -e 'my @s = stat($ARGV[0]) or die "csv-cache: cannot stat $ARGV[0]\n";
+                        printf "%d", time - $s[9];' "$1"
+}
+
+# Why a cached artifact may not be read back, on stdout. Exit 0 with a reason
+# when it is stale, 1 when it may be reused, 2 when the question could not be
+# answered — which is treated as stale by the caller, never as fresh.
+csv_cache_staleness_reason() {
+    local msg_path="$1"
+    local age_seconds max_seconds sig_path stored current
+
+    age_seconds="$(_csv_cache_file_age_seconds "$msg_path")" || return 2
+    max_seconds=$(( _CSV_CACHE_MAX_AGE_MINUTES * 60 ))
+    if (( age_seconds > max_seconds )); then
+        printf 'captured %d minutes ago, past the %d-minute validity period' \
+            $(( age_seconds / 60 )) "$_CSV_CACHE_MAX_AGE_MINUTES"
+        return 0
+    fi
+
+    sig_path="$(csv_cache_signature_path "$msg_path")"
+    if [[ ! -s "$sig_path" ]]; then
+        printf 'captured without a record of the CSV-emitting code that produced it'
+        return 0
+    fi
+    stored="$(cat "$sig_path")"
+    current="$(csv_cache_ltl_signature)" || return 2
+    if [[ "$stored" != "$current" ]]; then
+        printf 'the CSV-emitting code in ltl or the column rules changed after it was captured'
+        return 0
+    fi
+    return 1
+}
+
 # Pure: deterministic cache filename for one CSV.
 csv_cache_filename() {
     local scenario="$1" options="$2" log_shorthand="$3" kind="$4"
@@ -160,12 +258,26 @@ csv_cache_produce() {
     local msg_path="$_CSV_CACHE_DIR/$msg_name"
     local stats_path="$_CSV_CACHE_DIR/$stats_name"
     local stdout_path="${msg_path%__messages.csv}__stdout.txt"
+    local sig_path
+    sig_path="$(csv_cache_signature_path "$msg_path")"
 
     if [[ -s "$msg_path" && -s "$stats_path" && -s "$stdout_path" ]]; then
-        export CSV_CACHE_MESSAGES="$msg_path"
-        export CSV_CACHE_STATS="$stats_path"
-        export CSV_CACHE_STDOUT="$stdout_path"
-        return 0
+        local stale_reason stale_rc
+        stale_reason="$(csv_cache_staleness_reason "$msg_path")"
+        stale_rc=$?
+        if [[ $stale_rc -eq 1 ]]; then
+            export CSV_CACHE_MESSAGES="$msg_path"
+            export CSV_CACHE_STATS="$stats_path"
+            export CSV_CACHE_STDOUT="$stdout_path"
+            return 0
+        fi
+        # Anything but a clean "fresh" means the artifact is produced again.
+        # The warning is the point: a cache that silently serves the wrong
+        # thing is how three-day-old output validated a tool it never ran.
+        if [[ $stale_rc -eq 2 ]]; then
+            stale_reason="its validity could not be determined"
+        fi
+        echo "csv-cache: WARNING stale cache for scenario=$scenario — $stale_reason; refreshing" >&2
     fi
 
     mkdir -p "$_CSV_CACHE_DIR"
@@ -214,6 +326,14 @@ csv_cache_produce() {
     mv "$produced_stats" "$stats_path"
     mv "$tmp_dir/ltl.stdout" "$stdout_path"
     rm -rf "$tmp_dir"
+
+    # Recorded with the artifact, so a later run can tell whether the code that
+    # produced it is still the code in the tree.
+    if ! csv_cache_ltl_signature > "$sig_path"; then
+        echo "csv-cache: could not record the CSV signature for scenario=$scenario" >&2
+        rm -f "$sig_path"
+        return 1
+    fi
 
     export CSV_CACHE_MESSAGES="$msg_path"
     export CSV_CACHE_STATS="$stats_path"
