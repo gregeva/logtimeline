@@ -274,8 +274,81 @@ Recorded so the walkthrough starts from the code, not from the issue text.
 
 ## Open decisions
 
-None — D1–D16 cover the set; remaining tuning items (D6 exact budget, R5 final hide
-priorities) are settled on rendered output during development and locked back here.
+Two questions surfaced during scenario design (2026-08-31) — raised to the
+architect, blocking only the mixed-run bucket-cell scenario and the mixed-run
+notice choice, not the rest of the implementation:
+
+- **Q15 — mixed-run column visibility: D2 and D4 disagree.** D2 (per-row
+  eligibility) says a mixed run's *untouched buckets keep their percentages* —
+  which requires the columns to be visible on a mixed run. D4 says
+  **default-on only when every matched file's format is a qualifying ledger** —
+  which hides the columns entirely on a mixed run. Candidate readings: (a) D4
+  governs the default and D2's untouched-buckets clause applies only under
+  explicit enable; (b) a run with at least one qualifying file is default-on
+  and D2 blanks the polluted rows. The harness asserts only the surfaces both
+  agree on (run-level suppression everywhere, D10); the bucket-cell mixed
+  scenario lands once this is locked.
+- **Q16 — which notice fires on a mixed explicit-enable run.** Notice 1's
+  condition (non-ledger format, explicitly enabled) and notice 3's D4-extended
+  condition (request against formats without both criteria) can both match a
+  mixed run in which columns ARE shown for qualifying rows — and notice 3's
+  text ("the columns are not shown") would then be false. Needs a decision on
+  the mixed-run notice text/choice.
+
+Remaining tuning items (D6 exact budget, R5 final hide priorities) are settled on
+rendered output during development and locked back here.
+
+## Scenario contracts (pinned before implementation, 2026-08-31)
+
+The harness `tests/validate-classification-percentages.sh` is derived from the
+acceptance criteria and written BEFORE the code (red-first). It pins:
+
+- **Column ids** `success_pct`, `failure_pct` in `@column_layout`, declared
+  between the occurrences and duration blocks.
+- **`-V format-detection / classification` additive keys** (D5): `success_pct`,
+  `failure_pct` (printed only when the run qualifies), `pct_eligible: 1|0`,
+  `non_qualifying_lines: N` (the D2 provenance count).
+- **Notice text stems** (grep anchors; wording draft is Claude's, behaviour is
+  R9's): notice 1 `cover only operations the log records`; notice 2
+  `matched neither the success nor the failure classification`; notice 3
+  `percentage columns are not shown`.
+- **Colour families** (exact shade is a D14 tuning item; family and
+  distinctness are the contract): success fg in the green family, failure fg in
+  the red family, the two distinct, `fill_extent() == 0` on both.
+- **Fixtures**: `tests/fixtures/access-classification-buckets.txt` — five hourly
+  buckets: 3+1 → 75%/25%, an empty hour → blank cells, 0+3 → 0%/100%, 5+0 →
+  100%/0%, 1+2 → 33.333%/66.667% (run totals 9/6, overall 60%/40%);
+  `tests/fixtures/diagnostics-classification-overlap.txt` — 4 log4j lines in
+  hours 00/02 (2 ERROR → failures, 2 INFO → unclassified) for the non-ledger,
+  UNCLASSIFIED-row and mixed-run scenarios.
+
+## Scenario-design findings (2026-08-31)
+
+- **F12 — an included-but-unclassified line cannot exist on any shipped
+  event-ledger format.** The per-line category gate (`%log_level_set` membership
+  in `read_and_process_logs()`) drops any line whose extracted category is not
+  in the vocabulary — a crafted status `999` becomes `9xx` and is excluded
+  before inclusion, not left unclassified — and the shipped access entries
+  classify their entire vocabulary (1xx–3xx success, 4xx–5xx failure).
+  Consequently **notice 2 can never fire, and the UNCLASSIFIED row can never be
+  non-zero on a qualifying run, with shipped formats**; AC1's
+  unclassified-excluded-from-denominator arm is likewise unexercisable
+  end-to-end. The mechanism is still required (a future partial-coverage ledger
+  format — #483's G1 criteria are the live candidate — produces the state);
+  recorded as harness gaps, with the UNCLASSIFIED row's non-zero case asserted
+  on the diagnostics (non-ledger) run instead, where unclassified lines are
+  real.
+- **F13 — no shipped format is a non-ledger with both criteria**, so notice 1
+  (partial coverage under explicit enable) has no end-to-end scenario either;
+  the D4 explicit-enable relaxation is only reachable by a format that does not
+  exist yet (#476 per-format log levels / #387 user-defined formats territory).
+  Recorded as a gap; the notice's emission logic ships with the feature and its
+  text is pinned above.
+- **F14 — the run-options echo overflows the terminal** (found by this
+  harness's soft-wrap check at width 120): `print_run_options()` prints the raw
+  command line unfitted, a third #497-class producer alongside the
+  messages-table rows and the heatmap. Registered in
+  `tests/rendered-output/soft-wrap-known-failures.tsv` against #497.
 - ~~Q4~~ **D11 — Blank cells for absent measurements (architect, 2026-08-31).** Blank cell for both an
   ineligible row (D2) and an eligible bucket with no classified lines (consistent with
   how other
@@ -385,12 +458,13 @@ Draft — to be agreed before implementation (`docs/test-driven-development.md`)
 criteria marked (Qn) cannot be finalised until that decision is locked. Triage:
 *Assertable* / *Unassertable* / *Unknown*.
 
-- **AC1** (R2) — On a fixture with a known per-bucket mix — e.g. 3 successes, 1
-  failure, 6 unclassified in one bucket — run at `-bs 1440 -oe`, the success cell reads
-  `75%`, not `30%`: the denominator is `%bucket_outcomes` successes + failures, and
-  unclassified lines move nothing. *Assertable* — rendered output on a crafted fixture;
-  cross-checked against `-V format-detection / classification` totals summed over
-  buckets.
+- **AC1** (R2) — On a fixture with a known per-bucket mix — 3 successes, 1
+  failure — the success cell reads `75%`; the denominator is `%bucket_outcomes`
+  successes + failures, cross-checked against `-V format-detection /
+  classification`. *Assertable* — harness scenario `bucket-values`. The
+  unclassified-lines-move-nothing arm is unexercisable on shipped ledger
+  formats (F12) — the denominator property is proven by count parity (AC10)
+  instead.
 - **AC2** (R3) — The rendered values are `format_percentage()` output with `mode =>
   'decimals', digits => 3` and the column's width budget: `100%` for an all-success
   bucket (trailing zeros trimmed, never `100.000%`), `99.95%` vs `99.995%`

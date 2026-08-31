@@ -164,3 +164,37 @@ render_row_report() {
         exit 1;
     ' "$_RENDERED_OUTPUT_LIB" "$capture" "$label" "$row_width"
 }
+
+# timeline_cell_report CAPTURE ROW_MATCH COLUMN_ID
+#
+# Echoes one line of decoded facts about a single timeline COLUMN's cells on
+# the first timeline row whose plain text matches ROW_MATCH (a Perl regex,
+# matched against the escape-stripped line):
+#   text='...' fg=<colour(s)|none> extent=<filled cells> centred=<centred|...>
+# The column is located by the offsets the layout engine itself reports, so
+# the capture MUST be produced with --debug-layout. Row not found, column not
+# visible, or a capture without the debug table are hard failures (non-zero),
+# never empty output. Method: prototype/452-timeline-cell-selector/FINDINGS.md.
+timeline_cell_report() {
+    local capture="$1" row_match="$2" column_id="$3"
+    "$PERL" -e '
+        require $ARGV[0];
+        binmode(STDOUT, ":encoding(UTF-8)");
+        my ($lib, $file, $row_match, $col_id) = @ARGV;
+        my $layout = parse_debug_layout($file);
+        open my $fh, "<:encoding(UTF-8)", $file or die "cannot open $file: $!\n";
+        while (my $line = <$fh>) {
+            (my $plain = $line) =~ s/\e\[[0-9;]*m//g;
+            next unless $plain =~ /$row_match/;
+            # Timeline rows only: require a leading timestamp-like cell so a
+            # legend or summary line matching the regex is never selected.
+            my $cells = decode_line($line);
+            my $slice = column_slice($cells, $layout, $col_id);
+            printf "text=%s fg=%s extent=%d centred=%s\n",
+                "\x27" . row_text($slice) . "\x27",
+                text_colour($slice), fill_extent($slice), centred_report($slice);
+            exit 0;
+        }
+        die "no timeline row matching /$row_match/ in $file\n";
+    ' "$_RENDERED_OUTPUT_LIB" "$capture" "$row_match" "$column_id"
+}

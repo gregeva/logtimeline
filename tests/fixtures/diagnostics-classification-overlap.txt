@@ -1,0 +1,4 @@
+2025-05-07 00:15:03,120 INFO  [main] svc.worker  - poller heartbeat
+2025-05-07 00:45:03,120 ERROR [main] svc.worker  - poller failed to reach upstream
+2025-05-07 02:20:03,120 INFO  [main] svc.worker  - poller heartbeat
+2025-05-07 02:50:03,120 ERROR [main] svc.worker  - poller failed to reach upstream
