@@ -678,6 +678,19 @@ is itself worth confirming.
   classification` sub-section (and others); the entry #452 touches gets added when the
   `-V` change lands.
 
+## Gate results (2026-08-31, pre-PR)
+
+- Full suite: all 30 `tests/validate-*.sh` exit 0 on the branch content
+  (statistics after the L1 STATS-baseline re-bless for the two new CSV
+  columns; regression after the 43-golden re-bless). One registered XFAIL:
+  the run-options echo overflow at width 120 (#497, finding F14).
+- Benchmark, before (base commit) vs after (finished change), same machine,
+  `single-day-access-log-standard`: total 10.3 s → 10.5 s (+2.0%, single run,
+  within the 5% threshold), peak RSS −0.5%, structure counts unchanged.
+  TSVs deleted per the workflow.
+- Branch rebased onto `release/0.18.0` at the architect's instruction —
+  already based on its tip (`b05e78c`), nothing came in.
+
 ## Merge gate
 
 Per-feature workflow step 1 in full: the change touches `ltl` and harness expectations,
