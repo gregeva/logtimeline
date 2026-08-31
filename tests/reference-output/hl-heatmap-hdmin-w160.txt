@@ -26,9 +26,10 @@ command-line options: --disable-progress -ni -n 1 -dm raw --terminal-width 160 -
   INFO-HL                         4 (0.08%)   
   INFO                            1 (0.02%)      1 thingworx_standard
   ─────────────────────────────────────────   
+  LINES READ                           5000   
   HIGHLIGHTED                           502   
   LINES INCLUDED                       5000   
   FAILURE CLASSIFIED                     23   
-  LINES READ                           5000   
+  UNCLASSIFIED                 4977 (99.5%)   
   ─────────────────────────────────────────   
 

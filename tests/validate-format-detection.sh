@@ -1491,9 +1491,9 @@ scenario_classification_summary_rows() {
         contract    "$CLASSIFICATION_CONTRACT - summary rows: both rows shown when both outcomes are declared"
 
     assert_command \
-        command     "grep -oE 'LINES INCLUDED|SUCCESS CLASSIFIED|FAILURE CLASSIFIED|LINES READ' '$r_access' | tr '\n' ' ' | grep -q '^LINES INCLUDED SUCCESS CLASSIFIED FAILURE CLASSIFIED LINES READ '" \
-        label       'rows sit between LINES INCLUDED and LINES READ in that order' \
-        asserts     'The two rows partition LINES INCLUDED and appear directly beneath it' \
+        command     "grep -oE 'LINES INCLUDED|SUCCESS CLASSIFIED|FAILURE CLASSIFIED|LINES READ' '$r_access' | tr '\n' ' ' | grep -q '^LINES READ LINES INCLUDED SUCCESS CLASSIFIED FAILURE CLASSIFIED '" \
+        label       'tallies read as a funnel: LINES READ, LINES INCLUDED, then the classified rows' \
+        asserts     'The two rows partition LINES INCLUDED and appear directly beneath it; LINES READ leads the tallies (#452, architect 2026-08-31)' \
         produced_by "$SUMMARY_ROWS_PRODUCER" \
         contract    "$CLASSIFICATION_CONTRACT - summary rows placement"
 

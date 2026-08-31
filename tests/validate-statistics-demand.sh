@@ -658,7 +658,7 @@ assert_command \
     produced_by 'pipeline_render() in ltl (print_message_summary is not called when no message is retained)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
 assert_line "$out.plain" \
-    pattern     '^[[:space:]]+timestamp[[:space:]]+legend[[:space:]]+occurrences[[:space:]]' \
+    pattern     '^[[:space:]]+timestamp[[:space:]]+legend[[:space:]]+(success[[:space:]]+failure[[:space:]]+)?occurrences[[:space:]]' \
     asserts     'The timeline bar graph is still produced when no message is retained' \
     produced_by 'print_bar_graph() in ltl (column header row)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'

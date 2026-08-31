@@ -26,6 +26,16 @@ state the requirement: `bar_inverts()` (inside the fill the colour is the
 background and the text is black; outside it the colour is the foreground and
 there is no background), `fill_extent()`, `fill_colour()`, `text_colour()`.
 
+**A timeline column is selected by the layout engine's own offsets.**
+`parse_debug_layout()` reads the `--debug-layout` table into per-column cell
+offsets (accumulated exactly as the engine spends width), and `column_slice()`
+cuts a decoded row to one column's cells — so a predicate can assert colour,
+fill extent or centring (`centred_report()`) per column. A capture used this way
+must be produced with `--debug-layout`; a missing table, a missing column id, or
+a slice past the row end are hard failures, never empty results. Harness-facing
+wrapper: `timeline_cell_report` in `rendered-output.sh`. Method validated in
+`prototype/452-timeline-cell-selector/FINDINGS.md`.
+
 **No line may exceed the terminal width.** The output model rests on known
 character placement, so a line that soft-wraps displaces every line below it and
 every column with them — a rendering failure whatever the content says.

@@ -117,6 +117,7 @@ default_failure: <signature>
 - `unmatched_lines` — run total of the per-file `unmatched_lines:` key (R5: thrown away, never included).
 - `event_ledger_files` — files whose bound entry has `event_ledger` set / files with a bind; `0/0` when nothing bound.
 - `rule_changes` — count of mid-file changes of classifying entry whose old and new entry carry different criteria signatures (D19, D32). `rule_change:` — one line per such change naming the file, the line number at which the new rules took effect, and the old and new entries by **format slug** (the same names the per-file `format:` key and `-lf` use), input order (file order, then line number); at most the first `FORMAT_CLS_RULE_CHANGE_LINES_MAX` (10) per file; **absent** when the count is 0.
+- Additive keys `success_pct`, `failure_pct`, `pct_eligible`, `non_qualifying_lines` joined the block under #452 (non-breaking); their contract is owned by `features/452-success-failure-percentage-columns.md` § *`-V` classification keys (#452)*.
 - `default_failure` — the criteria signature of the resolved global default's failure list (D15), so a capture is self-describing about the default in force. The signature is the canonical string of `field=pattern` conditions, criteria joined by `|`, conditions within a criterion by `&`, e.g. `category_bucket=^(?:ERROR|FATAL|CRITICAL)$`.
 
 ## Performance obligation

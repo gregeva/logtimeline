@@ -27,9 +27,10 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 
   DEBUG                           1 (16.7%)      1 windchill_method_server
   TRACE                           1 (16.7%)   
   ─────────────────────────────────────────   
+  LINES READ                              6   
   HIGHLIGHTED                             1   
   LINES INCLUDED                          6   
   FAILURE CLASSIFIED                      2   
-  LINES READ                              6   
+  UNCLASSIFIED                    4 (66.7%)   
   ─────────────────────────────────────────   
 

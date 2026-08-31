@@ -23,6 +23,9 @@
 #   bar_inverts($cells)               -> (violations, filled, plain)
 #   row_text($cells)                  -> the characters, escapes removed
 #   slice_row($cells, $width)         -> the first $width cells (row isolation)
+#   parse_debug_layout($capture)      -> visible columns' {id,start,width} offsets
+#   column_slice($cells, $layout, $id)-> one timeline column's cells
+#   centred_report($slice)            -> 'centred' or the imbalance
 #
 # Attribute vocabulary: 'default', "ansi:<code>" (30-37/90-97 fg, 40-47/100-107
 # bg), "256:<n>" for 38;5;n / 48;5;n, and 'reverse' for SGR 7.
@@ -168,3 +171,67 @@ sub bar_inverts {
 }
 
 1;
+
+# --- Timeline column selection (#452) ----------------------------------------
+# Locate one timeline COLUMN's cells by the offsets the layout engine itself
+# reports (--debug-layout), so a predicate can assert colour, fill and
+# centring per column rather than per line. Method demonstrated and validated
+# against the #448 defect classes in prototype/452-timeline-cell-selector/.
+
+# parse_debug_layout($capture_path) -> arrayref of { id, start, width } for
+# every VISIBLE column, 0-based start offset in display cells. Offsets are
+# accumulated exactly as the layout engine spends width: before-spacing, the
+# column, after-spacing; invisible columns spend nothing. A capture without
+# the debug table is a hard failure, never an empty result (HARNESS-DESIGN:
+# a grep that matches nothing fails).
+sub parse_debug_layout {
+    my ($capture) = @_;
+    open my $fh, '<:encoding(UTF-8)', $capture or die "cannot open $capture: $!\n";
+    my ( $in_table, $pos ) = ( 0, 0 );
+    my @cols;
+    while ( my $line = <$fh> ) {
+        if ( $line =~ /^--- Layout Engine Debug/ ) { $in_table = 1; next }
+        next unless $in_table;
+        last if $line =~ /^---\s*$/;
+        next if $line =~ /^\s*Column\s+Type/;
+        next if $line =~ /TOTAL/;
+        if ( $line =~ /^\s*(\S+)\s+(\S+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/ ) {
+            my ( $id, $width, $bef, $aft, $vis ) = ( $1, $3, $4, $5, $6 );
+            next unless $vis;
+            die "visible column $id has non-numeric width '$width'\n" unless $width =~ /^\d+$/;
+            $pos += $bef;
+            push @cols, { id => $id, start => $pos, width => $width };
+            $pos += $width + $aft;
+        }
+    }
+    close $fh;
+    die "no Layout Engine Debug table found in $capture\n" unless $in_table && @cols;
+    return \@cols;
+}
+
+# column_slice($cells, $layout, $id) -> arrayref of the column's cells.
+# A missing column id, or a slice past the row end, is a hard failure — a
+# wrong offset must never produce a silent wrong-column read.
+sub column_slice {
+    my ( $cells, $layout, $id ) = @_;
+    my ($col) = grep { $_->{id} eq $id } @$layout;
+    die "column '$id' is not a visible column in the layout table\n" unless $col;
+    my ( $s, $w ) = ( $col->{start}, $col->{width} );
+    die "row has " . scalar(@$cells) . " cells; column $id needs [$s," . ( $s + $w ) . ")\n"
+        if @$cells < $s + $w;
+    return [ @{$cells}[ $s .. $s + $w - 1 ] ];
+}
+
+# centred_report($slice) -> 'centred' | 'empty' | description of the imbalance.
+# The centring rule: on an odd remainder the extra space sits on the LEFT
+# (features/452-success-failure-percentage-columns.md AC5).
+sub centred_report {
+    my ($slice) = @_;
+    my $text = join '', map { $_->{ch} } @$slice;
+    return 'empty' if $text =~ /^\s*$/;
+    my ($left)  = $text =~ /^( *)/;
+    my ($right) = $text =~ /( *)$/;
+    my ( $l, $r ) = ( length $left, length $right );
+    return 'centred' if $l == $r || $l == $r + 1;
+    return "left=$l right=$r (not centred)";
+}

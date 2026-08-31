@@ -6,9 +6,9 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-     timestamp                       legend                          occurrences       duration   bytes                      latency statistics                 
+     timestamp                       legend                   success failure                    occurrences                       duration          bytes      
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- 2025-05-07 00:00 5xx: 2 4xx: 2 3xx: 2 2xx: 2 1xx: 2  4:10/d │ ████████████████████     119ms     1.1 Ki │  P50:9ms    P95:41ms   P99:41ms   P999:41ms   CV:1.00
+ 2025-05-07 00:00 5xx: 2 4xx: 2 3xx: 2 2xx: 2 1xx: 2  4:10/d    60%     40%   │ █████████████████████████████████████████████   119 millisecon   1.1 KiB        
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 -ru d 
@@ -22,9 +22,9 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 
   2xx Success                       2 (20%)   
   1xx Informational                 2 (20%)      1 tomcat_access_with_duration
   ─────────────────────────────────────────   
+  LINES READ                             10   
   LINES INCLUDED                         10   
   SUCCESS CLASSIFIED                6 (60%)   
   FAILURE CLASSIFIED                4 (40%)   
-  LINES READ                             10   
   ─────────────────────────────────────────   
 

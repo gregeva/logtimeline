@@ -68,6 +68,7 @@ my $recursive_files = 0;                                                # -r: ex
 my @unreadable_directories;                                             # -r sweep: directories that could not be opened, reported once at the tail of read_and_process_logs()
 my ( $include_query_string, $include_session, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0 );
 my ( $hide_session, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0 );
+my ( $hide_classification, $show_classification ) = ( 0, 0 );   # #452 D8: one option pair governs both percentage columns
 # Contribution bar drawn over the category rows of the run summary (#448).
 # On by default; the variants exist to be judged against real logs.
 my ( $summary_bar_off, $summary_bar_absolute, $summary_bar_log, $summary_bar_reverse ) = ( 0, 0, 0, 0 );
@@ -265,6 +266,8 @@ my ( $write_messages_to_csv, $csv, $csv_fh, $csv_file_args ) = ( 0, undef, undef
 my $total_lines_read = 0;
 my $total_lines_included = 0;
 my ( $total_successes, $total_failures ) = ( 0, 0 );   # run-level classification outcomes (#453 R5)
+my $total_non_qualifying_lines = 0;   # included lines from formats that do not qualify
+                                      # for the percentage surfaces (#452 D2 provenance)
 my @progress_history = ();     # rolling history for lines/sec calculation: [ [timestamp, lines_read], ... ]
 
 # Overall progress across the whole selected file set (#446). The size sweep
@@ -483,6 +486,16 @@ use constant {
                                # undef on scanned entries, whose blocks inline it
     FR_CLS_SIG         => 26,  # criteria-signature id of the entry's resolved
                                # classification (0 = declines) (D32)
+    FR_PCT_QUALIFYING  => 27,  # 1 = lines from this entry qualify for the
+                               # success/failure percentage surfaces (#452 D2/D4):
+                               # both outcomes declared, and the entry is an
+                               # event ledger or the columns were explicitly
+                               # enabled; folded at build time so the include
+                               # point pays one array lookup per line
+    FR_CLS_BOTH        => 28,  # 1 = the entry's resolved classification
+                               # declares both outcomes (#452 D4 usability
+                               # floor, unfolded — column visibility reads it
+                               # per file, independent of the run mode)
 };
 my @format_registry;           # scanned entries, static cascade order: one
                                # occupant per variant-group slot (D47/F1)
@@ -1124,6 +1137,8 @@ my %colors = (
     'magenta' => "\033[35m\033[49m",
     'cyan' => "\033[36m\033[49m",
     'white' => "\033[36m\033[37m",
+    'dark-green' => "\033[38;5;22m",   # success-percentage value (#452 D14: named
+    'dark-red'   => "\033[38;5;88m",   # definitions, no @column_colors index)
     'bright-black' => "\033[90m\033[109m",
     'bright-red' => "\033[91m\033[109m",
     'bright-green' => "\033[92m\033[109m",
@@ -2224,6 +2239,7 @@ sub _classify_argv_provenance {
                 'include-query-string|iqs', 'include-session|is',
                 'hide-session|hs', 'hide-occurrences|ho', 'hide-legend|hl',
                 'hide-duration|hd', 'hide-bytes|hb', 'hide-count|hc',
+                'hide-classification|hcl', 'show-classification|scl',
                 'hide-stats|hst', 'seconds|s', 'milliseconds|ms',
                 'version|v', 'duration-min|dmin', 'duration-max|dmax',
                 'duration-unit|du', 'rate-unit|ru',
@@ -2341,6 +2357,8 @@ sub emit_runtime_config_verbose {
         'include-query-string'              => $include_query_string,
         'include-session'                   => $include_session,
         'hide-session'                      => $hide_session,
+        'hide-classification'               => $hide_classification,
+        'show-classification'               => $show_classification,
         'hide-occurrences'                  => $hide_occurrences,
         'hide-legend'                       => $hide_legend,
         'hide-duration'                     => $hide_duration,
@@ -3837,6 +3855,7 @@ sub format_classification_rule_change {
         "rule_change: file=$file line=$line_number from=$old_entry->[FR_SLUG] to=$new_entry->[FR_SLUG]"
         if $n <= FORMAT_CLS_RULE_CHANGE_LINES_MAX;
     $format_detection{$file}{event_ledger} = $new_entry->[FR_EVENT_LEDGER] if $format_detection{$file};
+    $format_detection{$file}{cls_both}     = $new_entry->[FR_CLS_BOTH]     if $format_detection{$file};
     defer_notice( "Note: $file line $line_number: the classification rules changed because the detected log format changed from "
         . $old_entry->[FR_SLUG] . " to " . $new_entry->[FR_SLUG]
         . " - lines before this point were classified under the previous rules\n" )
@@ -4266,6 +4285,9 @@ sub build_format_registry {
         die "ltl: format registry: entry '$spec->{name}' event_ledger must be 0 or 1\n"
             if defined $spec->{event_ledger} && $spec->{event_ledger} !~ /^[01]$/;
         $spec->{_cls} = format_classification_resolve($spec);
+        $spec->{_cls_both} = ($spec->{_cls}
+                              && @{ $spec->{_cls}{success} // [] }
+                              && @{ $spec->{_cls}{failure} // [] }) ? 1 : 0;
         my $sig = format_classification_signature($spec->{_cls});
         $spec->{_cls_sig} = $format_cls_sig_id{$sig} //= do { push @format_cls_sig_str, $sig; $#format_cls_sig_str };
         $spec->{_cls_src} = format_classification_src($spec);
@@ -4444,6 +4466,8 @@ sub build_format_registry {
         $entry->[FR_EVENT_LEDGER]    = $spec->{event_ledger} ? 1 : 0;
         $entry->[FR_CLASSIFY]        = $spec->{scanned} ? undef : compile_format_classifier($spec);
         $entry->[FR_CLS_SIG]         = $spec->{_cls_sig};
+        $entry->[FR_PCT_QUALIFYING]  = ($spec->{_cls_both} && ($spec->{event_ledger} || $show_classification)) ? 1 : 0;
+        $entry->[FR_CLS_BOTH]        = $spec->{_cls_both} ? 1 : 0;
         if ($spec->{scanned}) {
             push @format_registry_members, $entry;
             push @format_registry, $entry if $entry->[FR_GROUP_DEFAULT];
@@ -4657,6 +4681,56 @@ sub format_registry_promote {
 # The misclassification is intentional pending the format-registry
 # rewrite (#23); the harness codifies it and will need an update when
 # #23 splits the formats.
+# One reconciliation of the classification counters (#452 D13): every surface
+# that speaks about successes, failures, the classified denominator or the
+# percentage eligibility calls this — the run summary, the -V classification
+# block, the notices and the column-visibility gate — so no second inline copy
+# of the arithmetic can drift.
+sub classification_reconciliation {
+    my $classified   = $total_successes + $total_failures;
+    my $unclassified = $total_lines_included - $classified;
+    # D2/D4: the run prints percentages only when something was classified and
+    # every included line came from a qualifying source (the FR_PCT_QUALIFYING
+    # fold: both criteria declared, and event ledger or explicit enable).
+    my $eligible = ($classified > 0 && $total_non_qualifying_lines == 0) ? 1 : 0;
+    return {
+        successes      => $total_successes,
+        failures       => $total_failures,
+        classified     => $classified,
+        unclassified   => $unclassified,
+        included       => $total_lines_included,
+        non_qualifying => $total_non_qualifying_lines,
+        pct_eligible   => $eligible,
+        success_pct    => ($eligible && $classified) ? $total_successes / $classified * 100 : undef,
+        failure_pct    => ($eligible && $classified) ? $total_failures  / $classified * 100 : undef,
+    };
+}
+
+# The single-sited default-visibility decision for the percentage columns
+# (#452 D15). Visibility is a RENDER-SURFACE question answered from the
+# bound formats' properties (D4): default-on when every bound file's format
+# is an event ledger declaring both criteria; --show-classification shows
+# the pair whenever at least one bound format declares both;
+# --hide-classification always wins. It is NOT the data question — whether
+# a percentage exists is decided per aggregation bucket (a time bucket, the
+# run total) by its own contributing lines, and those values feed the
+# summary table, the -V overview and the output files whether or not the
+# columns render.
+sub classification_columns_visible {
+    return 0 if $hide_classification;
+    my ( $bound, $ledger_both, $any_both ) = ( 0, 0, 0 );
+    for my $file (@in_files) {
+        my $fdd = $format_detection{$file} or next;
+        next unless defined $fdd->{match_type};
+        $bound++;
+        $ledger_both++ if $fdd->{event_ledger} && $fdd->{cls_both};
+        $any_both++    if $fdd->{cls_both};
+    }
+    return 0 unless $bound;
+    return 1 if $show_classification && $any_both;
+    return ( $ledger_both == $bound ) ? 1 : 0;
+}
+
 sub emit_format_detection_verbose {
     return unless section_requested('format-detection');
 
@@ -4735,8 +4809,9 @@ sub emit_format_detection_verbose {
     # carried together, their derived shortfall, the unmatched run total
     # beside it, the ledger-file ratio, the rule-change count, and the
     # signature of the default failure rule in force.
-    my $classified   = $total_successes + $total_failures;
-    my $unclassified = $total_lines_included - $classified;
+    my $recon        = classification_reconciliation();
+    my $classified   = $recon->{classified};
+    my $unclassified = $recon->{unclassified};
     my $unmatched    = 0;
     my ($ledger_files, $bound_files) = (0, 0);
     for my $file (@in_files) {
@@ -4754,6 +4829,16 @@ sub emit_format_detection_verbose {
     push @verbose_output, "classified: $classified";
     push @verbose_output, "unclassified: $unclassified";
     push @verbose_output, "unclassified_pct: " . ($total_lines_included ? sprintf('%.1f', $unclassified / $total_lines_included * 100) : '0.0');
+    # #452 D5: the analysis overview joins this block as additive keys. The
+    # percentages obey the same suppression as every rendered surface (D10):
+    # absent when the run is ineligible; the eligibility state and the
+    # provenance count behind it make the printed-or-blank decision observable.
+    if ($recon->{pct_eligible}) {
+        push @verbose_output, "success_pct: " . sprintf('%.3f', $recon->{success_pct});
+        push @verbose_output, "failure_pct: " . sprintf('%.3f', $recon->{failure_pct});
+    }
+    push @verbose_output, "pct_eligible: $recon->{pct_eligible}";
+    push @verbose_output, "non_qualifying_lines: $recon->{non_qualifying}";
     push @verbose_output, "unmatched_lines: $unmatched";
     push @verbose_output, "event_ledger_files: $ledger_files/$bound_files";
     push @verbose_output, "rule_changes: $format_cls_rule_changes";
@@ -5413,6 +5498,48 @@ sub emit_udm_zero_match_notices {
             print STDERR "      hint: the token key '$config->{token_key}' contains regex characters and is matched literally - if you meant a regex, wrap it in slashes: /$config->{token_key}/\n";
         }
     }
+}
+
+# #452 R9/D12: the three qualifying notices for the success/failure
+# percentages, spoken after the read loop (they need run totals). Mutually
+# exclusive by condition. Registered on #412 as producers for the notices
+# surface. Never gated by --disable-progress: they tell the user what the
+# tool decided on their behalf.
+sub emit_classification_percentage_notices {
+    my ( $bound, $any_both, $nonledger ) = ( 0, 0, 0 );
+    for my $file (@in_files) {
+        my $fdd = $format_detection{$file} or next;
+        next unless defined $fdd->{match_type};
+        $bound++;
+        $any_both++ if $fdd->{cls_both};
+        $nonledger++ unless $fdd->{event_ledger};
+    }
+    return unless $bound;
+    # Notice 3 — explicitly requested, nothing to compute anywhere: no bound
+    # format declares both a success and a failure classification (subsumes
+    # 'none at all', D4), so the columns are not shown.
+    if ( $show_classification && !$hide_classification && !$any_both ) {
+        print STDERR "Note: the success/failure percentage columns are not shown: the matched log format(s) do not declare both a success and a failure classification, so no percentage can be computed. See --help formats for what each format classifies.\n";
+        return;
+    }
+    return unless classification_columns_visible();
+    # Notice 1 — shown by explicit enable while a bound format lacks the
+    # event-ledger property: the figure covers only what the log records.
+    # (On a mixed run this is the applicable caution: the columns render,
+    # rows fed by the non-ledger source stay blank per bucket eligibility.)
+    if ( $show_classification && $nonledger ) {
+        print STDERR "Note: the success/failure percentages cover only operations the log records: a matched format is not an event ledger, so operations can be missing from the figure entirely, and the configured criteria may not attribute an operation to success or failure correctly.\n";
+        return;
+    }
+    # Notice 2 — event-ledger formats only: any non-zero shortfall of
+    # successes + failures against lines included is a coverage defect in
+    # the format's configured patterns, reported with its scale.
+    my $r = classification_reconciliation();
+    if ( !$nonledger && $r->{unclassified} > 0 ) {
+        my $leak_pct = $r->{included} ? sprintf('%.1f', $r->{unclassified} / $r->{included} * 100) : '0.0';
+        print STDERR "Warning: $r->{unclassified} included line(s) ($leak_pct%) matched neither the success nor the failure classification - the percentages exclude them; investigate the format's detection patterns for coverage.\n";
+    }
+    return;
 }
 
 sub emit_udm_specs_verbose {
@@ -6352,7 +6479,7 @@ sub print_help_formats {
     my $out = '';
     $out .= get_title_string();
     $out .= help_wrap(
-        "Log formats ltl recognises, and how each one decides whether a line is a success or a failure. Detection is automatic, per file; -lf <name> reads every file as one named format instead. The success/failure counts appear as the SUCCESS CLASSIFIED and FAILURE CLASSIFIED rows of the run summary (each with its share of all classified lines), feed errRate, and are detailed in the classification sub-section of -V format-detection. Use 'ltl --explain classification' for what the classification means and when a figure built on it can be trusted.",
+        "Log formats ltl recognises, and how each one decides whether a line is a success or a failure. Detection is automatic, per file; -lf <name> reads every file as one named format instead. The success/failure counts appear as the SUCCESS CLASSIFIED, FAILURE CLASSIFIED and UNCLASSIFIED rows of the run summary (each with its share), drive the timeline's success and failure percentage columns on event-ledger formats, feed errRate, and are detailed in the classification sub-section of -V format-detection (including the overall success and failure percentages). Use 'ltl --explain classification' for what the classification means and when a figure built on it can be trusted.",
         indent       => 0,
         first_indent => 0,
     ) . "\n";
@@ -6588,8 +6715,8 @@ my $explain_bc_caveats = q{Sarle's BC is a *screen*, not a test. Two important c
 my $explain_bc_compute = q{Sarle's formula with sample-size correction: `BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))`. The denominator's sample-size adjustment is what distinguishes Sarle's BC from the unadjusted moment-based version -- it prevents small-sample false positives from being even worse. Requires n >= 4 and non-zero std_dev; emitted blank otherwise. Total cost: three arithmetic operations on numbers (skewness, kurtosis, n) already computed for the other shape moments.};
 
 # --- classification (--explain classification) ---
-my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as SUCCESS CLASSIFIED and FAILURE CLASSIFIED beneath LINES INCLUDED, each with its share of all classified lines; the classification sub-section of -V format-detection adds how many lines were unclassified and what share of the included lines they are. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
-my $explain_classification_ledger = q{Whether a success/failure figure means anything depends less on the rules than on the log. An *event ledger* is a format with maximum coverage of the operations it describes: every operation of that kind produces exactly one line, so a count over its lines is a count over everything that happened. An access log is an event ledger for requests; a garbage-collection log is one for pauses. A diagnostics log is not: it records what a component chose to write, at whatever level it chose, and says nothing about the operations that produced no line. This is the coverage argument of the Google SRE Workbook chapter on implementing SLOs (https://sre.google/workbook/implementing-slos/): a service-level indicator is a ratio of good events to all events, and the denominator is only honest when the source sees all events. A reliability figure -- successes over classified lines -- is therefore legitimate only over an event ledger. Each format declares whether it is one, the property is reported per file on -V format-detection (event_ledger), and consumers that compute a ratio read it to decide whether to show one.};
+my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as SUCCESS CLASSIFIED and FAILURE CLASSIFIED beneath LINES INCLUDED, each with its share of all classified lines, and an UNCLASSIFIED row with its share of included lines; on an event-ledger format the timeline adds a success and a failure percentage column per time bucket, over the same classified denominator (hide them with -hcl, or show them on a classifying non-ledger format with -scl); the classification sub-section of -V format-detection adds the overall success and failure percentages and how many lines were unclassified. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
+my $explain_classification_ledger = q{Whether a success/failure figure means anything depends less on the rules than on the log. An *event ledger* is a format with maximum coverage of the operations it describes: every operation of that kind produces exactly one line, so a count over its lines is a count over everything that happened. An access log is an event ledger for requests; a garbage-collection log is one for pauses. A diagnostics log is not: it records what a component chose to write, at whatever level it chose, and says nothing about the operations that produced no line. This is the coverage argument of the Google SRE Workbook chapter on implementing SLOs (https://sre.google/workbook/implementing-slos/): a service-level indicator is a ratio of good events to all events, and the denominator is only honest when the source sees all events. The success percentage -- successes over classified lines -- is therefore trustworthy at face value only over an event ledger. Each format declares whether it is one, the property is reported per file on -V format-detection (event_ledger), and consumers that compute a ratio read it to decide whether to show one.};
 my $explain_classification_reading = q{What a diagnostics log can legitimately tell you: how many failure-level lines there were, when they clustered, and which messages produced them -- the errRate column, and the per-message failure counts in the MESSAGES CSV. What it cannot tell you: a success rate, an availability, or any ratio whose denominator is "all operations", because most operations never wrote a line. The unclassified share is the warning sign: on a diagnostics log it is usually most of the file. On an event ledger the same share is a data-quality figure -- lines that carried a status the rules do not cover -- and a low value means the ratio can be trusted.};
 my $explain_classification_compute = q{Classification runs as each line is recognised, so it costs nothing to re-derive later: each format's rules are compiled once at startup into its recognition step, and the outcome is accumulated per time bucket (errRate reads the bucket's failure count, normalised to the -ru rate unit as before) and per message key (the successes and failures columns of -o CSV, which survive -g consolidation). If the detected format changes part-way through a file, lines after the change are classified under the new format's rules, the file's event-ledger property follows the new format, a note names the line and both formats, and -V format-detection lists the change. Lines already classified are not revisited. The rules themselves are documented per format under 'ltl --help formats', which also shows how a format declares them.};
 
@@ -7356,6 +7483,8 @@ sub print_help {
     $out .= help_opt("-hb,  --hide-bytes",            "Hide the bytes bar graph column");
     $out .= help_opt("-hc,  --hide-count",            "Hide the count bar graph column");
     $out .= help_opt("-hs,  --hide-session",          "Hide the Sessions column that automatically appears when session IDs are found in the log data");
+    $out .= help_opt("-hcl, --hide-classification",    "Hide the success and failure percentage columns shown by default for event-ledger formats such as access logs");
+    $out .= help_opt("-scl, --show-classification",    "Show the success and failure percentage columns for a format that declares both classifications without being an event ledger");
     $out .= help_opt("-hst, --hide-stats",            "Hide the latency statistics or heatmap column");
     $out .= help_opt("-lbg, --light-background",      "Use pale-to-bright color gradients suited for light/white terminal backgrounds");
     $out .= help_opt("-dbg, --dark-background",       "Force dark-background color gradients (disables auto-detect; wins over -lbg if both given)");
@@ -10932,6 +11061,8 @@ sub adapt_to_command_line_options {
         'include-query-string|iqs' => \$include_query_string,
         'include-session|is' => \$include_session,
         'hide-session|hs' => \$hide_session,
+        'hide-classification|hcl' => \$hide_classification,
+        'show-classification|scl' => \$show_classification,
         'hide-occurrences|ho' => \$hide_occurrences,
         'hide-legend|hl' => \$hide_legend,
         'hide-duration|hd' => \$hide_duration,
@@ -12125,6 +12256,7 @@ sub read_and_process_logs {
                     # The bound entry's event-ledger flag becomes the
                     # file's property (#453 R8/D19).
                     $fdd->{event_ledger}     = $line_entry ? $line_entry->[FR_EVENT_LEDGER] : 0;
+                    $fdd->{cls_both}         = $line_entry ? $line_entry->[FR_CLS_BOTH] : 0;
                     # D18: the bound format's duration unit varies across
                     # producers and no -du was given — tell the user which
                     # assumption is in effect, once per run. Phrased run-level
@@ -12374,6 +12506,13 @@ sub read_and_process_logs {
                 if ($line_outcome) {
                     $bucket_outcomes{$bucket}[$line_outcome]++;
                     if ($line_outcome == 2) { $total_failures++ } else { $total_successes++ }
+                }
+                # #452 D2: percentage-eligibility provenance. Slot 3 counts the
+                # bucket's lines from non-qualifying sources; slots 1/2 stay the
+                # outcome counters and slot 0 stays unwritten (#453 D30).
+                unless ($line_entry->[FR_PCT_QUALIFYING]) {
+                    $bucket_outcomes{$bucket}[3]++;
+                    $total_non_qualifying_lines++;
                 }
                 # The line was classified under different criteria than the
                 # file's previous included line (D32: one integer compare per
@@ -14923,6 +15062,47 @@ sub build_column_layout {
         };
     }
 
+    # Success / failure percentage pair (#452): value-only fixed columns —
+    # no bar (the reference of a percentage is 100, not the run maximum), a
+    # minimal fixed budget outside the proportional share (D6: 7 characters,
+    # the 7-char headers 'success'/'failure'), named colour definitions
+    # (D14), default visibility resolved in ONE place
+    # (classification_columns_visible, D15). Placed to the right of the
+    # legend, before the legend|graph separator (architect correction,
+    # 2026-08-31). Hide orders are the R5 provisional tuning values: failure
+    # right after the latency panel, success outliving duration/bytes/count.
+    {
+        my $cls_visible = classification_columns_visible();
+        push @cols, {
+            id              => 'success_pct',
+            type            => 'fixed',
+            name            => 'success',
+            width           => undef,
+            base_width      => 7,
+            spacing_before  => 1,
+            spacing_after   => 0,
+            visible         => $cls_visible,
+            color           => undef,
+            value_only      => 1,
+            value_color     => 'dark-green',
+            hide_order      => 25,
+        };
+        push @cols, {
+            id              => 'failure_pct',
+            type            => 'fixed',
+            name            => 'failure',
+            width           => undef,
+            base_width      => 7,
+            spacing_before  => 1,
+            spacing_after   => 1,
+            visible         => $cls_visible,
+            color           => undef,
+            value_only      => 1,
+            value_color     => 'dark-red',
+            hide_order      => 65,
+        };
+    }
+
     # Separator: legend | graph columns
     push @cols, {
         id              => 'sep_legend_graph',
@@ -15302,6 +15482,19 @@ sub normalize_data_for_output {
         # suffixed -HL) counts like any other.
         my $error_occurrences = $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[2] // 0) : 0;
 
+        # #452 D1: derive the bucket's percentage pair once, from the same
+        # outcome counters the error rate reads — rendering never re-derives
+        # an outcome. D2: a bucket touched by a non-qualifying source (slot 3)
+        # keeps its counts but gets no percentage; D11: a bucket with no
+        # classified line gets no value, so its cells render blank, never 0%.
+        if (my $bucket_outcome = $bucket_outcomes{$bucket}) {
+            my $bucket_classified = ($bucket_outcome->[1] // 0) + ($bucket_outcome->[2] // 0);
+            if ($bucket_classified > 0 && !($bucket_outcome->[3] // 0)) {
+                $log_stats{$bucket}{success_pct} = ($bucket_outcome->[1] // 0) / $bucket_classified * 100;
+                $log_stats{$bucket}{failure_pct} = ($bucket_outcome->[2] // 0) / $bucket_classified * 100;
+            }
+        }
+
         foreach my $category_bucket (keys %{$log_occurrences{$bucket}}) {
             my $occurrences = $log_occurrences{$bucket}{$category_bucket}{occurrences};
             next unless $occurrences > 0 && $category_bucket !~ /^(?:empty|err-rate|msg-rate)$/; 			# don't include the empty bucket who's purpose is to normalize the buckets represented
@@ -15379,6 +15572,11 @@ sub normalize_data_for_output {
         }
     }
     push @output_columns, "occurrences"; # if $category_bucket =~ /^err-rate$/;
+    # #452 D9: per-bucket outcome COUNTS join the STATS CSV — exact by
+    # construction, the percentages derivable precisely by any consumer
+    # (#503 reads, never recomputes), the eligibility judgement the
+    # consumer's own.
+    push @output_columns, "successes", "failures";
 
     # --- Layout engine (Phase 1): build and calculate but do NOT use for rendering ---
     {
@@ -16163,6 +16361,10 @@ sub print_bar_graph {
             }
 
             push @csv_data, format_csv_value($total_occurrences, 'occurrences');			# add the total message count to the output CSV data
+            # #452 D9: the bucket's outcome counts, in lockstep with the
+            # 'successes','failures' header pushes in normalize_data_for_output().
+            push @csv_data, format_csv_value( $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[1] // 0) : 0, 'successes' ),
+                            format_csv_value( $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[2] // 0) : 0, 'failures' );
 
             ## RENDER ROW BY ITERATING @column_layout
             for my $col (grep { $_->{visible} } @column_layout) {
@@ -16211,6 +16413,25 @@ sub print_bar_graph {
                     # Fill remaining width with spaces
                     my $remaining = $col_w - $scaled_occurrences_total;
                     print " " x $remaining if $remaining > 0;
+
+                } elsif ($col->{value_only}) {
+                    # #452 D1: a value-only column renders no bar — the
+                    # formatted value sits centred in the cell (the header
+                    # centring geometry: odd remainder pads the left), in the
+                    # column's named colour (D14). No value, no ink (D11).
+                    my $cell_value = $log_stats{$bucket}{$col_id};
+                    if (defined $cell_value && $col_w > 0) {
+                        my $cell_text = format_percentage( $cell_value, mode => 'significant', digits => 3, width => $col_w );
+                        $cell_text = substr( $cell_text, 0, $col_w ) if length($cell_text) > $col_w;
+                        my $cell_pad = $col_w - length($cell_text);
+                        $cell_pad = 0 if $cell_pad < 0;
+                        my $cell_left = int( $cell_pad / 2 + 0.5 );
+                        print ' ' x $cell_left;
+                        print $colors{ $col->{value_color} } . $cell_text . $colors{'NC'};
+                        print ' ' x ( $cell_pad - $cell_left );
+                    } else {
+                        print " " x $col_w;
+                    }
 
                 } elsif ($col_type eq 'proportional' && $col_id ne 'occurrences') {
                     # Secondary metric bar (duration, bytes, count, UDMs, threadpools)
@@ -17423,22 +17644,35 @@ sub print_summary_table {
     }
 
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
+    push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
     push @summary_table, sprintf( $table_format, "HIGHLIGHTED", $total_lines_highlighted ) if $highlight_active;
     push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
     # Classified lines (#453): each row is shown when its outcome was declared
     # by a bound format or observed. The share is of all classified lines and
     # is omitted when no line was a success (failures would always read 100%).
     {
-        my $classified = $total_successes + $total_failures;
+        my $recon = classification_reconciliation();
+        my $classified = $recon->{classified};
+        # #452 D10: the classified rows' shares print only when the run
+        # qualifies for percentages; the zero-success suppression stands
+        # (failure-only logs would always read 100%). Counts always print.
+        my $share_denominator = ($recon->{pct_eligible} && $total_successes) ? $classified : undef;
         my $emit = sub {
-            my ($label, $n) = @_;
+            my ($label, $n, $denominator) = @_;
             push @summary_table,
-                $padding . share_row_text( $label, $n, $total_successes ? $classified : undef ) . "$padding\n";
+                $padding . share_row_text( $label, $n, $denominator ) . "$padding\n";
         };
-        $emit->( "SUCCESS CLASSIFIED", $total_successes ) if $cls_success_declared || $total_successes;
-        $emit->( "FAILURE CLASSIFIED", $total_failures )  if $cls_failure_declared || $total_failures;
+        $emit->( "SUCCESS CLASSIFIED", $total_successes, $share_denominator ) if $cls_success_declared || $total_successes;
+        $emit->( "FAILURE CLASSIFIED", $total_failures, $share_denominator )  if $cls_failure_declared || $total_failures;
+        # #452 R13/R14: leakage is surfaced beside the classified rows — the
+        # count of matched lines that matched neither classification, with its
+        # share of INCLUDED lines (a leakage figure, not a classified-denominator
+        # figure). Always carries its share, eligible run or not (D10).
+        # Printed only when non-zero (architect, 2026-08-31): the row exists
+        # to surface leakage, and a permanent zero row is noise.
+        $emit->( "UNCLASSIFIED", $recon->{unclassified}, $total_lines_included )
+            if $recon->{unclassified} > 0 && ( $cls_success_declared || $cls_failure_declared || $classified );
     }
-    push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
     if ($show_timing) {
         push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "DETECT: FORMAT REGISTRY BUILD", format_time( $elapsed_detect_registry_build, 's', 'medium', " " ) );
         push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "PARSE: FILE PROCESSING", format_time( $elapsed_parse_read_files, 's', 'medium', " " ) );
@@ -18268,6 +18502,7 @@ sub pipeline_finalize {
     print "Calculate statistics..." unless $disable_progress;
     calculate_all_statistics();
     emit_udm_zero_match_notices();
+    emit_classification_percentage_notices();
     $end_time = [gettimeofday];
     $elapsed_finalize_calculate_statistics = tv_interval($start_time, $end_time);
     measure_memory_structures();
