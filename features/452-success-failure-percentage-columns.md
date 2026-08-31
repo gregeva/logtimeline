@@ -692,6 +692,15 @@ is itself worth confirming.
 - Branch rebased onto `release/0.18.0` at the architect's instruction —
   already based on its tip (`b05e78c`), nothing came in.
 
+## Gate results — visibility-gate fix (2026-08-31, second pass)
+
+After the render-surface correction (visibility = format test): all 31
+harnesses exit 0 on the fixed commit; before/after benchmark re-run on the
+same machine — three after-readings against base-commit befores spread
++2.0% / +4.9% / −1.1% on total time (single-run noise around zero; the
+feature's only per-line work is one conditional increment), peak RSS
++0.5–0.7% (~1 MB). Within the 5% threshold; TSVs deleted.
+
 ## Merge gate
 
 Per-feature workflow step 1 in full: the change touches `ltl` and harness expectations,
