@@ -2,11 +2,14 @@
 
 **Issue:** #452 (FEATURE: Success and failure percentage columns for access logs and analysis overview surface)
 **Branch:** `452-success-failure-percentage-columns` off `release/0.18.0`
-**Status:** in implementation (scheduled by the architect, 2026-08-31). Trigger-(d)
-prototype complete — AC3/AC5/AC6 assertable via the timeline-cell selector
-(`prototype/452-timeline-cell-selector/FINDINGS.md`). Tuning items (D6 exact budget,
-R5 final hide priorities) are settled on rendered output during development and
-locked back here.
+**Status:** implemented on the branch (2026-08-31): columns, overview keys,
+UNCLASSIFIED row, notices, CSV counts, options and doc sweep in place;
+`tests/validate-classification-percentages.sh` green (30 assertions, red-first).
+Mixed-run bucket cells await the Q15 lock (provisionally D4's letter:
+default-off on a mixed run). Tuning values in force, to be confirmed on rendered
+output: D6 budget = 7 characters; R5 hide orders success 25 / failure 65;
+D14 shades dark-green = 256-colour 22, dark-red = 256-colour 88; D7 headers
+lowercase `success` / `failure` (architect's case correction, 2026-08-31).
 
 ## Scope
 
@@ -401,8 +404,9 @@ acceptance criteria and written BEFORE the code (red-first). It pins:
   recomputes. Mechanics: header + row pushes in lockstep in the CSV builder, integer
   family mapping, and `tests/csv-output/rules/stats-columns.tsv` rows in the same
   commit.
-- ~~Q9~~ **D7 — Headers are the plain words `Success` and `Failure` (architect,
-  2026-08-31).** Each is exactly 7 characters — the same as the full value width
+- ~~Q9~~ **D7 — Headers are the plain words `success` and `failure` (architect,
+  2026-08-31; case corrected during implementation, 2026-08-31: header titles
+  are all lowercase in the existing style, and the new headers match it).** Each is exactly 7 characters — the same as the full value width
   (`99.995%`) — so the header fits D6's minimal budget with no extra cost; the `%` on
   every value carries the unit. Headers stay neutral like every other header (existing
   behaviour — colouring them would be new capability nobody asked for; the values
@@ -570,6 +574,33 @@ caveat recorded in the findings: `text_colour()` reads only the unfilled portion
 a slice — exactly right for these bar-less columns. No other prototype trigger
 applies beyond the note on D2's provenance increment: no new data model (the store
 ships), and the remaining work is per displayed cell.
+
+## `-V` classification keys (#452)
+
+Additive keys on `format-detection / classification` (emitted by
+`emit_format_detection_verbose()` from `classification_reconciliation()`,
+consumed by `tests/validate-classification-percentages.sh`; the parent block's
+contract is `features/453-success-failure-classification-event-ledger.md`
+§ *`-V` section-contract changes*):
+
+```
+success_pct: NN.NNN
+failure_pct: NN.NNN
+pct_eligible: 0|1
+non_qualifying_lines: N
+```
+
+- `success_pct` / `failure_pct` — the overall percentages over the classified
+  denominator (`successes / classified × 100`, three decimals). **Printed only
+  when the run qualifies** under the D2/D4 ladder (D10) — absence is the
+  suppression, observable through the next key.
+- `pct_eligible` — 1 when something was classified and every included line came
+  from a qualifying source (both criteria declared, and event ledger or
+  explicit enable); 0 otherwise. The printed-or-blank decision for every
+  percentage surface, made observable (D5).
+- `non_qualifying_lines` — run total of included lines from non-qualifying
+  sources (the D2 provenance count; per-bucket twin in `%bucket_outcomes`
+  slot 3).
 
 ## Hand-forward
 

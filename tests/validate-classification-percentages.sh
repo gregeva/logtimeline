@@ -129,6 +129,11 @@ capture_run() {
         cat "$outfile.stderr" >&2
         exit 1
     fi
+    # The debug-layout table prints on stderr; the column selector reads it
+    # from the capture, so append the delimited block (and only it) here.
+    sed -n '/^--- Layout Engine Debug/,/^---$/p' "$outfile.stderr" >> "$outfile"
+    grep -q '^--- Layout Engine Debug' "$outfile" || {
+        echo "ERROR: no debug-layout table on stderr for: $*" >&2; exit 1; }
 }
 
 # cell REPORT_CAPTURE ROW COL -> the timeline_cell_report line (fails hard on
@@ -141,7 +146,7 @@ layout_field() {
     local capture="$1" col="$2" field="$3"
     "$PERL" -ne '
         BEGIN { my %i = (width=>2, bef=>3, aft=>4, vis=>5, hideo=>6); $::f = $i{$ARGV[1] // ""} }
-        next unless /^\s*'"$col"'\s+\S+\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/;
+        next unless /^\s*'"$col"'\s+\S+\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*(?:\(auto-hidden\))?\s*$/;
         my @v = ($1,$2,$3,$4,$5);
         my %idx = (width=>0, bef=>1, aft=>2, vis=>3, hideo=>4);
         print $v[$idx{"'"$field"'"}], "\n"; exit 0;
@@ -155,6 +160,13 @@ capture_run "$A" 160 -lf "$ACCESS_FORMAT" -V format-detection "$ACCESS_FIXTURE"
 # Capture A2: width 120 (auto-hide active).
 A2="$TMP_DIR/access-120.out"
 capture_run "$A2" 120 -lf "$ACCESS_FORMAT" "$ACCESS_FIXTURE"
+# Capture A3: width 120 with the heatmap (which hides last), so the failure
+# column is the top hide candidate — the width point where the R5 ladder is
+# observable on rendered layout. Used ONLY for the visibility assertion: the
+# heatmap's own overflow at this width is the filed #497 defect, so this
+# capture is deliberately not in the soft-wrap sweep.
+A3="$TMP_DIR/access-120-hm.out"
+capture_run "$A3" 120 -lf "$ACCESS_FORMAT" -hm duration "$ACCESS_FIXTURE"
 # Capture H: --hide-classification.
 H="$TMP_DIR/access-hidden.out"
 capture_run "$H" 160 -lf "$ACCESS_FORMAT" --hide-classification "$ACCESS_FIXTURE"
@@ -244,9 +256,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md AC7, R5 (provisional priorities, locked after tuning)"
 
 assert_command \
-    label "at width 120 the failure column is hidden with the latency panel; success survives (AC7)" \
-    command "fpv=\$(layout_field '$A2' failure_pct vis) && spv=\$(layout_field '$A2' success_pct vis) && [[ \$fpv == 0 && \$spv == 1 ]] || { echo \"failure vis=\$fpv success vis=\$spv\"; false; }" \
-    asserts "as width shrinks the failure column is among the first hidden (right after the latency block) while the success column persists" \
+    label "under width pressure the failure column hides first and success survives (AC7; -hm 120, where the ladder binds)" \
+    command "fpv=\$(layout_field '$A3' failure_pct vis) && spv=\$(layout_field '$A3' success_pct vis) && [[ \$fpv == 0 && \$spv == 1 ]] || { echo \"failure vis=\$fpv success vis=\$spv\"; false; }" \
+    asserts "as width shrinks the failure column is among the first hidden while the success column persists — on the default view every supported width fits both once the latency panel goes, so the binding point is the heatmap view" \
     produced_by "the width-allocation auto-hide pass in build_column_layout()" \
     contract "features/452-success-failure-percentage-columns.md AC7 (width point re-checked at tuning lock)"
 
@@ -255,7 +267,7 @@ current_scenario="options"
 
 assert_command \
     label "--hide-classification removes exactly the two columns (AC9, D8)" \
-    command "! grep -qE '^\\s*(success_pct|failure_pct)\\s+\\S+\\s+\\S+\\s+\\d+\\s+\\d+\\s+1\\s' '$H' && grep -qE '^\\s*duration\\s+\\S+\\s+\\S+\\s+\\d+\\s+\\d+\\s+1\\s' '$H'" \
+    command "[[ \$(layout_field '$H' success_pct vis) == 0 && \$(layout_field '$H' failure_pct vis) == 0 && \$(layout_field '$H' duration vis) == 1 ]]" \
     asserts "the hide option turns the pair off where it is on by default, leaving every other column's visibility untouched" \
     produced_by "the single-sited visibility gate (D15) reading the hide option" \
     contract "features/452-success-failure-percentage-columns.md D8, D15, AC9"
@@ -282,7 +294,7 @@ current_scenario="non-qualifying-run"
 
 assert_command \
     label "columns absent by default on a classifying non-ledger run (AC8, D4)" \
-    command "! grep -qE '^\\s*(success_pct|failure_pct)\\s' '$D0'" \
+    command "[[ \$(layout_field '$D0' success_pct vis) == 0 && \$(layout_field '$D0' failure_pct vis) == 0 ]]" \
     asserts "default-off when the matched formats are not qualifying event ledgers" \
     produced_by "the single-sited visibility gate (D15) evaluating the D2/D4 ladder" \
     contract "features/452-success-failure-percentage-columns.md AC8, D4"
@@ -296,14 +308,14 @@ assert_command \
 
 assert_command \
     label "explicit request against a format without both criteria: no columns, notice 3 explains why (AC8, AC11, D4)" \
-    command "! grep -qE '^\\s*(success_pct|failure_pct)\\s' '$D1' && grep -q 'percentage columns are not shown' '$D1.stderr'" \
+    command "[[ \$(layout_field '$D1' success_pct vis) == 0 && \$(layout_field '$D1' failure_pct vis) == 0 ]] && grep -q 'percentage columns are not shown' '$D1.stderr'" \
     asserts "an explicit --show-classification against formats that do not declare both success and failure criteria shows no columns and says why, rather than leaving them silently absent" \
     produced_by "the post-read notice emission (D12) evaluating the D4 floor" \
     contract "features/452-success-failure-percentage-columns.md R9 notice 3, D4"
 
 assert_command \
     label "declining ledger (java_gc_g1) explicitly requested: no columns, notice 3 (AC8, F8)" \
-    command "! grep -qE '^\\s*(success_pct|failure_pct)\\s' '$G1' && grep -q 'percentage columns are not shown' '$G1.stderr'" \
+    command "[[ \$(layout_field '$G1' success_pct vis) == 0 && \$(layout_field '$G1' failure_pct vis) == 0 ]] && grep -q 'percentage columns are not shown' '$G1.stderr'" \
     asserts "a format that declares classification 'none' is treated as declaring no criteria: notice 3, never the leakage warning (F8's misfire is prevented by the D2 predicate)" \
     produced_by "the post-read notice emission (D12)" \
     contract "features/452-success-failure-percentage-columns.md F8, D2, R9 notice 3"
