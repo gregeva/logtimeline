@@ -716,6 +716,16 @@ same machine — three after-readings against base-commit befores spread
 feature's only per-line work is one conditional increment), peak RSS
 +0.5–0.7% (~1 MB). Within the 5% threshold; TSVs deleted.
 
+## Gate results — final (2026-08-31, on the merge commit's content)
+
+After the four rendered-output corrections and their two consumer-assertion
+updates: all 31 `tests/validate-*.sh` exit 0; before/after benchmark on the
+same machine (`single-day-access-log-standard`, before on base commit
+`b05e78c`): total −2.3%, peak RSS −0.4% — no regression. Spacing reviewed by
+the architect on rendered output and accepted as-is (the second space before a
+value is the centring pad inside the 7-character cell, sized to the header
+word; declared column spacing is 1 throughout). TSVs deleted.
+
 ## Merge gate
 
 Per-feature workflow step 1 in full: the change touches `ltl` and harness expectations,
