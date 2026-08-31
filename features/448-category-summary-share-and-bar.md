@@ -12,7 +12,9 @@ The category rows of the run summary show an absolute count and nothing else. Th
 ## Status
 
 Scoped 2026-08-29; decisions D1–D8 locked. Implemented 2026-08-29 on branch
-`448-category-summary-share-and-bar`, every decision as locked.
+`448-category-summary-share-and-bar`, every decision as locked. Reopened
+2026-08-31 for the monochrome defect and the rescope it exposed (D-6, D7
+amended); branch `448-category-summary-share-and-bar-3`.
 
 ## Scope
 
@@ -44,12 +46,11 @@ A label that fills its 30-character cell leaves 10 characters for the value; on 
 
 **D4 — The bar spans the row's content.** It can begin at the first character of the category name and extend to the last character of the row's content, inside the summary table's width; the colour is reset before the padding so the fill never bleeds into the file-details pane printed on the same physical line. The rule line above the `Category` header — the regression filter's closing anchor (#457 D3/D5) — acquires no colour or width change.
 
-**D5 — Five visible options, one root, short and long forms, combinable.**
+**D5 — Four visible bar options, one root, short and long forms, combinable.** Monochrome was originally a fifth member of this family and is not one — see D7.
 
 | Short | Long | Effect |
 |---|---|---|
 | `-sbo` | `--summary-bar-off` | no bar |
-| `-sbm` | `--summary-bar-mono` | bar in plain foreground/background, so it can be judged apart from the category colours |
 | `-sba` | `--summary-bar-absolute` | table width = 100 % of lines included, instead of largest-row-full-width |
 | `-sbl` | `--summary-bar-log` | logarithmic length scaling — the only thing that gives the tail rows a visible length when INFO is 98 % and FATAL 0.01 % |
 | `-sbr` | `--summary-bar-reverse` | bar drawn right-to-left |
@@ -58,9 +59,22 @@ All are visible: `--help` rows, `docs/usage.md` rows, `-V runtime-config` proven
 
 **D6 — The percentage and the bar are on by default** (R12). Non-terminal output follows what the tool does today: the ANSI escapes are emitted regardless of TTY (only the help renderer gates on colour).
 
-**D7 — Monochrome (`-sbm`) affects the category rows only.** It is a rendering choice for the bar, not a second "should colour be emitted" convention.
+**D7 (amended 2026-08-31) — Monochrome is a property of the summary table, not of the bar: `-sm, --summary-mono`.** The option renders the summary table — the panel on the left, every row of it: the category rows and the classified, timing and memory rows below the separator — with no colour of its own. Where a bar is drawn it becomes a plain reverse-video fill, so its length still reads; where no bar is drawn the row is plain text. The file-details column printed to the right on the same physical lines is a different surface and is untouched.
+
+The rows below the separator carry no colour today and are planned to. Scoping the option to the table rather than to the bar is what makes that safe: a row given a colour later is covered with nothing to add for it, provided it resolves its colour through `summary_colour()` (N7) rather than reading `%colors` directly.
+
+As originally locked, D7 read "monochrome affects the category rows only … a rendering choice for the bar", which narrowed R13 — "render the rows monochrome" — to the fill. The implementation followed the narrowed reading and the harness asserted it (D-6).
 
 **D8 — No prototype.** Everything is computed once per displayed row from `%category_totals` and `$total_lines_included`, both already accumulated; no per-line cost, no new data model.
+
+## Acceptance criteria
+
+Agreed 2026-08-31 for the D7 rescope, before the code (CLAUDE.md § Development Phases 1a). All four are assertable in `tests/validate-summary-contribution-bar.sh`.
+
+- **A1 — Under `-sm` the summary table emits no colour of its own**, on any row, category or below-the-separator, whether or not a bar covers it, `-sbo` included. Asserted as the absence of colour across the table's character range rather than row by row, so a row given a colour later is covered without extending the assertion; the only escapes permitted inside the table are the bar's plain reverse video and the resets that close it.
+- **A2 — `-sm` changes colour only.** Every bar length, its direction, and every character of row text is identical to the same run without it.
+- **A3 — Without `-sm` nothing changes.** The category rows keep their colour, including a row whose share draws no fill (the D-5 fix stands).
+- **A4 — The file-details column keeps its colour under `-sm`.** It is outside the boundary, and the assertion holds it there.
 
 ## In-drop obligations
 
@@ -87,6 +101,8 @@ All are visible: `--help` rows, `docs/usage.md` rows, `-V runtime-config` proven
 
 The mechanism is an **inversion**, not a colour pair: outside the bar the text is the category's own colour on the terminal's background; inside it, the background becomes the colour and the text turns black (`38;5;0`). That is what lets one rendering stay readable on a dark terminal and on a light one, since the terminal supplies the surrounding foreground either way. Both shades of the hue are used, as the timeline uses them: the vivid `highlighted_bg` for a `-HL` row, the subdued `plain_bg` for its plain twin, so a highlighted category is visibly the one that stands out.
 
+**N7 — One resolution point for the summary table's colour.** `summary_colour()` returns the colour a summary-table element should use, or the empty string under `-sm`. Every row that wants colour goes through it instead of reading `%colors` directly, which is what makes the monochrome switch a property of the table rather than a list of rows someone has to keep current. The file-details column does not call it.
+
 ### Defects found in the delivered implementation (2026-08-29)
 
 All five were reported from real runs after the drop merged, and all five are the same root cause: the bar was built from a newly invented `-HL` colour vocabulary instead of the bar mechanism the requirement named.
@@ -110,6 +126,24 @@ Two presentation corrections landed with them: the highlighted rows read `(HL)` 
 - **No highlight scenario at all**, so nothing compared a `-HL` row with its plain twin — the D-2 and shade defects were invisible by construction. A scenario now highlights one of two paths in the dominant category and asserts the two shades differ.
 - **Insufficient dynamic range in the fixture.** Its smallest category was 1 of 40, which at a 41-character row computes to exactly 1 on its own merits, so D-4's forced minimum produced the same extent the arithmetic already gave and no assertion could tell them apart. What was needed was not more skew but a ratio beyond the row width; the new fixture is 200 / 3 / 1.
 - **The harness's own fill reader misread the fill.** It treated `38;5;0` — the black foreground every bar fill pairs with — as a reset, because the parameter ends in `;0`, so a full-width bar measured as zero. The reader now parses SGR parameters as whole values, and the second copy of it inside the log-scale check was converged into the one reader.
+
+### Defect found after the drop merged (2026-08-31)
+
+**D-6 — `-sm` (then `-sbm`) left the category colours on any row the bar did not cover.** Reported from a real run: with the option on, the 5xx, 4xx and 3xx rows of a 1.4-million-line access log still printed red, yellow and magenta, because at 0.034 %, 0.157 % and 0.694 % of a 99.1 % dominant category none of them draws a fill. `summary_category_row()` applied the category colour to every character outside the fill — the D-5 fix, applied unconditionally — so the rows with no fill were coloured in their entirety. Adding `-sbl` gave every row a fill and made the option appear to work, which is how it read as an inconsistency rather than a plain miss.
+
+The root cause is the requirement narrowing recorded in D7, not the conditional: R13 asked for the rows to be monochrome, D5/D7 restated it as the bar, and the code and its harness assertion both implemented the restatement. The fix is the rescope — the option is now `-sm, --summary-mono` and is about the table — plus one resolution point for the table's colour so that future coloured rows inherit it.
+
+`-sbm` never appeared in a released version (it shipped only on the unreleased `release/0.18.0`), so the rename carries no compatibility obligation.
+
+### Harness defect found while fixing the monochrome option
+
+Found while running the completion gate for D-6 and fixed in the same drop, at the architect's direction.
+
+**The shared CSV capture cache never expired.** `tests/lib/csv-cache.sh` caches one `ltl -o` run per scenario so that `validate-csv-output.sh` and `validate-statistics.sh` can share it, and a `CI=1` run deliberately skips the cleanup so the second harness finds the first one's capture. Nothing ever invalidated those files. Forty artifacts left behind by a session on 2026-08-28 were read back on 2026-08-31: 21 of 23 scenarios were validated against CSVs produced by an `ltl` that predated `duration_nice` and `impact`, and both harnesses failed on output no version of the tool would produce. The same mechanism would as readily have passed a scenario that should have failed — the harness reported a result about a tool it never ran.
+
+The fix has two parts, decided by the architect: a **one-hour validity period**, and a **record of the CSV-emitting code that produced each artifact**. An artifact past the period, or produced by different CSV code, is captured again — with a warning naming the reason, because the silence is what kept this invisible for three days. The signature covers the `ltl` subs dedicated to CSV, the CSV-writing lines of the subs that write one, and the column-rule spec under `tests/csv-output/rules/`; it deliberately does not cover the whole tool, since an edit anywhere would then discard the cache and the regeneration cost would fall on every session touching an unrelated surface. What it cannot see — a value computed upstream and then written into a column — the validity period covers.
+
+Asserted in `tests/validate-csv-output.sh` § cache-validity: each staleness decision against a crafted artifact with no `ltl` run, and the refresh end to end on the smallest fixture scenario. Rule recorded in `tests/HARNESS-DESIGN.md` § Cached capture artifacts expire.
 
 ## Merge gate
 

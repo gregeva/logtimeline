@@ -17,9 +17,13 @@
 #   - the colour is reset before the table's trailing padding, so the fill
 #     cannot bleed into the file-details pane printed beside the table on the
 #     same physical line;
-#   - each variant does what it says: -sbo emits no fill, -sbm fills without
-#     the category colours, -sbr fills from the right edge, -sba scales
-#     against every included line, -sbl scales logarithmically;
+#   - each bar variant does what it says: -sbo emits no fill, -sbr fills from
+#     the right edge, -sba scales against every included line, -sbl scales
+#     logarithmically;
+#   - -sm renders the summary table itself without colour — asserted over the
+#     table's whole character range, not row by row, so a row given a colour
+#     later is covered by it; and the file listing beside the table, which is
+#     a different surface, keeps its colour;
 #   - every colour has a highlighted twin carrying a background, so a category
 #     whose colour is neither one of the five that were hand-mapped nor a
 #     basic ANSI colour still gets a fill.
@@ -64,6 +68,13 @@ command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 # 53 lines — so the four bar lengths are distinct at every scale and a bar drawn
 # against the wrong reference cannot coincidentally land on the right length.
 FIXTURE="$REPO_DIR/tests/fixtures/category-contribution-skew.txt"
+#
+# The second fixture holds 200 / 3 / 1 lines: a ratio beyond the row width, so
+# the smallest category's honest extent is zero characters. It is what the
+# sub-character and the monochrome scenarios need — the main fixture's smallest
+# category computes to one character on its own merits, so no assertion over it
+# can tell a row that draws no bar from one that draws a short one.
+SUBCHAR_FIXTURE="$REPO_DIR/tests/fixtures/category-contribution-subcharacter.txt"
 ACCESS_FORMAT="tomcat_access_with_duration"
 WIDTH=140
 
@@ -80,9 +91,11 @@ neutralize_colour_env
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
 fi
-if [[ ! -f "$FIXTURE" ]]; then
-    echo "ERROR: fixture not found: $FIXTURE"; exit 1
-fi
+for fixture in "$FIXTURE" "$SUBCHAR_FIXTURE"; do
+    if [[ ! -f "$fixture" ]]; then
+        echo "ERROR: fixture not found: $fixture"; exit 1
+    fi
+done
 
 TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -161,6 +174,8 @@ capture_render() {
 #   extent=N        characters covered by the fill, counted in glyphs
 #   side=left|right which end of the row the fill starts from
 #   fill=<sgr>      the SGR parameters that opened the fill
+#   colour=<sgrs>   every escape inside the row that is not a plain reset,
+#                   comma-separated, or "none" — what the row is coloured with
 #   text=<glyphs>   the row with every escape sequence removed
 #   tail_reset=yes  the row's escapes end with a reset, so nothing the table
 #                   prints after the row inherits the fill
@@ -235,19 +250,46 @@ row_bar_report() {
                 for my $f (@fill) { $seen_end++ if $f != $prev; $prev = $f }
                 if ($seen_end > 1) { print "fill is not contiguous in row [$label]\n"; exit 1 }
             }
+            # Escapes inside the character range of the row itself, resets
+            # aside: what the row is coloured with. The file-details column
+            # beyond the row boundary is a separate surface and is excluded.
+            my ($cpos, @row_sgr) = (0);
+            while ($line =~ /\G(\e\[([0-9;]*)m|.)/gs) {
+                my ($tok, $sgr) = ($1, $2);
+                if (defined $sgr) {
+                    next if $cpos > 2 + $row_width;
+                    next if $sgr eq "" || $sgr eq "0";
+                    ( my $shown = $tok ) =~ s/\e/ESC/;
+                    push @row_sgr, $shown;
+                    next;
+                }
+                $cpos++;
+            }
+            my $colour = @row_sgr ? join( ",", @row_sgr ) : "none";
             my ($fill_sgr) = ( $kept =~ /(\e\[(?:[0-9;]*;)?(?:48;5;\d+|7)m)/ );
             $fill_sgr = defined $fill_sgr ? do { (my $s = $fill_sgr) =~ s/\e/ESC/; $s } : "none";
             ( my $text = $line ) =~ s/\e\[[0-9;]*m//g;
             $text = substr($text, 2, $row_width);
             $text =~ s/\s+$//;
-            printf "extent=%d side=%s fill=%s tail_reset=%s text=%s\n",
-                $extent, $side, $fill_sgr, ($tail_reset ? "yes" : "no"), $text;
+            printf "extent=%d side=%s fill=%s colour=%s tail_reset=%s text=%s\n",
+                $extent, $side, $fill_sgr, $colour, ($tail_reset ? "yes" : "no"), $text;
             exit 0;
         }
         close $fh;
         print "no category row labelled [$label] in the render\n";
         exit 1;
     ' "$1" "$2" "$3"
+}
+
+# One field of one row's report. text= is emitted last and carries spaces, so
+# it is read to end of line; every other field is a single token.
+row_field() {
+    local report="$1" field="$2"
+    if [[ "$field" == "text" ]]; then
+        printf '%s\n' "$report" | sed -nE "s/.*(^| )text=(.*)$/\2/p"
+    else
+        printf '%s\n' "$report" | sed -nE "s/.*(^| )$field=([^ ]*).*/\2/p"
+    fi
 }
 
 # Assert one field of the row report equals an expected value.
@@ -257,20 +299,126 @@ check_row_field() {
     if ! report=$(row_bar_report "$render" "$label" "$ROW_WIDTH"); then
         echo "$report"; return 1
     fi
-    # text= is emitted last and carries spaces, so it is read to end of line;
-    # every other field is a single token.
     local got
-    if [[ "$field" == "text" ]]; then
-        got=$(printf '%s\n' "$report" | sed -nE "s/.*(^| )text=(.*)$/\2/p")
-    else
-        got=$(printf '%s\n' "$report" | sed -nE "s/.*(^| )$field=([^ ]*).*/\2/p")
-    fi
+    got=$(row_field "$report" "$field")
     if [[ "$got" == "$expected" ]]; then
         echo "row [$label] $field=$got"
         return 0
     fi
     echo "row [$label] $field is [$got], expected [$expected]"
     echo "  report: $report"
+    return 1
+}
+
+# Assert one field of a row reads the same in two renders. This is how "the
+# option changes colour only" is asserted: the lengths and the text are read
+# out of both renders and compared, rather than restated as literals that
+# would pass while both renders moved together.
+check_row_field_matches() {
+    local render_a="$1" render_b="$2" label="$3" field="$4"
+    local report_a report_b got_a got_b
+    if ! report_a=$(row_bar_report "$render_a" "$label" "$ROW_WIDTH"); then echo "$report_a"; return 1; fi
+    if ! report_b=$(row_bar_report "$render_b" "$label" "$ROW_WIDTH"); then echo "$report_b"; return 1; fi
+    got_a=$(row_field "$report_a" "$field")
+    got_b=$(row_field "$report_b" "$field")
+    if [[ -z "$got_a" ]]; then
+        echo "row [$label] reports no $field in $render_a"; return 1
+    fi
+    if [[ "$got_a" == "$got_b" ]]; then
+        echo "row [$label] $field=$got_a in both renders"
+        return 0
+    fi
+    echo "row [$label] $field is [$got_a] with the option and [$got_b] without it"
+    return 1
+}
+
+# Every escape the render emits between the top of the summary table and its
+# last row, split by where it falls: 'inside' is the table's own character
+# range — the two columns of padding and the ROW_WIDTH characters of row —
+# and 'outside' is everything beyond it on the same physical lines, which is
+# the file-details column, a different surface.
+#
+# The scan is over the table's character range rather than over the rows that
+# exist today: that is what lets the monochrome assertion hold for a
+# classification, timing or memory row given a colour later without anyone
+# remembering to extend it.
+table_colour_report() {
+    "$PERL" -e '
+        my ($render, $row_width, $where) = @ARGV;
+        open my $fh, "<", $render or die "cannot open $render: $!\n";
+        my ($in_table, @lines) = (0);
+        while (my $line = <$fh>) {
+            ( my $plain = $line ) =~ s/\e\[[0-9;]*m//g;
+            $in_table = 1 if $plain =~ /^  Category\s+Total/;
+            next unless $in_table;
+            my ($pos, @inside, @outside) = (0);
+            while ($line =~ /\G(\e\[([0-9;]*)m|.)/gs) {
+                my ($tok, $sgr) = ($1, $2);
+                if (defined $sgr) {
+                    ( my $shown = $tok ) =~ s/\e/ESC/;
+                    # The row runs to 2 + row_width glyphs; the reset that
+                    # closes it lands at that boundary and belongs to the row.
+                    push @{ $pos <= 2 + $row_width ? \@inside : \@outside }, $shown;
+                    next;
+                }
+                $pos++;
+            }
+            push @lines, sprintf( "%d:%s", scalar(@lines) + 1,
+                                  join( ",", $where eq "inside" ? @inside : @outside ) );
+            last if $plain =~ /MAXIMUM MEMORY USED/;
+        }
+        close $fh;
+        unless (@lines) { print "no summary table found in $render\n"; exit 1 }
+        print "$_\n" for @lines;
+        exit 0;
+    ' "$1" "$2" "$3"
+}
+
+# The summary table carries no colour of its own. Permitted inside the table:
+# the plain reverse-video fill the bar is drawn with under monochrome, and the
+# resets that close it. Any other escape is a colour the option should have
+# suppressed.
+check_table_is_monochrome() {
+    local render="$1"
+    local report offenders scanned
+    if ! report=$(table_colour_report "$render" "$ROW_WIDTH" inside); then
+        echo "$report"; return 1
+    fi
+    scanned=$(printf '%s\n' "$report" | wc -l | tr -d ' ')
+    if [[ "$scanned" -lt 5 ]]; then
+        echo "only $scanned table lines scanned in $render — the table was not found whole"
+        return 1
+    fi
+    offenders=$(printf '%s\n' "$report" | sed 's/^[0-9]*://' | tr ',' '\n' \
+                    | grep -v '^$' | grep -vE '^ESC\[(0|7)m$' || true)
+    if [[ -n "$offenders" ]]; then
+        echo "colour emitted inside the summary table:"
+        printf '%s\n' "$offenders" | sort | uniq -c
+        return 1
+    fi
+    echo "no colour inside the summary table across $scanned lines"
+    return 0
+}
+
+# The file-details column beside the table is outside the boundary: monochrome
+# must leave it exactly as it was. Compared escape for escape against the
+# render without the option, and required to carry colour at all, so the
+# assertion cannot pass by both sides being empty.
+check_pane_keeps_its_colour() {
+    local render_mono="$1" render_plain="$2"
+    local mono plain
+    if ! mono=$(table_colour_report "$render_mono" "$ROW_WIDTH" outside); then echo "$mono"; return 1; fi
+    if ! plain=$(table_colour_report "$render_plain" "$ROW_WIDTH" outside); then echo "$plain"; return 1; fi
+    if ! printf '%s\n' "$mono" | grep -q 'ESC\['; then
+        echo "no escapes at all beside the table in $render_mono — nothing was compared"
+        return 1
+    fi
+    if [[ "$mono" == "$plain" ]]; then
+        echo "the file-details column is escape-for-escape identical with and without the option"
+        return 0
+    fi
+    echo "the file-details column changed:"
+    diff <(printf '%s\n' "$plain") <(printf '%s\n' "$mono") | sed 's/^/  /'
     return 1
 }
 
@@ -336,6 +484,12 @@ check_every_category_has_a_fill() {
 run_ltl_args() {
     printf '%s\n' --disable-progress -ni -lf "$ACCESS_FORMAT" \
         -bs 1440 -oe -n 1 --terminal-width "$WIDTH" "$@" "$FIXTURE"
+}
+
+# The same invocation over the sub-character fixture.
+run_subchar_args() {
+    printf '%s\n' --disable-progress -ni -lf "$ACCESS_FORMAT" \
+        -bs 1440 -oe -n 1 --terminal-width "$WIDTH" "$@" "$SUBCHAR_FIXTURE"
 }
 
 BAR_PRODUCED='summary_category_row() and summary_bar_extent() in ltl, called from print_summary_table()'
@@ -437,29 +591,87 @@ assert_command \
     contract    'features/448-category-summary-share-and-bar.md § D1 — the share follows the count (pct%) convention; D5 scopes -sbo to the bar'
 
 # ---------------------------------------------------------------------------
-# Scenario: -sbm fills without the category colours.
+# Scenario: -sm renders the summary table without colour.
+#
+# Monochrome is a property of the summary table, not of the bar: the option
+# shipped as a bar variant and left the category colours on every row the bar
+# did not cover, which on a real access log was every row but the dominant one.
+#
+# Two things follow, and both are asserted here. The table-wide assertions read
+# the table's whole character range rather than the rows that exist today, so a
+# classification, timing or memory row given a colour later is covered by them
+# with nothing to extend. And the fixture is the sub-character one: at
+# 200 / 3 / 1 lines its 5xx row draws no fill at all, which is the case the
+# delivered option got wrong and the main fixture cannot reach.
 # ---------------------------------------------------------------------------
 
-current_scenario="summary-bar-mono"
+current_scenario="summary-mono"
 echo "[$current_scenario]"
 
 MONO_RENDER="$TMP_DIR/mono.txt"
+MONO_BAR_OFF_RENDER="$TMP_DIR/mono-bar-off.txt"
+MONO_BASE_RENDER="$TMP_DIR/mono-base.txt"
 # shellcheck disable=SC2046
-capture_render "$MONO_RENDER" ansi $(run_ltl_args -sbm)
+capture_render "$MONO_RENDER" ansi $(run_subchar_args -sm)
+# shellcheck disable=SC2046
+capture_render "$MONO_BAR_OFF_RENDER" ansi $(run_subchar_args -sm -sbo)
+# shellcheck disable=SC2046
+capture_render "$MONO_BASE_RENDER" ansi $(run_subchar_args)
+
+MONO_CONTRACT='features/448-category-summary-share-and-bar.md § D7 (amended) — monochrome is a property of the summary table, not of the bar; § Acceptance criteria A1–A4'
 
 assert_command \
-    command     "check_row_field '$MONO_RENDER' '5xx Server error' fill 'ESC[7m'" \
-    label       'the fill carries no category colour under -sbm' \
-    asserts     "Monochrome draws the bar in a plain reverse-video fill instead of the category's own colour, so the bar length can be judged on its own without the colours arguing with it. The category colours are not otherwise disturbed — this is a rendering choice for the bar, not a second opinion about whether colour should be emitted at all." \
-    produced_by "$BAR_PRODUCED" \
-    contract    'features/448-category-summary-share-and-bar.md § D5 — -sbm, plain foreground/background; D7 — it affects the category rows only'
+    command     "check_table_is_monochrome '$MONO_RENDER'" \
+    label       'the summary table emits no colour of its own under -sm' \
+    asserts     'Monochrome is asked of the table, so it holds across the table rather than on the rows that happen to be coloured today. The scan covers every line from the Category header to the last row and permits only the plain reverse-video fill and the resets that close it, which is what makes a classification, timing or memory row given a colour later fail here rather than ship uncovered.' \
+    produced_by 'summary_colour() in ltl, the one place the summary table resolves a colour, called from summary_category_row()' \
+    contract    "$MONO_CONTRACT"
 
 assert_command \
-    command     "check_row_field '$MONO_RENDER' '3xx Redirection' extent 8" \
-    label       'the bar keeps its length under -sbm' \
-    asserts     'Monochrome changes only the colour the bar is drawn in. The length is the same measurement it always was, which is the point of being able to judge it without the colours.' \
+    command     "check_table_is_monochrome '$MONO_BAR_OFF_RENDER'" \
+    label       'the summary table emits no colour of its own under -sm with the bar switched off' \
+    asserts     'The two options are independent: -sbo removes the bar, -sm removes the colour, and neither depends on the other. A monochrome run with no bar at all is the case where nothing is left to carry the colour, so a row that still emitted one would be showing it for no reason.' \
+    produced_by 'summary_colour() in ltl, called from summary_category_row()' \
+    contract    "$MONO_CONTRACT"
+
+assert_command \
+    command     "check_row_field '$MONO_RENDER' '5xx Server error' colour none" \
+    label       'a row whose share draws no fill carries no colour under -sm' \
+    asserts     'This is the row the delivered option got wrong. Its share is below one character, so no fill covers it, and the renderer coloured every character the fill did not cover — which for this row was all of them. Monochrome cannot depend on whether a row happened to earn a bar.' \
+    produced_by 'summary_category_row() in ltl, the no-fill return' \
+    contract    "$MONO_CONTRACT"
+
+assert_command \
+    command     "check_row_field '$MONO_RENDER' '2xx Success' fill 'ESC[7m'" \
+    label       'the bar is still drawn under -sm, as a plain reverse-video fill' \
+    asserts     'Taking the colour away must not take the bar away: the length is what the option exists to let the eye judge, so the fill stays and inverts the terminal own foreground and background instead of carrying a category colour.' \
     produced_by "$BAR_PRODUCED" \
-    contract    'features/448-category-summary-share-and-bar.md § D7 — -sbm is a rendering choice for the bar'
+    contract    "$MONO_CONTRACT"
+
+for label in '2xx Success' '3xx Redirection' '5xx Server error'; do
+    for field in extent text; do
+        assert_command \
+            command     "check_row_field_matches '$MONO_RENDER' '$MONO_BASE_RENDER' '$label' $field" \
+            label       "[$label] keeps its $field under -sm" \
+            asserts     'Monochrome changes the colour and nothing else. The length of every bar and every character of every row is read out of both renders and compared, so a change of scale or of text hiding behind the colour change is caught rather than assumed away.' \
+            produced_by "$BAR_PRODUCED" \
+            contract    "$MONO_CONTRACT"
+    done
+done
+
+assert_command \
+    command     "check_row_field '$MONO_BASE_RENDER' '5xx Server error' colour 'ESC[31m'" \
+    label       'without -sm a row whose share draws no fill keeps its category colour' \
+    asserts     'The other side of the same rule, and a regression this table has already suffered once: a row too small to draw a bar previously printed in the terminal default rather than in red. Without the option the row is coloured whether or not a fill covers it.' \
+    produced_by 'summary_category_row() in ltl, the no-fill return' \
+    contract    'features/448-category-summary-share-and-bar.md § Defects found in the delivered implementation — D-5, a row with no bar keeps its colour'
+
+assert_command \
+    command     "check_pane_keeps_its_colour '$MONO_RENDER' '$MONO_BASE_RENDER'" \
+    label       'the file-details column beside the table keeps its colour under -sm' \
+    asserts     'The summary table is the panel on the left. The file listing printed to its right shares the physical lines but is a different surface, and monochrome does not reach it: its escapes are compared one for one against the run without the option, and it must carry colour at all, so the comparison cannot pass by both sides being empty.' \
+    produced_by 'print_summary_table() in ltl, which composes the table and the file-details column as separate surfaces' \
+    contract    "$MONO_CONTRACT"
 
 # ---------------------------------------------------------------------------
 # Scenario: -sbr draws from the right edge.
@@ -678,16 +890,9 @@ assert_command \
 current_scenario="a-share-below-one-character-draws-no-bar"
 echo "[$current_scenario]"
 
-SUBCHAR_FIXTURE="$REPO_DIR/tests/fixtures/category-contribution-subcharacter.txt"
-if [[ ! -f "$SUBCHAR_FIXTURE" ]]; then
-    echo "ERROR: fixture not found: $SUBCHAR_FIXTURE"; exit 1
-fi
-
 SUBCHAR_RENDER="$TMP_DIR/subcharacter.txt"
 # shellcheck disable=SC2046
-capture_render "$SUBCHAR_RENDER" ansi \
-    --disable-progress -ni -lf "$ACCESS_FORMAT" \
-    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" "$SUBCHAR_FIXTURE"
+capture_render "$SUBCHAR_RENDER" ansi $(run_subchar_args)
 
 while IFS='|' read -r label extent; do
     assert_command \
@@ -706,9 +911,7 @@ SUBROWS
 # compresses the scale so the row that draws nothing linearly gets a length.
 SUBCHAR_LOG_RENDER="$TMP_DIR/subcharacter-log.txt"
 # shellcheck disable=SC2046
-capture_render "$SUBCHAR_LOG_RENDER" ansi \
-    --disable-progress -ni -lf "$ACCESS_FORMAT" \
-    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -sbl "$SUBCHAR_FIXTURE"
+capture_render "$SUBCHAR_LOG_RENDER" ansi $(run_subchar_args -sbl)
 
 assert_command \
     command     "check_row_field '$SUBCHAR_LOG_RENDER' '5xx Server error' extent 12" \
@@ -732,9 +935,7 @@ echo "[$current_scenario]"
 
 HL_RENDER="$TMP_DIR/highlighted.txt"
 # shellcheck disable=SC2046
-capture_render "$HL_RENDER" ansi \
-    --disable-progress -ni -lf "$ACCESS_FORMAT" \
-    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -h /catalog "$SUBCHAR_FIXTURE"
+capture_render "$HL_RENDER" ansi $(run_subchar_args -h /catalog)
 
 assert_command \
     command     "check_row_field '$HL_RENDER' '2xx Success (HL)' fill 'ESC[48;5;46m'" \

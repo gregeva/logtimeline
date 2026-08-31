@@ -536,6 +536,18 @@ fi
 
 The rule exists because the `udm-counting` csv-output scenario exercised the exact code path of a per-message uninitialized-division bug and emitted 125 warnings on every run — invisibly, because no harness read stderr (Issue #326). The sweep that brought every harness under the check was Issue #341.
 
+## Cached capture artifacts expire
+
+A helper that caches an `ltl` capture so several harnesses can share it (`tests/lib/csv-cache.sh`) must decide whether a cached artifact may still be read back. Two rules, both derived from one incident (Issue #448): a `CI=1` run deliberately skips the cleanup so the next harness in the chain can reuse its capture, so a session that ends without `tests/cleanup-test-artifacts.sh` leaves its artifacts on disk indefinitely. Forty of them, three days old, were later read back by both consumers and validated 21 of 23 scenarios against an `ltl` that predated two of the columns the contract had since gained. Both harnesses failed against output that no version of the tool would produce, and the same cache would just as easily have passed a scenario it should have failed.
+
+**A cached artifact has a validity period.** One hour: long enough for the chaining the cache exists for (the harnesses in a `CI=1` chain run minutes apart), short enough that nothing survives into another working session. Past it, the artifact is produced again.
+
+**A cached artifact records what produced it.** Age alone does not cover a capture taken minutes ago from a tool that has since changed. The record is a digest of the code that decides the artifact's content — for the CSV cache, the `ltl` subs dedicated to CSV, the CSV-writing lines of the subs that write one, and the column-rule spec the validators read. It is deliberately not a digest of the whole tool: an edit anywhere would then throw the capture away, and the regeneration cost would fall on every session that touches an unrelated surface.
+
+**The refresh is never silent, and an unanswerable question is never answered "fresh".** The run states that the artifacts were stale and are being produced again, with the reason. A cache that quietly serves the wrong artifact produces exactly the false confidence the missing-anchor rule exists to prevent — worse, because the harness reports a result about a tool it never ran. An artifact whose validity cannot be determined (no record, unreadable timestamp) is treated as stale.
+
+The rules themselves are under test: `tests/validate-csv-output.sh` § cache-validity asserts each decision against a crafted artifact — no `ltl` run — and proves the refresh end to end on the smallest fixture scenario.
+
 ## Colour rendering is controlled, never inherited
 
 `ltl` decides whether to emit ANSI from two environment variables, checked in this order by `help_ansi_enabled()`: `FORCE_COLOR` (npm/chalk convention) turns ANSI on, then `NO_COLOR` (no-color.org) turns it off, then `-t STDOUT` decides. That precedence is deliberate and is not a harness concern. What *is* a harness concern is that both variables arrive from whatever shell launched the suite.
