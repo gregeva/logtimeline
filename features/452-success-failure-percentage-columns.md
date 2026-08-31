@@ -2,7 +2,11 @@
 
 **Issue:** #452 (FEATURE: Success and failure percentage columns for access logs and analysis overview surface)
 **Branch:** `452-success-failure-percentage-columns` off `release/0.18.0`
-**Status:** planning complete — requirements, substrate audit and locked decisions D1–D16 recorded (architect, 2026-08-31); implementation awaits explicit scheduling. Tuning items (D6 exact budget, R5 final hide priorities) are settled on rendered output during development and locked back here.
+**Status:** in implementation (scheduled by the architect, 2026-08-31). Trigger-(d)
+prototype complete — AC3/AC5/AC6 assertable via the timeline-cell selector
+(`prototype/452-timeline-cell-selector/FINDINGS.md`). Tuning items (D6 exact budget,
+R5 final hide priorities) are settled on rendered output during development and
+locked back here.
 
 ## Scope
 
@@ -396,17 +400,22 @@ criteria marked (Qn) cannot be finalised until that decision is locked. Triage:
   extent 0 and value text in the green foreground; failure likewise in red. The decoded
   foreground code alone cannot prove which colour table supplied it — the
   mechanism-substitution check is AC6, which is discriminating. *Unknown* — needs the
-  timeline-cell selector (see the trigger-(d) gate below); *Assertable* once it exists.
+  timeline-cell selector; *Assertable* — the selector is demonstrated
+  (`prototype/452-timeline-cell-selector/`): slice the column's cells by
+  `--debug-layout` offsets, assert `fill_extent() == 0` and `text_colour()`
+  equal to the named colour definition.
 - **AC4** (R1) — `--debug-layout` lists the two new ids between `occurrences` and
   `duration` in array order. *Assertable* — trivial.
 - **AC5** (R4) — The value is centred: on an odd remainder the extra space is on the
   left, so the value sits one column right of exact centre — the same geometry the
-  header rule produces. *Unknown* — same selector dependency as AC3.
+  header rule produces. *Assertable* — the selector's `centred_report()` states the rule and
+  flags right-heavy and left-aligned values (prototype arm E).
 - **AC6** (R6, Q12) — On a run carrying sessions, threadpools and a UDM, every column
   after the insertion point renders the same colours as the base commit: the new
   columns consume no palette index, so the dynamic-column colour walk is unchanged.
-  *Unknown* — same selector dependency as AC3; the comparison against a base-commit
-  capture is the part that proves the mechanism.
+  *Assertable* — per-column `fill_colour()`/`text_colour()` comparison between a
+  base-commit capture and the change, by column id (prototype finding: the
+  discriminating form is the comparison, not a palette-index grep).
 - **AC7** (R5) — Across a terminal-width sweep, the auto-hide sequence drops failure
   immediately after the latency panel and drops success only after duration, bytes,
   count, sessions and UDMs (provisional priorities ~65 and ~25; final values tuned on
@@ -469,22 +478,24 @@ criteria marked (Qn) cannot be finalised until that decision is locked. Triage:
   in the decoded output. A measured zero and an absent measurement never look the same.
   *Assertable* — rendered output on a crafted fixture.
 
-**Unknown-state triage — three criteria are Unknown, and resolving them is a
-trigger-(d) prototype gate before implementation.** AC3, AC5 and AC6 need a
-timeline-cell selector that does not exist: `tests/lib/rendered-output.pl` ships cell
-predicates (`decode_line`, `text_colour`, `fill_extent`), but no harness has ever
-consumed them, and the one row selector is summary-table-shaped. The prototype, with
-its cost for the architect to approve: add a cell selector driven by `--debug-layout`
-column offsets to the rendered-output library, demonstrate it distinguishes known-good
-from known-bad on an existing column (bytes, whose fill colour and extent are known),
-and validate it against the defect specimens from #448 (category summary contribution
-bar — five shipped visual defects that passed 23 escape-code assertions). Cost:
-roughly a day. Exit per `prototype/README.md` trigger (d): a demonstrated assertion
-method, or a recorded decision that AC3/AC5/AC6 are Unassertable with eye verification
-on real data as the method. The architect approved the exercise and its cost
-2026-08-31. No other
-prototype trigger applies beyond the note on D2's provenance increment: no new data
-model (the store ships), and the remaining work is per displayed cell.
+**Unknown-state triage — resolved 2026-08-31.** The trigger-(d) prototype ran and
+exited with a demonstrated assertion method: `prototype/452-timeline-cell-selector/`
+parses the `--debug-layout` table into per-column cell offsets (accumulated as the
+layout engine spends width), slices a decoded timeline row to one column's cells,
+and asserts colour, fill and centring per column. Demonstrated on the bytes column
+(known fill table 256:46/34, inversion, extent) at widths 160 and 120 (auto-hide
+active); validated against the #448 defect classes that apply to a timeline column
+— S4 one-cell overdraw, S5 lost value colour, S6 twin shades flattened — each
+reading differently from the correct slice; sabotaged offsets fail loudly (changed
+slice content, or a hard die past the row end), and a missing debug table or column
+id is a hard failure. AC3, AC5 and AC6 are therefore *Assertable*; productionising
+is ≈70 lines moved into `tests/lib/rendered-output.pl` plus a
+`render_column_report` wrapper in `tests/lib/rendered-output.sh`, done in the
+implementation stage under HARNESS-DESIGN's assertion-change rules. One predicate
+caveat recorded in the findings: `text_colour()` reads only the unfilled portion of
+a slice — exactly right for these bar-less columns. No other prototype trigger
+applies beyond the note on D2's provenance increment: no new data model (the store
+ships), and the remaining work is per displayed cell.
 
 ## Hand-forward
 
