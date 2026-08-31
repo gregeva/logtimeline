@@ -182,6 +182,9 @@ capture_run "$G1" 160 --show-classification "$GC_FIXTURE"
 # Capture M: mixed access + diagnostics run.
 M="$TMP_DIR/mixed.out"
 capture_run "$M" 160 -V format-detection "$ACCESS_FIXTURE" "$DIAG_FIXTURE"
+# Capture M2: the same mixed run explicitly enabled.
+M2="$TMP_DIR/mixed-show.out"
+capture_run "$M2" 170 --show-classification "$ACCESS_FIXTURE" "$DIAG_FIXTURE"
 
 # ---------------------------------------------------------------------------
 current_scenario="column-placement"
@@ -330,6 +333,20 @@ assert_command \
     produced_by "the shared reconciliation sub (D13) gated by the D2 run-level predicate; print_summary_table() share suppression" \
     contract "features/452-success-failure-percentage-columns.md R12, D10, AC15 (bucket-level cells: pending the D2/D4 mixed-run visibility resolution, feature doc § Open decisions)"
 
+assert_command \
+    label "mixed run default: columns not rendered — visibility is the format test, not data eligibility (AC15, D4)" \
+    command "[[ \$(layout_field '$M' success_pct vis) == 0 && \$(layout_field '$M' failure_pct vis) == 0 ]]" \
+    asserts "default-on requires every bound file's format to be an event ledger declaring both criteria; a mixed run fails that test" \
+    produced_by "classification_columns_visible() reading per-file event_ledger/cls_both" \
+    contract "features/452-success-failure-percentage-columns.md D4 (visibility is a render-surface question — architect correction 2026-08-31)"
+
+assert_command \
+    label "mixed run + --show-classification: columns render; diagnostics-fed buckets blank, access-only buckets print; notice 1 fires (AC15, R12, D2)" \
+    command "[[ \$(layout_field '$M2' success_pct vis) == 1 ]] && s0=\$(cell '$M2' '^ 2025-05-07 00:00' success_pct) && s3=\$(cell '$M2' '^ 2025-05-07 03:00' success_pct) && s4=\$(cell '$M2' '^ 2025-05-07 04:00' failure_pct) && [[ \$s0 == *'centred=empty'* ]] && [[ \$s3 == *\"text='\"*'100%'* ]] && [[ \$s4 == *'66.667%'* ]] && grep -q 'cover only operations the log records' '$M2.stderr' || { echo \"s0=\$s0\"; echo \"s3=\$s3\"; echo \"s4=\$s4\"; false; }" \
+    asserts "per-bucket eligibility is a data question independent of visibility: a bucket touched by the non-qualifying source prints nothing, an untouched bucket keeps its stable figure, and the partial-coverage caution names the blind spots" \
+    produced_by "normalize_data_for_output() per-bucket derivation gated on %bucket_outcomes slot 3; emit_classification_percentage_notices()" \
+    contract "features/452-success-failure-percentage-columns.md R12/D2, R9 notice 1"
+
 # ---------------------------------------------------------------------------
 current_scenario="clean-run-hygiene"
 
@@ -340,7 +357,7 @@ assert_command \
     produced_by "the post-read notice emission (D12)" \
     contract "features/452-success-failure-percentage-columns.md R9, AC11"
 
-for cap in "$A" "$A2" "$H" "$D0" "$D1" "$G1" "$M"; do
+for cap in "$A" "$A2" "$H" "$D0" "$D1" "$G1" "$M" "$M2"; do
     label_name=$(basename "$cap")
     assert_command \
         label "no runtime warnings on stderr ($label_name)" \

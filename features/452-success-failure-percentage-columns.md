@@ -277,26 +277,27 @@ Recorded so the walkthrough starts from the code, not from the issue text.
 
 ## Open decisions
 
-Two questions surfaced during scenario design (2026-08-31) — raised to the
-architect, blocking only the mixed-run bucket-cell scenario and the mixed-run
-notice choice, not the rest of the implementation:
-
-- **Q15 — mixed-run column visibility: D2 and D4 disagree.** D2 (per-row
-  eligibility) says a mixed run's *untouched buckets keep their percentages* —
-  which requires the columns to be visible on a mixed run. D4 says
-  **default-on only when every matched file's format is a qualifying ledger** —
-  which hides the columns entirely on a mixed run. Candidate readings: (a) D4
-  governs the default and D2's untouched-buckets clause applies only under
-  explicit enable; (b) a run with at least one qualifying file is default-on
-  and D2 blanks the polluted rows. The harness asserts only the surfaces both
-  agree on (run-level suppression everywhere, D10); the bucket-cell mixed
-  scenario lands once this is locked.
-- **Q16 — which notice fires on a mixed explicit-enable run.** Notice 1's
-  condition (non-ledger format, explicitly enabled) and notice 3's D4-extended
-  condition (request against formats without both criteria) can both match a
-  mixed run in which columns ARE shown for qualifying rows — and notice 3's
-  text ("the columns are not shown") would then be false. Needs a decision on
-  the mixed-run notice text/choice.
+~~Q15/Q16~~ **Resolved by the architect's correction (2026-08-31): there was no
+D2/D4 conflict — the two decisions answer different questions.** Percentage
+*eligibility* is a property of the data, evaluated per aggregation bucket (a
+time-window bucket, the run-level total, in future a message row) from that
+bucket's own contributing lines; the values exist for the summary table, the
+`-V` overview and the output files whether or not any column renders. Column
+*visibility* is only the render surface: default-on when every bound file's
+format is an event ledger declaring both criteria, `--show-classification`
+shows the pair whenever at least one bound format declares both,
+`--hide-classification` always wins. Implemented in
+`classification_columns_visible()` from per-file `event_ledger`/`cls_both`
+(`FR_CLS_BOTH`, the unfolded both-criteria property). On a mixed run: columns
+hidden by default; under explicit enable they render, buckets fed by the
+non-qualifying source stay blank (per-bucket eligibility), untouched buckets
+keep their figures, and the run-level percentages stay suppressed. The notice
+on an explicitly-enabled mixed run is **notice 1** (partial coverage) — R9's
+condition read per bound format: a format that classifies without being a
+ledger is present, and the columns ARE shown, so "not shown" (notice 3) would
+be false; notice 3 fires only when NO bound format declares both criteria.
+(The notice-1-on-mixed reading is Claude's alignment of R9 to the corrected
+model — flagged, as the notice-3 extension in D4 already is.)
 
 Remaining tuning items (D6 exact budget, R5 final hide priorities) are settled on
 rendered output during development and locked back here.

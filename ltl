@@ -492,6 +492,10 @@ use constant {
                                # event ledger or the columns were explicitly
                                # enabled; folded at build time so the include
                                # point pays one array lookup per line
+    FR_CLS_BOTH        => 28,  # 1 = the entry's resolved classification
+                               # declares both outcomes (#452 D4 usability
+                               # floor, unfolded — column visibility reads it
+                               # per file, independent of the run mode)
 };
 my @format_registry;           # scanned entries, static cascade order: one
                                # occupant per variant-group slot (D47/F1)
@@ -3851,6 +3855,7 @@ sub format_classification_rule_change {
         "rule_change: file=$file line=$line_number from=$old_entry->[FR_SLUG] to=$new_entry->[FR_SLUG]"
         if $n <= FORMAT_CLS_RULE_CHANGE_LINES_MAX;
     $format_detection{$file}{event_ledger} = $new_entry->[FR_EVENT_LEDGER] if $format_detection{$file};
+    $format_detection{$file}{cls_both}     = $new_entry->[FR_CLS_BOTH]     if $format_detection{$file};
     defer_notice( "Note: $file line $line_number: the classification rules changed because the detected log format changed from "
         . $old_entry->[FR_SLUG] . " to " . $new_entry->[FR_SLUG]
         . " - lines before this point were classified under the previous rules\n" )
@@ -4462,6 +4467,7 @@ sub build_format_registry {
         $entry->[FR_CLASSIFY]        = $spec->{scanned} ? undef : compile_format_classifier($spec);
         $entry->[FR_CLS_SIG]         = $spec->{_cls_sig};
         $entry->[FR_PCT_QUALIFYING]  = ($spec->{_cls_both} && ($spec->{event_ledger} || $show_classification)) ? 1 : 0;
+        $entry->[FR_CLS_BOTH]        = $spec->{_cls_both} ? 1 : 0;
         if ($spec->{scanned}) {
             push @format_registry_members, $entry;
             push @format_registry, $entry if $entry->[FR_GROUP_DEFAULT];
@@ -4701,11 +4707,28 @@ sub classification_reconciliation {
 }
 
 # The single-sited default-visibility decision for the percentage columns
-# (#452 D15): everything that shows or hides the pair resolves here.
+# (#452 D15). Visibility is a RENDER-SURFACE question answered from the
+# bound formats' properties (D4): default-on when every bound file's format
+# is an event ledger declaring both criteria; --show-classification shows
+# the pair whenever at least one bound format declares both;
+# --hide-classification always wins. It is NOT the data question — whether
+# a percentage exists is decided per aggregation bucket (a time bucket, the
+# run total) by its own contributing lines, and those values feed the
+# summary table, the -V overview and the output files whether or not the
+# columns render.
 sub classification_columns_visible {
     return 0 if $hide_classification;
-    my $r = classification_reconciliation();
-    return $r->{pct_eligible};
+    my ( $bound, $ledger_both, $any_both ) = ( 0, 0, 0 );
+    for my $file (@in_files) {
+        my $fdd = $format_detection{$file} or next;
+        next unless defined $fdd->{match_type};
+        $bound++;
+        $ledger_both++ if $fdd->{event_ledger} && $fdd->{cls_both};
+        $any_both++    if $fdd->{cls_both};
+    }
+    return 0 unless $bound;
+    return 1 if $show_classification && $any_both;
+    return ( $ledger_both == $bound ) ? 1 : 0;
 }
 
 sub emit_format_detection_verbose {
@@ -5483,31 +5506,36 @@ sub emit_udm_zero_match_notices {
 # surface. Never gated by --disable-progress: they tell the user what the
 # tool decided on their behalf.
 sub emit_classification_percentage_notices {
-    my $r = classification_reconciliation();
-    # Notice 3 — explicitly requested, nothing to compute: the matched
-    # formats do not declare both a success and a failure classification
-    # (subsumes 'none at all', D4), or nothing was classified.
-    if ( $show_classification && !$r->{pct_eligible} ) {
+    my ( $bound, $any_both, $nonledger ) = ( 0, 0, 0 );
+    for my $file (@in_files) {
+        my $fdd = $format_detection{$file} or next;
+        next unless defined $fdd->{match_type};
+        $bound++;
+        $any_both++ if $fdd->{cls_both};
+        $nonledger++ unless $fdd->{event_ledger};
+    }
+    return unless $bound;
+    # Notice 3 — explicitly requested, nothing to compute anywhere: no bound
+    # format declares both a success and a failure classification (subsumes
+    # 'none at all', D4), so the columns are not shown.
+    if ( $show_classification && !$hide_classification && !$any_both ) {
         print STDERR "Note: the success/failure percentage columns are not shown: the matched log format(s) do not declare both a success and a failure classification, so no percentage can be computed. See --help formats for what each format classifies.\n";
         return;
     }
     return unless classification_columns_visible();
-    # Notice 1 — shown by explicit enable over a format without the
+    # Notice 1 — shown by explicit enable while a bound format lacks the
     # event-ledger property: the figure covers only what the log records.
-    my $ledger_only = 1;
-    for my $file (@in_files) {
-        my $fdd = $format_detection{$file} or next;
-        next unless defined $fdd->{match_type};
-        $ledger_only = 0, last unless $fdd->{event_ledger};
-    }
-    if ( $show_classification && !$ledger_only ) {
-        print STDERR "Note: the success/failure percentages cover only operations the log records: the format is not an event ledger, so operations can be missing from the figure entirely, and the configured criteria may not attribute an operation to success or failure correctly.\n";
+    # (On a mixed run this is the applicable caution: the columns render,
+    # rows fed by the non-ledger source stay blank per bucket eligibility.)
+    if ( $show_classification && $nonledger ) {
+        print STDERR "Note: the success/failure percentages cover only operations the log records: a matched format is not an event ledger, so operations can be missing from the figure entirely, and the configured criteria may not attribute an operation to success or failure correctly.\n";
         return;
     }
     # Notice 2 — event-ledger formats only: any non-zero shortfall of
     # successes + failures against lines included is a coverage defect in
     # the format's configured patterns, reported with its scale.
-    if ( $ledger_only && $r->{unclassified} > 0 ) {
+    my $r = classification_reconciliation();
+    if ( !$nonledger && $r->{unclassified} > 0 ) {
         my $leak_pct = $r->{included} ? sprintf('%.1f', $r->{unclassified} / $r->{included} * 100) : '0.0';
         print STDERR "Warning: $r->{unclassified} included line(s) ($leak_pct%) matched neither the success nor the failure classification - the percentages exclude them; investigate the format's detection patterns for coverage.\n";
     }
@@ -12208,6 +12236,7 @@ sub read_and_process_logs {
                     # The bound entry's event-ledger flag becomes the
                     # file's property (#453 R8/D19).
                     $fdd->{event_ledger}     = $line_entry ? $line_entry->[FR_EVENT_LEDGER] : 0;
+                    $fdd->{cls_both}         = $line_entry ? $line_entry->[FR_CLS_BOTH] : 0;
                     # D18: the bound format's duration unit varies across
                     # producers and no -du was given — tell the user which
                     # assumption is in effect, once per run. Phrased run-level
