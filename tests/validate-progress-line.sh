@@ -87,6 +87,74 @@ done
 
 TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
 
+# Checker for the row the progress line owns, run against a capture's RAW
+# stdout — not the whitespace-trimmed frames the other assertions read, because
+# the trailing spaces are precisely what it is about.
+#
+#   width   <raw> <terminal-width>  every painted frame occupies exactly
+#                                   terminal-width - 1 columns
+#   residue <raw>                   replaying the stream through a terminal
+#                                   (carriage returns move the cursor, writes
+#                                   overwrite) leaves nothing of any frame
+#                                   standing past the end of its successor
+#
+# The two are the mechanism and its consequence: the frame is padded to the row
+# width so that whatever the previous frame left is covered by this one. Both
+# exit non-zero when no frame is found at all — a run that painted nothing must
+# fail here rather than pass vacuously (HARNESS-DESIGN.md § Harnesses must fail
+# on missing anchors).
+ROW_CHECK="$TMP_DIR/progress-row-check.py"
+cat > "$ROW_CHECK" <<'PYEOF'
+import re, sys
+
+check, raw_path = sys.argv[1], sys.argv[2]
+# Read as bytes and decode: Python's text mode applies universal newlines,
+# which turns every carriage return into a line feed — so the row would appear
+# to start empty for each frame and the residue check could never fail.
+text = re.sub(r'\x1b\[[0-9;]*m', '', open(raw_path, 'rb').read().decode('utf-8', 'replace'))
+FRAME = re.compile(r'^Processing +[0-9]+%')
+
+# The row as the terminal holds it: '\r' returns the cursor to column 0, a
+# write overwrites what is under it, '\n' ends the row.
+row, col, frames, problems = [], 0, 0, []
+for piece in re.split(r'(\r|\n)', text):
+    if piece == '\r':
+        col = 0
+        continue
+    if piece == '\n':
+        row, col = [], 0
+        continue
+    if not piece:
+        continue
+    for ch in piece:
+        if col < len(row):
+            row[col] = ch
+        else:
+            row.append(ch)
+        col += 1
+    if not FRAME.match(piece):
+        continue
+    frames += 1
+    if check == 'width':
+        expected = int(sys.argv[3]) - 1
+        if len(piece) != expected:
+            problems.append("frame is %d columns, expected %d: %r" % (len(piece), expected, piece))
+    else:
+        leftover = ''.join(row[len(piece):])
+        if leftover.strip():
+            problems.append("frame leaves %r visible after it: %r" % (leftover, piece))
+
+if frames == 0:
+    print("no progress frame found in %s" % raw_path)
+    sys.exit(1)
+for p in problems[:5]:
+    print(p)
+if problems:
+    print("%d of %d frames failed the %s check" % (len(problems), frames, check))
+    sys.exit(1)
+sys.exit(0)
+PYEOF
+
 pass=0
 fail=0
 failures=()
@@ -250,6 +318,25 @@ assert_command \
     produced_by 'progress_line_text() in ltl (the filename absorbs the fit; the rate is dropped before the name)' \
     contract    'features/446-overall-progress-indicator.md D5 and the in-drop obligation that the line clear covers the longest form of the line'
 
+# The other side of the same invariant: no frame may fall SHORT of the row
+# either. The line shrinks between repaints as a matter of course — the rate
+# falls from 148.2k to 71k, the line count from 278.5k to 279k — and a carriage
+# return moves the cursor without erasing, so a frame that stops early leaves
+# the tail of its predecessor standing beside it.
+assert_command \
+    command     "python3 '$ROW_CHECK' width '$MULTI.raw' $WIDTH" \
+    label       "every painted frame occupies exactly $((WIDTH - 1)) columns" \
+    asserts     'Each frame is padded out to the width of the row it owns, so painting it covers whatever the previous frame left behind — the row never has to be blanked first, and no frame can be partly a fragment of an older one' \
+    produced_by 'paint_progress_line() in ltl' \
+    contract    'features/446-overall-progress-indicator.md D8 — every frame is written at the full row width'
+
+assert_command \
+    command     "python3 '$ROW_CHECK' residue '$MULTI.raw'" \
+    label       'no frame leaves characters of itself visible after the next one is painted' \
+    asserts     'Replaying the run through a terminal — carriage returns moving the cursor, writes overwriting — leaves nothing of any frame standing past the end of the frame that replaced it: what the reader sees is always one frame, never two spliced together' \
+    produced_by 'paint_progress_line() in ltl' \
+    contract    'features/446-overall-progress-indicator.md D8 — the padding exists to make this true without tracking what the row held'
+
 # ---------------------------------------------------------------------------
 # Scenario: single file — one percentage, no counter
 # ---------------------------------------------------------------------------
@@ -333,6 +420,13 @@ assert_command \
     asserts     'The numerics are what the narrowing protects: the file and overall percentages and the counter are still present at 60 columns, because the filename gives up its characters first' \
     produced_by 'progress_line_text() in ltl' \
     contract    'features/446-overall-progress-indicator.md D5 — truncate the variable part, never the numbers'
+
+assert_command \
+    command     "python3 '$ROW_CHECK' width '$NARROW.raw' $NARROW_WIDTH" \
+    label       "every painted frame occupies exactly $((NARROW_WIDTH - 1)) columns at a 60-column width" \
+    asserts     'The row the frame fills is the terminal it is painted on: at 60 columns the padding runs to 59, so the same self-covering property holds on a narrow terminal, where the filename shortening makes the line length vary most' \
+    produced_by 'paint_progress_line() in ltl (the pad is measured from $terminal_width)' \
+    contract    'features/446-overall-progress-indicator.md D8 — the row width is the terminal width the run was given'
 
 # ---------------------------------------------------------------------------
 # Scenario: an unreadable file keeps the two-percentage shape.
