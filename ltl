@@ -15042,6 +15042,47 @@ sub build_column_layout {
         };
     }
 
+    # Success / failure percentage pair (#452): value-only fixed columns —
+    # no bar (the reference of a percentage is 100, not the run maximum), a
+    # minimal fixed budget outside the proportional share (D6: 7 characters,
+    # the 7-char headers 'success'/'failure'), named colour definitions
+    # (D14), default visibility resolved in ONE place
+    # (classification_columns_visible, D15). Placed to the right of the
+    # legend, before the legend|graph separator (architect correction,
+    # 2026-08-31). Hide orders are the R5 provisional tuning values: failure
+    # right after the latency panel, success outliving duration/bytes/count.
+    {
+        my $cls_visible = classification_columns_visible();
+        push @cols, {
+            id              => 'success_pct',
+            type            => 'fixed',
+            name            => 'success',
+            width           => undef,
+            base_width      => 7,
+            spacing_before  => 1,
+            spacing_after   => 0,
+            visible         => $cls_visible,
+            color           => undef,
+            value_only      => 1,
+            value_color     => 'dark-green',
+            hide_order      => 25,
+        };
+        push @cols, {
+            id              => 'failure_pct',
+            type            => 'fixed',
+            name            => 'failure',
+            width           => undef,
+            base_width      => 7,
+            spacing_before  => 1,
+            spacing_after   => 1,
+            visible         => $cls_visible,
+            color           => undef,
+            value_only      => 1,
+            value_color     => 'dark-red',
+            hide_order      => 65,
+        };
+    }
+
     # Separator: legend | graph columns
     push @cols, {
         id              => 'sep_legend_graph',
@@ -15069,46 +15110,6 @@ sub build_column_layout {
         color           => undef,
         hide_order      => 10,
     };
-
-    # Success / failure percentage pair (#452): value-only fixed columns —
-    # no bar (the reference of a percentage is 100, not the run maximum), a
-    # minimal fixed budget outside the proportional share (D6: 7 characters,
-    # the full value '99.995%' and the 7-char headers 'success'/'failure'),
-    # named colour definitions (D14), default visibility resolved in ONE
-    # place (classification_columns_visible, D15). Hide orders are the R5
-    # provisional tuning values: failure right after the latency panel,
-    # success outliving duration/bytes/count.
-    {
-        my $cls_visible = classification_columns_visible();
-        push @cols, {
-            id              => 'success_pct',
-            type            => 'fixed',
-            name            => 'success',
-            width           => undef,
-            base_width      => 7,
-            spacing_before  => 1,
-            spacing_after   => 1,
-            visible         => $cls_visible,
-            color           => undef,
-            value_only      => 1,
-            value_color     => 'dark-green',
-            hide_order      => 25,
-        };
-        push @cols, {
-            id              => 'failure_pct',
-            type            => 'fixed',
-            name            => 'failure',
-            width           => undef,
-            base_width      => 7,
-            spacing_before  => 1,
-            spacing_after   => 1,
-            visible         => $cls_visible,
-            color           => undef,
-            value_only      => 1,
-            value_color     => 'dark-red',
-            hide_order      => 65,
-        };
-    }
 
     # Duration — proportional, secondary
     push @cols, {
@@ -16400,7 +16401,7 @@ sub print_bar_graph {
                     # column's named colour (D14). No value, no ink (D11).
                     my $cell_value = $log_stats{$bucket}{$col_id};
                     if (defined $cell_value && $col_w > 0) {
-                        my $cell_text = format_percentage( $cell_value, mode => 'decimals', digits => 3, width => $col_w );
+                        my $cell_text = format_percentage( $cell_value, mode => 'significant', digits => 3, width => $col_w );
                         $cell_text = substr( $cell_text, 0, $col_w ) if length($cell_text) > $col_w;
                         my $cell_pad = $col_w - length($cell_text);
                         $cell_pad = 0 if $cell_pad < 0;
@@ -17623,6 +17624,7 @@ sub print_summary_table {
     }
 
     push @summary_table, sprintf( "$padding" . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
+    push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
     push @summary_table, sprintf( $table_format, "HIGHLIGHTED", $total_lines_highlighted ) if $highlight_active;
     push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
     # Classified lines (#453): each row is shown when its outcome was declared
@@ -17646,10 +17648,11 @@ sub print_summary_table {
         # count of matched lines that matched neither classification, with its
         # share of INCLUDED lines (a leakage figure, not a classified-denominator
         # figure). Always carries its share, eligible run or not (D10).
+        # Printed only when non-zero (architect, 2026-08-31): the row exists
+        # to surface leakage, and a permanent zero row is noise.
         $emit->( "UNCLASSIFIED", $recon->{unclassified}, $total_lines_included )
-            if $cls_success_declared || $cls_failure_declared || $classified;
+            if $recon->{unclassified} > 0 && ( $cls_success_declared || $cls_failure_declared || $classified );
     }
-    push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read ); 
     if ($show_timing) {
         push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "DETECT: FORMAT REGISTRY BUILD", format_time( $elapsed_detect_registry_build, 's', 'medium', " " ) );
         push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "PARSE: FILE PROCESSING", format_time( $elapsed_parse_read_files, 's', 'medium', " " ) );

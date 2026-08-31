@@ -57,17 +57,20 @@ Stated in the architect's terms from the issue body (as corrected 2026-08-31: cl
 denominator; two columns, not one; no number is named "reliability").
 
 - **R1 — Two data-display columns, no bar.** Success percentage then failure
-  percentage, after the occurrences column and before the duration column. Success in
-  dark green, failure in dark red. Value only — no bar, no other visual treatment.
+  percentage, **to the right of the legend, before the legend|graph separator**
+  (architect correction on rendered output, 2026-08-31; supersedes the issue's
+  original "after occurrences, before duration"). Success in dark green, failure
+  in dark red. Value only — no bar, no other visual treatment.
 - **R2 — The classified denominator.** Per bucket: successes ÷ (successes + failures),
   read from `%bucket_outcomes` — the columns never re-derive an outcome (#453 D13: one
   classification surface; rendering reads counters). Unclassified lines are outside the
   ratio; their shortfall is notice 2's figure, never absorbed into the denominator.
-- **R3 — Shared percentage formatter.** Values rendered by `format_percentage()` with
-  this surface's parameters from `docs/percentage-presentation.md`: 3 decimals, the
-  column's width budget, rounded, `%` retained at every width. The value's intrinsic
-  budget is up to six characters for the number plus the `%` sign (issue: the width and
-  degradation bullets stand); degradation drops decimals one at a time, never the `%`.
+- **R3 — Shared percentage formatter.** Values rendered by `format_percentage()`
+  in **significant mode, 3 digits — the same rule the category and classified
+  summary shares use** (architect correction on rendered output, 2026-08-31,
+  superseding the 2026-08-29 3-decimals decision; `docs/percentage-presentation.md`
+  row updated). The column's width budget applies, rounded, `%` retained at every
+  width; degradation sheds digits, never the `%`.
 - **R4 — Centred value, headers attempting "Success"/"Failure".** The value is centred
   within the column's characters (architect, 2026-08-31: the small padding computation
   is accepted); headers truncate the way other headers do. (Header wording settled by D7:
@@ -127,7 +130,8 @@ denominator; two columns, not one; no number is named "reliability").
   by the ratio — excluded from the denominator — and do **not** disqualify a row under
   R12; the percentages then represent what is known about the successes and failures.
   In exchange the leakage is called out: the run summary gains an `UNCLASSIFIED` row —
-  no such row exists today; the count is currently `-V`-only. Vocabulary pinned by the
+  **printed only when the count is non-zero** (architect, 2026-08-31: a permanent
+  zero row is noise); no such row existed before; the count was `-V`-only. Vocabulary pinned by the
   architect (2026-08-31): `LINES INCLUDED` means anything matched (that survived
   filtering); `UNCLASSIFIED` means matched lines that matched neither the success nor
   the failure classification. The row carries the count and its share of included
@@ -691,6 +695,17 @@ is itself worth confirming.
   TSVs deleted per the workflow.
 - Branch rebased onto `release/0.18.0` at the architect's instruction —
   already based on its tip (`b05e78c`), nothing came in.
+
+## Rendered-output corrections (architect, 2026-08-31, on testing the build)
+
+Four corrections applied in one pass: (1) placement — the pair sits right of
+the legend, before the legend|graph separator (R1 updated); (2) value format —
+significant/3, matching the summary shares (R3 updated,
+`docs/percentage-presentation.md` row updated); (3) the `UNCLASSIFIED` row
+prints only when non-zero (R13 updated); (4) `LINES READ` moved to the head of
+the summary tallies, ahead of `LINES INCLUDED` (pre-existing ordering, fixed on
+this branch at the architect's instruction). Harness updated to the corrected
+contract (35 assertions).
 
 ## Gate results — visibility-gate fix (2026-08-31, second pass)
 

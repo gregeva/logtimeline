@@ -1,6 +1,6 @@
 # Percentage Presentation
 
-One convention for every percentage `ltl` prints. Decided 2026-08-29 while scoping #446 (overall progress), #448 (category share) and #452 (reliability column), when three independent presentations were found to be in flight at once.
+One convention for every percentage `ltl` prints. Decided 2026-08-29 while scoping #446 (overall progress), #448 (category share) and #452 (success/failure percentage columns), when three independent presentations were found to be in flight at once.
 
 ## The convention
 
@@ -24,7 +24,7 @@ Degradation, when the formatted value does not fit `width`: drop decimals one at
 | Surface | Mode | Width | Floor | Degrades by |
 |---|---|---|---|---|
 | Category share rows (#448) and `SUCCESS/FAILURE CLASSIFIED` rows (#453) | 3 significant digits | the row's slack after the label and count | round | decimals, then the percentage; the count never |
-| Reliability column (#452) | 3 decimals — the nines matter (`99.95%` vs `99.995%`), so significance is the wrong rule | the column's budget | round | rounds then truncates with the layout engine, `%` kept at every width |
+| Success/failure percentage columns (#452) | significant, 3 digits — the same rule the category and classified summary shares use (architect, 2026-08-31, superseding the 2026-08-29 3-decimals decision) | the column's budget | round | sheds digits with the layout engine, `%` kept at every width |
 | Progress line (#446): per-file and overall | integer | 3 characters, fixed | floor | — |
 | Memory breakdown rows (`-mem`) | integer with a `<1%` floor | 5 characters, fixed, parenthesised | round | — (unchanged; it fits its space) |
 

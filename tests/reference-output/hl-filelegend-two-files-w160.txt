@@ -3022,10 +3022,10 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -hdmin 10
   INFO-HL                        2 (0.025%)      Log Formats
   INFO                         1885 (23.6%)   
   ─────────────────────────────────────────      1 thingworx_standard
+  LINES READ                           7992   
   HIGHLIGHTED                             3   
   LINES INCLUDED                       7992   
   FAILURE CLASSIFIED                     89   
   UNCLASSIFIED                 7903 (98.9%)   
-  LINES READ                           7992   
   ─────────────────────────────────────────   
 

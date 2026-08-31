@@ -190,9 +190,9 @@ capture_run "$M2" 170 --show-classification "$ACCESS_FIXTURE" "$DIAG_FIXTURE"
 current_scenario="column-placement"
 
 assert_command \
-    label "success_pct and failure_pct sit between occurrences and duration, visible by default (AC4, R1, R7)" \
-    command "$PERL -ne 'push @o, \$1 if /^\\s*(\\S+)\\s+\\S+\\s+\\S+\\s+\\d+\\s+\\d+\\s+\\d+\\s+\\d+\\s*\$/; END { my \$ids = join(q{,}, @o); exit(\$ids =~ /occurrences,success_pct,failure_pct,duration/ ? 0 : 1) }' '$A'" \
-    asserts "the two new layout entries are declared in array order after occurrences and before duration, and both render by default on an all-ledger both-criteria run" \
+    label "success_pct and failure_pct sit right of the legend, before the legend|graph separator (AC4, R1, R7; placement corrected by the architect 2026-08-31)" \
+    command "$PERL -ne 'push @o, \$1 if /^\\s*(\\S+)\\s+\\S+\\s+\\S+\\s+\\d+\\s+\\d+\\s+\\d+\\s+\\d+\\s*\$/; END { my \$ids = join(q{,}, @o); exit(\$ids =~ /legend,success_pct,failure_pct,sep_legend_graph,occurrences/ ? 0 : 1) }' '$A'" \
+    asserts "the two new layout entries are declared in array order after the legend and before the legend|graph separator, and both render by default on an all-ledger both-criteria run" \
     produced_by "build_column_layout() in ltl" \
     contract "features/452-success-failure-percentage-columns.md R1 placement, D4 default-on ladder"
 
@@ -204,15 +204,15 @@ bucket_expect() {  # ROW SUCCESS_TEXT FAILURE_TEXT LABEL
     assert_command \
         label "$label" \
         command "s=\$(cell '$A' '^ $row' success_pct) && f=\$(cell '$A' '^ $row' failure_pct) && [[ \$s == *\"text='\"*\"$s_want\"* ]] && [[ \$f == *\"text='\"*\"$f_want\"* ]] || { echo \"success: \$s\"; echo \"failure: \$f\"; false; }" \
-        asserts "the rendered cell values are the classified-denominator percentages: successes/(successes+failures) per bucket, formatted by format_percentage() decimals mode" \
+        asserts "the rendered cell values are the classified-denominator percentages: successes/(successes+failures) per bucket, formatted by format_percentage() significant mode — the same rule the category and classified summary shares use (architect correction 2026-08-31)" \
         produced_by "normalize_data_for_output() derives the per-bucket ratio from %bucket_outcomes; the render step prints it via format_percentage()" \
-        contract "features/452-success-failure-percentage-columns.md AC1/AC2/AC14, docs/percentage-presentation.md (3 decimals, trailing zeros trimmed)"
+        contract "features/452-success-failure-percentage-columns.md AC1/AC2/AC14, docs/percentage-presentation.md (significant/3, trailing zeros trimmed)"
 }
 
 bucket_expect '2025-05-07 00:00' '75%'     '25%'      "3 successes + 1 failure reads 75% / 25% (AC1)"
 bucket_expect '2025-05-07 02:00' '0%'      '100%'     "failures-only bucket reads 0% success / 100% failure, never blank (AC14)"
-bucket_expect '2025-05-07 03:00' '100%'    '0%'       "successes-only bucket reads 100% / 0%, trailing zeros trimmed — never 100.000% (AC2)"
-bucket_expect '2025-05-07 04:00' '33.333%' '66.667%'  "1 of 3 renders 3 decimals: 33.333% / 66.667% (AC2)"
+bucket_expect '2025-05-07 03:00' '100%'    '0%'       "successes-only bucket reads 100% / 0%, never 100.000% (AC2)"
+bucket_expect '2025-05-07 04:00' '33.3%' '66.7%'  "1 of 3 renders under the significant-digits rule the summary shares use: 33.3% / 66.7% (AC2)"
 
 assert_command \
     label "an empty bucket renders both cells blank — a measured 0% and an absent measurement never look the same (AC14, D11)" \
@@ -303,6 +303,20 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md AC8, D4"
 
 assert_command \
+    label "no UNCLASSIFIED row on a fully-classified run — the row prints only when non-zero (R13; architect 2026-08-31)" \
+    command "! grep -q 'UNCLASSIFIED' '$A'" \
+    asserts "a permanent zero row is noise; leakage is surfaced only when it exists" \
+    produced_by "print_summary_table() gating the row on a non-zero unclassified count" \
+    contract "features/452-success-failure-percentage-columns.md R13 zero-suppression"
+
+assert_command \
+    label "LINES READ precedes LINES INCLUDED in the summary tallies (architect 2026-08-31)" \
+    command "r=\$(grep -n 'LINES READ' '$A' | head -1 | cut -d: -f1) && i=\$(grep -n 'LINES INCLUDED' '$A' | head -1 | cut -d: -f1) && (( r < i ))" \
+    asserts "the tally block reads as a funnel: lines read, then lines included, then the classified breakdown" \
+    produced_by "print_summary_table() row order" \
+    contract "features/452-success-failure-percentage-columns.md § summary-row order (architect instruction 2026-08-31)"
+
+assert_command \
     label "the UNCLASSIFIED summary row carries count and share of included lines: 2 (50%) (R13, R14)" \
     command "grep -E 'UNCLASSIFIED' '$D0' | grep -qE '2 \\(50(\\.0*)?%\\)'" \
     asserts "matched lines that matched neither classification are surfaced as their own run-summary row over the included-lines denominator — leakage is called out, never absorbed" \
@@ -342,7 +356,7 @@ assert_command \
 
 assert_command \
     label "mixed run + --show-classification: columns render; diagnostics-fed buckets blank, access-only buckets print; notice 1 fires (AC15, R12, D2)" \
-    command "[[ \$(layout_field '$M2' success_pct vis) == 1 ]] && s0=\$(cell '$M2' '^ 2025-05-07 00:00' success_pct) && s3=\$(cell '$M2' '^ 2025-05-07 03:00' success_pct) && s4=\$(cell '$M2' '^ 2025-05-07 04:00' failure_pct) && [[ \$s0 == *'centred=empty'* ]] && [[ \$s3 == *\"text='\"*'100%'* ]] && [[ \$s4 == *'66.667%'* ]] && grep -q 'cover only operations the log records' '$M2.stderr' || { echo \"s0=\$s0\"; echo \"s3=\$s3\"; echo \"s4=\$s4\"; false; }" \
+    command "[[ \$(layout_field '$M2' success_pct vis) == 1 ]] && s0=\$(cell '$M2' '^ 2025-05-07 00:00' success_pct) && s3=\$(cell '$M2' '^ 2025-05-07 03:00' success_pct) && s4=\$(cell '$M2' '^ 2025-05-07 04:00' failure_pct) && [[ \$s0 == *'centred=empty'* ]] && [[ \$s3 == *\"text='\"*'100%'* ]] && [[ \$s4 == *'66.7%'* ]] && grep -q 'cover only operations the log records' '$M2.stderr' || { echo \"s0=\$s0\"; echo \"s3=\$s3\"; echo \"s4=\$s4\"; false; }" \
     asserts "per-bucket eligibility is a data question independent of visibility: a bucket touched by the non-qualifying source prints nothing, an untouched bucket keeps its stable figure, and the partial-coverage caution names the blind spots" \
     produced_by "normalize_data_for_output() per-bucket derivation gated on %bucket_outcomes slot 3; emit_classification_percentage_notices()" \
     contract "features/452-success-failure-percentage-columns.md R12/D2, R9 notice 1"
