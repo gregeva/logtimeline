@@ -602,6 +602,30 @@ non_qualifying_lines: N
   sources (the D2 provenance count; per-bucket twin in `%bucket_outcomes`
   slot 3).
 
+## Rendered-output verification results (2026-08-31)
+
+- **AC13 eye pass** (real access log, widths 200/160/120): values render in
+  256-colour 22 / 88, no fill, centred; empty buckets blank; layout clean at
+  all three widths. Two observations for the tuning review: (a) at 160 the
+  bytes value can shed its unit suffix (`26.1 ` for `26.1 KiB`) because the
+  secondaries ceded the pair's two 9-character footprints; (b) **on a busy
+  access log at 160 the locked R5 ladder hides the latency panel first** — the
+  re-blessed `access-w160` golden now shows percentages and no latency panel
+  where the previous release showed the reverse. Both follow the locked
+  decisions (D6 minimal budget, R5 ordering: failure hides *after* latency);
+  whether that trade at the standard width is the intended default is the R5
+  tuning decision, now concrete on rendered output.
+- **AC6 mechanism proof** (base commit vs change, width 200, sessions +
+  threadpool-free UDM run): every following column keeps its palette —
+  duration 256:184, bytes 256:34, UDM 256:20 — on both sides; the one decoded
+  difference is the UDM value spilling past its narrower bar (a width effect,
+  not a colour-attribution change). The dynamic-column colour walk is
+  unchanged, as D14 constructs.
+- **Sabotage proof**: swapping the two named colours and the two hide
+  priorities was caught by exactly the colour-distinctness and hide-ordering
+  assertions (plus the rendered-hide arm); the harness had already run
+  red-first (17 assertions failing as missing anchors) before implementation.
+
 ## Hand-forward
 
 - **Per-file success/failure percentages** — outputting the figures for a whole file
