@@ -10130,6 +10130,32 @@ sub progress_line_text {
     return $prefix . $shown;
 }
 
+# Paint a progress frame into the row it owns.
+#
+# The frame is rewritten in place with a carriage return, which moves the cursor
+# without erasing anything: a frame shorter than the one already on screen would
+# leave the tail of its predecessor standing beside it. The line shrinks
+# routinely — the rate falls from "148.2k" to "71k", the line count from
+# "278.5k" to "279k" — and the reader then sees fragments of an older frame
+# glued to the current one ("...2025-05-07.txtxt").
+#
+# Every frame is therefore padded with spaces out to the width the row occupies,
+# so each paint covers whatever the previous one left. Nothing has to be
+# remembered between frames, and nothing flickers: the text is overwritten by
+# text in the same write, and the blanks only ever cover the tail — the row is
+# never blanked and repainted. The pad is the same width the line clear writes,
+# and progress_line_text() already fits the line inside it, so the pad cannot
+# go negative; the guard is there because the fit and the pad must never
+# disagree silently.
+sub paint_progress_line {
+    my ($text) = @_;
+    my $pad = $terminal_width - 1 - length($text);
+    $pad = 0 if $pad < 0;
+    print "\r$text" . " " x $pad;
+    $| = 1;                                     # Flush output to stdout
+    return;
+}
+
 sub legend_category_total {
     my ($occurrences) = @_;
     return $precise_values ? $occurrences : format_number($occurrences, 'short');
@@ -11802,10 +11828,7 @@ sub read_and_process_logs {
                 file_size     => $progress_file_size,
                 file_position => 0,
             );
-            if ($line ne "") {
-                print "\r$line";
-                $| = 1;
-            }
+            paint_progress_line($line) if $line ne "";
             $progress_last_paint = Time::HiRes::time();
         }
 
@@ -11858,10 +11881,7 @@ sub read_and_process_logs {
                         file_size     => $progress_file_size,
                         file_position => $pos,
                     );
-                    if ($line ne "") {
-                        print "\r$line";
-                        $| = 1;                             # Flush output to stdout
-                    }
+                    paint_progress_line($line) if $line ne "";
                 }
             }
 

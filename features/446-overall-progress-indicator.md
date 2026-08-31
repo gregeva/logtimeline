@@ -12,7 +12,9 @@ The progress line reports the file in flight — its line count and, since #397 
 ## Status
 
 Scoped 2026-08-29; decisions D1–D7 locked. Implemented 2026-08-29 on
-`446-overall-progress-indicator`, all seven decisions as written.
+`446-overall-progress-indicator`, all seven decisions as written. D8 added
+2026-08-31 on `446-overall-progress-indicator-2` for the shrinking-frame defect
+(below).
 
 ## Research
 
@@ -54,6 +56,8 @@ Reading: file percentage over overall percentage; `line` is the position in the 
 
 **D6 — Suppression is `--disable-progress` only.** The indicator is a progress surface; it rides the existing gate and gets no option of its own.
 
+**D8 — Every frame is written at the full row width.** A carriage return moves the cursor without erasing, so a frame shorter than the one already on screen leaves its predecessor's tail standing beside it — the run reports `...2025-05-07.txtxt` (defect below). Each frame is therefore padded with spaces to `terminal_width - 1`, the same width the between-file clear writes, so painting a frame covers whatever the last one left. Nothing about the previous frame is remembered, so no format transition, rounding step or skipped file can put the row and the tracker out of step; and nothing flickers, because text overwrites text in the same write and the blanks only ever cover the tail — the row is never blanked and repainted. `progress_line_text()` already fits the line inside that width, so the pad cannot go negative.
+
 **D7 — No prototype.** No new data model; the per-line cost is one modulo check, which the existing tick already pays. The gate is time-based, so the change touches the hot path: the before/after benchmark (per-feature step 1b) is mandatory and is the instrument for D4's check cadence.
 
 ## In-drop obligations
@@ -79,6 +83,18 @@ The size sweep is `size_selected_files_for_progress()`, called from the end of `
 **Why the harness did not catch the collision.** `tests/validate-progress-line.sh` runs with the progress line on — that is its subject — but every scenario pinned the format with `-lf`, which keeps the run deterministic *and* suppresses the unit-ambiguity note, the only notice this fixture can raise. It also captured stdout and stderr to separate files. Both choices are right for asserting the line's shape and wrong for asserting that nothing writes over it: the collision exists only when a mid-read notice is raised and the two streams share a row. The `notice-not-in-progress-row` scenario closes it — no `-lf`, streams interleaved — with an anchor asserting the notice is actually raised, so the scenario fails rather than passes silently if a future format change makes this fixture unambiguous. The general lesson for this surface: a scenario that pins away the conditions that make a run interesting can only assert the quiet path.
 
 **Defect found by audit (2026-08-30): an empty file collapsed the line to one percentage.** The file percentage guards its division on `$file_size > 0`, which is right, but the guard also skipped the figure entirely — and the line's assembly then fell through to the single-file shape. A zero-byte file in a multi-file run rendered `Processing 50% (file 2/3)`, where the lone figure is the *overall* percentage occupying the slot the *file* percentage holds in every other frame, with nothing to tell the reader which one it is. The counter still advanced, so the run read as though that file were half-way through itself. A file with nothing in it has been read in full the moment it is opened, so it now reports 0: `Processing 0%/50% (file 2/3)`. The single-file forms are unchanged, and a single empty file still shows `Processing 0%` with no division. Covered by the `empty-file-keeps-both-percentages` scenario, both assertions sabotage-proved.
+
+**Defect found in use (2026-08-31): a shrinking frame left its predecessor's tail on screen.** The line shrinks routinely between repaints inside one file — the rate falls from `68.9k` to `71k`, the line count from `278.5k` to `279k` — and the paint was a bare `\r` plus the text, which erases nothing. Replaying the raw stdout of a run over the 762k-line single-day access log through a terminal (carriage returns moving the cursor, writes overwriting) shows 4 of its 22 frames leaving `xt` from the filename visible past their own end. Between *files* the defect does not appear: the read loop already blanks the whole row when a file closes, which is why a long-name-then-short-name run reproduces nothing. Fixed by D8; `paint_progress_line()` is now the one place a frame reaches the terminal, and both paint sites call it.
+
+**Acceptance criteria for the fix** (assertable, `tests/validate-progress-line.sh`):
+
+| Criterion | Observable | Method |
+|---|---|---|
+| A frame never leaves part of an older frame visible | Replaying a run's raw stdout through a terminal shows each frame alone on the row | `progress-row-check.py residue` over the multi-file capture |
+| Every painted frame fills the row | Each frame is exactly `terminal_width - 1` columns, at 140 and at 60 | `progress-row-check.py width` over the multi-file and narrow captures |
+| The erase costs no flicker | No frame is preceded by a blanking of the row it is about to occupy | Property of D8: the padding is part of the frame's own write |
+
+All three were proved to fail before they were trusted to pass (HARNESS-DESIGN.md § Proving a new assertion can fail): the width check fails on the pre-fix code against the committed fixture, the residue check fails on the pre-fix capture of the real access log with the `xt` diagnostic, and both fail on a capture containing no frame. Proving them also exposed a false pass in the checker itself — Python's text mode translates a lone carriage return to a line feed, so the row appeared to start empty for every frame; it reads bytes and decodes.
 
 ### Findings
 
