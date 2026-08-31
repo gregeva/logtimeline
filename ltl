@@ -1137,8 +1137,13 @@ my %colors = (
     'magenta' => "\033[35m\033[49m",
     'cyan' => "\033[36m\033[49m",
     'white' => "\033[36m\033[37m",
-    'dark-green' => "\033[38;5;34m",   # success-percentage value (#452 D14: named
-    'dark-red'   => "\033[38;5;160m",  # definitions, no @column_colors index)
+    # Classification shades, shared by the timeline's success/failure
+    # percentage columns and the classified rows of the run summary, so one
+    # outcome reads in one colour wherever it appears (#452 D14: named
+    # definitions, no @column_colors index). Named for the colour they are.
+    'kelly-green' => "\033[38;5;34m",    # success
+    'rosso-corsa' => "\033[38;5;160m",   # failure
+    'gold'        => "\033[38;5;178m",   # unclassified: neither outcome
     'bright-black' => "\033[90m\033[109m",
     'bright-red' => "\033[91m\033[109m",
     'bright-green' => "\033[92m\033[109m",
@@ -5522,6 +5527,33 @@ sub emit_classification_percentage_notices {
         print STDERR "Note: the success/failure percentage columns are not shown: the matched log format(s) do not declare both a success and a failure classification, so no percentage can be computed. See --help formats for what each format classifies.\n";
         return;
     }
+    # Notice 4 — the summary's classified rows carry their shares only on a
+    # qualifying run. A format that declares no success rule can report a
+    # failure but never a success, so a combined share would measure one
+    # source's failures against another's successes: the shares are withheld
+    # and this says why, naming the formats responsible. Spoken outside the
+    # columns-visible gate above: the summary rows print whether or not the
+    # timeline columns do. The contributing formats are read from each
+    # entry's run-total match count, which a mid-file format change cannot
+    # overwrite the way the per-file flag can.
+    # Only where a share was actually withheld: the run reports successes (or a
+    # bound format declares them), so the SUCCESS row is on screen without its
+    # share. A failure-only run has no success row at all and nothing was taken
+    # away, so it stays silent.
+    my $recon = classification_reconciliation();
+    if ( ( $cls_success_declared || $recon->{successes} )
+         && !( $recon->{pct_eligible} && $recon->{successes} ) ) {
+        my %no_success_rule;
+        for my $entry (@format_registry) {
+            next unless $entry->[FR_MATCHES];
+            my $cls = $format_registry_spec{ $entry->[FR_NAME] }{_cls};
+            next if $cls && $cls->{success} && @{ $cls->{success} };
+            $no_success_rule{ $entry->[FR_SLUG] } = 1;
+        }
+        print STDERR "Note: the SUCCESS and FAILURE CLASSIFIED shares are omitted - a percentage needs a population where both outcomes are classified, and these formats define no success rule: "
+            . join( ', ', sort keys %no_success_rule ) . ".\n"
+            if %no_success_rule;
+    }
     return unless classification_columns_visible();
     # Notice 1 — shown by explicit enable while a bound format lacks the
     # event-ledger property: the figure covers only what the log records.
@@ -5534,7 +5566,7 @@ sub emit_classification_percentage_notices {
     # Notice 2 — event-ledger formats only: any non-zero shortfall of
     # successes + failures against lines included is a coverage defect in
     # the format's configured patterns, reported with its scale.
-    my $r = classification_reconciliation();
+    my $r = $recon;
     if ( !$nonledger && $r->{unclassified} > 0 ) {
         my $leak_pct = $r->{included} ? sprintf('%.1f', $r->{unclassified} / $r->{included} * 100) : '0.0';
         print STDERR "Warning: $r->{unclassified} included line(s) ($leak_pct%) matched neither the success nor the failure classification - the percentages exclude them; investigate the format's detection patterns for coverage.\n";
@@ -15084,7 +15116,7 @@ sub build_column_layout {
             visible         => $cls_visible,
             color           => undef,
             value_only      => 1,
-            value_color     => 'dark-green',
+            value_color     => 'kelly-green',
             hide_order      => 25,
         };
         push @cols, {
@@ -15098,7 +15130,7 @@ sub build_column_layout {
             visible         => $cls_visible,
             color           => undef,
             value_only      => 1,
-            value_color     => 'dark-red',
+            value_color     => 'rosso-corsa',
             hide_order      => 65,
         };
     }
@@ -17657,20 +17689,28 @@ sub print_summary_table {
         # qualifies for percentages; the zero-success suppression stands
         # (failure-only logs would always read 100%). Counts always print.
         my $share_denominator = ($recon->{pct_eligible} && $total_successes) ? $classified : undef;
+        # Each row reads in its outcome's own colour, the same shade the
+        # timeline's percentage columns use, so a success is one colour and a
+        # failure another wherever the run reports them. The colour resolves
+        # through summary_colour(), which is what makes -sm print the table
+        # plain. The padding stays outside the colour so nothing bleeds into
+        # the file-details pane printed beside the table.
         my $emit = sub {
-            my ($label, $n, $denominator) = @_;
-            push @summary_table,
-                $padding . share_row_text( $label, $n, $denominator ) . "$padding\n";
+            my ($label, $n, $denominator, $colour) = @_;
+            my $row_text = share_row_text( $label, $n, $denominator );
+            my $fg = summary_colour( $colors{$colour} );
+            $row_text = $fg . $row_text . $colors{'NC'} if length $fg;
+            push @summary_table, $padding . $row_text . "$padding\n";
         };
-        $emit->( "SUCCESS CLASSIFIED", $total_successes, $share_denominator ) if $cls_success_declared || $total_successes;
-        $emit->( "FAILURE CLASSIFIED", $total_failures, $share_denominator )  if $cls_failure_declared || $total_failures;
+        $emit->( "SUCCESS CLASSIFIED", $total_successes, $share_denominator, 'kelly-green' ) if $cls_success_declared || $total_successes;
+        $emit->( "FAILURE CLASSIFIED", $total_failures, $share_denominator, 'rosso-corsa' )  if $cls_failure_declared || $total_failures;
         # #452 R13/R14: leakage is surfaced beside the classified rows — the
         # count of matched lines that matched neither classification, with its
         # share of INCLUDED lines (a leakage figure, not a classified-denominator
         # figure). Always carries its share, eligible run or not (D10).
         # Printed only when non-zero (architect, 2026-08-31): the row exists
         # to surface leakage, and a permanent zero row is noise.
-        $emit->( "UNCLASSIFIED", $recon->{unclassified}, $total_lines_included )
+        $emit->( "UNCLASSIFIED", $recon->{unclassified}, $total_lines_included, 'gold' )
             if $recon->{unclassified} > 0 && ( $cls_success_declared || $cls_failure_declared || $classified );
     }
     if ($show_timing) {

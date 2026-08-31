@@ -185,6 +185,10 @@ capture_run "$M" 160 -V format-detection "$ACCESS_FIXTURE" "$DIAG_FIXTURE"
 # Capture M2: the same mixed run explicitly enabled.
 M2="$TMP_DIR/mixed-show.out"
 capture_run "$M2" 170 --show-classification "$ACCESS_FIXTURE" "$DIAG_FIXTURE"
+# Capture SM: the diagnostics run under -sm, for the monochrome half of the
+# summary-row colour contract (the same rows as D0, with no colour to apply).
+SM="$TMP_DIR/diag-mono.out"
+capture_run "$SM" 160 -sm "$DIAG_FIXTURE"
 
 # ---------------------------------------------------------------------------
 current_scenario="column-placement"
@@ -227,7 +231,7 @@ current_scenario="value-only-rendering"
 assert_command \
     label "no bar: fill extent 0 in both cells; value text carries each column's own colour, green vs red distinct (AC3, D1, D14)" \
     command "s=\$(cell '$A' '^ 2025-05-07 00:00' success_pct) && f=\$(cell '$A' '^ 2025-05-07 00:00' failure_pct) && [[ \$s == *'extent=0'* && \$f == *'extent=0'* ]] && sfg=\$(sed -E 's/.* fg=([^ ]+).*/\\1/' <<<\"\$s\") && ffg=\$(sed -E 's/.* fg=([^ ]+).*/\\1/' <<<\"\$f\") && [[ \$sfg =~ ^(ansi:32|256:(2|22|28|34|64|70))\$ ]] && [[ \$ffg =~ ^(ansi:31|256:(1|52|88|124|160))\$ ]] && [[ \$sfg != \"\$ffg\" ]] || { echo \"success: \$s\"; echo \"failure: \$f\"; false; }" \
-    asserts "the columns are value-only (no background fill anywhere in the cell) and the values print in a dark-green / dark-red named colour definition, not via any @column_colors index" \
+    asserts "the columns are value-only (no background fill anywhere in the cell) and the values print in a kelly-green / rosso-corsa named colour definition, not via any @column_colors index" \
     produced_by "the value-only flag on the layout entry read by the render step; named colour definitions per D14" \
     contract "features/452-success-failure-percentage-columns.md AC3, D1, D14 (exact shade locked at tuning; the family and distinctness are the contract)"
 
@@ -362,16 +366,50 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md R12/D2, R9 notice 1"
 
 # ---------------------------------------------------------------------------
+current_scenario="summary-row-colour"
+
+assert_command \
+    label "the classified summary rows carry the classification shades: success kelly-green, failure rosso-corsa (D14)" \
+    command "grep -aE $'\\033\\[38;5;34m *SUCCESS CLASSIFIED' '$A' >/dev/null && grep -aE $'\\033\\[38;5;160m *FAILURE CLASSIFIED' '$A' >/dev/null" \
+    asserts "an outcome reads in one colour wherever the run reports it: the summary rows take the same named definitions as the timeline's percentage columns, not a colour of their own" \
+    produced_by "the classified-row emitter in print_summary_table() resolving through summary_colour()" \
+    contract "features/452-success-failure-percentage-columns.md D14"
+
+assert_command \
+    label "the UNCLASSIFIED summary row carries the gold shade, distinct from both outcome colours (D14)" \
+    command "grep -aE $'\\033\\[38;5;178m *UNCLASSIFIED' '$D0' >/dev/null" \
+    asserts "the row for lines that are neither a success nor a failure is told apart from both at a glance, in a third named definition" \
+    produced_by "the classified-row emitter in print_summary_table() resolving through summary_colour()" \
+    contract "features/452-success-failure-percentage-columns.md D14"
+
+assert_command \
+    label "-sm renders the same rows with no colour at all (D14, -sm contract)" \
+    command "! grep -aE $'\\033\\[38;5;(34|160|178)m' '$SM' >/dev/null && grep -aq 'UNCLASSIFIED' '$SM'" \
+    asserts "monochrome is a property of the whole summary table: the classified rows inherit the switch through summary_colour() rather than reading %colors directly, so none of the three shades survives -sm" \
+    produced_by "summary_colour() returning empty under \$summary_mono" \
+    contract "features/452-success-failure-percentage-columns.md D14; ltl summary_colour()"
+
+# ---------------------------------------------------------------------------
+current_scenario="share-omission-notice"
+
+assert_command \
+    label "a run whose shares are withheld says why, naming the formats that define no success rule (R9)" \
+    command "grep -q 'shares are omitted' '$M.stderr' && grep -q 'these formats define no success rule: windchill_method_server' '$M.stderr'" \
+    asserts "when the classified rows drop their shares because a contributing format can report failures but never successes, the run says so and names that format — the reader is not left to infer why two percentages vanished" \
+    produced_by "emit_classification_percentage_notices(), outside the columns-visible gate: the summary rows print whether or not the timeline columns do" \
+    contract "features/452-success-failure-percentage-columns.md R9 notice 4, D10"
+
+# ---------------------------------------------------------------------------
 current_scenario="clean-run-hygiene"
 
 assert_command \
     label "no qualifying notice fires on a clean, fully-classified ledger run (AC11)" \
-    command "! grep -qE 'percentage columns are not shown|matched neither the success nor the failure classification|cover only operations the log records' '$A.stderr'" \
-    asserts "the three notices are mutually exclusive by condition and silent when no condition holds" \
+    command "! grep -qE 'percentage columns are not shown|matched neither the success nor the failure classification|cover only operations the log records|shares are omitted' '$A.stderr'" \
+    asserts "the qualifying notices are mutually exclusive by condition and silent when no condition holds — including the share-omission notice, which has nothing to say on a run whose shares print" \
     produced_by "the post-read notice emission (D12)" \
     contract "features/452-success-failure-percentage-columns.md R9, AC11"
 
-for cap in "$A" "$A2" "$H" "$D0" "$D1" "$G1" "$M" "$M2"; do
+for cap in "$A" "$A2" "$H" "$D0" "$D1" "$G1" "$M" "$M2" "$SM"; do
     label_name=$(basename "$cap")
     assert_command \
         label "no runtime warnings on stderr ($label_name)" \

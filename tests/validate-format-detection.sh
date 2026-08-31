@@ -1478,6 +1478,13 @@ scenario_classification_summary_rows() {
     "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$gc" 2> "$r_gc.stderr" > "$r_gc"
     assert_no_runtime_warnings "$r_gc.stderr" "$current_scenario gc"
 
+    # The classified rows carry their outcome's colour. This scenario asserts
+    # the rows' text and shape — the count, the share, the funnel order — so
+    # the escapes are stripped here rather than written into every anchored
+    # pattern; the colour itself is the contract of
+    # tests/validate-classification-percentages.sh.
+    perl -i -pe 's/\e\[[0-9;]*m//g' "$r_access" "$r_diag" "$r_gc"
+
     assert_line "$r_access" \
         pattern     '^  SUCCESS CLASSIFIED +6 \(60%\) *$' \
         asserts     'An access log shows the success count with its share of all classified lines (6 of 10), right-aligned to the table boundary' \
