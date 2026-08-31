@@ -8,7 +8,8 @@ UNCLASSIFIED row, notices, CSV counts, options and doc sweep in place;
 Mixed-run bucket cells await the Q15 lock (provisionally D4's letter:
 default-off on a mixed run). Tuning values in force, to be confirmed on rendered
 output: D6 budget = 7 characters; R5 hide orders success 25 / failure 65;
-D14 shades dark-green = 256-colour 34, dark-red = 256-colour 160; D7 headers
+D14 shades kelly-green = 256-colour 34, rosso-corsa = 256-colour 160,
+gold = 256-colour 178; D7 headers
 lowercase `success` / `failure` (architect's case correction, 2026-08-31).
 
 ## Scope
@@ -90,7 +91,7 @@ denominator; two columns, not one; no number is named "reliability").
   totalised counts. The included-lines figure is reported alongside, never as the
   denominator. Where classification is off and the data does not exist, no line is
   printed — the standing verbose-surface behaviour, no policy of its own.
-- **R9 — Three mutually exclusive notices**, each with its stated content:
+- **R9 — Four notices** (the first three mutually exclusive), each with its stated content:
   - *Notice 1 — partial coverage* (non-ledger format, columns explicitly enabled):
     names two blind spots in order of severity — primary, the log may not contain a
     line for every operation that executed, so operations can be missing from the
@@ -103,6 +104,19 @@ denominator; two columns, not one; no number is named "reliability").
   - *Notice 3 — no classification configured* (columns explicitly requested for a
     format declaring no criteria): the columns are not shown, and the notice explains
     why rather than leaving them silently absent.
+  - *Notice 4 — shares withheld* (added post-delivery, architect 2026-08-31): fires
+    whenever the summary's classified rows drop their shares while a contributing
+    format defines no success rule. It states that a percentage needs a population
+    where both outcomes are classified and lists those formats, so the analyst can
+    see which source to separate out rather than infer why two percentages vanished.
+    Spoken outside the columns-visible gate: the summary rows print whether or not
+    the timeline columns do. Not mutually exclusive with the first three.
+    Condition, narrowed after the first gate run caught it firing too widely: the
+    run must report successes or have a bound format that declares them, so a
+    SUCCESS row is on screen without its share. A failure-only run has no success
+    row at all — nothing was withheld — and stays silent, which is what
+    `validate-numeric-criteria-notices.sh` and the variant scenarios of
+    `validate-format-detection.sh` proved by failing on the first cut.
 - **R10 — Documentation sweep.** The consumer enumerations in `--explain
   classification`, `--help formats`, `docs/explain/classification.md` and
   `docs/usage.md` § Log formats and classification gain the new columns and overview in
@@ -319,7 +333,7 @@ acceptance criteria and written BEFORE the code (red-first). It pins:
 - **Notice text stems** (grep anchors; wording draft is Claude's, behaviour is
   R9's): notice 1 `cover only operations the log records`; notice 2
   `matched neither the success nor the failure classification`; notice 3
-  `percentage columns are not shown`.
+  `percentage columns are not shown`; notice 4 `shares are omitted`.
 - **Colour families** (exact shade is a D14 tuning item; family and
   distinctness are the contract): success fg in the green family, failure fg in
   the red family, the two distinct, `fill_extent() == 0` on both.
@@ -440,8 +454,15 @@ acceptance criteria and written BEFORE the code (red-first). It pins:
   The architect's amendment: the named lookup hash has been built selectively, so the
   dark shades may not be present as usable entries — if the existing `green`/`red`
   entries' stops do not give a true dark green / dark red, register **new named colour
-  definitions in the hash** (e.g. dark-green, dark-red) rather than repurposing or
-  mutating existing entries.
+  definitions in the hash** rather than repurposing or mutating existing entries.
+  Post-delivery amendment (architect, 2026-08-31, on testing the build): the first
+  shades read too dark, so both moved two rungs up their axis of the colour cube,
+  and the names now state the colour they are rather than its depth — `kelly-green`
+  (256-colour 34) for success, `rosso-corsa` (256-colour 160) for failure, joined by
+  `gold` (256-colour 178) for unclassified. The same three shades colour the
+  classified rows of the run summary, so one outcome reads in one colour wherever
+  the run reports it; those rows resolve through `summary_colour()`, which is what
+  makes `-sm` print the table plain.
 - ~~Q13~~ **D15 — Single-sited visibility gate (architect, 2026-08-31).** The
   default-visibility decision
   (D2 eligibility, hide options, Q3's explicit enable) is resolved in exactly one place, and the
@@ -546,6 +567,18 @@ criteria marked (Qn) cannot be finalised until that decision is locked. Triage:
   ` at … line` suffix. *Assertable* — the notice-harness pattern
   (`tests/validate-numeric-criteria-notices.sh` shape), with an exactly-one-of-N count
   assertion.
+- **AC16** (D14, post-delivery) — On a qualifying run the SUCCESS and FAILURE
+  CLASSIFIED summary rows render in the same named colour definitions the timeline's
+  percentage columns use (`kelly-green`, `rosso-corsa`), and the UNCLASSIFIED row in a
+  third (`gold`) distinct from both; under `-sm` none of the three shades appears
+  anywhere in the table. The criterion names the definitions so it cannot pass against
+  a newly invented colour vocabulary. *Assertable* — escape-sequence assertions on the
+  summary rows of the owning harness, with the rendered output confirmed by eye on a
+  real log (the escape assertion alone cannot tell a right shade from a wrong one).
+- **AC17** (R9 notice 4, post-delivery) — A run whose classified rows drop their
+  shares because a contributing format defines no success rule prints notice 4 naming
+  those formats; a run whose shares print says nothing. *Assertable* — stderr
+  assertions in the owning harness, on the mixed and the clean captures.
 - **AC12** (R10) — The consumer enumerations in `--explain classification` and
   `docs/usage.md` name the columns and the overview; all four classification surfaces
   stay in parity; no user-facing text names a number "reliability". *Assertable* —
@@ -734,3 +767,34 @@ benchmark on `single-day-access-log-standard` against a base-commit baseline cap
 before the first code change. Version restored to `0.18.0` before the gate. Acceptance
 criteria above pass; AC13's eye pass on real data is recorded in the completion
 comment.
+
+## Post-delivery pass — colour tuning and the share-omission notice (2026-08-31)
+
+Three changes after the feature merged, all from the architect testing the built
+tool on real logs.
+
+1. **Shades too dark.** `kelly-green` (256-colour 34) and `rosso-corsa` (160)
+   replace the original 22 and 88, two rungs up their axis of the colour cube;
+   the names now state the colour rather than its depth. See D14's amendment.
+2. **The classified summary rows take those colours**, plus `gold` (178) for
+   UNCLASSIFIED, resolved through `summary_colour()` so `-sm` prints the table
+   plain. AC16.
+3. **Notice 4.** Testing a mixed run surfaced the UNCLASSIFIED row carrying a
+   share while SUCCESS and FAILURE did not, with nothing on screen to say why.
+   The architect's analysis of the asymmetry is the reason the shares stay
+   withheld: a format declaring failures only can report a failure but never a
+   success, so a pooled share would measure one source's failures against
+   another's successes, and no denominator on screen makes that ratio honest.
+   The behaviour was correct; the silence was the defect. AC17.
+
+A fourth observation from the same session is NOT fixed here and needs its own
+issue if it is to be: an HTTP status outside 1xx–5xx (a 601 seen in a real
+ThingWorx access log) is dropped by the category-vocabulary gate in
+`read_and_process_logs()` before classification is reached, so the line is
+absent from LINES INCLUDED rather than surfacing as unclassified leakage.
+
+The colouring also moved a consumer: `validate-format-detection.sh`'s
+`classification-summary-rows` scenario anchors the rows' text and shape, so its
+captures now have the escapes stripped before assertion — the colour itself is
+asserted in `tests/validate-classification-percentages.sh`, which owns that
+contract.
