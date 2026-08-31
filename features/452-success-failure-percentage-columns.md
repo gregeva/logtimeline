@@ -8,7 +8,7 @@ UNCLASSIFIED row, notices, CSV counts, options and doc sweep in place;
 Mixed-run bucket cells await the Q15 lock (provisionally D4's letter:
 default-off on a mixed run). Tuning values in force, to be confirmed on rendered
 output: D6 budget = 7 characters; R5 hide orders success 25 / failure 65;
-D14 shades dark-green = 256-colour 22, dark-red = 256-colour 88; D7 headers
+D14 shades dark-green = 256-colour 34, dark-red = 256-colour 160; D7 headers
 lowercase `success` / `failure` (architect's case correction, 2026-08-31).
 
 ## Scope
