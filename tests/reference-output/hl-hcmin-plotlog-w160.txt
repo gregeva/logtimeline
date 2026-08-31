@@ -39,6 +39,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -ic -hcmi
   HIGHLIGHTED                            45   
   LINES INCLUDED                       2992   
   FAILURE CLASSIFIED                     66   
+  UNCLASSIFIED                 2926 (97.8%)   
   LINES READ                           2992   
   ─────────────────────────────────────────   
 

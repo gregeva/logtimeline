@@ -29,6 +29,7 @@ command-line options: --disable-progress -ni -n 1 -hmdm bin --terminal-width 160
   HIGHLIGHTED                           502   
   LINES INCLUDED                       5000   
   FAILURE CLASSIFIED                     23   
+  UNCLASSIFIED                 4977 (99.5%)   
   LINES READ                           5000   
   ─────────────────────────────────────────   
 
