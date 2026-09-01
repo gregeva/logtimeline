@@ -232,6 +232,69 @@ build guard fires with its diagnostic.
 enumerate no format names (the `-lf` usage error lists them at runtime), so
 neither changes.
 
+## Success/failure classification (#510, 2026-09-01)
+
+**The entry declares no classification: it inherits the global default —
+failure on `category_bucket ^(?:ERROR|FATAL|CRITICAL)$`, no success
+criterion — and carries no event-ledger flag.** The survey below is why.
+
+### Level vocabulary and its provenance
+
+The layout is a `log4j` pattern layout, so the level vocabulary is that
+framework's: `OFF`, `FATAL`, `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`, `ALL`
+(verified against the Apache Log4j 2 documentation). `CRITICAL` is **not** a
+Log4j level in either 1.x or 2.x, though a producer may define custom levels
+through `Level.forName()`; none is defined here.
+
+Levels actually emitted, over the whole corpus held (71 files, 2,554,333
+lines — `docs/test-logs.md` § *MethodServer/*):
+
+| Service | Files | Levels emitted |
+|---|---|---|
+| MethodServer | 61 | ERROR 1,688,434 · INFO 52,370 · WARN 1,026 · FATAL 12 · TRACE 10 |
+| BackgroundMethodServer | 7 | INFO 204,241 · WARN 635 · ERROR 62 · FATAL 2 |
+| BackgroundMethodServerCAD | 1 | INFO 295 · WARN 33 · ERROR 5 |
+| BackgroundMethodServerESI | 1 | ERROR 1,356 |
+
+Five levels only, all of them members of `@log_levels`; no `DEBUG`, no
+`CRITICAL`, nothing outside the tool's vocabulary. The survey therefore adds
+no code to the generic failure classification, which #510 anticipated it
+might.
+
+### What each level says about an outcome
+
+- **FATAL (14 lines)** is the orderly shutdown sequence — `Stop call
+  received.`, `Stopping services...`, `MethodServer stopped`, from
+  `wt.method.server.shutdown`. It is nonetheless classified as a failure:
+  a fatal condition is generically a failure, and the default is not bent to
+  one producer's usage of the level (architect, 2026-09-01).
+- **ERROR (1,689,857)** is 96% one recurring application-data condition
+  (`UwgmObjectFactory.createPartIteration :: Unsupported PartType: …`, five
+  part types), then a recycled-request-object exception (42,214). It stays an
+  unqualified failure for the same reason: `ERROR` is generically a failure,
+  and narrowing it to exclude a noisy message would encode one deployment's
+  data quality into the format definition (architect, 2026-09-01).
+- **WARN (1,694)** is JMX memory/queue notifications and thread interrupts,
+  with roughly fifty genuine datastore query-cancel exceptions among them. It
+  is **not** a failure.
+- **INFO (256,906)** is largely `wt.system.out` / `wt.system.err` capture —
+  HTML fragments, blank lines, statement-cache dumps. It says nothing about
+  any operation's outcome.
+- **TRACE (10)** is debug dumps.
+
+### Why there is no success criterion
+
+Nothing in the corpus reports the successful completion of an operation. The
+format logs incidents, not requests: there is no per-operation record, no
+status field, and no line of the form "operation N completed". `INFO` is a
+stdout/stderr capture channel, not an outcome statement. This is exactly the
+case #453 D7 describes — an `INFO` line is not evidence that anything
+succeeded — so success is left undeclared and no reliability figure is
+available for this format.
+
+For the same reason the entry is not an event ledger: coverage of the
+operations the server performs is not maximal, or even attempted.
+
 ## Open items
 
 - Other Windchill processes (`ServerManager`, the Windchill DS / Info*Engine
