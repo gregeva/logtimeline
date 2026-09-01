@@ -57,7 +57,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0";
+my $version_number = "0.18.0-455";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -1683,10 +1683,10 @@ sub serialize_filters {
     # values were given on the command line (Issue #310). Cross-flag order is
     # already fixed by the push order above.
     push @parts, "-e=" . $url_encode->(join(',', sort @exclude_args))   if @exclude_args;
-    push @parts, "-ef=" . $url_encode->(join(',', sort @exclude_files)) if @exclude_files;
+    push @parts, "-epf=" . $url_encode->(join(',', sort @exclude_files)) if @exclude_files;
     push @parts, "-et=" . $url_encode->($filter_range_end)              if $filter_range_end ne "";
     push @parts, "-i=" . $url_encode->(join(',', sort @include_args))   if @include_args;
-    push @parts, "-if=" . $url_encode->(join(',', sort @include_files)) if @include_files;
+    push @parts, "-ipf=" . $url_encode->(join(',', sort @include_files)) if @include_files;
     push @parts, "-st=" . $url_encode->($filter_range_start)       if $filter_range_start ne "";
     return join(';', @parts);
 }
@@ -2232,7 +2232,7 @@ sub _classify_argv_provenance {
             my @specs = (
                 'bucket-size|bs', 'pause|p', 'start|st', 'end|et',
                 'exclude|e', 'include|i', 'highlight|h',
-                'exclude-file|ef', 'include-file|if', 'highlight-file|hf',
+                'exclude-pattern-file|epf', 'include-pattern-file|ipf', 'highlight-pattern-file|hpf',
                 'verbose|V', 'top-messages|n',
                 'omit-values|ov', 'precise-values|pv', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
                 'recursive|r',
@@ -2241,8 +2241,8 @@ sub _classify_argv_provenance {
                 'summary-bar-absolute|sba', 'summary-bar-log|sbl',
                 'summary-bar-reverse|sbr',
                 'omit-bytes|ob', 'omit-count|oc', 'include-count|ic',
-                'include-query-string|iqs', 'include-session|is',
-                'hide-session|hs', 'hide-occurrences|ho', 'hide-legend|hl',
+                'expose-query-string|xqs', 'expose-session|xs',
+                'hide-session|hses', 'hide-occurrences|ho', 'hide-legend|hl',
                 'hide-duration|hd', 'hide-bytes|hb', 'hide-count|hc',
                 'hide-classification|hcl', 'show-classification|scl',
                 'hide-stats|hst', 'seconds|s', 'milliseconds|ms',
@@ -2359,8 +2359,8 @@ sub emit_runtime_config_verbose {
         'omit-bytes'                        => $omit_bytes,
         'omit-count'                        => $omit_count,
         'include-count'                     => $include_count,
-        'include-query-string'              => $include_query_string,
-        'include-session'                   => $include_session,
+        'expose-query-string'               => $include_query_string,
+        'expose-session'                    => $include_session,
         'hide-session'                      => $hide_session,
         'hide-classification'               => $hide_classification,
         'show-classification'               => $show_classification,
@@ -7461,9 +7461,9 @@ sub print_help {
     $out .= help_opt("-i,   --include <regex>",       "Only process lines matching this pattern, discard everything else. Can be specified multiple times; patterns are combined with OR. Use & for AND: \"A&B\" matches lines containing both A and B. && for literal &. & binds tighter than |.");
     $out .= help_opt("-e,   --exclude <regex>",       "Discard lines matching this pattern before analysis. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
     $out .= help_opt("-h,   --highlight <regex>",     "Show matching lines as a separate colored bar alongside the main bar for visual comparison. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
-    $out .= help_opt("-if,  --include-file <file>",   "Load include patterns from a file (one pattern per line)");
-    $out .= help_opt("-ef,  --exclude-file <file>",   "Load exclude patterns from a file (one pattern per line)");
-    $out .= help_opt("-hf,  --highlight-file <file>", "Load highlight patterns from a file (one pattern per line)");
+    $out .= help_opt("-ipf, --include-pattern-file <file>",   "Load include patterns from a file (one pattern per line)");
+    $out .= help_opt("-epf, --exclude-pattern-file <file>",   "Load exclude patterns from a file (one pattern per line)");
+    $out .= help_opt("-hpf, --highlight-pattern-file <file>", "Load highlight patterns from a file (one pattern per line)");
     $out .= help_opt("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept)");
     $out .= help_opt("-dmax, --duration-max <N>",     "Hide log entries with duration above this threshold (inclusive: entries exactly at N are kept)");
     $out .= help_opt("-bmin, --bytes-min <N>",        "Hide log entries with response size below this threshold (inclusive)");
@@ -7477,7 +7477,7 @@ sub print_help {
     $out .= help_opt("-hcmin, --highlight-count-min <N>",    "Highlight log entries with count at or above this value, without filtering anything out");
     $out .= help_opt("-hcmax, --highlight-count-max <N>",    "Highlight log entries with count at or below this value, without filtering anything out");
     $out .= "\n";
-    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded; ltl reports how many entries were excluded this way. An inverted range (minimum above maximum) is unsatisfiable and warns up front. Highlight criteria (-h/-hf and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric.";
+    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded; ltl reports how many entries were excluded this way. An inverted range (minimum above maximum) is unsatisfiable and warns up front. Highlight criteria (-h, -hpf and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric.";
     $out .= help_wrap($note_text, indent => $help_opt_col, first_indent => $help_opt_col) . "\n";
 
     # Recording & Processing
@@ -7498,8 +7498,8 @@ sub print_help {
     $out .= help_subheading("Message Grouping");
     $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output.");
     $out .= help_opt("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
-    $out .= help_opt("-iqs, --include-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
-    $out .= help_opt("-is,  --include-session",       "Keep session/user IDs when grouping messages, so each session is tracked separately");
+    $out .= help_opt("-xqs, --expose-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
+    $out .= help_opt("-xs,  --expose-session",       "Keep session/user IDs when grouping messages, so each session is tracked separately");
     $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
 
     # Display & Output
@@ -7518,7 +7518,7 @@ sub print_help {
     $out .= help_opt("-hd,  --hide-duration",         "Hide the duration bar graph column");
     $out .= help_opt("-hb,  --hide-bytes",            "Hide the bytes bar graph column");
     $out .= help_opt("-hc,  --hide-count",            "Hide the count bar graph column");
-    $out .= help_opt("-hs,  --hide-session",          "Hide the Sessions column that automatically appears when session IDs are found in the log data");
+    $out .= help_opt("-hses, --hide-session",         "Hide the Sessions column that automatically appears when session IDs are found in the log data");
     $out .= help_opt("-hcl, --hide-classification",    "Hide the success and failure percentage columns shown by default for event-ledger formats such as access logs");
     $out .= help_opt("-scl, --show-classification",    "Show the success and failure percentage columns for a format that declares both classifications without being an event ledger");
     $out .= help_opt("-hst, --hide-stats",            "Hide the latency statistics or heatmap column");
@@ -7576,7 +7576,7 @@ sub print_help {
 
     # ENVIRONMENT
     $out .= help_heading("ENVIRONMENT");
-    $out .= help_opt("LTL_CONFIG", "Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (-i, -e, -h, -if, -ef, -hf, -tpa, -udm, -ucm) combine from both sources.");
+    $out .= help_opt("LTL_CONFIG", "Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (-i, -e, -h, -ipf, -epf, -hpf, -tpa, -udm, -ucm) combine from both sources.");
 
     # INFO
     $out .= help_heading("INFO");
@@ -11072,9 +11072,9 @@ sub adapt_to_command_line_options {
         'exclude|e=s' => \@exclude_args,
         'include|i=s' => \@include_args,
         'highlight|h=s' => \@highlight_args,
-        'exclude-file|ef=s' => \@exclude_files,
-        'include-file|if=s' => \@include_files,
-        'highlight-file|hf=s' => \@highlight_files,
+        'exclude-pattern-file|epf=s' => \@exclude_files,
+        'include-pattern-file|ipf=s' => \@include_files,
+        'highlight-pattern-file|hpf=s' => \@highlight_files,
         'verbose|V:s@' => \@verbose_args,   # Issue #226: optional, repeatable section name; bare -V = all sections
         'top-messages|n=i' => \$top_n_messages,
         'omit-values|ov' => \$omit_values,
@@ -11094,9 +11094,9 @@ sub adapt_to_command_line_options {
         'omit-bytes|ob' => \$omit_bytes,
         'omit-count|oc' => \$omit_count,
         'include-count|ic' => \$include_count,
-        'include-query-string|iqs' => \$include_query_string,
-        'include-session|is' => \$include_session,
-        'hide-session|hs' => \$hide_session,
+        'expose-query-string|xqs' => \$include_query_string,
+        'expose-session|xs' => \$include_session,
+        'hide-session|hses' => \$hide_session,
         'hide-classification|hcl' => \$hide_classification,
         'show-classification|scl' => \$show_classification,
         'hide-occurrences|ho' => \$hide_occurrences,
@@ -17427,17 +17427,17 @@ sub print_run_options {
         next if exists $argv_hash{$arg};  # Skip log files
 
         # Handle pattern file options with indicators
-        if ($arg =~ /^(-ef|--exclude-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
+        if ($arg =~ /^(-epf|--exclude-pattern-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
             my $indicator = get_pattern_file_indicator('exclude', $file);
             $cli_options .= "$arg $file$indicator ";
             $i++;  # Skip the filename in next iteration
-        } elsif ($arg =~ /^(-if|--include-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
+        } elsif ($arg =~ /^(-ipf|--include-pattern-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
             my $indicator = get_pattern_file_indicator('include', $file);
             $cli_options .= "$arg $file$indicator ";
             $i++;  # Skip the filename in next iteration
-        } elsif ($arg =~ /^(-hf|--highlight-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
+        } elsif ($arg =~ /^(-hpf|--highlight-pattern-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
             my $indicator = get_pattern_file_indicator('highlight', $file);
             $cli_options .= "$arg $file$indicator ";
