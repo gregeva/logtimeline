@@ -18,3 +18,4 @@ windchill-method-server.txt	BackgroundMethodServerESI-2507180624-9559-log4j.log	
 windchill-method-server.txt	MethodServer-2507180627-9144-log4j.log.2025-07-18_3	(same fixture)	log4j daily-roll suffix after the extension decomposes through the date_n index form; roll date matches the content
 windchill-method-server.txt	app.txt	(same fixture)	no name evidence; recognition by content alone
 windchill-method-server.txt	MethodServer.log	(same fixture)	bare service name earns stem + ext evidence; the producer tail is optional
+wgm-client-localtime.txt	uwgm.log.1	WGM uwgm.log.1 and genlwsc.log.1 slices from clients configured use_local_time YES (users, hosts and addresses replaced)	numeric zone offset (+0:00 and +2:00, hour not zero-padded) binds mt16 by shape, never thingworx_rac_client

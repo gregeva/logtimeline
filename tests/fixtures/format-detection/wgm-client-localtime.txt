@@ -1,0 +1,35 @@
+2026-04-30T13:29:13.168+0:00: C: P187c: T25ec: $default: $generic: columns "date time tz msgtype logid tid area message"
+2026-04-30T13:29:13.168+0:00: C: P187c: T25ec: $default: $generic: columns_sep ": "
+2026-04-30T13:29:13.168+0:00: C: P187c: T25ec: $default: $generic: date_format "%Y-%m-%d"
+2026-04-30T13:29:13.168+0:00: C: P187c: T25ec: $default: $generic: log_base_name "xtop"
+2026-04-30T13:29:13.168+0:00: C: P187c: T25ec: $default: $generic: log_dir_path "."
+2026-04-30T13:29:13.168+0:00: C: P187c: T25ec: $default: $generic: time_format "%H:%M:%S"
+2026-04-30T13:29:13.168+0:00: C: P187c: T25ec: $default: $generic: time_precision 3
+2026-04-30T13:29:13.168+0:00: C: P187c: T25ec: $default: $generic: tm_comp_sep 'T'
+2026-04-30T13:29:13.168+0:00: C: P187c: T25ec: $default: $generic: use_hour_logs NO
+2026-04-30T13:29:13.168+0:00: C: P187c: T25ec: $default: $generic: use_local_time YES
+2026-04-30T13:29:13.168+0:00: C: P187c: T25ec: $default: $generic: verbose_level 0
+2026-04-30T13:29:13.137+0:00: X: P187c: T25ec: uwgm.session0: Session 'wgmuser@198.51.100.10 2026-04-30T13:29:13.137-00:0' created
+2026-04-30T13:29:13.167+0:00: S: P187c: T25ec: uwgm.session0: UwgmServerCache_i::load started
+2026-04-30T13:29:13.173+0:00: S: P187c: T25ec: uwgm.session0: UwgmServerCache_i::loadCacheFiles started
+2026-04-30T13:29:13.174+0:00: F: P187c: T25ec: uwgm.session0: UwgmServerCache_i::loadCacheFiles finished
+2026-04-30T13:29:13.174+0:00: S: P187c: T25ec: uwgm.session0: UwgmServerCache_i::saveCurrentSchema started
+2026-04-30T13:29:13.175+0:00: S: P187c: T25ec: uwgm.session0: UwgmServerCache_i::writeSchema started
+2026-04-30T13:29:13.210+0:00: F: P187c: T25ec: uwgm.session0: UwgmServerCache_i::writeSchema finished
+2026-04-30T13:29:13.210+0:00: F: P187c: T25ec: uwgm.session0: UwgmServerCache_i::saveCurrentSchema finished
+2026-04-30T13:29:13.215+0:00: F: P187c: T25ec: uwgm.session0: UwgmServerCache_i::load finished
+2026-04-30T13:29:13.226+0:00: S: P187c: T25ec: uwgm.session0: UwgmIpcGuard:saveResource(wscaches.guard) started
+2026-04-30T13:29:13.230+0:00: F: P187c: T25ec: uwgm.session0: UwgmIpcGuard:saveResource(wscaches.guard) finished
+2026-04-30T13:29:13.236+0:00: X: P187c: T25ec: uwgm.session0.act#308398324895638: DefaultEventName Transaction 'wgmuser@198.51.100.10 2026-04-30T13:29:13.137-00:0'@308398324895638 created
+2026-04-30T13:29:13.237+0:00: I: P187c: T25ec: uwgm.session0.act#308398324895638: IndexLogging: Ver-0.1 308398324895638$<ActionID>308398324895638</ActionID>
+2026-04-30T13:29:13.238+0:00: I: P187c: T25ec: uwgm.session0.act#308398324895638: IndexLogging: Ver-0.1 308398324895638$<ActionState>started</ActionState>
+2026-04-30T13:29:20.919+0:00: E: P187c: T25ec: uwgm.session0: ServerCache: UwgmServerCache_i::getIconFileLocalPaths Download for Icon File Fails with reason : Unable to establish connection
+2026-04-30T13:33:58.854+0:00: E: P187c: T33ac: uwgm.session0.act#544466312560645: UWGMLIB_CONTENT_MANAGER: uwgmCMContentPlugin::getDBIDIterMap : context is null.
+2026-04-30T13:41:55.141+0:00: D: P187c: T33ac: uwgm.session0.act#544466312560651: IndexLogging: Ver-0.1 544466312560651$<ContentDownloadStart>Object Id=OR:wt.epm.EPMDocument:3018012, Content Id=OR:wt.content.ApplicationData:3374720, Attempt=1, Time=4/30/2026 13:41:55.141</ContentDownloadStart>
+2026-04-30T13:41:59.092+0:00: D: P187c: T1508: uwgm.session0.act#544466312560651: IndexLogging: Ver-0.1 544466312560651$<ContentDownloadFinish>Object Id=OR:wt.epm.EPMDocument:3018012, Content Id=OR:wt.content.ApplicationData:3358475, Attempt=1, Time=4/30/2026 13:41:59.092, Content Size=4445, Status=UWGM_DOWNLOAD_COMPLETION_STATUS_SUCCESS</ContentDownloadFinish>
+2026-04-30T13:42:01.482+0:00: I: P187c: T25ec: uwgm.session0.act#308398324895638: IndexLogging: Ver-0.1 308398324895638$<ActionState>finished: SUCCEEDED</ActionState>
+2026-04-30T13:42:01.500+0:00: Y: P187c: T25ec: uwgm.session0.act#308398324895638: DefaultEventName Transaction 'wgmuser@198.51.100.10 2026-04-30T13:29:13.137-00:0'@308398324895638 destroyed
+2026-04-27T21:54:35.971+2:00: D: P297c: Ta8d4: Core.SvcMgr.Service.0x23442fdaea8: CORE_SVCM_ACTIONS: Common name is set to [CreoStorage][version=0]
+2026-04-27T21:54:36.801+2:00: T: P297c: Taed8: LuLog: ZBAG_SERVICE: zbag_Service::zbag_Service
+2026-04-27T21:54:36.982+2:00: W: P297c: Tde30: LuLog: ZBAG_JS: zbag_Js::zbsf_RegisterJs 0x44fba4b0, DoesJSBridgeCmdExist is already registered in session
+2026-04-27T21:54:37.010+0:00: Y: P187c: T25ec: uwgm.session0: Session 'wgmuser@198.51.100.10 2026-04-30T13:29:13.137-00:0' destroyed

@@ -23,11 +23,13 @@ scenarios. No hot-loop code changes; the registry does the work.
 ### Line shape
 
 ```
-<YYYY-MM-DD>T<HH:MM:SS.mmm>Z: <msgtype>: P<pid-hex>: T<tid-hex>: <area>: <message>
+<YYYY-MM-DD>T<HH:MM:SS.mmm><zone>: <msgtype>: P<pid-hex>: T<tid-hex>: <area>: <message>
 ```
 
-Every field is separated by the literal `": "` the header declares. Verified
-over all twelve sample files (2,534,326 lines): every line matches; there are
+`<zone>` is `Z` or a numeric offset (see § *Zone forms*). Every other field is
+separated by the literal `": "` the header declares. Verified
+over all twelve UTC-form sample files (2,534,326 lines) and the four
+local-offset files (7,143,655 lines): every line matches; there are
 no continuation lines, no blank lines, no lines without a timestamp, no BOM.
 Some messages end in a carriage return (HTTP response headers echoed into
 trace lines) — that is message content under a `\r?\n` line ending, which the
@@ -48,9 +50,32 @@ count, `stats_eligible => 0`, `duration_unit => undef`.
 
 ### Time contract
 
-`layout iso_ms`, `precision ms`, `tz utc` (the header's `use_local_time NO`
-and the `Z` suffix agree), `frac fixed3`. Every timestamp in the corpus is
-UTC; the time axis is therefore in UTC for these files.
+`layout iso_ms`, `precision ms`, `tz utc`, `frac fixed3`. The epoch is
+computed from the timestamp's own digits by fixed-offset arithmetic; the zone
+marker sits past offset 19 and is never read, so the time axis is the wall
+clock the file states, whichever zone form it uses.
+
+### Zone forms (#512)
+
+The producer writes the zone according to its header's `use_local_time`
+declaration, and both forms are one entry:
+
+| Header | Zone written | Example |
+|---|---|---|
+| `use_local_time NO` | `Z` | `2025-10-29T10:56:53.239Z` |
+| `use_local_time YES` | numeric offset, hour **not** zero-padded | `2026-04-27T21:54:35.962+2:00`, `2026-04-30T13:29:13.168+0:00` |
+
+The pattern matches the zone as `(?:Z|[+-]\d{1,2}:\d{2})` in a non-capturing
+group: the offset is recognised so the line is claimed, and discarded because
+nothing consumes it. A one- or two-digit hour and a signed offset are both
+accepted; the offset form is therefore not strictly ISO-8601.
+
+The entry keeps a single slug rather than becoming a variant group (architect,
+2026-09-01): the two forms differ only in a zone that has no consumer, so a
+member split would divide the format's identity on a distinction nothing
+downstream can act on. `tz` stays `utc` and the zone is not captured into the
+record; making the offset addressable would mean a fourteenth record field,
+which is its own change if a consumer ever wants it.
 
 ### msgtype vocabulary (D54)
 
