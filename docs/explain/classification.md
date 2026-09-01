@@ -18,7 +18,7 @@ This is the coverage argument of the Google SRE Workbook chapter on implementing
 
 ## Operational use
 
-What a diagnostics log can legitimately tell you: how many failure-level lines there were, when they clustered, and which messages produced them — the `errRate` column, and the per-message failure counts in the MESSAGES CSV. What it cannot tell you: a success rate, an availability, or any ratio whose denominator is "all operations", because most operations never wrote a line. The unclassified share is the warning sign: on a diagnostics log it is usually most of the file. On an event ledger the same share is a data-quality figure — lines that carried a status the rules do not cover — and a low value means the ratio can be trusted.
+What a diagnostics log can legitimately tell you: how many failure-level lines there were, when they clustered, and which messages produced them — the `errRate` column, and the per-message failure counts in the MESSAGES CSV. What it cannot tell you: a success rate, an availability, or any ratio whose denominator is "all operations", because most operations never wrote a line. The unclassified share is the warning sign: on a diagnostics log it is usually most of the file. On an event ledger the same share is a data-quality figure — lines that carried a status the rules do not cover — and a low value means the ratio can be trusted. The classification is also actionable: `-if`/`-ef` and `-is`/`-es` filter on failures and successes, `-hf`/`-hs` highlight them within the full population, and excluding both (`-ef -es`) leaves exactly the unclassified remainder for inspection.
 
 ## Example
 
