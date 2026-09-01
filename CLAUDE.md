@@ -123,6 +123,18 @@ Track observations for process improvement. After releases, review what worked a
 
 This is a public repository. After cloning, run `./build/setup-hooks.sh` once to activate the tracked pre-commit guard at `.githooks/pre-commit`. The guard blocks commits that stage `.claude/`, `.env*`, `*.pem`/`*.key`/`*.p12`/`*.pfx`/`*.kdbx`, `id_rsa*`/`id_ed25519*`, `.netrc`, `.npmrc`, `secrets/`, `credentials*`, or content matching common token patterns (AWS, GitHub, OpenAI, Slack, PEM private keys). `.gitignore` is the primary defense; the hook is a backstop. If you genuinely need to override, use `git commit --no-verify` and explain in the commit message.
 
+### Project artifacts are never deleted — CRITICAL
+
+**`logs/` and everything under it, and every other untracked project artifact on the architect's machine, are read-only to Claude.** The sample-log corpora are not reproducible: they are gathered from real systems, they are gitignored, and nothing in the repository can restore them. Deleting one destroys work that no `git checkout` brings back — it has happened twice, the second time found on 2026-09-01 while picking up #510 (success/failure classification criteria for the Windchill Method Server and Workgroup Manager formats), with the WGM and MethodServer corpora missing and the architect having to restore them.
+
+The rule is mechanical, not a matter of judgement:
+
+- **Never** run `rm`, `mv`, `git clean`, `git checkout -- .`, a redirect that truncates, or any other destructive or relocating operation against `logs/`, its subdirectories, its symlink, or any untracked file in the working tree — not to "tidy up", not to reclaim space, not as part of a harness or a script, not because a path looks stale or unreferenced.
+- Test output and scratch files go to `/tmp` or the session scratchpad, never into a project directory that then needs clearing.
+- `./tests/cleanup-test-artifacts.sh` is the only sanctioned cleanup, and its scope is the shared test scratch directory — it is not extended, and nothing else is written to do the same job.
+- Where a corpus genuinely appears to be missing, that is a finding to report with evidence, never a state to repair by moving or recreating anything.
+- Anything destructive outside that one script is proposed to the architect and executed only on his say-so, whatever its apparent scope.
+
 ## Commit conventions
 
 Commits may carry a `Co-Authored-By` trailer for Claude's contribution, but it MUST be model-agnostic:
