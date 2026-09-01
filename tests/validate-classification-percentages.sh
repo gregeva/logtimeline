@@ -359,11 +359,18 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md D4 (visibility is a render-surface question — architect correction 2026-08-31)"
 
 assert_command \
-    label "mixed run + --show-classification: columns render; diagnostics-fed buckets blank, access-only buckets print; notice 1 fires (AC15, R12, D2)" \
-    command "[[ \$(layout_field '$M2' success_pct vis) == 1 ]] && s0=\$(cell '$M2' '^ 2025-05-07 00:00' success_pct) && s3=\$(cell '$M2' '^ 2025-05-07 03:00' success_pct) && s4=\$(cell '$M2' '^ 2025-05-07 04:00' failure_pct) && [[ \$s0 == *'centred=empty'* ]] && [[ \$s3 == *\"text='\"*'100%'* ]] && [[ \$s4 == *'66.7%'* ]] && grep -q 'cover only operations the log records' '$M2.stderr' || { echo \"s0=\$s0\"; echo \"s3=\$s3\"; echo \"s4=\$s4\"; false; }" \
-    asserts "per-bucket eligibility is a data question independent of visibility: a bucket touched by the non-qualifying source prints nothing, an untouched bucket keeps its stable figure, and the partial-coverage caution names the blind spots" \
+    label "mixed run + --show-classification: columns render; ineligible buckets print counts, qualifying buckets print shares; notice 1 fires (AC15, AC18, R12, D2)" \
+    command "[[ \$(layout_field '$M2' success_pct vis) == 1 ]] && s0=\$(cell '$M2' '^ 2025-05-07 00:00' success_pct) && f0=\$(cell '$M2' '^ 2025-05-07 00:00' failure_pct) && s3=\$(cell '$M2' '^ 2025-05-07 03:00' success_pct) && s4=\$(cell '$M2' '^ 2025-05-07 04:00' failure_pct) && [[ \$s0 == *\"text='\"*'3'* && \$s0 != *'%'* ]] && [[ \$f0 == *\"text='\"*'2'* && \$f0 != *'%'* ]] && [[ \$s3 == *\"text='\"*'100%'* ]] && [[ \$s4 == *'66.7%'* ]] && grep -q 'cover only operations the log records' '$M2.stderr' || { echo \"s0=\$s0\"; echo \"f0=\$f0\"; echo \"s3=\$s3\"; echo \"s4=\$s4\"; false; }" \
+    asserts "per-bucket eligibility is a data question independent of visibility: a bucket touched by a source that cannot report a success shows the counts the share would have been built from — never a share, and never blank, which would read as a window with no successes and no failures — while an untouched bucket keeps its stable figure and the partial-coverage caution names the blind spots" \
     produced_by "normalize_data_for_output() per-bucket derivation gated on %bucket_outcomes slot 3; emit_classification_percentage_notices()" \
     contract "features/452-success-failure-percentage-columns.md R12/D2, R9 notice 1"
+
+assert_command \
+    label "an ineligible window with no successes shows the count 0, not a blank cell (AC18, D2 as amended)" \
+    command "s=\$(cell '$M2' '^ 2025-05-07 02:00' success_pct) && f=\$(cell '$M2' '^ 2025-05-07 02:00' failure_pct) && [[ \$s == *\"text='\"*'0'* && \$s != *'%'* ]] && [[ \$f == *\"text='\"*'4'* ]] || { echo \"success: \$s\"; echo \"failure: \$f\"; false; }" \
+    asserts "a measured zero in an ineligible window is reported as a zero count: the D11 blank is reserved for a window with no classified line at all, so the two remain distinguishable after the count fallback was added" \
+    produced_by "normalize_data_for_output() setting the *_count keys on a slot-3 bucket with classified lines; the value-only render branch choosing format_number over format_percentage" \
+    contract "features/452-success-failure-percentage-columns.md D2 as amended (architect, 2026-09-01), D11, AC18"
 
 # ---------------------------------------------------------------------------
 current_scenario="summary-row-colour"

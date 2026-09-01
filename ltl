@@ -15516,14 +15516,27 @@ sub normalize_data_for_output {
 
         # #452 D1: derive the bucket's percentage pair once, from the same
         # outcome counters the error rate reads — rendering never re-derives
-        # an outcome. D2: a bucket touched by a non-qualifying source (slot 3)
-        # keeps its counts but gets no percentage; D11: a bucket with no
-        # classified line gets no value, so its cells render blank, never 0%.
+        # an outcome. D11: a bucket with no classified line gets neither a
+        # percentage nor a count, so its cells render blank, never 0%.
+        #
+        # D2, as amended (architect, 2026-09-01): a bucket touched by a source
+        # that cannot report a success (slot 3) gets the raw counts instead of
+        # a share. A share there would be read against a denominator one
+        # contributor could only add failures to, so the window's failures
+        # would be overstated and the run skewed toward the failure-only
+        # source. Blank cells were worse than either: they read as a window
+        # with no successes and no failures at all. The absent '%' is what
+        # tells the reader a cell is a count.
         if (my $bucket_outcome = $bucket_outcomes{$bucket}) {
             my $bucket_classified = ($bucket_outcome->[1] // 0) + ($bucket_outcome->[2] // 0);
-            if ($bucket_classified > 0 && !($bucket_outcome->[3] // 0)) {
-                $log_stats{$bucket}{success_pct} = ($bucket_outcome->[1] // 0) / $bucket_classified * 100;
-                $log_stats{$bucket}{failure_pct} = ($bucket_outcome->[2] // 0) / $bucket_classified * 100;
+            if ($bucket_classified > 0) {
+                if ($bucket_outcome->[3] // 0) {
+                    $log_stats{$bucket}{success_pct_count} = $bucket_outcome->[1] // 0;
+                    $log_stats{$bucket}{failure_pct_count} = $bucket_outcome->[2] // 0;
+                } else {
+                    $log_stats{$bucket}{success_pct} = ($bucket_outcome->[1] // 0) / $bucket_classified * 100;
+                    $log_stats{$bucket}{failure_pct} = ($bucket_outcome->[2] // 0) / $bucket_classified * 100;
+                }
             }
         }
 
@@ -16451,9 +16464,16 @@ sub print_bar_graph {
                     # formatted value sits centred in the cell (the header
                     # centring geometry: odd remainder pads the left), in the
                     # column's named colour (D14). No value, no ink (D11).
+                    # A window that qualifies carries a share; one that does
+                    # not carries the count the share would have been built
+                    # from, abbreviated so it fits the same cell. Which key is
+                    # set is decided once in normalize_data_for_output().
                     my $cell_value = $log_stats{$bucket}{$col_id};
-                    if (defined $cell_value && $col_w > 0) {
-                        my $cell_text = format_percentage( $cell_value, mode => 'significant', digits => 3, width => $col_w );
+                    my $cell_count = $log_stats{$bucket}{"${col_id}_count"};
+                    if ((defined $cell_value || defined $cell_count) && $col_w > 0) {
+                        my $cell_text = defined $cell_value
+                            ? format_percentage( $cell_value, mode => 'significant', digits => 3, width => $col_w )
+                            : format_number( $cell_count, 'medium' );
                         $cell_text = substr( $cell_text, 0, $col_w ) if length($cell_text) > $col_w;
                         my $cell_pad = $col_w - length($cell_text);
                         $cell_pad = 0 if $cell_pad < 0;
