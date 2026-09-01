@@ -57,20 +57,26 @@ ltl -bs 60 -pr weekends access.log
 
 ### Filtering & Highlighting
 
-logtimeline's investigative power comes from combining filtering and highlighting: filter criteria shape the population being analyzed, while highlight criteria visually isolate a subset within that population. One set of conditions controls what is measured; an independent set controls what stands out — and both kinds accept text patterns or numeric thresholds. **Include** isolates lines matching a pattern, discarding everything else. **Exclude** removes matching lines, keeping everything else. **Highlight** renders matching lines as a separate colored bar alongside the main bar in every time bucket, allowing visual comparison of a subset against the full population. All three accept regex, can be specified multiple times, and support `&` for AND logic within a single pattern.
+logtimeline's investigative power comes from combining filtering and highlighting: filter criteria shape the population being analyzed, while highlight criteria visually isolate a subset within that population. One set of conditions controls what is measured; an independent set controls what stands out — and both kinds accept text patterns, numeric thresholds, or the success/failure classification the log format declares. **Include** isolates lines matching a pattern, discarding everything else. **Exclude** removes matching lines, keeping everything else. **Highlight** renders matching lines as a separate colored bar alongside the main bar in every time bucket, allowing visual comparison of a subset against the full population. All three accept regex, can be specified multiple times, and support `&` for AND logic within a single pattern.
 
-The typical workflow is subtractive: start with all data, exclude known noise, narrow with includes until the signal is clear, then highlight to see your target in the context of the full population. Pattern files (`-if`, `-ef`, `-hf`) allow reusable sets of patterns for common scenarios. Numeric threshold filters (`-dmin`, `-dmax`, `-bmin`, `-bmax`, `-cmin`, `-cmax`) complement regex filtering by selecting entries based on metric values rather than text content; all bounds are inclusive (an entry exactly at the threshold is kept). Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded — ltl reports how many entries were excluded this way after processing. An inverted range (minimum above maximum) is unsatisfiable — whether on a filter pair or a highlight pair — and ltl warns up front instead of producing a silently empty selection.
+The typical workflow is subtractive: start with all data, exclude known noise, narrow with includes until the signal is clear, then highlight to see your target in the context of the full population. Pattern files (`-ipf`, `-epf`, `-hpf`) allow reusable sets of patterns for common scenarios. Outcome filters (`-if`/`-ef` for failures, `-is`/`-es` for successes) select on the classification the log format declares rather than on text or values; excluding both successes and failures (`-ef -es`) leaves exactly the unclassified remainder, the direct way to inspect lines the format's classification rules did not attribute. Numeric threshold filters (`-dmin`, `-dmax`, `-bmin`, `-bmax`, `-cmin`, `-cmax`) complement regex filtering by selecting entries based on metric values rather than text content; all bounds are inclusive (an entry exactly at the threshold is kept). Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded — ltl reports how many entries were excluded this way after processing. An inverted range (minimum above maximum) is unsatisfiable — whether on a filter pair or a highlight pair — and ltl warns up front instead of producing a silently empty selection.
 
-Highlighting is available on the same numeric criteria: `-hdmin`/`-hdmax`, `-hbmin`/`-hbmax`, and `-hcmin`/`-hcmax` mark entries whose duration, response size, or count falls inside the given inclusive range — without removing anything from the analysis. This keeps the full timeline in view while a slow tail, oversized responses, or unusual counts light up in context. Numeric highlight criteria combine freely with the hard filters (trim noise with `-dmin` while highlighting the extreme cases with `-hdmin`) and with the regex highlight: when both `-h` and numeric criteria are given, an entry is highlighted only if it matches the pattern *and* satisfies every numeric criterion. An entry that carries no value for a metric is never highlighted by a criterion on that metric.
+Highlighting is available on the same numeric criteria: `-hdmin`/`-hdmax`, `-hbmin`/`-hbmax`, and `-hcmin`/`-hcmax` mark entries whose duration, response size, or count falls inside the given inclusive range — without removing anything from the analysis. This keeps the full timeline in view while a slow tail, oversized responses, or unusual counts light up in context. Numeric highlight criteria combine freely with the hard filters (trim noise with `-dmin` while highlighting the extreme cases with `-hdmin`) and with the regex highlight: when both `-h` and numeric criteria are given, an entry is highlighted only if it matches the pattern *and* satisfies every numeric criterion. An entry that carries no value for a metric is never highlighted by a criterion on that metric. Classification is a highlight criterion too: `-hf`/`-hs` mark the entries the format classifies as failures or successes — see where failures cluster in the timeline without losing the surrounding traffic. Outcome highlights AND-compose with the other highlight families like everything else, and an entry classified to neither outcome never satisfies them.
 
 | Option | Description |
 |--------|-------------|
 | `-i, --include <regex>` | Only process lines matching this pattern, discard everything else. Can be specified multiple times; patterns are combined with OR. Use `&` for AND: `A&B` matches lines containing both A and B. `&&` for literal `&`. `&` binds tighter than `\|`. |
 | `-e, --exclude <regex>` | Discard lines matching this pattern before analysis. Can be specified multiple times; patterns are combined with OR. Supports `&` (AND) and `&&` (literal `&`). |
 | `-h, --highlight <regex>` | Show matching lines as a separate colored bar alongside the main bar for visual comparison. Can be specified multiple times; patterns are combined with OR. Supports `&` (AND) and `&&` (literal `&`). |
-| `-if, --include-file <file>` | Load include patterns from a file (one pattern per line) |
-| `-ef, --exclude-file <file>` | Load exclude patterns from a file (one pattern per line) |
-| `-hf, --highlight-file <file>` | Load highlight patterns from a file (one pattern per line) |
+| `-ipf, --include-pattern-file <file>` | Load include patterns from a file (one pattern per line) |
+| `-epf, --exclude-pattern-file <file>` | Load exclude patterns from a file (one pattern per line) |
+| `-hpf, --highlight-pattern-file <file>` | Load highlight patterns from a file (one pattern per line) |
+| `-if, --include-failure` | Only include lines the log format classifies as failures; lines without a classification are dropped too |
+| `-ef, --exclude-failure` | Drop lines the log format classifies as failures; unclassified lines are kept |
+| `-hf, --highlight-failure` | Highlight lines the log format classifies as failures, without filtering anything out |
+| `-is, --include-success` | Only include lines the log format classifies as successes; lines without a classification are dropped too |
+| `-es, --exclude-success` | Drop lines the log format classifies as successes; unclassified lines are kept. Combine `-ef` and `-es` to see only the unclassified remainder |
+| `-hs, --highlight-success` | Highlight lines the log format classifies as successes, without filtering anything out |
 | `-dmin, --duration-min <N>` | Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept) |
 | `-dmax, --duration-max <N>` | Hide log entries with duration above this threshold (inclusive: entries exactly at N are kept) |
 | `-bmin, --bytes-min <N>` | Hide log entries with response size below this threshold (inclusive) |
@@ -96,7 +102,7 @@ ltl -hdmin 5000 access.log
 ltl -h "/api/v2/orders" -hdmin 5000 access.log
 ```
 
-> **Note:** Filters affect all computed statistics. For example, `-dmin 1000` will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population of data in the file. Numeric filters only keep entries that carry the filtered metric; entries with no value for it are excluded and their count is reported. Highlight criteria (`-h`/`-hf` and the `-h*min`/`-h*max` options) never change which entries are analyzed — they only mark a subset within the full population.
+> **Note:** Filters affect all computed statistics. For example, `-dmin 1000` will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population of data in the file. Numeric filters only keep entries that carry the filtered metric; entries with no value for it are excluded and their count is reported. Highlight criteria (`-h`, `-hpf`, `-hf`, `-hs` and the `-h*min`/`-h*max` options) never change which entries are analyzed — they only mark a subset within the full population.
 
 ### Recording & Processing
 
@@ -137,8 +143,8 @@ Consolidated entries are marked with `~` in the summary table output. All statis
 |--------|-------------|
 | `-g, --group-similar <N>` | Enable fuzzy message consolidation with N% Dice similarity threshold (50-99, default: 85). Lower values are more aggressive. |
 | `-uuid, --mask-uuid` | Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to `-g` for UUID-only variation) |
-| `-iqs, --include-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
-| `-is, --include-session` | Keep session/user IDs when grouping messages, so each session is tracked separately |
+| `-xqs, --expose-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
+| `-xs, --expose-session` | Keep session/user IDs when grouping messages, so each session is tracked separately |
 | `-gc, --group-ceiling <N>` | Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000) |
 
 ```bash
@@ -147,7 +153,7 @@ ltl -g access.log
 # Don't consolidate messages with more than 5000 occurrences
 ltl -g -gc 5000 access.log
 # Consolidate but keep query strings and sessions as separate entries
-ltl -g 80 -iqs -is access.log
+ltl -g 80 -xqs -xs access.log
 ```
 
 **Performance characteristics:** Time overhead is ~20-30% at all scales. Memory overhead depends on data size — at small scale (< 200 MB) consolidation uses more memory due to trigram structures during checkpoint processing, but at production scale (1+ GB) it saves memory dramatically (up to 88% reduction on 7.9 GB) because matched keys are absorbed inline and never stored.
@@ -176,7 +182,7 @@ Each category row shows its share of the lines included beside its total — `2 
 | `-hd, --hide-duration` | Hide the duration bar graph column |
 | `-hb, --hide-bytes` | Hide the bytes bar graph column |
 | `-hc, --hide-count` | Hide the count bar graph column |
-| `-hs, --hide-session` | Hide the Sessions column that automatically appears when session IDs are found in the log data |
+| `-hses, --hide-session` | Hide the Sessions column that automatically appears when session IDs are found in the log data |
 | `-hcl, --hide-classification` | Hide the success and failure percentage columns shown by default for event-ledger formats such as access logs |
 | `-scl, --show-classification` | Show the success and failure percentage columns for a format that declares both classifications without being an event ledger |
 | `-hst, --hide-stats` | Hide the latency statistics or heatmap column |
@@ -502,7 +508,7 @@ The `LTL_CONFIG` environment variable lets you define default options that apply
 
 | Variable | Description |
 |----------|-------------|
-| `LTL_CONFIG` | Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (`-i`, `-e`, `-h`, `-if`, `-ef`, `-hf`, `-tpa`, `-udm`, `-ucm`) combine from both sources. |
+| `LTL_CONFIG` | Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (`-i`, `-e`, `-h`, `-ipf`, `-epf`, `-hpf`, `-tpa`, `-udm`, `-ucm`) combine from both sources. |
 
 ### Info
 

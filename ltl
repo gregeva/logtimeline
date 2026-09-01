@@ -351,6 +351,12 @@ my %profile_modes = (
 my ( $profile_dropped_samples, $profile_included_samples ) = ( 0, 0 );
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
 my( $include_filter, $exclude_filter, $highlight_filter );  # Compiled filter matchers (Issue #117)
+# Outcome criteria (Issue #455): filters and highlights that select on the
+# success/failure classification the format registry produced for the line.
+my( $include_failure, $exclude_failure, $include_success, $exclude_success );
+my( $highlight_failure, $highlight_success );
+my $outcome_filter_active = 0;   # any outcome filter given
+my $outcome_highlight_active = 0;   # any outcome highlight given
 my( @exclude_args, @include_args, @highlight_args, @threadpool_activity_args );
 my $ltl_config_raw = '';                                 # Raw LTL_CONFIG env var string for display
 my ( @udm_configs, @udm_raw_args, %udm_last_value );
@@ -1658,6 +1664,7 @@ sub percentile {
 sub has_active_filters {
     return 1 if @include_args || @exclude_args;
     return 1 if @include_files || @exclude_files;
+    return 1 if $include_failure || $exclude_failure || $include_success || $exclude_success;
     return 1 if $filter_range_start ne "" || $filter_range_end ne "";
     return 1 if defined $filter_duration_min || defined $filter_duration_max;
     return 1 if defined $filter_bytes_min    || defined $filter_bytes_max;
@@ -1683,10 +1690,14 @@ sub serialize_filters {
     # values were given on the command line (Issue #310). Cross-flag order is
     # already fixed by the push order above.
     push @parts, "-e=" . $url_encode->(join(',', sort @exclude_args))   if @exclude_args;
-    push @parts, "-ef=" . $url_encode->(join(',', sort @exclude_files)) if @exclude_files;
+    push @parts, "-ef"                                                  if $exclude_failure;
+    push @parts, "-epf=" . $url_encode->(join(',', sort @exclude_files)) if @exclude_files;
+    push @parts, "-es"                                                  if $exclude_success;
     push @parts, "-et=" . $url_encode->($filter_range_end)              if $filter_range_end ne "";
     push @parts, "-i=" . $url_encode->(join(',', sort @include_args))   if @include_args;
-    push @parts, "-if=" . $url_encode->(join(',', sort @include_files)) if @include_files;
+    push @parts, "-if"                                                  if $include_failure;
+    push @parts, "-ipf=" . $url_encode->(join(',', sort @include_files)) if @include_files;
+    push @parts, "-is"                                                  if $include_success;
     push @parts, "-st=" . $url_encode->($filter_range_start)       if $filter_range_start ne "";
     return join(';', @parts);
 }
@@ -2232,7 +2243,9 @@ sub _classify_argv_provenance {
             my @specs = (
                 'bucket-size|bs', 'pause|p', 'start|st', 'end|et',
                 'exclude|e', 'include|i', 'highlight|h',
-                'exclude-file|ef', 'include-file|if', 'highlight-file|hf',
+                'exclude-pattern-file|epf', 'include-pattern-file|ipf', 'highlight-pattern-file|hpf',
+                'include-failure|if', 'exclude-failure|ef', 'highlight-failure|hf',
+                'include-success|is', 'exclude-success|es', 'highlight-success|hs',
                 'verbose|V', 'top-messages|n',
                 'omit-values|ov', 'precise-values|pv', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
                 'recursive|r',
@@ -2241,8 +2254,8 @@ sub _classify_argv_provenance {
                 'summary-bar-absolute|sba', 'summary-bar-log|sbl',
                 'summary-bar-reverse|sbr',
                 'omit-bytes|ob', 'omit-count|oc', 'include-count|ic',
-                'include-query-string|iqs', 'include-session|is',
-                'hide-session|hs', 'hide-occurrences|ho', 'hide-legend|hl',
+                'expose-query-string|xqs', 'expose-session|xs',
+                'hide-session|hses', 'hide-occurrences|ho', 'hide-legend|hl',
                 'hide-duration|hd', 'hide-bytes|hb', 'hide-count|hc',
                 'hide-classification|hcl', 'show-classification|scl',
                 'hide-stats|hst', 'seconds|s', 'milliseconds|ms',
@@ -2359,8 +2372,14 @@ sub emit_runtime_config_verbose {
         'omit-bytes'                        => $omit_bytes,
         'omit-count'                        => $omit_count,
         'include-count'                     => $include_count,
-        'include-query-string'              => $include_query_string,
-        'include-session'                   => $include_session,
+        'include-failure'                   => $include_failure,
+        'exclude-failure'                   => $exclude_failure,
+        'highlight-failure'                 => $highlight_failure,
+        'include-success'                   => $include_success,
+        'exclude-success'                   => $exclude_success,
+        'highlight-success'                 => $highlight_success,
+        'expose-query-string'               => $include_query_string,
+        'expose-session'                    => $include_session,
         'hide-session'                      => $hide_session,
         'hide-classification'               => $hide_classification,
         'show-classification'               => $show_classification,
@@ -5546,7 +5565,7 @@ sub emit_classification_percentage_notices {
     # away, so it stays silent.
     my $recon = classification_reconciliation();
     if ( ( $cls_success_declared || $recon->{successes} )
-         && !( $recon->{pct_eligible} && $recon->{successes} ) ) {
+         && !( $recon->{pct_eligible} && $cls_success_declared ) ) {
         my %no_success_rule;
         for my $entry (@format_registry) {
             next unless $entry->[FR_MATCHES];
@@ -6753,7 +6772,7 @@ my $explain_bc_compute = q{Sarle's formula with sample-size correction: `BC = (s
 # --- classification (--explain classification) ---
 my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as SUCCESS CLASSIFIED and FAILURE CLASSIFIED beneath LINES INCLUDED, each with its share of all classified lines, and an UNCLASSIFIED row with its share of included lines; on an event-ledger format the timeline adds a success and a failure percentage column per time bucket, over the same classified denominator (hide them with -hcl, or show them on a classifying non-ledger format with -scl); the classification sub-section of -V format-detection adds the overall success and failure percentages and how many lines were unclassified. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
 my $explain_classification_ledger = q{Whether a success/failure figure means anything depends less on the rules than on the log. An *event ledger* is a format with maximum coverage of the operations it describes: every operation of that kind produces exactly one line, so a count over its lines is a count over everything that happened. An access log is an event ledger for requests; a garbage-collection log is one for pauses. A diagnostics log is not: it records what a component chose to write, at whatever level it chose, and says nothing about the operations that produced no line. This is the coverage argument of the Google SRE Workbook chapter on implementing SLOs (https://sre.google/workbook/implementing-slos/): a service-level indicator is a ratio of good events to all events, and the denominator is only honest when the source sees all events. The success percentage -- successes over classified lines -- is therefore trustworthy at face value only over an event ledger. Each format declares whether it is one, the property is reported per file on -V format-detection (event_ledger), and consumers that compute a ratio read it to decide whether to show one.};
-my $explain_classification_reading = q{What a diagnostics log can legitimately tell you: how many failure-level lines there were, when they clustered, and which messages produced them -- the errRate column, and the per-message failure counts in the MESSAGES CSV. What it cannot tell you: a success rate, an availability, or any ratio whose denominator is "all operations", because most operations never wrote a line. The unclassified share is the warning sign: on a diagnostics log it is usually most of the file. On an event ledger the same share is a data-quality figure -- lines that carried a status the rules do not cover -- and a low value means the ratio can be trusted.};
+my $explain_classification_reading = q{What a diagnostics log can legitimately tell you: how many failure-level lines there were, when they clustered, and which messages produced them -- the errRate column, and the per-message failure counts in the MESSAGES CSV. What it cannot tell you: a success rate, an availability, or any ratio whose denominator is "all operations", because most operations never wrote a line. The unclassified share is the warning sign: on a diagnostics log it is usually most of the file. On an event ledger the same share is a data-quality figure -- lines that carried a status the rules do not cover -- and a low value means the ratio can be trusted. The classification is also actionable: -if/-ef and -is/-es filter on failures and successes, -hf/-hs highlight them within the full population, and excluding both (-ef -es) leaves exactly the unclassified remainder for inspection.};
 my $explain_classification_compute = q{Classification runs as each line is recognised, so it costs nothing to re-derive later: each format's rules are compiled once at startup into its recognition step, and the outcome is accumulated per time bucket (errRate reads the bucket's failure count, normalised to the -ru rate unit as before) and per message key (the successes and failures columns of -o CSV, which survive -g consolidation). If the detected format changes part-way through a file, lines after the change are classified under the new format's rules, the file's event-ledger property follows the new format, a note names the line and both formats, and -V format-detection lists the change. Lines already classified are not revisited. The rules themselves are documented per format under 'ltl --help formats', which also shows how a format declares them.};
 
 # --- heatmap (--explain heatmap) ---
@@ -7461,9 +7480,15 @@ sub print_help {
     $out .= help_opt("-i,   --include <regex>",       "Only process lines matching this pattern, discard everything else. Can be specified multiple times; patterns are combined with OR. Use & for AND: \"A&B\" matches lines containing both A and B. && for literal &. & binds tighter than |.");
     $out .= help_opt("-e,   --exclude <regex>",       "Discard lines matching this pattern before analysis. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
     $out .= help_opt("-h,   --highlight <regex>",     "Show matching lines as a separate colored bar alongside the main bar for visual comparison. Can be specified multiple times; patterns are combined with OR. Supports & (AND) and && (literal &).");
-    $out .= help_opt("-if,  --include-file <file>",   "Load include patterns from a file (one pattern per line)");
-    $out .= help_opt("-ef,  --exclude-file <file>",   "Load exclude patterns from a file (one pattern per line)");
-    $out .= help_opt("-hf,  --highlight-file <file>", "Load highlight patterns from a file (one pattern per line)");
+    $out .= help_opt("-ipf, --include-pattern-file <file>",   "Load include patterns from a file (one pattern per line)");
+    $out .= help_opt("-epf, --exclude-pattern-file <file>",   "Load exclude patterns from a file (one pattern per line)");
+    $out .= help_opt("-hpf, --highlight-pattern-file <file>", "Load highlight patterns from a file (one pattern per line)");
+    $out .= help_opt("-if,  --include-failure",       "Only include lines the log format classifies as failures; lines without a classification are dropped too");
+    $out .= help_opt("-ef,  --exclude-failure",       "Drop lines the log format classifies as failures; unclassified lines are kept");
+    $out .= help_opt("-hf,  --highlight-failure",     "Highlight lines the log format classifies as failures, without filtering anything out");
+    $out .= help_opt("-is,  --include-success",       "Only include lines the log format classifies as successes; lines without a classification are dropped too");
+    $out .= help_opt("-es,  --exclude-success",       "Drop lines the log format classifies as successes; unclassified lines are kept. Combine -ef and -es to see only the unclassified remainder");
+    $out .= help_opt("-hs,  --highlight-success",     "Highlight lines the log format classifies as successes, without filtering anything out");
     $out .= help_opt("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept)");
     $out .= help_opt("-dmax, --duration-max <N>",     "Hide log entries with duration above this threshold (inclusive: entries exactly at N are kept)");
     $out .= help_opt("-bmin, --bytes-min <N>",        "Hide log entries with response size below this threshold (inclusive)");
@@ -7477,7 +7502,7 @@ sub print_help {
     $out .= help_opt("-hcmin, --highlight-count-min <N>",    "Highlight log entries with count at or above this value, without filtering anything out");
     $out .= help_opt("-hcmax, --highlight-count-max <N>",    "Highlight log entries with count at or below this value, without filtering anything out");
     $out .= "\n";
-    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded; ltl reports how many entries were excluded this way. An inverted range (minimum above maximum) is unsatisfiable and warns up front. Highlight criteria (-h/-hf and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric.";
+    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded; ltl reports how many entries were excluded this way. An inverted range (minimum above maximum) is unsatisfiable and warns up front. Highlight criteria (-h, -hpf, -hf, -hs and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric, and an entry classified to neither outcome never satisfies -hf or -hs.";
     $out .= help_wrap($note_text, indent => $help_opt_col, first_indent => $help_opt_col) . "\n";
 
     # Recording & Processing
@@ -7498,8 +7523,8 @@ sub print_help {
     $out .= help_subheading("Message Grouping");
     $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output.");
     $out .= help_opt("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
-    $out .= help_opt("-iqs, --include-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
-    $out .= help_opt("-is,  --include-session",       "Keep session/user IDs when grouping messages, so each session is tracked separately");
+    $out .= help_opt("-xqs, --expose-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
+    $out .= help_opt("-xs,  --expose-session",       "Keep session/user IDs when grouping messages, so each session is tracked separately");
     $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
 
     # Display & Output
@@ -7518,7 +7543,7 @@ sub print_help {
     $out .= help_opt("-hd,  --hide-duration",         "Hide the duration bar graph column");
     $out .= help_opt("-hb,  --hide-bytes",            "Hide the bytes bar graph column");
     $out .= help_opt("-hc,  --hide-count",            "Hide the count bar graph column");
-    $out .= help_opt("-hs,  --hide-session",          "Hide the Sessions column that automatically appears when session IDs are found in the log data");
+    $out .= help_opt("-hses, --hide-session",         "Hide the Sessions column that automatically appears when session IDs are found in the log data");
     $out .= help_opt("-hcl, --hide-classification",    "Hide the success and failure percentage columns shown by default for event-ledger formats such as access logs");
     $out .= help_opt("-scl, --show-classification",    "Show the success and failure percentage columns for a format that declares both classifications without being an event ledger");
     $out .= help_opt("-hst, --hide-stats",            "Hide the latency statistics or heatmap column");
@@ -7576,7 +7601,7 @@ sub print_help {
 
     # ENVIRONMENT
     $out .= help_heading("ENVIRONMENT");
-    $out .= help_opt("LTL_CONFIG", "Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (-i, -e, -h, -if, -ef, -hf, -tpa, -udm, -ucm) combine from both sources.");
+    $out .= help_opt("LTL_CONFIG", "Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (-i, -e, -h, -ipf, -epf, -hpf, -tpa, -udm, -ucm) combine from both sources.");
 
     # INFO
     $out .= help_heading("INFO");
@@ -11072,9 +11097,15 @@ sub adapt_to_command_line_options {
         'exclude|e=s' => \@exclude_args,
         'include|i=s' => \@include_args,
         'highlight|h=s' => \@highlight_args,
-        'exclude-file|ef=s' => \@exclude_files,
-        'include-file|if=s' => \@include_files,
-        'highlight-file|hf=s' => \@highlight_files,
+        'exclude-pattern-file|epf=s' => \@exclude_files,
+        'include-pattern-file|ipf=s' => \@include_files,
+        'highlight-pattern-file|hpf=s' => \@highlight_files,
+        'include-failure|if' => \$include_failure,
+        'exclude-failure|ef' => \$exclude_failure,
+        'highlight-failure|hf' => \$highlight_failure,
+        'include-success|is' => \$include_success,
+        'exclude-success|es' => \$exclude_success,
+        'highlight-success|hs' => \$highlight_success,
         'verbose|V:s@' => \@verbose_args,   # Issue #226: optional, repeatable section name; bare -V = all sections
         'top-messages|n=i' => \$top_n_messages,
         'omit-values|ov' => \$omit_values,
@@ -11094,9 +11125,9 @@ sub adapt_to_command_line_options {
         'omit-bytes|ob' => \$omit_bytes,
         'omit-count|oc' => \$omit_count,
         'include-count|ic' => \$include_count,
-        'include-query-string|iqs' => \$include_query_string,
-        'include-session|is' => \$include_session,
-        'hide-session|hs' => \$hide_session,
+        'expose-query-string|xqs' => \$include_query_string,
+        'expose-session|xs' => \$include_session,
+        'hide-session|hses' => \$hide_session,
         'hide-classification|hcl' => \$hide_classification,
         'show-classification|scl' => \$show_classification,
         'hide-occurrences|ho' => \$hide_occurrences,
@@ -11447,6 +11478,8 @@ sub adapt_to_command_line_options {
     $include_filter   = build_filter_matcher(\@include_args,   \@include_files,   'include');
     $exclude_filter   = build_filter_matcher(\@exclude_args,   \@exclude_files,   'exclude');
     $highlight_filter = build_filter_matcher(\@highlight_args,  \@highlight_files, 'highlight');
+    $outcome_filter_active = ( $include_failure || $exclude_failure
+                            || $include_success || $exclude_success ) ? 1 : 0;
     $threadpool_activity_regex = join('|', @threadpool_activity_args) if @threadpool_activity_args;
 
     # Set legacy regex strings for defined-checks and display
@@ -11460,7 +11493,9 @@ sub adapt_to_command_line_options {
         $highlight_duration_min, $highlight_duration_max,
         $highlight_bytes_min, $highlight_bytes_max,
         $highlight_count_min, $highlight_count_max ) ? 1 : 0;
-    $highlight_active = ( defined($highlight_filter) || $numeric_highlight_active ) ? 1 : 0;
+    $outcome_highlight_active = ( $highlight_failure || $highlight_success ) ? 1 : 0;
+    $highlight_active = ( defined($highlight_filter) || $numeric_highlight_active
+                       || $outcome_highlight_active ) ? 1 : 0;
 
     # An inverted numeric range (minimum above maximum) is unsatisfiable: no
     # line can ever pass the filter pair, and no line can ever be highlighted
@@ -12451,6 +12486,17 @@ sub read_and_process_logs {
 
                 next if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) );
                 next if( defined( $include_filter )         && !match_filter($_, $include_filter) );
+                # Outcome filters select on the classification the scan block
+                # already produced (1 success, 2 failure, 0 unclassified) — the
+                # line is never re-tested. An include keeps only its named
+                # outcome; an exclude drops only its named outcome, so
+                # unclassified lines survive every exclude.
+                if( $outcome_filter_active ) {
+                    next if( $include_failure && $line_outcome != 2 );
+                    next if( $include_success && $line_outcome != 1 );
+                    next if( $exclude_failure && $line_outcome == 2 );
+                    next if( $exclude_success && $line_outcome == 1 );
+                }
                 # Numeric threshold filters. A line that carries no value for the
                 # filtered metric can never satisfy a numeric criterion on that
                 # metric (same semantics as the numeric highlight criteria), so it
@@ -12501,12 +12547,17 @@ sub read_and_process_logs {
                     }
                 }
 
-                # determine if this line should be highlighted: the regex matcher and the numeric
-                # criteria are independent constraints — when both families are given, a line must
-                # satisfy both (AND); either family alone decides when the other is absent.
-                # A line missing a metric never satisfies a numeric criterion on that metric.
+                # determine if this line should be highlighted: the regex matcher, the numeric
+                # criteria and the outcome criteria are independent constraint families — when
+                # several are given, a line must satisfy all of them (AND); any family alone
+                # decides when the others are absent. A line missing a metric never satisfies a
+                # numeric criterion on that metric, and a line classified to neither outcome
+                # never satisfies an outcome criterion.
                 if( $highlight_active
                     && ( !defined( $highlight_filter ) || match_filter($_, $highlight_filter) )
+                    && ( !$outcome_highlight_active || (
+                           ( !$highlight_failure || $line_outcome == 2 )
+                        && ( !$highlight_success || $line_outcome == 1 ) ) )
                     && ( !$numeric_highlight_active || (
                            ( !defined( $highlight_duration_min ) || ( defined( $duration ) && $duration >= $highlight_duration_min ) )
                         && ( !defined( $highlight_duration_max ) || ( defined( $duration ) && $duration <= $highlight_duration_max ) )
@@ -17427,17 +17478,17 @@ sub print_run_options {
         next if exists $argv_hash{$arg};  # Skip log files
 
         # Handle pattern file options with indicators
-        if ($arg =~ /^(-ef|--exclude-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
+        if ($arg =~ /^(-epf|--exclude-pattern-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
             my $indicator = get_pattern_file_indicator('exclude', $file);
             $cli_options .= "$arg $file$indicator ";
             $i++;  # Skip the filename in next iteration
-        } elsif ($arg =~ /^(-if|--include-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
+        } elsif ($arg =~ /^(-ipf|--include-pattern-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
             my $indicator = get_pattern_file_indicator('include', $file);
             $cli_options .= "$arg $file$indicator ";
             $i++;  # Skip the filename in next iteration
-        } elsif ($arg =~ /^(-hf|--highlight-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
+        } elsif ($arg =~ /^(-hpf|--highlight-pattern-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
             my $file = $ORIGINAL_ARGV[$i + 1];
             my $indicator = get_pattern_file_indicator('highlight', $file);
             $cli_options .= "$arg $file$indicator ";
@@ -17705,14 +17756,18 @@ sub print_summary_table {
     push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
     # Classified lines (#453): each row is shown when its outcome was declared
     # by a bound format or observed. The share is of all classified lines and
-    # is omitted when no line was a success (failures would always read 100%).
+    # is omitted when no bound format declares a success rule (a failure-only
+    # log would always read 100%).
     {
         my $recon = classification_reconciliation();
         my $classified = $recon->{classified};
         # #452 D10: the classified rows' shares print only when the run
-        # qualifies for percentages; the zero-success suppression stands
-        # (failure-only logs would always read 100%). Counts always print.
-        my $share_denominator = ($recon->{pct_eligible} && $total_successes) ? $classified : undef;
+        # qualifies for percentages, and the failure-only suppression is a
+        # test of the declared rules, not of the surviving data — an outcome
+        # filter (#455) can zero one outcome's count on a format that
+        # declares both rules, and there the shares stay meaningful and must
+        # agree with the per-bucket percentage columns. Counts always print.
+        my $share_denominator = ($recon->{pct_eligible} && $cls_success_declared) ? $classified : undef;
         # Each row reads in its outcome's own colour, the same shade the
         # timeline's percentage columns use, so a success is one colour and a
         # failure another wherever the run reports them. The colour resolves

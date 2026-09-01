@@ -311,7 +311,7 @@ By the time you cut the release, every feature/bugfix issue has already been com
 ./ltl [options] <logfile(s)>
 ```
 
-Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-ni` (do not read or update `ltl-index.csv`), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-if/-ef/-hf` (pattern files), `-du` (duration unit), `-hm` (heatmap), `-hg` (histogram), `-ms` (millisecond precision), `-st/-et` (time range filters, supports milliseconds), `-hs` (hide sessions column), `-g N` (fuzzy message consolidation at N% similarity), `--help` (full help)
+Key options: `-n N` (top N messages), `-b N` (bucket size minutes), `-o` (CSV output), `-ni` (do not read or update `ltl-index.csv`), `-dmin/-dmax` (duration filters), `-include/-exclude` (pattern filters), `-ipf/-epf/-hpf` (pattern files), `-du` (duration unit), `-hm` (heatmap), `-hg` (histogram), `-ms` (millisecond precision), `-st/-et` (time range filters, supports milliseconds), `-hses` (hide sessions column), `-g N` (fuzzy message consolidation at N% similarity), `--help` (full help)
 
 **Hidden options:** `--disable-progress` (ALWAYS use this flag when running ltl from Claude Code — suppresses progress output that wastes tokens), `--terminal-width N` (control terminal width in piped/non-TTY contexts), `--debug-layout`, `--validate-layout`.
 
@@ -549,7 +549,7 @@ Phase 1 begins only on explicit instruction. Filing a requirement is not plannin
 
 ## Pattern Files
 
-The `patterns/` directory contains filter patterns for `-if`, `-ef`, and `-hf` options:
+The `patterns/` directory contains filter patterns for `-ipf`, `-epf`, and `-hpf` options:
 - `metrics` - ThingWorx metrics endpoints
 - `navigate-app-calls` - Windchill Navigate API calls
 - `probes` - Health check endpoints

@@ -1,9 +1,9 @@
 # Filter and highlight criteria for success and failure (#455)
 
-Status: **specification** — requirements and naming locked in dialog with the architect
-(2026-09-01); implementation not scheduled. Issue: #455. Prerequisite classification
-substrate: #453 (delivered, `release/0.18.0`); percentage columns and reconciliation:
-#452 (delivered).
+Status: **implemented** — requirements and naming locked in dialog with the architect
+(2026-09-01); delivered on branch `455-success-failure-filter-highlight-criteria`
+the same day. Issue: #455. Prerequisite classification substrate: #453 (delivered,
+`release/0.18.0`); percentage columns and reconciliation: #452 (delivered).
 
 ## Requirement
 
@@ -145,6 +145,14 @@ After this change each verb means exactly one thing across the CLI:
 
 Derived from the requirement before implementation; each triaged
 assertable / unassertable / unknown per `docs/test-driven-development.md`.
+Enforcing harness: `tests/validate-outcome-criteria.sh` (AC1–AC6, AC9, and the
+rejection/acceptance halves of AC7/AC8); option-surface parity for AC7 is
+`tests/validate-help-content.sh`. AC3 runs on
+`tests/fixtures/diagnostics-classification-overlap.txt` (2 of 4 lines
+unclassified) — the crafted-fixture route; the #483 GC-format criteria remain a
+future richer source. AC4's visual half was verified on a real access log
+(highlighted messages panel, `(HL)` category row, highlight count equal to the
+failure count, population unchanged).
 
 - **AC1** (assertable): on an access-log fixture, `--include-failure` leaves only
   failure-classified lines in every surface — lines included, summary counts,
@@ -185,6 +193,17 @@ names (D2); existing index files left alone, new filters enter the signature (D7
 count spun out to #514 (D5); and sequencing against #478 (highlight bookkeeping on
 the hot path) is decided — this feature is not gated on it and lands first; #478
 carries a comment describing the option shape this feature brings.
+
+## Findings during implementation
+
+- **F1 — summary shares vanished under outcome filters** (architect bug report,
+  2026-09-01, during testing): the run summary's classified-row shares were
+  gated on the observed success count, so `-es`/`-if` (failures-only remainder)
+  dropped them while the per-bucket columns still read 0%/100%. The suppression
+  exists for formats that declare no success rule (classifying only errors) and
+  is a test of the declared rules, not the surviving data — fixed by gating on
+  `$cls_success_declared`; #452's D10 (eligibility gating consistent across all
+  surfaces) carries the amendment.
 
 ## Related record
 
