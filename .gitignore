@@ -3,6 +3,9 @@ _Inline/
 tests/profile/samples/
 tests/.artifacts/
 logs/
+# ... and the symlink of the same name that the git worktrees carry in place
+# of the directory, which the trailing slash above does not match.
+logs
 
 # Runtime artifact (Issue #46 / #179)
 ltl-index.csv
