@@ -73,8 +73,10 @@ Highlighting is available on the same numeric criteria: `-hdmin`/`-hdmax`, `-hbm
 | `-hpf, --highlight-pattern-file <file>` | Load highlight patterns from a file (one pattern per line) |
 | `-if, --include-failure` | Only include lines the log format classifies as failures; lines without a classification are dropped too |
 | `-ef, --exclude-failure` | Drop lines the log format classifies as failures; unclassified lines are kept |
+| `-hf, --highlight-failure` | Highlight lines the log format classifies as failures, without filtering anything out |
 | `-is, --include-success` | Only include lines the log format classifies as successes; lines without a classification are dropped too |
 | `-es, --exclude-success` | Drop lines the log format classifies as successes; unclassified lines are kept. Combine `-ef` and `-es` to see only the unclassified remainder |
+| `-hs, --highlight-success` | Highlight lines the log format classifies as successes, without filtering anything out |
 | `-dmin, --duration-min <N>` | Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept) |
 | `-dmax, --duration-max <N>` | Hide log entries with duration above this threshold (inclusive: entries exactly at N are kept) |
 | `-bmin, --bytes-min <N>` | Hide log entries with response size below this threshold (inclusive) |

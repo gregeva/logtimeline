@@ -354,7 +354,9 @@ my( $include_filter, $exclude_filter, $highlight_filter );  # Compiled filter ma
 # Outcome criteria (Issue #455): filters and highlights that select on the
 # success/failure classification the format registry produced for the line.
 my( $include_failure, $exclude_failure, $include_success, $exclude_success );
+my( $highlight_failure, $highlight_success );
 my $outcome_filter_active = 0;   # any outcome filter given
+my $outcome_highlight_active = 0;   # any outcome highlight given
 my( @exclude_args, @include_args, @highlight_args, @threadpool_activity_args );
 my $ltl_config_raw = '';                                 # Raw LTL_CONFIG env var string for display
 my ( @udm_configs, @udm_raw_args, %udm_last_value );
@@ -2242,8 +2244,8 @@ sub _classify_argv_provenance {
                 'bucket-size|bs', 'pause|p', 'start|st', 'end|et',
                 'exclude|e', 'include|i', 'highlight|h',
                 'exclude-pattern-file|epf', 'include-pattern-file|ipf', 'highlight-pattern-file|hpf',
-                'include-failure|if', 'exclude-failure|ef',
-                'include-success|is', 'exclude-success|es',
+                'include-failure|if', 'exclude-failure|ef', 'highlight-failure|hf',
+                'include-success|is', 'exclude-success|es', 'highlight-success|hs',
                 'verbose|V', 'top-messages|n',
                 'omit-values|ov', 'precise-values|pv', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
                 'recursive|r',
@@ -2372,8 +2374,10 @@ sub emit_runtime_config_verbose {
         'include-count'                     => $include_count,
         'include-failure'                   => $include_failure,
         'exclude-failure'                   => $exclude_failure,
+        'highlight-failure'                 => $highlight_failure,
         'include-success'                   => $include_success,
         'exclude-success'                   => $exclude_success,
+        'highlight-success'                 => $highlight_success,
         'expose-query-string'               => $include_query_string,
         'expose-session'                    => $include_session,
         'hide-session'                      => $hide_session,
@@ -7481,8 +7485,10 @@ sub print_help {
     $out .= help_opt("-hpf, --highlight-pattern-file <file>", "Load highlight patterns from a file (one pattern per line)");
     $out .= help_opt("-if,  --include-failure",       "Only include lines the log format classifies as failures; lines without a classification are dropped too");
     $out .= help_opt("-ef,  --exclude-failure",       "Drop lines the log format classifies as failures; unclassified lines are kept");
+    $out .= help_opt("-hf,  --highlight-failure",     "Highlight lines the log format classifies as failures, without filtering anything out");
     $out .= help_opt("-is,  --include-success",       "Only include lines the log format classifies as successes; lines without a classification are dropped too");
     $out .= help_opt("-es,  --exclude-success",       "Drop lines the log format classifies as successes; unclassified lines are kept. Combine -ef and -es to see only the unclassified remainder");
+    $out .= help_opt("-hs,  --highlight-success",     "Highlight lines the log format classifies as successes, without filtering anything out");
     $out .= help_opt("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept)");
     $out .= help_opt("-dmax, --duration-max <N>",     "Hide log entries with duration above this threshold (inclusive: entries exactly at N are kept)");
     $out .= help_opt("-bmin, --bytes-min <N>",        "Hide log entries with response size below this threshold (inclusive)");
@@ -7496,7 +7502,7 @@ sub print_help {
     $out .= help_opt("-hcmin, --highlight-count-min <N>",    "Highlight log entries with count at or above this value, without filtering anything out");
     $out .= help_opt("-hcmax, --highlight-count-max <N>",    "Highlight log entries with count at or below this value, without filtering anything out");
     $out .= "\n";
-    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded; ltl reports how many entries were excluded this way. An inverted range (minimum above maximum) is unsatisfiable and warns up front. Highlight criteria (-h, -hpf and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric.";
+    my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded; ltl reports how many entries were excluded this way. An inverted range (minimum above maximum) is unsatisfiable and warns up front. Highlight criteria (-h, -hpf, -hf, -hs and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric, and an entry classified to neither outcome never satisfies -hf or -hs.";
     $out .= help_wrap($note_text, indent => $help_opt_col, first_indent => $help_opt_col) . "\n";
 
     # Recording & Processing
@@ -11096,8 +11102,10 @@ sub adapt_to_command_line_options {
         'highlight-pattern-file|hpf=s' => \@highlight_files,
         'include-failure|if' => \$include_failure,
         'exclude-failure|ef' => \$exclude_failure,
+        'highlight-failure|hf' => \$highlight_failure,
         'include-success|is' => \$include_success,
         'exclude-success|es' => \$exclude_success,
+        'highlight-success|hs' => \$highlight_success,
         'verbose|V:s@' => \@verbose_args,   # Issue #226: optional, repeatable section name; bare -V = all sections
         'top-messages|n=i' => \$top_n_messages,
         'omit-values|ov' => \$omit_values,
@@ -11485,7 +11493,9 @@ sub adapt_to_command_line_options {
         $highlight_duration_min, $highlight_duration_max,
         $highlight_bytes_min, $highlight_bytes_max,
         $highlight_count_min, $highlight_count_max ) ? 1 : 0;
-    $highlight_active = ( defined($highlight_filter) || $numeric_highlight_active ) ? 1 : 0;
+    $outcome_highlight_active = ( $highlight_failure || $highlight_success ) ? 1 : 0;
+    $highlight_active = ( defined($highlight_filter) || $numeric_highlight_active
+                       || $outcome_highlight_active ) ? 1 : 0;
 
     # An inverted numeric range (minimum above maximum) is unsatisfiable: no
     # line can ever pass the filter pair, and no line can ever be highlighted
@@ -12537,12 +12547,17 @@ sub read_and_process_logs {
                     }
                 }
 
-                # determine if this line should be highlighted: the regex matcher and the numeric
-                # criteria are independent constraints — when both families are given, a line must
-                # satisfy both (AND); either family alone decides when the other is absent.
-                # A line missing a metric never satisfies a numeric criterion on that metric.
+                # determine if this line should be highlighted: the regex matcher, the numeric
+                # criteria and the outcome criteria are independent constraint families — when
+                # several are given, a line must satisfy all of them (AND); any family alone
+                # decides when the others are absent. A line missing a metric never satisfies a
+                # numeric criterion on that metric, and a line classified to neither outcome
+                # never satisfies an outcome criterion.
                 if( $highlight_active
                     && ( !defined( $highlight_filter ) || match_filter($_, $highlight_filter) )
+                    && ( !$outcome_highlight_active || (
+                           ( !$highlight_failure || $line_outcome == 2 )
+                        && ( !$highlight_success || $line_outcome == 1 ) ) )
                     && ( !$numeric_highlight_active || (
                            ( !defined( $highlight_duration_min ) || ( defined( $duration ) && $duration >= $highlight_duration_min ) )
                         && ( !defined( $highlight_duration_max ) || ( defined( $duration ) && $duration <= $highlight_duration_max ) )
