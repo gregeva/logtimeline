@@ -371,7 +371,8 @@ acceptance criteria and written BEFORE the code (red-first). It pins:
   command line unfitted, a third #497-class producer alongside the
   messages-table rows and the heatmap. Registered in
   `tests/rendered-output/soft-wrap-known-failures.tsv` against #497.
-- ~~Q4~~ **D11 — Blank cells for absent measurements (architect, 2026-08-31).** Blank cell for both an
+- ~~Q4~~ **D11 — Blank cells for absent measurements (architect, 2026-08-31; the
+  ineligible half superseded 2026-09-01, see D17).** Blank cell for both an
   ineligible row (D2) and an eligible bucket with no classified lines (consistent with
   how other
   columns render bucket-absent values), never `0%`; an all-success bucket renders
@@ -588,6 +589,14 @@ criteria marked (Qn) cannot be finalised until that decision is locked. Triage:
   degradation, and the geometry trade of Q6. *Unassertable as a harness in full* — the
   per-property assertions above cover the parts; the composed look is verified by eye
   on real data (repo rule for visual surfaces), cost: minutes per iteration.
+- **AC18** (D17, post-delivery) — On a mixed run with the columns enabled, a bucket
+  whose window took lines from a format that declares no success rule renders the
+  success and failure **counts**, abbreviated with the tool's number formatter at
+  medium unit length so they fit the same cell, and carrying no `%`; a bucket whose
+  contributors all declare both outcomes still renders shares; a bucket with no
+  classified line at all still renders blank. A measured zero in an ineligible window
+  renders `0`, not a blank — the two states stay distinguishable. *Assertable* —
+  rendered-output cell assertions on the mixed capture in the owning harness.
 - **AC14** (Q4) — On a fixture where one bucket carries only unclassified lines and an
   adjacent bucket only failures, the first bucket's two cells render blank and the
   second renders `0%` success / `100%` failure — and the two rows are distinguishable
@@ -767,6 +776,33 @@ benchmark on `single-day-access-log-standard` against a base-commit baseline cap
 before the first code change. Version restored to `0.18.0` before the gate. Acceptance
 criteria above pass; AC13's eye pass on real data is recorded in the completion
 comment.
+
+## D17 — Ineligible windows show counts, not blanks (architect, 2026-09-01)
+
+**Supersedes the ineligible half of D11.** A window whose contributors include a
+format that classifies failures but not successes gets the raw success and failure
+counts in its two cells, rendered through the tool's number formatter at medium
+unit length (`3`, `218.4k`, `1.4Mil`) — at most seven characters, which is the D6
+cell budget, so the layout is untouched. Blank is reserved for a window with no
+classified line at all (D11's other half).
+
+**Why the share cannot be shown, and why blank was worse.** A failure-only format
+can add to the failure counter but can never add to the success counter, so a share
+computed over a window it touched is measured against a denominator one contributor
+could only push in one direction: the window's failure share is overstated, and
+across a run where most windows carry both outcomes and one carries only failures,
+the whole picture skews toward the failure-only source. But rendering nothing said
+something false and stronger — that the window had no successes and no failures at
+all. The counts say what is actually known.
+
+**How a reader tells the two apart:** the absent `%`. A count is an absolute number;
+a share always carries its symbol. Column headers are unchanged — both columns still
+report successes and failures, in a different unit.
+
+**Not reopened:** default visibility on a mixed run stays as D4 has it (architect,
+2026-09-01). And this changes only what an already-ineligible cell renders, not which
+cells are ineligible — a window touched by a *declining* format keeps today's
+treatment.
 
 ## Post-delivery pass — colour tuning and the share-omission notice (2026-08-31)
 
