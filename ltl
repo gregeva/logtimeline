@@ -5565,7 +5565,7 @@ sub emit_classification_percentage_notices {
     # away, so it stays silent.
     my $recon = classification_reconciliation();
     if ( ( $cls_success_declared || $recon->{successes} )
-         && !( $recon->{pct_eligible} && $recon->{successes} ) ) {
+         && !( $recon->{pct_eligible} && $cls_success_declared ) ) {
         my %no_success_rule;
         for my $entry (@format_registry) {
             next unless $entry->[FR_MATCHES];
@@ -17756,14 +17756,18 @@ sub print_summary_table {
     push @summary_table, sprintf( $table_format, "LINES INCLUDED", $total_lines_included ); 
     # Classified lines (#453): each row is shown when its outcome was declared
     # by a bound format or observed. The share is of all classified lines and
-    # is omitted when no line was a success (failures would always read 100%).
+    # is omitted when no bound format declares a success rule (a failure-only
+    # log would always read 100%).
     {
         my $recon = classification_reconciliation();
         my $classified = $recon->{classified};
         # #452 D10: the classified rows' shares print only when the run
-        # qualifies for percentages; the zero-success suppression stands
-        # (failure-only logs would always read 100%). Counts always print.
-        my $share_denominator = ($recon->{pct_eligible} && $total_successes) ? $classified : undef;
+        # qualifies for percentages, and the failure-only suppression is a
+        # test of the declared rules, not of the surviving data — an outcome
+        # filter (#455) can zero one outcome's count on a format that
+        # declares both rules, and there the shares stay meaningful and must
+        # agree with the per-bucket percentage columns. Counts always print.
+        my $share_denominator = ($recon->{pct_eligible} && $cls_success_declared) ? $classified : undef;
         # Each row reads in its outcome's own colour, the same shade the
         # timeline's percentage columns use, so a success is one colour and a
         # failure another wherever the run reports them. The colour resolves

@@ -293,6 +293,18 @@ Recorded so the walkthrough starts from the code, not from the issue text.
   the `UNCLASSIFIED` share (over included lines — a leakage figure, not a
   classified-denominator figure) always prints.
 
+  *Amendment (architect, 2026-09-01, under #455 — outcome filter and highlight
+  criteria):* the failure-only share suppression is a test of the **declared
+  rules**, never of the surviving data. Shares are withheld when no bound format
+  declares a success rule (the run may be classifying only errors); they print —
+  `0 (0%)` included — when the formats declare both rules and an outcome filter
+  (`-es`, `-if`) merely zeroed one side, keeping the summary rows consistent with
+  the per-bucket percentage columns. The original implementation gated on the
+  observed success count and wrongly dropped the shares on filtered runs
+  (architect bug report, 2026-09-01). Predicate: `$cls_success_declared` in the
+  `share_denominator` in `print_summary_table()` and in notice 4's condition;
+  regression assertion in `tests/validate-outcome-criteria.sh`.
+
 ## Open decisions
 
 ~~Q15/Q16~~ **Resolved by the architect's correction (2026-08-31): there was no

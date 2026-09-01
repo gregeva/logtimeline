@@ -174,6 +174,13 @@ assert_command \
     produced_by "the outcome-filter block in read_and_process_logs(); unclassified lines (outcome 0) survive every exclude" \
     contract "features/455-success-failure-filter-highlight-criteria.md AC3 (fixture: diagnostics-classification-overlap.txt, 2 of 4 lines unclassified)" \
 
+assert_command \
+    label "summary shares survive outcome filtering and agree with the bucket columns: -if reads 0 (0%) / 6 (100%), -ef reads 9 (100%) / 0 (0%) (architect bug report 2026-09-01)" \
+    command "s=\$(sed -E \$'s/\\x1b\\[[0-9;]*m//g' '$IF' | grep -E '^ *SUCCESS CLASSIFIED') && f=\$(sed -E \$'s/\\x1b\\[[0-9;]*m//g' '$IF' | grep -E '^ *FAILURE CLASSIFIED') && [[ \$s == *'0 (0%)'* && \$f == *'6 (100%)'* ]] && s2=\$(sed -E \$'s/\\x1b\\[[0-9;]*m//g' '$EF' | grep -E '^ *SUCCESS CLASSIFIED') && f2=\$(sed -E \$'s/\\x1b\\[[0-9;]*m//g' '$EF' | grep -E '^ *FAILURE CLASSIFIED') && [[ \$s2 == *'9 (100%)'* && \$f2 == *'0 (0%)'* ]] || { echo \"if: \$s / \$f\"; echo \"ef: \$s2 / \$f2\"; false; }" \
+    asserts "the failure-only share suppression is a test of the declared rules, not the surviving data: on a format declaring both rules an outcome filter that zeroes one count leaves the shares printing over the classified denominator, consistent with the per-bucket percentage columns" \
+    produced_by "the share_denominator predicate in print_summary_table(), reading \$cls_success_declared" \
+    contract "features/452-success-failure-percentage-columns.md D10 as amended under #455 (declaration-based suppression)" \
+
 # ---------------------------------------------------------------------------
 current_scenario="outcome-highlights"
 

@@ -194,6 +194,17 @@ count spun out to #514 (D5); and sequencing against #478 (highlight bookkeeping 
 the hot path) is decided — this feature is not gated on it and lands first; #478
 carries a comment describing the option shape this feature brings.
 
+## Findings during implementation
+
+- **F1 — summary shares vanished under outcome filters** (architect bug report,
+  2026-09-01, during testing): the run summary's classified-row shares were
+  gated on the observed success count, so `-es`/`-if` (failures-only remainder)
+  dropped them while the per-bucket columns still read 0%/100%. The suppression
+  exists for formats that declare no success rule (classifying only errors) and
+  is a test of the declared rules, not the surviving data — fixed by gating on
+  `$cls_success_declared`; #452's D10 (eligibility gating consistent across all
+  surfaces) carries the amendment.
+
 ## Related record
 
 - #453 (per-variant success/failure classification and the event-ledger property)
