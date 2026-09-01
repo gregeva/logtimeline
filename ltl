@@ -351,6 +351,10 @@ my %profile_modes = (
 my ( $profile_dropped_samples, $profile_included_samples ) = ( 0, 0 );
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
 my( $include_filter, $exclude_filter, $highlight_filter );  # Compiled filter matchers (Issue #117)
+# Outcome criteria (Issue #455): filters and highlights that select on the
+# success/failure classification the format registry produced for the line.
+my( $include_failure, $exclude_failure, $include_success, $exclude_success );
+my $outcome_filter_active = 0;   # any outcome filter given
 my( @exclude_args, @include_args, @highlight_args, @threadpool_activity_args );
 my $ltl_config_raw = '';                                 # Raw LTL_CONFIG env var string for display
 my ( @udm_configs, @udm_raw_args, %udm_last_value );
@@ -1658,6 +1662,7 @@ sub percentile {
 sub has_active_filters {
     return 1 if @include_args || @exclude_args;
     return 1 if @include_files || @exclude_files;
+    return 1 if $include_failure || $exclude_failure || $include_success || $exclude_success;
     return 1 if $filter_range_start ne "" || $filter_range_end ne "";
     return 1 if defined $filter_duration_min || defined $filter_duration_max;
     return 1 if defined $filter_bytes_min    || defined $filter_bytes_max;
@@ -1683,10 +1688,14 @@ sub serialize_filters {
     # values were given on the command line (Issue #310). Cross-flag order is
     # already fixed by the push order above.
     push @parts, "-e=" . $url_encode->(join(',', sort @exclude_args))   if @exclude_args;
+    push @parts, "-ef"                                                  if $exclude_failure;
     push @parts, "-epf=" . $url_encode->(join(',', sort @exclude_files)) if @exclude_files;
+    push @parts, "-es"                                                  if $exclude_success;
     push @parts, "-et=" . $url_encode->($filter_range_end)              if $filter_range_end ne "";
     push @parts, "-i=" . $url_encode->(join(',', sort @include_args))   if @include_args;
+    push @parts, "-if"                                                  if $include_failure;
     push @parts, "-ipf=" . $url_encode->(join(',', sort @include_files)) if @include_files;
+    push @parts, "-is"                                                  if $include_success;
     push @parts, "-st=" . $url_encode->($filter_range_start)       if $filter_range_start ne "";
     return join(';', @parts);
 }
@@ -2233,6 +2242,8 @@ sub _classify_argv_provenance {
                 'bucket-size|bs', 'pause|p', 'start|st', 'end|et',
                 'exclude|e', 'include|i', 'highlight|h',
                 'exclude-pattern-file|epf', 'include-pattern-file|ipf', 'highlight-pattern-file|hpf',
+                'include-failure|if', 'exclude-failure|ef',
+                'include-success|is', 'exclude-success|es',
                 'verbose|V', 'top-messages|n',
                 'omit-values|ov', 'precise-values|pv', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
                 'recursive|r',
@@ -2359,6 +2370,10 @@ sub emit_runtime_config_verbose {
         'omit-bytes'                        => $omit_bytes,
         'omit-count'                        => $omit_count,
         'include-count'                     => $include_count,
+        'include-failure'                   => $include_failure,
+        'exclude-failure'                   => $exclude_failure,
+        'include-success'                   => $include_success,
+        'exclude-success'                   => $exclude_success,
         'expose-query-string'               => $include_query_string,
         'expose-session'                    => $include_session,
         'hide-session'                      => $hide_session,
@@ -7464,6 +7479,10 @@ sub print_help {
     $out .= help_opt("-ipf, --include-pattern-file <file>",   "Load include patterns from a file (one pattern per line)");
     $out .= help_opt("-epf, --exclude-pattern-file <file>",   "Load exclude patterns from a file (one pattern per line)");
     $out .= help_opt("-hpf, --highlight-pattern-file <file>", "Load highlight patterns from a file (one pattern per line)");
+    $out .= help_opt("-if,  --include-failure",       "Only include lines the log format classifies as failures; lines without a classification are dropped too");
+    $out .= help_opt("-ef,  --exclude-failure",       "Drop lines the log format classifies as failures; unclassified lines are kept");
+    $out .= help_opt("-is,  --include-success",       "Only include lines the log format classifies as successes; lines without a classification are dropped too");
+    $out .= help_opt("-es,  --exclude-success",       "Drop lines the log format classifies as successes; unclassified lines are kept. Combine -ef and -es to see only the unclassified remainder");
     $out .= help_opt("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept)");
     $out .= help_opt("-dmax, --duration-max <N>",     "Hide log entries with duration above this threshold (inclusive: entries exactly at N are kept)");
     $out .= help_opt("-bmin, --bytes-min <N>",        "Hide log entries with response size below this threshold (inclusive)");
@@ -11075,6 +11094,10 @@ sub adapt_to_command_line_options {
         'exclude-pattern-file|epf=s' => \@exclude_files,
         'include-pattern-file|ipf=s' => \@include_files,
         'highlight-pattern-file|hpf=s' => \@highlight_files,
+        'include-failure|if' => \$include_failure,
+        'exclude-failure|ef' => \$exclude_failure,
+        'include-success|is' => \$include_success,
+        'exclude-success|es' => \$exclude_success,
         'verbose|V:s@' => \@verbose_args,   # Issue #226: optional, repeatable section name; bare -V = all sections
         'top-messages|n=i' => \$top_n_messages,
         'omit-values|ov' => \$omit_values,
@@ -11447,6 +11470,8 @@ sub adapt_to_command_line_options {
     $include_filter   = build_filter_matcher(\@include_args,   \@include_files,   'include');
     $exclude_filter   = build_filter_matcher(\@exclude_args,   \@exclude_files,   'exclude');
     $highlight_filter = build_filter_matcher(\@highlight_args,  \@highlight_files, 'highlight');
+    $outcome_filter_active = ( $include_failure || $exclude_failure
+                            || $include_success || $exclude_success ) ? 1 : 0;
     $threadpool_activity_regex = join('|', @threadpool_activity_args) if @threadpool_activity_args;
 
     # Set legacy regex strings for defined-checks and display
@@ -12451,6 +12476,17 @@ sub read_and_process_logs {
 
                 next if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) );
                 next if( defined( $include_filter )         && !match_filter($_, $include_filter) );
+                # Outcome filters select on the classification the scan block
+                # already produced (1 success, 2 failure, 0 unclassified) — the
+                # line is never re-tested. An include keeps only its named
+                # outcome; an exclude drops only its named outcome, so
+                # unclassified lines survive every exclude.
+                if( $outcome_filter_active ) {
+                    next if( $include_failure && $line_outcome != 2 );
+                    next if( $include_success && $line_outcome != 1 );
+                    next if( $exclude_failure && $line_outcome == 2 );
+                    next if( $exclude_success && $line_outcome == 1 );
+                }
                 # Numeric threshold filters. A line that carries no value for the
                 # filtered metric can never satisfy a numeric criterion on that
                 # metric (same semantics as the numeric highlight criteria), so it
