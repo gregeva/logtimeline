@@ -1815,6 +1815,43 @@ scenario_windchill_workgroup_manager() {
         contract 'features/log-format-registry.md section -V format-detection section-contract (D26 pinned-closure MTF)'
 }
 
+# A WGM client written by a client configured with `use_local_time YES`
+# (issue #512): the zone is a numeric offset with a non-zero-padded hour
+# (`+2:00`, `+0:00`) instead of `Z`. The whole file must bind mt16 by shape;
+# the regression this guards is a zone-anchored pattern that matches nothing
+# here, leaving the file to thingworx_rac_client, whose bracketed-token tail
+# accepts the minority of lines that carry one.
+scenario_wgm_client_localtime() {
+    current_scenario="wgm-client-localtime"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture wgm-client-localtime.txt uwgm.log.1) || return
+    local out; out=$(run_format_detection "$log" -V benchmark-data); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  format: windchill_workgroup_manager$' \
+        asserts 'A WGM client log whose timestamps carry a numeric zone offset binds windchill_workgroup_manager, not the bracketed-token format that would otherwise accept a minority of its lines' \
+        produced_by 'read_and_process_logs() in ltl (first-match block); emitted by emit_format_detection_verbose()' \
+        contract 'features/395-wgm-client-log-format.md section Zone forms (#512)'
+    assert_absent "$out" pattern '^  format: thingworx_rac_client$' \
+        asserts 'No WGM file binds thingworx_rac_client: mt16 is a pinned ancestor of mt2, and the zone form must not decide which of the two claims the file' \
+        produced_by 'derive_format_constraints() and format_registry_promote() in ltl; emitted by emit_format_detection_verbose()' \
+        contract 'features/395-wgm-client-log-format.md section Scan-order constraint'
+    assert_line "$out" pattern '^  matched_lines: 35$' \
+        asserts 'Every line of the local-offset fixture matches the mt16 pattern - both the +0:00 and +2:00 offset forms, header block, data lines and the bracket-bearing line that the thingworx_rac_client tail would otherwise accept' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
+        contract 'features/395-wgm-client-log-format.md section Zone forms (#512); the fixture and this count change in the same commit'
+    assert_line "$out" pattern '^  unmatched_lines: 0$' \
+        asserts 'No local-offset WGM line falls through the scan' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file unmatched_lines field)' \
+        contract 'features/395-wgm-client-log-format.md section Zone forms (#512)'
+    assert_line "$out" pattern $'^lines_included\t35$' \
+        asserts 'Every matched local-offset line survives the category-vocabulary gate through the wgm_msgtype transform' \
+        produced_by 'wgm_msgtype transform in %format_transform_code; the gate and $total_lines_included in read_and_process_logs(); emitted by the benchmark-data section' \
+        contract 'features/395-wgm-client-log-format.md section D54 (msgtype mapping); @log_levels in ltl GLOBALS'
+    assert_line "$out" pattern '^  sample_formats: mt16=35$' \
+        asserts 'The evidence sample recognises every local-offset line as mt16 in static cascade order - no earlier entry accepts the shape' \
+        produced_by 'sample_file_for_detection() in ltl (direct pattern recognition, static cascade order)' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+}
+
 # The three WGM filenames share one entry (a group of one, D55): each stem
 # decomposes to mt16, `uwgm` is not consumed as a prefix of `uwgm_client`,
 # and a renamed file still binds by shape with the stem signal withheld.
@@ -1934,6 +1971,7 @@ scenario_windchill_method_server_renamed; echo ""
 scenario_variant_mixed_legend; echo ""
 scenario_windchill_workgroup_manager; echo ""
 scenario_wgm_filename_family;   echo ""
+scenario_wgm_client_localtime;  echo ""
 scenario_format_pin
 
 echo ""
