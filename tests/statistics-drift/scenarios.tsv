@@ -63,3 +63,4 @@ codebeamer-sorted-by-p999	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	
 apache-bin-consolidated	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log	-du us -cp full -bs 240 -g 90 -n 25 -mdm bin -bdm bin
 thingworx-bin-consolidated	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-cp full -bs 240 -g 90 -n 25 -mdm bin -bdm bin
 codebeamer-bin-consolidated	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-cp full -bs 240 -g 90 -n 25 -mdm bin -bdm bin
+tomcat-histogram-export	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -n 25 -hg duration -mdm bin -bdm bin

@@ -169,7 +169,7 @@ Each category row shows its share of the lines included beside its total — `2 
 | Option | Description |
 |--------|-------------|
 | `-n, --top-messages <N>` | Number of unique messages to show in the top-messages table (default: 10). `0` keeps no individual message at all: no message table, no message CSV and no per-message statistics, so a log with many distinct messages costs far less memory. The timeline and the statistics over the whole population are unchanged, and inclusion/exclusion filtering still applies. Message grouping (`-g`), the message statistics data model (`-mdm`) and the message ranking (`-so`) then have nothing to act on and are ignored, with a note saying so |
-| `-o, --output-csv` | Write all extracted data to a CSV file for external analysis |
+| `-o, --output-csv` | Write the analysed data to files for external analysis: a STATS CSV per time bucket, a MESSAGES CSV per message, and a YAML aggregate export describing the whole population with no per-message content (see *Aggregate export* below). The YAML file's name carries no argument text; which blocks it holds follows the run's options (`-hg` for population-wide percentiles, `-hm` for per-bucket heatmap percentiles) |
 | `-cp, --csv-precision <mode>` | Control CSV decimal precision: `default` (per-family decimals derived from `-du`), `full` (raw precise floats), or an integer N (cap all numeric columns at N decimals) |
 | `-osum, --omit-summary` | Hide the run summary printed at the end of the output |
 | `-sm, --summary-mono` | Render the run summary table without colour: every row plain, and the contribution bar drawn as a plain fill, so the bar can be judged apart from the category colours |
@@ -248,7 +248,7 @@ ltl -so bimodality_coef access.log
 ltl -so occurrences -sa access.log
 ```
 
-Percentile and shape metrics require a sufficient sample size to be statistically meaningful: `p999` ≥ ~1k, `p9999` ≥ ~100k, `p99999` ≥ ~1M. `bimodality_coef` is a *screening* statistic — at n < 100 small-sample noise can produce false positives. Skewness/kurtosis/bimodality_coef are undefined (blank in CSV) when n < 4.
+Percentile and shape metrics require a sufficient sample size to be statistically meaningful: `p99` ≥ ~1k, `p999` ≥ ~10k, `p9999` ≥ ~100k, `p99999` ≥ ~1M. `bimodality_coef` is a *screening* statistic — at n < 100 small-sample noise can produce false positives. Skewness/kurtosis/bimodality_coef are undefined (blank in CSV) when n < 4.
 
 When sorting on a statistic, messages that have no defined value for it (no recorded durations, or too few samples for that statistic) are not ranked by it: they are listed after the ranked messages, ordered by occurrence count. Their blank statistic column is the signal. With `-sa`, ascending means the smallest defined value first — never the undefined ones. When no message at all can be ranked — the metric was switched off with its `--omit-*` option, the run never observed it, or no message had enough values for the statistic — a note says so and the table is ordered by occurrences.
 
@@ -319,6 +319,23 @@ ltl -hgdm raw -hm duration -hg access.log
 
 # Inspect which selectors are active for this run
 ltl -V runtime-config -dm raw -hgdm bin access.log
+```
+
+### Aggregate export (YAML)
+
+With `-o`, every run also writes `<stamp>-LTL-AGGREGATE.yaml` beside the STATS CSV, sharing its timestamp stamp and carrying no argument text in its name. The file describes the whole analysed population with aggregates only — no message text, no URL, no per-message record — so a `-n 0 -o` run yields a complete machine-readable description of the population with nothing per message on disk. It holds what the run computed and nothing computed for the file alone, in four blocks:
+
+- **provenance** — the ltl version, when the file was generated (UTC), the option lines exactly as the terminal echoes them under the timeline, the population-selection signature `ltl-index.csv` records, the data model resolved for each surface and the precision tier, the duration source unit, and the `-pr` mode or `-lf` pin when given.
+- **population** — each matched log format with its event-ledger property and the file counts behind it, the observation window as the run summary heading states it with the population's duration in seconds and in words, the count of files read and matched and the directories they were read from (as the paths were given; the working directory itself is never recorded), and the line accounting: lines read, unmatched by any format, excluded by each criterion in force, included, highlighted.
+- **measurements** — the run summary in machine form: the classification totals with the success and failure percentages where the run was eligible for them, the category totals, the run's total time and peak memory, and for each metric `-hg` histogrammed, the population-wide statistics: count, observed extremes and the percentile ladder.
+- **series** — the bucket size, bucket count and rate unit, then one entry per time bucket carrying every STATS CSV column family that is active for the run — outcomes, categories, rates, the duration statistics, bytes, count, sessions, thread pools, user-defined metrics — and, when `-hm` ran, the heatmap's per-bucket percentile ladder under its metric's name.
+
+Every figure is the exact in-memory value: no rounding, no unit escalation, and `-cp` does not apply. Three fields are formatted strings by design — the population duration's readable form, and the run's total time and peak memory as the summary prints them. A percentile is written only when the block's own observation count reaches the sample-size rule (`pN` needs `10/(1-N/100)` observations); the count is written beside it as `occurrences`, so a missing key is explained and a reader renders it as a gap, never as zero. Counts, sums, minimum, mean and maximum are never withheld. Population-wide statistics exclude non-positive values, as the histogram does.
+
+<!-- ltl-test: skip -->
+<!-- the example writes files where it runs; the harness runs examples from the repository root -->
+```
+ltl -n 0 -o -hg duration -bs 240 -ni logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt
 ```
 
 ### Distribution shape (CSV columns)

@@ -40,6 +40,7 @@ credentials*
 .vscode
 *.log
 *.csv
+*-LTL-AGGREGATE.yaml
 *.out
 
 # #224 statistics-drift baselines are tracked deliverables, not produced

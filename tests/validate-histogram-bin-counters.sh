@@ -480,8 +480,8 @@ scenario_message_stats_csv_shared() {
         produced_by 'emit_bin_counter_mode_verbose() in ltl - %shares_with map carrying csv_output => summary_table' \
         contract    'features/189-histogram-bin-counter-primitives.md section R7 - shared partitions across consumers; features/187 section Decision 8 - locked short-form block; features/287 section R8.1.'
 
-    # Cleanup: -o leaves CSV files in the cwd
-    rm -f *MESSAGES-*.csv *STATS-*.csv 2>/dev/null || true
+    # Cleanup: -o leaves its two CSVs and the aggregate export in the cwd
+    rm -f *MESSAGES-*.csv *STATS-*.csv *-LTL-AGGREGATE.yaml 2>/dev/null || true
     rm -f "$out" "$out.stderr"
 }
 

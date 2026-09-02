@@ -49,6 +49,9 @@ use File::Glob qw(bsd_glob);
 use File::Spec;
 use Text::CSV;
 use Text::CSV_PP;
+use YAML::PP;
+use YAML::PP::Common ();
+use JSON::PP ();
 use Text::ParseWords qw(shellwords);
 
 
@@ -117,6 +120,9 @@ my %verbose_section_registry = (
     'message-grouping' => {
         description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction, and the cluster membership consolidation produced (Issue #96, #462).',
     },
+    'filter-summary' => {
+        description => 'Line accounting for the run as the funnel it passed through: lines read, unmatched by any format, excluded per cause (time window, profile fold, content and outcome filters, numeric thresholds, other), included, and highlighted (Issue #503).',
+    },
     'format-detection' => {
         description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts, plus registry scan telemetry: order, promotions, per-entry match counts, sampled no-match cost (Issues #228, #58).',
     },
@@ -144,6 +150,9 @@ my %verbose_section_registry = (
     'udm-specs' => {
         description => 'Per -udm specification: how the spec was read (unit, aggregation, transform, extraction method, key, source), each compiled pattern, the run-wide production derived from the bucket accumulators, the intent hint if any, and parse-time rejections (Issues #443, #449).',
     },
+    'aggregate-export' => {
+        description => 'The YAML aggregate export -o writes beside the STATS CSV: file path and size, the blocks written, buckets written, percentiles withheld under the sample-size rule, and the per-bucket heatmap ladder retained for the file (Issue #503).',
+    },
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
@@ -155,6 +164,7 @@ my @verbose_section_order = qw(
     histogram-bin-counters
     histogram-percentile-ticks
     message-grouping
+    filter-summary
     format-detection
     format-registry
     heatmap-palette
@@ -164,6 +174,7 @@ my @verbose_section_order = qw(
     profile
     udm-counting
     udm-specs
+    aggregate-export
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -263,8 +274,18 @@ my $top_n_messages = 10;
 # capture branch in read_and_process_logs().
 my $capture_messages = 1;
 my ( $write_messages_to_csv, $csv, $csv_fh, $csv_file_args ) = ( 0, undef, undef, "" );
+my $run_file_stamp;   # the local-time stamp every output file of one run is named by
+# The duration statistics family in STATS CSV column order: the header, the
+# row and the aggregate export read this one list.
+my @duration_family_stats = qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );
 my $total_lines_read = 0;
 my $total_lines_included = 0;
+# Line accounting between read and included: lines no format matched (a CSV
+# file's metadata line among them), and lines a criterion dropped after
+# matching, counted per cause at the site that drops them. The -pr fold's
+# drops are $profile_dropped_samples. Reported by -V filter-summary.
+my $total_lines_unmatched = 0;
+my ( $excluded_time_window, $excluded_filter, $excluded_numeric, $excluded_other ) = ( 0, 0, 0, 0 );
 my ( $total_successes, $total_failures ) = ( 0, 0 );   # run-level classification outcomes (#453 R5)
 my $total_non_qualifying_lines = 0;   # included lines from formats that do not qualify
                                       # for the percentage surfaces (#452 D2 provenance)
@@ -687,6 +708,12 @@ my %heatmap_counters_hl;                    # {$bucket} = entry struct - unified
 my @heatmap_boundaries;                     # Pre-calculated bucket boundaries
 my ($heatmap_min, $heatmap_max) = (undef, undef);   # Global min/max for normalization (undef = not yet set)
 my $heatmap_max_density = 0;                # Maximum density across all cells
+# The full percentile ladder ltl computes, slug and quantile, in order: the
+# histogram's population-wide statistics, and the heatmap's per-bucket
+# values retained for the aggregate export.
+my @percentile_ladder = (['p1',0.01], ['p5',0.05], ['p10',0.10], ['p25',0.25], ['p50',0.50],
+                         ['p75',0.75], ['p90',0.90], ['p95',0.95], ['p99',0.99],
+                         ['p999',0.999], ['p9999',0.9999], ['p99999',0.99999]);
 my %heatmap_percentiles;                    # {$bucket} = { p50 => index, p95 => index, p99 => index, p999 => index } - percentile marker positions
 
 # Per-consumer telemetry snapshot captured at finalize before streaming
@@ -1599,6 +1626,16 @@ sub counter_entry_observe {
     }
 }
 
+# Observations a bin-counter partition holds: every in-range bin plus the
+# underflow and overflow. The one count percentile(), the histogram finalize
+# and the heatmap finalize all measure a partition by.
+sub counter_entry_total {
+    my ($entry) = @_;
+    my $total = ($entry->{underflow} // 0) + ($entry->{overflow} // 0);
+    $total += ($_ // 0) for @{ $entry->{bins} };
+    return $total;
+}
+
 sub percentile {
     # R4: Prometheus HistogramQuantile in-bucket interpolation. Formula and
     # rank convention locked verbatim against promql/quantile.go at:
@@ -1626,9 +1663,7 @@ sub percentile {
     my $under = $entry->{underflow} // 0;
     my $over  = $entry->{overflow}  // 0;
 
-    my $in_total = 0;
-    $in_total += ($_ // 0) for @$bins;
-    my $total_N = $under + $in_total + $over;
+    my $total_N = counter_entry_total($entry);
     return (undef, 'none') if $total_N == 0;
 
     my $target_rank = POSIX::ceil($q * $total_N);
@@ -4761,6 +4796,20 @@ sub classification_columns_visible {
     return ( $ledger_both == $bound ) ? 1 : 0;
 }
 
+# Files that bound a format, and among them the files whose bound entry is
+# an event ledger: the N/M of event_ledger_files on -V format-detection and
+# the two counts the aggregate export carries.
+sub format_ledger_file_counts {
+    my ($ledger_files, $bound_files) = (0, 0);
+    for my $file (@in_files) {
+        my $fdd = $format_detection{$file} or next;
+        next unless defined $fdd->{match_type};
+        $bound_files++;
+        $ledger_files++ if $fdd->{event_ledger};
+    }
+    return ($ledger_files, $bound_files);
+}
+
 sub emit_format_detection_verbose {
     return unless section_requested('format-detection');
 
@@ -4842,15 +4891,7 @@ sub emit_format_detection_verbose {
     my $recon        = classification_reconciliation();
     my $classified   = $recon->{classified};
     my $unclassified = $recon->{unclassified};
-    my $unmatched    = 0;
-    my ($ledger_files, $bound_files) = (0, 0);
-    for my $file (@in_files) {
-        my $fdd = $format_detection{$file} or next;
-        $unmatched += $fdd->{unmatched_lines} // 0;
-        next unless defined $fdd->{match_type};
-        $bound_files++;
-        $ledger_files++ if $fdd->{event_ledger};
-    }
+    my ($ledger_files, $bound_files) = format_ledger_file_counts();
     (my $default_failure = format_classification_signature({ failure => $classification_default{failure} })) =~ s/^failure=//;
     push @verbose_output, "=== format-detection / classification ===";
     push @verbose_output, "lines_included: $total_lines_included";
@@ -4869,7 +4910,7 @@ sub emit_format_detection_verbose {
     }
     push @verbose_output, "pct_eligible: $recon->{pct_eligible}";
     push @verbose_output, "non_qualifying_lines: $recon->{non_qualifying}";
-    push @verbose_output, "unmatched_lines: $unmatched";
+    push @verbose_output, "unmatched_lines: $total_lines_unmatched";
     push @verbose_output, "event_ledger_files: $ledger_files/$bound_files";
     push @verbose_output, "rule_changes: $format_cls_rule_changes";
     push @verbose_output, @format_cls_rule_change_lines;
@@ -5387,6 +5428,49 @@ sub emit_statistics_demand_verbose {
 # profile_window_seconds, included_weekdays, samples_included, samples_dropped;
 # the profile_active enum (yes|no). Weekdays are listed in the mode's own axis
 # order (first kept day first), comma-joined.
+# A line no format matched. Counted per file for -V format-detection and
+# once for the run; a file gets its detection record on its first
+# unmatched line even when no match has bound a format yet (Issue #228).
+sub note_unmatched_line {
+    my ($in_file) = @_;
+    my $fdd = $format_detection{$in_file} //= {
+        match_type       => undef,
+        slug             => undef,
+        metrics_observed => 0,
+        event_ledger     => 0,
+        matched_lines    => 0,
+        unmatched_lines  => 0,
+        first_match_line => undef,
+    };
+    $fdd->{unmatched_lines}++;
+    $total_lines_unmatched++;
+}
+
+# Lines a criterion dropped after a format matched them, every cause summed:
+# the one computation -V filter-summary and benchmark-data both print.
+sub lines_excluded_total {
+    return $excluded_time_window + $profile_dropped_samples + $excluded_filter + $excluded_numeric + $excluded_other;
+}
+
+# -V filter-summary: the run's line accounting as the funnel's stages, in
+# order. Every key prints on every run; a cause that was not in force reads 0.
+# Contract: features/503-yaml-aggregate-export.md section -V filter-summary.
+sub emit_filter_summary_verbose {
+    return unless section_requested('filter-summary');
+    push @verbose_output, "=== filter-summary ===";
+    push @verbose_output, "lines_read: $total_lines_read";
+    push @verbose_output, "lines_unmatched: $total_lines_unmatched";
+    push @verbose_output, "lines_excluded: " . lines_excluded_total();
+    push @verbose_output, "excluded_time_window: $excluded_time_window";
+    push @verbose_output, "excluded_profile: $profile_dropped_samples";
+    push @verbose_output, "excluded_filter: $excluded_filter";
+    push @verbose_output, "excluded_numeric: $excluded_numeric";
+    push @verbose_output, "excluded_other: $excluded_other";
+    push @verbose_output, "lines_included: $total_lines_included";
+    push @verbose_output, "lines_highlighted: $total_lines_highlighted";
+    push @verbose_output, "=== END filter-summary ===";
+}
+
 sub emit_profile_verbose {
     return unless section_requested('profile');
 
@@ -5800,6 +5884,352 @@ sub emit_bin_counter_mode_verbose {
     }
 
     push @verbose_output, "=== END histogram-bin-counters ===";
+}
+
+# ============================================================================
+# AGGREGATE EXPORT (Issue #503)
+# ============================================================================
+# With -o, one YAML file per run beside the STATS CSV describing the analysed
+# population with aggregates only: what was read, what the run declared about
+# it, the figures over the population and the figures per time bucket. The
+# file exposes what the run computed, in ltl's names, and computes nothing for
+# itself but the population duration. Record: features/503-yaml-aggregate-export.md.
+
+# Quantile behind each percentile slug, for the sample-size rule the file
+# applies: pN is written only when the block's own count reaches 10/(1-N/100).
+my %percentile_quantile = map { $_->[0] => $_->[1] } @percentile_ladder;
+
+sub percentile_supported {
+    my ($slug, $count) = @_;
+    my $q = $percentile_quantile{$slug};
+    return 1 unless defined $q;
+    return ($count // 0) >= 10 / (1 - $q);
+}
+
+# A mapping whose keys dump in insertion order.
+sub aggregate_mapping {
+    tie my %h, 'YAML::PP::Preserve::Hash';
+    return \%h;
+}
+
+# A numeric field: the in-memory value, numified so the file carries a
+# number, never a quoted string. Undefined stays undefined (the key is left out).
+sub aggregate_number {
+    my ($v) = @_;
+    return defined $v ? $v + 0 : undef;
+}
+
+# Copy the percentile keys of a statistics hash into a block, applying the
+# sample-size rule against the block's count; returns the number withheld.
+sub aggregate_percentiles {
+    my ($block, $stats, $count, @slugs) = @_;
+    my $gated = 0;
+    for my $slug (@slugs) {
+        next unless defined $stats->{$slug};
+        if (percentile_supported($slug, $count)) {
+            $block->{$slug} = aggregate_number($stats->{$slug});
+        } else {
+            $gated++;
+        }
+    }
+    return $gated;
+}
+
+sub write_aggregate_export {
+    return unless $write_messages_to_csv;
+
+    my $doc = aggregate_mapping();
+    $doc->{schema_version} = 1;
+    my @blocks;
+    my $percentiles_gated = 0;
+    my @heatmap_ladder_lines;
+
+    ## PROVENANCE ##
+    my $determining = aggregate_mapping();
+    $determining->{version}      = $version_number;
+    $determining->{generated_at} = strftime("%Y-%m-%dT%H:%M:%SZ", gmtime());
+    my $options = aggregate_mapping();
+    my $cli_options = build_run_options_string();
+    $options->{'command-line'} = $cli_options if $cli_options ne '';
+    $options->{environment}    = $ltl_config_raw if $ltl_config_raw ne '';
+    $determining->{options} = $options;
+    $determining->{filters} = has_active_filters() ? serialize_filters() : '-';
+    my $data_model = aggregate_mapping();
+    $data_model->{bucket_stats}  = $bucket_stats_capture_mode;
+    $data_model->{message_stats} = $message_stats_capture_mode;
+    $data_model->{histogram}     = $histogram_capture_mode;
+    $data_model->{heatmap}       = $heatmap_capture_mode;
+    $data_model->{precision}     = aggregate_number($data_model_precision_level);
+    $determining->{data_model} = $data_model;
+    $determining->{duration_unit_resolved} = $duration_unit_resolved;
+    $determining->{duration_unit_source}   = $duration_unit_source;
+    $determining->{profile}    = $profile_mode    if $profile_mode;
+    $determining->{format_pin} = $log_format_pin  if defined $log_format_pin && $log_format_pin ne '';
+    my $provenance = aggregate_mapping();
+    $provenance->{determining} = $determining;
+    $doc->{provenance} = $provenance;
+    push @blocks, 'provenance';
+
+    ## POPULATION ##
+    my $population = aggregate_mapping();
+    my %entry_by_slug = map { $_->[FR_SLUG] => $_ } (@format_registry_members, values %format_registry_entry);
+    my @formats;
+    for my $slug (@format_legend_order) {
+        my $f = aggregate_mapping();
+        $f->{name} = $slug;
+        my $entry = $entry_by_slug{$slug};
+        $f->{event_ledger} = ($entry && $entry->[FR_EVENT_LEDGER]) ? JSON::PP::true() : JSON::PP::false();
+        push @formats, $f;
+    }
+    $population->{formats} = \@formats;
+    my ($ledger_files, $bound_files) = format_ledger_file_counts();
+    $population->{files_bound}        = $bound_files;
+    $population->{files_event_ledger} = $ledger_files;
+    $population->{rule_changes}       = $format_cls_rule_changes;
+
+    if (defined $output_timestamp_min && defined $output_timestamp_max) {
+        my $observation = aggregate_mapping();
+        $observation->{start} = format_observation_timestamp($output_timestamp_min);
+        $observation->{end}   = format_observation_timestamp($output_timestamp_max);
+        my $span = $output_timestamp_max - $output_timestamp_min;
+        $observation->{duration_seconds} = aggregate_number($span);
+        $observation->{duration}         = format_time($span, 's', 'long', ' ', 3);
+        $population->{observation} = $observation;
+    }
+
+    my $sources = aggregate_mapping();
+    $sources->{files}         = scalar @in_files;
+    $sources->{files_matched} = scalar grep { $in_files_matched{$_} } @in_files;
+    my (@directories, %seen_directory);
+    for my $path (@in_files) {
+        my $dir = $path =~ m{^(.*)[/\\][^/\\]*$} ? $1 : '.';
+        $dir = '.' if $dir eq '';
+        push @directories, $dir unless $seen_directory{$dir}++;
+    }
+    $sources->{directories}    = scalar @directories;
+    $sources->{directory_list} = \@directories;
+    $population->{sources} = $sources;
+
+    my $lines = aggregate_mapping();
+    $lines->{read}      = $total_lines_read;
+    $lines->{unmatched} = $total_lines_unmatched;
+    $lines->{included}  = $total_lines_included;
+    my $excluded = aggregate_mapping();
+    $excluded->{time_window} = $excluded_time_window if $filter_range_start ne '' || $filter_range_end ne '';
+    $excluded->{profile}     = $profile_dropped_samples if $profile_mode;
+    $excluded->{filter}      = $excluded_filter if defined $include_filter || defined $exclude_filter || $outcome_filter_active;
+    $excluded->{numeric}     = $excluded_numeric if grep { defined } ($filter_duration_min, $filter_duration_max, $filter_bytes_min, $filter_bytes_max, $filter_count_min, $filter_count_max);
+    $excluded->{other}       = $excluded_other;
+    $lines->{excluded}    = $excluded;
+    $lines->{highlighted} = $total_lines_highlighted if $highlight_active;
+    $population->{lines} = $lines;
+    $doc->{population} = $population;
+    push @blocks, 'population';
+
+    ## MEASUREMENTS ##
+    my $measurements = aggregate_mapping();
+    my $recon = classification_reconciliation();
+    $measurements->{lines_included} = $total_lines_included;
+    $measurements->{classified}     = $recon->{classified};
+    $measurements->{successes}      = $recon->{successes};
+    $measurements->{failures}       = $recon->{failures};
+    $measurements->{unclassified}   = $recon->{unclassified};
+    if ($recon->{pct_eligible}) {
+        $measurements->{success_pct} = aggregate_number($recon->{success_pct});
+        $measurements->{failure_pct} = aggregate_number($recon->{failure_pct});
+    }
+    $measurements->{pct_eligible}         = $recon->{pct_eligible} ? JSON::PP::true() : JSON::PP::false();
+    $measurements->{non_qualifying_lines} = $recon->{non_qualifying};
+    my $categories = aggregate_mapping();
+    for my $category (@log_levels) {
+        next unless exists $category_totals{$category};
+        $categories->{$category} = aggregate_number($category_totals{$category});
+    }
+    $measurements->{categories}      = $categories;
+    $measurements->{total_time}      = format_time($elapsed_total, 's', 'medium', " ");
+    $measurements->{max_memory_used} = format_bytes($max_memory_usage, 'B');
+
+    my @histogram_metrics = grep { ($histogram_stats{$_}{count} // 0) > 0 }
+        (qw(duration bytes count), sort grep { !/^(?:duration|bytes|count)$/ } keys %histogram_stats);
+    if (@histogram_metrics) {
+        my $histogram = aggregate_mapping();
+        my @ladder = map { $_->[0] } @percentile_ladder;
+        for my $metric (@histogram_metrics) {
+            my $stats = $histogram_stats{$metric};
+            my $block = aggregate_mapping();
+            $block->{data_model}  = $histogram_capture_mode;
+            $block->{occurrences} = aggregate_number($stats->{count});
+            # The observed extremes: the bin path tracks them per line, the
+            # chart's own min/max being the adjusted axis; the raw path's
+            # stats hold the sorted sample's ends.
+            my $observed_min = $histogram_capture_mode eq 'bin' && defined $histogram_data_min{$metric} ? $histogram_data_min{$metric} : $stats->{min};
+            my $observed_max = $histogram_capture_mode eq 'bin' && defined $histogram_data_max{$metric} ? $histogram_data_max{$metric} : $stats->{max};
+            $block->{min} = aggregate_number($observed_min);
+            $block->{max} = aggregate_number($observed_max);
+            $percentiles_gated += aggregate_percentiles($block, $stats, $stats->{count}, @ladder);
+            my $hl = $histogram_stats_hl{$metric};
+            if ($hl && ($hl->{count} // 0) > 0) {
+                my $hl_block = aggregate_mapping();
+                $hl_block->{occurrences} = aggregate_number($hl->{count});
+                $percentiles_gated += aggregate_percentiles($hl_block, $hl, $hl->{count}, @ladder);
+                $block->{highlighted} = $hl_block;
+            }
+            $histogram->{$metric} = $block;
+        }
+        $measurements->{histogram} = $histogram;
+        push @blocks, 'measurements.histogram';
+    }
+    $doc->{measurements} = $measurements;
+    push @blocks, 'measurements';
+
+    ## SERIES ##
+    my $series = aggregate_mapping();
+    $series->{bucket_size_seconds} = aggregate_number($bucket_size_seconds);
+    $series->{bucket_count}        = scalar keys %log_occurrences;
+    $series->{omit_empty}          = $omit_empty ? JSON::PP::true() : JSON::PP::false();
+    $series->{rate_unit}           = $rate_unit;
+    my $heatmap_written = $heatmap_enabled && defined $heatmap_metric && grep { $heatmap_percentiles{$_}{values} } keys %heatmap_percentiles;
+    push @blocks, 'series.heatmap' if $heatmap_written;
+
+    my $duration_family_active = stats_csv_duration_columns_active();
+    my $bytes_family_active    = stats_csv_bytes_columns_active();
+    my @ladder_slugs = map { $_->[0] } @percentile_ladder;
+    my @buckets;
+    for my $bucket (sort { $a <=> $b } keys %log_occurrences) {
+        my $b = aggregate_mapping();
+        $b->{timestamp} = format_bucket_timestamp($bucket);
+        my $occurrences = 0;
+        my $bucket_categories = aggregate_mapping();
+        my ($err_rate, $msg_rate);
+        for my $category (@log_levels) {
+            next unless exists $log_occurrences{$bucket}{$category};
+            my $n = $log_occurrences{$bucket}{$category}{occurrences};
+            if    ($category eq 'err-rate') { $err_rate = $n }
+            elsif ($category eq 'msg-rate') { $msg_rate = $n }
+            elsif ($category eq 'empty')    { }
+            else { $occurrences += $n; $bucket_categories->{$category} = aggregate_number($n) }
+        }
+        $b->{occurrences} = $occurrences;
+        my $outcomes = $bucket_outcomes{$bucket};
+        $b->{successes} = $outcomes ? ($outcomes->[1] // 0) : 0;
+        $b->{failures}  = $outcomes ? ($outcomes->[2] // 0) : 0;
+        my $stats = $log_stats{$bucket} // {};
+        if (defined $stats->{success_pct}) {
+            $b->{success_pct} = aggregate_number($stats->{success_pct});
+            $b->{failure_pct} = aggregate_number($stats->{failure_pct});
+        }
+        $b->{non_qualifying_lines} = $outcomes ? ($outcomes->[3] // 0) : 0;
+        if ($occurrences == 0) { push @buckets, $b; next; }
+        $b->{categories} = $bucket_categories if %$bucket_categories;
+        $b->{err_rate} = aggregate_number($err_rate) if defined $err_rate;
+        $b->{msg_rate} = aggregate_number($msg_rate) if defined $msg_rate;
+
+        # The STATS CSV column families, in the order the row writes them.
+        my ($udm, $threadpools);
+        for my $key (@populated_graph_columns) {
+            if ($key eq 'duration') {
+                next unless defined $stats->{duration};
+                my $block = aggregate_mapping();
+                $block->{data_model}  = $bucket_stats_capture_mode;
+                $block->{occurrences} = aggregate_number($stats->{duration_count}) if defined $stats->{duration_count};
+                $block->{sum}         = aggregate_number($stats->{duration});
+                if ($duration_family_active) {
+                    for my $stat (@duration_family_stats) {
+                        next unless defined $stats->{$stat};
+                        if (exists $percentile_quantile{$stat}) {
+                            if (percentile_supported($stat, $stats->{duration_count})) { $block->{$stat} = aggregate_number($stats->{$stat}) }
+                            else { $percentiles_gated++ }
+                        } else {
+                            $block->{$stat} = aggregate_number($stats->{$stat});
+                        }
+                    }
+                }
+                $b->{duration} = $block;
+            } elsif ($key eq 'bytes') {
+                next unless defined $stats->{bytes};
+                my $block = aggregate_mapping();
+                if ($bytes_family_active) {
+                    $block->{$_} = aggregate_number($stats->{"bytes_$_"}) for grep { defined $stats->{"bytes_$_"} } qw(occurrences min mean max);
+                }
+                $block->{sum} = aggregate_number($stats->{bytes});
+                $b->{bytes} = $block;
+            } elsif ($key eq 'count') {
+                next if $omit_count || !defined $stats->{count_occurrences};
+                my $block = aggregate_mapping();
+                $block->{$_} = aggregate_number($stats->{"count_$_"}) for grep { defined $stats->{"count_$_"} } qw(occurrences min mean max sum);
+                $b->{count} = $block;
+            } elsif ($key =~ /^udm_(.+)$/) {
+                my $name = $1;
+                my ($config) = grep { $_->{name} eq $name } @udm_configs;
+                $udm //= aggregate_mapping();
+                if ($config && ($config->{agg_kind} eq 'counting' || $config->{name} ne $config->{base_name})) {
+                    next unless defined $stats->{$key};
+                    my $block = aggregate_mapping();
+                    $block->{ $config->{aggregation} } = aggregate_number($stats->{$key});
+                    $udm->{$name} = $block;
+                } else {
+                    next unless defined $stats->{"${key}_occurrences"};
+                    my $block = aggregate_mapping();
+                    $block->{$_} = aggregate_number($stats->{"${key}_$_"}) for grep { defined $stats->{"${key}_$_"} } qw(occurrences min mean max sum);
+                    $udm->{$name} = $block;
+                }
+            } elsif ($key eq 'sessions') {
+                $b->{sessions} = aggregate_number($stats->{sessions}) if defined $stats->{sessions};
+            } elsif (grep { $_ eq $key } @graph_threadpools_activity) {
+                next unless defined $stats->{$key};
+                $threadpools //= aggregate_mapping();
+                $threadpools->{$key} = aggregate_number($stats->{$key});
+            } elsif (defined $stats->{$key}) {
+                $b->{$key} = aggregate_number($stats->{$key});
+            }
+        }
+        $b->{threadpools} = $threadpools if $threadpools;
+        $b->{udm}         = $udm if $udm && %$udm;
+
+        # The heatmap block nests its metric like the histogram block does, so a
+        # run with another heatmap metric stays comparable: heatmap.<metric>.<key>.
+        if ($heatmap_written && $heatmap_percentiles{$bucket}{values}) {
+            my $values = $heatmap_percentiles{$bucket}{values};
+            my $count  = $heatmap_percentiles{$bucket}{occurrences};
+            my $block = aggregate_mapping();
+            $block->{data_model}  = $heatmap_capture_mode;
+            $block->{occurrences} = aggregate_number($count);
+            $percentiles_gated += aggregate_percentiles($block, $values, $count, @ladder_slugs);
+            my $heatmap = aggregate_mapping();
+            $heatmap->{$heatmap_metric} = $block;
+            $b->{heatmap} = $heatmap;
+            push @heatmap_ladder_lines, join("\t", $b->{timestamp}, "metric=$heatmap_metric", "occurrences=$count",
+                map { "$_=$values->{$_}" } grep { defined $values->{$_} } @ladder_slugs);
+        }
+        push @buckets, $b;
+    }
+    $series->{buckets} = \@buckets;
+    $doc->{series} = $series;
+    push @blocks, 'series';
+
+    ## WRITE ##
+    my $path = run_file_stamp() . "-LTL-AGGREGATE.yaml";
+    my $yaml = YAML::PP->new(boolean => 'JSON::PP', preserve => YAML::PP::Common::PRESERVE_ORDER());
+    $yaml->dump_file($path, $doc);
+
+    # -V aggregate-export: what was written, printed here because the section
+    # printer has already flushed by the time the file exists. Contract:
+    # features/503-yaml-aggregate-export.md § -V aggregate-export section contract.
+    if (section_requested('aggregate-export')) {
+        print "=== aggregate-export ===\n";
+        print "file: $path\n";
+        print "bytes: " . (-s $path) . "\n";
+        print "blocks: " . join(',', @blocks) . "\n";
+        print "buckets_written: " . scalar(@buckets) . "\n";
+        print "percentiles_gated: $percentiles_gated\n";
+        if (@heatmap_ladder_lines) {
+            print "=== aggregate-export / heatmap-ladder ===\n";
+            print "$_\n" for @heatmap_ladder_lines;
+            print "=== END aggregate-export / heatmap-ladder ===\n";
+        }
+        print "=== END aggregate-export ===\n";
+    }
+    return $path;
 }
 
 sub write_index_file {
@@ -6751,7 +7181,7 @@ my $explain_iqr_compute = q{Derived from already-computed percentiles: `iqr = p7
 my $explain_percentiles_intuition = q{Percentiles answer the question "what value is faster than (or equal to) N% of all observations?" The N-th percentile pN is the value at which N percent of observed durations fall at or below. p50 is the median; p99 is the value that 99% of requests beat; p999 is the value that 99.9% of requests beat. Where `mean` collapses a distribution to a single average, percentiles describe its *shape* -- by reading off the values at many different points along the cumulative distribution.};
 my $explain_percentiles_operational = q{Percentiles are the primary SRE latency-investigation tool. Each percentile answers a different operational question: `p50` (median) is the "typical" experience; `p90` and `p95` are commonly-used SLO target points; `p99`, `p999`, and higher tail percentiles describe the user-visible worst-case latencies that drive outage and complaint patterns; `p1`, `p5`, `p10` are the lower-body percentiles useful for fast-path analysis (cache effectiveness, what does the system look like when not loaded). The progression of nines -- p99, p999, p9999, p99999 -- describes *how heavy* the tail is: in a benign distribution these values converge quickly; in a pathological one (GC pauses, lock contention, retry storms) they diverge sharply.};
 my $explain_percentiles_table_intro = q{Available percentile slugs and their operational meaning:};
-my $explain_percentiles_sample_size = q{Higher percentiles require larger samples to be statistically meaningful. The general rule: pN needs at least 10/(1-N/100) observations to be informative -- p99 needs ~1000, p999 needs ~10000, p9999 needs ~100000, p99999 needs ~1 million. Below these thresholds the percentile collapses toward `max` and carries no signal independent of `max`. ltl emits every percentile column regardless of sample size, so check the `occurrences` column when interpreting high-nines values.};
+my $explain_percentiles_sample_size = q{Higher percentiles require larger samples to be statistically meaningful. The general rule: pN needs at least 10/(1-N/100) observations to be informative -- p99 needs ~1000, p999 needs ~10000, p9999 needs ~100000, p99999 needs ~1 million. Below these thresholds the percentile collapses toward `max` and carries no signal independent of `max`. ltl emits every percentile column regardless of sample size, so check the `occurrences` column when interpreting high-nines values. The YAML aggregate export written with -o is the one surface that applies the rule: a percentile a block's own count does not support is left out of that block, and the count is written beside the ones that remain.};
 my $explain_percentiles_compute = q{ltl computes percentiles via one of two data models, each using its own algorithm. The raw values data model holds every observation in memory and selects the percentile by nearest-rank from the sorted array (an actually-observed value at the computed rank), so the reported value is exact. The bin counter data model accumulates observations into log-spaced bin counters and computes the percentile by exponential interpolation within the bucket containing the target rank (a synthesised value placed inside the matching bin on a log scale spanning the bin's lower and upper edges); it is exact about how many observations fell where and approximate about where inside a bucket the target rank sits, so the reported value lands within the bucket that holds the true answer. The two algorithms return different values on the same input, particularly in the tail. Fuzzy consolidation (`-g`) adds to that on the per-message-key surface: the merged messages' histograms are re-projected onto one shared geometry, so a consolidated row's percentiles can sit up to about one bucket from the value the pooled observations would give -- measured on real duration streams, a reading falls outside that band on roughly 1.5-2% of the percentiles of consolidated rows. Pin `--message-stats-data-model raw` when consolidated rows need exact percentiles; `min`, `max`, `mean`, `std_dev` and the shape statistics stay exact under either model. Surface defaults: histogram and heatmap use the bin counter data model; per-message-key statistics (summary table / MESSAGES CSV) and per-time-bucket statistics (STATS CSV) use the raw values data model. Override per surface via `--message-stats-data-model`, `--bucket-stats-data-model`, `--histogram-data-model`, `--heatmap-data-model`; pin globally via `--data-model`. On surfaces using the bin counter data model, the resolution is set by `--data-model-precision` (tier 1..9, default 5); higher tiers give finer resolution at higher memory cost.};
 
 # --- skewness (user-supplied content) ---
@@ -7149,7 +7579,7 @@ my $explain_histogram_flags = <<'END';
     ltl -hg duration -dmp 7 access.log            # tighter precision (slower)
 END
 
-my $explain_histogram_notes = q{The X-axis log scale means that visual distance between bars represents an exponential, not linear, gap in actual value. Two bars that look the same width apart on the screen could represent a 10x difference at one part of the chart and a 100x difference at another. When -hg is invoked alongside the bar graph (default), the histogram renders as an additional panel below the timeline. When -hg is invoked with multiple metrics (-hg duration,bytes), each metric gets its own histogram panel stacked vertically. Highlight overlays (-h pattern, or numeric criteria such as -hdmin) draw colored sub-bars within each main bar showing the proportion of highlighted entries; the highlight percentile legend appears below the main legend in highlight color. Color rendering depends on terminal support: modern Unix terminals and Windows Terminal display the gradient correctly; legacy Windows CMD with `more` shows monochrome bars (the layout and percentile ticks remain readable).};
+my $explain_histogram_notes = q{The X-axis log scale means that visual distance between bars represents an exponential, not linear, gap in actual value. Two bars that look the same width apart on the screen could represent a 10x difference at one part of the chart and a 100x difference at another. When -hg is invoked alongside the bar graph (default), the histogram renders as an additional panel below the timeline. When -hg is invoked with multiple metrics (-hg duration,bytes), each metric gets its own histogram panel stacked vertically. Highlight overlays (-h pattern, or numeric criteria such as -hdmin) draw colored sub-bars within each main bar showing the proportion of highlighted entries; the highlight percentile legend appears below the main legend in highlight color. Color rendering depends on terminal support: modern Unix terminals and Windows Terminal display the gradient correctly; legacy Windows CMD with `more` shows monochrome bars (the layout and percentile ticks remain readable). Population-wide statistics exclude non-positive values: a zero or negative duration, byte count or count is never captured, so the histogram's count can be smaller than the lines included. The YAML aggregate export written with -o carries each histogrammed metric's count, observed extremes and percentile ladder.};
 
 sub populate_explain_topics {
     %explain_topics = (
@@ -7532,7 +7962,7 @@ sub print_help {
     # Display & Output
     $out .= help_subheading("Display & Output");
     $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the top-messages table (default: 10). 0 keeps no individual message at all: no message table, no message CSV and no per-message statistics, so a log with many distinct messages costs far less memory. The timeline and the statistics over the whole population are unchanged, and inclusion/exclusion filtering still applies. Message grouping (-g), the message statistics data model (-mdm) and the message ranking (-so) then have nothing to act on and are ignored, with a note saying so.");
-    $out .= help_opt("-o,   --output-csv",            "Write all extracted data to a CSV file for external analysis");
+    $out .= help_opt("-o,   --output-csv",            "Write the analysed data to files for external analysis: a STATS CSV per time bucket, a MESSAGES CSV per message, and a YAML aggregate export describing the whole population with no per-message content. The YAML file's name carries no argument text; which blocks it holds follows the run's options (-hg for population-wide percentiles, -hm for per-bucket heatmap percentiles)");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from -du), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
     $out .= help_opt("-sm,  --summary-mono",          "Render the run summary table without colour: every row plain, and the contribution bar drawn as a plain fill, so the bar can be judged apart from the category colours");
@@ -10094,10 +10524,37 @@ sub format_bytes {
 }
 
 # Build CSV output filename with truncation to avoid filesystem errors
+# The stamp that names every output file of a run, read once so the STATS
+# and MESSAGES CSVs and the aggregate export share it.
+sub run_file_stamp {
+    return $run_file_stamp if defined $run_file_stamp;
+    my ($sec, $min, $hour, $mday, $mon, $year) = localtime();
+    $run_file_stamp = sprintf("%04d-%02d-%02d_%02d%02d%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec);
+    return $run_file_stamp;
+}
+
+# A bucket key rendered as the timeline and the STATS CSV print it: the run's
+# timestamp format, and the millisecond part under -ms, where the key is an
+# integer millisecond count.
+sub format_bucket_timestamp {
+    my ($bucket) = @_;
+    return strftime($output_timestamp_format, gmtime($bucket / 1000)) . sprintf(".%03d", $bucket % 1000)
+        if $print_milliseconds;
+    return strftime($output_timestamp_format, gmtime($bucket));
+}
+
+# An included-line epoch (fractional seconds) rendered as the run summary
+# heading prints the observation window's bounds.
+sub format_observation_timestamp {
+    my ($epoch) = @_;
+    my $str = strftime($output_timestamp_format, gmtime($epoch));
+    $str .= sprintf ".%03d", ($epoch - int($epoch)) * 1000 if $print_milliseconds;
+    return $str;
+}
+
 sub build_csv_filename {
     my ($file_type) = @_;  # 'STATS' or 'MESSAGES'
-    my ($sec, $min, $hour, $mday, $mon, $year) = localtime();
-    my $timestamp = sprintf("%04d-%02d-%02d_%02d%02d%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec);
+    my $timestamp = run_file_stamp();
 
     # Sanitize args: replace special characters with underscores
     my $safe_args = $csv_file_args;
@@ -10402,8 +10859,23 @@ sub format_number {
 
     return $formatted_value;
 }
+# Decimal places that give $value a count of significant digits: the integer
+# part takes as many as its magnitude needs and the remainder are decimals,
+# so 98.2, 1.11 and 0.107 all carry three. The one rule for every formatter
+# that renders to significant digits.
+sub significant_decimals {
+    my ($value, $digits) = @_;
+    my $magnitude = $value >= 100 ? 3 : $value >= 10 ? 2 : $value >= 1 ? 1 : 0;
+    my $decimals = $digits - $magnitude;
+    return $decimals < 0 ? 0 : $decimals;
+}
+
+# $significant, when given, renders the scaled value to that many significant
+# digits with trailing zeros and a bare point stripped (1.5 days, 7 days,
+# 14.4 hours); absent, the value carries one decimal as every existing
+# caller expects.
 sub format_time {
-    my ($value, $unit, $format, $space) = @_;
+    my ($value, $unit, $format, $space, $significant) = @_;
     my %units = (
         'us' => 1,                      # Microseconds
         'ms' => 1000,                   # Milliseconds
@@ -10440,9 +10912,16 @@ sub format_time {
         }
     }
 
-    $formatted_value = sprintf("%.1f", $formatted_value);
-    $formatted_value =~ s/\.0+(?=\s|$)//;                                                    # remove trailing .0 if followed by space or end of string
-    
+    if (defined $significant) {
+        $formatted_value = sprintf("%.*f", significant_decimals($formatted_value, $significant), $formatted_value);
+        if ($formatted_value =~ /\./) {
+            $formatted_value =~ s/0+$//;
+            $formatted_value =~ s/\.$//;
+        }
+    } else {
+        $formatted_value = sprintf("%.1f", $formatted_value);
+        $formatted_value =~ s/\.0+(?=\s|$)//;                                                # remove trailing .0 if followed by space or end of string
+    }
 
     my $unit_name = $unit_names{$formatted_unit}{$format};                                  # Get the appropriate unit name based on format
     $unit_name =~ s/s$// if $formatted_value == 1 && $format eq 'long';                     # Singular units for long format
@@ -10661,10 +11140,7 @@ sub format_percentage {
     } else {
         # Significant digits: the integer part consumes as many of them as
         # its own magnitude needs, and the remainder become decimals.
-        my $digits = $p{digits} // 3;
-        my $magnitude = $value >= 100 ? 3 : $value >= 10 ? 2 : $value >= 1 ? 1 : 0;
-        $decimals = $digits - $magnitude;
-        $decimals = 0 if $decimals < 0;
+        $decimals = significant_decimals($value, $p{digits} // 3);
     }
 
     # Padding sits inside the brackets, so the inner budget is what the
@@ -12192,6 +12668,7 @@ sub read_and_process_logs {
                     $potential_csv_header = undef;  # Log pattern matched — not a CSV file
                 } elsif ($line_number == 1) {
                     $potential_csv_header = $_;     # Stash as potential CSV header
+                    note_unmatched_line($in_file);  # metadata, matched to no format
                     next;
                 } elsif ($line_number == 2 && defined $potential_csv_header) {
                     # Validate: parse header, check that line 2 has matching field count
@@ -12403,6 +12880,7 @@ sub read_and_process_logs {
                 }
 
                 unless (exists $log_level_set{$category_bucket}) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
+                    $excluded_other++;
                     next;
                 } elsif (!$csv_epoch_timestamp && $match_type == 13) {
                     # Extract milliseconds if present (supports . or , separator, 1-6 digits)
@@ -12419,6 +12897,7 @@ sub read_and_process_logs {
                     # the row instead (Issue #328).
                     if (!defined $timestamp_str || $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/) {
                         $csv_skipped_timestamp_rows++;
+                        $excluded_other++;
                         if ($csv_skipped_timestamp_rows == 1) {
                             print STDERR "Warning: $in_file line $line_number: CSV timestamp '" . (defined $timestamp_str ? $timestamp_str : '') . "' is neither epoch nor ISO (YYYY-MM-DD HH:MM:SS) - skipping row (further rows in this file skipped silently)\n";
                         }
@@ -12476,16 +12955,16 @@ sub read_and_process_logs {
                     if (defined $tod_s && defined $tod_e && $tod_s > $tod_e) {
                         # Window wraps past midnight (e.g. 22:00 to 02:00): keep
                         # the two segments [start,24h) and [0,end).
-                        next unless $tod >= $tod_s || $tod < $tod_e;
+                        unless ($tod >= $tod_s || $tod < $tod_e) { $excluded_time_window++; next; }
                     } else {
-                        next if defined $tod_s && $tod <  $tod_s;
-                        next if defined $tod_e && $tod >= $tod_e;
+                        if (defined $tod_s && $tod <  $tod_s) { $excluded_time_window++; next; }
+                        if (defined $tod_e && $tod >= $tod_e) { $excluded_time_window++; next; }
                         # A bound given with a date (not time-only) stays absolute.
-                        next if !defined $tod_s && $timestamp_epoch <  $filter_range_epoch{'start'};
-                        next if !defined $tod_e && $timestamp_epoch >= $filter_range_epoch{'end'};
+                        if (!defined $tod_s && $timestamp_epoch <  $filter_range_epoch{'start'}) { $excluded_time_window++; next; }
+                        if (!defined $tod_e && $timestamp_epoch >= $filter_range_epoch{'end'})   { $excluded_time_window++; next; }
                     }
                 } else {
-                    next if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} );
+                    if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} ) { $excluded_time_window++; next; }
                 }
 
                 # --profile: fold onto the reference period AFTER range filtering
@@ -12504,18 +12983,18 @@ sub read_and_process_logs {
                     $bucket_epoch = $folded + ($fractional_ms / 1000);
                 }
 
-                next if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) );
-                next if( defined( $include_filter )         && !match_filter($_, $include_filter) );
+                if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) )  { $excluded_filter++; next; }
+                if( defined( $include_filter )         && !match_filter($_, $include_filter) ) { $excluded_filter++; next; }
                 # Outcome filters select on the classification the scan block
                 # already produced (1 success, 2 failure, 0 unclassified) — the
                 # line is never re-tested. An include keeps only its named
                 # outcome; an exclude drops only its named outcome, so
                 # unclassified lines survive every exclude.
                 if( $outcome_filter_active ) {
-                    next if( $include_failure && $line_outcome != 2 );
-                    next if( $include_success && $line_outcome != 1 );
-                    next if( $exclude_failure && $line_outcome == 2 );
-                    next if( $exclude_success && $line_outcome == 1 );
+                    if( $include_failure && $line_outcome != 2 ) { $excluded_filter++; next; }
+                    if( $include_success && $line_outcome != 1 ) { $excluded_filter++; next; }
+                    if( $exclude_failure && $line_outcome == 2 ) { $excluded_filter++; next; }
+                    if( $exclude_success && $line_outcome == 1 ) { $excluded_filter++; next; }
                 }
                 # Numeric threshold filters. A line that carries no value for the
                 # filtered metric can never satisfy a numeric criterion on that
@@ -12523,19 +13002,19 @@ sub read_and_process_logs {
                 # is dropped — and counted, so the exclusion is reported after
                 # processing instead of silently shrinking the totals.
                 if( defined( $filter_duration_min ) || defined( $filter_duration_max ) ) {
-                    if( !defined( $duration ) ) { $numeric_filter_no_metric{duration}++; next; }
-                    next if( defined( $filter_duration_min ) && $duration < $filter_duration_min );	# skip if duration value is below specified minimum filter
-                    next if( defined( $filter_duration_max ) && $duration > $filter_duration_max );	# skip if duration value is above specified maximum filter
+                    if( !defined( $duration ) ) { $numeric_filter_no_metric{duration}++; $excluded_numeric++; next; }
+                    if( defined( $filter_duration_min ) && $duration < $filter_duration_min ) { $excluded_numeric++; next; }	# skip if duration value is below specified minimum filter
+                    if( defined( $filter_duration_max ) && $duration > $filter_duration_max ) { $excluded_numeric++; next; }	# skip if duration value is above specified maximum filter
                 }
                 if( defined( $filter_bytes_min ) || defined( $filter_bytes_max ) ) {
-                    if( !defined( $bytes ) ) { $numeric_filter_no_metric{bytes}++; next; }
-                    next if( defined( $filter_bytes_min ) && $bytes < $filter_bytes_min );		# skip if bytes value is below specified minimum filter
-                    next if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max );		# skip if bytes value is above specified maximum filter
+                    if( !defined( $bytes ) ) { $numeric_filter_no_metric{bytes}++; $excluded_numeric++; next; }
+                    if( defined( $filter_bytes_min ) && $bytes < $filter_bytes_min ) { $excluded_numeric++; next; }		# skip if bytes value is below specified minimum filter
+                    if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max ) { $excluded_numeric++; next; }		# skip if bytes value is above specified maximum filter
                 }
                 if( defined( $filter_count_min ) || defined( $filter_count_max ) ) {
-                    if( !defined( $count ) ) { $numeric_filter_no_metric{count}++; next; }
-                    next if( defined( $filter_count_min ) && $count < $filter_count_min );		# skip if count value is below specified minimum filter
-                    next if( defined( $filter_count_max ) && $count > $filter_count_max );		# skip if count value is above specified maximum filter
+                    if( !defined( $count ) ) { $numeric_filter_no_metric{count}++; $excluded_numeric++; next; }
+                    if( defined( $filter_count_min ) && $count < $filter_count_min ) { $excluded_numeric++; next; }		# skip if count value is below specified minimum filter
+                    if( defined( $filter_count_max ) && $count > $filter_count_max ) { $excluded_numeric++; next; }		# skip if count value is above specified maximum filter
                 }
 
                 # take note if any results were found in this file
@@ -13258,18 +13737,7 @@ sub read_and_process_logs {
                     }
                 }
             } else {
-                # Format-detection: unmatched lines tracked even before any
-                # match has bound a slug for this file (Issue #228).
-                my $fdd = $format_detection{$in_file} //= {
-                    match_type       => undef,
-                    slug             => undef,
-                    metrics_observed => 0,
-                    event_ledger     => 0,
-                    matched_lines    => 0,
-                    unmatched_lines  => 0,
-                    first_match_line => undef,
-                };
-                $fdd->{unmatched_lines}++;
+                note_unmatched_line($in_file);
             }
         }
 
@@ -13433,6 +13901,17 @@ sub calculate_heatmap_buckets_exact {
                 p99  => find_heatmap_bucket($p99_value, $heatmap_bucket_count),
                 p999 => find_heatmap_bucket($p999_value, $heatmap_bucket_count),
             };
+            # Under -o the aggregate export carries the whole ladder by the
+            # same nearest-rank rule the markers use (see the bin path).
+            if ($write_messages_to_csv) {
+                my %values;
+                for my $pair (@percentile_ladder) {
+                    my ($name, $q) = @$pair;
+                    $values{$name} = $sorted_values[int($count * $q)] // $sorted_values[-1];
+                }
+                $heatmap_percentiles{$bucket}{values}      = \%values;
+                $heatmap_percentiles{$bucket}{occurrences} = $count;
+            }
         }
 
         foreach my $value (@sorted_values) {
@@ -13593,6 +14072,20 @@ sub finalize_heatmap_unified {
             $markers{$name} = find_heatmap_bucket($v, $W);
         }
         $heatmap_percentiles{$bucket} = \%markers if %markers;
+        # Under -o the aggregate export carries the bucket's whole ladder as
+        # values, beside the four marker indices the render reads; the render
+        # itself is unchanged. Computed here while the streaming partition is
+        # still in hand, from the same percentile() the markers use, unclamped.
+        if ($write_messages_to_csv) {
+            my %values;
+            for my $pair (@percentile_ladder) {
+                my ($name, $q) = @$pair;
+                my ($v) = percentile($src, $q);
+                $values{$name} = $v if defined $v;
+            }
+            $heatmap_percentiles{$bucket}{values}      = \%values;
+            $heatmap_percentiles{$bucket}{occurrences} = counter_entry_total($src);
+        }
 
         # Every partition on this surface is projected into display shape
         # exactly once per run, after the telemetry snapshot above — which is
@@ -13860,9 +14353,7 @@ sub finalize_histogram_unified {
         next unless $src;
 
         # Total sample count across in-range bins + over/underflow.
-        my $n = 0;
-        $n += ($_ // 0) for @{$src->{bins}};
-        $n += ($src->{overflow} // 0) + ($src->{underflow} // 0);
+        my $n = counter_entry_total($src);
         next if $n == 0;
 
         push @metrics_with_data, $metric;
@@ -13903,9 +14394,7 @@ sub finalize_histogram_unified {
         # documented at the heatmap marker site.
         my %stats = (count => $n, min => $min, max => $max,
                      bucket_count => $bucket_count, decades => $decades);
-        for my $pair (['p1',0.01], ['p5',0.05], ['p10',0.10], ['p25',0.25], ['p50',0.50],
-                      ['p75',0.75], ['p90',0.90], ['p95',0.95], ['p99',0.99],
-                      ['p999',0.999], ['p9999',0.9999], ['p99999',0.99999]) {
+        for my $pair (@percentile_ladder) {
             my ($name, $q) = @$pair;
             my ($v) = percentile($src, $q);
             if (defined $v) {
@@ -13947,9 +14436,7 @@ sub finalize_histogram_unified {
                 # The clamp target is the PARENT's axis: the highlight legend
                 # and the parent legend are drawn against one geometry.
                 my %stats_hl = (count => $n_hl, min => $min, max => $max);
-                for my $pair (['p1',0.01], ['p5',0.05], ['p10',0.10], ['p25',0.25], ['p50',0.50],
-                              ['p75',0.75], ['p90',0.90], ['p95',0.95], ['p99',0.99],
-                              ['p999',0.999], ['p9999',0.9999], ['p99999',0.99999]) {
+                for my $pair (@percentile_ladder) {
                     my ($name, $q) = @$pair;
                     my ($v) = percentile($src_hl, $q);
                     if (defined $v) {
@@ -14839,6 +15326,7 @@ sub calculate_statistics {
     $t->{terminal_core}{computed}++ if $t;
     my %stats = (
         min => $min, p50 => $p50, p95 => $p95, p99 => $p99, p999 => $p999, cv => $cv,
+        duration_count => $duration_count,
     );
     if ($demand->{csv_body}) {
         $t->{csv_body}{computed}++ if $t;
@@ -15042,7 +15530,7 @@ sub calculate_statistics_bin {
     $t->{terminal_core}{computed}++ if $t;
     my %stats = (
         min => $min, p50 => $pct{p50}, p95 => $pct{p95}, p99 => $pct{p99},
-        p999 => $pct{p999}, cv => $cv,
+        p999 => $pct{p999}, cv => $cv, duration_count => $n,
     );
     if ($demand->{csv_body}) {
         $t->{csv_body}{computed}++ if $t;
@@ -15819,7 +16307,7 @@ sub normalize_data_for_output {
         push @output_columns, qw( bytes_occurrences bytes_min bytes_mean bytes_max );
     }
     if (stats_csv_duration_columns_active()) {
-        push @output_columns, qw( duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef );
+        push @output_columns, map { "duration_$_" } @duration_family_stats;
     }
 
     foreach my $bucket (keys %log_occurrences) {
@@ -16236,6 +16724,7 @@ sub print_verbose_output {
     print "FILES\t" . join(';', @files_processed) . "\t$total_file_size\n";
 
     print "lines_read\t$total_lines_read\n";
+    print "lines_excluded\t" . lines_excluded_total() . "\n";
     print "lines_included\t$total_lines_included\n";
 
     # Timing rows (raw seconds)
@@ -16389,14 +16878,7 @@ sub print_bar_graph {
         my $profile_week_fold = ($profile_mode && $output_timestamp_format =~ /%a/) ? 1 : 0;
         my $prev_fold_wday;
         foreach my $bucket (sort { $a <=> $b } keys %log_occurrences) {
-            my $bucket_time_str;
-            if ($print_milliseconds) {
-                # Bucket is integer milliseconds - convert to seconds for gmtime, extract ms part
-                $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket / 1000));
-                $bucket_time_str .= sprintf ".%03d", $bucket % 1000;
-            } else {
-                $bucket_time_str = strftime($output_timestamp_format, gmtime($bucket));
-            }
+            my $bucket_time_str = format_bucket_timestamp($bucket);
             # Blanking the repeated weekday is a terminal-display affordance only.
             # The CSV must keep the full folded timestamp on every row so each
             # row is self-describing (a blanked "    10:00" would be ambiguous to
@@ -16723,7 +17205,7 @@ sub print_bar_graph {
                 # The storage keys are the bare statistic names; the CSV column names
                 # take the duration_ prefix (#432), so the value is looked up by the
                 # bare name and formatted under the prefixed one.
-                foreach my $stat ( qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef ) ) {
+                foreach my $stat ( @duration_family_stats ) {
                     push @csv_data, format_csv_value( $log_stats{$bucket}{$stat}, "duration_${stat}" );
                 }
             }
@@ -17490,11 +17972,10 @@ sub category_display_name {
 # they produced: each view is meant to be screenshot with the command that made
 # it, so the reader can reproduce it (docs/purpose.md). Printed for every run,
 # including one whose run summary is suppressed.
-sub print_run_options {
-    ## PRINT COMMAND AND ARGUMENTS ##
-    if ($ltl_config_raw ne '') {
-        print "\n$colors{'bright-black'}environment options: $ltl_config_raw$colors{'NC'}";
-    }
+# The command-line options as the terminal echoes them under the timeline
+# and the aggregate export records them: the arguments minus the file
+# operands, pattern-file indicators appended, one trailing space.
+sub build_run_options_string {
     my %argv_hash = map { $_ => 1 } @ARGV;
     my $cli_options = '';
     for (my $i = 0; $i < @ORIGINAL_ARGV; $i++) {
@@ -17521,6 +18002,15 @@ sub print_run_options {
             $cli_options .= "$arg ";
         }
     }
+    return $cli_options;
+}
+
+sub print_run_options {
+    ## PRINT COMMAND AND ARGUMENTS ##
+    if ($ltl_config_raw ne '') {
+        print "\n$colors{'bright-black'}environment options: $ltl_config_raw$colors{'NC'}";
+    }
+    my $cli_options = build_run_options_string();
     if ($cli_options ne '') {
         print "\n$colors{'bright-black'}command-line options: $cli_options$colors{'NC'}";
     }
@@ -17731,10 +18221,8 @@ sub print_summary_table {
     my ( @match_char ) = ( "$colors{'red'}χ", "$colors{'green'}√", "$colors{'green-HL'}√" );
 
     ## FORMAT MIN/MAX LOG TIMESTAMPS FOR THE SUMMARY ##
-    my $min_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_min));
-    my $max_timestamp_str = strftime($output_timestamp_format, gmtime($output_timestamp_max));
-    $min_timestamp_str .= sprintf ".%03d", ($output_timestamp_min-int($output_timestamp_min))*1000 if $print_milliseconds;
-    $max_timestamp_str .= sprintf ".%03d", ($output_timestamp_max-int($output_timestamp_max))*1000 if $print_milliseconds;
+    my $min_timestamp_str = format_observation_timestamp($output_timestamp_min);
+    my $max_timestamp_str = format_observation_timestamp($output_timestamp_max);
 
     ## START SUMMARY STATISTIC TABLE ##
     push @summary_table, sprintf( "\n  " . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
@@ -18705,6 +19193,8 @@ sub pipeline_render {
 
     emit_bin_counter_mode_verbose();
 
+    emit_filter_summary_verbose();
+
     emit_format_detection_verbose();
 
     emit_format_registry_verbose();
@@ -18800,6 +19290,10 @@ sub pipeline_render {
     # the full process lifetime; surfaced by the -mem debug "end" line below.
     measure_memory_structures();
     memory_debug_decomposition("end");
+
+    # The aggregate export reads the run's peak memory and total time, so it
+    # follows the summary and the post-output measurement (Issue #503).
+    write_aggregate_export();
 
     write_index_file() unless $no_index;  # Write persistent index file with per-file metadata (Issue #46)
 }
