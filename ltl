@@ -49,9 +49,6 @@ use File::Glob qw(bsd_glob);
 use File::Spec;
 use Text::CSV;
 use Text::CSV_PP;
-use YAML::PP;
-use YAML::PP::Common ();
-use JSON::PP ();
 use Text::ParseWords qw(shellwords);
 
 
@@ -5908,7 +5905,7 @@ sub percentile_supported {
 
 # A mapping whose keys dump in insertion order.
 sub aggregate_mapping {
-    tie my %h, 'YAML::PP::Preserve::Hash';
+    tie my %h, 'YAML::PP::Preserve::Hash';   # loaded by write_aggregate_export() before the first call
     return \%h;
 }
 
@@ -5937,6 +5934,14 @@ sub aggregate_percentiles {
 
 sub write_aggregate_export {
     return unless $write_messages_to_csv;
+
+    # The YAML writer and the boolean class are loaded here, on the one path
+    # that needs them: loading them at startup costs every run about 7 MB of
+    # resident memory. The bare require statements keep them visible to the
+    # packager's static dependency scan.
+    require YAML::PP;
+    require YAML::PP::Common;
+    require JSON::PP;
 
     my $doc = aggregate_mapping();
     $doc->{schema_version} = 1;
@@ -5978,7 +5983,7 @@ sub write_aggregate_export {
         my $f = aggregate_mapping();
         $f->{name} = $slug;
         my $entry = $entry_by_slug{$slug};
-        $f->{event_ledger} = ($entry && $entry->[FR_EVENT_LEDGER]) ? JSON::PP::true : JSON::PP::false;
+        $f->{event_ledger} = ($entry && $entry->[FR_EVENT_LEDGER]) ? JSON::PP::true() : JSON::PP::false();
         push @formats, $f;
     }
     $population->{formats} = \@formats;
@@ -6038,7 +6043,7 @@ sub write_aggregate_export {
         $measurements->{success_pct} = aggregate_number($recon->{success_pct});
         $measurements->{failure_pct} = aggregate_number($recon->{failure_pct});
     }
-    $measurements->{pct_eligible}         = $recon->{pct_eligible} ? JSON::PP::true : JSON::PP::false;
+    $measurements->{pct_eligible}         = $recon->{pct_eligible} ? JSON::PP::true() : JSON::PP::false();
     $measurements->{non_qualifying_lines} = $recon->{non_qualifying};
     my $categories = aggregate_mapping();
     for my $category (@log_levels) {
@@ -6086,7 +6091,7 @@ sub write_aggregate_export {
     my $series = aggregate_mapping();
     $series->{bucket_size_seconds} = aggregate_number($bucket_size_seconds);
     $series->{bucket_count}        = scalar keys %log_occurrences;
-    $series->{omit_empty}          = $omit_empty ? JSON::PP::true : JSON::PP::false;
+    $series->{omit_empty}          = $omit_empty ? JSON::PP::true() : JSON::PP::false();
     $series->{rate_unit}           = $rate_unit;
     my $heatmap_written = $heatmap_enabled && defined $heatmap_metric && grep { $heatmap_percentiles{$_}{values} } keys %heatmap_percentiles;
     if ($heatmap_written) {
