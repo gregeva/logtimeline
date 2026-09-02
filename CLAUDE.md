@@ -11,8 +11,9 @@ checkpoint names it, never reconstructed from memory.
 Ranked by how often each has failed after being written down. When in doubt
 about anything else, these still hold.
 
-1. **Do exactly what was asked.** "Commit" is not commit+push+PR; "file it" is
-   not design it; a fix for a reported case is not a fix for every case that
+1. **Do exactly what was asked.** "Commit" is not commit+push+PR; a drop or
+   stage of an issue is a commit and a push on the issue branch, never a PR (one
+   PR per issue, at the end); "file it" is not design it; a fix for a reported case is not a fix for every case that
    matches the words. The natural next step is the architect's to direct.
 2. **Every reference carries its meaning.** `#312 (numeric criteria as
    highlight)`, `D5 (print a notice when consolidation degrades percentiles)`,
