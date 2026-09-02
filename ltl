@@ -57,7 +57,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0";
+my $version_number = "0.18.0-503";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -10453,8 +10453,23 @@ sub format_number {
 
     return $formatted_value;
 }
+# Decimal places that give $value a count of significant digits: the integer
+# part takes as many as its magnitude needs and the remainder are decimals,
+# so 98.2, 1.11 and 0.107 all carry three. The one rule for every formatter
+# that renders to significant digits.
+sub significant_decimals {
+    my ($value, $digits) = @_;
+    my $magnitude = $value >= 100 ? 3 : $value >= 10 ? 2 : $value >= 1 ? 1 : 0;
+    my $decimals = $digits - $magnitude;
+    return $decimals < 0 ? 0 : $decimals;
+}
+
+# $significant, when given, renders the scaled value to that many significant
+# digits with trailing zeros and a bare point stripped (1.5 days, 7 days,
+# 14.4 hours); absent, the value carries one decimal as every existing
+# caller expects.
 sub format_time {
-    my ($value, $unit, $format, $space) = @_;
+    my ($value, $unit, $format, $space, $significant) = @_;
     my %units = (
         'us' => 1,                      # Microseconds
         'ms' => 1000,                   # Milliseconds
@@ -10491,9 +10506,16 @@ sub format_time {
         }
     }
 
-    $formatted_value = sprintf("%.1f", $formatted_value);
-    $formatted_value =~ s/\.0+(?=\s|$)//;                                                    # remove trailing .0 if followed by space or end of string
-    
+    if (defined $significant) {
+        $formatted_value = sprintf("%.*f", significant_decimals($formatted_value, $significant), $formatted_value);
+        if ($formatted_value =~ /\./) {
+            $formatted_value =~ s/0+$//;
+            $formatted_value =~ s/\.$//;
+        }
+    } else {
+        $formatted_value = sprintf("%.1f", $formatted_value);
+        $formatted_value =~ s/\.0+(?=\s|$)//;                                                # remove trailing .0 if followed by space or end of string
+    }
 
     my $unit_name = $unit_names{$formatted_unit}{$format};                                  # Get the appropriate unit name based on format
     $unit_name =~ s/s$// if $formatted_value == 1 && $format eq 'long';                     # Singular units for long format
@@ -10712,10 +10734,7 @@ sub format_percentage {
     } else {
         # Significant digits: the integer part consumes as many of them as
         # its own magnitude needs, and the remainder become decimals.
-        my $digits = $p{digits} // 3;
-        my $magnitude = $value >= 100 ? 3 : $value >= 10 ? 2 : $value >= 1 ? 1 : 0;
-        $decimals = $digits - $magnitude;
-        $decimals = 0 if $decimals < 0;
+        $decimals = significant_decimals($value, $p{digits} // 3);
     }
 
     # Padding sits inside the brackets, so the inner budget is what the
