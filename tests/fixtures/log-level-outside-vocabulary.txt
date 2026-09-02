@@ -1,0 +1,3 @@
+2025-07-18 04:46:41,354 INFO  [main] wt.method.server.startup  - kept line
+2025-07-18 04:46:42,354 NOTICE [main] wt.method.server.startup  - level outside the vocabulary
+2025-07-18 04:46:43,354 INFO  [main] wt.method.server.startup  - kept line two
