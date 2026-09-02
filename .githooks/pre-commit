@@ -27,7 +27,19 @@ path_patterns=(
     '(^|/)credentials'
 )
 
+# Shared Claude Code project configuration is tracked and reviewed like any
+# other file; everything else under .claude/ stays blocked.
+allowed_paths=(
+    '^\.claude/rules/[^/]+\.md$'
+    '^\.claude/settings\.json$'
+)
+
 while IFS= read -r path; do
+    allowed=0
+    for re in "${allowed_paths[@]}"; do
+        [[ "$path" =~ $re ]] && allowed=1
+    done
+    [ "$allowed" -eq 1 ] && continue
     for re in "${path_patterns[@]}"; do
         if [[ "$path" =~ $re ]]; then
             fail "path '$path' matches blocked pattern /$re/"

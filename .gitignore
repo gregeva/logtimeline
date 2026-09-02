@@ -10,8 +10,12 @@ logs
 # Runtime artifact (Issue #46 / #179)
 ltl-index.csv
 
-# Local Claude Code state — never commit
-.claude/
+# Local Claude Code state — never commit. Only the shared, reviewed project
+# configuration is tracked: .claude/rules/ (path-scoped rules) and
+# .claude/settings.json (hooks). settings.local.json, worktrees, locks stay local.
+.claude/*
+!.claude/rules/
+!.claude/settings.json
 .claude.local/
 
 # Common secret-bearing files
