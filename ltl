@@ -49,6 +49,9 @@ use File::Glob qw(bsd_glob);
 use File::Spec;
 use Text::CSV;
 use Text::CSV_PP;
+use YAML::PP;
+use YAML::PP::Common ();
+use JSON::PP ();
 use Text::ParseWords qw(shellwords);
 
 
@@ -5905,7 +5908,7 @@ sub percentile_supported {
 
 # A mapping whose keys dump in insertion order.
 sub aggregate_mapping {
-    tie my %h, 'YAML::PP::Preserve::Hash';   # loaded by write_aggregate_export() before the first call
+    tie my %h, 'YAML::PP::Preserve::Hash';
     return \%h;
 }
 
@@ -5934,14 +5937,6 @@ sub aggregate_percentiles {
 
 sub write_aggregate_export {
     return unless $write_messages_to_csv;
-
-    # The YAML writer and the boolean class are loaded here, on the one path
-    # that needs them: loading them at startup costs every run about 7 MB of
-    # resident memory. The bare require statements keep them visible to the
-    # packager's static dependency scan.
-    require YAML::PP;
-    require YAML::PP::Common;
-    require JSON::PP;
 
     my $doc = aggregate_mapping();
     $doc->{schema_version} = 1;
