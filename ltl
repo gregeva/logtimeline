@@ -802,6 +802,7 @@ my $bucket_stats_capture_mode      = undef;   # 'raw' or 'bin' (set before parsi
 my $bucket_duration_stats_demand   = 0;       # per-time-bucket statistics (%log_analysis): timeline latency column, STATS CSV
 my $message_duration_stats_demand  = 0;       # per-message-key statistics (%log_messages): messages-table statistics variant, MESSAGES CSV
 my $bytes_aggregate_demand         = 0;       # bytes_occurrences/bytes_min/bytes_max at both scopes: CSV surfaces and bytes-family sorts (#516)
+my $message_outcomes_demand        = 0;       # per-message success/failure counters: MESSAGES CSV successes/failures columns (#517)
 
 # Statistics-group demand registry (#305): extends the store-level demand
 # above to statistic-group granularity. The 22-statistic duration ladder is
@@ -11733,6 +11734,12 @@ sub adapt_to_command_line_options {
            $write_messages_to_csv
         || $sort_key =~ /^bytes_(?:occurrences|min|mean|max)$/
     ) ) ? 1 : 0;
+    # Per-message outcome-counter demand (#517): the per-message success/failure
+    # counters reach the user only through the MESSAGES CSV successes/failures
+    # columns. The default classification surfaces (summary classified rows,
+    # timeline percentage columns, errRate) read the run totals and
+    # %bucket_outcomes, not this store.
+    $message_outcomes_demand = $write_messages_to_csv ? 1 : 0;
 
     # Statistics-group demand (#305): layer per-group demand on top of the
     # store-level booleans above, from the consumer declarations in
@@ -12670,7 +12677,7 @@ sub read_and_process_logs {
                         if ($is_new_key) {
                             # Build stats source from parsed line values for merge_consolidation_stats()
                             my $stats_source = { occurrences => 1 };
-                            $stats_source->{outcomes}[$line_outcome] = 1 if $line_outcome;
+                            $stats_source->{outcomes}[$line_outcome] = 1 if $message_outcomes_demand && $line_outcome;
                             if ($metrics_observed) {
                                 $stats_source->{total_bytes} = $bytes if defined $bytes;
                                 if (defined $count) {
@@ -12765,7 +12772,7 @@ sub read_and_process_logs {
                         });
 
                         $log_messages{$category}{$log_key}{occurrences}++;
-                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $line_outcome;
+                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
 
                         # Bytes carries the same aggregate family as count (#432).
                         # bytes_occurrences counts lines that actually carried a
@@ -12924,7 +12931,7 @@ sub read_and_process_logs {
                         }
                     } else {
                         $log_messages{$category}{$log_key}{occurrences}++;
-                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $line_outcome;
+                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
                     }
                     }  # end: if (!$consolidation_s1_matched)
                 }
