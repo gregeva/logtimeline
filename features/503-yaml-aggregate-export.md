@@ -159,8 +159,8 @@ measurements:                                 # the run summary, in machine form
       p99999: 27100
       highlighted:                            # %histogram_stats_hl{duration}; present when a highlight is active
         occurrences: 118220
-        p50: 210
-        p95: 1900
+          p50: 210
+          p95: 1900
     bytes:                                    # every histogrammed metric gets the same block; UDM metrics by name
       data_model: bin
       occurrences: 41799210
@@ -175,9 +175,6 @@ series:
   bucket_count: 42                            # scalar keys %log_occurrences (= COUNTS log_occurrences_entries)
   omit_empty: false                           # -oe
   rate_unit: m                                # -ru token as held ($rate_unit: s|m|h|d); the CSV column suffix is its rendering
-  heatmap:                                    # present only when -hm captured it (F1b)
-    metric: duration
-    data_model: bin                           # $heatmap_capture_mode
   buckets:
     - timestamp: "2026-08-18 04:00"           # the STATS CSV `timestamp` value, verbatim (floor-aligned bucket; precedes observation.start by design)
       occurrences: 1043122                    # every included line in the bucket
@@ -225,19 +222,21 @@ series:
       udm:                                    # user-defined metrics, by metric name, when active; `-HL` twins beside them
         job_ms: { occurrences: 14, sum: 8812, min: 12, mean: 629.4, max: 4100 }
         users: { distinct: 44 }
-      heatmap:                                # per-bucket percentiles of series.heatmap.metric (F1b, D4), gated
-        occurrences: 1043122                  # the partition total percentile() forms
-        p1: 1                                 # the full ladder, computed at finalize under -o
-        p5: 2
-        p10: 3
-        p25: 6
-        p50: 12
-        p75: 42
-        p90: 131
-        p95: 301
-        p99: 1120
-        p999: 6400
-        p9999: 21800
+      heatmap:                                # present only when -hm captured it (F1b, D4); the metric a level below, as the histogram block (architect, 2026-09-03)
+        duration:                             # $heatmap_metric; a -hm bytes run writes heatmap.bytes, comparable by name
+          data_model: bin                     # $heatmap_capture_mode
+          occurrences: 1043122                # the partition total percentile() forms; positive values only, as the histogram
+          p1: 1                               # the full ladder, computed at finalize under -o, gated
+          p5: 2
+          p10: 3
+          p25: 6
+          p50: 12
+          p75: 42
+          p90: 131
+          p95: 301
+          p99: 1120
+          p999: 6400
+          p9999: 21800
     # ... an empty bucket carries occurrences: 0, the three outcome counts, and nothing else ...
 ```
 
@@ -281,8 +280,8 @@ series:
 | `…unclassified` | *(not carried per bucket — D14: the consumer subtracts)* | occurrences − successes − failures (#453 D30) | derivable |
 | `…success_percentage` | `buckets[].success_pct/failure_pct` + `non_qualifying_lines` | `%log_stats{$bucket}{success_pct}` (#452 D1); slot 3 | derivable / missing |
 | `…status_families` | `buckets[].categories` | `%log_occurrences{$bucket}{$category}` | exists |
-| `…percentiles`, `maximum` | `buckets[].duration.*` and `buckets[].heatmap.*` | `%log_stats{$bucket}` (STATS CSV columns); `finalize_heatmap_unified()` values under `-hm` (F1b) | exists / derivable |
-| per-bucket gating input | `buckets[].duration.occurrences`, `buckets[].heatmap.occurrences` | `duration_count` under `bin` only (F8); the heatmap partition total | missing on `raw` / derivable |
+| `…percentiles`, `maximum` | `buckets[].duration.*` and `buckets[].heatmap.<metric>.*` | `%log_stats{$bucket}` (STATS CSV columns); `finalize_heatmap_unified()` values under `-hm` (F1b) | exists / derivable |
+| per-bucket gating input | `buckets[].duration.occurrences`, `buckets[].heatmap.<metric>.occurrences` | `duration_count` under `bin` only (F8); the heatmap partition total | missing on `raw` / derivable |
 
 ## Locked decisions (planning walkthrough, 2026-09-02)
 
@@ -291,7 +290,7 @@ Each is stated as what the tool will do. D1 and D2 were set by the issue body's 
 - **D1 — The file speaks ltl.** Every key is an existing ltl name where one exists (`p999`, `successes`, `success_pct`, `lines_included`, `classified`, `event_ledger`, `ms`, `bucket_size_seconds`, `histogram`, `heatmap`); the consumer translates. No key is invented where ltl has a word. *Set by the issue body's framing and the architect's 2026-09-02 instruction; recorded here so the record shows it.*
 - **D2 — Structure follows the consumer's four blocks.** `provenance` / `population` / `measurements` / `series`, with `provenance` split into `determining` and `contextual`. The architect said the structure "conceptually and structurally seems okay" (2026-09-02).
 - **D3 — Population-wide statistics come from the histogram surface and only when it ran (locked, architect, 2026-09-02).** `measurements.histogram.<metric>` is written for each metric `%histogram_stats` holds; no new store, no new per-line work. The block declares the histogram's data model, reads `count` as `occurrences`, and reads the **observed** extremes (`%histogram_data_min/max{$metric}`), not the chart's adjusted ones (F1). The non-positive-value exclusion is documented on the user surface (§ *Documentation*). A run without `-hg` has no population-wide percentiles, by the governing principle. *Architect, 2026-09-02.*
-- **D4 — Per-bucket statistics come from the two surfaces that produce them, each under its own name (locked, architect, 2026-09-02).** `buckets[].duration` mirrors the STATS CSV duration family from the bucket store (whenever `-o` demands it — always, for this file); `buckets[].heatmap` carries the heatmap metric's percentiles when `-hm` ran. Under `-o`, `finalize_heatmap_unified()` computes the full ladder `p1 … p99999` per bucket (today it computes the four marker slugs) and retains the values beside the marker indices it already produces (`%heatmap_percentiles{$bucket}` gains the values) — a finalize-time change, one `percentile()` call per slug per bucket. **The rendered heatmap does not change** (architect, 2026-09-02): the additional percentiles exist in the data model for the file only. The histogram needs no such addition: `finalize_histogram_unified()` already computes all twelve slugs plus `count`, `min` and `max` per metric, of which the chart prints four. The two blocks are not merged: they differ in model and sometimes metric, and each is named for its producer.
+- **D4 — Per-bucket statistics come from the two surfaces that produce them, each under its own name (locked, architect, 2026-09-02).** `buckets[].duration` mirrors the STATS CSV duration family from the bucket store (whenever `-o` demands it — always, for this file); `buckets[].heatmap.<metric>` carries the heatmap metric's percentiles when `-hm` ran (the metric a level below, as the histogram block; architect, 2026-09-03). Under `-o`, `finalize_heatmap_unified()` computes the full ladder `p1 … p99999` per bucket (today it computes the four marker slugs) and retains the values beside the marker indices it already produces (`%heatmap_percentiles{$bucket}` gains the values) — a finalize-time change, one `percentile()` call per slug per bucket. **The rendered heatmap does not change** (architect, 2026-09-02): the additional percentiles exist in the data model for the file only. The histogram needs no such addition: `finalize_histogram_unified()` already computes all twelve slugs plus `count`, `min` and `max` per metric, of which the chart prints four. The two blocks are not merged: they differ in model and sometimes metric, and each is named for its producer.
 - **D5 — The two option lines the terminal prints are copied into the file as two strings, untouched (locked, architect, 2026-09-02).** Nested as `options.command-line` and `options.environment`, the names the terminal lines carry. `command-line` is exactly the text `print_run_options()` prints after `command-line options:` (its `$cli_options` string: the arguments minus the file operands, pattern-file indicators appended, as today); `environment` is exactly the text after `environment options:` (`$ltl_config_raw`), absent when `LTL_CONFIG` is unset. Nothing is reordered, merged or added; the strings are built once and printed and written from the same value, and YAML-quoted only as the format requires. The echo's shape (F15) is not this issue's to change; its value-collision defect is filed separately (§ *Record corrections*).
 - **D6 — `generated_at` is `gmtime()` in `%Y-%m-%dT%H:%M:%SZ` (locked, architect, 2026-09-02).** The index's `entry_date` convention plus the designator, because it is a real clock reading. Every timestamp taken from the logs is the string the terminal or the STATS CSV prints (D7, D8, D14), never a re-rendering.
 - **D7 — The observation window is the one the run summary states, and nothing more (locked, architect, 2026-09-02).** `observation.start` and `observation.end` are the heading's two strings verbatim (`$min_timestamp_str` / `$max_timestamp_str`, rendered from `$output_timestamp_min/max` at the run's precision), `observation.duration_seconds` is the exact difference of the underlying epochs and `observation.duration` its formatted form (D13). No requested-bounds block, no exclusivity flag, no time-of-day flag, no alignment flag: the consumer tests alignment by comparing the two instants it is given, and the requested `-st`/`-et` values are visible in `options.command-line`. F4's account of the three windows stands as background.
@@ -382,16 +381,16 @@ blocks: <comma list>
 buckets_written: N
 percentiles_gated: N
 === aggregate-export / heatmap-ladder ===
-<bucket timestamp>\toccurrences=N\tp1=<value>\t...\tp99999=<value>
+<bucket timestamp>\tmetric=<heatmap metric>\toccurrences=N\tp1=<value>\t...\tp99999=<value>
 === END aggregate-export / heatmap-ladder ===
 === END aggregate-export ===
 ```
 
 - `file` — the file's name as written (relative to where ltl ran); `bytes` its size on disk.
-- `blocks` — the blocks written, in writing order: `provenance`, `population`, `measurements.histogram` when `-hg` captured a metric, `measurements`, `series.heatmap` when `-hm` ran, `series`.
+- `blocks` — the blocks written, in writing order: `provenance`, `population`, `measurements.histogram` when `-hg` captured a metric, `measurements`, `series.heatmap` when `-hm` ran (the per-bucket `heatmap.<metric>` blocks; there is no series-level heatmap declaration), `series`.
 - `buckets_written` — the entries of `series.buckets`, equal to `series.bucket_count`.
 - `percentiles_gated` — the count of `pN` keys withheld under D15 across every block.
-- `heatmap-ladder` sub-section, present when `series.heatmap` is — one tab-separated line per bucket: the bucket's timestamp string, its partition count, and every ladder value as computed (ungated: the section shows what the writer had; the file shows what D15 kept).
+- `heatmap-ladder` sub-section, present when the bucket heatmap blocks are — one tab-separated line per bucket: the bucket's timestamp string, the heatmap metric, its partition count, and every ladder value as computed (ungated: the section shows what the writer had; the file shows what D15 kept).
 - Printed directly at the writer's site after the file is written, so it appears after every section `print_verbose_output()` flushes and after the run summary. Only when `-o` and `-V aggregate-export` are both given.
 
 ## Findings from the build (2026-09-03)
@@ -399,6 +398,7 @@ percentiles_gated: N
 - **The dependency's fixed cost (D17).** Loading `YAML::PP` with `YAML::PP::Common` and `JSON::PP` at startup costs every run about 9.5 MB of resident memory (a bare Perl at 3.3 MB, with the three modules 12.8 MB), read on the before/after gate as peak RSS up 5–8 % on the single-day access log whether or not a file is written; timings are unchanged. The modules are declared at the top and loaded statically like every other library (architect, 2026-09-03: libraries are never lazily loaded); the cost is the dependency's, settled when D17 chose it, not a disposition question. The booleans (`event_ledger`, `pct_eligible`, `omit_empty`) are `JSON::PP` boolean objects, the core class the YAML module renders as bare `true`/`false`; a second import, core so nothing is installed, chosen during the build and confirmed by the architect on 2026-09-03 over Perl's built-in booleans (which would bind every build Perl to 5.36 or newer).
 - **Number rendering.** The file carries Perl's default rendering of each double (15 significant digits), the same rendering the STATS CSV writes under `-cp full`, so the oracle-to-file chain compares to the last digit. `-V histogram-percentile-ticks` prints 17 significant digits of the same values; the harness compares those numerically at a relative tolerance of 10⁻¹². Whether the file should carry 17 digits is the architect's call; nothing in the record asked for more than the CSV gives.
 - **The sample-size rule applied literally.** D15's rule `10/(1−N/100)` gives p1 a floor of 10.1 observations, p5 10.5, p10 11.1, p25 13.3: the low percentiles are cheap under the rule as published, which was written for the upper tail. The file applies it as locked; a symmetric rule for the low tail would be a change to the published text and to D15.
+- **The heatmap block nests its metric** (architect, 2026-09-03, on inspecting the full-day file): `buckets[].heatmap.<metric>.{data_model, occurrences, ladder}`, the histogram block's shape, so a run with another heatmap metric is comparable by name; the series-level `heatmap: {metric, data_model}` declaration of the draft is dropped as redundant. The duration-focused test scenarios drop `-hm`: the bucket store already carries every duration statistic, so the drift row `tomcat-histogram-export` and the harness's main scenario run `-hg duration` alone, and the pinned-comparison scenario proves the heatmap block. The benchmark scenario `heatmap-histogram-export` keeps `-hm`, being the cost case for both surfaces.
 - **The pinned comparison (open item settled).** At the default tier the heatmap runs 616 bins per decade and the bucket store 53, so their ladders differ by model resolution. At tier 7 (`-dmp 7`) both are 616 and the two ladders agree on `p25`–`p95` on the spread fixture (the harness scenario `heatmap-vs-bucket-store-pinned`); `p1`–`p10` are not compared because the bucket store clamps to the observed extremes and the heatmap ladder is unclamped.
 - **A CSV file's per-file `unmatched_lines`** on `-V format-detection` now reads 1 (its header) where it read 0 (drop 1); no harness asserted the old value.
 - **The documented usage example is not executed** by `tests/validate-doc-examples.sh`: examples run from the repository root, and this one writes files where it runs; it carries the skip marker and a comment saying why.
@@ -436,7 +436,7 @@ Mandatory triggers under docs/process/workflow.md § Feature lifecycle, step 2: 
 - [ ] `measurements.classified == successes + failures`, and `lines.included == classified + unclassified`, read from the same `classification_reconciliation()` call that feeds `-V format-detection / classification`; the file's counts equal that section's on the same run. [assertable — cross-surface]
 - [ ] `success_pct` is absent from the run block whenever `-V` reports `pct_eligible: 0`, and present with full double precision otherwise; per bucket, absent exactly on the buckets the timeline renders as counts. [assertable]
 - [ ] With `-hg duration`, every percentile `-V histogram-percentile-ticks` lists for the metric (the chart's selected ones) equals the same key in `measurements.histogram.duration`, and `max` equals the largest `duration_max` over the STATS CSV rows of the same run under `-cp full` (the population's maximum is some bucket's maximum); without `-hg`, `measurements.histogram` is absent. [assertable — cross-surface]
-- [ ] With `-hm duration`, every populated bucket carries the heatmap ladder down to the depth its `heatmap.occurrences` supports, as the calculated percentile values (never the display projections), and on a scenario that pins the bucket store and the heatmap to the same model the values equal the STATS CSV's `duration_p*` of the same bucket under `-cp full`; without `-hm`, no bucket carries `heatmap`. [assertable — cross-surface; see § Open items on bins-per-decade]
+- [x] With `-hm duration`, every populated bucket carries the heatmap ladder under `heatmap.duration` down to the depth its `heatmap.duration.occurrences` supports, as the calculated percentile values (never the display projections), and on a scenario that pins the bucket store and the heatmap to the same model the values equal the STATS CSV's `duration_p*` of the same bucket under `-cp full`; without `-hm`, no bucket carries `heatmap`. [assertable — cross-surface; see § Open items on bins-per-decade]
 - [ ] A bucket with fewer than 1,000 duration observations carries no `duration.p99`; one with fewer than 40 carries no `duration.p75`; `min`/`mean`/`max` are present on every bucket with at least one observation. [assertable]
 - [ ] Every active STATS CSV column family on a run appears as a block of the same bucket in the file, with equal values under `-cp full`, the family set read from the same gates the CSV header reads (`stats_csv_duration_columns_active()`, `stats_csv_bytes_columns_active()`, the count, session, thread-pool and UDM activity tests); the two rate columns are excepted, because the CSV fixes them at one decimal in every `-cp` mode while the file carries the in-memory value. [assertable — cross-surface]
 - [ ] On every scenario in `tests/statistics-drift/scenarios.tsv`, each per-bucket value the file carries and the CSV also carries equals the STATS CSV value of the same bucket and column from the same run, to the last digit (those scenarios pin `-cp full`; the rate columns and the per-bucket percentages, which are not CSV columns, are outside this check), and every column the block leaves out is one D15 (a percentile resting on too few values is withheld) gates on that block's own count. The STATS CSV rows are the ones the statistics harness has already validated against its NumPy/SciPy oracle (`tests/validate-statistics.sh` layer 3), so the file is tied to the oracle through the CSV: oracle → STATS CSV → file. Time-bucket rows only; the MESSAGES CSV and the run-level values are outside this chain. [assertable — cross-surface; runs in `tests/validate-aggregate-export.sh` over the CSV cache the statistics harness fills, so the two harnesses read the same run]
