@@ -6089,13 +6089,7 @@ sub write_aggregate_export {
     $series->{omit_empty}          = $omit_empty ? JSON::PP::true() : JSON::PP::false();
     $series->{rate_unit}           = $rate_unit;
     my $heatmap_written = $heatmap_enabled && defined $heatmap_metric && grep { $heatmap_percentiles{$_}{values} } keys %heatmap_percentiles;
-    if ($heatmap_written) {
-        my $heatmap = aggregate_mapping();
-        $heatmap->{metric}     = $heatmap_metric;
-        $heatmap->{data_model} = $heatmap_capture_mode;
-        $series->{heatmap} = $heatmap;
-        push @blocks, 'series.heatmap';
-    }
+    push @blocks, 'series.heatmap' if $heatmap_written;
 
     my $duration_family_active = stats_csv_duration_columns_active();
     my $bytes_family_active    = stats_csv_bytes_columns_active();
@@ -6192,14 +6186,19 @@ sub write_aggregate_export {
         $b->{threadpools} = $threadpools if $threadpools;
         $b->{udm}         = $udm if $udm && %$udm;
 
+        # The heatmap block nests its metric like the histogram block does, so a
+        # run with another heatmap metric stays comparable: heatmap.<metric>.<key>.
         if ($heatmap_written && $heatmap_percentiles{$bucket}{values}) {
             my $values = $heatmap_percentiles{$bucket}{values};
             my $count  = $heatmap_percentiles{$bucket}{occurrences};
             my $block = aggregate_mapping();
+            $block->{data_model}  = $heatmap_capture_mode;
             $block->{occurrences} = aggregate_number($count);
             $percentiles_gated += aggregate_percentiles($block, $values, $count, @ladder_slugs);
-            $b->{heatmap} = $block;
-            push @heatmap_ladder_lines, join("\t", $b->{timestamp}, "occurrences=$count",
+            my $heatmap = aggregate_mapping();
+            $heatmap->{$heatmap_metric} = $block;
+            $b->{heatmap} = $heatmap;
+            push @heatmap_ladder_lines, join("\t", $b->{timestamp}, "metric=$heatmap_metric", "occurrences=$count",
                 map { "$_=$values->{$_}" } grep { defined $values->{$_} } @ladder_slugs);
         }
         push @buckets, $b;

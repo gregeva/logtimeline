@@ -81,8 +81,7 @@ series.bucket_size_seconds	number	yes
 series.bucket_count	int	yes	
 series.omit_empty	bool	yes	
 series.rate_unit	string	yes	
-series.heatmap.metric	string	conditional:-hm	
-series.heatmap.data_model	string	conditional:-hm	
+
 series.buckets[].timestamp	string	yes	
 series.buckets[].occurrences	int	yes	
 series.buckets[].successes	int	yes	
@@ -130,16 +129,17 @@ series.buckets[].count.sum	number	conditional:count
 series.buckets[].sessions	int	conditional:sessions	
 series.buckets[].threadpools.*	number	conditional:-tpa	
 series.buckets[].udm.*.*	number	conditional:-udm	
-series.buckets[].heatmap.occurrences	int	conditional:-hm	
-series.buckets[].heatmap.p1	number	conditional:-hm	count:occurrences
-series.buckets[].heatmap.p5	number	conditional:-hm	count:occurrences
-series.buckets[].heatmap.p10	number	conditional:-hm	count:occurrences
-series.buckets[].heatmap.p25	number	conditional:-hm	count:occurrences
-series.buckets[].heatmap.p50	number	conditional:-hm	count:occurrences
-series.buckets[].heatmap.p75	number	conditional:-hm	count:occurrences
-series.buckets[].heatmap.p90	number	conditional:-hm	count:occurrences
-series.buckets[].heatmap.p95	number	conditional:-hm	count:occurrences
-series.buckets[].heatmap.p99	number	conditional:-hm	count:occurrences
-series.buckets[].heatmap.p999	number	conditional:-hm	count:occurrences
-series.buckets[].heatmap.p9999	number	conditional:-hm	count:occurrences
-series.buckets[].heatmap.p99999	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.data_model	string	conditional:-hm	
+series.buckets[].heatmap.*.occurrences	int	conditional:-hm	
+series.buckets[].heatmap.*.p1	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p5	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p10	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p25	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p50	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p75	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p90	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p95	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p99	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p999	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p9999	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p99999	number	conditional:-hm	count:occurrences

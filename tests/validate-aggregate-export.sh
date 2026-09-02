@@ -135,9 +135,9 @@ echo "Validating the YAML aggregate export (Issue #503)"
 echo ""
 
 # ---------------------------------------------------------------------------
-current_scenario="both-surfaces-n0"
+current_scenario="histogram-n0"
 if want "$current_scenario"; then
-    run_export -bs 1440 -oe -n 0 -cp full -hg duration -hm duration -h orders "$FIXTURES/http-status-families.txt" "$FIXTURES/tomcat-access-duration-spread.txt" || true
+    run_export -bs 1440 -oe -n 0 -cp full -hg duration -h orders "$FIXTURES/http-status-families.txt" "$FIXTURES/tomcat-access-duration-spread.txt" || true
     if [[ -n "$YAML_FILE" ]]; then
         local_count=$(ls "$TMP_DIR/$current_scenario"/*.yaml | wc -l | tr -d ' ')
         assert_equal "exactly one YAML file" "$local_count" 1 asserts 'One file per run' produced_by "$PRODUCER" contract "$CONTRACT"
@@ -151,7 +151,7 @@ if want "$current_scenario"; then
         agg="$TMP_DIR/$current_scenario.agg"; sed -n '/=== aggregate-export ===/,/=== END aggregate-export ===/p' "$OUT" > "$agg"
         assert_equal "section file" "$(section_value "$agg" file)" "$name" asserts 'The section names the file written' produced_by "$PRODUCER (-V aggregate-export)" contract 'features/503-yaml-aggregate-export.md section -V aggregate-export section contract'
         assert_equal "section bytes" "$(section_value "$agg" bytes)" "$(stat -f %z "$YAML_FILE")" asserts 'The section reports the file size' produced_by "$PRODUCER (-V aggregate-export)" contract 'features/503-yaml-aggregate-export.md section -V aggregate-export section contract'
-        assert_equal "section blocks" "$(section_value "$agg" blocks)" "provenance,population,measurements.histogram,measurements,series.heatmap,series" asserts 'With -hg and -hm both blocks are written and named' produced_by "$PRODUCER (-V aggregate-export)" contract 'features/503-yaml-aggregate-export.md section -V aggregate-export section contract'
+        assert_equal "section blocks" "$(section_value "$agg" blocks)" "provenance,population,measurements.histogram,measurements,series" asserts 'With -hg the histogram block is written and named; no heatmap ran' produced_by "$PRODUCER (-V aggregate-export)" contract 'features/503-yaml-aggregate-export.md section -V aggregate-export section contract'
         assert_equal "section buckets_written" "$(section_value "$agg" buckets_written)" "$(yget series.bucket_count)" asserts 'buckets_written equals the file bucket_count' produced_by "$PRODUCER (-V aggregate-export)" contract 'features/503-yaml-aggregate-export.md section -V aggregate-export section contract'
         # cross-surface: filter-summary, format-detection / classification, benchmark-data
         for k in read:lines_read unmatched:lines_unmatched included:lines_included; do
@@ -185,15 +185,7 @@ if want "$current_scenario"; then
         done
         assert_equal "histogram occurrences excludes non-positive values" "$(yget measurements.histogram.duration.occurrences)" "$(section_value "$OUT" 'lines_included' | awk -v z=0 '{print $1}' | xargs -I{} sh -c 'echo $(( {} - 85 ))')" asserts 'Of the 444 included lines, 85 carry a zero duration the histogram capture gate excludes (10 in the status fixture, 75 in the spread fixture)' produced_by "$PRODUCER; read_and_process_logs() in ltl (histogram capture gate)" contract "$CONTRACT (D3, F1)"
         assert_present_key measurements.histogram.duration.highlighted.occurrences asserts 'A highlight yields the highlighted subset block' produced_by "$PRODUCER" contract "$CONTRACT (D3)"
-        # heatmap ladder: the section's line equals the file's block for the first bucket
-        ladder="$(sed -n '/=== aggregate-export \/ heatmap-ladder ===/,/=== END aggregate-export \/ heatmap-ladder ===/p' "$OUT" | sed -n 2p)"
-        ts0="$(yget series.buckets.0.timestamp)"
-        assert_equal "heatmap-ladder line names the first bucket" "$(echo "$ladder" | cut -f1)" "$ts0" asserts 'The sub-section carries one line per bucket, timestamp first' produced_by "$PRODUCER (-V aggregate-export / heatmap-ladder)" contract 'features/503-yaml-aggregate-export.md section -V aggregate-export section contract'
-        for kv in $(echo "$ladder" | cut -f2- ); do
-            k="${kv%%=*}"; v="${kv#*=}"; fv="$(yget series.buckets.0.heatmap.$k)"
-            [[ -z "$fv" ]] && continue   # gated in the file, printed on the section
-            assert_near "bucket 0 heatmap.$k = ladder line" "$fv" "$v" asserts 'The file carries the values the section prints' produced_by "$PRODUCER" contract "$CONTRACT (D4)"
-        done
+        assert_absent_key series.buckets.0.heatmap asserts 'Without -hm no bucket carries a heatmap block' produced_by "$PRODUCER" contract "$CONTRACT (D4)"
         # gating: the two fixtures share one day, so one bucket of 444 lines
         assert_equal "one bucket of 444 lines" "$(yget series.buckets.0.duration.occurrences)" 444 asserts 'Both fixtures fall in the one 1440-minute bucket' produced_by "$PRODUCER" contract "$CONTRACT (D15: the count each block is measured against)"
         assert_present_key series.buckets.0.duration.p95 asserts 'A bucket of 444 lines carries p95 (needs 200)' produced_by "$PRODUCER" contract "$CONTRACT (D15)"
@@ -238,7 +230,7 @@ if want "$current_scenario"; then
     if [[ -n "$YAML_FILE" ]]; then
         assert_checker
         assert_absent_key measurements.histogram asserts 'Without -hg there are no population-wide percentiles' produced_by "$PRODUCER" contract "$CONTRACT (D3)"
-        assert_absent_key series.heatmap asserts 'Without -hm there is no heatmap declaration' produced_by "$PRODUCER" contract "$CONTRACT (D4)"
+
         assert_absent_key series.buckets.0.heatmap asserts 'Without -hm no bucket carries a heatmap block' produced_by "$PRODUCER" contract "$CONTRACT (D4)"
         agg="$TMP_DIR/$current_scenario.agg"; sed -n '/=== aggregate-export ===/,/=== END aggregate-export ===/p' "$OUT" > "$agg"
         assert_equal "section blocks" "$(section_value "$agg" blocks)" "provenance,population,measurements,series" asserts 'Only the four blocks are written' produced_by "$PRODUCER (-V aggregate-export)" contract 'features/503-yaml-aggregate-export.md section -V aggregate-export section contract'
@@ -334,9 +326,19 @@ if want "$current_scenario"; then
     if [[ -n "$YAML_FILE" ]]; then
         assert_checker
         assert_equal "bins per decade equal on both surfaces" "$(yget provenance.determining.data_model.heatmap)/$(yget provenance.determining.data_model.bucket_stats)/$(yget provenance.determining.data_model.precision)" "bin/bin/7" asserts 'The scenario pins both surfaces to bin at tier 7' produced_by "$PRODUCER" contract "$CONTRACT (open item: bins-per-decade)"
+        assert_equal "heatmap block nests its metric" "$(yget series.buckets.0.heatmap.duration.data_model)/$(yget series.buckets.0.heatmap.duration.occurrences)" "bin/349" asserts 'The bucket heatmap block is heatmap.<metric>.<key>, the histogram shape, with the model and the partition count inside; the partition holds the 349 positive durations of the 434 (the capture gate excludes non-positive values, as the histogram does)' produced_by "$PRODUCER" contract "$CONTRACT (D4; architect 2026-09-03: the metric a level below heatmap)"
+        assert_absent_key series.buckets.0.heatmap.occurrences asserts 'No key sits directly under heatmap: the metric level is mandatory' produced_by "$PRODUCER" contract "$CONTRACT (D4)"
+        # the section's ladder line equals the file's block for the first bucket
+        ladder="$(sed -n '/=== aggregate-export \/ heatmap-ladder ===/,/=== END aggregate-export \/ heatmap-ladder ===/p' "$OUT" | sed -n 2p)"
+        assert_equal "heatmap-ladder line: timestamp and metric" "$(echo "$ladder" | cut -f1,2)" "$(yget series.buckets.0.timestamp)	metric=duration" asserts 'One line per bucket: timestamp, metric, then the values' produced_by "$PRODUCER (-V aggregate-export / heatmap-ladder)" contract 'features/503-yaml-aggregate-export.md section -V aggregate-export section contract'
+        for kv in $(echo "$ladder" | cut -f3- ); do
+            k="${kv%%=*}"; v="${kv#*=}"; fv="$(yget series.buckets.0.heatmap.duration.$k)"
+            [[ -z "$fv" ]] && continue   # gated in the file, printed on the section
+            assert_near "bucket 0 heatmap.duration.$k = ladder line" "$fv" "$v" asserts 'The file carries the values the section prints' produced_by "$PRODUCER" contract "$CONTRACT (D4)"
+        done
         n=0
         for p in p25 p50 p75 p90 p95; do
-            hv="$(yget series.buckets.0.heatmap.$p)"; dv="$(yget series.buckets.0.duration.$p)"
+            hv="$(yget series.buckets.0.heatmap.duration.$p)"; dv="$(yget series.buckets.0.duration.$p)"
             [[ -z "$hv" || -z "$dv" ]] && continue
             assert_near "heatmap.$p = duration.$p" "$hv" "$dv" asserts 'Same model, same bins per decade, same values: the two ladders agree' produced_by "$PRODUCER; finalize_heatmap_unified() and calculate_statistics_bin() in ltl" contract "$CONTRACT (D4)"; n=$((n+1))
         done
