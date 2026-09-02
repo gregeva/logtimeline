@@ -69,30 +69,46 @@ commit `b5389e7` before the first code change.
 
 ## Measurement
 
-The gate only changes runs that combine `-n 0` with a bytes-family sort operand and
-no `-o`, so the benchmark case (which is a retaining run) is a no-op by construction
-and measures only that nothing regressed. The effect itself is measured on the store
-it stops filling.
+The gate changes per-line work only on runs that combine `-n 0` with a bytes-family
+sort operand and no `-o`, so that is the shape it is measured on. Same machine, same
+file, five interleaved runs per arm; the before arm is the base commit's `ltl`
+(`b5389e7`) verified byte-identical to `git show b5389e7:ltl`.
 
-Input: `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt`
-(5,000 lines, 5 one-minute buckets), `--disable-progress -ni --terminal-width 200
--bs 1 -mem -V benchmark-data`. `Devel::Size` over identical content is deterministic,
-so these are exact values, not medians.
+Input: `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt`
+(155 MB, 761,698 lines). Invocation: `--disable-progress -ni --terminal-width 200
+-bs 60 -n 0 -so bytes_min -V benchmark-data`.
 
-| run | `MEMORY log_analysis` before | after |
-|---|---|---|
-| `-n 0` | 363,897 B | 363,897 B |
-| `-n 0 -so bytes_min` | 365,474 B | 363,897 B |
+| metric | before (median) | after (median) | change |
+|---|---|---|---|
+| `parse/read_files` | 7.399 s | 7.302 s | **-97 ms, -1.31%** |
+| `TIMING/total` | 7.501 s | 7.406 s | **-95 ms, -1.27%** |
 
-The 1,577 B the inert sort used to add over five buckets is the per-bucket bytes
-family. After the change the two runs are identical, which is criterion 1; the
-pre-change inequality is its failure proof.
+Ranges: before `parse` 7.365-7.414 s, after 7.226-7.356 s; before `total`
+7.466-7.517 s, after 7.330-7.457 s. **The two distributions do not overlap on either
+metric.** Normalised, the saving is 0.127 s per million lines - the three hash
+operations per bytes-carrying line that the gate now skips.
+
+Memory, from a separate `-mem` run per arm (the structure walk raises RSS, so it is
+not merged with the timing table):
+
+| structure | before | after | change |
+|---|---|---|---|
+| `MEMORY/log_analysis` | 55,259,354 B | 55,254,897 B | -4,457 B |
+| `MEMORY/rss_peak` | 92,651,520 B | 92,372,992 B | -278,528 B |
+
+The store saving is small here because `-bs 60` over one day is 24 buckets, and the
+family costs about 186 B per bucket. It scales with bucket count, not with line
+count; the line-count-proportional saving is the time above.
+
+The same store measurement on a five-bucket slice makes acceptance criterion 1 exact:
+`-n 0 -so bytes_min` sized `%log_analysis` at 365,474 B against 363,897 B for plain
+`-n 0`, and now reports the same 363,897 B.
 
 ## Completion gate
 
 Run on the finished change with `$version_number` restored to `0.18.0`.
 
-**Harness suite — 32 of 32 pass**, every summary line reporting checks actually run:
+**Harness suite - 32 of 32 pass**, every summary line reporting checks actually run:
 `validate-csv-output` 28, `validate-statistics` 21 scenarios, `validate-explain` 154,
 `validate-format-detection` 249, `validate-profile` 106, `validate-statistics-demand`
 95, `validate-heatmap-palette` 85, `validate-histogram-bin-counters` 84,
@@ -115,15 +131,11 @@ failures are the nine #469 cells (one bin-model percentile projection onto the s
 geometry) in `tests/statistics-drift/known-failures.tsv`.
 
 **Benchmark**, `single-day-access-log-standard`, before captured on base commit
-`b5389e7` prior to the first code change, after on the finished change, same machine:
-
-| metric | before | after | change |
-|---|---|---|---|
-| `parse/read_files` | 9.5 s | 9.4 s | -1.6% |
-| `TIMING/total` | 9.7 s | 9.6 s | -1.5% |
-| `MEMORY/rss_peak` | 143.5 MB | 143.9 MB | +0.3% |
-| `MEMORY/log_analysis` | 52.7 MB | 52.7 MB | 0.0% |
-
-Nothing worse by more than 5%. The case is a retaining run with no bytes-family
-sort, so it exercises neither side of the gate — the deltas are run-to-run variation.
-Both TSVs deleted afterwards.
+`b5389e7` prior to the first code change, after on the finished change, one run each:
+`parse/read_files` 9.5 s to 9.4 s (-150 ms), `TIMING/total` 9.7 s to 9.6 s (-143 ms),
+`MEMORY/rss_peak` 143.5 MB to 143.9 MB (+432 KB), `MEMORY/log_analysis` unchanged at
+52.7 MB. **That case passes no options, so the demand flag resolves to 0 on both
+sides and the run never takes the gated path** - the unchanged `log_analysis` is the
+direct evidence. Its deltas are run-to-run variation in both directions and attribute
+nothing to this change; the attributed figures are the interleaved medians under
+§ Measurement. Both TSVs deleted afterwards.
