@@ -117,6 +117,9 @@ my %verbose_section_registry = (
     'message-grouping' => {
         description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction, and the cluster membership consolidation produced (Issue #96, #462).',
     },
+    'filter-summary' => {
+        description => 'Line accounting for the run as the funnel it passed through: lines read, unmatched by any format, excluded per cause (time window, profile fold, content and outcome filters, numeric thresholds, other), included, and highlighted (Issue #503).',
+    },
     'format-detection' => {
         description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts, plus registry scan telemetry: order, promotions, per-entry match counts, sampled no-match cost (Issues #228, #58).',
     },
@@ -155,6 +158,7 @@ my @verbose_section_order = qw(
     histogram-bin-counters
     histogram-percentile-ticks
     message-grouping
+    filter-summary
     format-detection
     format-registry
     heatmap-palette
@@ -265,6 +269,12 @@ my $capture_messages = 1;
 my ( $write_messages_to_csv, $csv, $csv_fh, $csv_file_args ) = ( 0, undef, undef, "" );
 my $total_lines_read = 0;
 my $total_lines_included = 0;
+# Line accounting between read and included: lines no format matched (a CSV
+# file's metadata line among them), and lines a criterion dropped after
+# matching, counted per cause at the site that drops them. The -pr fold's
+# drops are $profile_dropped_samples. Reported by -V filter-summary.
+my $total_lines_unmatched = 0;
+my ( $excluded_time_window, $excluded_filter, $excluded_numeric, $excluded_other ) = ( 0, 0, 0, 0 );
 my ( $total_successes, $total_failures ) = ( 0, 0 );   # run-level classification outcomes (#453 R5)
 my $total_non_qualifying_lines = 0;   # included lines from formats that do not qualify
                                       # for the percentage surfaces (#452 D2 provenance)
@@ -4842,11 +4852,9 @@ sub emit_format_detection_verbose {
     my $recon        = classification_reconciliation();
     my $classified   = $recon->{classified};
     my $unclassified = $recon->{unclassified};
-    my $unmatched    = 0;
     my ($ledger_files, $bound_files) = (0, 0);
     for my $file (@in_files) {
         my $fdd = $format_detection{$file} or next;
-        $unmatched += $fdd->{unmatched_lines} // 0;
         next unless defined $fdd->{match_type};
         $bound_files++;
         $ledger_files++ if $fdd->{event_ledger};
@@ -4869,7 +4877,7 @@ sub emit_format_detection_verbose {
     }
     push @verbose_output, "pct_eligible: $recon->{pct_eligible}";
     push @verbose_output, "non_qualifying_lines: $recon->{non_qualifying}";
-    push @verbose_output, "unmatched_lines: $unmatched";
+    push @verbose_output, "unmatched_lines: $total_lines_unmatched";
     push @verbose_output, "event_ledger_files: $ledger_files/$bound_files";
     push @verbose_output, "rule_changes: $format_cls_rule_changes";
     push @verbose_output, @format_cls_rule_change_lines;
@@ -5387,6 +5395,49 @@ sub emit_statistics_demand_verbose {
 # profile_window_seconds, included_weekdays, samples_included, samples_dropped;
 # the profile_active enum (yes|no). Weekdays are listed in the mode's own axis
 # order (first kept day first), comma-joined.
+# A line no format matched. Counted per file for -V format-detection and
+# once for the run; a file gets its detection record on its first
+# unmatched line even when no match has bound a format yet (Issue #228).
+sub note_unmatched_line {
+    my ($in_file) = @_;
+    my $fdd = $format_detection{$in_file} //= {
+        match_type       => undef,
+        slug             => undef,
+        metrics_observed => 0,
+        event_ledger     => 0,
+        matched_lines    => 0,
+        unmatched_lines  => 0,
+        first_match_line => undef,
+    };
+    $fdd->{unmatched_lines}++;
+    $total_lines_unmatched++;
+}
+
+# Lines a criterion dropped after a format matched them, every cause summed:
+# the one computation -V filter-summary and benchmark-data both print.
+sub lines_excluded_total {
+    return $excluded_time_window + $profile_dropped_samples + $excluded_filter + $excluded_numeric + $excluded_other;
+}
+
+# -V filter-summary: the run's line accounting as the funnel's stages, in
+# order. Every key prints on every run; a cause that was not in force reads 0.
+# Contract: features/503-yaml-aggregate-export.md section -V filter-summary.
+sub emit_filter_summary_verbose {
+    return unless section_requested('filter-summary');
+    push @verbose_output, "=== filter-summary ===";
+    push @verbose_output, "lines_read: $total_lines_read";
+    push @verbose_output, "lines_unmatched: $total_lines_unmatched";
+    push @verbose_output, "lines_excluded: " . lines_excluded_total();
+    push @verbose_output, "excluded_time_window: $excluded_time_window";
+    push @verbose_output, "excluded_profile: $profile_dropped_samples";
+    push @verbose_output, "excluded_filter: $excluded_filter";
+    push @verbose_output, "excluded_numeric: $excluded_numeric";
+    push @verbose_output, "excluded_other: $excluded_other";
+    push @verbose_output, "lines_included: $total_lines_included";
+    push @verbose_output, "lines_highlighted: $total_lines_highlighted";
+    push @verbose_output, "=== END filter-summary ===";
+}
+
 sub emit_profile_verbose {
     return unless section_requested('profile');
 
@@ -12192,6 +12243,7 @@ sub read_and_process_logs {
                     $potential_csv_header = undef;  # Log pattern matched — not a CSV file
                 } elsif ($line_number == 1) {
                     $potential_csv_header = $_;     # Stash as potential CSV header
+                    note_unmatched_line($in_file);  # metadata, matched to no format
                     next;
                 } elsif ($line_number == 2 && defined $potential_csv_header) {
                     # Validate: parse header, check that line 2 has matching field count
@@ -12403,6 +12455,7 @@ sub read_and_process_logs {
                 }
 
                 unless (exists $log_level_set{$category_bucket}) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
+                    $excluded_other++;
                     next;
                 } elsif (!$csv_epoch_timestamp && $match_type == 13) {
                     # Extract milliseconds if present (supports . or , separator, 1-6 digits)
@@ -12419,6 +12472,7 @@ sub read_and_process_logs {
                     # the row instead (Issue #328).
                     if (!defined $timestamp_str || $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/) {
                         $csv_skipped_timestamp_rows++;
+                        $excluded_other++;
                         if ($csv_skipped_timestamp_rows == 1) {
                             print STDERR "Warning: $in_file line $line_number: CSV timestamp '" . (defined $timestamp_str ? $timestamp_str : '') . "' is neither epoch nor ISO (YYYY-MM-DD HH:MM:SS) - skipping row (further rows in this file skipped silently)\n";
                         }
@@ -12476,16 +12530,16 @@ sub read_and_process_logs {
                     if (defined $tod_s && defined $tod_e && $tod_s > $tod_e) {
                         # Window wraps past midnight (e.g. 22:00 to 02:00): keep
                         # the two segments [start,24h) and [0,end).
-                        next unless $tod >= $tod_s || $tod < $tod_e;
+                        unless ($tod >= $tod_s || $tod < $tod_e) { $excluded_time_window++; next; }
                     } else {
-                        next if defined $tod_s && $tod <  $tod_s;
-                        next if defined $tod_e && $tod >= $tod_e;
+                        if (defined $tod_s && $tod <  $tod_s) { $excluded_time_window++; next; }
+                        if (defined $tod_e && $tod >= $tod_e) { $excluded_time_window++; next; }
                         # A bound given with a date (not time-only) stays absolute.
-                        next if !defined $tod_s && $timestamp_epoch <  $filter_range_epoch{'start'};
-                        next if !defined $tod_e && $timestamp_epoch >= $filter_range_epoch{'end'};
+                        if (!defined $tod_s && $timestamp_epoch <  $filter_range_epoch{'start'}) { $excluded_time_window++; next; }
+                        if (!defined $tod_e && $timestamp_epoch >= $filter_range_epoch{'end'})   { $excluded_time_window++; next; }
                     }
                 } else {
-                    next if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} );
+                    if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} ) { $excluded_time_window++; next; }
                 }
 
                 # --profile: fold onto the reference period AFTER range filtering
@@ -12504,18 +12558,18 @@ sub read_and_process_logs {
                     $bucket_epoch = $folded + ($fractional_ms / 1000);
                 }
 
-                next if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) );
-                next if( defined( $include_filter )         && !match_filter($_, $include_filter) );
+                if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) )  { $excluded_filter++; next; }
+                if( defined( $include_filter )         && !match_filter($_, $include_filter) ) { $excluded_filter++; next; }
                 # Outcome filters select on the classification the scan block
                 # already produced (1 success, 2 failure, 0 unclassified) — the
                 # line is never re-tested. An include keeps only its named
                 # outcome; an exclude drops only its named outcome, so
                 # unclassified lines survive every exclude.
                 if( $outcome_filter_active ) {
-                    next if( $include_failure && $line_outcome != 2 );
-                    next if( $include_success && $line_outcome != 1 );
-                    next if( $exclude_failure && $line_outcome == 2 );
-                    next if( $exclude_success && $line_outcome == 1 );
+                    if( $include_failure && $line_outcome != 2 ) { $excluded_filter++; next; }
+                    if( $include_success && $line_outcome != 1 ) { $excluded_filter++; next; }
+                    if( $exclude_failure && $line_outcome == 2 ) { $excluded_filter++; next; }
+                    if( $exclude_success && $line_outcome == 1 ) { $excluded_filter++; next; }
                 }
                 # Numeric threshold filters. A line that carries no value for the
                 # filtered metric can never satisfy a numeric criterion on that
@@ -12523,19 +12577,19 @@ sub read_and_process_logs {
                 # is dropped — and counted, so the exclusion is reported after
                 # processing instead of silently shrinking the totals.
                 if( defined( $filter_duration_min ) || defined( $filter_duration_max ) ) {
-                    if( !defined( $duration ) ) { $numeric_filter_no_metric{duration}++; next; }
-                    next if( defined( $filter_duration_min ) && $duration < $filter_duration_min );	# skip if duration value is below specified minimum filter
-                    next if( defined( $filter_duration_max ) && $duration > $filter_duration_max );	# skip if duration value is above specified maximum filter
+                    if( !defined( $duration ) ) { $numeric_filter_no_metric{duration}++; $excluded_numeric++; next; }
+                    if( defined( $filter_duration_min ) && $duration < $filter_duration_min ) { $excluded_numeric++; next; }	# skip if duration value is below specified minimum filter
+                    if( defined( $filter_duration_max ) && $duration > $filter_duration_max ) { $excluded_numeric++; next; }	# skip if duration value is above specified maximum filter
                 }
                 if( defined( $filter_bytes_min ) || defined( $filter_bytes_max ) ) {
-                    if( !defined( $bytes ) ) { $numeric_filter_no_metric{bytes}++; next; }
-                    next if( defined( $filter_bytes_min ) && $bytes < $filter_bytes_min );		# skip if bytes value is below specified minimum filter
-                    next if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max );		# skip if bytes value is above specified maximum filter
+                    if( !defined( $bytes ) ) { $numeric_filter_no_metric{bytes}++; $excluded_numeric++; next; }
+                    if( defined( $filter_bytes_min ) && $bytes < $filter_bytes_min ) { $excluded_numeric++; next; }		# skip if bytes value is below specified minimum filter
+                    if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max ) { $excluded_numeric++; next; }		# skip if bytes value is above specified maximum filter
                 }
                 if( defined( $filter_count_min ) || defined( $filter_count_max ) ) {
-                    if( !defined( $count ) ) { $numeric_filter_no_metric{count}++; next; }
-                    next if( defined( $filter_count_min ) && $count < $filter_count_min );		# skip if count value is below specified minimum filter
-                    next if( defined( $filter_count_max ) && $count > $filter_count_max );		# skip if count value is above specified maximum filter
+                    if( !defined( $count ) ) { $numeric_filter_no_metric{count}++; $excluded_numeric++; next; }
+                    if( defined( $filter_count_min ) && $count < $filter_count_min ) { $excluded_numeric++; next; }		# skip if count value is below specified minimum filter
+                    if( defined( $filter_count_max ) && $count > $filter_count_max ) { $excluded_numeric++; next; }		# skip if count value is above specified maximum filter
                 }
 
                 # take note if any results were found in this file
@@ -13258,18 +13312,7 @@ sub read_and_process_logs {
                     }
                 }
             } else {
-                # Format-detection: unmatched lines tracked even before any
-                # match has bound a slug for this file (Issue #228).
-                my $fdd = $format_detection{$in_file} //= {
-                    match_type       => undef,
-                    slug             => undef,
-                    metrics_observed => 0,
-                    event_ledger     => 0,
-                    matched_lines    => 0,
-                    unmatched_lines  => 0,
-                    first_match_line => undef,
-                };
-                $fdd->{unmatched_lines}++;
+                note_unmatched_line($in_file);
             }
         }
 
@@ -16236,6 +16279,7 @@ sub print_verbose_output {
     print "FILES\t" . join(';', @files_processed) . "\t$total_file_size\n";
 
     print "lines_read\t$total_lines_read\n";
+    print "lines_excluded\t" . lines_excluded_total() . "\n";
     print "lines_included\t$total_lines_included\n";
 
     # Timing rows (raw seconds)
@@ -18704,6 +18748,8 @@ sub pipeline_render {
     emit_index_readback_verbose();
 
     emit_bin_counter_mode_verbose();
+
+    emit_filter_summary_verbose();
 
     emit_format_detection_verbose();
 
