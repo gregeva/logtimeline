@@ -11730,9 +11730,12 @@ sub adapt_to_command_line_options {
     # CSV surfaces and the bytes-family sort operands — nothing is rendered from
     # them (the rendered bytes columns read total_bytes, which stays ungated).
     # A run with no such consumer skips the per-line capture at both scopes.
+    # The sort operand only ranks the top-messages table, so it is a consumer only
+    # while a message is retained: under -n 0 the sort is inert (#458 D3) and holds
+    # no demand, while the CSV term stands on its own.
     $bytes_aggregate_demand = ( !$omit_bytes && (
            $write_messages_to_csv
-        || $sort_key =~ /^bytes_(?:occurrences|min|mean|max)$/
+        || ( $capture_messages && $sort_key =~ /^bytes_(?:occurrences|min|mean|max)$/ )
     ) ) ? 1 : 0;
     # Per-message outcome-counter demand (#517): the per-message success/failure
     # counters reach the user only through the MESSAGES CSV successes/failures
