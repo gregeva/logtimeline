@@ -801,6 +801,7 @@ my $bucket_stats_capture_mode      = undef;   # 'raw' or 'bin' (set before parsi
 # the consumer half of that conjunction. One boolean per statistics store.
 my $bucket_duration_stats_demand   = 0;       # per-time-bucket statistics (%log_analysis): timeline latency column, STATS CSV
 my $message_duration_stats_demand  = 0;       # per-message-key statistics (%log_messages): messages-table statistics variant, MESSAGES CSV
+my $bytes_aggregate_demand         = 0;       # bytes_occurrences/bytes_min/bytes_max at both scopes: CSV surfaces and bytes-family sorts (#516)
 
 # Statistics-group demand registry (#305): extends the store-level demand
 # above to statistic-group granularity. The 22-statistic duration ladder is
@@ -11723,6 +11724,15 @@ sub adapt_to_command_line_options {
     # MESSAGES CSV statistics columns - exist only for retained messages, so
     # retention is the single condition on this store's demand.
     $message_duration_stats_demand = ( !$omit_durations && $capture_messages ) ? 1 : 0;
+    # Bytes aggregate-family demand (#516): bytes_occurrences/bytes_min/bytes_max
+    # (and the bytes_mean derived from them) reach the user only through the two
+    # CSV surfaces and the bytes-family sort operands — nothing is rendered from
+    # them (the rendered bytes columns read total_bytes, which stays ungated).
+    # A run with no such consumer skips the per-line capture at both scopes.
+    $bytes_aggregate_demand = ( !$omit_bytes && (
+           $write_messages_to_csv
+        || $sort_key =~ /^bytes_(?:occurrences|min|mean|max)$/
+    ) ) ? 1 : 0;
 
     # Statistics-group demand (#305): layer per-group demand on top of the
     # store-level booleans above, from the consumer declarations in
@@ -12783,11 +12793,13 @@ sub read_and_process_logs {
                         if( defined $bytes && !$omit_bytes ) {
                             my $e = $log_messages{$category}{$log_key};
                             $e->{total_bytes} += $bytes;
-                            if( $e->{bytes_occurrences}++ ) {
-                                $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
-                                $e->{bytes_max} = $bytes if $bytes > $e->{bytes_max};
-                            } else {
-                                $e->{bytes_min} = $e->{bytes_max} = $bytes;
+                            if( $bytes_aggregate_demand ) {
+                                if( $e->{bytes_occurrences}++ ) {
+                                    $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
+                                    $e->{bytes_max} = $bytes if $bytes > $e->{bytes_max};
+                                } else {
+                                    $e->{bytes_min} = $e->{bytes_max} = $bytes;
+                                }
                             }
                         }
 
@@ -13060,11 +13072,13 @@ sub read_and_process_logs {
                             $e->{total_bytes} += $bytes;
                             $e->{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;
                         }
-                        if( $e->{bytes_occurrences}++ ) {
-                            $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
-                            $e->{bytes_max} = $bytes if $bytes > $e->{bytes_max};
-                        } else {
-                            $e->{bytes_min} = $e->{bytes_max} = $bytes;
+                        if( $bytes_aggregate_demand ) {
+                            if( $e->{bytes_occurrences}++ ) {
+                                $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
+                                $e->{bytes_max} = $bytes if $bytes > $e->{bytes_max};
+                            } else {
+                                $e->{bytes_min} = $e->{bytes_max} = $bytes;
+                            }
                         }
                     }
 

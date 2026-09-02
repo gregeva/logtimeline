@@ -1,0 +1,49 @@
+====================================================================================================
+Profile:  /Users/gregeva/Documents/GitHub/logtimeline/tests/profile/results/0180-parse-regression/100k/nytprof.out
+Script:   /Users/gregeva/Documents/GitHub/logtimeline/ltl
+Perl:     5.42.2
+CPU time: 2.7633 s (sum of exclusive times)
+Subs:     25 shown of 452 matching (from 1158 total)
+Sort:     incl time | Filter: Perl subs only
+ltl -V:   lines_read=100000  total=4.528s  rss=51 MB
+====================================================================================================
+
+Rank  Subroutine                                               Calls   Incl(s)   Excl(s)   ms/call   %Tot
+----------------------------------------------------------------------------------------------------
+   1  pipeline_parse                                               1    2.6629  0.000038  2662.909   96.4
+   2  read_and_process_logs                                        1    2.6577    1.7587  2657.684   96.2
+   3  __ANON__[(eval 45)[/Users/gregeva/Documents/GitHu...    100045    0.7526    0.5374     0.008   27.2
+   4  get_memory_usage                                             7    0.0267    0.0002     3.815    1.0
+   5  pipeline_finalize                                            1    0.0239  0.000048    23.915    0.9
+   6  measure_memory_structures                                    5    0.0202  0.000062     4.045    0.7
+   7  calculate_all_statistics                                     1    0.0195    0.0064    19.475    0.7
+   8  pipeline_detect                                              1    0.0130  0.000009    12.968    0.5
+   9  build_format_registry                                        1    0.0130    0.0023    12.954    0.5
+  10  calculate_statistics                                        13    0.0127    0.0042     0.975    0.5
+  11  Term::ReadKey::GetTerminalSize                               1    0.0125    0.0001    12.545    0.5
+  12  format_scan_sub_resolve                                      1    0.0114  0.000013    11.354    0.4
+  13  compile_format_scan_sub                                      1    0.0113    0.0037    11.341    0.4
+  14  pipeline_render                                              1    0.0113  0.000087    11.261    0.4
+  15  BEGIN@50                                                     1    0.0069    0.0003     6.942    0.3
+  16  Text::CSV::_load                                             2    0.0066  0.000038     3.296    0.2
+  17  Text::CSV::_load_pp                                          1    0.0065         -     6.549    0.2
+  18  Text::CSV::BEGIN@1.1                                         1    0.0065    0.0062     6.525    0.2
+  19  BEGIN@38                                                     1    0.0060    0.0016     6.017    0.2
+  20  BEGIN@37                                                     1    0.0058    0.0015     5.817    0.2
+  21  compile_format_extractor                                    34    0.0057    0.0051     0.168    0.2
+  22  BEGIN@41                                                     1    0.0044    0.0031     4.429    0.2
+  23  pipeline_accumulate                                          1    0.0038  0.000051     3.778    0.1
+  24  XSLoader::load                                               8    0.0036    0.0036     0.444    0.1
+  25  BEGIN@49                                                     1    0.0023    0.0007     2.299    0.1
+
+Note: %Tot = incl_time / 2.7633 s (total Perl CPU time)
+      Use --all to include XSubs [xs] and opcodes [op]
+      Use --sort excl to rank by exclusive time
+
+====================================================================================================
+Cross-Validation: NYTProf call counts vs ltl -V output
+----------------------------------------------------------------------------------------------------
+  read_and_process_logs                     NYTProf calls=1  ltl-V lines_read=100000
+    (called once; loops internally over lines)
+
+  [OK] All cross-validation checks within tolerance.
