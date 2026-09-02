@@ -223,7 +223,7 @@ series:
         min: 128
         mean: 3175.7
         max: 9437184
-      count:                                  # STATS CSV count family, when active (-ic)
+      count:                                  # STATS CSV count family, when active (any bucket holds a count observation; -oc switches capture off)
         occurrences: 0
       sessions: 812                           # STATS CSV `sessions`, when active
       threadpools: { http-nio-8080-exec: 412, catalina-exec: 9 }    # -tpa/-tpas columns, when active (R3 caveat)
@@ -336,6 +336,7 @@ Mandatory triggers under docs/process/workflow.md § Feature lifecycle, step 2: 
 - [ ] With `-hm duration`, every populated bucket carries the heatmap ladder down to the depth its `heatmap.occurrences` supports, and each of `p50 p95 p99 p999` lies in the heatmap cell its marker index names; without `-hm`, no bucket carries `heatmap`. [assertable]
 - [ ] A bucket with fewer than 1,000 duration observations carries no `duration.p99`; one with fewer than 40 carries no `duration.p75`; `min`/`mean`/`max` are present on every bucket with at least one observation. [assertable]
 - [ ] Every active STATS CSV column family on a run appears as a block of the same bucket in the file, with equal values under `-cp full`. [assertable — cross-surface]
+- [ ] On every scenario in `tests/statistics-drift/scenarios.tsv`, each per-bucket value the file carries equals the STATS CSV value of the same bucket and column from the same run, to the last digit (those scenarios pin `-cp full`), and every column the block leaves out is one D15 (a percentile resting on too few values is withheld) gates on that block's own count. The STATS CSV rows are the ones the statistics harness has already validated against its NumPy/SciPy oracle (`tests/validate-statistics.sh` layer 3), so the file is tied to the oracle through the CSV: oracle → STATS CSV → file. Time-bucket rows only; the MESSAGES CSV and the run-level values are outside this chain. [assertable — cross-surface; runs in `tests/validate-aggregate-export.sh` over the CSV cache the statistics harness fills, so the two harnesses read the same run]
 - [ ] `population.formats` lists the distinct slugs `-V format-detection`'s `legend:` names, in its order, on the format-switch fixture (2) and on a single-format fixture (1); `files_event_ledger` / `files_bound` equal that section's `event_ledger_files: N/M`. [assertable — cross-surface]
 - [ ] `observation.start` and `observation.end` are byte-identical to the two timestamps in the run-summary heading, on a default run, under `-s` and under `-pr week` (where they read as weekday and time); `observation.duration_seconds` equals the difference of the underlying epochs; the heading carries the same span in brackets after the end time, and `observation.duration` is that same string. [assertable; the heading by rendered-output inspection]
 - [ ] Every bucket `timestamp` is byte-identical to the STATS CSV `timestamp` value of the same row, including under `-pr`. [assertable — cross-surface]
@@ -344,6 +345,7 @@ Mandatory triggers under docs/process/workflow.md § Feature lifecycle, step 2: 
 - [ ] `options.command-line` and `options.environment` in the file are byte-identical to the text after `command-line options:` and `environment options:` on the terminal for the same run, colour stripped. [assertable — cross-surface]
 - [ ] The file parses under a strict YAML parser in the harness. [assertable]
 - [ ] The step 1(b) before/after gate is run on a case with active filters and reports its figures. [assertable — process]
+- [ ] The benchmark matrix in `tests/baseline/run-benchmark.sh` gains the export's expected use as a scenario: `heatmap-histogram-export|-hm -hg -n 0 -o`, the existing `heatmap-histogram` scenario plus the two options the use case adds (`-hm -hg` default to the duration metric, so this is `-hg duration -hm -n 0 -o`). Both surfaces feeding the file are on, so the file is as large as a run can make it, and it runs on every file selection of the tier, so the cost reads across the log populations. Its delta against `heatmap-histogram` on the same file selection carries two changes together, the export and the message store switched off; `no-messages` against `standard` on the same selection isolates the second, so the export's own cost is the difference of the two deltas. The before/after gate for this issue reports this scenario's figures. [assertable — process]
 - Unassertable, recorded: that the recorded `options` string reproduces the run (a re-execution round-trip is a methodology-side check; the harness asserts the string is lossless against `@ORIGINAL_ARGV`, not that it re-runs).
 
 ## Observability and harness obligations
@@ -376,6 +378,8 @@ lines_highlighted: N
 - `lines_unmatched` — the same run total `format-detection / classification` prints as `unmatched_lines`, computed once and read by both.
 - `lines_excluded` — the sum of the five `excluded_*` counters (D12 causes: the time window; the `-pr` fold; the content and outcome filters `-i/-e/-ipf/-epf/-if/-ef/-is/-es`; the numeric thresholds `-dmin/-dmax/-bmin/-bmax/-cmin/-cmax`, including a line dropped for carrying no value for the filtered metric; other — category outside `%log_level_set`, unparseable CSV timestamp). The `LINES EXCLUDED` row prints `lines_excluded`.
 - `lines_highlighted` — `$total_lines_highlighted` (the `HIGHLIGHTED` row); `0` when no highlight is active.
+- CSV cache (`tests/lib/csv-cache.sh`): a cache miss already runs `ltl … -o` in a scratch directory and keeps the two CSVs under deterministic names; it keeps the `.yaml` written beside them the same way and exports its path (`CSV_CACHE_AGGREGATE`), so the oracle-to-file chain above reads the file from the same run as the CSVs it is compared with.
+- Benchmark tooling: the new `heatmap-histogram-export` scenario joins the scenario list `tests/baseline/compare-results.sh` hard-codes for its table view, and the `run_test` invocation for a scenario carrying `-o` writes its output files to a scratch directory and removes them after the run, never into the working directory. The cross-product comment at the head of `run-benchmark.sh` (7 file selections × 10 scenarios) is updated with the count.
 - Harness `tests/validate-aggregate-export.sh`: rules TSV per key (type, required/conditional on the producing option, gate), the reconciliation identities, the cross-surface equalities above, a sabotage proof per new assertion, and the runtime-warning check. Its `ltl` invocations are shaped to the assertion (`-bs 1440 -oe` on the smallest fixture carrying the signal).
 
 ## Documentation surfaces
@@ -387,6 +391,7 @@ lines_highlighted: N
 - `docs/usage.md` § sort options states `p999` needs ~1k observations; the explain surface and the arithmetic say ~10,000. The usage row is wrong by a decade.
 - `features/453-success-failure-classification-event-ledger.md` § *Per-format declarations* still shows the access family's criteria as `status_code ^[123]\d\d$`; its own D26 amended them to `category_bucket ^(?:1xx|2xx|3xx)$`, which is what the code declares.
 - `tests/HARNESS-DESIGN.md` § Reserved section names lacks `csv-output` and `percentile-algorithm`, both shipped.
+- `-ic` is parsed, echoed on `-V runtime-config` and read by nothing (#514, count metric capture and display become explicit, records its retirement); the count family's presence in the STATS CSV, and so in this file, is decided by observation alone (`count_occurrences` on any bucket). The schema comment above says so; nothing here depends on `-ic`.
 - `build/cpanfile` carries `requires 'Cwd';` while nothing in `ltl` uses it (moot once D9 lands).
 - `print_run_options()` drops an option value that is string-equal to a file operand (`-e <path> <path>` echoes without the pattern) — a display defect worth its own bug report.
 - `-lf`, `-pr` and `--detection-window` are absent from `_resolve_short_to_long()`'s `@specs`, so `-V runtime-config` can never report them; `%option_overrides` is never written, so its clamp annotation is dead. Both are `-V runtime-config` defects outside this issue's scope.
