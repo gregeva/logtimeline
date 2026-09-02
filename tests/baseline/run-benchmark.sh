@@ -134,6 +134,8 @@ run_test() {
             echo "SKIP: $test_name — no files matched: $LOGS_DIR/$files_glob" >&2
             return 1
         fi
+        # absolute, because the run below leaves this directory
+        [[ "$f" == /* ]] || f="$PWD/$f"
         file_args="$file_args $f"
         ((found++))
     done
