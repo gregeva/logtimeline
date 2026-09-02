@@ -237,7 +237,7 @@ run_doc_example() {
             label       "doc example exited $ec" \
             asserts     "Every non-skipped ltl example in user-facing documentation parses its options and runs to completion (exit 0) against a known fixture. A non-zero exit means an option was renamed, removed, or the example was wrong from the start." \
             produced_by 'docs/usage.md (example) + ltl option parser' \
-            contract    'features/225-test-harness-coverage-gaps.md section #234 - docs/usage.md is the canonical wiki source per CLAUDE.md release-process step 15; broken examples ship to the wiki' \
+            contract    'features/225-test-harness-coverage-gaps.md section #234 - docs/usage.md is the canonical wiki source per docs/process/workflow.md section Post-release (wiki sync); broken examples ship to the wiki' \
             detail      "command: $LTL $LTL_INJECT $ltl_args ; stderr: $(head -3 "$stderr_file" 2>/dev/null | tr '\n' ' ')"
         return
     fi

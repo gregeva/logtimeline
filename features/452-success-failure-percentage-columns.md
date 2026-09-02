@@ -219,7 +219,7 @@ Recorded so the walkthrough starts from the code, not from the issue text.
 - **F9 — Per-bucket denominators are legitimately zero.** `%bucket_outcomes` is sparse;
   buckets with no classified line (including injected empty buckets) have no entry.
   What a zero-denominator cell renders is undecided (Q4), and per the observation-count
-  rule (CLAUDE.md 2026-07-09) it must be distinguishable from a measured 0%.
+  rule (CLAUDE.md § Before writing or changing code) it must be distinguishable from a measured 0%.
 - **F10 — #503 (YAML aggregate export) needs raw values, not rendered strings.** Its
   contract is exact figures — no rounding — over the same classified denominator, plus
   an event-ledger state of true/false/mixed for the run. The per-bucket ratio must be

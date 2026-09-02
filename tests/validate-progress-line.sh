@@ -383,7 +383,7 @@ assert_command \
     label       'no progress frame and no completion line under --disable-progress' \
     asserts     'The progress line is an indicator, so --disable-progress suppresses it entirely — including the completion line. This is the only suppression: the indicator gets no option of its own' \
     produced_by 'read_and_process_logs() in ltl (every progress print is gated on $disable_progress)' \
-    contract    'features/446-overall-progress-indicator.md D6 — suppression is --disable-progress only; CLAUDE.md § CLI option conventions, which forbids gating BEHAVIOURAL notices behind that flag but requires it for indicators'
+    contract    'features/446-overall-progress-indicator.md D6 — suppression is --disable-progress only; CLAUDE.md § Before writing or changing code, which forbids gating BEHAVIOURAL notices behind that flag but requires it for indicators'
 
 # The analysis itself must be unaffected by which of the two modes ran: the
 # progress line reads state, it never writes any. The summary's included-line
@@ -518,7 +518,7 @@ assert_command \
     contract    'features/446-overall-progress-indicator.md section Implementation — flush_deferred_notices() empties the queue once the read is over'
 
 # The deferral changes WHEN a notice is written, never whether: a behavioural
-# notice always prints, --disable-progress or not (CLAUDE.md § CLI option
+# notice always prints, --disable-progress or not (CLAUDE.md section Before writing or changing code:
 # conventions). Without this, deferral could silently become suppression.
 QUIET_NOTICE="$TMP_DIR/quiet-notice.err"
 set +e
@@ -531,7 +531,7 @@ assert_command \
     label       'the notice still prints under --disable-progress' \
     asserts     'Deferral moves a notice past the read; it never suppresses one. --disable-progress silences the indicator, and a behavioural notice is not an indicator' \
     produced_by 'flush_deferred_notices() in ltl — the flush is not gated on $disable_progress' \
-    contract    'CLAUDE.md section CLI option conventions — user-facing behavioural messages are never gated behind --disable-progress'
+    contract    'CLAUDE.md section Before writing or changing code — user-facing behavioural messages are never gated behind --disable-progress'
 
 # ---------------------------------------------------------------------------
 

@@ -46,7 +46,7 @@ Steps 1-4 are sequential prerequisites; all are shipped. Step 5 (this feature) c
 
 ### Integration
 
-Work lands on the issue branch `287-message-stats-bin-counter-data-model` per CLAUDE.md's development workflow. Release-branch integration is decided at the implementation-ticket level.
+Work lands on the issue branch `287-message-stats-bin-counter-data-model` per docs/process/workflow.md. Release-branch integration is decided at the implementation-ticket level.
 
 ## Terminology
 
@@ -347,7 +347,7 @@ This feature does NOT own:
 | `tests/statistics-drift/baselines/{apache,tomcat,thingworx,codebeamer}-bin-data-model/messages.csv` | Re-capture against the new bin path (R9.1). |
 | `docs/usage.md` (the `-mdm` entry) | Update the description: remove "selector resolved but currently only the raw reduction is implemented for this surface; `bin` lands in a follow-up". |
 | `print_help()` | Same update for the `-mdm` help line at `ltl:3773`. |
-| `releases/v0.15.0.md` | One bullet referencing #287 per CLAUDE.md release process. |
+| `releases/v0.15.0.md` | One bullet referencing #287 per docs/process/workflow.md § Merge and close. |
 | `CLAUDE.md` | No change unless a release-process surface mentions the surface-3 fallback; sweep to confirm. |
 
 ## Algorithm appendix

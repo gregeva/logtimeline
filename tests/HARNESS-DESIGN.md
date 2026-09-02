@@ -668,4 +668,4 @@ Render-invariant harnesses (the category above) were added after Issue #292: thr
 - `ltl --help` — current `-V` surface and known section names
 - `ltl -V list` — runtime-discoverable registry of section names and one-line descriptions
 - Issue #226 — framework that this document is built on
-- CLAUDE.md § `-V` discipline — the mandatory pointer back to this document
+- CLAUDE.md § Before writing or changing code and § Where to look — the mandatory pointers back to this document

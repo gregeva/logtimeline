@@ -119,7 +119,7 @@ profile" rather than "a single weekends profile".
 
 ## Merge gate
 
-The change touches `ltl` and four harness-side files: the full `tests/validate-*.sh` suite and the before/after benchmark on this machine apply (CLAUDE.md per-feature step 1).
+The change touches `ltl` and four harness-side files: the full `tests/validate-*.sh` suite and the before/after benchmark on this machine apply (docs/process/workflow.md § Completion gate).
 
 ## Related
 

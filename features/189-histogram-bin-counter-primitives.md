@@ -49,7 +49,7 @@ Steps 1 and 2 are sequential (the contract must be locked before the prototype i
 
 ### Integration
 
-All work lands on feature branches per CLAUDE.md's release process. Specific release-branch integration is the implementation ticket's call, not the contract's.
+All work lands on feature branches per docs/process/workflow.md. Specific release-branch integration is the implementation ticket's call, not the contract's.
 
 ## Terminology
 

@@ -89,7 +89,7 @@ DPM5K_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k
 # The version banner is normalised to [VERSION] so the goldens survive a version
 # bump. The pattern must accept the branch marker as well as the release number:
 # a feature branch stamps $version_number as X.Y.Z-{issue} (e.g. 0.18.0-432) for
-# the life of the branch, per CLAUDE.md § Version Stamping, so every development
+# the life of the branch, per docs/process/workflow.md § Version stamping, so every development
 # build carries a suffix. Matching only [0-9.]+ made every scenario fail on any
 # branch, for the one reason the goldens are explicitly meant to ignore.
 #

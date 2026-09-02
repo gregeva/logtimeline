@@ -255,7 +255,7 @@ is verified by benchmark (see the performance obligation above), not by harness.
 
 ### D10 — No prototype is required; D4 removed the hot-path change
 
-CLAUDE.md § Development Phases makes prototyping mandatory when work introduces a new
+docs/process/workflow.md § Feature lifecycle makes prototyping mandatory when work introduces a new
 per-line hot-path cost. **D4 removes that cost from the design**: the gate is derived
 after the read loop from accumulators that already exist, so there is no new per-line
 statement to size and nothing for a staged-scale prototype to compare.

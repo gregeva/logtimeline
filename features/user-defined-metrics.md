@@ -373,7 +373,7 @@ Verification gates: `validate-help-content.sh`, `validate-help-layout.sh`, `CI=1
 - First-ever UDM coverage in `tests/csv-output/`: the `udm-counting` scenario (all five counting aggregations on ApplicationLog `[U:]`) with `udm-counting`-family column rules in both rules TSVs. A companion `udm-numeric` scenario for the five-column numeric family was drafted and immediately caught a pre-existing #268 gap (MESSAGES-CSV numeric-UDM columns bypass `--csv-precision` formatting); per user decision it was dropped pending the fix — filed as #324. Resolved with #324: the MESSAGES emission builds the same column names as the header and routes every UDM value through `format_csv_value()`, so each value resolves to the same precision family as its column (numeric-UDM columns carry the `count` family per `resolve_csv_column_family()`); the `udm-numeric` scenario (`job_ms:ms:max:durationMS` on ScriptLog) now runs in `tests/csv-output/` with `udm-numeric`-family rules rows in both rules TSVs (the drafted scenario was never committed, so it was recreated rather than restored).
 - `-g` consolidation run with counting UDMs (merge branch); `-mem` on a large log observing `%udm_distinct` size and free-after-count.
 - Suites: validate-help-content (add `-udm` function-list assertion), validate-help-layout, validate-csv-output, validate-doc-examples (new usage.md example is executed), validate-regression.
-- Docs in the same commit as help changes (CLAUDE.md alignment rule): `print_help()` `-udm` function list, docs/usage.md spec table + example + alias table, README.
+- Docs in the same commit as help changes (CLAUDE.md § Before writing or changing code): `print_help()` `-udm` function list, docs/usage.md spec table + example + alias table, README.
 
 ### Risks
 

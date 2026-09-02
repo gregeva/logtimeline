@@ -97,4 +97,4 @@ is the decision.
 
 - `docs/test-driven-development.md` — where the (d) trigger comes from
 - `tests/HARNESS-DESIGN.md` — building the harness once the method is known
-- CLAUDE.md § *Development Phases* — where prototyping sits in the workflow
+- `docs/process/workflow.md` § Feature lifecycle — where prototyping sits in the workflow

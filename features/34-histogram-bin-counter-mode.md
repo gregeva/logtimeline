@@ -42,7 +42,7 @@ Steps 1, 2, and 3 are sequential prerequisites. Step 4 (this feature's work) can
 
 ### Integration
 
-Work lands on feature branches per CLAUDE.md's release process. Specific release-branch integration is this implementation ticket's choice.
+Work lands on feature branches per docs/process/workflow.md. Specific release-branch integration is this implementation ticket's choice.
 
 ## Terminology
 
@@ -170,7 +170,7 @@ Empirical validation (V6 in `prototype/189-bin-counter-primitives.pl` against th
 
 Internal precision improves because the streaming partition runs at locked bpd=616 (Level 9, HdrHistogram 3-sig-digit reference). The finalize re-bin's per-bucket displacement is a **bar-and-cell rendering bound only** — at that bpd it is below the visibility threshold of a 9-character-tall ASCII histogram on both canonical datasets (V8 sweep evidence: 1.10% on your file, 5.78% on 148MB file — both well under the ~11% threshold for one character row of visible difference). It is not the accuracy bound on the percentile numbers: those are computed at bpd=616 and never pass through the projection, so their bound is R4's own bin-resolution bound at the streaming resolution.
 
-Implementation tickets must validate against the existing baseline-regression harness (`tests/baseline/`, per CLAUDE.md) to confirm:
+Implementation tickets must validate against the existing baseline-regression harness (`tests/baseline/`, per docs/process/workflow.md) to confirm:
 - F2: byte-equivalent display output within the 1-column X-offset algebraic bound.
 - F3: visible histogram structure (spike-trough patterns, multi-modal peaks) preserved per V8 evidence. Per-bucket displacement at locked bpd=616 is below visual threshold; the spike-trough-spike pattern of legacy renders is reproduced exactly.
 
@@ -303,7 +303,7 @@ Validation on the canonical 148MB Tomcat log:
 
 ## Validation
 
-This section defines the **validation scenarios** for the heatmap and histogram migrations. The validation harness lives in `tests/baseline/` per CLAUDE.md.
+This section defines the **validation scenarios** for the heatmap and histogram migrations. The validation harness lives in `tests/baseline/` per docs/process/workflow.md.
 
 ### Contract-level scenarios from #187
 

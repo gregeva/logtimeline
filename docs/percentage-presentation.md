@@ -30,7 +30,7 @@ Degradation, when the formatted value does not fit `width`: drop decimals one at
 
 ## Why one sub
 
-Two percentage renderers had already diverged before this convention existed (the memory rows' `(<1%)` field and #453's three-significant-digit row value), and two more were specified without reference to either. One resolution surface per value class is a standing rule of this repository (CLAUDE.md, 2026-07-09): the formatter is one named sub, and adding a percentage anywhere means calling it with parameters, never writing a new one.
+Two percentage renderers had already diverged before this convention existed (the memory rows' `(<1%)` field and #453's three-significant-digit row value), and two more were specified without reference to either. One resolution surface per value class is a standing rule of this repository (CLAUDE.md § Before writing or changing code): the formatter is one named sub, and adding a percentage anywhere means calling it with parameters, never writing a new one.
 
 ## Migration of the existing sites
 

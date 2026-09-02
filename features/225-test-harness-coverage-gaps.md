@@ -31,7 +31,7 @@ Decisions that apply across multiple sub-issues are captured here.
 - **Harness language**: bash, matching the `tests/HARNESS-DESIGN.md` reference implementation (`tests/validate-histogram-bin-counters.sh`). Earlier per-sub-issue research often recommended Perl; the doctrine — issued after the research — supersedes.
 - **Self-documenting assertions are mandatory.** Every assertion records `asserts`, `produced_by`, and `contract` fields surfaced on failure.
 - **Hidden-option convention**: inline `# hidden` comment trailing the GetOptions line. Adopted by #232; available for any future sub-task that needs to distinguish intentionally-hidden from accidentally-missing flags.
-- **`docs/usage.md` mismatches are hard failures** wherever a harness covers the usage-table surface. The wiki source-of-truth status (CLAUDE.md release-process step 15) makes usage.md part of the user-facing contract, not a soft reference.
+- **`docs/usage.md` mismatches are hard failures** wherever a harness covers the usage-table surface. The wiki source-of-truth status (docs/process/workflow.md § Post-release, wiki sync) makes usage.md part of the user-facing contract, not a soft reference.
 
 ---
 
@@ -48,7 +48,7 @@ Decisions that apply across multiple sub-issues are captured here.
 2. Every GetOptions short form is documented in `--help`.
 3. The version string emitted at every in-binary site (`-v`, `-V benchmark-data` TSV row) agrees with `$version_number` in source.
 
-This sub-issue exists because of a documented history of drift (CLAUDE.md observation 2026-02-07: "When adding or modifying CLI options, update `print_help()` in ltl and the options reference in README.md").
+This sub-issue exists because of a documented history of drift (CLAUDE.md § Before writing or changing code, then a CLAUDE.md observation dated 2026-02-07: "When adding or modifying CLI options, update `print_help()` in ltl and the options reference in README.md").
 
 ### Code surfaces touched
 
@@ -179,7 +179,7 @@ This is exactly the class of regression the harness is meant to surface.
 
 `tests/validate-doc-examples.sh` (with `tests/extract-doc-examples.pl`) — runs every `ltl` example in `docs/usage.md` against real (truncated) fixtures, asserting exit 0 and non-empty stdout. Catches the documentation-drift class: option renames, removed flags, restructured `-V` blocks that break documented `-V | grep` patterns.
 
-CLAUDE.md release-step 15 pushes `docs/usage.md` to the wiki at every release. Before this sub-issue, there was nothing between "release-branch ready" and "wiki overwritten with possibly-broken examples." This harness slots in at step 8b — after the version bump, before benchmarks — to gate broken examples from shipping.
+docs/process/workflow.md § Post-release pushes `docs/usage.md` to the wiki at every release. Before this sub-issue, there was nothing between "release-branch ready" and "wiki overwritten with possibly-broken examples." This harness slots in at step 8b — after the version bump, before benchmarks — to gate broken examples from shipping.
 
 ### Code surfaces touched
 

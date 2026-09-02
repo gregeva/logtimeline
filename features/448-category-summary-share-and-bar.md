@@ -69,7 +69,7 @@ As originally locked, D7 read "monochrome affects the category rows only … a r
 
 ## Acceptance criteria
 
-Agreed 2026-08-31 for the D7 rescope, before the code (CLAUDE.md § Development Phases 1a). All four are assertable in `tests/validate-summary-contribution-bar.sh`.
+Agreed 2026-08-31 for the D7 rescope, before the code (docs/process/workflow.md § Feature lifecycle, step 1a). All four are assertable in `tests/validate-summary-contribution-bar.sh`.
 
 - **A1 — Under `-sm` the summary table emits no colour of its own**, on any row, category or below-the-separator, whether or not a bar covers it, `-sbo` included. Asserted as the absence of colour across the table's character range rather than row by row, so a row given a colour later is covered without extending the assertion; the only escapes permitted inside the table are the bar's plain reverse video and the resets that close it.
 - **A2 — `-sm` changes colour only.** Every bar length, its direction, and every character of row text is identical to the same run without it.
@@ -141,7 +141,7 @@ The shared CSV capture cache never expired, so artifacts left behind by an earli
 
 ## Merge gate
 
-Touches `ltl`, harnesses and goldens: the full `tests/validate-*.sh` suite and the before/after benchmark on this machine (CLAUDE.md per-feature step 1).
+Touches `ltl`, harnesses and goldens: the full `tests/validate-*.sh` suite and the before/after benchmark on this machine (docs/process/workflow.md § Completion gate).
 
 ## Related
 

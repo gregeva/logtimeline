@@ -112,4 +112,4 @@ under the "unknown" state above.
 
 - `tests/HARNESS-DESIGN.md` — building the harness once you know what to assert
 - `prototype/README.md` — resolving an unknown verification method
-- CLAUDE.md § *Development Phases* — where this sits in the workflow
+- `docs/process/workflow.md` § Feature lifecycle — where this sits in the workflow

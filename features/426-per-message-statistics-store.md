@@ -404,7 +404,7 @@ Numbered so the later locked decisions map one-for-one. Status after the prototy
   N timed runs; report **median with min–max range**; TSV
   `candidate / fixture / lines / metric / median / min / max`; `Devel::Size::total_size`
   and RSS delta as their own metric rows.
-- **Staging**: 1k → 10k → 100k → 1M, per the CLAUDE.md prototype rule.
+- **Staging**: 1k → 10k → 100k → 1M, per docs/process/workflow.md § Feature lifecycle, prototyping.
 - **Fixture**: high-cardinality, derived from the `humungous-log-uniqueness` source
   (`ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log`, 286,659 distinct keys) —
   deterministic slices, no sampling, in the shape of `prototype/58-generate-fixtures.sh`.
@@ -678,7 +678,7 @@ to a later session. Nothing below is started.
 ### Do this first, next session
 
 Before any prototype code, run the audit that should have preceded this session's framing
-(the mechanical gate now recorded in CLAUDE.md § observations, 2026-08-25):
+(the mechanical gate now recorded in CLAUDE.md § Before planning, scoping, or stating a design view):
 
 1. **Enumerate the impacted surfaces from the code** — for each row of `%TIER_BPD`
    (`histogram`, `heatmap`, `bucket-stats`, `message-stats`): the globals holding its
@@ -964,7 +964,7 @@ wholly uncovered (R2)*
 | `docs/explain/histogram.md` | "Precision and tuning" | Bin resolution tied to `-dmp` |
 | `ltl` `--explain` strings | `$explain_percentiles_compute`, `$explain_{min,max,iqr,skewness,kurtosis}_compute` | Same claims, second surface; nothing enforces agreement between the two |
 
-Per CLAUDE.md's 2026-05-23 rule none of this may name internal identifiers, so a *rename*
+Per CLAUDE.md § Before writing a file, an issue body, or a comment (no internals in user-facing prose) none of this may name internal identifiers, so a *rename*
 does not propagate here — but a change to bin width, per-partition footprint, sidecar
 mechanism, or "scales with partition count" does.
 

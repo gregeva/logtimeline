@@ -159,7 +159,7 @@ jobs:
           else
             echo "::error::Release notes file not found: releases/${VERSION}.md"
             echo "Please create release notes before tagging a release."
-            echo "See CLAUDE.md for release process documentation."
+            echo "See docs/process/workflow.md for the release process."
             exit 1
           fi
 

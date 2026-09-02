@@ -103,7 +103,7 @@ All three were proved to fail before they were trusted to pass (HARNESS-DESIGN.m
 
 ## Merge gate
 
-Touches `ltl` and adds a harness scenario: the full `tests/validate-*.sh` suite plus the before/after benchmark on this machine (CLAUDE.md per-feature step 1), the benchmark being load-bearing here (D4).
+Touches `ltl` and adds a harness scenario: the full `tests/validate-*.sh` suite plus the before/after benchmark on this machine (docs/process/workflow.md § Completion gate), the benchmark being load-bearing here (D4).
 
 Run 2026-08-29 on the merged commit: 30 harnesses, 1,354 assertions passed, 3 failed. All three failures are `validate-regression.sh` scenarios (`errrate-access-unhighlighted-w160`, `errrate-access-highlighted-failure-w160`, `errrate-diagnostics-highlighted-failure-w160`) and are pre-existing and unrelated: the committed references carry an absolute path from another worktree (`/Users/gregeva/Documents/GitHub/ltl-448/tests/fixtures/...`) where the run correctly produces the repo-relative path, which is the condition #209 removed. The same three fail identically on the branch-point commit with this drop's code absent.
 

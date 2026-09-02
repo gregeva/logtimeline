@@ -1009,7 +1009,7 @@ Filename provenance evidence and variant groups specified through an architect i
 8. **D51 — Committed fixtures staged under producer-true names**; `logs/` is gitignored and is not a test substrate.
 9. **D52 — Content probes**: out-of-range component (decisive), monotonicity (graded), filename-date cross-check (breaks the ≤12-day ceiling for date-rolled files); silence is inconclusive; #385's guard and diagnostic ship here.
 
-Process: #384 had been left `on hold` with a prose-only "blocked by #58" after #58 closed — recorded in CLAUDE.md (2026-08-22 observation; per-feature workflow step 9). Recorded directly on `release/0.17.0` (planning artifact; architect instruction 2026-08-22).
+Process: #384 had been left `on hold` with a prose-only "blocked by #58" after #58 closed — recorded in docs/process/workflow.md § Merge and close, step 9 (release the dependents). Recorded directly on `release/0.17.0` (planning artifact; architect instruction 2026-08-22).
 
 ### 2026-08-21: #385 — same line shape, divergent data quality; fix deferred to the provenance mechanism
 

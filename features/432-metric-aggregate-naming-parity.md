@@ -198,7 +198,7 @@ well.
 ## Prototyping obligation
 
 `bytes_occurrences` / `bytes_min` / `bytes_max` are **new per-line capture** at the
-per-message and per-bucket scopes (CLAUDE.md § Development Phases 2 — new per-line
+per-message and per-bucket scopes (docs/process/workflow.md § Feature lifecycle, prototyping trigger (b) — new per-line
 hot-path cost). D-c's original premise, that this capability exists nowhere in the
 tool, is correct *at these scopes*: the `bytes_min`/`bytes_max` that ship today are
 the whole-file index accumulator (D4), a different aggregation level.
@@ -215,8 +215,8 @@ Requirements carried forward from that precedent:
   insufficient there: the same code measured +0.44% and +1.99% in different sessions
   because within-arm spread exceeded the effect.
 - **The baseline arm reproduces the production call structure verbatim** (#58 F9,
-  CLAUDE.md 2026-08-21) — extracted from `ltl`, not wrapped in a convenience sub.
-- **Constants come from the source, not from memory** (CLAUDE.md 2026-08-27) — slice
+  docs/process/workflow.md § Feature lifecycle, prototyping) — extracted from `ltl`, not wrapped in a convenience sub.
+- **Constants come from the source, not from memory** (docs/process/workflow.md § Feature lifecycle, prototyping) — slice
   them out and name the source symbol beside any value that must be restated.
 
 The measurement question is the per-line cost of the added comparisons under their

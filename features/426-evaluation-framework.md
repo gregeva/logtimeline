@@ -217,7 +217,7 @@ The full register. **CONTRACT** = a locked decision or stated requirement a repl
 | H2 | Bin-assignment algorithm cost | Closed-form vs binary vs linear; boundaries stored or derived | 189 § *R2* → "efficient enough to invoke per-line in the parsing hot path"; storing boundaries "adds ~4.75× memory" | CONTRACT (per-line efficiency) / QUALITY (algorithm) |
 | H3 | Read-side traversal and comparator | Population walk and sort cost | 426 § *Open questions* Q1 | QUALITY |
 | H4 | Merge and `-g` fold cost | Time in consolidation | Revalidation report V2 | QUALITY |
-| H5 | Benchmark regression gate (≤5%) | Any metric worse by >5% is stop-and-investigate | CLAUDE.md § *Per-feature workflow* step 1b | CONTRACT (process gate) |
+| H5 | Benchmark regression gate (≤5%) | Any metric worse by >5% is stop-and-investigate | `docs/process/workflow.md` § Completion gate (b) | CONTRACT (process gate) |
 
 ### I. Resolution and the precision lever
 

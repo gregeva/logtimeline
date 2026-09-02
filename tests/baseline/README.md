@@ -64,7 +64,7 @@ figures.
 | Development reference | `dev-<host-class>-*.tsv` | A working reference for a development cycle. Not a release baseline. |
 | Comparison report | `comparison-<from>-vs-<to>.md` | Saved output of `compare-results.sh --save`. |
 
-Since `$version_number` is stamped at branch creation (CLAUDE.md § *Version Stamping*),
+Since `$version_number` is stamped at branch creation (`docs/process/workflow.md` § Version stamping),
 a TSV's `version` row identifies the code that produced it, and the filename records the
 host class and the point in the cycle.
 
