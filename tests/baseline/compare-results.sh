@@ -771,6 +771,7 @@ TABLE_AWK_COMMON='
         scenarios[++ns] = "heatmap-histogram-consolidate"
         scenarios[++ns] = "sort-p99"
         scenarios[++ns] = "sort-skewness"
+        scenarios[++ns] = "heatmap-histogram-export"
 
         slabel[1] = "standard"
         slabel[2] = "no-msgs"
@@ -782,6 +783,7 @@ TABLE_AWK_COMMON='
         slabel[8] = "hm+hg+cons"
         slabel[9] = "sort-p99"
         slabel[10] = "sort-skew"
+        slabel[11] = "hm+hg+export"
     }
 
     NR == FNR && FNR == 1 { next }

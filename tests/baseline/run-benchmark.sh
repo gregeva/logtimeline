@@ -4,13 +4,13 @@
 # Usage: ./run-benchmark.sh [target] [--label <name>] [--options "<ltl options>"]
 #
 # Targets:
-#   quick — single test case for dev/testing (twx-unique-errors-standard)
+#   quick — single test case for dev/testing (single-day-application-log-standard)
 #   full  — standard file selections 1-5 x all scenarios (default)
 #   xl    — extra-large file selections 6-7 x all scenarios
 #   all   — all file selections x all scenarios
-#   <name> — run a single named test case (e.g. "twx-unique-errors-standard")
+#   <name> — run a single named test case (e.g. "single-day-application-log-standard")
 #
-# Test cases are the cross-product of 7 file selections x 10 option scenarios = 70 total.
+# Test cases are the cross-product of 7 file selections x 11 option scenarios = 77 total.
 #
 # Issue #56: Memory Baseline Profiling
 
@@ -97,6 +97,11 @@ SCENARIOS+=("top25-consolidate|-n 25 -g")
 SCENARIOS+=("heatmap|-hm")
 SCENARIOS+=("histogram|-hg")
 SCENARIOS+=("heatmap-histogram|-hm -hg")
+# The aggregate export's expected use (#503): both surfaces that feed the file
+# on, no message store, the file written. Its delta against heatmap-histogram
+# carries the export and the message store switched off together; no-messages
+# against standard on the same selection isolates the second.
+SCENARIOS+=("heatmap-histogram-export|-hm -hg -n 0 -o")
 SCENARIOS+=("heatmap-histogram-consolidate|-hm -hg -g")
 SCENARIOS+=("sort-p99|-so p99")
 SCENARIOS+=("sort-skewness|-so skewness")
@@ -152,10 +157,17 @@ run_test() {
     # otherwise word-splits into a command that does not exist, and every test
     # reads as "ltl returned non-zero". The option and file lists stay unquoted
     # on purpose — they are word lists, not single arguments.
-    if ! output=$("$LTL" --disable-progress -V benchmark-data -mem $benchmark_defaults $options $EXTRA_OPTIONS $file_args 2>&1); then
+    # A scenario carrying -o writes its output files where ltl runs, so the run
+    # takes a scratch directory of its own, removed afterwards; the file
+    # operands are absolute (LOGS_DIR is), so nothing else moves.
+    local scratch_dir
+    scratch_dir="$(mktemp -d)"
+    if ! output=$(cd "$scratch_dir" && "$LTL" --disable-progress -V benchmark-data -mem $benchmark_defaults $options $EXTRA_OPTIONS $file_args 2>&1); then
+        rm -rf "$scratch_dir"
         echo "FAIL: $test_name — ltl returned non-zero" >&2
         return 1
     fi
+    rm -rf "$scratch_dir"
 
     # Extract benchmark data block
     local benchmark_data
@@ -235,7 +247,7 @@ if [[ $run_count -eq 0 ]]; then
         printf "  %-35s %s\n" "$name" "${opts:-(default)}" >&2
     done
     echo "" >&2
-    echo "Test names: {file-selection}-{scenario} (e.g. twx-unique-errors-standard)" >&2
+    echo "Test names: {file-selection}-{scenario} (e.g. single-day-application-log-standard)" >&2
     echo "Targets: quick (1 test), full (std files, default), xl (extra-large files), all (everything)" >&2
     rm -f "$OUTPUT_FILE"
     # Restore previous results if we backed them up

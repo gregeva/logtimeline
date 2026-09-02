@@ -158,13 +158,13 @@ csv_cache_ltl_signature() {
             my @parts;
             while ($src =~ /^(sub (\w+) \{.*?^\})$/msg) {
                 my ($body, $name) = ($1, $2);
-                if ($name =~ /csv/i) { push @parts, $body; next }
+                if ($name =~ /csv|aggregate/i) { push @parts, $body; next }
                 my @lines = grep { /\$csv\b|\$csv_fh\b|\$csv->|csv_columns|csv_headers|csv_prefix/ }
                             split /\n/, $body;
                 push @parts, join( "\n", @lines ) if @lines;
             }
             die "csv-cache: no CSV-emitting code found in $ltl\n" unless @parts;
-            my @rules = sort glob( "$rules_dir/*.tsv" );
+            my @rules = sort ( glob( "$rules_dir/*.tsv" ), glob( "$rules_dir/../../aggregate-export/rules/*.tsv" ) );
             die "csv-cache: no column rules found under $rules_dir\n" unless @rules;
             for my $rule (@rules) {
                 open my $rh, "<", $rule or die "csv-cache: cannot read $rule: $!\n";
@@ -258,10 +258,11 @@ csv_cache_produce() {
     local msg_path="$_CSV_CACHE_DIR/$msg_name"
     local stats_path="$_CSV_CACHE_DIR/$stats_name"
     local stdout_path="${msg_path%__messages.csv}__stdout.txt"
+    local aggregate_path="${msg_path%__messages.csv}__aggregate.yaml"
     local sig_path
     sig_path="$(csv_cache_signature_path "$msg_path")"
 
-    if [[ -s "$msg_path" && -s "$stats_path" && -s "$stdout_path" ]]; then
+    if [[ -s "$msg_path" && -s "$stats_path" && -s "$stdout_path" && -s "$aggregate_path" ]]; then
         local stale_reason stale_rc
         stale_reason="$(csv_cache_staleness_reason "$msg_path")"
         stale_rc=$?
@@ -269,6 +270,7 @@ csv_cache_produce() {
             export CSV_CACHE_MESSAGES="$msg_path"
             export CSV_CACHE_STATS="$stats_path"
             export CSV_CACHE_STDOUT="$stdout_path"
+            export CSV_CACHE_AGGREGATE="$aggregate_path"
             return 0
         fi
         # Anything but a clean "fresh" means the artifact is produced again.
@@ -312,18 +314,20 @@ csv_cache_produce() {
         return 1
     fi
 
-    local produced_msg produced_stats
+    local produced_msg produced_stats produced_aggregate
     produced_msg="$(_csv_cache_find_produced "$tmp_dir" MESSAGES)"
     produced_stats="$(_csv_cache_find_produced "$tmp_dir" STATS)"
+    produced_aggregate="$(ls "$tmp_dir"/*-LTL-AGGREGATE.yaml 2>/dev/null | head -1)"
 
-    if [[ -z "$produced_msg" || -z "$produced_stats" ]]; then
-        echo "csv-cache: ltl ran but produced files missing scenario=$scenario messages=${produced_msg:-MISSING} stats=${produced_stats:-MISSING}" >&2
+    if [[ -z "$produced_msg" || -z "$produced_stats" || -z "$produced_aggregate" ]]; then
+        echo "csv-cache: ltl ran but produced files missing scenario=$scenario messages=${produced_msg:-MISSING} stats=${produced_stats:-MISSING} aggregate=${produced_aggregate:-MISSING}" >&2
         rm -rf "$tmp_dir"
         return 1
     fi
 
     mv "$produced_msg" "$msg_path"
     mv "$produced_stats" "$stats_path"
+    mv "$produced_aggregate" "$aggregate_path"
     mv "$tmp_dir/ltl.stdout" "$stdout_path"
     rm -rf "$tmp_dir"
 
@@ -338,6 +342,7 @@ csv_cache_produce() {
     export CSV_CACHE_MESSAGES="$msg_path"
     export CSV_CACHE_STATS="$stats_path"
     export CSV_CACHE_STDOUT="$stdout_path"
+    export CSV_CACHE_AGGREGATE="$aggregate_path"
     return 0
 }
 

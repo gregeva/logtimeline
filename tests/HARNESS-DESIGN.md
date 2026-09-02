@@ -187,6 +187,7 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `csv-output` — CSV output precision mode, resolved per-family decimal counts, duration unit source, and the max-decimals ceiling the structural harness reads (Issue #268)
 - `percentile-algorithm` — per-surface effective percentile algorithm: resolved data model and algorithm name for histogram, heatmap, message-stats and bucket-stats (Issue #280)
 - `filter-summary` — the run's line accounting as the funnel it passed through: lines read, unmatched by any format, excluded per cause (time window, profile fold, content and outcome filters, numeric thresholds, other), included, highlighted (Issue #503, reserved by #229/#230; contract in features/503-yaml-aggregate-export.md § `-V filter-summary` section contract)
+- `aggregate-export` — the YAML aggregate export `-o` writes: file path and size, the blocks written, buckets written, percentiles withheld under the sample-size rule, and the `heatmap-ladder` sub-section with each bucket's retained heatmap percentile values (Issue #503; contract in features/503-yaml-aggregate-export.md § `-V aggregate-export` section contract). Printed at the writer's site after the file exists, so it appears after every section `print_verbose_output()` flushes.
 
 **Reserved by sub-issues, not yet implemented:**
 - `option-resolution` (Issue #231)

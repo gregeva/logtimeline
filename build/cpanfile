@@ -1,5 +1,5 @@
-requires 'Cwd';
 requires 'Devel::Size';
+requires 'File::Glob';
 requires 'File::Spec';
 requires 'Getopt::Long';
 requires 'List::Util';
@@ -12,3 +12,4 @@ requires 'Text::ParseWords';
 requires 'Time::HiRes';
 requires 'Time::Local';
 requires 'Time::Piece';
+requires 'YAML::PP';

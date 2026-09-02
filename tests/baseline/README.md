@@ -13,9 +13,9 @@ into a TSV; `compare-results.sh` reports one TSV against another. A captured TSV
 | tier | what it runs | when |
 |---|---|---|
 | `quick` | one test | smoke |
-| `full` | the five standard file selections × all scenarios (45 tests) | development |
+| `full` | the five standard file selections × all scenarios (55 tests) | development |
 | `xl` | the two extra-large selections (1.5 GB and 7.6 GB) × all scenarios | release |
-| `all` | everything (63 tests) | release |
+| `all` | everything (77 tests) | release |
 
 A single selection can be named directly — `run-benchmark.sh single-day-access-log-standard`
 — which is what the per-feature completion gate uses.
