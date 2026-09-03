@@ -84,8 +84,19 @@ figures (same place); the notices surface itself (#412).
   can hold two outcomes. All three become reachable with the first format that
   classifies on evidence outside the grouping key — #483 (success/failure
   classification criteria for the Java G1 GC log format) is the nearest
-  candidate. **No rendered output moves on any shipping format**, and nothing in
-  the current corpus exercises the new states; see § Acceptance criteria.
+  candidate. D10 broadens the mixed test to a row mixing an outcome with
+  unclassified lines, which does not change this: on those entries no included
+  line goes unclassified, and on `java_gc_g1` every line does, so a row is
+  uniform either way. **No rendered output moves on any shipping format**, and
+  nothing in the current corpus exercises the new states; see § Acceptance
+  criteria.
+
+- **F5 — `MIXED` cannot be computed on a run that retains no messages.**
+  `$capture_messages = ( $top_n_messages > 0 ) ? 1 : 0;`, so `-n 0` populates no
+  `%log_messages` entries and there are no rows to test for uniformity. The
+  run-level mixed count is then unavailable, and with it D9's suppression: the
+  same data would print run-level percentages under `-n 0` and withhold them
+  without it. To be resolved.
 
 ## Requirements
 
@@ -206,14 +217,19 @@ Stated in the architect's terms (2026-09-03).
   per-bucket columns are untouched: they keep what was known when the bucket
   passed (D4).
 
+- **D10 — A row's state is uniformity, and anything else is `MIXED`
+  (architect, 2026-09-03).** A message row takes an outcome's colour only when
+  every one of its lines carries that same state: all success, all failure, or
+  all conflict (amethyst). Every other combination is `MIXED`, including a row
+  mixing an outcome with unclassified lines — any uncertainty removes the
+  expectation of certainty, and a row rendered as pure success when some of its
+  lines were never classified would be read as a count of successful
+  occurrences it is not. A row whose lines are all unclassified stays unmarked
+  (R2). This supersedes Claude's proposal that unclassified lines be treated as
+  leakage the row's state ignores.
+
 ## Open decisions
 
-- **Q4 — Row state when a row is not uniform in other ways.** D4 defines mixed
-  from success and failure both being present. Still to settle: a row carrying
-  successes and unclassified lines (proposed: success, since the leakage is what
-  the unclassified figure exists to surface), and a row whose lines are all
-  conflicts (proposed: the conflict colour), and a row mixing conflicts with an
-  outcome (proposed: mixed).
 - **Q5 — The issue split.** The indicator is a render change on two tables;
   D3–D7 are a classification data-model change touching the per-line outcome, the
   bucket counters, eligibility across the timeline, the summary rows, `-V`, the
