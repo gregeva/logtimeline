@@ -264,6 +264,17 @@ Recorded so the walkthrough starts from the code, not from the issue text.
   (count + share of included lines) and the notice-2 warning that the format's
   classification leaks.
 
+  *Revised under #456 (architect, 2026-09-03).* The lenient rung is wrong for a
+  format that declares both outcomes: there an unclassified line means the
+  classification failed to catch something, nobody knows what, and the
+  success/failure pair has quietly stopped being the window's whole population.
+  Such a line now disqualifies its window, which falls back to absolute counts by
+  the D17 mechanism, alongside the shipped non-qualifying path and the new
+  classification-conflict path. Unclassified lines from a *non*-qualifying source
+  are unaffected — those windows already fall back on slot 3. Counting it needs a
+  per-bucket unclassified count, which does not exist today. Specification and
+  rationale: `features/456-per-message-success-failure-indicator.md` D6/D7.
+
 - **D4 — Both criteria are the usability floor; the ledger property only sets the
   default (architect, 2026-08-31).** The percentages cannot be used at all unless a
   format declares *both* success and failure criteria — one-sided classification (the
@@ -694,6 +705,11 @@ non_qualifying_lines: N
 - **Per-message percentages** — the per-message outcome counts ship (#453, MESSAGES
   CSV `successes`/`failures` columns); a rendered per-message percentage is future
   scope and inherits the same predicate.
+- **Per-message classification indicator** — #456 renders the row's classification
+  state as a coloured character and adds the two states that make it honest
+  (`CLASSIFICATION CONFLICT` per line, `MIXED` per message row), together with the
+  eligibility revision recorded against D3 above. Record:
+  `features/456-per-message-success-failure-indicator.md`.
 
 ## Regression surface
 

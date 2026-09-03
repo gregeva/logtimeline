@@ -349,6 +349,22 @@ Each item follows from a locked decision above; none reopens one. Item 1 is a lo
 - **Completion gate (2026-08-29, on `3e537fa` with `$version_number` = `0.18.0`):** all 28 harnesses exit 0 with assertions run (`validate-format-detection.sh` 243/243, `validate-regression.sh` 74/74 including the re-captured goldens), no runtime warnings. `single-day-access-log-standard` against `0.18.0-453-before.tsv` (same machine, load average ≈ 2.5): total −0.9 %, parse/read −0.9 %, peak RSS +0.8 % — the whole issue's read-loop cost (classify, count, D32 compare) is inside the run-to-run band on the access case; the per-family attribution stands as recorded in § 13 (application log +2.5 %, custom +1.9 %, consolidated access +3.7 % from the S3 counting, all under or at D21's 3 % bar).
 - **Kept as is:** the `--explain <topic>` intro sentence ("one of the statistics ltl computes…") is the framework's shared preamble and already precedes the heatmap and histogram topics; changing it is a #261-framework edit, not this issue's.
 
+## Extension under #456 — the fourth outcome (2026-09-03)
+
+`$line_outcome` gains a fourth value, `CLASSIFICATION CONFLICT`, for a line whose
+success and failure criteria both evaluate true. The generated classifier in
+`format_classification_src()` compiles the decision as `($f) ? 2 : ($s) ? 1 : 0`
+today, so failure short-circuits and such a line is silently filed as a failure —
+the conflict state retires that. Consequences owned here: the compiled classifier
+and its interpreted reference, `expect_outcomes` on every registry spec, the
+outcome filters and highlight criteria (`-is/-if/-es/-ef`, `-hs/-hf`, #455), the
+`%bucket_outcomes` slots, and the `-V` classification section contract, which also
+gains the counted `unclassified` figure that
+`classification_reconciliation()` derives by subtraction today.
+
+Specification, rationale and the message-scope `MIXED` state that rides with it:
+`features/456-per-message-success-failure-indicator.md`.
+
 ## Open items
 
 1. Expressibility in #387 (user-defined YAML formats): confirm the field+pattern, list-of-conjunctions shape maps onto what #387 will accept — checked at #387 planning, recorded here.

@@ -2,10 +2,12 @@
 
 **Issue:** #456 (FEATURE: Per-message success/failure indicator in log messages and summary table)
 **Branch:** `456-per-message-success-failure-indicator` off `release/0.18.0`
-**Status:** requirements and specification, in definition with the architect
-(2026-09-03). No code written. The classification data-model work below is
-larger than the issue body describes and its split from the render change is an
-open decision.
+**Status:** requirements and specification agreed with the architect
+(2026-09-03), D1-D11 locked, no open decisions. No code written. Acceptance
+criteria are the remaining step before code, blocked on the producer question in
+F4. Everything specified here ships under this issue (D11); the decisions that
+belong to another surface are recorded in that surface's own document and
+referenced from here.
 
 ## Scope
 
@@ -16,7 +18,7 @@ character alongside each row answers that at a glance, in the character position
 the consolidation marker already occupies, costing the layout nothing.
 
 Defining that indicator honestly turned out to require three states the tool
-does not have. A row is not always uniform, a line's two classification rules can
+does not have, and all of them ship here (D11). A row is not always uniform, a line's two classification rules can
 both fire, and a window's success/failure pair can silently stop being that
 window's whole population. Each of those is a gap in what the tool can currently
 say, so the work divides into:
@@ -247,14 +249,19 @@ Stated in the architect's terms (2026-09-03).
   (R2). This supersedes Claude's proposal that unclassified lines be treated as
   leakage the row's state ignores.
 
-## Open decisions
+- **D11 — The whole of this specification ships under #456, and each decision
+  lives in the document that owns its surface (architect, 2026-09-03).** The
+  indicator and the classification states it needs are one piece of work and are
+  not split into separate issues. The master reference documents are the source
+  of truth for what belongs to them, and this document points at them rather than
+  restating them:
 
-- **Q5 — The issue split.** The indicator is a render change on two tables;
-  D3–D7 are a classification data-model change touching the per-line outcome, the
-  bucket counters, eligibility across the timeline, the summary rows, `-V`, the
-  YAML export, and a revision of a locked #452 decision. Whether that ships
-  inside #456 or as its own issue with #456 blocked on it is the architect's
-  call.
+  | Decision | Recorded in |
+  |---|---|
+  | Unclassified from a qualifying source disqualifies its window (revises D3) | `features/452-success-failure-percentage-columns.md` § Locked decisions, D3 amendment |
+  | The fourth `$line_outcome` value, its effect on the compiled classifier, `expect_outcomes`, the outcome filters and highlight criteria, and the `-V` classification section contract | `features/453-success-failure-classification-event-ledger.md` § Extension under #456 |
+  | The new outcome figures in the aggregate export and the causes of an absent percentage | `features/503-yaml-aggregate-export.md`, beside D16 |
+  | The indicator itself, the `MIXED` state, the colours, and the reasoning behind all of the above | this document |
 
 ## Data model changes
 
@@ -268,15 +275,19 @@ Stated in the architect's terms (2026-09-03).
 
 ## Surfaces to update in the same drop
 
-- Timeline `success` / `failure` columns and the errRate column — eligibility only.
+Each carries its own document's contract; the pointer is to the owner, not a
+second copy of the rule (D11).
+
+- Timeline `success` / `failure` columns and the errRate column — eligibility
+  only, per the D3 amendment in `features/452-success-failure-percentage-columns.md`.
 - Run summary: the new `CLASSIFICATION CONFLICT` and `MIXED` rows, printed on the
   `UNCLASSIFIED` pattern (only when non-zero), through `summary_colour()` so `-sm`
   prints the table plain.
-- `-V` classification section: the new counters, and the section contract in
-  `features/453-success-failure-classification-event-ledger.md`.
-- YAML aggregate export: the new outcome figures at run and bucket scope, and the
-  reason an absent percentage is absent (#503 D16 carries only the non-qualifying
-  count today).
+- `-V` classification section — contract owned by
+  `features/453-success-failure-classification-event-ledger.md`; read
+  `tests/HARNESS-DESIGN.md` before touching it, and update every consumer in the
+  same commit.
+- YAML aggregate export — keys owned by `features/503-yaml-aggregate-export.md`.
 - STATS CSV and MESSAGES CSV outcome columns.
 - `--help` (`-g` row) and `docs/usage.md:140`, which both state that a
   consolidated entry is marked with `~`, now also a classification carrier.
