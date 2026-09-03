@@ -695,14 +695,14 @@ sub check_observability_surface {
         $f++;
     }
 
-    if ($vp->{duration_unit_resolved} !~ /^(ns|us|ms|s|n\/a)$/) {
+    if ($vp->{duration_unit_resolved} !~ /^(ns|us|ms|s|m|h|d|w|month|year|n\/a)$/) {
         emit_fail({
             scenario => $opt{scenario}, file => $opt{file_kind}, row => 0,
             column => '(v-csv-output/duration_unit_resolved)',
-            asserts => "duration_unit_resolved must be one of ns, us, ms, s, n/a",
+            asserts => "duration_unit_resolved must be a canonical time-unit ladder token (ns, us, ms, s, m, h, d, w, month, year) or n/a",
             produced_by => 'emit_csv_output_verbose() in ltl',
             contract => 'Issue #268 § duration_unit_resolved enum',
-            expected => "ns | us | ms | s | n/a",
+            expected => "ns | us | ms | s | m | h | d | w | month | year | n/a",
             actual => $vp->{duration_unit_resolved},
             rule => 'duration_unit_resolved enum',
         });

@@ -401,7 +401,7 @@ my $csv_regex_arg_max_length = 30;                       # Max length for regex 
 my %pattern_file_status;                                 # {filter_type}{filename} => { status => 'ok'|'empty'|'error', count => N }
 
 # Duration unit override (Issue #17)
-my $duration_unit_override = undef;                      # User-specified unit via -du (ns, us, ms, s)
+my $duration_unit_override = undef;                      # User-specified unit via -du, a canonical ladder token once validated
 my $log_format_pin = undef;                              # -lf: the log format to use for every file (D49)
 
 # Format-detection observability (Issue #228).
@@ -600,11 +600,46 @@ my $format_unit_ambiguity_warned = 0;  # D18 unit-ambiguity note emitted (once p
 my $format_current_file = '';          # file being read (steady-loop probe signals, -V)
 my $format_current_line_ref = \0;      # ref to the read loop's line counter (diagnostics)
 
-# Rate unit override (Issue #122)
-my $rate_unit = 'm';                                     # Default: per-minute (preserves existing behavior)
-my %rate_multiplier = ( 's' => 1, 'm' => 60, 'h' => 3600, 'd' => 86400 );
-my %rate_suffix     = ( 's' => '/s', 'm' => '/m', 'h' => '/h', 'd' => '/d' );
-my %rate_csv_suffix = ( 's' => '_sec', 'm' => '_min', 'h' => '_hr', 'd' => '_day' );
+# Time-unit ladder: the one definition of every time unit the tool reads,
+# validates, converts or names. Each step carries its canonical token, the
+# spellings it is accepted under (matched case-insensitively; m is always
+# the minute), its length in milliseconds, its display names by tier, and
+# for the sub-millisecond steps the divisor that turns a value into
+# milliseconds with one correctly rounded division. Month and year are
+# fixed lengths, 30 and 365 days: time buckets are fixed-width, so a
+# calendar month is not representable, and these lengths keep every step a
+# whole number of minutes. Every time-unit surface (-bs, -du, -ru, the
+# metric unit slot, the per-line converter, the display scaler and the rate
+# tables) reads this ladder through %time_unit_step, time_unit_canonical()
+# and the views derived below; no sub keeps a token list, a unit regex or a
+# multiplier of its own.
+my @time_unit_ladder = (
+    { token => 'ns',    spellings => [qw( ns nsec )],              ms => 0.000001,       per_ms => 1_000_000, short => 'ns', medium => 'nsec', long => 'nanoseconds'  },
+    { token => 'us',    spellings => [qw( us usec )],              ms => 0.001,          per_ms => 1_000,     short => 'us', medium => 'usec', long => 'microseconds' },
+    { token => 'ms',    spellings => [qw( ms msec )],              ms => 1,                                   short => 'ms', medium => 'msec', long => 'milliseconds' },
+    { token => 's',     spellings => [qw( s sec second seconds )], ms => 1_000,                               short => 's',  medium => 'sec',  long => 'seconds'      },
+    { token => 'm',     spellings => [qw( m min minute minutes )], ms => 60_000,                              short => 'm',  medium => 'min',  long => 'minutes'      },
+    { token => 'h',     spellings => [qw( h hr hour hours )],      ms => 3_600_000,                           short => 'h',  medium => 'hr',   long => 'hours'        },
+    { token => 'd',     spellings => [qw( d day days )],           ms => 86_400_000,                          short => 'd',  medium => 'day',  long => 'days'         },
+    { token => 'w',     spellings => [qw( w wk week weeks )],      ms => 604_800_000,                         short => 'w',  medium => 'wk',   long => 'weeks'        },
+    { token => 'month', spellings => [qw( month mo mon months )],  ms => 2_592_000_000,                       short => 'mo', medium => 'mon',  long => 'months'       },
+    { token => 'year',  spellings => [qw( year y yr years )],      ms => 31_536_000_000,                      short => 'y',  medium => 'yr',   long => 'years'        },
+);
+my %time_unit_step        = map { $_->{token} => $_ } @time_unit_ladder;
+my %time_unit_by_spelling = map { my $step = $_; map { $_ => $step->{token} } @{ $step->{spellings} } } @time_unit_ladder;
+my $time_unit_list        = join(', ', map { $_->{token} } @time_unit_ladder);    # the canonical tokens, for usage messages
+
+# Rate unit override (Issue #122): the seconds-per-unit multiplier and the
+# terminal and CSV suffixes are views of the ladder, keyed by canonical token.
+my $rate_unit = 'm';                                     # Default: per-minute
+my %rate_multiplier = map { $_->{token} => $_->{ms} / 1000 } @time_unit_ladder;
+my %rate_suffix     = map { $_->{token} => '/' . $_->{short} } @time_unit_ladder;
+my %rate_csv_suffix = map { $_->{token} => '_' . $_->{medium} } @time_unit_ladder;
+
+# Unit of a bare -bs number and of $time_bucket_size once resolved: the
+# minute, or the second under -s, or the millisecond under -ms. Set in
+# adapt_to_command_line_options().
+my $bucket_size_unit = 'm';
 
 my $pause_output = 0;
 my $omit_values = 0;
@@ -792,7 +827,7 @@ my $percentile_seed_decades        = 5;       # partition seeds at 5 decades cen
 # csv-output section reads them.
 my $csv_precision                  = 'default';      # 'default' | 'full' | integer N
 my $csv_precision_source           = 'default';      # 'default' | '-cp <value>' | 'LTL_CONFIG'
-my $duration_unit_resolved         = undef;          # 'ns' | 'us' | 'ms' | 's' — final resolved unit
+my $duration_unit_resolved         = undef;          # final resolved unit, a canonical ladder token
 my $duration_unit_source           = 'default';      # 'default' | '-du <value>' | 'auto-detected from <file>'
 my %csv_family_decimals;                             # populated during option resolution: family => N decimals
 
@@ -7897,15 +7932,15 @@ sub print_help {
 
     # Time & Buckets
     $out .= help_subheading("Time & Buckets");
-    $out .= help_opt("-bs,  --bucket-size <N>",       "Set the width of each time bucket on the timeline (default unit: minutes; -s switches to seconds, -ms switches to milliseconds)");
-    $out .= help_opt("-s,   --seconds",               "Interpret bucket size as seconds instead of minutes");
-    $out .= help_opt("-ms,  --milliseconds",          "Switch the -bs <N> bucket width to milliseconds (and render timestamps with .fff precision). Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured.");
+    $out .= help_opt("-bs,  --bucket-size <width>",   "Set the width of each time bucket on the timeline: a bare number in minutes (seconds under -s, milliseconds under -ms), or a number with a unit such as 90s, 1.5h, 1d or 1w (units: ns, us, ms, s, m, h, d, w, month, year; m is always the minute, a month is 30 days and a year 365). The unit sets the width only; the timestamp precision stays with -s and -ms.");
+    $out .= help_opt("-s,   --seconds",               "Read a bare -bs number as seconds, and render timestamps with seconds precision");
+    $out .= help_opt("-ms,  --milliseconds",          "Read a bare -bs number as milliseconds, and render timestamps with .fff precision. Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured.");
     $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto one representative period so every date overlays into a single profile. The singular modes (day, workday, weekday, weekend) stack their days onto one 24-hour axis; the plural ones (week, workweek, weekdays, weekends) keep each day's identity on the axis. Each has an -alt variant using the Sunday-anchored calendar. Run 'ltl --help profile' for which days each mode keeps and how to choose one.");
     $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A full date (YYYY-MM-DD HH:MM:SS[.mmm]) is an absolute cutoff; a bare time (HH:MM[:SS[.mmm]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight.");
     $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a full date is an absolute cutoff; a bare time applies to every day.");
-    $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when it cannot be determined from the format or the file name (ns, us, ms, s)");
+    $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when it cannot be determined from the format or the file name (ns, us, ms, s, m, h, d, w, month, year)");
     $out .= help_opt("-lf,  --log-format <name>",     "Read every file as this log format instead of detecting it - the escape hatch when detection picks the wrong variant; an unknown name lists the known formats");
-    $out .= help_opt("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: s (second), m (minute, default), h (hour), d (day)");
+    $out .= help_opt("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: s (second), m (minute, default), h (hour), d (day), or any other unit of the same ladder (ns, us, ms, w, month, year)");
 
     # Filtering
     $out .= help_subheading("Filtering & Highlighting");
@@ -8018,7 +8053,7 @@ sub print_help {
     $out .= help_subheading("User-Defined Metrics");
     $out .= help_opt("-udm, --user-defined-metrics <spec>", "Extract a custom metric from each log line; patterns match against the whole raw line, not only the message. Format: name[:unit[:function]][:key|:/regex/]. A metric that produces nothing is reported with how its spec was read.");
     $out .= help_opt("      name",                   "Metric name and column label; also matches \"name=value\" or \"name: value\" in log lines when no key or /regex/ is given");
-    $out .= help_opt("      unit",                   "Time: ns, us, ms, s, m, h. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T. Leave empty for raw numbers (name::max, not name:max). Ignored for counting aggregations.");
+    $out .= help_opt("      unit",                   "Time: ns, us, ms, s, m, h, d, w, month, year. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T. Leave empty for raw numbers (name::max, not name:max). Ignored for counting aggregations.");
     $out .= help_opt("      function",               "Aggregations: sum (default), min, max, mean (alias avg). Counting: count, distinct (alias dcount, unique), ratio, rate, drate. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), mean(delta), max(idelta), etc.");
     $out .= help_opt("      key",                    "Token key: builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. exception_variety::distinct:JavaException. A fourth field without /.../ is always a token key and is matched literally.");
     $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. Overrides default name/key matching.");
@@ -8305,7 +8340,6 @@ sub get_pattern_file_indicator {
 # User-defined metrics parsing (Issue #22)
 sub parse_udm_configs {
     my $number = qr/-?\d+(?:\.\d+)?/;
-    my %time_units = map { $_ => 1 } qw( ns us ms s m h );
     my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );
     my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );
     my %udm_agg_aliases = ( avg => 'mean', dcount => 'distinct', unique => 'distinct' );
@@ -8319,10 +8353,9 @@ sub parse_udm_configs {
         push @udm_rejected_specs, { spec => $spec, reason => $reason, spec_index => $spec_index };
     };
 
-    # Case normalization: map lowercase variants to canonical forms
+    # Case normalization: map lowercase variants to canonical forms (time
+    # units go through the ladder's own spelling map)
     my %byte_unit_canonical = map { lc($_) => $_ } keys %byte_units;
-    my %time_unit_canonical = map { lc($_) => $_ } keys %time_units;
-    $time_unit_canonical{'min'} = 'm';
 
     foreach my $raw_arg (@udm_raw_args) {
         $spec_index++;
@@ -8421,8 +8454,8 @@ sub parse_udm_configs {
                 # Case-sensitive match — $unit stays as-is
             } else {
                 my $lc = lc($unit);
-                if (exists $time_unit_canonical{$lc}) {
-                    $unit = $time_unit_canonical{$lc};
+                if (defined(my $canonical = time_unit_canonical($unit))) {
+                    $unit = $canonical;
                 } elsif (exists $byte_unit_canonical{$lc}) {
                     $unit = $byte_unit_canonical{$lc};
                 }
@@ -8431,7 +8464,7 @@ sub parse_udm_configs {
 
         # Determine unit type, converter, and formatter
         my ($unit_type, $converter, $formatter);
-        if (defined $unit && exists $time_units{$unit}) {
+        if (defined $unit && exists $time_unit_step{$unit}) {
             $unit_type = 'time';
             $converter = sub { convert_duration_to_ms($_[0], $unit) };
             $formatter = \&format_time;
@@ -8574,17 +8607,22 @@ sub detect_and_parse_csv_header {
     return 1;
 }
 
-# Duration unit autodetection functions (Issue #17)
+# The canonical token for any spelling on the time-unit ladder, matched
+# case-insensitively; undef when the spelling is not on the ladder.
+sub time_unit_canonical {
+    my ($spelling) = @_;
+    return undef unless defined $spelling;
+    return $time_unit_by_spelling{ lc $spelling };
+}
+
+# A value in any ladder unit, as milliseconds: one lookup and one multiply,
+# or one division for the sub-millisecond steps so the result is the
+# correctly rounded quotient. An unknown unit is read as milliseconds.
 sub convert_duration_to_ms {
     my ($value, $unit) = @_;
     return undef unless defined $value;
-    return $value * 1000         if $unit eq 's';
-    return $value                if $unit eq 'ms';
-    return $value / 1000         if $unit eq 'us';
-    return $value / 1000000      if $unit eq 'ns';
-    return $value * 60000        if $unit eq 'm';
-    return $value * 3600000      if $unit eq 'h';
-    return $value;  # default: assume milliseconds
+    my $step = $time_unit_step{$unit} or return $value;
+    return $step->{per_ms} ? $value / $step->{per_ms} : $value * $step->{ms};
 }
 
 sub detect_light_terminal_background {
@@ -10876,41 +10914,18 @@ sub significant_decimals {
 # caller expects.
 sub format_time {
     my ($value, $unit, $format, $space, $significant) = @_;
-    my %units = (
-        'us' => 1,                      # Microseconds
-        'ms' => 1000,                   # Milliseconds
-        's'  => 1000000,                # Seconds
-        'm'  => 60 * 1000000,           # Minutes
-        'h'  => 60 * 60 * 1000000,      # Hours
-        'D'  => 24 * 60 * 60 * 1000000, # Days
-    );
-
-    my %unit_names = (
-        'us' => { short => 'us', medium => 'usec', long => 'microseconds' },
-        'ms' => { short => 'ms', medium => 'msec', long => 'milliseconds' },
-        's'  => { short => 's',  medium => 'sec',      long => 'seconds' },
-        'm'  => { short => 'm',  medium => 'min',      long => 'minutes' },
-        'h'  => { short => 'h',  medium => 'hr',       long => 'hours' },
-        'D'  => { short => 'd',  medium => 'day',      long => 'days' },
-    );
-
+    return undef unless defined $value;
     $format = "short" if !defined $format;
 
-    my $microseconds = $value * $units{$unit};
-
-
-    my @unit_order = ('us', 'ms', 's', 'm', 'h', 'D');
-    my $formatted_value = $microseconds;
-    my $formatted_unit = 'us';
-
-    foreach my $u (@unit_order) {          # Determine the most relevant unit
-        if ($microseconds >= $units{$u}) {
-            $formatted_value = $microseconds / $units{$u};
-            $formatted_unit = $u;
-        } else {
-            last;
-        }
+    # Climb the ladder to the largest step the value reaches; a value below
+    # the lowest step (and zero) renders in that lowest step.
+    my $milliseconds = convert_duration_to_ms($value, $unit);
+    my $step = $time_unit_ladder[0];
+    foreach my $candidate (@time_unit_ladder) {
+        last if $milliseconds < $candidate->{ms};
+        $step = $candidate;
     }
+    my $formatted_value = $step->{per_ms} ? $milliseconds * $step->{per_ms} : $milliseconds / $step->{ms};
 
     if (defined $significant) {
         $formatted_value = sprintf("%.*f", significant_decimals($formatted_value, $significant), $formatted_value);
@@ -10923,11 +10938,11 @@ sub format_time {
         $formatted_value =~ s/\.0+(?=\s|$)//;                                                # remove trailing .0 if followed by space or end of string
     }
 
-    my $unit_name = $unit_names{$formatted_unit}{$format};                                  # Get the appropriate unit name based on format
+    my $unit_name = $step->{$format};                                                       # Get the appropriate unit name based on format
     $unit_name =~ s/s$// if $formatted_value == 1 && $format eq 'long';                     # Singular units for long format
     $unit_name = " " . $unit_name if defined( $space );
 
-    return defined $value ? "$formatted_value$unit_name" : undef;
+    return "$formatted_value$unit_name";
 }
 
 # Render a duration statistic (millisecond-valued) for terminal display. A
@@ -10950,8 +10965,8 @@ sub format_duration {
     my ($value, $max_chars) = @_;
     return "" unless defined $value;
     my $unit = $duration_unit_resolved // 'ms';
-    # format_time auto-scales 0 down to the smallest unit (0us); render zero in
-    # the source's resolved unit instead so it reads as "zero <source unit>".
+    # format_time auto-scales 0 down to the ladder's lowest step; render zero
+    # in the source's resolved unit instead so it reads as "zero <source unit>".
     return "0$unit" if $value == 0;
     my $decimals = $duration_display_decimals{$unit} // 0;
     my $rounded  = sprintf( "%.${decimals}f", $value );
@@ -11568,7 +11583,7 @@ sub adapt_to_command_line_options {
     my $getopt_ok = do {
         local $SIG{__WARN__} = sub { push @getopt_warnings, $_[0]; };
         GetOptions(
-        'bucket-size|bs=i' => \$time_bucket_size,
+        'bucket-size|bs=s' => \$time_bucket_size,
         'pause|p' => \$pause_output,
         'start|st=s' => \$filter_range_start,
         'end|et=s' => \$filter_range_end,
@@ -11885,15 +11900,48 @@ sub adapt_to_command_line_options {
     $heatmap_stream_bpd              = bpd_for_surface('heatmap');
     $histogram_stream_bpd            = bpd_for_surface('histogram');
 
-    # Duration unit option validation (Issue #17)
+    # Duration unit option validation (Issue #17): any ladder spelling,
+    # carried onward as its canonical token
     if (defined $duration_unit_override) {
-        do { print_usage("Invalid duration unit '$duration_unit_override'. Valid values: ns, us, ms, s"); exit 1; }
-            unless $duration_unit_override =~ /^(ns|us|ms|s)$/;
+        my $canonical = time_unit_canonical($duration_unit_override);
+        do { print_usage("Invalid duration unit '$duration_unit_override'. Valid values: $time_unit_list"); exit 1; }
+            unless defined $canonical;
+        $duration_unit_override = $canonical;
     }
 
-    # Rate unit option validation (Issue #122)
-    do { print_usage("Invalid rate unit '$rate_unit'. Valid values: s, m, h, d"); exit 1; }
-        unless $rate_unit =~ /^(s|m|h|d)$/;
+    # Rate unit option validation (Issue #122): any ladder spelling
+    {
+        my $canonical = time_unit_canonical($rate_unit);
+        do { print_usage("Invalid rate unit '$rate_unit'. Valid values: $time_unit_list"); exit 1; }
+            unless defined $canonical;
+        $rate_unit = $canonical;
+    }
+
+    # Bucket size (Issue #524). A bare number keeps the run's unit: the
+    # minute, or the second under -s, or the millisecond under -ms. A number
+    # with a ladder unit is converted and expressed in that same run unit, so
+    # $time_bucket_size means downstream exactly what a bare number means.
+    # Only a value that cannot be read at all is rejected: an unknown unit,
+    # no number, a malformed number, or a zero or negative width with a unit.
+    $bucket_size_unit = $print_seconds ? 's' : $print_milliseconds ? 'ms' : 'm';
+    if (defined $time_bucket_size && $time_bucket_size ne '') {
+        my $decimal = qr/-?(?:\d+(?:\.\d+)?|\.\d+)/;
+        my $accepted_forms = "Accepted forms: a bare number in the run's unit, or <number><unit> such as 90s, 1.5h or 1d with a unit of $time_unit_list";
+        if ($time_bucket_size =~ /^$decimal$/) {
+            $time_bucket_size += 0;
+        } elsif ($time_bucket_size =~ /^($decimal)([A-Za-z]+)$/) {
+            my ($width, $spelling) = ($1, $2);
+            my $canonical = time_unit_canonical($spelling);
+            my $problem = !defined $canonical ? "unknown unit '$spelling'"
+                        : $width <= 0          ? 'the width must be positive'
+                        :                        undef;
+            do { print_usage("Invalid bucket size '$time_bucket_size' ($problem). $accepted_forms"); exit 1; } if defined $problem;
+            $time_bucket_size = convert_duration_to_ms($width, $canonical) / $time_unit_step{$bucket_size_unit}{ms};
+        } else {
+            print_usage("Invalid bucket size '$time_bucket_size'. $accepted_forms");
+            exit 1;
+        }
+    }
 
     # CSV precision option validation (Issue #268)
     do { print_usage("Invalid --csv-precision value '$csv_precision'. Valid values: default, full, or a non-negative integer."); exit 1; }
@@ -12338,14 +12386,8 @@ sub adapt_to_terminal_settings {
         }
     }
 
-    # Convert time_bucket_size to seconds based on the time precision mode
-    if( $print_seconds ) {
-        $bucket_size_seconds = $time_bucket_size;
-    } elsif( $print_milliseconds ) {
-        $bucket_size_seconds = $time_bucket_size / 1000;
-    } else {
-        $bucket_size_seconds = $time_bucket_size * 60;
-    }
+    # Convert time_bucket_size, in the run's unit, to seconds
+    $bucket_size_seconds = convert_duration_to_ms($time_bucket_size, $bucket_size_unit) / 1000;
 
     $max_log_message_length = $terminal_width;		# this is the max that we can print without wrapping, depends on the summary table width, and terminal width
     return;
@@ -12870,9 +12912,12 @@ sub read_and_process_logs {
                     # Epoch timestamp: value is already epoch seconds (or other unit via -du)
                     my $epoch_val = $timestamp_str;
                     if (defined $duration_unit_override) {
-                        $epoch_val /= 1000         if $duration_unit_override eq 'ms';
-                        $epoch_val /= 1000000      if $duration_unit_override eq 'us';
-                        $epoch_val /= 1000000000   if $duration_unit_override eq 'ns';
+                        # To seconds through the ladder: one multiply for the
+                        # second and above (x1 for seconds), one division below
+                        my $step = $time_unit_step{$duration_unit_override};
+                        $epoch_val = $step->{ms} >= 1000
+                            ? $epoch_val * ($step->{ms} / 1000)
+                            : $epoch_val / (($step->{per_ms} // 1) * 1000);
                     }
                     $timestamp = int($epoch_val);
                     my $frac = $epoch_val - $timestamp;
@@ -16822,7 +16867,7 @@ sub print_verbose_output {
     printf "CONFIG\tterminal_width\t%d\n", $terminal_width;
     printf "CONFIG\tterminal_height\t%d\n", $terminal_height;
     printf "CONFIG\tmax_log_message_length\t%d\n", $max_log_message_length;
-    printf "CONFIG\ttime_bucket_size\t%d\n", $time_bucket_size;
+    printf "CONFIG\ttime_bucket_size\t%s\n", $time_bucket_size;
     printf "CONFIG\tbucket_size_seconds\t%.2f\n", $bucket_size_seconds;
 
     print "=== END benchmark-data ===\n";
