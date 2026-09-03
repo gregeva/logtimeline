@@ -166,13 +166,30 @@ Stated in the architect's terms (2026-09-03).
   way to revise them without a structure that does not exist. The consequence is
   deliberate — the summary rows will no longer reconcile with the sum of the
   bucket counters, by exactly the mixed count.
-- **D5 — Mixed is decided from the row's final outcome counts, not from the
-  merge path (Claude's proposal, accepted implicitly by D4's framing;
-  confirmation wanted).** One walk of `%log_messages` at end of parse: an entry
-  whose final `outcomes` carries both a success and a failure is mixed, its two
-  counts move, and the same walk sets the row's indicator state. Exact, one pass,
-  no per-line cost, and it needs no distinction between a consolidated cluster
-  and a plain key — it catches a row holding both outcomes however it came to.
+- **D5 — Every line of a mixed row leaves its own counter for `MIXED`
+  (architect, 2026-09-03).** The movement is mechanical and symmetric: when
+  rows are formed and merged and a row's state resolves to mixed, each of its
+  lines is subtracted from the counter it was counted in and added to the mixed
+  counter. The architect's worked case: one line counted as a success and
+  another as a failure each increment their global counter; the final
+  consolidation pass merges the two messages into one entry; success decrements
+  by one, failure decrements by one, mixed increments by two, and the
+  consolidated entry's classification state becomes mixed. Under D10 the same
+  applies to a mixed row's unclassified and conflict lines — the row is one
+  representation and all of it is mixed. The run-level figures therefore become
+  a five-way partition of counted quantities, and `unclassified` stops being
+  the subtraction `included - (successes + failures)` that
+  `classification_reconciliation()` computes today:
+
+  ```
+  SUCCESS + FAILURE + CLASSIFICATION CONFLICT + MIXED + UNCLASSIFIED = LINES INCLUDED
+  ```
+
+  *Implementation note, not a competing decision:* the same result is produced
+  by one walk of the retained rows at end of parse, after the final
+  consolidation pass, which also covers a row that resolves to mixed without
+  having been consolidated. Whichever way it is realised, the arithmetic above
+  is the contract.
 - **D6 — Percentage suppression is one meaning with three paths (architect,
   2026-09-03).** A window falls back to absolute counts (the D17 mechanism:
   `success_pct_count` / `failure_pct_count`, the absent `%` telling the reader it
@@ -243,7 +260,7 @@ Stated in the architect's terms (2026-09-03).
 |---|---|---|
 | Fourth `$line_outcome` value for conflict | `format_classification_src()`, and every consumer of `$line_outcome`: the outcome filters and highlight criteria (`-is/-if/-es/-ef`, `-hs/-hf`, #455), the per-message `outcomes` array, `expect_outcomes` validation on every format spec | The compiled classifier stops short-circuiting on failure and evaluates both criteria |
 | `%bucket_outcomes` slots 4 and 5 | The include point in `read_and_process_logs()` | Two conditional increments per line, the class of the shipped slot-3 increment |
-| Global mixed counter | End-of-parse walk of `%log_messages` (D5) | One pass over retained keys; no per-line cost |
+| Global mixed counter, and `unclassified` becomes counted rather than derived | The point rows are formed and merged (D5); `classification_reconciliation()` stops subtracting | One pass over retained rows; no per-line cost |
 | Per-message outcome capture back on for classified runs | `$message_outcomes_demand`, #517 D1 — its demand terms gain this feature's state, as #517 anticipated | One array increment per classified line, on default access-log runs. **The one measurable cost in the design**; the before/after benchmark has to carry it |
 | Revised eligibility predicate | `normalize_data_for_output()` per bucket, `classification_reconciliation()` for the run | Arithmetic only |
 
