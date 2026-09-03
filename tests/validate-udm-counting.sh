@@ -232,7 +232,17 @@ scenario_users_column() {
         label "-xu splits message rows per user ($plain rows without, $xu with)" \
         asserts '-xu prepends the user to the message key the way -xs prepends the session, so a text logged by several users becomes one row per user (D12)' \
         produced_by 'the prepend_user transform emitted by compile_format_extractor() under -xu in ltl' contract "$USERS_CONTRACT"
-    rm -f "$out" "$out.stderr"
+    # A non-access format that captures a user renders the same column: the
+    # synthetic Windchill Method Server fixture carries three placeholder
+    # users on nine of its twelve lines.
+    local wc="$REPO_DIR/tests/fixtures/format-detection/windchill-method-server-users.txt"
+    local wout; wout=$(mktemp "$TMP_DIR/out.XXXXXX")
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -V udm-counting "$wc" > "$wout" 2> "$wout.stderr" || true
+    check_capture_warnings "$wout"
+    assert_line "$wout" pattern '^bucket: [0-9]+  users: 3  users_hl: 0$' \
+        asserts 'the Windchill Method Server user field feeds the same users column (three distinct users in the day bucket)' \
+        produced_by 'read_and_process_logs() (%log_users accumulation) in ltl, fed by the windchill_method_server field map' contract "$USERS_CONTRACT"
+    rm -f "$out" "$out.stderr" "$wout" "$wout.stderr"
 }
 
 scenario_fixture_values() {

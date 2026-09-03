@@ -136,7 +136,7 @@ This sub-issue addresses the **silent unit-misinterpretation risk**: Apache HTTP
 | # | Scenario | Fixture | Expected slug | `match_type` |
 |---|---|---|---|---|
 | 1 | tomcat9-ms | `localhost_access_log-twx01-...-5k.txt` | `access_common_duration_ms` | 3 |
-| 2 | apache-httpd-us | `ApacheHTTP2Server-...2026-01-25.log` | `access_common_duration_ms` (misclassified — see below) | 3 |
+| 2 | apache-httpd-us | `ApacheHTTP2Server-...2026-01-25.log` | `access_common_duration_ms` by unit-group default (the file name carries no stem evidence; #444) | 3 |
 | 3 | codebeamer | `codebeamer_access_log.2025-10-29.txt` | `access_common_duration_bracketed` | 12 |
 | 4 | thingworx-standard | `ApplicationLog.2025-05-05.0.log` | `thingworx_standard` | 1 |
 | 5 | thingworx-with-metrics | `ScriptLog-DPMExtended-clean.log` | `thingworx_standard` (`metrics_observed: yes`) | 1 |
@@ -158,14 +158,14 @@ This is exactly the class of regression the harness is meant to surface.
 ### Decisions locked
 
 1. **Slug naming**: semantic descriptive form (e.g., `access_common_duration_ms`) rather than server+version (e.g., `tomcat9_access_d_ms`) or generic shape.
-2. **Apache HTTP2 misclassification**: codified — Apache HTTP2 log and Tomcat 9 log resolve to the same slug today. When #23 splits the formats, the `apache-httpd-us` scenario will need an update.
+2. **Apache HTTP2 specimen**: under the #444 family the specimen's analyst-renamed file carries no stem evidence, so it binds `access_common_duration_ms` by the unit group's default with the ambiguity note; the `apache-httpd-us` scenario asserts that and the staged `httpd-access.txt` fixture proves the microsecond member by name evidence.
 3. **Single PR** vs. two-PR split: combined ltl changes + harness into one PR rather than two.
 
 ### Stability notes for future maintainers
 
 - `%match_type_to_slug` in `ltl` GLOBALS is the **contract surface**. Slug values are stability-locked under `HARNESS-DESIGN.md § Stability contract` — renames require updating every consumer (currently just `tests/validate-format-detection.sh`) in the same commit.
 - The `format-detection` `-V` section is reserved per `HARNESS-DESIGN.md § Reserved section names`.
-- The Apache HTTP2 misclassification is a **known, intentional** mapping today, pending the format-registry rewrite (#23). The scenarios.apache-httpd-us assertion is the canary that will fail when #23 lands — that failure is the signal to update both the slug map and the harness in the same commit.
+- The Apache HTTP2 specimen's binding is a unit-group default, not a misclassification: the shape is one format written in two units, and the member is chosen from name evidence (#444 D3).
 - The CSV path (match_type 13) requires `-udm <name>` to fire. A CSV file passed without `-udm` produces no matches and is intentional — the harness covers this with a positive scenario.
 
 ---

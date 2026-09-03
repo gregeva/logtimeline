@@ -145,7 +145,7 @@ my %verbose_section_registry = (
         description => 'Timeline folding (--profile): resolved mode, fold period, included weekdays, and included vs dropped sample counts (Issue #256).',
     },
     'udm-counting' => {
-        description => 'Per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313).',
+        description => 'Per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus the sessions and users oracle references (Issues #313, #444).',
     },
     'udm-specs' => {
         description => 'Per -udm specification: how the spec was read (unit, aggregation, transform, extraction method, key, source), each compiled pattern, the run-wide production derived from the bucket accumulators, the intent hint if any, and parse-time rejections (Issues #443, #449).',
@@ -4946,22 +4946,16 @@ sub format_registry_promote {
 
 # Section name and field names are locked by
 # features/225-test-harness-coverage-gaps.md § #228 section. Slug values are
-# locked by %match_type_to_slug at the top of GLOBALS. Renames and
+# the bound entry's slug (FR_SLUG). Renames and
 # field-name changes are breaking under tests/HARNESS-DESIGN.md §
 # Stability contract; consumer harnesses (tests/validate-format-detection.sh)
 # must be updated in the same commit.
 #
-# The Apache HTTP Server 2.x access log is currently misclassified as
-# slug `tomcat_access_with_duration` because its regex is identical to
-# Tomcat 9's. Apache emits %D in microseconds; Tomcat 9 in milliseconds.
-# The misclassification is intentional pending the format-registry
-# rewrite (#23); the harness codifies it and will need an update when
-# #23 splits the formats.
-# One reconciliation of the classification counters (#452 D13): every surface
-# that speaks about successes, failures, the classified denominator or the
-# percentage eligibility calls this — the run summary, the -V classification
-# block, the notices and the column-visibility gate — so no second inline copy
-# of the arithmetic can drift.
+# The access-log family (#444) names each shape and selects the unit member
+# of a shape written in two units from the file's name and content; a file
+# whose name carries no evidence falls to the millisecond default with a
+# note naming the alternative, and -du or -lf pins the other unit.
+
 # A retained message row's classification state (#456 D10): an outcome's
 # name when every one of its lines carries that outcome (success, failure,
 # conflict), undef when none of its lines was classified, and 'mixed' for
@@ -5005,6 +4999,11 @@ sub resolve_message_classification_states {
     return;
 }
 
+# One reconciliation of the classification counters (#452 D13): every surface
+# that speaks about successes, failures, the classified denominator or the
+# percentage eligibility calls this — the run summary, the -V classification
+# block, the notices and the column-visibility gate — so no second inline copy
+# of the arithmetic can drift.
 sub classification_reconciliation {
     my $classified = $total_successes + $total_failures;
     # The five figures are counted quantities that partition the included
@@ -11254,6 +11253,21 @@ my %duration_display_decimals = ( ns => 6, us => 3, ms => 0, s => 0 );
 # fractional digit is the only expendable part — the unit is never truncated.
 # Callers that lay out fixed-width columns (the latency-stats cells) pass their
 # per-cell budget so the column stays aligned regardless of magnitude.
+# A duration-valued total (a bucket's or a message's summed milliseconds)
+# for display. A zero total rendered through the display scaler alone lands
+# on the ladder's lowest step, so a window whose durations sum to zero read
+# `0us` beside neighbours in `ms` (#444 R17): the cause was display scaling,
+# not a unit binding. Zero renders in the resolved source unit, as the
+# latency cells do through format_duration(); every other value climbs the
+# ladder as before.
+sub format_duration_total {
+    my ($value, $format, $space) = @_;
+    return undef unless defined $value;
+    return format_time($value, 'ms', $format, $space) if $value != 0;
+    my $unit = $duration_unit_resolved // 'ms';
+    return '0' . (defined $space ? ' ' : '') . $time_unit_step{$unit}{ $format // 'short' };
+}
+
 sub format_duration {
     my ($value, $max_chars) = @_;
     return "" unless defined $value;
@@ -15532,7 +15546,7 @@ sub calculate_all_statistics {
                         @{ $log_messages{$category}{$log_key} }{ keys %$stats } = values %$stats;
                     }
                     $log_messages{$category}{$log_key}{total_duration_num} = $aggregated_data->{total_duration} if defined $aggregated_data->{total_duration};
-                    $log_messages{$category}{$log_key}{total_duration} = format_time( $aggregated_data->{total_duration}, 'ms', 'medium', 'space' ) if defined $aggregated_data->{total_duration};
+                    $log_messages{$category}{$log_key}{total_duration} = format_duration_total( $aggregated_data->{total_duration}, 'medium', 'space' ) if defined $aggregated_data->{total_duration};
                 }
 
                 $log_messages{$category}{$log_key}{total_bytes} = $aggregated_data->{total_bytes} if defined $aggregated_data->{total_bytes};
@@ -17477,7 +17491,7 @@ sub print_bar_graph {
                         if( $key =~ /^(time|duration)$/i ) {
                             my $time_format = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
                             my $time_space = $time_format eq 'short' ? undef : ' ';
-                            $trend_value = " " . format_time( $log_stats{$bucket}{$key}, 'ms', $time_format, $time_space );
+                            $trend_value = " " . format_duration_total( $log_stats{$bucket}{$key}, $time_format, $time_space );
                         } elsif( $key =~ /^bytes$/i ) {
                             $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
                         } elsif( $key =~ /^count$/i ) {
@@ -17490,7 +17504,7 @@ sub print_bar_graph {
                                 if ($unit_type eq 'time') {
                                     my $fmt = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
                                     my $spc = $fmt eq 'short' ? undef : ' ';
-                                    $trend_value = " " . format_time($log_stats{$bucket}{$key}, 'ms', $fmt, $spc);
+                                    $trend_value = " " . format_duration_total($log_stats{$bucket}{$key}, $fmt, $spc);
                                 } elsif ($unit_type eq 'bytes') {
                                     $trend_value = " " . format_bytes($log_stats{$bucket}{$key}, 'B');
                                 } else {
@@ -17572,7 +17586,7 @@ sub print_bar_graph {
             foreach my $key (@populated_graph_columns) {
                 if( $key =~ /^(time|duration)$/i ) {
                     push @csv_data,
-                        (defined $log_stats{$bucket}{$key} ? ltrim(format_time($log_stats{$bucket}{$key}, 'ms', 'medium', ' ')) : undef),
+                        (defined $log_stats{$bucket}{$key} ? ltrim(format_duration_total($log_stats{$bucket}{$key}, 'medium', ' ')) : undef),
                         format_csv_value( $log_stats{$bucket}{$key}, 'duration' );
                 } elsif( $key =~ /^bytes$/i ) {
                     push @csv_data,
