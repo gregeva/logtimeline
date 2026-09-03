@@ -195,13 +195,19 @@ Stated in the architect's terms (2026-09-03).
   judged on rendered output during implementation, as `kelly-green` and
   `rosso-corsa` were after 22 and 88 proved too dark on a build.
 
+- **D9 — `MIXED` suppresses the run-level percentages (architect,
+  2026-09-03).** Once a mixed row's lines are pulled out of the global success
+  and failure counters, the run's classified denominator no longer covers every
+  classified line, so a share of it is not a share of the population. With a
+  non-zero mixed count the run summary's `SUCCESS CLASSIFIED` and `FAILURE
+  CLASSIFIED` rows print their counts without a share, exactly as they already do
+  on a run carrying a non-qualifying source. `mixed` joins `non_qualifying` in
+  the run-level eligibility predicate in `classification_reconciliation()`. The
+  per-bucket columns are untouched: they keep what was known when the bucket
+  passed (D4).
+
 ## Open decisions
 
-- **Q3 — Does `MIXED` suppress the run-level percentages?** The reasoning behind
-  D6 — a share is only honest when the classified pair is the whole population —
-  says yes: with mixed lines pulled out of successes and failures, the run
-  summary would otherwise print a clean success rate directly above a `MIXED` row
-  the ratio does not account for. Raised, not yet answered.
 - **Q4 — Row state when a row is not uniform in other ways.** D4 defines mixed
   from success and failure both being present. Still to settle: a row carrying
   successes and unclassified lines (proposed: success, since the leakage is what
