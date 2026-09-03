@@ -91,7 +91,7 @@ figures (same place); the notices surface itself (#412).
   line goes unclassified, and on `java_gc_g1` every line does, so a row is
   uniform either way. **No rendered output moves on any shipping format**, and
   nothing in the current corpus exercises the new states; see § Acceptance
-  criteria.
+  criteria, which D12 resolves by building the producer as part of this work.
 
 - **F5 — A run that retains no messages needs no special case (architect,
   2026-09-03).** `$capture_messages = ( $top_n_messages > 0 ) ? 1 : 0;`, and
@@ -263,6 +263,38 @@ Stated in the architect's terms (2026-09-03).
   | The new outcome figures in the aggregate export and the causes of an absent percentage | `features/503-yaml-aggregate-export.md`, beside D16 |
   | The indicator itself, the `MIXED` state, the colours, and the reasoning behind all of the above | this document |
 
+- **D12 — The producer for the new states is built here (architect,
+  2026-09-03).** "You need to be able to test what you build": a synthetic log
+  file and a registry entry capable of producing all four line states ship as
+  part of this work, not as a dependency on #483.
+
+  **Design.** The entry declares both outcomes on the `duration` field, which the
+  message key does not carry (`[$log_level] [$thread] [$object] $message`, and
+  `$log_level` is the category when no status code is captured). Deliberately
+  overlapping and deliberately incomplete criteria give one field all four
+  states — success `^\d{1,3}$`, failure `^[5-9]\d{2,}$`:
+
+  | duration | matches | state |
+  |---|---|---|
+  | 12 | success only | success |
+  | 750 | both | classification conflict |
+  | 5000 | failure only | failure |
+  | 1500 | neither | unclassified, from a qualifying source |
+
+  Because the classifying field is outside the key, the same message text at
+  different durations collapses to one row holding several states — `MIXED`
+  without `-g` — while near-identical texts give mixed clusters with it. The
+  entry declares `event_ledger => 1` and both criteria, so it qualifies, which is
+  what makes its unclassified line the new D6 path rather than the shipped
+  slot-3 one.
+
+  **Containment.** It is declared `scanned => 0`, so it never joins the scan
+  cascade and no real log can bind it; the harness reaches it with `-lf`. It is
+  excluded from the `--help formats` listing, which today iterates every spec, so
+  a verification-only entry never appears in user-facing prose. Both are
+  registry-schema questions owned by `features/log-format-registry.md` and are
+  recorded there in the same commit that adds the entry.
+
 ## Data model changes
 
 | Change | Where | Cost |
@@ -295,28 +327,87 @@ second copy of the rule (D11).
 
 ## Acceptance criteria
 
-To be agreed before code, per `docs/test-driven-development.md`. The blocker to
-resolve first:
+Agreed before code, per `docs/test-driven-development.md`. Every criterion below
+is **assertable**; D12 removed the one "unknown" the feature had by making the
+producer part of the work. Runs are shaped to the assertion they serve:
+`-bs 1440 -oe -ni` for counting and selection assertions, `-lf` to bind the
+verification format, fixed `--terminal-width` for rendered-cell assertions.
 
-**No shipping format can reach conflict, mixed, or qualifying-source
-unclassified (F4).** Every criterion below that exercises a new state therefore
-needs a producer that does not exist yet — a registry entry declaring overlapping
-or partial criteria, or #483 landing first. Which of those it is has to be
-settled before the criteria can be written, and it is the one "unknown"
-verification method in the feature.
+**The producer**
 
-Criteria that can be written now, against the shipped states:
+1. The synthetic fixture is committed as `.txt`, confirmed tracked by
+   `git ls-files`, described in `docs/test-logs.md` in the same commit, and
+   carries lines for all four states, plus one message text repeated at
+   differing durations and one pair of near-identical texts for the `-g` case.
+2. The verification entry never binds by detection: every existing
+   `tests/validate-format-detection.sh` scenario reports the same format it does
+   on the base commit, and the fixture itself is unrecognised without `-lf`.
+3. The entry is absent from `ltl --help formats`, and
+   `tests/validate-help-content.sh` passes with `--help` and `docs/usage.md` in
+   agreement.
 
-1. The indicator renders in the two message blocks for success and failure rows,
-   in the character position the consolidation marker occupies, with the table's
-   column widths byte-identical to the base commit on the same run.
-2. A consolidated row keeps `~` and changes only its colour; a non-consolidated
-   row renders `•`.
-3. An unclassified row renders exactly as it does today.
-4. No runtime warnings: stderr carries no ` at ltl line N` lines on any criterion
-   run.
-5. Full suite green, and the before/after benchmark carries the per-line cost of
-   re-enabled outcome capture.
+**The four line states**
+
+4. On the fixture, `-V` classification reports successes, failures, conflicts and
+   unclassified matching the fixture's designed composition.
+5. The line whose duration satisfies both criteria is counted as a conflict and
+   in neither successes nor failures — the regression guard on the retired
+   `($f) ? 2 : ($s) ? 1 : 0` short-circuit.
+6. `SUCCESS + FAILURE + CLASSIFICATION CONFLICT + MIXED + UNCLASSIFIED =
+   LINES INCLUDED` on every run in this section.
+
+**Eligibility**
+
+7. A window holding a conflict renders its success and failure cells as absolute
+   counts — no `%` — and a window holding a qualifying-source unclassified line
+   does the same, each proved on a bucket carrying only that cause.
+8. A window carrying neither, on the same run, still renders percentages.
+9. The run-level shares are withheld and the counts printed whenever any of the
+   run's disqualifying terms is non-zero, including a non-zero mixed count (D9),
+   while the timeline columns keep their per-bucket percentages (D4).
+
+**`MIXED`**
+
+10. A message row holding lines of differing states without `-g` renders the
+    terracotta indicator, and the global counters lose exactly that row's lines
+    to `MIXED`.
+11. The architect's worked case under `-g`: one success line and one failure line
+    consolidate to one entry; success decrements by one, failure decrements by
+    one, mixed increments by two, and the entry renders `~` in terracotta.
+12. A row whose lines are all conflicts renders `~` or `•` in amethyst; a row
+    whose lines are all unclassified renders exactly as it does on the base
+    commit.
+13. `-n 0` on the same fixture prints the run-level shares and no `MIXED` row,
+    with no `-n 0` branch anywhere in the source (F5).
+
+**The indicator**
+
+14. A non-consolidated classified row renders `•` (U+2022); a consolidated one
+    renders `~`; both in their state's colour, and the row's remaining text is
+    unchanged from the base commit.
+15. The message table's column widths and every other rendered column are
+    byte-identical to the base commit on the same run — the indicator occupies
+    the position the marker already held and costs the layout nothing.
+
+**Export and regression**
+
+16. The YAML aggregate export carries the new outcome figures at run and bucket
+    scope and the cause of each absent percentage, per the extension recorded in
+    `features/503-yaml-aggregate-export.md`.
+17. Every `tests/reference-output/*.txt` scenario is byte-identical to the base
+    commit: F4 establishes that no shipping format can reach any new state, and
+    `unclassified` becoming counted rather than derived must not change its
+    value.
+18. No runtime warnings: stderr carries no ` at ltl line N` on any criterion run
+    (`tests/lib/runtime-warnings.sh`).
+19. Full `tests/validate-*.sh` suite green, and a before/after benchmark on this
+    machine carrying the cost of per-message outcome capture re-enabled on
+    classified runs (#517 D1).
+
+**Harness placement.** The new assertions extend the classification contract, so
+`tests/HARNESS-DESIGN.md` is read before any harness file is created or renamed,
+every assertion declares `asserts`, `produced_by` and `contract`, and every
+consumer of a changed `-V` section is updated in the same commit.
 
 ## Merge gate
 
