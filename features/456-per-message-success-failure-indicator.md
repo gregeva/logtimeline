@@ -182,20 +182,21 @@ Stated in the architect's terms (2026-09-03).
   "the rules matched nothing on this line" and "the rules contradicted each
   other" are three explanations a reader has to be able to tell apart.
 
+- **D8 — Two new classification colours (architect, 2026-09-03).** `terracotta`
+  = 256-colour **173** (`#d7875f`) for `MIXED`, matched to the swatch the
+  architect supplied; `amethyst` = 256-colour **135** (`#af5fff`) for
+  `CLASSIFICATION CONFLICT`. Both join the classification shades in `%colors`
+  beside `kelly-green`, `rosso-corsa` and `gold`, named for the colour they are
+  (#452 D14), and each reads the same wherever its state appears — the summary
+  row and the message indicator. A muted terracotta keeps `MIXED` clear of `gold`
+  at one-character size, which a pure orange such as 208 would not; a violet
+  keeps `CLASSIFICATION CONFLICT` off the green–gold–orange–red axis entirely, so
+  it cannot be read as a degree of good or bad, which it is not. Both are still
+  judged on rendered output during implementation, as `kelly-green` and
+  `rosso-corsa` were after 22 and 88 proved too dark on a build.
+
 ## Open decisions
 
-- **Q1 — The `MIXED` colour.** The architect supplied a swatch (2026-09-03): a
-  muted terracotta orange. Nearest 256-colour is **173** (`#d7875f`); `209`
-  (`#ff875f`) is the brighter neighbour. It has to stay distinguishable in a
-  single character from `rosso-corsa` (160) and from `gold` (178), which is the
-  reason for preferring a value with blue in it over a pure orange such as 208.
-  Proposed name `terracotta`, following D14's rule that the name states the
-  colour. To be judged on rendered output, as 34 and 160 were after the first
-  shades proved too dark.
-- **Q2 — The `CLASSIFICATION CONFLICT` colour.** Not yet chosen. Claude's
-  proposal is a violet (**135**, `#af5fff`, proposed name `amethyst`): it sits
-  off the green–gold–orange–red axis entirely, so a conflict cannot be misread as
-  a degree of good or bad, which is what it is not.
 - **Q3 — Does `MIXED` suppress the run-level percentages?** The reasoning behind
   D6 — a share is only honest when the classified pair is the whole population —
   says yes: with mixed lines pulled out of successes and failures, the run
