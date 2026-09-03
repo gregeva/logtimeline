@@ -91,12 +91,14 @@ figures (same place); the notices surface itself (#412).
   nothing in the current corpus exercises the new states; see § Acceptance
   criteria.
 
-- **F5 — `MIXED` cannot be computed on a run that retains no messages.**
-  `$capture_messages = ( $top_n_messages > 0 ) ? 1 : 0;`, so `-n 0` populates no
-  `%log_messages` entries and there are no rows to test for uniformity. The
-  run-level mixed count is then unavailable, and with it D9's suppression: the
-  same data would print run-level percentages under `-n 0` and withhold them
-  without it. To be resolved.
+- **F5 — A run that retains no messages needs no special case (architect,
+  2026-09-03).** `$capture_messages = ( $top_n_messages > 0 ) ? 1 : 0;`, and
+  `adapt_to_command_line_options()` switches consolidation off outright under
+  `-n 0` (`$group_similar_sensitivity = "none"`, with the note that `-g` has no
+  effect). No messages means no merging means no ambiguity to manage: nothing is
+  ever moved into `MIXED`, its count is zero rather than unknown, and D9's
+  suppression simply does not trigger. The run-level shares print by the ordinary
+  rule. No `-n 0` branch is added anywhere.
 
 ## Requirements
 
