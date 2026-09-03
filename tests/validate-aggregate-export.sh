@@ -279,6 +279,26 @@ if want "$current_scenario"; then
     fi
 fi
 
+
+# ---------------------------------------------------------------------------
+current_scenario="users-and-highlight-twins"
+if want "$current_scenario"; then
+    # #444 D13: whatever is captured as a metric is exported. With a highlight
+    # the sessions and users scalars gain their _hl twins; without one neither
+    # twin is written.
+    USERS_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/access-users-sessions.txt"
+    run_export -bs 1440 -oe -n 0 -h alice "$USERS_FIXTURE" || true
+    if [[ -n "$YAML_FILE" ]]; then
+        assert_equal "users" "$(yget series.buckets.0.users)" 3 asserts 'The users scalar: three distinct remote users in the day bucket' produced_by "$PRODUCER" contract 'features/444-access-log-format-family-and-user-surface.md D10/D13'
+        assert_equal "users_hl" "$(yget series.buckets.0.users_hl)" 1 asserts 'The highlighted twin under -h alice: one highlighted user' produced_by "$PRODUCER" contract 'features/444-access-log-format-family-and-user-surface.md D13'
+        assert_equal "sessions_hl" "$(yget series.buckets.0.sessions_hl)" 3 asserts 'The sessions twin under the same highlight: alice holds three sessions across her lines' produced_by "$PRODUCER" contract 'features/444-access-log-format-family-and-user-surface.md D13'
+    fi
+    run_export -bs 1440 -oe -n 0 "$USERS_FIXTURE" || true
+    if [[ -n "$YAML_FILE" ]]; then
+        assert_equal "no users_hl without a highlight" "$(yget series.buckets.0.users_hl)|$(yget series.buckets.0.sessions_hl)" "|" asserts 'Without a highlight neither twin is written' produced_by "$PRODUCER" contract 'features/444-access-log-format-family-and-user-surface.md D13'
+    fi
+fi
+
 # ---------------------------------------------------------------------------
 current_scenario="directories-relative"
 if want "$current_scenario"; then

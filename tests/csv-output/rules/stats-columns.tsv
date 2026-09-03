@@ -72,6 +72,10 @@ occurrences	*	int	yes	0	meta
 successes	*	int	yes	0	meta
 failures	*	int	yes	0	meta
 conflicts	*	int	yes	0	meta
+sessions	*	int	no	0	meta
+sessions-HL	*	int	no	0	meta
+users	*	int	no	0	meta
+users-HL	*	int	no	0	meta
 duration	*	float	conditional:duration	9	duration
 duration_nice	*	nice	conditional:duration	n/a	duration
 bytes	*	int	conditional:bytes	0	bytes

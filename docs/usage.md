@@ -146,7 +146,8 @@ Consolidated entries are marked with `~` in the summary table output; that marke
 | `-g, --group-similar <N>` | Enable fuzzy message consolidation with N% Dice similarity threshold (50-99, default: 85). Lower values are more aggressive. |
 | `-uuid, --mask-uuid` | Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to `-g` for UUID-only variation) |
 | `-xqs, --expose-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
-| `-xs, --expose-session` | Keep session/user IDs when grouping messages, so each session is tracked separately |
+| `-xs, --expose-session` | Keep session IDs when grouping messages, so each session is tracked separately |
+| `-xu, --expose-user` | Keep user names when grouping messages, so each user is tracked separately |
 | `-gc, --group-ceiling <N>` | Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000) |
 
 ```bash
@@ -185,6 +186,7 @@ Each category row shows its share of the lines included beside its total — `2 
 | `-hb, --hide-bytes` | Hide the bytes bar graph column |
 | `-hc, --hide-count` | Hide the count bar graph column |
 | `-hses, --hide-session` | Hide the Sessions column that automatically appears when session IDs are found in the log data |
+| `-hu, --hide-user` | Hide the Users column that automatically appears when user names are found in the log data |
 | `-hcl, --hide-classification` | Hide the success and failure percentage columns shown by default for event-ledger formats such as access logs |
 | `-scl, --show-classification` | Show the success and failure percentage columns for a format that declares both classifications without being an event ledger |
 | `-hst, --hide-stats` | Hide the latency statistics or heatmap column |
@@ -330,7 +332,7 @@ With `-o`, every run also writes `<stamp>-LTL-AGGREGATE.yaml` beside the STATS C
 - **provenance** — the ltl version, when the file was generated (UTC), the option lines exactly as the terminal echoes them under the timeline, the population-selection signature `ltl-index.csv` records, the data model resolved for each surface and the precision tier, the duration source unit, and the `-pr` mode or `-lf` pin when given.
 - **population** — each matched log format with its event-ledger property and the file counts behind it, the observation window as the run summary heading states it with the population's duration in seconds and in words, the count of files read and matched and the directories they were read from (as the paths were given; the working directory itself is never recorded), and the line accounting: lines read, unmatched by any format, excluded by each criterion in force, included, highlighted.
 - **measurements** — the run summary in machine form: the classification totals with the success and failure percentages where the run was eligible for them, the category totals, the run's total time and peak memory, and for each metric `-hg` histogrammed, the population-wide statistics: count, observed extremes and the percentile ladder.
-- **series** — the bucket size, bucket count and rate unit, then one entry per time bucket carrying every STATS CSV column family that is active for the run — outcomes, categories, rates, the duration statistics, bytes, count, sessions, thread pools, user-defined metrics — and, when `-hm` ran, the heatmap's per-bucket percentile ladder under its metric's name.
+- **series** — the bucket size, bucket count and rate unit, then one entry per time bucket carrying every STATS CSV column family that is active for the run — outcomes, categories, rates, the duration statistics, bytes, count, sessions, users, thread pools, user-defined metrics — and, when `-hm` ran, the heatmap's per-bucket percentile ladder under its metric's name.
 
 Every figure is the exact in-memory value: no rounding, no unit escalation, and `-cp` does not apply. Three fields are formatted strings by design — the population duration's readable form, and the run's total time and peak memory as the summary prints them. A percentile is written only when the block's own observation count reaches the sample-size rule (`pN` needs `10/(1-N/100)` observations); the count is written beside it as `occurrences`, so a missing key is explained and a reader renders it as a gap, never as zero. Counts, sums, minimum, mean and maximum are never withheld. Population-wide statistics exclude non-positive values, as the histogram does.
 

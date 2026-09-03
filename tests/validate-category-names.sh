@@ -52,7 +52,7 @@ command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 # unit-ambiguity note. -ni keeps the developer's ltl-index.csv out of the run.
 FAMILIES_FIXTURE="$REPO_DIR/tests/fixtures/http-status-families.txt"
 LEVELS_FIXTURE="$REPO_DIR/tests/fixtures/log-level-vocabulary.txt"
-ACCESS_FORMAT="tomcat_access_with_duration"
+ACCESS_FORMAT="access_common_duration_ms"
 WIDTH=140
 
 # shellcheck source=lib/runtime-warnings.sh

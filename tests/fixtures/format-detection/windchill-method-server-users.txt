@@ -1,0 +1,12 @@
+2025-07-18 06:40:00,100 ERROR  [ajp-nio-127.0.0.1-8011-exec-1] com.example.mvc.controllers.RequestController alice - request /store/catalog handled
+2025-07-18 06:40:07,101 INFO  [ajp-nio-127.0.0.1-8011-exec-2] com.example.mvc.controllers.RequestController bob - request /store/item/42 handled
+2025-07-18 06:41:14,102 INFO  [ajp-nio-127.0.0.1-8011-exec-3] com.example.mvc.controllers.RequestController carol - request /store/cart handled
+2025-07-18 06:41:21,103 INFO  [ajp-nio-127.0.0.1-8011-exec-1] com.example.mvc.controllers.RequestController  - request /store/checkout handled
+2025-07-18 06:42:28,104 INFO  [ajp-nio-127.0.0.1-8011-exec-2] com.example.mvc.controllers.RequestController alice - request /store/search handled
+2025-07-18 06:42:35,105 ERROR  [ajp-nio-127.0.0.1-8011-exec-3] com.example.mvc.controllers.RequestController bob - request /store/login handled
+2025-07-18 06:43:42,106 INFO  [ajp-nio-127.0.0.1-8011-exec-1] com.example.mvc.controllers.RequestController carol - request /store/logout handled
+2025-07-18 06:43:49,107 INFO  [ajp-nio-127.0.0.1-8011-exec-2] com.example.mvc.controllers.RequestController  - request /store/images/logo.png handled
+2025-07-18 06:44:56,108 INFO  [ajp-nio-127.0.0.1-8011-exec-3] com.example.mvc.controllers.RequestController alice - request /store/api/orders handled
+2025-07-18 06:44:03,109 INFO  [ajp-nio-127.0.0.1-8011-exec-1] com.example.mvc.controllers.RequestController bob - request /store/api/stock handled
+2025-07-18 06:45:10,110 ERROR  [ajp-nio-127.0.0.1-8011-exec-2] com.example.mvc.controllers.RequestController carol - request /store/help handled
+2025-07-18 06:45:17,111 INFO  [ajp-nio-127.0.0.1-8011-exec-3] com.example.mvc.controllers.RequestController  - request /store/account handled

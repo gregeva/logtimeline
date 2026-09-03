@@ -213,13 +213,23 @@ scenario_inventory() {
     check_capture_warnings "$out"
 
     assert_line "$out" \
-        pattern     '^scanned_entries: 17$' \
+        pattern     '^scanned_entries: 21$' \
         asserts     'The registry compiles 17 scanned entries (every format the scan can recognise, variant members included); csv is stateful and outside the scan array' \
         produced_by 'emit_format_registry_verbose() in ltl, reading @format_registry_members built by build_format_registry()' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - changes only when a scanned format is added or removed, in the same commit as this assertion'
 
     assert_line "$out" \
-        pattern     '^scan_slots: 15$' \
+        pattern     '^family: access=mt3ts,mt3tsus,mt12,mt9,mt19,mt20,mt3,mt3us,mt4$' \
+        asserts     'the access family lists its nine members in static order: thread-session (ms, us), bracketed, jboss, combined-duration, combined, common-duration (ms, us), common (#444 D4/D5)' \
+        produced_by 'emit_format_registry_verbose() in ltl (family line)' \
+        contract    'features/444-access-log-format-family-and-user-surface.md D5; features/log-format-registry.md section -V format-registry section-contract'
+    assert_line "$out" \
+        pattern     '^  ancestors: mt19 <- mt9$' \
+        asserts     'access_combined_duration stays behind jboss_access, whose samples its generic pattern also matches (#444 D4)' \
+        produced_by 'derive_format_constraints() in ltl' \
+        contract    'features/444-access-log-format-family-and-user-surface.md D4'
+    assert_line "$out" \
+        pattern     '^scan_slots: 18$' \
         asserts     'The 17 scanned entries occupy 15 scan slots: one slot per variant group, since only one member of a group is seated at a time (D47)' \
         produced_by 'emit_format_registry_verbose() in ltl, reading @format_registry (one entry per group slot)' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - agrees with entries: N in format-detection / scan, which counts the same slots'
@@ -231,7 +241,7 @@ scenario_inventory() {
         contract    'features/log-format-registry.md section -V format-registry section-contract'
 
     assert_line "$out" \
-        pattern     '^  entry: mt3us slug=httpd_access_with_duration group=access_with_duration default=no role=scanned$' \
+        pattern     '^  entry: mt3us slug=access_common_duration_us group=access_common_duration default=no role=scanned$' \
         asserts     'A non-default variant member reports its group and default=no - the evidence pass can seat it, but it does not hold the slot by default' \
         produced_by 'emit_format_registry_verbose() in ltl (group and FR_GROUP_DEFAULT per entry)' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - variant groups are D47/F1'
@@ -350,7 +360,7 @@ scenario_election_pinned() {
     current_scenario="election-pinned"
     echo "[$current_scenario]"
     local out
-    out=$(run_format_registry "$FIXTURES/tomcat-access.txt" -lf tomcat_access_with_duration)
+    out=$(run_format_registry "$FIXTURES/tomcat-access.txt" -lf access_common_duration_ms)
     check_capture_warnings "$out"
 
     assert_line "$out" \

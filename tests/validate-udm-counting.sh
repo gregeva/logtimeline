@@ -166,6 +166,75 @@ assert_header_present() {
 # Scenario: fixture-values — every counting aggregation, both buckets, plain
 # and highlight, against hand-computed expectations, plus the sessions oracle.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Scenario: users-column (#444 D10/D12/D13) - the users column mirrors the
+# sessions column piece for piece: a distinct UDM over the remote-user token
+# equals the built-in users column per bucket, plain and highlighted, across
+# >= 2 buckets; -hu hides the column and keeps the CSV value; -i and -h on a
+# user token select exactly the lines carrying it; -xu splits rows per user.
+# ---------------------------------------------------------------------------
+USERS_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/access-users-sessions.txt"
+USERS_CONTRACT='features/444-access-log-format-family-and-user-surface.md D10 (users mirrors sessions), D12 (-xu), D13 (highlighted twins exported)'
+run_ltl_users() {
+    local outfile
+    outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
+    "$LTL" --disable-progress -ni "$@" "$USERS_FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
+    echo "$outfile"
+}
+scenario_users_column() {
+    current_scenario="users-column"
+    echo "[$current_scenario]"
+    local out
+    # -s -bs 5: the twelve lines fall into three five-second buckets. The
+    # distinct UDM captures the remote-user token and skips a bare -, the
+    # rule the users column applies.
+    out=$(run_ltl_users -s -bs 5 -oe -n 0 -h alice -V udm-counting -udm 'ruser::distinct:/^\S+ \S+ ([^- ]\S*) /')
+    check_capture_warnings "$out"
+    assert_command \
+        command     "awk '/^bucket: [0-9]+  metric: ruser  /{ u[\$2]=\$14; u_hl[\$2]=\$16 } /^bucket: [0-9]+  users: /{ us[\$2]=\$4; us_hl[\$2]=\$6 } END { n=0; for (b in u) { n++; if (!(b in us) || u[b] != us[b] || u_hl[b] != us_hl[b]) { print \"mismatch bucket \" b \": udm \" u[b] \"/\" u_hl[b] \" users \" us[b] \"/\" us_hl[b]; exit 1 } } if (n < 2) { print \"only \" n \" bucket(s)\"; exit 1 } }' '$out'" \
+        label       'distinct UDM on the remote-user token equals the built-in users column per bucket, plain and highlight, across >= 2 buckets' \
+        asserts     'the users column is the sessions oracle twinned: a distinct-count UDM over the user token reproduces the users column exactly, including the -HL dimension' \
+        produced_by 'read_and_process_logs() (%log_users accumulation) + calculate_all_statistics() (users promotion) + emit_udm_counting_verbose() in ltl' \
+        contract    "$USERS_CONTRACT"
+    assert_line "$out" pattern '^bucket: [0-9]+  users: [0-9]+  users_hl: 1$' \
+        asserts 'with -h alice the highlighted users twin counts the one highlighted user in a bucket she appears in' \
+        produced_by 'calculate_all_statistics() users promotion in ltl' contract "$USERS_CONTRACT"
+    # The rendered column and its hide option: the header names users beside
+    # sessions; -hu removes it and the STATS CSV keeps the value.
+    local dir="$TMP_DIR/users-csv"; mkdir -p "$dir"
+    ( cd "$dir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 --terminal-width 200 -h alice -o "$USERS_FIXTURE" > shown.out 2> shown.err ) || true
+    ( cd "$dir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 --terminal-width 200 -hu -o "$USERS_FIXTURE" > hidden.out 2> hidden.err ) || true
+    check_stderr_warnings "$dir/shown.err"; check_stderr_warnings "$dir/hidden.err"
+    assert_command \
+        command "sed -E 's/\x1b\[[0-9;]*m//g' '$dir/shown.out' | grep -E '^ +timestamp' | grep -qE 'sessions +users' && ! sed -E 's/\x1b\[[0-9;]*m//g' '$dir/hidden.out' | grep -E '^ +timestamp' | grep -q 'users'" \
+        label 'the users column renders right of sessions and -hu removes it' \
+        asserts 'users and sessions render side by side when both have data (R11), users immediately right of sessions (D10); -hu hides the column' \
+        produced_by 'add_dynamic_column() registration in normalize_data_for_output() in ltl' contract "$USERS_CONTRACT"
+    assert_command \
+        command "for f in '$dir'/*-LTL-STATS-*.csv; do head -1 \"\$f\" | tr ',' '\n' | grep -qx users || exit 1; done; h=\$(ls '$dir'/*-LTL-STATS-*.csv | head -1); c=\$(head -1 \"\$h\" | tr ',' '\n' | grep -nx users | cut -d: -f1); [ \"\$(awk -F, -v c=\"\$c\" 'NR==2{print \$c}' \"\$h\")\" = 3 ] && head -1 \"\$h\" | tr ',' '\n' | grep -qx 'users-HL' && head -1 \"\$h\" | tr ',' '\n' | grep -qx 'sessions-HL'" \
+        label 'STATS CSV carries users (3 distinct in the day bucket) in both runs, and the users-HL and sessions-HL twins under the highlight' \
+        asserts 'whatever is captured as a metric is exported: the users column reaches the STATS CSV whether or not it is rendered, and a highlight adds the -HL twins beside the category twins (R12/D13)' \
+        produced_by 'normalize_data_for_output() column build and print_bar_graph() CSV row in ltl' contract "$USERS_CONTRACT"
+    # Filtering and highlighting on the user token select exactly its lines.
+    out=$(run_ltl_users -bs 1440 -oe -n 0 -i alice -V filter-summary); check_capture_warnings "$out"
+    assert_line "$out" pattern '^lines_included: 3$' \
+        asserts '-i on a user token that appears only in the user column includes exactly the three lines carrying it (R9/D11: the raw-line filter)' \
+        produced_by 'match_filter() on the raw line in read_and_process_logs() in ltl' contract "$USERS_CONTRACT; features/444-access-log-format-family-and-user-surface.md D11"
+    # -xu: the thread-session fixture has one message per line, so the split
+    # is proven on the ThingWorx specimen, whose messages repeat across users.
+    local tw="$REPO_DIR/tests/fixtures/format-detection/thingworx-application-log.txt"
+    local plain xu
+    plain=$("$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 "$tw" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -cE '^[^\[[:space:]]*\s*\[' || true)
+    xu=$("$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 -xu "$tw" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -cE '^[^\[[:space:]]*\s*\[' || true)
+    assert_command \
+        command "[ \"$xu\" -gt \"$plain\" ] && [ \"$plain\" -gt 0 ]" \
+        label "-xu splits message rows per user ($plain rows without, $xu with)" \
+        asserts '-xu prepends the user to the message key the way -xs prepends the session, so a text logged by several users becomes one row per user (D12)' \
+        produced_by 'the prepend_user transform emitted by compile_format_extractor() under -xu in ltl' contract "$USERS_CONTRACT"
+    rm -f "$out" "$out.stderr"
+}
+
 scenario_fixture_values() {
     current_scenario="fixture-values"
     echo "[$current_scenario]"
@@ -498,6 +567,7 @@ scenario_alias_canonical
 scenario_csv_columns
 scenario_consolidation
 scenario_mem
+scenario_users_column
 
 echo
 echo "Results: $pass passed, $fail failed"

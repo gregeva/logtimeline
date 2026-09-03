@@ -66,7 +66,7 @@ FIXTURE_DIR="$REPO_DIR/tests/fixtures/progress-multi-file"
 PART1="$FIXTURE_DIR/part-1.txt"
 PART2="$FIXTURE_DIR/part-2.txt"
 PART3="$FIXTURE_DIR/part-3.txt"
-ACCESS_FORMAT="tomcat_access_with_duration"
+ACCESS_FORMAT="access_common_duration_ms"
 WIDTH=140
 
 # shellcheck source=lib/runtime-warnings.sh
