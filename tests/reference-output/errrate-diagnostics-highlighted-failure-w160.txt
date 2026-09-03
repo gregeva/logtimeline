@@ -15,7 +15,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 
 
   TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                                                                     Occur. 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  [ERROR] [main] [wt.method.server.startup] Error level line                                                                                                1 
+• [ERROR] [main] [wt.method.server.startup] Error level line                                                                                                1 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-07-18 04:46 and 2025-07-18 04:46

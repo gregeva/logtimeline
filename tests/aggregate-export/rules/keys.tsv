@@ -41,6 +41,9 @@ measurements.classified	int	yes
 measurements.successes	int	yes	
 measurements.failures	int	yes	
 measurements.unclassified	int	yes	
+measurements.conflicts	int	yes	
+measurements.mixed	int	yes	
+measurements.unclassified_qualifying_lines	int	yes	
 measurements.success_pct	number	conditional:pct_eligible	
 measurements.failure_pct	number	conditional:pct_eligible	
 measurements.pct_eligible	bool	yes	
@@ -89,6 +92,8 @@ series.buckets[].failures	int	yes
 series.buckets[].success_pct	number	conditional:bucket-eligible	
 series.buckets[].failure_pct	number	conditional:bucket-eligible	
 series.buckets[].non_qualifying_lines	int	yes	
+series.buckets[].conflicts	int	yes	
+series.buckets[].unclassified_qualifying_lines	int	yes	
 series.buckets[].categories.*	int	conditional:populated-bucket	
 series.buckets[].err_rate	number	conditional:rates	
 series.buckets[].msg_rate	number	conditional:rates	

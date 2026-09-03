@@ -895,12 +895,14 @@ This section is the owning contract for the `format-registry` `-V` section, emit
 
 Entry names (`mt1std`, `mt3us`, …) throughout, never slugs — the registry orders and compiles entries, and two entries can share a slug (mt1std/mt1gen → `thingworx_standard`), the same vocabulary rule the `format-detection / scan` sub-section follows.
 
+**Pin-only entries (#456 D12, 2026-09-03).** Two spec keys govern an entry that exists to produce states no shipping format can reach, so a harness can verify them: `scanned => 0` together with a `pattern_src` makes the entry *compiled but not scanned* — its pattern, extractor and generated block are built and it passes gates 1 (samples match) and 2 (extraction and classification parity), but it takes no slot in the cascade, no clobber set (it scans alone), no cross-shadow ancestor constraint, no filename evidence, and the sample pass never sees it, so no file binds it by detection; `-lf <slug>` seats it exactly as it seats a scanned member. `verification => 1` keeps the entry out of every user-facing listing: `--help formats` and the known-format list a mistyped `-lf` is answered with. The live registry keeps such entries in `@format_registry_pin_only`; the stateful `csv` entry (no pattern) is neither scanned nor compiled. One entry today: `mtvfy` (`classification_verification`), whose four samples declare the four `expect_outcomes` values 1, 4, 2, 0. The fixture that exercises it is `tests/fixtures/classification-states.txt` and its harness `tests/validate-classification-states.sh`.
+
 **Inventory** — what was compiled from the declarative specs:
 
-- `entries: N` — every entry in `format_registry_specs()`, scanned and stateful alike (18: 17 scanned + `csv`).
+- `entries: N` — every entry in `format_registry_specs()`, scanned, pin-only and stateful alike (19: 17 scanned + the pin-only `mtvfy` + `csv`).
 - `scanned_entries: N` — entries the scan can recognise, variant members included (17). Changes only when a scanned format is added or removed — same commit updates this contract and the harness.
 - `scan_slots: N` — slots in the live scan array (15). One per variant group, since only one member of a group is seated at a time (D47), so `scan_slots ≤ scanned_entries`. Equals `entries: N` in `format-detection / scan`, which counts the same slots. Under `-lf` this narrows to the pinned format's member count.
-- `  entry: <name> slug=<slug> group=<group> default=yes|no role=scanned|stateful` — one line per entry, static spec order. `group` is the entry's `variant_group` or its own name; `default=yes` marks the member holding the group's slot by default; `role=stateful` marks an entry outside the generated scan (`csv` alone today, D32).
+- `  entry: <name> slug=<slug> group=<group> default=yes|no role=scanned|stateful` — one line per entry, static spec order. `group` is the entry's `variant_group` or its own name; `default=yes` marks the member holding the group's slot by default; `role=stateful` marks an entry outside the generated scan with no pattern (`csv` alone today, D32); `role=pin-only` marks a compiled entry outside the scan cascade that only `-lf` seats (the `mtvfy` classification-verification producer, #456 D12; see § Pin-only entries).
 
 **Structure** — how the scan is organised and what constrains its ordering:
 

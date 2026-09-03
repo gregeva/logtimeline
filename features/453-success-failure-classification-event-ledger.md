@@ -365,6 +365,32 @@ gains the counted `unclassified` figure that
 Specification, rationale and the message-scope `MIXED` state that rides with it:
 `features/456-per-message-success-failure-indicator.md`.
 
+Implemented 2026-09-03 (branch `456-per-message-success-failure-indicator-2`):
+
+- **The outcome value is 4**, and outcome values double as `%bucket_outcomes` and
+  per-message `outcomes` slots: 1 success, 2 failure, 4 classification conflict;
+  bucket slot 3 stays the non-qualifying-source count and slot 5 is the new
+  count of unclassified lines from a qualifying source. The compiled decision is
+  `($f) ? (($s) ? 4 : 2) : ($s) ? 1 : 0`; the interpreted reference evaluates
+  both outcomes and agrees; `expect_outcomes` accepts 4 (the self-validation
+  message names it); no shipping entry's declared outcomes change.
+- **Outcome filters and highlight criteria** are unchanged in code: a conflict
+  line satisfies neither `-is`/`-if` nor `-hs`/`-hf` and survives `-es`/`-ef`,
+  exactly as an unclassified line does.
+- **`-V format-detection / classification`** gains, additively: `conflicts: N`,
+  `mixed: N`, `unclassified_qualifying: N` (lines from a qualifying source the
+  rules said nothing about, the per-line count before any MIXED movement), and
+  `unclassified: N` is now the counted figure. `successes + failures + conflicts
+  + mixed + unclassified = lines_included` on every run. `pct_eligible` is 0
+  when any of `non_qualifying_lines`, `conflicts`, `unclassified_qualifying` or
+  `mixed` is non-zero. Consumers: `tests/validate-classification-states.sh`
+  (new), `tests/validate-classification-percentages.sh`,
+  `tests/validate-outcome-criteria.sh`, `tests/validate-filter-summary.sh`,
+  `tests/validate-aggregate-export.sh`, `tests/validate-format-detection.sh`.
+- **STATS CSV and MESSAGES CSV** gain a `conflicts` column after `failures`
+  (rules: `tests/csv-output/rules/*.tsv`; the MESSAGES CSV fixed positions from
+  `bytes_occurrences` on shift by one).
+
 ## Open items
 
 1. Expressibility in #387 (user-defined YAML formats): confirm the field+pattern, list-of-conjunctions shape maps onto what #387 will accept — checked at #387 planning, recorded here.

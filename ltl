@@ -190,10 +190,12 @@ my %verbose_sections_requested;   # Populated by adapt_to_command_line_options()
 my %verbose_section_buffer;
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_sessions );
-# Per-bucket success/failure outcomes (#453 D17/D30): $bucket_outcomes{$bucket}[1]
-# successes, [2] failures, written only for classified lines; a bucket's
-# unclassified count is occurrences minus both, derived at emission. Kept
-# out of %log_analysis so the statistics population is unchanged.
+# Per-bucket classification outcomes (#453 D17/D30, #456 D7): the outcome
+# value is the slot, so $bucket_outcomes{$bucket}[1] successes, [2] failures,
+# [4] classification conflicts; [3] lines from non-qualifying sources and
+# [5] unclassified lines from qualifying sources are the two other causes of
+# an absent percentage. Slot 0 is never written. Kept out of %log_analysis so
+# the statistics population is unchanged.
 my %bucket_outcomes;
 # Per-category message-key display order, computed once in calculate_all_statistics()
 # and reused by print_message_summary() so the same keys are not sorted twice
@@ -287,6 +289,10 @@ my $total_lines_included = 0;
 my $total_lines_unmatched = 0;
 my ( $excluded_time_window, $excluded_filter, $excluded_numeric, $excluded_other ) = ( 0, 0, 0, 0 );
 my ( $total_successes, $total_failures ) = ( 0, 0 );   # run-level classification outcomes (#453 R5)
+my $total_conflicts    = 0;   # lines whose success and failure criteria both fired (CLASSIFICATION CONFLICT, #456 D3)
+my $total_unclassified = 0;   # lines the rules said nothing about, counted per line (#456 D5)
+my $total_unclassified_qualifying = 0;   # of those, from a source that declares both outcomes (#456 D6/D7)
+my $total_mixed        = 0;   # lines of message rows whose lines were not uniform (MIXED, #456 D4/D5)
 my $total_non_qualifying_lines = 0;   # included lines from formats that do not qualify
                                       # for the percentage surfaces (#452 D2 provenance)
 my @progress_history = ();     # rolling history for lines/sec calculation: [ [timestamp, lines_read], ... ]
@@ -438,6 +444,17 @@ my %match_type_to_slug = (
     15 => 'integration_runtime_standard',    # ThingWorx Integration Runtime, yyyy-dd-MM dates (variant of 10)
     16 => 'windchill_workgroup_manager', # Windchill Workgroup Manager client logs (genlwsc / uwgm_client / uwgm)
     17 => 'windchill_method_server',         # Windchill Method Server / Background Method Server log4j
+    18 => 'classification_verification',     # verification-only producer of every classification state (-lf only)
+);
+
+# A message row's classification state, keyed to the colour it renders in:
+# the indicator in the message blocks and the run summary's rows read the
+# same shade for the same state (#456 D2/D8).
+my %classification_state_colour = (
+    success  => 'kelly-green',
+    failure  => 'rosso-corsa',
+    conflict => 'amethyst',
+    mixed    => 'terracotta',
 );
 
 # Per-file format-detection accumulator. Populated in read_and_process_logs()
@@ -526,6 +543,7 @@ use constant {
 };
 my @format_registry;           # scanned entries, static cascade order: one
                                # occupant per variant-group slot (D47/F1)
+my @format_registry_pin_only;  # compiled entries outside the cascade, seated by -lf alone (verification producers)
 my @format_registry_members;   # every scanned entry incl. non-occupant variant
                                # members, spec order (telemetry, match_counts)
 my %format_registry_entry;     # name => entry (includes non-scanned entries)
@@ -1214,6 +1232,8 @@ my %colors = (
     'kelly-green' => "\033[38;5;34m",    # success
     'rosso-corsa' => "\033[38;5;160m",   # failure
     'gold'        => "\033[38;5;178m",   # unclassified: neither outcome
+    'terracotta'  => "\033[38;5;173m",   # mixed: a message row whose lines were not uniform
+    'amethyst'    => "\033[38;5;135m",   # classification conflict: both criteria fired on the line
     'bright-black' => "\033[90m\033[109m",
     'bright-red' => "\033[91m\033[109m",
     'bright-green' => "\033[92m\033[109m",
@@ -3213,6 +3233,38 @@ sub format_registry_specs {
     # (detect_and_parse_csv_header), not a regex, so this entry is never
     # scanned. It exists so downstream metadata (slug, time contract,
     # statistics eligibility) has one resolution surface.
+    # Verification-only entry (#456 D12): the producer of every classification
+    # state. It classifies on the duration field, which the message key does
+    # not carry, with criteria that deliberately overlap (a value from 500 to
+    # 999 satisfies both: a classification conflict) and are deliberately
+    # incomplete (a value from 1000 to 4999 satisfies neither: unclassified
+    # from a qualifying source), so one message text at several durations is
+    # a non-uniform row. scanned => 0 with a pattern keeps it out of the scan
+    # cascade: no file binds it by detection, only -lf seats it.
+    # verification => 1 keeps it out of every user-facing listing.
+    { name => 'mtvfy', slug => 'classification_verification', match_type => 18, scanned => 0, verification => 1, head_class => 'any',
+      pattern_src => '^VERIFY CLS (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) level=([A-Z]+) thread=([^ ]+) object=([^ ]+) took=(\d+) (.*)$',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'thread'],[4,'object'],[5,'duration'],[6,'message'] ],
+      transforms => [],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'utc', frac => 'fixed3' },
+      duration_unit => 'ms', stats_eligible => 1,
+      event_ledger => 1,
+      classification => { success => [ { duration => '^\d{1,3}$' } ],
+                          failure => [ { duration => '^[5-9]\d{2,}$' } ] },
+      expect_ancestors => [],
+      samples => [
+        'VERIFY CLS 2025-06-01 10:00:00.000 level=INFO thread=worker-1 object=Store took=12 catalog fetch',
+        'VERIFY CLS 2025-06-01 10:00:01.000 level=INFO thread=worker-1 object=Store took=750 index rebuild',
+        'VERIFY CLS 2025-06-01 10:00:02.000 level=INFO thread=worker-1 object=Store took=5000 upload',
+        'VERIFY CLS 2025-06-01 10:00:03.000 level=INFO thread=worker-1 object=Store took=1500 cache warm',
+      ],
+      expect => [
+        [ '2025-06-01 10:00:00', 'INFO', 'Store', '', '', '', '', 'worker-1', 'catalog fetch', undef, '12',   '0', '1' ],
+        [ '2025-06-01 10:00:01', 'INFO', 'Store', '', '', '', '', 'worker-1', 'index rebuild', undef, '750',  '0', '1' ],
+        [ '2025-06-01 10:00:02', 'INFO', 'Store', '', '', '', '', 'worker-1', 'upload',        undef, '5000', '0', '1' ],
+        [ '2025-06-01 10:00:03', 'INFO', 'Store', '', '', '', '', 'worker-1', 'cache warm',    undef, '1500', '0', '1' ],
+      ],
+      expect_outcomes => [ 1, 4, 2, 0 ] },
     { name => 'csv', slug => 'csv', match_type => 13, scanned => 0,
       pattern_src => undef,
       field_map => [], transforms => [],
@@ -3680,13 +3732,19 @@ sub format_elect_scan_front {
 # automatic detection, the evidence pass and variant selection are all
 # bypassed. An unknown name is a usage error listing the known names.
 sub apply_format_pin {
-    my %known;
-    $known{ $_->[FR_SLUG] } = 1 for values %format_registry_entry;
+    # Every entry is pinnable, the pin-only verification entries included;
+    # the list a mistyped name is answered with names only the formats a
+    # user is meant to see.
+    my (%known, %listed);
+    for my $e (values %format_registry_entry) {
+        $known{ $e->[FR_SLUG] } = 1;
+        $listed{ $e->[FR_SLUG] } = 1 unless $format_registry_spec{ $e->[FR_NAME] }{verification};
+    }
     if (!$known{$log_format_pin}) {
-        print_usage("Unknown log format '$log_format_pin' for -lf. Known formats: " . join(', ', sort keys %known));
+        print_usage("Unknown log format '$log_format_pin' for -lf. Known formats: " . join(', ', sort keys %listed));
         exit 1;
     }
-    @format_registry   = grep { $_->[FR_SLUG] eq $log_format_pin } @format_registry_members;
+    @format_registry   = grep { $_->[FR_SLUG] eq $log_format_pin } (@format_registry_members, @format_registry_pin_only);
     @format_scan_order = @format_registry;
     %format_scan_sub_cache = ();
     format_scan_sub_resolve();
@@ -3908,7 +3966,10 @@ sub format_classification_src {
     };
     my $f = ($cls->{failure} && @{ $cls->{failure} }) ? $outcome_src->($cls->{failure}) : undef;
     my $s = ($cls->{success} && @{ $cls->{success} }) ? $outcome_src->($cls->{success}) : undef;
-    my $expr = defined $f && defined $s ? "($f) ? 2 : ($s) ? 1 : 0"
+    # Both criteria are evaluated when both are declared: a line satisfying
+    # both is a classification conflict (4), neither a success nor a failure
+    # (#456 D3).
+    my $expr = defined $f && defined $s ? "($f) ? (($s) ? 4 : 2) : ($s) ? 1 : 0"
              : defined $f               ? "($f) ? 2 : 0"
              : defined $s               ? "($s) ? 1 : 0"
              :                            '0';
@@ -3921,6 +3982,7 @@ sub format_classification_src {
 sub format_classification_reference {
     my ($cls, $line) = @_;
     return 0 unless $cls;
+    my %hit;
     for my $o ([ failure => 2 ], [ success => 1 ]) {
         my $list = $cls->{ $o->[0] } or next;
         for my $c (@$list) {
@@ -3929,10 +3991,10 @@ sub format_classification_reference {
                 my $v = $f eq 'line' ? $line : ${ $format_record_ref{$f} };
                 unless (defined $v && $v =~ /$c->{$f}/) { $all = 0; last }
             }
-            return $o->[1] if $all;
+            if ($all) { $hit{ $o->[1] } = 1; last }
         }
     }
-    return 0;
+    return $hit{2} && $hit{1} ? 4 : $hit{2} ? 2 : $hit{1} ? 1 : 0;
 }
 
 # The entry's classification as a write-direct closure over the record
@@ -4398,7 +4460,11 @@ sub build_format_registry {
     for my $spec (@specs) {
         die "ltl: format registry: entry '$spec->{name}' declares event_pairs, which is reserved and not yet consumed (features/log-format-registry.md D23)\n"
             if $spec->{event_pairs} && @{ $spec->{event_pairs} };
-        next unless $spec->{scanned};
+        # A compiled entry carries a pattern and a generated block: every
+        # scanned entry, plus a pin-only entry (scanned => 0 with a pattern)
+        # that only -lf seats. The stateful csv entry has neither.
+        $spec->{_compiled} = ($spec->{scanned} || defined $spec->{pattern_src}) ? 1 : 0;
+        next unless $spec->{_compiled};
         $patterns{ $spec->{name} } = qr/$spec->{pattern_src}/;
     }
 
@@ -4411,9 +4477,11 @@ sub build_format_registry {
         next if $group_clobber_done{ $spec->{group} }++;
         $clobber_union{ $_->[1] } = 1 for grep { $is_record{ $_->[1] } } @{ $spec->{field_map} };
     }
+    # A pin-only entry scans alone, so nothing precedes it to clobber a field.
+    $clobbered_by{ $_->{name} } //= {} for grep { $_->{_compiled} } @specs;
 
     # D24 gate 1: every sample matches its own pattern.
-    for my $spec (grep { $_->{scanned} } @specs) {
+    for my $spec (grep { $_->{_compiled} } @specs) {
         for my $i (0 .. $#{ $spec->{samples} }) {
             die "ltl: format registry: entry '$spec->{name}' sample " . ($i + 1)
               . " does not match its own pattern (produced_by format_registry_specs(); the sample set is the entry's executable self-test):\n  $spec->{samples}[$i]\n"
@@ -4424,12 +4492,12 @@ sub build_format_registry {
     # D24 gate 2: extraction parity — the default-config closure (same
     # write-direct shape production runs) must leave the record lexicals
     # equal to the declared expected record for every sample.
-    for my $spec (grep { $_->{scanned} } @specs) {
+    for my $spec (grep { $_->{_compiled} } @specs) {
         my $extract = compile_format_extractor($spec, $clobbered_by{ $spec->{name} },
             { include_query_string => 0, include_session => 0 });
         my $want_o = $spec->{expect_outcomes};
         die "ltl: format registry: entry '$spec->{name}' declares " . (ref $want_o eq 'ARRAY' ? scalar(@$want_o) : 'no')
-          . " expect_outcomes for " . scalar(@{ $spec->{samples} }) . " samples (one integer per sample: 2 failure, 1 success, 0 unclassified)\n"
+          . " expect_outcomes for " . scalar(@{ $spec->{samples} }) . " samples (one integer per sample: 4 classification conflict, 2 failure, 1 success, 0 unclassified)\n"
             unless ref $want_o eq 'ARRAY' && @$want_o == @{ $spec->{samples} };
         for my $i (0 .. $#{ $spec->{samples} }) {
             ( $timestamp_str, $category_bucket, $object, $instance, $user, $session, $platform, $thread, $message ) = (undef) x 9;
@@ -4467,7 +4535,7 @@ sub build_format_registry {
 
     # D24 gate 3: guard soundness — pattern match implies guard pass, over
     # every sample of every entry.
-    my %guards = map { $_->{name} => compile_format_guard($_->{guard}) } grep { $_->{scanned} } @specs;
+    my %guards = map { $_->{name} => compile_format_guard($_->{guard}) } grep { $_->{_compiled} } @specs;
     for my $guarded (grep { $_->{scanned} && $guards{ $_->{name} } } @specs) {
         for my $spec (grep { $_->{scanned} } @specs) {
             for my $sample (@{ $spec->{samples} }) {
@@ -4534,6 +4602,7 @@ sub build_format_registry {
     my $opts = { include_query_string => $include_query_string, include_session => $include_session };
     @format_registry = ();
     @format_registry_members = ();
+    @format_registry_pin_only = ();
     %format_registry_entry = ();
     %format_variant_groups = ();
     for my $spec (@specs) {
@@ -4542,7 +4611,7 @@ sub build_format_registry {
         $entry->[FR_SLUG]            = $spec->{slug};
         $entry->[FR_MATCH_TYPE]      = $spec->{match_type};
         $entry->[FR_SCANNED]         = $spec->{scanned};
-        $entry->[FR_PATTERN]         = $spec->{scanned} ? $patterns{ $spec->{name} } : undef;
+        $entry->[FR_PATTERN]         = $spec->{_compiled} ? $patterns{ $spec->{name} } : undef;
         $entry->[FR_PATTERN_SRC]     = $spec->{pattern_src};
         $entry->[FR_FIELD_MAP]       = $spec->{field_map};
         $entry->[FR_TRANSFORMS]      = $spec->{transforms};
@@ -4550,7 +4619,7 @@ sub build_format_registry {
         $entry->[FR_DURATION_UNIT]   = $spec->{duration_unit};
         $entry->[FR_STATS]           = $spec->{stats_eligible};
         $entry->[FR_GUARD]           = $guards{ $spec->{name} };
-        $entry->[FR_EXTRACT]         = $spec->{scanned}
+        $entry->[FR_EXTRACT]         = $spec->{_compiled}
             ? compile_format_extractor($spec, $clobbered_by{ $spec->{name} }, $opts) : undef;
         $entry->[FR_MESSAGE_METRICS] = $spec->{message_metrics};
         $entry->[FR_EVENT_PAIRS]     = $spec->{event_pairs};
@@ -4564,13 +4633,15 @@ sub build_format_registry {
         $entry->[FR_FILENAME]        = $filename{ $spec->{name} };
         $entry->[FR_FILENAME_SAMPLES]= $spec->{filename}{samples} // [];
         $entry->[FR_EVENT_LEDGER]    = $spec->{event_ledger} ? 1 : 0;
-        $entry->[FR_CLASSIFY]        = $spec->{scanned} ? undef : compile_format_classifier($spec);
+        $entry->[FR_CLASSIFY]        = $spec->{_compiled} ? undef : compile_format_classifier($spec);
         $entry->[FR_CLS_SIG]         = $spec->{_cls_sig};
         $entry->[FR_PCT_QUALIFYING]  = ($spec->{_cls_both} && ($spec->{event_ledger} || $show_classification)) ? 1 : 0;
         $entry->[FR_CLS_BOTH]        = $spec->{_cls_both} ? 1 : 0;
         if ($spec->{scanned}) {
             push @format_registry_members, $entry;
             push @format_registry, $entry if $entry->[FR_GROUP_DEFAULT];
+        } elsif ($spec->{_compiled}) {
+            push @format_registry_pin_only, $entry;
         }
         $format_registry_entry{ $spec->{name} } = $entry;
     }
@@ -4786,18 +4857,73 @@ sub format_registry_promote {
 # percentage eligibility calls this — the run summary, the -V classification
 # block, the notices and the column-visibility gate — so no second inline copy
 # of the arithmetic can drift.
+# A retained message row's classification state (#456 D10): an outcome's
+# name when every one of its lines carries that outcome (success, failure,
+# conflict), undef when none of its lines was classified, and 'mixed' for
+# every other combination, an outcome mixed with unclassified lines
+# included. Read from the row's outcome slots and its occurrence count, so
+# the indicator and the MIXED bookkeeping resolve the state the same way.
+sub message_classification_state {
+    my ($entry) = @_;
+    my $outcomes = $entry->{outcomes} or return undef;
+    my $n = $entry->{occurrences} // 0;
+    my ($s, $f, $c) = map { $outcomes->[$_] // 0 } 1, 2, 4;
+    return undef unless $s || $f || $c;
+    return 'success'  if $s == $n;
+    return 'failure'  if $f == $n;
+    return 'conflict' if $c == $n;
+    return 'mixed';
+}
+
+# MIXED bookkeeping (#456 D4/D5): once every file has been read and the
+# final consolidation pass has formed the rows the run reports, every line
+# of a non-uniform row leaves the counter it was counted in for the MIXED
+# counter, so the run-level figures stay a partition of the included lines.
+# Per-bucket counters are not revised: they state what was known when the
+# bucket passed. A run that retains no message has no rows and moves
+# nothing, with no special case.
+sub resolve_message_classification_states {
+    $total_mixed = 0;
+    for my $grouping (keys %log_messages) {
+        for my $entry (values %{ $log_messages{$grouping} }) {
+            my $state = message_classification_state($entry);
+            next unless defined $state && $state eq 'mixed';
+            my $n = $entry->{occurrences} // 0;
+            my ($s, $f, $c) = map { $entry->{outcomes}[$_] // 0 } 1, 2, 4;
+            $total_successes    -= $s;
+            $total_failures     -= $f;
+            $total_conflicts    -= $c;
+            $total_unclassified -= $n - $s - $f - $c;
+            $total_mixed        += $n;
+        }
+    }
+    return;
+}
+
 sub classification_reconciliation {
-    my $classified   = $total_successes + $total_failures;
-    my $unclassified = $total_lines_included - $classified;
-    # D2/D4: the run prints percentages only when something was classified and
-    # every included line came from a qualifying source (the FR_PCT_QUALIFYING
-    # fold: both criteria declared, and event ledger or explicit enable).
-    my $eligible = ($classified > 0 && $total_non_qualifying_lines == 0) ? 1 : 0;
+    my $classified = $total_successes + $total_failures;
+    # The five figures are counted quantities that partition the included
+    # lines (#456 D5): SUCCESS + FAILURE + CLASSIFICATION CONFLICT + MIXED +
+    # UNCLASSIFIED = LINES INCLUDED. Nothing here is derived by subtraction.
+    #
+    # #452 D2/D4 as revised by #456 D6/D9: the run prints percentages only
+    # when something was classified and the success/failure pair is the whole
+    # classified population: no line from a non-qualifying source, no
+    # classification conflict, no unclassified line from a qualifying source,
+    # and no line moved to MIXED.
+    my $eligible = ( $classified > 0
+                  && $total_non_qualifying_lines == 0
+                  && $total_conflicts == 0
+                  && $total_unclassified_qualifying == 0
+                  && $total_mixed == 0 ) ? 1 : 0;
     return {
         successes      => $total_successes,
         failures       => $total_failures,
+        conflicts      => $total_conflicts,
+        mixed          => $total_mixed,
         classified     => $classified,
-        unclassified   => $unclassified,
+        unclassified   => $total_unclassified,
+        unclassified_qualifying => $total_unclassified_qualifying,
         included       => $total_lines_included,
         non_qualifying => $total_non_qualifying_lines,
         pct_eligible   => $eligible,
@@ -4930,10 +5056,13 @@ sub emit_format_detection_verbose {
     (my $default_failure = format_classification_signature({ failure => $classification_default{failure} })) =~ s/^failure=//;
     push @verbose_output, "=== format-detection / classification ===";
     push @verbose_output, "lines_included: $total_lines_included";
-    push @verbose_output, "successes: $total_successes";
-    push @verbose_output, "failures: $total_failures";
+    push @verbose_output, "successes: $recon->{successes}";
+    push @verbose_output, "failures: $recon->{failures}";
+    push @verbose_output, "conflicts: $recon->{conflicts}";
+    push @verbose_output, "mixed: $recon->{mixed}";
     push @verbose_output, "classified: $classified";
     push @verbose_output, "unclassified: $unclassified";
+    push @verbose_output, "unclassified_qualifying: $recon->{unclassified_qualifying}";
     push @verbose_output, "unclassified_pct: " . ($total_lines_included ? sprintf('%.1f', $unclassified / $total_lines_included * 100) : '0.0');
     # #452 D5: the analysis overview joins this block as additive keys. The
     # percentages obey the same suppression as every rendered surface (D10):
@@ -4978,7 +5107,7 @@ sub emit_format_registry_verbose {
             "  entry: %s slug=%s group=%s default=%s role=%s",
             $e->[FR_NAME], $e->[FR_SLUG], $e->[FR_GROUP],
             ( $e->[FR_GROUP_DEFAULT] ? 'yes' : 'no' ),
-            ( $e->[FR_SCANNED] ? 'scanned' : 'stateful' ) );
+            ( $e->[FR_SCANNED] ? 'scanned' : $e->[FR_PATTERN] ? 'pin-only' : 'stateful' ) );
     }
 
     # Structure: variant groups with their live occupants, the static scan
@@ -6069,6 +6198,9 @@ sub write_aggregate_export {
     $measurements->{successes}      = $recon->{successes};
     $measurements->{failures}       = $recon->{failures};
     $measurements->{unclassified}   = $recon->{unclassified};
+    $measurements->{conflicts}      = $recon->{conflicts};
+    $measurements->{mixed}          = $recon->{mixed};
+    $measurements->{unclassified_qualifying_lines} = $recon->{unclassified_qualifying};
     if ($recon->{pct_eligible}) {
         $measurements->{success_pct} = aggregate_number($recon->{success_pct});
         $measurements->{failure_pct} = aggregate_number($recon->{failure_pct});
@@ -6154,6 +6286,10 @@ sub write_aggregate_export {
             $b->{failure_pct} = aggregate_number($stats->{failure_pct});
         }
         $b->{non_qualifying_lines} = $outcomes ? ($outcomes->[3] // 0) : 0;
+        # #456: the conflict count and the qualifying-source unclassified
+        # count, the two other causes of an absent percentage (D16).
+        $b->{conflicts} = $outcomes ? ($outcomes->[4] // 0) : 0;
+        $b->{unclassified_qualifying_lines} = $outcomes ? ($outcomes->[5] // 0) : 0;
         if ($occurrences == 0) { push @buckets, $b; next; }
         $b->{categories} = $bucket_categories if %$bucket_categories;
         $b->{err_rate} = aggregate_number($err_rate) if defined $err_rate;
@@ -7018,6 +7154,7 @@ sub print_help_formats {
     };
     my %seen_slug;
     for my $spec (sort { $a->{slug} cmp $b->{slug} } values %format_registry_spec) {
+        next if $spec->{verification};   # a verification-only producer is not a format a user reads
         next if $seen_slug{ $spec->{slug} }++;
         my $ledger = $spec->{event_ledger} ? 'event ledger' : 'not an event ledger';
         my $cls;
@@ -7237,7 +7374,7 @@ my $explain_bc_caveats = q{Sarle's BC is a *screen*, not a test. Two important c
 my $explain_bc_compute = q{Sarle's formula with sample-size correction: `BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))`. The denominator's sample-size adjustment is what distinguishes Sarle's BC from the unadjusted moment-based version -- it prevents small-sample false positives from being even worse. Requires n >= 4 and non-zero std_dev; emitted blank otherwise. Total cost: three arithmetic operations on numbers (skewness, kurtosis, n) already computed for the other shape moments.};
 
 # --- classification (--explain classification) ---
-my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as SUCCESS CLASSIFIED and FAILURE CLASSIFIED beneath LINES INCLUDED, each with its share of all classified lines, and an UNCLASSIFIED row with its share of included lines; on an event-ledger format the timeline adds a success and a failure percentage column per time bucket, over the same classified denominator (hide them with -hcl, or show them on a classifying non-ledger format with -scl); the classification sub-section of -V format-detection adds the overall success and failure percentages and how many lines were unclassified. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
+my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as SUCCESS CLASSIFIED and FAILURE CLASSIFIED beneath LINES INCLUDED, each with its share of all classified lines, and an UNCLASSIFIED row with its share of included lines; on an event-ledger format the timeline adds a success and a failure percentage column per time bucket, over the same classified denominator (hide them with -hcl, or show them on a classifying non-ledger format with -scl); the classification sub-section of -V format-detection adds the overall success and failure percentages and how many lines were unclassified. Two further states keep those figures honest. A line that satisfies both the success and the failure rule is a *classification conflict*: the rules contradict each other on it, so it is counted as neither, under its own CLASSIFICATION CONFLICT row. A message row whose lines were not all of one state is *mixed*: its lines are counted under MIXED rather than as successes or failures, so the run-level figures say only what the data supports. In the message tables the marker position of every row carries its state as a colour (green success, red failure, violet conflict, terracotta mixed; no mark when the row's lines are unclassified). Either state withholds the percentages, as does an unclassified line on a format that declares both rules: in each case the classified pair has stopped being the whole population, and the counts are shown instead. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
 my $explain_classification_ledger = q{Whether a success/failure figure means anything depends less on the rules than on the log. An *event ledger* is a format with maximum coverage of the operations it describes: every operation of that kind produces exactly one line, so a count over its lines is a count over everything that happened. An access log is an event ledger for requests; a garbage-collection log is one for pauses. A diagnostics log is not: it records what a component chose to write, at whatever level it chose, and says nothing about the operations that produced no line. This is the coverage argument of the Google SRE Workbook chapter on implementing SLOs (https://sre.google/workbook/implementing-slos/): a service-level indicator is a ratio of good events to all events, and the denominator is only honest when the source sees all events. The success percentage -- successes over classified lines -- is therefore trustworthy at face value only over an event ledger. Each format declares whether it is one, the property is reported per file on -V format-detection (event_ledger), and consumers that compute a ratio read it to decide whether to show one.};
 my $explain_classification_reading = q{What a diagnostics log can legitimately tell you: how many failure-level lines there were, when they clustered, and which messages produced them -- the errRate column, and the per-message failure counts in the MESSAGES CSV. What it cannot tell you: a success rate, an availability, or any ratio whose denominator is "all operations", because most operations never wrote a line. The unclassified share is the warning sign: on a diagnostics log it is usually most of the file. On an event ledger the same share is a data-quality figure -- lines that carried a status the rules do not cover -- and a low value means the ratio can be trusted. The classification is also actionable: -if/-ef and -is/-es filter on failures and successes, -hf/-hs highlight them within the full population, and excluding both (-ef -es) leaves exactly the unclassified remainder for inspection.};
 my $explain_classification_compute = q{Classification runs as each line is recognised, so it costs nothing to re-derive later: each format's rules are compiled once at startup into its recognition step, and the outcome is accumulated per time bucket (errRate reads the bucket's failure count, normalised to the -ru rate unit as before) and per message key (the successes and failures columns of -o CSV, which survive -g consolidation). If the detected format changes part-way through a file, lines after the change are classified under the new format's rules, the file's event-ledger property follows the new format, a note names the line and both formats, and -V format-detection lists the change. Lines already classified are not revisited. The rules themselves are documented per format under 'ltl --help formats', which also shows how a format declares them.};
@@ -7988,7 +8125,7 @@ sub print_help {
 
     # Message Grouping
     $out .= help_subheading("Message Grouping");
-    $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output.");
+    $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified.");
     $out .= help_opt("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
     $out .= help_opt("-xqs, --expose-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
     $out .= help_opt("-xs,  --expose-session",       "Keep session/user IDs when grouping messages, so each session is tracked separately");
@@ -9594,9 +9731,10 @@ sub merge_bin_state {
 sub merge_consolidation_stats {
     my ($target, $source) = @_;
     $target->{occurrences} += ($source->{occurrences} // 0);
-    # Success/failure outcome slots (#453 D30): element-wise, slot 1 and 2.
+    # Classification outcome slots (#453 D30, #456 D3): element-wise, slots
+    # 1 (success), 2 (failure) and 4 (classification conflict).
     if (my $so = $source->{outcomes}) {
-        $target->{outcomes}[$_] += $so->[$_] for grep { $so->[$_] } 1, 2;
+        $target->{outcomes}[$_] += $so->[$_] for grep { $so->[$_] } 1, 2, 4;
     }
 
     # Duration stats
@@ -10992,6 +11130,7 @@ my %csv_column_family = (
     'occurrences'       => 'meta',
     'successes'         => 'meta',
     'failures'          => 'meta',
+    'conflicts'         => 'meta',
     # bytes
     'bytes_occurrences' => 'meta',
     'bytes_min'         => 'bytes',
@@ -12261,12 +12400,15 @@ sub adapt_to_command_line_options {
            $write_messages_to_csv
         || ( $capture_messages && $sort_key =~ /^bytes_(?:occurrences|min|mean|max)$/ )
     ) ) ? 1 : 0;
-    # Per-message outcome-counter demand (#517): the per-message success/failure
-    # counters reach the user only through the MESSAGES CSV successes/failures
-    # columns. The default classification surfaces (summary classified rows,
-    # timeline percentage columns, errRate) read the run totals and
-    # %bucket_outcomes, not this store.
-    $message_outcomes_demand = $write_messages_to_csv ? 1 : 0;
+    # Per-message outcome-counter demand (#517 D1, #456): the per-message
+    # outcome counters reach the user through the MESSAGES CSV outcome columns
+    # and through the classification indicator on every retained message row,
+    # whose state (uniform success, failure or conflict, or MIXED) is read
+    # from them. A run that retains no message has no row to mark. The
+    # default classification surfaces (summary classified rows, timeline
+    # percentage columns, errRate) read the run totals and %bucket_outcomes,
+    # not this store.
+    $message_outcomes_demand = ( $write_messages_to_csv || $capture_messages ) ? 1 : 0;
 
     # Statistics-group demand (#305): layer per-group demand on top of the
     # store-level booleans above, from the consumer declarations in
@@ -13031,10 +13173,11 @@ sub read_and_process_logs {
                 if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) )  { $excluded_filter++; next; }
                 if( defined( $include_filter )         && !match_filter($_, $include_filter) ) { $excluded_filter++; next; }
                 # Outcome filters select on the classification the scan block
-                # already produced (1 success, 2 failure, 0 unclassified) — the
-                # line is never re-tested. An include keeps only its named
-                # outcome; an exclude drops only its named outcome, so
-                # unclassified lines survive every exclude.
+                # already produced (1 success, 2 failure, 4 classification
+                # conflict, 0 unclassified) — the line is never re-tested. An
+                # include keeps only its named outcome; an exclude drops only
+                # its named outcome, so unclassified and conflict lines survive
+                # every exclude and satisfy no include.
                 if( $outcome_filter_active ) {
                     if( $include_failure && $line_outcome != 2 ) { $excluded_filter++; next; }
                     if( $include_success && $line_outcome != 1 ) { $excluded_filter++; next; }
@@ -13134,13 +13277,26 @@ sub read_and_process_logs {
 
                 $log_occurrences{$bucket}{$category_bucket}{occurrences}++;
                 $total_lines_included++;
+                # The outcome value is its bucket slot: 1 success, 2 failure,
+                # 4 classification conflict. An unclassified line is counted
+                # per line (#456 D5), and in slot 5 when its source declares
+                # both outcomes (#456 D6/D7), which withholds the bucket's
+                # percentages the way a conflict does.
                 if ($line_outcome) {
                     $bucket_outcomes{$bucket}[$line_outcome]++;
-                    if ($line_outcome == 2) { $total_failures++ } else { $total_successes++ }
+                    if    ($line_outcome == 2) { $total_failures++ }
+                    elsif ($line_outcome == 1) { $total_successes++ }
+                    else                       { $total_conflicts++ }
+                } else {
+                    $total_unclassified++;
+                    if ($line_entry->[FR_PCT_QUALIFYING]) {
+                        $bucket_outcomes{$bucket}[5]++;
+                        $total_unclassified_qualifying++;
+                    }
                 }
                 # #452 D2: percentage-eligibility provenance. Slot 3 counts the
-                # bucket's lines from non-qualifying sources; slots 1/2 stay the
-                # outcome counters and slot 0 stays unwritten (#453 D30).
+                # bucket's lines from non-qualifying sources; slot 0 stays
+                # unwritten (#453 D30).
                 unless ($line_entry->[FR_PCT_QUALIFYING]) {
                     $bucket_outcomes{$bucket}[3]++;
                     $total_non_qualifying_lines++;
@@ -13816,7 +13972,7 @@ sub read_and_process_logs {
             # assigned in first-detection order across the run.
             my (%seen, @found);
             push @found, $fdd->{slug} if defined $fdd->{slug};
-            for my $e (@format_registry_members, $format_registry_entry{csv}) {
+            for my $e (@format_registry_members, @format_registry_pin_only, $format_registry_entry{csv}) {
                 next unless $e->[FR_MATCHES] > $fr_matches_at_start{ $e->[FR_NAME] };
                 push @found, $e->[FR_SLUG];
             }
@@ -16139,10 +16295,16 @@ sub normalize_data_for_output {
         # source. Blank cells were worse than either: they read as a window
         # with no successes and no failures at all. The absent '%' is what
         # tells the reader a cell is a count.
+        #
+        # #456 D6: the same fallback for the two other ways the pair stops
+        # being the window's whole classified population — a classification
+        # conflict (slot 4) or an unclassified line from a qualifying source
+        # (slot 5). A window holding only conflicts shows its zero counts.
         if (my $bucket_outcome = $bucket_outcomes{$bucket}) {
             my $bucket_classified = ($bucket_outcome->[1] // 0) + ($bucket_outcome->[2] // 0);
-            if ($bucket_classified > 0) {
-                if ($bucket_outcome->[3] // 0) {
+            my $bucket_disqualified = ($bucket_outcome->[3] // 0) + ($bucket_outcome->[4] // 0) + ($bucket_outcome->[5] // 0);
+            if ($bucket_classified > 0 || ($bucket_outcome->[4] // 0)) {
+                if ($bucket_disqualified) {
                     $log_stats{$bucket}{success_pct_count} = $bucket_outcome->[1] // 0;
                     $log_stats{$bucket}{failure_pct_count} = $bucket_outcome->[2] // 0;
                 } else {
@@ -16233,7 +16395,7 @@ sub normalize_data_for_output {
     # construction, the percentages derivable precisely by any consumer
     # (#503 reads, never recomputes), the eligibility judgement the
     # consumer's own.
-    push @output_columns, "successes", "failures";
+    push @output_columns, "successes", "failures", "conflicts";
 
     # --- Layout engine (Phase 1): build and calculate but do NOT use for rendering ---
     {
@@ -17015,7 +17177,8 @@ sub print_bar_graph {
             # #452 D9: the bucket's outcome counts, in lockstep with the
             # 'successes','failures' header pushes in normalize_data_for_output().
             push @csv_data, format_csv_value( $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[1] // 0) : 0, 'successes' ),
-                            format_csv_value( $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[2] // 0) : 0, 'failures' );
+                            format_csv_value( $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[2] // 0) : 0, 'failures' ),
+                            format_csv_value( $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[4] // 0) : 0, 'conflicts' );
 
             ## RENDER ROW BY ITERATING @column_layout
             for my $col (grep { $_->{visible} } @column_layout) {
@@ -18348,6 +18511,12 @@ sub print_summary_table {
         # to surface leakage, and a permanent zero row is noise.
         $emit->( "UNCLASSIFIED", $recon->{unclassified}, $total_lines_included, 'gold' )
             if $recon->{unclassified} > 0 && ( $cls_success_declared || $cls_failure_declared || $classified );
+        # #456 D3/D4: the two other states, on the same pattern — printed when
+        # non-zero, with their share of included lines, in their own colours.
+        $emit->( "CLASSIFICATION CONFLICT", $recon->{conflicts}, $total_lines_included, $classification_state_colour{conflict} )
+            if $recon->{conflicts} > 0;
+        $emit->( "MIXED", $recon->{mixed}, $total_lines_included, $classification_state_colour{mixed} )
+            if $recon->{mixed} > 0;
     }
     if ($show_timing) {
         push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "DETECT: FORMAT REGISTRY BUILD", format_time( $elapsed_detect_registry_build, 's', 'medium', " " ) );
@@ -18628,7 +18797,15 @@ sub print_message_summary {
                 next if $messages_printed++ >= $messages_to_print{$grouping};
                 next if !defined $key;
                 my $is_consolidated = ($log_messages{$grouping}{$key}{is_consolidated} // 0);
-                my $row = $is_consolidated ? "~" : " " x $table_padding_outer;
+                # The classification indicator (#456 D1/D2) occupies the
+                # consolidation marker's position: the bullet on a row that is
+                # not consolidated, the ~ itself when it is, either one in the
+                # colour of the row's state; an unclassified row keeps the
+                # blank or the plain ~ it rendered before. The position is one
+                # character wide, so the layout is untouched.
+                my $cls_state = message_classification_state($log_messages{$grouping}{$key});
+                my $marker = $is_consolidated ? "~" : $cls_state ? "\xe2\x80\xa2" : " " x $table_padding_outer;
+                my $row = $cls_state ? $colors{ $classification_state_colour{$cls_state} } . $marker . $colors{'NC'} : $marker;
 
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
                     my $message = substr( $key, 0, $col_width{1} );                         # truncate message for printing if too long to fit in column
@@ -18736,6 +18913,7 @@ sub print_message_summary {
                             format_csv_value($occurrences,       'occurrences'),
                             format_csv_value($outcomes ? ($outcomes->[1] // 0) : 0, 'successes'),
                             format_csv_value($outcomes ? ($outcomes->[2] // 0) : 0, 'failures'),
+                            format_csv_value($outcomes ? ($outcomes->[4] // 0) : 0, 'conflicts'),
                             format_csv_value($bytes_occurrences, 'bytes_occurrences'),
                             format_csv_value($bytes_min,         'bytes_min'),
                             format_csv_value($bytes_mean,        'bytes_mean'),
@@ -19307,7 +19485,7 @@ sub pipeline_render {
         # convention (#432). The duration statistics take the duration_ prefix here
         # even though the CLI keeps their bare spellings, so every column on this
         # surface names its metric.
-        $csv->print($csv_fh, [qw(category message occurrences successes failures bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
+        $csv->print($csv_fh, [qw(category message occurrences successes failures conflicts bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
     }
 
     print_message_summary() if $capture_messages;									                    # Print and write message summaries
@@ -19511,6 +19689,7 @@ pipeline_detect();
 pipeline_parse();
 pipeline_accumulate();
 pipeline_finalize();
+resolve_message_classification_states();
 pipeline_render();
 
 print "\n";

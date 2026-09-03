@@ -391,8 +391,8 @@ assert_command \
 
 assert_command \
     label "-sm renders the same rows with no colour at all (D14, -sm contract)" \
-    command "! grep -aE $'\\033\\[38;5;(34|160|178)m' '$SM' >/dev/null && grep -aq 'UNCLASSIFIED' '$SM'" \
-    asserts "monochrome is a property of the whole summary table: the classified rows inherit the switch through summary_colour() rather than reading %colors directly, so none of the three shades survives -sm" \
+    command "! grep -aE 'CLASSIFIED|CONFLICT|MIXED' '$SM' | grep -aE $'\\033\\[38;5;(34|160|178|173|135)m' >/dev/null && grep -aq 'UNCLASSIFIED' '$SM'" \
+    asserts "monochrome is a property of the whole summary table: the classified rows inherit the switch through summary_colour() rather than reading %colors directly, so none of the classification shades survives -sm on a summary row (the message blocks' classification indicator is outside -sm, which renders the run summary table alone)" \
     produced_by "summary_colour() returning empty under \$summary_mono" \
     contract "features/452-success-failure-percentage-columns.md D14; ltl summary_colour()"
 

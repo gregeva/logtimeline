@@ -2,12 +2,12 @@
 
 **Issue:** #456 (FEATURE: Per-message success/failure indicator in log messages and summary table)
 **Branch:** `456-per-message-success-failure-indicator` off `release/0.18.0`
-**Status:** requirements and specification agreed with the architect
-(2026-09-03), D1-D11 locked, no open decisions. No code written. Acceptance
-criteria are the remaining step before code, blocked on the producer question in
-F4. Everything specified here ships under this issue (D11); the decisions that
-belong to another surface are recorded in that surface's own document and
-referenced from here.
+**Status:** implemented on branch `456-per-message-success-failure-indicator-2`
+(2026-09-03), D1-D12 locked, no open decisions; the acceptance criteria below
+are asserted by `tests/validate-classification-states.sh`. Everything specified
+here ships under this issue (D11); the decisions that belong to another surface
+are recorded in that surface's own document and referenced from here. Findings
+made while implementing are in § Implementation findings.
 
 ## Scope
 
@@ -408,6 +408,67 @@ verification format, fixed `--terminal-width` for rendered-cell assertions.
 `tests/HARNESS-DESIGN.md` is read before any harness file is created or renamed,
 every assertion declares `asserts`, `produced_by` and `contract`, and every
 consumer of a changed `-V` section is updated in the same commit.
+
+## Implementation findings
+
+Recorded on the tree as implemented (2026-09-03).
+
+- **The conflict outcome is the value 4, and outcome values are slots.** The
+  per-line block writes `$bucket_outcomes{$bucket}[$line_outcome]++` and the
+  per-message store `outcomes[$line_outcome]++` unchanged; 3 was already the
+  non-qualifying-source slot (#452 D2), so the fourth outcome takes the slot D7
+  reserved for it and no per-line mapping is added. Slot 5 (unclassified from a
+  qualifying source) and the counted run-level unclassified figure are one
+  `else` branch on the existing `if ($line_outcome)`. Details in
+  `features/453-success-failure-classification-event-ledger.md` § Extension
+  under #456.
+- **The verification entry's line shape had to avoid a loose shipping pattern.**
+  The first draft put the timestamp second (`VERIFY <timestamp> [INFO] …`) and
+  every line bound `tw_edge_c_sdk`, whose pattern takes any first token before
+  an ISO timestamp; a bracketed level after a leading timestamp would bind
+  `thingworx_rac_client` the same way. The shape is `VERIFY CLS <timestamp>
+  level=<L> thread=<t> object=<o> took=<ms> <message>`, which no cascade
+  pattern matches (16 of 16 lines unmatched without `-lf`). The message key is
+  `[INFO] [worker] [Store] <message>` (the thread truncated to the key's
+  width), so one text at several durations is one row.
+- **Containment is two registry-schema keys**, recorded in
+  `features/log-format-registry.md` § Pin-only entries: `scanned => 0` with a
+  pattern makes the entry compiled but not scanned (it passes the sample and
+  parity gates, takes no cascade slot, and only `-lf` seats it); `verification
+  => 1` keeps it out of `--help formats` and the known-format list. The pin
+  path previously read only the scanned members, so a non-scanned entry could
+  not be pinned at all; it now reads the pin-only list too.
+- **The MIXED movement is one walk of the retained rows** after the final
+  consolidation pass (`resolve_message_classification_states()`, the
+  implementation note under D5): each row's state is read by the same
+  function the indicator uses, and a mixed row's lines leave the counter each
+  was counted in. `unclassified_qualifying` is a cause counter, not a
+  partition member, and is not reduced by the movement.
+- **Per-message outcome capture is on whenever a message is retained**
+  (`$message_outcomes_demand` = MESSAGES CSV or `-n` above zero), the demand
+  term #517 anticipated. The before/after benchmark at the gate carries it.
+- **Acceptance criterion 17 does not hold as written, by design of R1.** Every
+  classified row on a shipping format now renders the bullet in its outcome's
+  colour, so a regression golden that carries a message block changes in
+  exactly the marker column; the goldens are re-blessed and the diff confined
+  to that column is the check. No other cell moves: criterion 15 is what
+  holds.
+- **Consumers of the marker column and of the MESSAGES CSV shape.** The
+  duration-display checker (`tests/duration-display/check-duration-cells.pl`)
+  anchored a message row on a bracket preceded by whitespace only; the marker
+  position now precedes the bracket, so the anchor admits it (the bullet is
+  three bytes, which a single-character class did not cover). The statistics
+  drift baselines (`tests/statistics-drift/baselines/`) carry the MESSAGES and
+  STATS CSV shapes, so the `conflicts` column is a structural drift against
+  them by construction; they were re-captured and the diff inspected to be the
+  added column alone. The `-sm` assertion in
+  `tests/validate-classification-percentages.sh` grepped the whole capture for
+  the classification shades and now reads the summary rows only, since `-sm`
+  renders the run summary table plain and the indicator lives in the message
+  blocks.
+- **Colours judged on rendered output.** Terracotta 173 reads clearly apart
+  from gold 178 at one-character size and amethyst 135 sits off the
+  green-gold-red axis, on the fixture and on an access-log specimen (D8).
 
 ## Merge gate
 

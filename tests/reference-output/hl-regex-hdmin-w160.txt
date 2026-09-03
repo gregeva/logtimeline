@@ -50,7 +50,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -du us -h
 
   TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  [200] GET /Windchill/sslClientAuth/servlet/odata/v2/BomTransformation/$metadata                            10  133ms  184ms  903ms   0.94       2.5 sec 
+• [200] GET /Windchill/sslClientAuth/servlet/odata/v2/BomTransformation/$metadata                            10  133ms  184ms  903ms   0.94       2.5 sec 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2026-01-22 08:49 and 2026-01-25 07:41

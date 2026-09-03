@@ -310,7 +310,13 @@ Each is stated as what the tool will do. D1 and D2 were set by the issue body's 
   gains its second and third causes beside `non_qualifying_lines` — a conflict in
   the window, and an unclassified line from a qualifying source — which D16 below
   requires the export to carry. Specification:
-  `features/456-per-message-success-failure-indicator.md`.
+  `features/456-per-message-success-failure-indicator.md`. Keys as implemented
+  (2026-09-03): `measurements.conflicts`, `measurements.mixed`,
+  `measurements.unclassified_qualifying_lines` (always present, integers), and
+  per bucket `conflicts` and `unclassified_qualifying_lines` beside
+  `non_qualifying_lines`; a non-zero value in any of the three per-bucket
+  causes explains an absent `success_pct`/`failure_pct` pair, and at run scope
+  a non-zero `mixed` is the fourth cause. Rules: `tests/aggregate-export/rules/keys.tsv`.
 
 - **D16 — Percentages follow #452 D10 at both scales, with the reason for absence carried (locked, architect, 2026-09-02).** Run level: `success_pct`/`failure_pct` present only when `pct_eligible`; `pct_eligible` and `non_qualifying_lines` always present. Per bucket: present only for an eligible bucket, exactly as `%log_stats{$bucket}` holds them; `non_qualifying_lines` always present (slot 3 of `%bucket_outcomes`, exported for the first time).
 - **D17 — The file is written with `YAML::PP`, the module #387 already locked (inherited; architect, 2026-09-02).** #58's D37 (which re-scoped user-defined formats into #387, whose body carries it) makes `YAML::PP` a hard `use` dependency — pure Perl, expected PAR-safe on all three build platforms per #58 research finding F7, not yet proved by a build; `YAML::Tiny` (weaker validation) and `YAML::XS` (packing risk) were rejected there. This issue is the first to ship the import if it lands before #387, so it carries the packaging obligations: the `use YAML::PP;` line, a hand run of `build/generate-cpanfile.sh` (F13), `build/install-deps.sh` run from the build path so the module is installed on the system, and the three platform builds proven; staged in that order (architect, 2026-09-02). Numbers are written from the in-memory value; booleans as YAML `true`/`false`.

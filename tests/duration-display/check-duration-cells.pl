@@ -79,7 +79,10 @@ for my $line (@lines) {
 my $stat_or_empty = qr/^(?:[0-9]+(?:\.[0-9]+)?(?:$UNIT)?)?$/;  # number +/- unit, or empty
 my $cv_shaped     = qr/^[0-9]+\.[0-9]+$/;                       # bare decimal, no unit
 for my $line (@lines) {
-    next unless $line =~ /^\s*\[[^\]]+\]\s/;   # bracketed-category data row
+    # A bracketed-category data row: the marker position (one character: the
+    # classification indicator, the consolidation ~, or blank) precedes the
+    # bracket.
+    next unless $line =~ /^[^\[\s]*\s*\[[^\]]+\]\s/;
     my @f = split ' ', $line;
     my $occ_idx;
     for my $i (0 .. $#f - 4) {

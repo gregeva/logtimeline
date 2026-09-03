@@ -139,7 +139,7 @@ Log messages frequently contain variable parameters — user IDs, UUIDs, session
 
 **How it works:** During parsing, logtimeline discovers patterns by comparing unique messages using Dice coefficient scoring on character trigrams. When two messages are sufficiently similar, it aligns them character-by-character to identify which parts are constant and which vary, producing a canonical form like `GET /Thingworx/Things/*/Services/* HTTP/1.1`. Discovered patterns are compiled into regex and applied inline to all subsequent messages — matched messages never enter the main data structures, which is why consolidation reduces memory at scale.
 
-Consolidated entries are marked with `~` in the summary table output. All statistics (occurrences, duration, bytes, percentiles, etc.) are aggregated across matched messages.
+Consolidated entries are marked with `~` in the summary table output; that marker position also carries the row's classification as a colour (a bullet `•` on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified. All statistics (occurrences, duration, bytes, percentiles, etc.) are aggregated across matched messages.
 
 | Option | Description |
 |--------|-------------|
