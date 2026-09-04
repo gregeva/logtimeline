@@ -278,6 +278,25 @@ accounts for 2,017 of the 5,000 lines leaves 09:48 at 17 blocks against 09:49 at
 13, and the difference in the remaining traffic becomes readable. The dominant
 message had been setting the scale and flattening everything measured against it.
 
+### F16 — the technique is attribute isolation, and the session is only one attribute
+
+From the interview (architect, 2026-09-04). Session Isolation as the issue named it
+is a special case of a general move: the analyst holds an attribute of the activity
+and wants to isolate on it, highlight it, or exclude it. The attribute may be the
+session, a thread, a user, a remote host, a query string, or a value inside the
+message itself — a filename requested from a download API, a user name executing a
+particular set of calls, a thread name recurring across a string of errors. The
+move, the reading and the surfaces are the same whichever it is; only the field
+changes.
+
+Two attributes the move applies to cannot be exposed today, and the architect
+identified both during the interview: the thread name, and the remote host in
+access logs. Grouping, filtering or highlighting on either would be useful and each
+needs an exposure surface of its own. Filed as #536 (expose the thread name as an
+attribute) and #537 (expose the access-log remote host as an attribute).
+Informational, not gates: the Attribute Isolation topic is written against the
+attributes that exist today and gains these two once they land.
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
@@ -346,14 +365,24 @@ its signal is the rescaling measured in F15, which the isolation page cannot ren
 at the same time.
 
 Attribute Surfacing covers `-xqs`, `-xu` and `-xs` on one page because the move,
-the reading and the precondition are the same for all three (F14). Session Isolation
-keeps its own page for the different move: cutting to one session and reading that
-journey through.
+the reading and the precondition are the same for all three (F14). Attribute Isolation
+(D5) keeps its own page for the different move: acting on one known attribute
+value — isolating, highlighting or excluding it.
 
 File Attribution sits in Population rather than Correlation because it is an
 attribution question — which part of the input carries this — of the same shape as
 which API carries this. Correlation relates two different logs on a shared axis,
 which this does not.
+
+### D5 — Session Isolation becomes Attribute Isolation (architect, 2026-09-04)
+
+The architect's framing: the technique "is actually about attribute isolation,
+highlighting, or exclusion. Whether we are talking about a session or a thread or a
+user or an IP address or a query string." Session Isolation is renamed **Attribute
+Isolation** (`ltl --explain attribute-isolation`) and written generically, with the
+session as one worked attribute among several. It pairs with Attribute Surfacing
+(D4): surfacing separates the population by an attribute so its values can be seen;
+isolation acts on one value once it is known.
 
 ## Technique roster
 
@@ -363,7 +392,7 @@ Bold marks a technique added after the issue was filed.
 | Group | Techniques |
 |---|---|
 | Time | Window Narrowing · Resolution Zoom · Traffic Load Profiling |
-| Population | Contribution Highlighting · API Isolation · Session Isolation · Rank then Isolate · Outcome Isolation · **Remainder Analysis** · **Attribute Surfacing** · **File Attribution** |
+| Population | Contribution Highlighting · API Isolation · Attribute Isolation *(was Session Isolation, D5)* · Rank then Isolate · Outcome Isolation · **Remainder Analysis** · **Attribute Surfacing** · **File Attribution** |
 | Shape | Tail Excursion vs. Distribution Shift · Bimodal Split · Variety vs. Volume · Timeout Clustering |
 | Comparison | Period-over-Period Comparison · Status Composition Over Time |
 | Concurrency | Thread Pool Utilisation |
