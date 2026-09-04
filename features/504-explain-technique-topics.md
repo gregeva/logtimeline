@@ -371,6 +371,38 @@ tight column near 1ms while the population spreads across three decades. The
 comparison is both visual and numeric in a single view, with no second run and
 without cutting the population away.
 
+### F20 — Status Composition Over Time is read down the column, and the highlight splits it
+
+From the interview (architect, 2026-09-04), with the highlight behaviour verified on
+the 5,000-line access-log slice.
+
+The technique is the mix moving while the volume holds: 2xx giving way to 4xx at
+constant volume is a different event from 5xx appearing on top of unchanged 2xx, and
+a single failure percentage collapses both into one number.
+
+Three things make the column readable, and the topic has to teach all three.
+
+**The shortened totals are what make rows comparable.** Comparing absolute values
+down a column works while the numbers are small. Once they are large it stops
+working, which is why the category totals carry engineering suffixes: `1.5k` beside
+`1.5k` is close enough, and the reader does not need to know whether the difference
+was 1,525 against 1,582. At `40` against `20` the difference matters and the
+unshortened figures are there to be read.
+
+**The percentages answer the coherent question and the counts answer the next one.**
+Reading straight down the success and failure percentage columns answers whether
+the traffic in each bucket succeeded and in what proportion; the absolute count
+columns beside them answer how many.
+
+**The highlight splits the composition per bucket.** Verified: with a highlight on
+one API, each bucket's legend carries that API's own per-status counts beside the
+population's. On the slice, the 09:48 bucket reads `5xx(HL) 1 · 4xx 5 · 3xx 1 ·
+2xx(HL) 379 · 2xx 891` — the highlighted API accounts for every 5xx in the bucket,
+which no population-level figure would have shown. That is what answers whether one
+API is driving the success percentage down or is the source of all or most of the
+errors. The highlighted twin renders as a bare number whose identity is carried by
+its colour rather than a repeated label, so the technique page says how to read it.
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
