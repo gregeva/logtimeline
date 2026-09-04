@@ -489,7 +489,7 @@ index.
 Three techniques the interview surfaced have no home in the issue's original list
 and are added to the Population group, taking the roster from sixteen techniques to
 nineteen and the technique-family topic count to twenty-five (nineteen techniques
-plus the six group pages of D1).
+plus the six group pages of D1). D7 later takes it to twenty and twenty-six.
 
 | Topic | `ltl --explain …` | The question it answers |
 |---|---|---|
@@ -532,9 +532,27 @@ whether that relationship holds or changes across time buckets. It is the only
 Shape technique that does not enter through a ranked shape statistic: the candidate
 is already in hand and the question is how it sits against everything else.
 
+### D7 — the Concurrency group becomes Load, with two techniques (architect, 2026-09-04)
+
+Following F21, the group and its single technique are both renamed and a second
+technique is added.
+
+| | Was | Is |
+|---|---|---|
+| Group | Concurrency | **Load** — concurrency is one reading of the column, not the whole of it |
+| Technique | Thread Pool Utilisation | **Load Over Time** (`load-over-time`) — the distinct-count column read as a load indicator: sessions and users appearing on their own when the log carries them, thread pools switched on with `-tpa` or `-tpas`; read for pool sizing when the count sits at its ceiling and circulates, and for the bottleneck where it reaches maximum and throughput stops |
+| Technique | — | **Custom Metric Tracking** (`custom-metric`) — `-udm` placing any token or value the line carries onto the same bar-chart surface under its own aggregation function, worked as queue depth over time |
+
+Two pages rather than one because the preconditions differ: Load Over Time reads
+what the tool derives by itself, Custom Metric Tracking requires the analyst to
+define the extraction before there is anything to draw, and each has its own signal
+to render.
+
+The roster is twenty techniques and twenty-six topics.
+
 ## Technique roster
 
-Nineteen techniques in six groups, each group also a topic of its own (D1).
+Twenty techniques in six groups, each group also a topic of its own (D1).
 Bold marks a technique added after the issue was filed.
 
 | Group | Techniques |
@@ -543,7 +561,7 @@ Bold marks a technique added after the issue was filed.
 | Population | Contribution Highlighting · API Isolation · Attribute Isolation *(was Session Isolation, D5)* · Rank then Isolate · Outcome Isolation · **Remainder Analysis** · **Attribute Surfacing** · **File Attribution** |
 | Shape | Tail Excursion vs. Distribution Shift · Bimodal Split · Shape Comparison *(was Variety vs. Volume, D6)* · Timeout Clustering |
 | Comparison | Period-over-Period Comparison · Status Composition Over Time |
-| Concurrency | Thread Pool Utilisation |
+| Load *(was Concurrency, D7)* | Load Over Time *(was Thread Pool Utilisation, D7)* · **Custom Metric Tracking** |
 | Correlation | Cross-Log Correlation |
 
 ## Planning walkthrough
