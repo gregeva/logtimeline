@@ -24,7 +24,10 @@ by-product.
 
 Findings from the documentation and code-surface audit that opened the planning
 walkthrough. Each is stated as what was read, in what, and what a reader would
-observe.
+observe. F1 to F22 come from the audit and the interview; F26 and F27 were found
+during implementation and are recorded here with the rest. F23 to F25, which are
+observations about this work's own construction rather than about the tool, are
+under *Implementation*.
 
 ### F1 — `--explain` already carries three categories, not one
 
@@ -475,6 +478,44 @@ as it does on a highlight pattern (F3).
 This collided with File Attribution (D4) — the same mechanism, surface and signal,
 differing only in framing. Resolved by D8: the two are one technique.
 
+### F26 — the wiki was published by hand mid-issue, which is a release step
+
+Publishing to the wiki was done directly from this branch before the map was
+understood, so the live wiki briefly carried unreleased content and a
+hand-edited `Home`. Both pages happen to match what the release copy will
+write, so nothing is left inconsistent, but the act was wrong: the wiki is
+generated at release from `docs/`, and nothing else should write to it. The
+correction is that this issue changes only `docs/` and the map; the wiki
+reaches its published state at the next release like every other page.
+
+### F27 — the wiki is generated from `docs/`, and nothing asserted the map
+
+Read from `docs/process/workflow.md` § *Post-release*, step 14. The wiki is not
+a second document maintained alongside the repository: the release step clones
+`logtimeline.wiki`, overwrites each page with a byte-for-byte copy of its
+`docs/` source, stages the pages by name and pushes. The note beneath the step
+records that `docs/` is the source of truth and the wiki is overwritten each
+release.
+
+Two consequences the content has to respect, neither of which was written down
+anywhere a reader would meet them:
+
+- A page is copied verbatim, so a link to a sibling is written **in the source**
+  as its wiki page name — `[Statistics Reference](Statistics-Reference)`, which
+  is how `docs/usage.md` already writes its links. A file path resolves in the
+  repository and 404s for the wiki reader the mirror exists to serve.
+- The step names each source and each page explicitly, in two places: a `cp`
+  line and the `git add`. A source with no `cp` line never reaches the wiki; a
+  page copied but not staged is discarded with the clone at the end of the step,
+  silently.
+
+Nothing asserted that map, and the mirror requirement stopped at
+`docs/explain/`. Observed consequence: this work's mirror was written and the
+map was not touched, which would have shipped a release with no wiki page for
+the technique family. Three pre-existing symptoms of the same gap were found on
+the published wiki at the same time and filed as #539 (published wiki pages are
+behind the `docs/` sources they are copied from).
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
@@ -654,11 +695,17 @@ the reader observes, not how it is built.
   and across directories under `-r` (F3, F22); and the normalised message and error
   rates standing beside absolute counts that change with the bucket width (F4).
 - **R9** — Every technique-family topic's content is mirrored under `docs/explain/`,
-  as the statistics, heatmap, histogram and classification topics are.
+  as the statistics, heatmap, histogram and classification topics are, **and that
+  mirror reaches the wiki**: the release step that regenerates the wiki from
+  `docs/` copies it and commits it, like every other mirror (F27). A mirror the
+  release step does not name is a page the wiki reader never gets.
 - **R10** — The content carries no internals: no Perl identifiers, issue numbers or
   decision labels, in either the terminal pages or the mirror.
 - **R11** — A group page's *See also* names the group an analyst typically reaches
   for next; the six groups are not presented as an ordered pipeline (F7).
+- **R12** — A cross-reference in the mirror resolves on both surfaces it is
+  published to. The wiki page is a byte-for-byte copy of the source, so a link to
+  a sibling is written as its wiki page name rather than as a file path (F27).
 
 ## Acceptance criteria
 
@@ -708,6 +755,20 @@ extend.
       identifier, an issue number or a decision label.
 - [x] **AC11 (R9)** — Every technique-family topic has mirrored content under
       `docs/explain/`.
+- [x] **AC13 (R9)** — The release step that regenerates the wiki from `docs/`
+      carries the technique mirror, and carries every other mirror under
+      `docs/explain/`: each has a copy line, each copied source exists, and each
+      copied page is also staged — a page written into the clone but not staged
+      is discarded when the step removes the clone. Asserted against the map read
+      out of `docs/process/workflow.md` itself, so the assertion cannot drift
+      from the procedure it guards. Scenario `wiki-sync-map`.
+- [x] **AC14 (R12)** — No mirror under `docs/explain/` links to a sibling by file
+      path; a cross-reference is written as the wiki page name, so it resolves in
+      the repository and on the wiki alike. Scenario `wiki-link-form`.
+- [x] **AC15 (R11)** — Every group page's *See also* names at least one group
+      other than itself, and the six do not simply name their successor in roster
+      order — a set of neighbours an analyst moves between, not a sequence to be
+      followed. Scenario `group-see-also`.
 
 ### Unassertable
 
@@ -984,6 +1045,13 @@ findings; and across mixed time bases the correlation fails silently (#155).
 | 2. Interview, group by group | Closed — F7 to F22 across all six groups; roster changes D4 to D8 |
 | 3. Content spec | Closed — one block per topic under *Content specification* |
 | 4. Acceptance criteria and harness plan | Closed — R1 to R11, AC1 to AC12, D9 |
+
+AC15 was added during implementation: R11 was the one requirement the triage
+left without a criterion, and an unasserted requirement is how the wiki gap
+happened. R12 and its criteria AC13 and AC14 were added from F27:
+the mirror requirement stopped at `docs/explain/` and said nothing about the
+release step that carries it to the wiki, which is the gap that let this work's
+mirror be written without the map being touched.
 | 5. Delivery shape | Closed — D11, three drops |
 
 Specification complete. All three drops implemented.
@@ -997,9 +1065,9 @@ Specification complete. All three drops implemented.
 | 3 | Landed — Shape (4), Comparison (2) and Load (2) |
 
 Twenty-five topics reachable and listed; nineteen techniques and six group
-pages. Every acceptance criterion from AC1 to AC11 is asserted by
-`tests/validate-explain.sh`, which grew from 154 to 662 assertions across
-nine new scenarios. AC12 stands on the compensating practice D9 settles:
+pages. Every acceptance criterion but one — AC1 to AC11 and AC13 to AC15 — is
+asserted by `tests/validate-explain.sh`, which grew from 154 to 694 assertions
+across twelve new scenarios. AC12 stands on the compensating practice D9 settles:
 every signal was produced by running that technique's own worked command
 against a real log and matching the page to what came back.
 
@@ -1025,38 +1093,21 @@ Three findings the implementation added to the record:
 
 ### The wiki mirror
 
-R9's mirror has two homes, and the mechanism between them is a copy, not a
-second document. The release procedure (`docs/process/workflow.md`,
-*Post-release*, step 14) clones the wiki and overwrites each page with its
-`docs/` source; `docs/` is the source of truth and the wiki is regenerated
-from it every release. So the surfaces cannot drift as long as the map is
-right, and the map is what needs asserting.
+R9 as originally written stopped at `docs/explain/`. F27 records why that was
+not enough and what the mechanism actually is; R9 now carries the release step
+too, R12 carries the link form, and AC13 and AC14 assert both. What was
+delivered against them:
 
-Nothing asserted it. The technique mirror was written and the map was not
-touched, which would have shipped a release with no wiki page for the
-family. Two scenarios now close that:
-
-- **`wiki-sync-map`** — every source the step copies exists; every page it
-  copies is also staged, since the step removes the clone at the end and an
-  unstaged page is lost without a word; and every mirror under
-  `docs/explain/` is carried by the map. The map is read out of the workflow
-  document rather than restated in the harness, so the check cannot drift
-  from the procedure it guards.
-- **`wiki-link-form`** — no mirror links to a sibling by file path. A page is
-  copied verbatim, so `](statistics.md)` resolves in the repository and 404s
-  on the wiki; a sibling is addressed by its wiki page name, which is how
-  `docs/usage.md` already writes its links. `docs/explain/techniques.md` was
-  corrected to that form.
-
-### F26 — the wiki was published by hand mid-issue, which is a release step
-
-Publishing to the wiki was done directly from this branch before the map was
-understood, so the live wiki briefly carried unreleased content and a
-hand-edited `Home`. Both pages happen to match what the release copy will
-write, so nothing is left inconsistent, but the act was wrong: the wiki is
-generated at release from `docs/`, and nothing else should write to it. The
-correction is that this issue changes only `docs/` and the map; the wiki
-reaches its published state at the next release like every other page.
+- `docs/explain/techniques.md` links its siblings by wiki page name, so it is
+  copy-ready. `docs/usage.md` already wrote its links that way.
+- The sync step in `docs/process/workflow.md` gains its copy and add lines for
+  the technique family, and the note beneath it states the link rule and names
+  the harness that enforces the map.
+- Scenarios `wiki-sync-map` and `wiki-link-form` in `tests/validate-explain.sh`,
+  reading the map out of the workflow document rather than restating it. Four
+  sabotage probes, each producing the expected diagnostic: a mirror with no copy
+  line, a copy line naming a source that does not exist, a page copied but never
+  staged, and a file-path link in a mirror.
 
 ### Pre-existing drift, not repaired here
 

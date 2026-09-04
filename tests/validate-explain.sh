@@ -1756,6 +1756,90 @@ scenario_wiki_link_form() {
     done
 }
 
+# --- Scenario: a group page points at a neighbour, not down a pipeline (R11). ---
+# The six groups are not a sequence: where an investigation enters depends on
+# the signal that started it, and the path crosses groups freely. Each group
+# page's See also therefore names the group an analyst typically reaches for
+# next. A page that named only itself would be a dead end, and a set of pages
+# that each named the next one in roster order would be presenting a pipeline.
+scenario_group_see_also_names_a_neighbour() {
+    local group
+    for group in "${TECHNIQUE_GROUPS[@]}"; do
+        current_scenario="group-see-also:$group"
+        echo "[$current_scenario]"
+        local result
+        result=$(run_ltl "see-also-$group" --explain "$group")
+        local out="${result#*:}"
+        check_capture_warnings "$out"
+
+        # The See also section runs to the end of the page.
+        local seealso="$TMP_DIR/see-also-$group.section"
+        sed -n "/^  See also\$/,\$p" "$out" > "$seealso"
+        if [[ ! -s "$seealso" ]]; then
+            echo "  FAIL  $current_scenario"
+            echo "        asserts:     A group page carries a See also section."
+            echo "        produced_by: %explain_topics in ltl (the group page anatomy)"
+            echo "        contract:    Issue #504 AC4: See also closes every technique-family page"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: no See also section")
+            continue
+        fi
+
+        # At least one group other than this one must be named.
+        local other found=""
+        for other in "${TECHNIQUE_GROUPS[@]}"; do
+            [[ "$other" == "$group" ]] && continue
+            if grep -qE "(^|[^a-z-])${other}([^a-z-]|\$)" "$seealso"; then
+                found="$found $other"
+            fi
+        done
+        if [[ -n "$found" ]]; then
+            echo "  PASS  $current_scenario :: names$found"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $current_scenario"
+            echo "        the See also of '$group' names no other group"
+            echo "        asserts:     A group page's See also names the group an analyst typically reaches for next, so a reader who has finished one grouping has somewhere to go."
+            echo "        produced_by: %explain_topics in ltl (the group page See also block)"
+            echo "        contract:    Issue #504 AC15, R11: the six groups are a set of neighbours, not an ordered pipeline; a page naming no neighbour is a dead end"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: names no other group")
+        fi
+    done
+
+    # Not a pipeline: the six pages must not simply name their successor in
+    # roster order and nothing else.
+    current_scenario="group-see-also:not-a-pipeline"
+    echo "[$current_scenario]"
+    local i pipeline=1 n=${#TECHNIQUE_GROUPS[@]}
+    for (( i = 0; i < n - 1; i++ )); do
+        local this="${TECHNIQUE_GROUPS[$i]}" next="${TECHNIQUE_GROUPS[$((i + 1))]}"
+        local sec="$TMP_DIR/see-also-$this.section"
+        [[ -f "$sec" ]] || { pipeline=0; break; }
+        local others=0 o
+        for o in "${TECHNIQUE_GROUPS[@]}"; do
+            [[ "$o" == "$this" ]] && continue
+            grep -qE "(^|[^a-z-])${o}([^a-z-]|\$)" "$sec" && others=$((others + 1))
+        done
+        # A pipeline page names exactly its successor and no other group.
+        if ! { [[ "$others" -eq 1 ]] && grep -qE "(^|[^a-z-])${next}([^a-z-]|\$)" "$sec"; }; then
+            pipeline=0; break
+        fi
+    done
+    if [[ "$pipeline" -eq 0 ]]; then
+        echo "  PASS  $current_scenario :: the group pages do not read as an ordered pipeline"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario"
+        echo "        every group page names only its successor in roster order"
+        echo "        asserts:     The six groups are presented as neighbours an analyst moves between, not as a sequence to be followed in order."
+        echo "        produced_by: %explain_topics in ltl (the group page See also blocks)"
+        echo "        contract:    Issue #504 AC15, R11: where an investigation enters depends on the signal that started it, so the pages must not imply a fixed order"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: See also sections read as an ordered pipeline")
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Run scenarios
 # ---------------------------------------------------------------------------
@@ -1814,6 +1898,8 @@ echo ""
 scenario_wiki_sync_map
 echo ""
 scenario_wiki_link_form
+echo ""
+scenario_group_see_also_names_a_neighbour
 
 echo ""
 echo "Results: $pass passed, $fail failed"
