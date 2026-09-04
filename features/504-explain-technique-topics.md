@@ -153,6 +153,44 @@ Informational, not a gate: this work is specified and implemented in full agains
 the multi-run form that works today, and the Period-over-Period Comparison topic
 gains a pointer once #534 lands.
 
+### F10 — Resolution Zoom is a ladder of aperture and bucket width, alternated
+
+From the interview (architect, 2026-09-04). The default bucket is 60 minutes, so a
+day of logs reads as 24 rows and every absolute value is a one-hour total. That
+view locates the area to zoom into, and nothing more: a spike at 12:00 says nothing
+about what happens inside that hour. The move then alternates two adjustments, and
+the alternation is the technique:
+
+1. Close the aperture with `-st`/`-et` around the spike, dropping everything else.
+2. Narrow the bucket for what remains — the hour at 60-minute width becomes 60 rows
+   at one-minute width.
+3. Read the result. Still localised to a particular minute means an anomalous
+   occurrence, and the ladder continues. Flat across the hour means something
+   occurring over a long span, and the answer is already in hand.
+4. Continuing: tighten `-st`/`-et` again (12:32 to 12:38), then drop below the
+   minute — five-second buckets, and more rows again.
+5. Tighten once more (12:33:32) and change the timestamp precision, so the smallest
+   unit goes minute, then second (`-s`), then millisecond (`-ms`).
+6. At the finest grain: millisecond precision on the timestamp with 250ms buckets,
+   giving four rows inside each second, which answers whether executions are spread
+   evenly across the second or all land exactly on the second transition.
+
+The precondition on the last step is the data: it only works if the log's own
+timestamps carry millisecond precision.
+
+### F11 — reported: the rates go wrong at extreme zoom (unverified)
+
+Reported by the architect in the same interview; not observed in tool output during
+this audit, and stated here as a claim to be tested, not a measured finding. The
+message and error rates are normalised per `-ru` and so should hold steady as the
+bucket width shrinks. The architect reports that beyond a point they diverge, and
+that at extreme zoom and high precision the numbers become very wrong — cause
+unknown, either too few samples per bucket to support a rate or an error in the
+normalisation itself.
+
+This bears directly on the Resolution Zoom topic: what the analyst reads to know a
+zoom has not misled them is exactly the pair the claim puts in doubt.
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
