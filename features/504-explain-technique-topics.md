@@ -1023,6 +1023,29 @@ Three findings the implementation added to the record:
   120 and 200, generated signals included, so the exemption is unused by
   this work rather than relied on.
 
+### The wiki mirror
+
+R9's mirror has two homes, and the second was missed on the first pass. The
+established pattern is that a `docs/explain/` file and its wiki page are the
+same bytes under a different name: `Heatmap-Reference` and `heatmap.md` are
+byte-identical, as are `Histogram-Reference` and `histogram.md`. The
+technique family follows it — `Analysis-Techniques-Reference` carries
+`docs/explain/techniques.md` verbatim, with only the four cross-references to
+the statistics, histogram, heatmap and classification references taking their
+wiki page names instead of file paths.
+
+`Home` mirrors `docs/usage.md` the same way, so the two edits this work made
+there were applied to it: the `--explain` option row and the paragraph on the
+technique family beside the one pointing at the statistics reference.
+
+Two pre-existing drifts were found and are **not** repaired here, since
+neither belongs to this issue: `Statistics-Reference` is behind
+`docs/explain/statistics.md` by two content changes (the interquartile range's
+accuracy note and the export's sample-size rule), and `Home` is behind
+`docs/usage.md` by around 150 lines. Both are the same class of gap — nothing
+asserts that a wiki page still matches the file it mirrors, which is why the
+drift was invisible. Worth an issue of its own.
+
 ### Completion gate
 
 Run on the commit being merged, with `$version_number` restored to
