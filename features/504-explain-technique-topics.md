@@ -435,6 +435,31 @@ entry count per queue and graphing it per time bucket turns those lines into a q
 observation over time. (Corpus content is not reproduced here: the lines carry host
 and queue names.)
 
+### F22 — Cross-Log Correlation is the same file-marker read, driven by any criterion
+
+From the interview (architect, 2026-09-04), with the marker behaviour verified on two
+access logs.
+
+What the architect correlates is different logs from the same system — separated by
+physical node, by application instance, or by date — each writing its lines to its
+own file. The question is which of those files surfaces a pattern or satisfies a
+condition, and the answer is the yes/no marker in the summary's file list: the check
+where a file matched, the highlight marker where it matched the highlight criteria.
+
+The criteria are not limited to text patterns. `-hdmin 60000` answers which log files
+carried requests over sixty seconds; `-if` reduces the run to the files that contain
+failures. Verified over a two-file run: with `-hdmin 1000` both files take the
+highlight marker; raising the threshold to a deliberately extreme value leaves one
+file with the highlight marker and drops the other back to the plain check. The
+marker therefore discriminates between files on numeric and outcome criteria exactly
+as it does on a highlight pattern (F3).
+
+**This collides with File Attribution (D4).** The mechanism, the surface and the
+signal are the same read; only the framing differs — locating a file worth opening,
+against attributing a condition to a node, an instance or a day. Two pages would
+render the same signal twice, which the anatomy of D3 does not support. Raised for
+decision rather than resolved.
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
